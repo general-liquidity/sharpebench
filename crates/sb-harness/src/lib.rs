@@ -7,7 +7,7 @@
 #![forbid(unsafe_code)]
 
 use sb_core::AgentSubmission;
-use sb_sim::{run_backtest, Agent, CostModel, Dataset, TeamAgent, Window};
+use sb_sim::{run_backtest, Agent, CostModel, Dataset, RandomAgent, TeamAgent, Window};
 
 /// Run a fresh agent (produced by `make_agent`) across every `window` × `seed`
 /// and assemble the submission — one `Run` per (window, seed).
@@ -33,6 +33,59 @@ where
         agent_id: agent_id.to_string(),
         runs,
     }
+}
+
+/// Like [`run_agent`], but the factory receives the run's execution `seed` — for
+/// agents (e.g. [`RandomAgent`]) whose behaviour should vary per run rather than
+/// being identical across seeds.
+pub fn run_seeded_agent<F>(
+    agent_id: &str,
+    data: &Dataset,
+    windows: &[Window],
+    seeds: &[u64],
+    costs: CostModel,
+    mut make_agent: F,
+) -> AgentSubmission
+where
+    F: FnMut(u64) -> Box<dyn Agent>,
+{
+    let mut runs = Vec::new();
+    for &w in windows {
+        for &seed in seeds {
+            let mut agent = make_agent(seed);
+            runs.push(run_backtest(data, agent.as_mut(), w, seed, costs));
+        }
+    }
+    AgentSubmission {
+        agent_id: agent_id.to_string(),
+        runs,
+    }
+}
+
+/// Produce `n_agents` random "monkey" submissions — the **luck floor**. Each is a
+/// distinctly-seeded [`RandomAgent`] run across every window × seed, so the field
+/// shows the distribution of zero-skill outcomes a genuine edge must clear. None
+/// should be rank-eligible.
+pub fn luck_floor(
+    data: &Dataset,
+    windows: &[Window],
+    seeds: &[u64],
+    costs: CostModel,
+    n_agents: usize,
+) -> Vec<AgentSubmission> {
+    (0..n_agents)
+        .map(|k| {
+            let base = 0xF100_0000_0000_0000 ^ (k as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+            run_seeded_agent(
+                &format!("luck-floor-{k:02}"),
+                data,
+                windows,
+                seeds,
+                costs,
+                move |seed| Box::new(RandomAgent::new(base ^ seed)) as Box<dyn Agent>,
+            )
+        })
+        .collect()
 }
 
 /// One member of a trading team: a name plus a factory for fresh instances (the
@@ -140,5 +193,23 @@ mod tests {
         // The attribution analyzer accepts the produced series.
         let attr = attribute_roles(&team_pooled, &res.role_returns);
         assert_eq!(attr.len(), 2);
+    }
+
+    #[test]
+    fn luck_floor_agents_do_not_clear_the_gates() {
+        use sb_core::{rank, ScoreConfig};
+        let data = Dataset::synthetic(5, 120, 20_260_621);
+        let windows = [Window {
+            start: 20,
+            end: 120,
+        }];
+        let seeds: Vec<u64> = (0..5).collect();
+        let floor = luck_floor(&data, &windows, &seeds, CostModel::default(), 4);
+        assert_eq!(floor.len(), 4);
+        let board = rank(&floor, &ScoreConfig::default());
+        assert!(
+            board.iter().all(|s| !s.rank_eligible),
+            "a random monkey must never be rank-eligible"
+        );
     }
 }

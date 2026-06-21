@@ -14,7 +14,7 @@ pub mod engine;
 pub mod external;
 pub mod windows;
 
-pub use agent::{Agent, BuyAndHold, Momentum, TeamAgent};
+pub use agent::{Agent, BuyAndHold, Momentum, RandomAgent, TeamAgent};
 pub use costs::CostModel;
 pub use data::Dataset;
 pub use engine::{run_backtest, Window};

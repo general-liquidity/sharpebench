@@ -50,6 +50,11 @@ impl Rng {
     pub fn signed_unit(&mut self) -> f64 {
         (self.next_u64() >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0
     }
+
+    /// Uniform in [0, 1).
+    pub fn unit(&mut self) -> f64 {
+        (self.next_u64() >> 11) as f64 / (1u64 << 53) as f64
+    }
 }
 
 #[cfg(test)]

@@ -194,13 +194,16 @@ fn run_demo() -> ExitCode {
     let mo = sb_harness::run_agent("momentum", &data, &windows, &seeds, costs, || {
         Box::new(Momentum::default()) as Box<dyn Agent>
     });
+    // The luck floor: random monkeys that show the zero-skill distribution.
+    let mut field = vec![bh, mo];
+    field.extend(sb_harness::luck_floor(&data, &windows, &seeds, costs, 3));
 
     println!(
-        "SharpeBench — reference run ({} windows × {} seeds, costs on)\n",
+        "SharpeBench — reference run ({} windows × {} seeds, costs on; incl. luck floor)\n",
         windows.len(),
         seeds.len()
     );
-    print_board(&rank(&[bh, mo], &ScoreConfig::default()));
+    print_board(&rank(&field, &ScoreConfig::default()));
     ExitCode::SUCCESS
 }
 

@@ -81,6 +81,47 @@ impl Agent for BuyAndHold {
     }
 }
 
+/// A coin-flip "monkey": a fully-invested, long-only portfolio with random
+/// weights each step. Seeded so it is reproducible. Run many of these to draw the
+/// **luck floor** — the distribution of outcomes from zero skill that a genuine
+/// agent must clear to be rank-eligible.
+pub struct RandomAgent {
+    rng: crate::costs::Rng,
+}
+
+impl RandomAgent {
+    pub fn new(seed: u64) -> Self {
+        Self {
+            rng: crate::costs::Rng::new(seed ^ 0x1AC4_0000_2026_0000),
+        }
+    }
+}
+
+impl Agent for RandomAgent {
+    fn decide(&mut self, obs: &MarketObservation) -> Decision {
+        let raws: Vec<f64> = obs.symbols.iter().map(|_| self.rng.unit()).collect();
+        let total: f64 = raws.iter().sum();
+        let orders = obs
+            .symbols
+            .iter()
+            .zip(&raws)
+            .map(|(s, &r)| {
+                let w = if total > 0.0 { r / total } else { 0.0 };
+                Order {
+                    symbol: s.symbol.clone(),
+                    action: if w > 0.0 { Action::Buy } else { Action::Close },
+                    target_weight: w,
+                    confidence: 0.5,
+                }
+            })
+            .collect();
+        Decision {
+            orders,
+            reasoning: "random allocation (luck floor)".to_string(),
+        }
+    }
+}
+
 /// Cross-sectional momentum: equal-weight the symbols with positive trailing return.
 pub struct Momentum {
     pub lookback: usize,
