@@ -7,7 +7,8 @@
 Ranks agents on risk-adjusted *skill that survives deflation* — not the luckiest run over one quarter.
 
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
-[![Status](https://img.shields.io/badge/status-Phase%200-orange.svg)](docs/PLAN.md)
+[![Status](https://img.shields.io/badge/status-active%20(pre--1.0)-brightgreen.svg)](docs/PLAN.md)
+[![Unsafe](https://img.shields.io/badge/unsafe-forbidden-success.svg)](#architecture)
 
 </div>
 
@@ -21,43 +22,69 @@ SharpeBench adds, as **ranking gates**, the things none of them have:
 
 1. **Deflated Sharpe / PSR** — deflate the Sharpe by how many agents were tested × track length × return skew/kurtosis (Bailey & López de Prado).
 2. **pass^k reliability** — the agent must clear the bar on *every* seed × window, not on average.
-3. **Field-wide significance** — a deterministic stationary bootstrap; the edge must beat noise.
+3. **Field-wide significance** — a deterministic stationary bootstrap, White's Reality Check, Hansen's studentized & consistent SPA, and Romano–Wolf step-down; the edge must beat data-snooping, not just noise.
 4. **Process discipline** — placing an order that never passed the risk gate, ignoring a drawdown halt, or bypassing a deny-list **zeroes the entry**, however good the P&L looks.
-5. **Forward-attestation** *(Phase 2)* — agents commit before the data exists, so there's nothing to overfit and anyone can independently verify the signed result.
+5. **Forward-attestation** — agents commit before the data exists, so there's nothing to overfit, and signed, tamper-evident result chains let anyone verify the board independently of the host.
 
-Raw return is reported but is **never** the rank key.
+Raw return is reported but is **never** the rank key. It also *reports* (without gating) alpha/beta attribution, confidence calibration, edge half-life, out-of-sample decay, turnover, Pareto-optimality, conviction-weighted return, cost-efficiency, and economic-rationality — so a high score is legible, not a black box.
 
 > Other leaderboards rank the luckiest run over one quarter. SharpeBench ranks the skill that survives deflation — and proves it forward.
 
-## Status — Phase 0
+## Status — active (pre-1.0)
 
-The scoring kernel (`sb-core`) and the `sharpebench score` CLI are implemented and tested. The point-in-time simulator, agent protocol harness, forward-attestation, and public leaderboard are scaffolded and land next — see [docs/PLAN.md](docs/PLAN.md).
+All eight crates are implemented, tested, and CI-green (fmt · clippy `-D warnings` · workspace tests · a determinism check · the self-audit · a docs build). The scoring kernel, point-in-time simulator, run harness, forward-attestation, leaderboard, WASM bridge, and CLI all work end-to-end on synthetic / reference data.
+
+**Not yet built** (need external infra or a decision): real market-data adapters, a live/forward public arena with hosting, and the public data-curation protocol. The repo is currently private. See [docs/PLAN.md](docs/PLAN.md).
 
 ## Quickstart
 
 ```bash
-cargo test --workspace          # run the kernel's tests (incl. the luck-demotion proof)
-cargo run -p sb-cli -- score suites/example_submissions.json
+cargo test --workspace                                  # all tests, incl. the luck-demotion proof
+cargo run -p sb-cli -- run                              # run reference agents + the luck floor through the sim
+cargo run -p sb-cli -- score suites/example_submissions.json   # rank a JSON field of submissions
+cargo run -p sb-cli -- audit                           # prove the scorer resists 5 known gaming attacks
 ```
 
-The example field includes a *skilled* agent, a *lucky* agent with a **higher raw return**, and a *process-violating* agent. The skilled agent ranks first; the other two are ineligible — which is the whole point.
+The example field includes a *skilled* agent, a *lucky* agent with a **higher raw return**, and a *process-violating* agent. The skilled agent ranks first; the other two are ineligible — which is the whole point. `run` adds a **luck floor** of random "monkey" agents so you can see the zero-skill distribution a real edge must clear.
+
+### CLI commands
+
+| Command | What it does |
+|---|---|
+| `run` | Run the reference agents + luck floor through the point-in-time sim and rank them. |
+| `score <subs.json>` | Rank a JSON field of pre-computed submissions. |
+| `stress` | Run the adversarial stress suite (flash-crash / whipsaw), contamination-masked. |
+| `audit` | Self-audit: fire 5 known gaming attacks at the scorer; non-zero exit if any is not demoted. |
+| `commit <agent> <window> <digest> <salt>` | Forward-attestation pre-registration commitment. |
+| `sign <subs.json> <key> <out.json>` | Score + sign a board to a tamper-evident file. |
+| `verify <board.json> <key>` | Verify a signed board's chain. |
 
 ## Architecture
 
-A Rust [Cargo workspace](Cargo.toml) (modular, à la Paradigm's Rust OSS — reuse any crate on its own):
+A Rust [Cargo workspace](Cargo.toml) (modular, à la Paradigm's Rust OSS — reuse any crate on its own). The whole tree is `#![forbid(unsafe_code)]`.
 
 | Crate | Role |
 |---|---|
-| **`sb-core`** | the deterministic scoring kernel — deflated Sharpe / PSR / pass^k / bootstrap significance / process / decay / calibration / composite. `#![forbid(unsafe_code)]`, no I/O, no ambient RNG → byte-identical scores forever. |
+| **`sb-core`** | the deterministic scoring kernel — deflated Sharpe / PSR / pass^k / bootstrap + Reality Check + SPA + step-down significance / process / decay / calibration / attribution / roles / OOS-decay / economic-rationality / self-audit / composite. No I/O, no ambient RNG, fixed float reduction → byte-identical scores forever. |
 | **`sb-protocol`** | the language-agnostic agent ⇄ harness JSON protocol (any-language agents compete). |
+| **`sb-sim`** | point-in-time simulator (look-ahead is structurally impossible) with fees, seeded slippage, square-root market impact, financing, liquidity/partial-fill caps, dividends, adversarial stress paths, and reference + team + random agents. |
+| **`sb-harness`** | run orchestration across seeds × windows; team harness + role attribution; luck-floor and economic-rationality producers. |
+| **`sb-attest`** | forward-attestation: SHA-256 pre-registration commitments + HMAC tamper-evident signed result chains + an integer-epoch time-lock registry. |
 | **`sb-wasm`** | WASM bindings so Gordon (TypeScript) runs the *identical* scorer — internal eval and public benchmark can't drift. |
-| `sb-sim` · `sb-harness` · `sb-attest` · `sb-leaderboard` · `sb-cli` | point-in-time sim · run orchestration · forward-attestation · leaderboard · CLI. |
+| `sb-leaderboard` · `sb-cli` | leaderboard render / sign / persist · the `sharpebench` CLI. |
 
 ## Governance
 
 Hosted by [General Liquidity](https://github.com/general-liquidity) to start, with a roadmap to neutral governance. Credibility comes from **forward-attestation + signed, independently-verifiable results** (`sb-attest`), not from trust in the host — and Gordon (GL's agent) competes on the board like any other entrant.
 
 The neutral home may already exist: the FINOS-governed [Open FinLLM Leaderboard](https://huggingface.co/spaces/finosfoundation/Open-Financial-LLM-Leaderboard) covers the financial-*knowledge* axis (NLP, sentiment, QA, compliance) but has **no trading-performance axis**. SharpeBench is positioned to be the skill-vs-luck *trading* track it lacks — complementary, not competing. See **[docs/GOVERNANCE.md](docs/GOVERNANCE.md)**.
+
+## Documentation
+
+Full methodology — the gates, each significance test, process discipline, the
+submission formats, forward-attestation, and the integrity model — is in the
+mdBook under [`docs/book/`](docs/book/) (`mdbook serve docs/book`). Design and
+governance live in [docs/PLAN.md](docs/PLAN.md) and [docs/GOVERNANCE.md](docs/GOVERNANCE.md).
 
 ## License
 
