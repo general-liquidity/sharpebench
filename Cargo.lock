@@ -138,6 +138,7 @@ dependencies = [
  "sb-harness",
  "sb-leaderboard",
  "sb-sim",
+ "serde",
  "serde_json",
 ]
 
