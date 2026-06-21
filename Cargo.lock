@@ -171,6 +171,7 @@ name = "sb-protocol"
 version = "0.0.1"
 dependencies = [
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -180,6 +181,7 @@ dependencies = [
  "sb-core",
  "sb-protocol",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

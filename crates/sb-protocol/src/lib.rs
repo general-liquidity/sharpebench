@@ -79,3 +79,42 @@ pub enum Action {
 fn default_confidence() -> f64 {
     0.5
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn observation_and_decision_roundtrip() {
+        let obs = MarketObservation {
+            date: "2025-01-01".to_string(),
+            cash: 1.0,
+            symbols: vec![SymbolSnapshot {
+                symbol: "A".to_string(),
+                close_history: vec![1.0, 2.0],
+                fundamentals: Default::default(),
+                news: vec!["headline".to_string()],
+            }],
+            portfolio: vec![PositionState {
+                symbol: "A".to_string(),
+                shares: 1.0,
+                avg_price: 2.0,
+            }],
+        };
+        let back: MarketObservation =
+            serde_json::from_str(&serde_json::to_string(&obs).unwrap()).unwrap();
+        assert_eq!(back.symbols[0].symbol, "A");
+
+        let d = Decision {
+            orders: vec![Order {
+                symbol: "A".to_string(),
+                action: Action::Buy,
+                target_weight: 0.5,
+                confidence: 0.9,
+            }],
+            reasoning: "r".to_string(),
+        };
+        let db: Decision = serde_json::from_str(&serde_json::to_string(&d).unwrap()).unwrap();
+        assert_eq!(db.orders[0].action, Action::Buy);
+    }
+}
