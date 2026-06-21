@@ -18,6 +18,16 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/general-liquidity/sharpebench"
 authors = ["General Liquidity, Inc."]
 
+# Lints enforced by the manifest (not just the CI `-D warnings` flag), so a plain
+# `cargo clippy` locally fails the same way CI does. Crates opt in via `[lints]
+# workspace = true`. We do not ban unwrap/expect — internal code is trusted and
+# only validates at boundaries — but we deny stray todo!()/dbg!() and all of
+# clippy's default lints.
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+todo = "deny"
+dbg_macro = "deny"
+
 [profile.release]
 lto = true
 codegen-units = 1

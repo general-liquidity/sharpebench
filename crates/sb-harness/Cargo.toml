@@ -1,12 +1,15 @@
 [package]
 name = "sb-harness"
-version = "0.0.1"
-edition = "2021"
-license = "MIT OR Apache-2.0"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 description = "SharpeBench orchestration: drive an agent over seeds × windows and capture trajectories (Phase 1)."
-repository = "https://github.com/general-liquidity/sharpebench"
+repository.workspace = true
 
 [dependencies]
 sb-core = { path = "../sb-core", version = "0.0.1" }
 sb-protocol = { path = "../sb-protocol", version = "0.0.1" }
 sb-sim = { path = "../sb-sim", version = "0.0.1" }
+
+[lints]
+workspace = true

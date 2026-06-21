@@ -1,10 +1,10 @@
 [package]
 name = "sb-attest"
-version = "0.0.1"
-edition = "2021"
-license = "MIT OR Apache-2.0"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 description = "SharpeBench forward-attestation: pre-registration commitments + signed, verifiable result chains."
-repository = "https://github.com/general-liquidity/sharpebench"
+repository.workspace = true
 keywords = ["attestation", "commitment", "hmac", "benchmark", "integrity"]
 categories = ["cryptography", "science"]
 
@@ -12,3 +12,6 @@ categories = ["cryptography", "science"]
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 hmac = "0.12"
+
+[lints]
+workspace = true

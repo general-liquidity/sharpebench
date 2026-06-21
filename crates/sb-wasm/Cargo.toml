@@ -1,10 +1,10 @@
 [package]
 name = "sb-wasm"
-version = "0.0.1"
-edition = "2021"
-license = "MIT OR Apache-2.0"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 description = "WASM bindings for the SharpeBench scoring kernel (consumed by Gordon/Bun via the identical kernel)."
-repository = "https://github.com/general-liquidity/sharpebench"
+repository.workspace = true
 
 [dependencies]
 sb-core = { path = "../sb-core", version = "0.0.1" }
@@ -17,3 +17,6 @@ wasm-bindgen = "0.2"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
+
+[lints]
+workspace = true
