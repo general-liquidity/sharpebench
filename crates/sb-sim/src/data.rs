@@ -110,7 +110,11 @@ impl Dataset {
             let mut price = 100.0;
             let mut series = Vec::with_capacity(n_days);
             for i in 0..n_days {
-                let dir = if (i + s + phase) % 2 == 0 { 1.0 } else { -1.0 };
+                let dir = if (i + s + phase).is_multiple_of(2) {
+                    1.0
+                } else {
+                    -1.0
+                };
                 price *= 1.0 + dir * amplitude;
                 series.push(price);
             }
