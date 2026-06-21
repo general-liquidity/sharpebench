@@ -191,6 +191,92 @@ pub fn spa_pvalue(field: &[Vec<f64>], seed: u64, n_boot: usize, block_prob: f64)
     (at_least_as_large as f64 + 1.0) / (n_boot as f64 + 1.0)
 }
 
+/// Hansen's **consistent** SPA p-value (SPA_c). Improves on [`spa_pvalue`] by
+/// dropping models whose sample mean is so negative they cannot plausibly be the
+/// best under any reasonable null — rather than White's least-favorable assumption
+/// that every model sits exactly on the boundary. Excluding clearly-bad models
+/// from the bootstrap maximum yields more power (a smaller p) without inflating
+/// size. A model is dropped when its studentized mean falls below the Hansen
+/// (2005) threshold `-sqrt(2 log log n)`. Shares [`spa_pvalue`]'s bootstrap path,
+/// so `spa_consistent_pvalue ≤ spa_pvalue` for the same arguments. Deterministic.
+pub fn spa_consistent_pvalue(field: &[Vec<f64>], seed: u64, n_boot: usize, block_prob: f64) -> f64 {
+    let k = field.len();
+    if k == 0 || n_boot == 0 {
+        return 1.0;
+    }
+    let n = field.iter().map(Vec::len).min().unwrap_or(0);
+    if n < 2 {
+        return 1.0;
+    }
+    let sqrt_n = (n as f64).sqrt();
+    let means: Vec<f64> = field.iter().map(|f| mean(&f[..n])).collect();
+
+    // Same bootstrap path + scale as `spa_pvalue` (shared seed constant), so the
+    // only difference is the exclusion of bad models — guaranteeing SPA_c ≤ SPA_l.
+    let mut rng = SplitMix64(seed ^ 0x59A0_50A0_2026_BEEF);
+    let mut rows: Vec<Vec<f64>> = Vec::with_capacity(n_boot);
+    let mut idxs = vec![0usize; n];
+    for _ in 0..n_boot {
+        let mut idx = rng.below(n);
+        for slot in idxs.iter_mut() {
+            *slot = idx;
+            if rng.unit() < block_prob {
+                idx = rng.below(n);
+            } else {
+                idx = (idx + 1) % n;
+            }
+        }
+        let row: Vec<f64> = field
+            .iter()
+            .enumerate()
+            .map(|(ki, f)| {
+                let bmean = idxs.iter().map(|&j| f[j]).sum::<f64>() / n as f64;
+                sqrt_n * (bmean - means[ki])
+            })
+            .collect();
+        rows.push(row);
+    }
+
+    let omega: Vec<f64> = (0..k)
+        .map(|ki| {
+            let col_mean = rows.iter().map(|r| r[ki]).sum::<f64>() / n_boot as f64;
+            let var = rows.iter().map(|r| (r[ki] - col_mean).powi(2)).sum::<f64>() / n_boot as f64;
+            var.sqrt().max(1e-8)
+        })
+        .collect();
+
+    let z: Vec<f64> = (0..k).map(|ki| sqrt_n * means[ki] / omega[ki]).collect();
+    let t_obs = z.iter().map(|&v| v.max(0.0)).fold(0.0_f64, f64::max);
+
+    // Consistent recentering: a model with studentized mean below -sqrt(2 ln ln n)
+    // is dropped from the null max. For tiny n (ln ln n ≤ 0) keep every model
+    // (threshold → ∞), reducing exactly to the studentized SPA.
+    let lnln = (n as f64).ln().ln();
+    let thresh = if lnln > 0.0 {
+        (2.0 * lnln).sqrt()
+    } else {
+        f64::INFINITY
+    };
+    let bad: Vec<bool> = z.iter().map(|&zk| zk < -thresh).collect();
+
+    let mut at_least_as_large = 0usize;
+    for row in &rows {
+        let t_star = (0..k)
+            .map(|ki| {
+                if bad[ki] {
+                    0.0
+                } else {
+                    (row[ki] / omega[ki]).max(0.0)
+                }
+            })
+            .fold(0.0_f64, f64::max);
+        if t_star >= t_obs {
+            at_least_as_large += 1;
+        }
+    }
+    (at_least_as_large as f64 + 1.0) / (n_boot as f64 + 1.0)
+}
+
 /// Romano–Wolf step-down multiple testing: per-agent significance that controls
 /// the family-wise error rate across the whole field, but is more powerful than
 /// the single-step Reality Check (it re-tests the survivors after removing
@@ -356,6 +442,25 @@ mod tests {
             spa_pvalue(&noise, 1, 1000, 0.1) > 0.1,
             "should clear pure noise"
         );
+    }
+
+    #[test]
+    fn consistent_spa_is_at_least_as_powerful() {
+        // A strong leader alongside several clearly-bad (negative-mean) models —
+        // exactly where dropping the bad models from the null max buys power.
+        let strong: Vec<f64> = (0..150)
+            .map(|i| 0.003 + 0.001 * (i as f64 * 0.5).sin())
+            .collect();
+        let mut field = vec![strong];
+        field.extend((0..4).map(|k| {
+            (0..150)
+                .map(|i| -0.004 + 0.001 * ((i + k) as f64 * 0.9).sin())
+                .collect()
+        }));
+        let c = spa_consistent_pvalue(&field, 1, 1000, 0.1);
+        let l = spa_pvalue(&field, 1, 1000, 0.1);
+        assert!(c <= l + 1e-12, "consistent {c} should be ≤ studentized {l}");
+        assert!(c < 0.1, "should still flag the real leader");
     }
 
     #[test]

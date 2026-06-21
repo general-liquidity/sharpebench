@@ -179,6 +179,10 @@ pub struct CompositeScore {
     /// sibling of `field_reality_check_p`). Same value across the field; filled by
     /// [`rank`]. 1.0 from `score_agent` alone.
     pub field_spa_p: f64,
+    /// Hansen's *consistent* SPA p-value — the most powerful of the field-wide
+    /// data-snooping tests (drops clearly-bad models from the null). Same value
+    /// across the field; filled by [`rank`]. 1.0 from `score_agent` alone.
+    pub field_spa_consistent_p: f64,
 }
 
 /// Pareto dominance on (return↑, drawdown↓, turnover↓).
@@ -310,6 +314,7 @@ pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
         cost,
         return_per_cost,
         field_spa_p: 1.0,
+        field_spa_consistent_p: 1.0,
     }
 }
 
@@ -372,9 +377,16 @@ pub fn rank(subs: &[AgentSubmission], cfg: &ScoreConfig) -> Vec<CompositeScore> 
             cfg.n_boot,
             cfg.block_prob,
         );
+        let spa_c_p = crate::significance::spa_consistent_pvalue(
+            &field_excess,
+            cfg.bootstrap_seed,
+            cfg.n_boot,
+            cfg.block_prob,
+        );
         for cs in scores.iter_mut() {
             cs.field_reality_check_p = rc_p;
             cs.field_spa_p = spa_p;
+            cs.field_spa_consistent_p = spa_c_p;
         }
         let sd = crate::significance::step_down_significant(
             &field_excess,
