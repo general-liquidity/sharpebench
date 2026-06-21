@@ -59,6 +59,8 @@ The example field includes a *skilled* agent, a *lucky* agent with a **higher ra
 | `sign <subs.json> <key> <out.json>` | Score + sign a board to a tamper-evident file. |
 | `verify <board.json> <key>` | Verify a signed board's chain. |
 
+Add `--json` to any command for machine-readable output (structured JSON instead of the human table) — for agents, CI, or a leaderboard front-end.
+
 ## Architecture
 
 A Rust [Cargo workspace](Cargo.toml) (modular, à la Paradigm's Rust OSS — reuse any crate on its own). The whole tree is `#![forbid(unsafe_code)]`.
