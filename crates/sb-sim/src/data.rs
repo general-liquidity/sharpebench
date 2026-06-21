@@ -131,6 +131,21 @@ impl Dataset {
             ("whipsaw", Dataset::whipsaw(6, 180, 0.04, seed)),
         ]
     }
+
+    /// A contamination-masked copy: symbols renamed to opaque ids and dates
+    /// replaced with plain indices, so an agent can't pattern-match a memorized
+    /// ticker or calendar window. Prices are preserved. (After KTD-Fin's data-side
+    /// masking.)
+    pub fn masked(&self) -> Dataset {
+        let dates: Vec<String> = (0..self.dates.len()).map(|i| format!("t{i}")).collect();
+        let closes: BTreeMap<String, Vec<f64>> = self
+            .closes
+            .values()
+            .enumerate()
+            .map(|(i, series)| (format!("ASSET_{i:03}"), series.clone()))
+            .collect();
+        Dataset { dates, closes }
+    }
 }
 
 #[cfg(test)]
@@ -176,5 +191,19 @@ mod tests {
     #[test]
     fn stress_suite_has_scenarios() {
         assert_eq!(Dataset::stress_suite(1).len(), 2);
+    }
+
+    #[test]
+    fn masking_anonymizes_but_preserves_prices() {
+        let d = Dataset::synthetic(3, 40, 1);
+        let m = d.masked();
+        assert_eq!(m.symbols().len(), 3);
+        assert!(m.symbols().iter().all(|s| s.starts_with("ASSET_")));
+        assert!(m.dates.iter().all(|s| s.starts_with('t')));
+        // Prices are preserved (BTreeMap order is stable, so first maps to first).
+        assert_eq!(
+            d.closes.values().next().unwrap(),
+            m.closes.values().next().unwrap()
+        );
     }
 }
