@@ -3,11 +3,58 @@
 //! External agents speak the JSON [`sb_protocol`] over a container/HTTP boundary;
 //! this trait is the in-process equivalent used for reference agents and tests.
 
+use std::collections::BTreeMap;
+
 use sb_protocol::{Action, Decision, MarketObservation, Order};
 
 /// Something that turns a point-in-time observation into trading orders.
 pub trait Agent {
     fn decide(&mut self, obs: &MarketObservation) -> Decision;
+}
+
+/// A trading *team*: several member agents whose target weights are averaged into
+/// one consensus decision (a symbol only one member likes is down-weighted by the
+/// whole team's size). Modelled on the TradingAgents multi-agent firm — the team
+/// is scored as a unit while [`sb_core::attribute_roles`] estimates each member's
+/// load on the team outcome.
+pub struct TeamAgent {
+    pub members: Vec<Box<dyn Agent>>,
+}
+
+impl Agent for TeamAgent {
+    fn decide(&mut self, obs: &MarketObservation) -> Decision {
+        let n = self.members.len().max(1) as f64;
+        let mut weight: BTreeMap<String, f64> = BTreeMap::new();
+        let mut conf: BTreeMap<String, f64> = BTreeMap::new();
+        let mut votes: BTreeMap<String, f64> = BTreeMap::new();
+        for m in self.members.iter_mut() {
+            for o in m.decide(obs).orders {
+                *weight.entry(o.symbol.clone()).or_default() += o.target_weight;
+                *conf.entry(o.symbol.clone()).or_default() += o.confidence;
+                *votes.entry(o.symbol).or_default() += 1.0;
+            }
+        }
+        let orders = weight
+            .iter()
+            .map(|(sym, &w)| {
+                let avg_w = (w / n).max(0.0);
+                Order {
+                    symbol: sym.clone(),
+                    action: if avg_w > 0.0 {
+                        Action::Buy
+                    } else {
+                        Action::Close
+                    },
+                    target_weight: avg_w,
+                    confidence: conf[sym] / votes[sym].max(1.0),
+                }
+            })
+            .collect();
+        Decision {
+            orders,
+            reasoning: "team consensus (mean target weight)".to_string(),
+        }
+    }
 }
 
 /// Equal-weight buy-and-hold across all symbols — the baseline every agent must beat.
