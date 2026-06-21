@@ -11,8 +11,10 @@ pub mod agent;
 pub mod costs;
 pub mod data;
 pub mod engine;
+pub mod windows;
 
 pub use agent::{Agent, BuyAndHold, Momentum};
 pub use costs::CostModel;
 pub use data::Dataset;
 pub use engine::{run_backtest, Window};
+pub use windows::{tag_regime, walk_forward, Regime};
