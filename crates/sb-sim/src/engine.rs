@@ -12,6 +12,9 @@ use crate::data::Dataset;
 const LOOKBACK: usize = 20;
 /// Per-name weight above which we record a (warn-severity) concentration breach.
 const CONCENTRATION_CAP: f64 = 0.5;
+/// Per-name weight beyond which (or if non-finite) an order is treated as a
+/// simulator-exploitation attempt — a block-severity violation.
+const HARD_WEIGHT_CAP: f64 = 5.0;
 
 /// A simulation window over the dataset's date axis: steps `[start, end)`.
 #[derive(Clone, Copy, Debug)]
@@ -99,6 +102,11 @@ pub fn run_backtest(
         for ord in &decision.orders {
             let p = price(data, &ord.symbol, t);
             if p <= 0.0 {
+                continue;
+            }
+            // Sim-exploitation guard: non-finite or absurd weights are gaming attempts.
+            if !ord.target_weight.is_finite() || ord.target_weight.abs() > HARD_WEIGHT_CAP {
+                trace.events.push(ProcessEvent::ManipulativeOrder);
                 continue;
             }
             if ord.target_weight.abs() > CONCENTRATION_CAP {
