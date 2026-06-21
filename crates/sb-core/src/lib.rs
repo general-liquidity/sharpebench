@@ -18,14 +18,14 @@
 //! reported but never the rank key — see [`composite`].
 #![forbid(unsafe_code)]
 
-pub mod stats;
-pub mod deflated_sharpe;
-pub mod pass_k;
-pub mod significance;
-pub mod process;
-pub mod decay;
 pub mod calibration;
 pub mod composite;
+pub mod decay;
+pub mod deflated_sharpe;
+pub mod pass_k;
+pub mod process;
+pub mod significance;
+pub mod stats;
 
 pub use composite::{rank, score_agent, AgentSubmission, CompositeScore, Run, ScoreConfig};
 pub use process::{ProcessEvent, ProcessScore, Trace};

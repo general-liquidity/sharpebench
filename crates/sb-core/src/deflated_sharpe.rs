@@ -27,8 +27,10 @@ pub fn probabilistic_sharpe_ratio(returns: &[f64], sr_benchmark: f64) -> f64 {
     let sr = sharpe_ratio(returns);
     let g3 = skewness(returns);
     let g4 = kurtosis(returns); // non-excess kurtosis (normal = 3)
-    // Denominator of the PSR z-statistic; guarded so it never goes non-positive.
-    let denom = (1.0 - g3 * sr + ((g4 - 1.0) / 4.0) * sr * sr).max(1e-12).sqrt();
+                                // Denominator of the PSR z-statistic; guarded so it never goes non-positive.
+    let denom = (1.0 - g3 * sr + ((g4 - 1.0) / 4.0) * sr * sr)
+        .max(1e-12)
+        .sqrt();
     let z = (sr - sr_benchmark) * (n as f64 - 1.0).sqrt() / denom;
     norm_cdf(z)
 }
@@ -67,7 +69,9 @@ mod tests {
     /// A long, steady, low-vol track clears PSR vs 0 easily.
     #[test]
     fn psr_high_for_consistent_edge() {
-        let r: Vec<f64> = (0..250).map(|i| 0.001 + 0.0001 * ((i % 5) as f64 - 2.0)).collect();
+        let r: Vec<f64> = (0..250)
+            .map(|i| 0.001 + 0.0001 * ((i % 5) as f64 - 2.0))
+            .collect();
         assert!(probabilistic_sharpe_ratio(&r, 0.0) > 0.99);
     }
 
@@ -76,9 +80,14 @@ mod tests {
     /// Sharpe (~0.3/period) so PSR is in its sensitive range, not saturated.
     #[test]
     fn deflation_penalizes_many_trials() {
-        let r: Vec<f64> = (0..120).map(|i| 0.02 + 0.1 * (i as f64 * 0.9).sin()).collect();
+        let r: Vec<f64> = (0..120)
+            .map(|i| 0.02 + 0.1 * (i as f64 * 0.9).sin())
+            .collect();
         let few = deflated_sharpe_ratio(&r, 2, 0.5);
         let many = deflated_sharpe_ratio(&r, 500, 0.5);
-        assert!(many < few, "many-trial DSR {many} should be < few-trial DSR {few}");
+        assert!(
+            many < few,
+            "many-trial DSR {many} should be < few-trial DSR {few}"
+        );
     }
 }

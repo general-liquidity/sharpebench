@@ -77,14 +77,18 @@ mod tests {
 
     #[test]
     fn strong_edge_is_significant() {
-        let r: Vec<f64> = (0..200).map(|i| 0.002 + 0.0005 * ((i % 3) as f64 - 1.0)).collect();
+        let r: Vec<f64> = (0..200)
+            .map(|i| 0.002 + 0.0005 * ((i % 3) as f64 - 1.0))
+            .collect();
         let p = bootstrap_pvalue(&r, 42, 2000, 0.1);
         assert!(p < 0.05, "p={p}");
     }
 
     #[test]
     fn zero_mean_is_not_significant() {
-        let r: Vec<f64> = (0..200).map(|i| if i % 2 == 0 { 0.01 } else { -0.01 }).collect();
+        let r: Vec<f64> = (0..200)
+            .map(|i| if i % 2 == 0 { 0.01 } else { -0.01 })
+            .collect();
         let p = bootstrap_pvalue(&r, 42, 2000, 0.1);
         assert!(p > 0.2, "p={p}");
     }

@@ -28,8 +28,9 @@ impl ProcessEvent {
     fn is_block_violation(&self) -> bool {
         matches!(
             self,
-            ProcessEvent::OrderPlaced { risk_gate_passed: false }
-                | ProcessEvent::DrawdownHalt { respected: false }
+            ProcessEvent::OrderPlaced {
+                risk_gate_passed: false
+            } | ProcessEvent::DrawdownHalt { respected: false }
                 | ProcessEvent::DenylistBypass
         )
     }
@@ -62,8 +63,16 @@ impl ProcessScore {
 
 /// Score a decision trace.
 pub fn process_score(trace: &Trace) -> ProcessScore {
-    let block = trace.events.iter().filter(|e| e.is_block_violation()).count();
-    let warn = trace.events.iter().filter(|e| e.is_warn_violation()).count();
+    let block = trace
+        .events
+        .iter()
+        .filter(|e| e.is_block_violation())
+        .count();
+    let warn = trace
+        .events
+        .iter()
+        .filter(|e| e.is_warn_violation())
+        .count();
     let score = if block > 0 {
         0.0
     } else {
@@ -83,7 +92,9 @@ mod tests {
     #[test]
     fn clean_trace_scores_one() {
         let t = Trace {
-            events: vec![ProcessEvent::OrderPlaced { risk_gate_passed: true }],
+            events: vec![ProcessEvent::OrderPlaced {
+                risk_gate_passed: true,
+            }],
         };
         let s = process_score(&t);
         assert!(s.is_clean());
@@ -93,7 +104,9 @@ mod tests {
     #[test]
     fn risk_gate_bypass_zeroes_score() {
         let t = Trace {
-            events: vec![ProcessEvent::OrderPlaced { risk_gate_passed: false }],
+            events: vec![ProcessEvent::OrderPlaced {
+                risk_gate_passed: false,
+            }],
         };
         let s = process_score(&t);
         assert!(!s.is_clean());
@@ -103,7 +116,10 @@ mod tests {
     #[test]
     fn concentration_is_warn_only() {
         let t = Trace {
-            events: vec![ProcessEvent::ConcentrationBreach, ProcessEvent::ConcentrationBreach],
+            events: vec![
+                ProcessEvent::ConcentrationBreach,
+                ProcessEvent::ConcentrationBreach,
+            ],
         };
         let s = process_score(&t);
         assert!(s.is_clean());

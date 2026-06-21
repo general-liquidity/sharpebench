@@ -63,7 +63,7 @@ impl Default for ScoreConfig {
             dsr_bar: 0.95,
             per_run_psr_bar: 0.90,
             alpha: 0.05,
-            bootstrap_seed: 0x5B_A7_2026,
+            bootstrap_seed: 0x5BA7_2026,
             n_boot: 2000,
             block_prob: 0.1,
         }
@@ -87,7 +87,11 @@ pub struct CompositeScore {
 
 /// Score a single agent submission against `cfg`.
 pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
-    let pooled: Vec<f64> = sub.runs.iter().flat_map(|r| r.returns.iter().copied()).collect();
+    let pooled: Vec<f64> = sub
+        .runs
+        .iter()
+        .flat_map(|r| r.returns.iter().copied())
+        .collect();
 
     let psr = probabilistic_sharpe_ratio(&pooled, 0.0);
     let dsr = deflated_sharpe_ratio(&pooled, cfg.n_trials, cfg.trials_sr_std);
@@ -106,8 +110,7 @@ pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
     let bootstrap_p = bootstrap_pvalue(&pooled, cfg.bootstrap_seed, cfg.n_boot, cfg.block_prob);
     let raw_mean_return = mean(&pooled);
 
-    let rank_eligible =
-        dsr >= cfg.dsr_bar && passed_k && process_ok && bootstrap_p < cfg.alpha;
+    let rank_eligible = dsr >= cfg.dsr_bar && passed_k && process_ok && bootstrap_p < cfg.alpha;
     let composite = if rank_eligible { dsr } else { 0.0 };
 
     CompositeScore {
@@ -193,10 +196,9 @@ mod tests {
     #[test]
     fn process_violator_is_disqualified() {
         let mut runs: Vec<Run> = (0..5).map(|_| run(0.002, 0.0005, 60)).collect();
-        runs[0]
-            .trace
-            .events
-            .push(ProcessEvent::OrderPlaced { risk_gate_passed: false });
+        runs[0].trace.events.push(ProcessEvent::OrderPlaced {
+            risk_gate_passed: false,
+        });
         let s = score_agent(&agent("violator", runs), &ScoreConfig::default());
         assert!(!s.process_ok);
         assert!(!s.rank_eligible, "a risk-gate bypass must disqualify");
@@ -215,9 +217,20 @@ mod tests {
         let board = rank(&[lucky.clone(), skilled.clone()], &ScoreConfig::default());
 
         // Sanity: the lucky agent really does have the higher raw return.
-        let lucky_raw = board.iter().find(|s| s.agent_id == "lucky").unwrap().raw_mean_return;
-        let skilled_raw = board.iter().find(|s| s.agent_id == "skilled").unwrap().raw_mean_return;
-        assert!(lucky_raw > skilled_raw, "lucky raw {lucky_raw} should exceed skilled {skilled_raw}");
+        let lucky_raw = board
+            .iter()
+            .find(|s| s.agent_id == "lucky")
+            .unwrap()
+            .raw_mean_return;
+        let skilled_raw = board
+            .iter()
+            .find(|s| s.agent_id == "skilled")
+            .unwrap()
+            .raw_mean_return;
+        assert!(
+            lucky_raw > skilled_raw,
+            "lucky raw {lucky_raw} should exceed skilled {skilled_raw}"
+        );
 
         // Yet the board ranks the skilled agent first.
         assert_eq!(board[0].agent_id, "skilled");
