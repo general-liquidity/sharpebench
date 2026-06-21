@@ -55,7 +55,9 @@ A Rust [Cargo workspace](Cargo.toml) (modular, à la Paradigm's Rust OSS — reu
 
 ## Governance
 
-Hosted by [General Liquidity](https://github.com/general-liquidity) to start, with a roadmap to neutral governance. Credibility comes from **forward-attestation + signed, independently-verifiable results**, not from trust in the host — and Gordon (GL's agent) competes on the board like any other entrant.
+Hosted by [General Liquidity](https://github.com/general-liquidity) to start, with a roadmap to neutral governance. Credibility comes from **forward-attestation + signed, independently-verifiable results** (`sb-attest`), not from trust in the host — and Gordon (GL's agent) competes on the board like any other entrant.
+
+The neutral home may already exist: the FINOS-governed [Open FinLLM Leaderboard](https://huggingface.co/spaces/finosfoundation/Open-Financial-LLM-Leaderboard) covers the financial-*knowledge* axis (NLP, sentiment, QA, compliance) but has **no trading-performance axis**. SharpeBench is positioned to be the skill-vs-luck *trading* track it lacks — complementary, not competing. See **[docs/GOVERNANCE.md](docs/GOVERNANCE.md)**.
 
 ## License
 
