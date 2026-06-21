@@ -136,6 +136,7 @@ dependencies = [
  "sb-attest",
  "sb-core",
  "sb-harness",
+ "sb-leaderboard",
  "sb-sim",
  "serde_json",
 ]
@@ -163,6 +164,7 @@ version = "0.0.1"
 dependencies = [
  "sb-attest",
  "sb-core",
+ "serde",
  "serde_json",
 ]
 

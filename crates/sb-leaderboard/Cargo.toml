@@ -9,4 +9,5 @@ repository = "https://github.com/general-liquidity/sharpebench"
 [dependencies]
 sb-core = { path = "../sb-core" }
 sb-attest = { path = "../sb-attest" }
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"

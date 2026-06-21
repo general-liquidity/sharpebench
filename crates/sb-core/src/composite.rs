@@ -125,7 +125,7 @@ impl Default for ScoreConfig {
 }
 
 /// The scored result for one agent.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CompositeScore {
     pub agent_id: String,
     pub deflated_sharpe: f64,

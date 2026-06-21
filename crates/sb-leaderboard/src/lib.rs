@@ -8,6 +8,8 @@
 
 use std::fmt::Write as _;
 
+use serde::{Deserialize, Serialize};
+
 use sb_attest::{sign_result, verify_chain, SignedResult, GENESIS};
 use sb_core::CompositeScore;
 
@@ -53,6 +55,33 @@ pub fn verify_board(chain: &[SignedResult], key: &[u8]) -> bool {
     verify_chain(chain, key)
 }
 
+/// A published board: the ranked scores plus their tamper-evident signature chain.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PublishedBoard {
+    pub scores: Vec<CompositeScore>,
+    pub chain: Vec<SignedResult>,
+}
+
+/// Build a published board (scores + signed chain).
+pub fn publish(board: &[CompositeScore], key: &[u8]) -> PublishedBoard {
+    PublishedBoard {
+        scores: board.to_vec(),
+        chain: sign_board(board, key),
+    }
+}
+
+/// Persist a published board to a JSON file.
+pub fn save(board: &PublishedBoard, path: &str) -> std::io::Result<()> {
+    let json = serde_json::to_string_pretty(board).map_err(std::io::Error::other)?;
+    std::fs::write(path, json)
+}
+
+/// Load a published board from a JSON file.
+pub fn load(path: &str) -> std::io::Result<PublishedBoard> {
+    let s = std::fs::read_to_string(path)?;
+    serde_json::from_str(&s).map_err(std::io::Error::other)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -77,5 +106,16 @@ mod tests {
         let chain = sign_board(&board, b"key");
         assert!(verify_board(&chain, b"key"));
         assert!(!verify_board(&chain, b"wrong-key"));
+    }
+
+    #[test]
+    fn publish_roundtrips_and_verifies() {
+        let board = rank(&[sub("a", 0.002), sub("b", 0.0)], &ScoreConfig::default());
+        let pb = publish(&board, b"key");
+        let back: PublishedBoard =
+            serde_json::from_str(&serde_json::to_string(&pb).unwrap()).unwrap();
+        assert_eq!(back.scores.len(), 2);
+        assert!(verify_board(&back.chain, b"key"));
+        assert!(!verify_board(&back.chain, b"wrong"));
     }
 }

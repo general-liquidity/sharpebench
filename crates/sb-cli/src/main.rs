@@ -22,6 +22,8 @@ fn main() -> ExitCode {
         },
         Some("commit") => run_commit(&args),
         Some("stress") => run_stress(),
+        Some("sign") => run_sign(&args),
+        Some("verify") => run_verify(&args),
         Some("--help") | Some("-h") | None => {
             help();
             ExitCode::SUCCESS
@@ -44,6 +46,61 @@ fn help() {
         "  sharpebench commit <agent> <window> <digest> <salt>  forward-attestation pre-registration"
     );
     println!("  sharpebench stress                    run the adversarial stress suite (masked)");
+    println!("  sharpebench sign <subs.json> <key> <out.json>  score + sign a board to a file");
+    println!("  sharpebench verify <board.json> <key>  verify a signed board's chain");
+}
+
+fn run_sign(args: &[String]) -> ExitCode {
+    if args.len() < 5 {
+        eprintln!("usage: sharpebench sign <submissions.json> <key> <out.json>");
+        return ExitCode::from(2);
+    }
+    let data = match std::fs::read_to_string(&args[2]) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("error: cannot read {}: {e}", args[2]);
+            return ExitCode::FAILURE;
+        }
+    };
+    let subs: Vec<AgentSubmission> = match serde_json::from_str(&data) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: invalid submissions JSON: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let pb = sb_leaderboard::publish(&rank(&subs, &ScoreConfig::default()), args[3].as_bytes());
+    match sb_leaderboard::save(&pb, &args[4]) {
+        Ok(()) => {
+            println!("signed board ({} entries) -> {}", pb.chain.len(), args[4]);
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run_verify(args: &[String]) -> ExitCode {
+    if args.len() < 4 {
+        eprintln!("usage: sharpebench verify <board.json> <key>");
+        return ExitCode::from(2);
+    }
+    let pb = match sb_leaderboard::load(&args[2]) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: cannot load {}: {e}", args[2]);
+            return ExitCode::FAILURE;
+        }
+    };
+    if sb_leaderboard::verify_board(&pb.chain, args[3].as_bytes()) {
+        println!("OK — {} entries, signature chain valid", pb.chain.len());
+        ExitCode::SUCCESS
+    } else {
+        eprintln!("FAIL — signature chain invalid (tampered or wrong key)");
+        ExitCode::FAILURE
+    }
 }
 
 fn run_stress() -> ExitCode {

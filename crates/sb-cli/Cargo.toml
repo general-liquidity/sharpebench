@@ -15,4 +15,5 @@ sb-core = { path = "../sb-core" }
 sb-sim = { path = "../sb-sim" }
 sb-harness = { path = "../sb-harness" }
 sb-attest = { path = "../sb-attest" }
+sb-leaderboard = { path = "../sb-leaderboard" }
 serde_json = "1"
