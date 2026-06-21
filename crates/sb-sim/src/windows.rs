@@ -89,6 +89,7 @@ mod tests {
             Dataset {
                 dates: (0..50).map(|i| format!("d{i}")).collect(),
                 closes,
+                dividends: BTreeMap::new(),
             }
         };
         let up: Vec<f64> = (0..50).map(|i| 100.0 * (1.0 + 0.01 * i as f64)).collect();
