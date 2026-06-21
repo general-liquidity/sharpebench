@@ -1,0 +1,16 @@
+[book]
+title = "SharpeBench"
+description = "A luck-robust, deflation-surviving benchmark for AI trading agents."
+authors = ["General Liquidity"]
+language = "en"
+src = "src"
+
+[output.html]
+default-theme = "ayu"
+preferred-dark-theme = "ayu"
+git-repository-url = "https://github.com/general-liquidity/sharpebench"
+edit-url-template = "https://github.com/general-liquidity/sharpebench/edit/main/docs/book/{path}"
+
+[output.html.fold]
+enable = true
+level = 1

@@ -5,6 +5,9 @@
 # Generated WASM JS bindings (run scripts/build-wasm.sh)
 /pkg
 
+# Generated mdbook output (run `mdbook build docs/book`)
+/docs/book/book
+
 # We intentionally COMMIT Cargo.lock — reproducible scores require a pinned
 # dependency graph. (Generate it with `cargo build` on first checkout.)
 
