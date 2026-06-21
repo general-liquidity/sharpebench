@@ -6,7 +6,7 @@ use sb_core::{ProcessEvent, Run, Trace};
 use sb_protocol::{MarketObservation, PositionState, SymbolSnapshot};
 
 use crate::agent::Agent;
-use crate::costs::{CostModel, Rng};
+use crate::costs::{market_impact_frac, CostModel, Rng};
 use crate::data::Dataset;
 
 const LOOKBACK: usize = 20;
@@ -121,8 +121,12 @@ pub fn run_backtest(
             if delta_value.abs() < 1e-9 {
                 continue;
             }
-            let slip =
-                (costs.slippage_bps + rng.signed_unit().abs() * costs.slippage_bps) / 10_000.0;
+            // Base seeded slippage plus own-order market impact: the bigger the
+            // trade relative to NAV, the more the fill moves against the agent.
+            let participation = delta_value.abs() / cur_nav.max(1e-9);
+            let slip = (costs.slippage_bps + rng.signed_unit().abs() * costs.slippage_bps)
+                / 10_000.0
+                + market_impact_frac(costs.impact_bps, participation);
             let exec_p = if delta_value > 0.0 {
                 p * (1.0 + slip)
             } else {

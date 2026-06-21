@@ -9,6 +9,10 @@
 pub struct CostModel {
     pub fee_bps: f64,
     pub slippage_bps: f64,
+    /// Own-order market-impact coefficient (bps at 100% participation). Slippage
+    /// grows with the square root of the trade's share of portfolio NAV, so an
+    /// agent that wins by betting huge pays for the size it moves.
+    pub impact_bps: f64,
 }
 
 impl Default for CostModel {
@@ -16,8 +20,16 @@ impl Default for CostModel {
         Self {
             fee_bps: 2.0,
             slippage_bps: 3.0,
+            impact_bps: 50.0,
         }
     }
+}
+
+/// Own-order market impact as a return fraction: a concave (square-root law)
+/// function of `participation` = |trade value| / portfolio NAV. Concavity is the
+/// empirical Almgren shape — the first dollar moves the price more than the last.
+pub fn market_impact_frac(impact_bps: f64, participation: f64) -> f64 {
+    impact_bps / 10_000.0 * participation.max(0.0).sqrt()
 }
 
 /// Minimal deterministic PRNG (SplitMix64) for seeded execution noise.
@@ -37,5 +49,26 @@ impl Rng {
     /// Uniform in [-1, 1].
     pub fn signed_unit(&mut self) -> f64 {
         (self.next_u64() >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn impact_grows_with_participation() {
+        let small = market_impact_frac(50.0, 0.01);
+        let big = market_impact_frac(50.0, 0.5);
+        assert!(big > small, "bigger trade should cost more");
+        assert!(market_impact_frac(50.0, 0.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn impact_is_concave() {
+        // Square-root law: doubling participation less-than-doubles the impact.
+        let a = market_impact_frac(50.0, 0.1);
+        let b = market_impact_frac(50.0, 0.2);
+        assert!(b < 2.0 * a, "impact must be concave in size");
     }
 }
