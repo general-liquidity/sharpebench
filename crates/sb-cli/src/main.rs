@@ -20,6 +20,7 @@ fn main() -> ExitCode {
                 ExitCode::from(2)
             }
         },
+        Some("commit") => run_commit(&args),
         Some("--help") | Some("-h") | None => {
             help();
             ExitCode::SUCCESS
@@ -38,6 +39,27 @@ fn help() {
     println!(
         "  sharpebench score <submissions.json>  rank a JSON field of pre-computed submissions"
     );
+    println!(
+        "  sharpebench commit <agent> <window> <digest> <salt>  forward-attestation pre-registration"
+    );
+}
+
+fn run_commit(args: &[String]) -> ExitCode {
+    if args.len() < 6 {
+        eprintln!("usage: sharpebench commit <agent_id> <target_window> <artifact_digest> <salt>");
+        return ExitCode::from(2);
+    }
+    let c = sb_attest::make_commitment(&args[2], &args[3], &args[4], &args[5]);
+    match serde_json::to_string_pretty(&c) {
+        Ok(j) => {
+            println!("{j}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn run_demo() -> ExitCode {

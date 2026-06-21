@@ -133,6 +133,7 @@ dependencies = [
 name = "sb-cli"
 version = "0.0.1"
 dependencies = [
+ "sb-attest",
  "sb-core",
  "sb-harness",
  "sb-sim",
