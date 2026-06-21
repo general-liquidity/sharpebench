@@ -40,6 +40,39 @@ pub struct AgentSubmission {
     pub runs: Vec<Run>,
 }
 
+/// A trading mandate: constraints the agent must respect to be rank-eligible.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Mandate {
+    /// Max tolerable drawdown over the pooled track (e.g. 0.20). 1.0 = unconstrained.
+    pub max_drawdown: f64,
+}
+
+impl Default for Mandate {
+    fn default() -> Self {
+        Self { max_drawdown: 1.0 }
+    }
+}
+
+/// Maximum drawdown of the equity curve implied by a return series, in [0, 1].
+fn max_drawdown(returns: &[f64]) -> f64 {
+    let mut nav = 1.0;
+    let mut peak = 1.0;
+    let mut mdd = 0.0;
+    for &r in returns {
+        nav *= 1.0 + r;
+        if nav > peak {
+            peak = nav;
+        }
+        if peak > 0.0 {
+            let dd = 1.0 - nav / peak;
+            if dd > mdd {
+                mdd = dd;
+            }
+        }
+    }
+    mdd
+}
+
 /// Scoring configuration. `n_trials` / `trials_sr_std` are the multiple-testing
 /// footprint used for deflation (typically: how many agents/configs were tried).
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -55,6 +88,9 @@ pub struct ScoreConfig {
     pub bootstrap_seed: u64,
     pub n_boot: usize,
     pub block_prob: f64,
+    /// Mandate constraints the agent must respect (default: unconstrained).
+    #[serde(default)]
+    pub mandate: Mandate,
 }
 
 impl Default for ScoreConfig {
@@ -68,6 +104,7 @@ impl Default for ScoreConfig {
             bootstrap_seed: 0x5BA7_2026,
             n_boot: 2000,
             block_prob: 0.1,
+            mandate: Mandate::default(),
         }
     }
 }
@@ -99,6 +136,10 @@ pub struct CompositeScore {
     /// the probability the *leader's* edge is luck given how many agents were tried.
     /// Same value across the field. 1.0 from `score_agent` alone.
     pub field_reality_check_p: f64,
+    /// Maximum drawdown over the pooled track, in [0, 1].
+    pub max_drawdown: f64,
+    /// Whether the agent respected its mandate (e.g. the drawdown cap).
+    pub mandate_ok: bool,
 }
 
 /// Score a single agent submission against `cfg`.
@@ -147,7 +188,12 @@ pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
     let per_run_edge: Vec<f64> = sub.runs.iter().map(|r| mean(&r.returns)).collect();
     let edge_half_life_periods = edge_half_life(&per_run_edge);
 
-    let rank_eligible = dsr >= cfg.dsr_bar && passed_k && process_ok && bootstrap_p < cfg.alpha;
+    // Mandate adherence: does the drawdown respect the mandate's cap?
+    let mdd = max_drawdown(&pooled);
+    let mandate_ok = mdd <= cfg.mandate.max_drawdown;
+
+    let rank_eligible =
+        dsr >= cfg.dsr_bar && passed_k && process_ok && bootstrap_p < cfg.alpha && mandate_ok;
     let composite = if rank_eligible { dsr } else { 0.0 };
 
     CompositeScore {
@@ -165,6 +211,8 @@ pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
         calibration_brier,
         edge_half_life: edge_half_life_periods,
         field_reality_check_p: 1.0,
+        max_drawdown: mdd,
+        mandate_ok,
     }
 }
 
