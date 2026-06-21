@@ -88,6 +88,92 @@ pub fn luck_floor(
         .collect()
 }
 
+/// Elicit dominance choices from a live agent to feed
+/// [`sb_core::assess_rationality`]. Each scenario presents `n_symbols` assets whose
+/// trailing returns encode a known "value", with exactly one clearly-best asset
+/// rotated to a different position each time. The agent's choice is read off as the
+/// asset it allocates the most weight to. A return-seeking agent should pick the
+/// best asset; an indiscriminate one leaves value on the table.
+pub fn probe_dominance(
+    agent: &mut dyn Agent,
+    n_scenarios: usize,
+    n_symbols: usize,
+) -> Vec<sb_core::DominanceChoice> {
+    use sb_protocol::{MarketObservation, PositionState, SymbolSnapshot};
+    use std::collections::BTreeMap;
+
+    (0..n_scenarios)
+        .map(|s| {
+            let best = if n_symbols > 0 { s % n_symbols } else { 0 };
+            // Known option values: one clear winner, distinct losers elsewhere.
+            let values: Vec<f64> = (0..n_symbols)
+                .map(|i| {
+                    if i == best {
+                        0.05
+                    } else {
+                        -0.01 - 0.005 * i as f64
+                    }
+                })
+                .collect();
+            let symbols: Vec<SymbolSnapshot> = values
+                .iter()
+                .enumerate()
+                .map(|(i, &v)| SymbolSnapshot {
+                    symbol: format!("SYM{i:02}"),
+                    close_history: vec![1.0, 1.0 + v], // trailing return = v
+                    fundamentals: BTreeMap::new(),
+                    news: Vec::new(),
+                })
+                .collect();
+            let portfolio = symbols
+                .iter()
+                .map(|s| PositionState {
+                    symbol: s.symbol.clone(),
+                    shares: 0.0,
+                    avg_price: 0.0,
+                })
+                .collect();
+            let obs = MarketObservation {
+                date: format!("t{s}"),
+                cash: 1.0,
+                symbols,
+                portfolio,
+            };
+            let decision = agent.decide(&obs);
+            // Chosen = the asset given the most target weight (first on ties).
+            let mut chosen = 0usize;
+            let mut best_w = f64::NEG_INFINITY;
+            for i in 0..n_symbols {
+                let sym = format!("SYM{i:02}");
+                let w = decision
+                    .orders
+                    .iter()
+                    .find(|o| o.symbol == sym)
+                    .map(|o| o.target_weight)
+                    .unwrap_or(0.0);
+                if w > best_w {
+                    best_w = w;
+                    chosen = i;
+                }
+            }
+            sb_core::DominanceChoice {
+                options: values,
+                chosen,
+            }
+        })
+        .collect()
+}
+
+/// Probe an agent's economic rationality over `n_scenarios` dominance menus.
+pub fn probe_rationality(
+    agent: &mut dyn Agent,
+    n_scenarios: usize,
+    n_symbols: usize,
+) -> sb_core::EconRationalityReport {
+    let choices = probe_dominance(agent, n_scenarios, n_symbols);
+    sb_core::assess_rationality(&choices, &[], n_symbols)
+}
+
 /// Segment a submission's runs by window and report out-of-sample edge decay.
 /// [`run_agent`] lays runs out window-major (all seeds of window 0, then window 1,
 /// …), so the first `runs.len()/n_windows` runs are the in-sample window and the
@@ -214,6 +300,25 @@ mod tests {
         // The attribution analyzer accepts the produced series.
         let attr = attribute_roles(&team_pooled, &res.role_returns);
         assert_eq!(attr.len(), 2);
+    }
+
+    #[test]
+    fn rationality_probe_separates_discriminating_agents() {
+        // Momentum concentrates on the single best asset → fully rational.
+        let mut mo = Momentum::default();
+        let r_mo = probe_rationality(&mut mo, 8, 4);
+        assert_eq!(
+            r_mo.rationality_score, 1.0,
+            "momentum should pick the winner"
+        );
+
+        // Buy-and-hold spreads weight indiscriminately → leaves value on the table.
+        let mut bh = BuyAndHold;
+        let r_bh = probe_rationality(&mut bh, 8, 4);
+        assert!(
+            r_mo.rationality_score > r_bh.rationality_score,
+            "a discriminating agent should out-score an indiscriminate one"
+        );
     }
 
     #[test]
