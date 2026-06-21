@@ -1,0 +1,10 @@
+[package]
+name = "sb-sim"
+version = "0.0.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "SharpeBench point-in-time market simulator (Phase 1)."
+repository = "https://github.com/general-liquidity/sharpebench"
+
+[dependencies]
+sb-protocol = { path = "../sb-protocol" }

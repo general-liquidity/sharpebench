@@ -1,0 +1,15 @@
+[package]
+name = "sb-core"
+version = "0.0.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Deterministic, luck-robust scoring kernel for SharpeBench (deflated Sharpe / PSR / pass^k / process / decay)."
+repository = "https://github.com/general-liquidity/sharpebench"
+keywords = ["benchmark", "trading", "sharpe", "quant", "evaluation"]
+categories = ["science", "finance"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"

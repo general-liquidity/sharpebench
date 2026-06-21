@@ -1,0 +1,4 @@
+# Normalize line endings to LF across platforms (keeps rustfmt --check stable in CI).
+* text=auto eol=lf
+*.png binary
+*.jpg binary

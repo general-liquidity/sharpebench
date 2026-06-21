@@ -1,0 +1,15 @@
+[package]
+name = "sb-cli"
+version = "0.0.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "SharpeBench command-line interface."
+repository = "https://github.com/general-liquidity/sharpebench"
+
+[[bin]]
+name = "sharpebench"
+path = "src/main.rs"
+
+[dependencies]
+sb-core = { path = "../sb-core" }
+serde_json = "1"

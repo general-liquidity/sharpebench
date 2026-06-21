@@ -1,0 +1,10 @@
+[package]
+name = "sb-protocol"
+version = "0.0.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "SharpeBench language-agnostic agent ⇄ harness protocol (JSON message types)."
+repository = "https://github.com/general-liquidity/sharpebench"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }

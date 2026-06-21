@@ -1,0 +1,10 @@
+[package]
+name = "sb-wasm"
+version = "0.0.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "WASM bindings for the SharpeBench scoring kernel (consumed by Gordon/Bun)."
+repository = "https://github.com/general-liquidity/sharpebench"
+
+[dependencies]
+sb-core = { path = "../sb-core" }

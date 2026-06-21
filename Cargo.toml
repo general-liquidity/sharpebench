@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/sb-core",
+    "crates/sb-cli",
+    "crates/sb-protocol",
+    "crates/sb-wasm",
+    "crates/sb-sim",
+    "crates/sb-harness",
+    "crates/sb-attest",
+    "crates/sb-leaderboard",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/general-liquidity/sharpebench"
+authors = ["General Liquidity, Inc."]
+
+[profile.release]
+lto = true
+codegen-units = 1

@@ -1,0 +1,10 @@
+[package]
+name = "sb-leaderboard"
+version = "0.0.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "SharpeBench leaderboard storage + rendering + signed result chain (Phase 2)."
+repository = "https://github.com/general-liquidity/sharpebench"
+
+[dependencies]
+sb-core = { path = "../sb-core" }
