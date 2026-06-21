@@ -79,6 +79,54 @@ impl Dataset {
         }
         Dataset { dates, closes }
     }
+
+    /// Adversarial path: a synthetic series with a sudden one-day **flash crash**
+    /// of `crash_pct` at `crash_day` that does not fully recover — a tail-stress
+    /// scenario that should blow up agents with no risk discipline.
+    pub fn flash_crash(
+        n_symbols: usize,
+        n_days: usize,
+        crash_day: usize,
+        crash_pct: f64,
+        seed: u64,
+    ) -> Dataset {
+        let mut d = Dataset::synthetic(n_symbols, n_days, seed);
+        let factor = (1.0 - crash_pct).max(0.0);
+        for series in d.closes.values_mut() {
+            for v in series.iter_mut().skip(crash_day) {
+                *v *= factor;
+            }
+        }
+        d
+    }
+
+    /// **Whipsaw** regime: sharp alternating up/down moves with no drift. Trend and
+    /// momentum agents get chopped up by transaction costs.
+    pub fn whipsaw(n_symbols: usize, n_days: usize, amplitude: f64, seed: u64) -> Dataset {
+        let dates: Vec<String> = (0..n_days).map(|d| format!("2025-{:03}", d + 1)).collect();
+        let mut closes = BTreeMap::new();
+        let phase = (seed % 2) as usize;
+        for s in 0..n_symbols {
+            let mut price = 100.0;
+            let mut series = Vec::with_capacity(n_days);
+            for i in 0..n_days {
+                let dir = if (i + s + phase) % 2 == 0 { 1.0 } else { -1.0 };
+                price *= 1.0 + dir * amplitude;
+                series.push(price);
+            }
+            closes.insert(format!("SYM{s:02}"), series);
+        }
+        Dataset { dates, closes }
+    }
+
+    /// A named adversarial stress suite — each scenario tests *survival*, not
+    /// calm-market return.
+    pub fn stress_suite(seed: u64) -> Vec<(&'static str, Dataset)> {
+        vec![
+            ("flash_crash", Dataset::flash_crash(6, 180, 90, 0.30, seed)),
+            ("whipsaw", Dataset::whipsaw(6, 180, 0.04, seed)),
+        ]
+    }
 }
 
 #[cfg(test)]
@@ -99,5 +147,30 @@ mod tests {
         let a = Dataset::synthetic(3, 40, 99);
         let b = Dataset::synthetic(3, 40, 99);
         assert_eq!(a.closes, b.closes);
+    }
+
+    #[test]
+    fn flash_crash_has_a_big_drop() {
+        let d = Dataset::flash_crash(2, 120, 60, 0.3, 5);
+        let s = &d.closes["SYM00"];
+        assert!(
+            s[60] < s[59] * 0.8,
+            "crash should drop ≥20%: {} -> {}",
+            s[59],
+            s[60]
+        );
+    }
+
+    #[test]
+    fn whipsaw_has_near_zero_drift() {
+        let d = Dataset::whipsaw(1, 100, 0.03, 1);
+        let s = &d.closes["SYM00"];
+        let total = s.last().unwrap() / s[0] - 1.0;
+        assert!(total.abs() < 0.1, "whipsaw drift={total}");
+    }
+
+    #[test]
+    fn stress_suite_has_scenarios() {
+        assert_eq!(Dataset::stress_suite(1).len(), 2);
     }
 }
