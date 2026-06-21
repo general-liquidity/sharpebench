@@ -83,6 +83,10 @@ pub struct CompositeScore {
     pub rank_eligible: bool,
     /// The ranking key: the deflated Sharpe when eligible, else 0.0.
     pub composite: f64,
+    /// Field-relative attribution, filled by [`rank`]: the skill (alpha) and
+    /// market-beta components of the agent's return. Zero from `score_agent` alone.
+    pub alpha: f64,
+    pub beta: f64,
 }
 
 /// Score a single agent submission against `cfg`.
@@ -123,13 +127,44 @@ pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
         raw_mean_return,
         rank_eligible,
         composite,
+        alpha: 0.0,
+        beta: 0.0,
     }
 }
 
 /// Score and rank a field of agents. Eligible agents sort first (by composite
 /// desc); ineligible agents sort last (by raw return desc, for display only).
 pub fn rank(subs: &[AgentSubmission], cfg: &ScoreConfig) -> Vec<CompositeScore> {
-    let mut scores: Vec<CompositeScore> = subs.iter().map(|s| score_agent(s, cfg)).collect();
+    // Pooled returns per agent + an equal-weight market proxy (the field average),
+    // used for performance attribution: alpha (skill) vs beta (market exposure).
+    let pooled: Vec<Vec<f64>> = subs
+        .iter()
+        .map(|s| {
+            s.runs
+                .iter()
+                .flat_map(|r| r.returns.iter().copied())
+                .collect()
+        })
+        .collect();
+    let min_len = pooled.iter().map(Vec::len).min().unwrap_or(0);
+    let n_agents = pooled.len().max(1) as f64;
+    let market: Vec<f64> = (0..min_len)
+        .map(|i| pooled.iter().map(|p| p[i]).sum::<f64>() / n_agents)
+        .collect();
+
+    let mut scores: Vec<CompositeScore> = subs
+        .iter()
+        .enumerate()
+        .map(|(idx, s)| {
+            let mut cs = score_agent(s, cfg);
+            if min_len >= 2 {
+                let (alpha, beta) = crate::attribution::alpha_beta(&pooled[idx], &market);
+                cs.alpha = alpha;
+                cs.beta = beta;
+            }
+            cs
+        })
+        .collect();
     scores.sort_by(|a, b| {
         b.rank_eligible
             .cmp(&a.rank_eligible)

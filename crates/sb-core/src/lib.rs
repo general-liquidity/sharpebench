@@ -18,6 +18,7 @@
 //! reported but never the rank key — see [`composite`].
 #![forbid(unsafe_code)]
 
+pub mod attribution;
 pub mod calibration;
 pub mod composite;
 pub mod decay;
