@@ -11,9 +11,9 @@ name = "sharpebench"
 path = "src/main.rs"
 
 [dependencies]
-sb-core = { path = "../sb-core" }
-sb-sim = { path = "../sb-sim" }
-sb-harness = { path = "../sb-harness" }
-sb-attest = { path = "../sb-attest" }
-sb-leaderboard = { path = "../sb-leaderboard" }
+sb-core = { path = "../sb-core", version = "0.0.1" }
+sb-sim = { path = "../sb-sim", version = "0.0.1" }
+sb-harness = { path = "../sb-harness", version = "0.0.1" }
+sb-attest = { path = "../sb-attest", version = "0.0.1" }
+sb-leaderboard = { path = "../sb-leaderboard", version = "0.0.1" }
 serde_json = "1"

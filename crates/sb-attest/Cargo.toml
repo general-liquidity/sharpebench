@@ -5,6 +5,8 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "SharpeBench forward-attestation: pre-registration commitments + signed, verifiable result chains."
 repository = "https://github.com/general-liquidity/sharpebench"
+keywords = ["attestation", "commitment", "hmac", "benchmark", "integrity"]
+categories = ["cryptography", "science"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

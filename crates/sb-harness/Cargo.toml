@@ -7,6 +7,6 @@ description = "SharpeBench orchestration: drive an agent over seeds × windows a
 repository = "https://github.com/general-liquidity/sharpebench"
 
 [dependencies]
-sb-core = { path = "../sb-core" }
-sb-protocol = { path = "../sb-protocol" }
-sb-sim = { path = "../sb-sim" }
+sb-core = { path = "../sb-core", version = "0.0.1" }
+sb-protocol = { path = "../sb-protocol", version = "0.0.1" }
+sb-sim = { path = "../sb-sim", version = "0.0.1" }

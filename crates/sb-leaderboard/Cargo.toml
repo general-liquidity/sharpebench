@@ -7,7 +7,7 @@ description = "SharpeBench leaderboard rendering + tamper-evident signed result 
 repository = "https://github.com/general-liquidity/sharpebench"
 
 [dependencies]
-sb-core = { path = "../sb-core" }
-sb-attest = { path = "../sb-attest" }
+sb-core = { path = "../sb-core", version = "0.0.1" }
+sb-attest = { path = "../sb-attest", version = "0.0.1" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
