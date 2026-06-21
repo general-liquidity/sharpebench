@@ -175,6 +175,10 @@ pub struct CompositeScore {
     pub cost: f64,
     /// Raw mean return per unit cost — skill-per-dollar. `None` when cost is unreported.
     pub return_per_cost: Option<f64>,
+    /// Hansen's studentized SPA p-value for the field leader (a more robust
+    /// sibling of `field_reality_check_p`). Same value across the field; filled by
+    /// [`rank`]. 1.0 from `score_agent` alone.
+    pub field_spa_p: f64,
 }
 
 /// Pareto dominance on (return↑, drawdown↓, turnover↓).
@@ -305,6 +309,7 @@ pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
         confidence_weighted_return,
         cost,
         return_per_cost,
+        field_spa_p: 1.0,
     }
 }
 
@@ -361,8 +366,15 @@ pub fn rank(subs: &[AgentSubmission], cfg: &ScoreConfig) -> Vec<CompositeScore> 
             cfg.n_boot,
             cfg.block_prob,
         );
+        let spa_p = crate::significance::spa_pvalue(
+            &field_excess,
+            cfg.bootstrap_seed,
+            cfg.n_boot,
+            cfg.block_prob,
+        );
         for cs in scores.iter_mut() {
             cs.field_reality_check_p = rc_p;
+            cs.field_spa_p = spa_p;
         }
         let sd = crate::significance::step_down_significant(
             &field_excess,

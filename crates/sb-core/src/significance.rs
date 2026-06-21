@@ -120,6 +120,77 @@ pub fn reality_check_pvalue(field: &[Vec<f64>], seed: u64, n_boot: usize, block_
     (at_least_as_large as f64 + 1.0) / (n_boot as f64 + 1.0)
 }
 
+/// Hansen's Superior Predictive Ability (SPA) p-value — a studentized Reality
+/// Check. Where [`reality_check_pvalue`] takes the max of raw outperformance,
+/// SPA divides each agent's statistic by its own bootstrap standard deviation
+/// before taking the max, so a single high-variance agent can't dominate the
+/// field maximum and inflate the apparent edge. This is Hansen's "lower"/liberal
+/// studentized variant (no consistent recentering); lower p ⇒ the field leader's
+/// risk-adjusted edge is real. `field` rows are each agent's *excess* returns vs
+/// the benchmark. Deterministic given `seed`.
+pub fn spa_pvalue(field: &[Vec<f64>], seed: u64, n_boot: usize, block_prob: f64) -> f64 {
+    let k = field.len();
+    if k == 0 || n_boot == 0 {
+        return 1.0;
+    }
+    let n = field.iter().map(Vec::len).min().unwrap_or(0);
+    if n < 2 {
+        return 1.0;
+    }
+    let sqrt_n = (n as f64).sqrt();
+    let means: Vec<f64> = field.iter().map(|f| mean(&f[..n])).collect();
+
+    // Bootstrap rows of the centered statistic sqrt(n)*(bmean_k - mean_k), reused
+    // both to estimate each agent's scale (omega_k) and for the null max.
+    let mut rng = SplitMix64(seed ^ 0x59A0_50A0_2026_BEEF);
+    let mut rows: Vec<Vec<f64>> = Vec::with_capacity(n_boot);
+    let mut idxs = vec![0usize; n];
+    for _ in 0..n_boot {
+        let mut idx = rng.below(n);
+        for slot in idxs.iter_mut() {
+            *slot = idx;
+            if rng.unit() < block_prob {
+                idx = rng.below(n);
+            } else {
+                idx = (idx + 1) % n;
+            }
+        }
+        let row: Vec<f64> = field
+            .iter()
+            .enumerate()
+            .map(|(ki, f)| {
+                let bmean = idxs.iter().map(|&j| f[j]).sum::<f64>() / n as f64;
+                sqrt_n * (bmean - means[ki])
+            })
+            .collect();
+        rows.push(row);
+    }
+
+    // omega_k = bootstrap std of the centered statistic (the studentizing scale).
+    let omega: Vec<f64> = (0..k)
+        .map(|ki| {
+            let col_mean = rows.iter().map(|r| r[ki]).sum::<f64>() / n_boot as f64;
+            let var = rows.iter().map(|r| (r[ki] - col_mean).powi(2)).sum::<f64>() / n_boot as f64;
+            var.sqrt().max(1e-8)
+        })
+        .collect();
+
+    let t_obs = (0..k)
+        .map(|ki| (sqrt_n * means[ki] / omega[ki]).max(0.0))
+        .fold(0.0_f64, f64::max);
+
+    let mut at_least_as_large = 0usize;
+    for row in &rows {
+        let t_star = (0..k)
+            .map(|ki| (row[ki] / omega[ki]).max(0.0))
+            .fold(0.0_f64, f64::max);
+        if t_star >= t_obs {
+            at_least_as_large += 1;
+        }
+    }
+    (at_least_as_large as f64 + 1.0) / (n_boot as f64 + 1.0)
+}
+
 /// Romano–Wolf step-down multiple testing: per-agent significance that controls
 /// the family-wise error rate across the whole field, but is more powerful than
 /// the single-step Reality Check (it re-tests the survivors after removing
@@ -256,6 +327,35 @@ mod tests {
             })
             .collect();
         assert!(reality_check_pvalue(&field, 1, 1000, 0.1) > 0.1);
+    }
+
+    #[test]
+    fn spa_flags_a_real_leader_and_clears_noise() {
+        let strong: Vec<f64> = (0..150)
+            .map(|i| 0.003 + 0.001 * (i as f64 * 0.5).sin())
+            .collect();
+        let mut field = vec![strong];
+        field.extend((0..5).map(|k| {
+            (0..150)
+                .map(|i| 0.002 * ((i + k) as f64 * 0.9).sin())
+                .collect()
+        }));
+        assert!(
+            spa_pvalue(&field, 1, 1000, 0.1) < 0.1,
+            "should flag the leader"
+        );
+
+        let noise: Vec<Vec<f64>> = (0..6)
+            .map(|k| {
+                (0..150)
+                    .map(|i| 0.002 * ((i + k) as f64 * 0.9).sin())
+                    .collect()
+            })
+            .collect();
+        assert!(
+            spa_pvalue(&noise, 1, 1000, 0.1) > 0.1,
+            "should clear pure noise"
+        );
     }
 
     #[test]
