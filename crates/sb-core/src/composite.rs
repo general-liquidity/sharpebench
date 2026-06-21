@@ -16,7 +16,7 @@ use crate::calibration::brier_score;
 use crate::decay::edge_half_life;
 use crate::deflated_sharpe::{deflated_sharpe_ratio, probabilistic_sharpe_ratio};
 use crate::pass_k::{pass_k, PassMode};
-use crate::process::{process_score, Trace};
+use crate::process::{process_score, ProcessEvent, Trace};
 use crate::significance::bootstrap_pvalue;
 use crate::stats::mean;
 
@@ -140,6 +140,21 @@ pub struct CompositeScore {
     pub max_drawdown: f64,
     /// Whether the agent respected its mandate (e.g. the drawdown cap).
     pub mandate_ok: bool,
+    /// Turnover proxy: average orders placed per run (trading frequency / capacity).
+    pub turnover: f64,
+    /// Whether the agent is on the Pareto front over (return↑, drawdown↓,
+    /// turnover↓). Filled by [`rank`].
+    pub pareto_optimal: bool,
+}
+
+/// Pareto dominance on (return↑, drawdown↓, turnover↓).
+fn dominates(a: &CompositeScore, b: &CompositeScore) -> bool {
+    a.raw_mean_return >= b.raw_mean_return
+        && a.max_drawdown <= b.max_drawdown
+        && a.turnover <= b.turnover
+        && (a.raw_mean_return > b.raw_mean_return
+            || a.max_drawdown < b.max_drawdown
+            || a.turnover < b.turnover)
 }
 
 /// Score a single agent submission against `cfg`.
@@ -192,6 +207,20 @@ pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
     let mdd = max_drawdown(&pooled);
     let mandate_ok = mdd <= cfg.mandate.max_drawdown;
 
+    // Turnover proxy: average number of orders placed per run.
+    let total_orders: usize = sub
+        .runs
+        .iter()
+        .map(|r| {
+            r.trace
+                .events
+                .iter()
+                .filter(|e| matches!(e, ProcessEvent::OrderPlaced { .. }))
+                .count()
+        })
+        .sum();
+    let turnover = total_orders as f64 / sub.runs.len().max(1) as f64;
+
     let rank_eligible =
         dsr >= cfg.dsr_bar && passed_k && process_ok && bootstrap_p < cfg.alpha && mandate_ok;
     let composite = if rank_eligible { dsr } else { 0.0 };
@@ -213,6 +242,8 @@ pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
         field_reality_check_p: 1.0,
         max_drawdown: mdd,
         mandate_ok,
+        turnover,
+        pareto_optimal: false,
     }
 }
 
@@ -272,6 +303,14 @@ pub fn rank(subs: &[AgentSubmission], cfg: &ScoreConfig) -> Vec<CompositeScore> 
         for cs in scores.iter_mut() {
             cs.field_reality_check_p = rc_p;
         }
+    }
+
+    // Pareto front over (return↑, drawdown↓, turnover↓).
+    let pareto: Vec<bool> = (0..scores.len())
+        .map(|i| !(0..scores.len()).any(|j| j != i && dominates(&scores[j], &scores[i])))
+        .collect();
+    for (cs, p) in scores.iter_mut().zip(pareto) {
+        cs.pareto_optimal = p;
     }
 
     scores.sort_by(|a, b| {
