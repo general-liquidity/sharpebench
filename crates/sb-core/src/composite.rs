@@ -40,6 +40,17 @@ pub struct AgentSubmission {
     pub runs: Vec<Run>,
 }
 
+/// What to rank eligible agents by.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RankKey {
+    /// Deflated Sharpe (the default — luck-robust risk-adjusted skill).
+    #[default]
+    DeflatedSharpe,
+    /// Alpha (skill net of market beta).
+    Alpha,
+}
+
 /// A trading mandate: constraints the agent must respect to be rank-eligible.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Mandate {
@@ -91,6 +102,9 @@ pub struct ScoreConfig {
     /// Mandate constraints the agent must respect (default: unconstrained).
     #[serde(default)]
     pub mandate: Mandate,
+    /// What eligible agents are ranked by (default: deflated Sharpe).
+    #[serde(default)]
+    pub rank_key: RankKey,
 }
 
 impl Default for ScoreConfig {
@@ -105,6 +119,7 @@ impl Default for ScoreConfig {
             n_boot: 2000,
             block_prob: 0.1,
             mandate: Mandate::default(),
+            rank_key: RankKey::default(),
         }
     }
 }
@@ -313,12 +328,22 @@ pub fn rank(subs: &[AgentSubmission], cfg: &ScoreConfig) -> Vec<CompositeScore> 
         cs.pareto_optimal = p;
     }
 
+    let sort_key = |s: &CompositeScore| match cfg.rank_key {
+        RankKey::DeflatedSharpe => s.composite,
+        RankKey::Alpha => {
+            if s.rank_eligible {
+                s.alpha
+            } else {
+                f64::NEG_INFINITY
+            }
+        }
+    };
     scores.sort_by(|a, b| {
         b.rank_eligible
             .cmp(&a.rank_eligible)
             .then(
-                b.composite
-                    .partial_cmp(&a.composite)
+                sort_key(b)
+                    .partial_cmp(&sort_key(a))
                     .unwrap_or(std::cmp::Ordering::Equal),
             )
             .then(
