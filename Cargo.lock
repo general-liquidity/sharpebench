@@ -160,7 +160,9 @@ dependencies = [
 name = "sb-leaderboard"
 version = "0.0.1"
 dependencies = [
+ "sb-attest",
  "sb-core",
+ "serde_json",
 ]
 
 [[package]]
