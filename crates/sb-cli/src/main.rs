@@ -21,6 +21,7 @@ fn main() -> ExitCode {
             }
         },
         Some("commit") => run_commit(&args),
+        Some("stress") => run_stress(),
         Some("--help") | Some("-h") | None => {
             help();
             ExitCode::SUCCESS
@@ -42,6 +43,32 @@ fn help() {
     println!(
         "  sharpebench commit <agent> <window> <digest> <salt>  forward-attestation pre-registration"
     );
+    println!("  sharpebench stress                    run the adversarial stress suite (masked)");
+}
+
+fn run_stress() -> ExitCode {
+    use sb_sim::{Agent, BuyAndHold, CostModel, Dataset, Momentum, Window};
+
+    let seeds: Vec<u64> = (0..6).collect();
+    let costs = CostModel::default();
+    println!("SharpeBench — adversarial stress suite (contamination-masked, costs on)\n");
+    for (name, data) in Dataset::stress_suite(20_260_621) {
+        let masked = data.masked();
+        let windows = [Window {
+            start: 20,
+            end: masked.len(),
+        }];
+        let bh = sb_harness::run_agent("buy-and-hold", &masked, &windows, &seeds, costs, || {
+            Box::new(BuyAndHold) as Box<dyn Agent>
+        });
+        let mo = sb_harness::run_agent("momentum", &masked, &windows, &seeds, costs, || {
+            Box::new(Momentum::default()) as Box<dyn Agent>
+        });
+        println!("# scenario: {name}");
+        print_board(&rank(&[bh, mo], &ScoreConfig::default()));
+        println!();
+    }
+    ExitCode::SUCCESS
 }
 
 fn run_commit(args: &[String]) -> ExitCode {
