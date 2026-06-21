@@ -12,6 +12,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::calibration::brier_score;
+use crate::decay::edge_half_life;
 use crate::deflated_sharpe::{deflated_sharpe_ratio, probabilistic_sharpe_ratio};
 use crate::pass_k::{pass_k, PassMode};
 use crate::process::{process_score, Trace};
@@ -87,6 +89,12 @@ pub struct CompositeScore {
     /// market-beta components of the agent's return. Zero from `score_agent` alone.
     pub alpha: f64,
     pub beta: f64,
+    /// Calibration of stated confidence (Brier score; lower = better). `None` if
+    /// the agent reported no confidences/outcomes.
+    pub calibration_brier: Option<f64>,
+    /// Edge durability: half-life (in runs) of the per-run edge. `None` if there
+    /// are too few runs or the edge isn't decaying.
+    pub edge_half_life: Option<f64>,
 }
 
 /// Score a single agent submission against `cfg`.
@@ -114,6 +122,27 @@ pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
     let bootstrap_p = bootstrap_pvalue(&pooled, cfg.bootstrap_seed, cfg.n_boot, cfg.block_prob);
     let raw_mean_return = mean(&pooled);
 
+    // Calibration: does stated conviction predict outcomes? (None if not reported.)
+    let conf: Vec<f64> = sub
+        .runs
+        .iter()
+        .flat_map(|r| r.confidences.iter().copied())
+        .collect();
+    let outc: Vec<bool> = sub
+        .runs
+        .iter()
+        .flat_map(|r| r.outcomes.iter().copied())
+        .collect();
+    let calibration_brier = if !conf.is_empty() && !outc.is_empty() {
+        Some(brier_score(&conf, &outc))
+    } else {
+        None
+    };
+
+    // Edge durability: half-life of the per-run edge across runs.
+    let per_run_edge: Vec<f64> = sub.runs.iter().map(|r| mean(&r.returns)).collect();
+    let edge_half_life_periods = edge_half_life(&per_run_edge);
+
     let rank_eligible = dsr >= cfg.dsr_bar && passed_k && process_ok && bootstrap_p < cfg.alpha;
     let composite = if rank_eligible { dsr } else { 0.0 };
 
@@ -129,6 +158,8 @@ pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
         composite,
         alpha: 0.0,
         beta: 0.0,
+        calibration_brier,
+        edge_half_life: edge_half_life_periods,
     }
 }
 
