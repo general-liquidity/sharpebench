@@ -95,6 +95,10 @@ pub struct CompositeScore {
     /// Edge durability: half-life (in runs) of the per-run edge. `None` if there
     /// are too few runs or the edge isn't decaying.
     pub edge_half_life: Option<f64>,
+    /// Field-wide data-snooping p-value (White's Reality Check), filled by [`rank`]:
+    /// the probability the *leader's* edge is luck given how many agents were tried.
+    /// Same value across the field. 1.0 from `score_agent` alone.
+    pub field_reality_check_p: f64,
 }
 
 /// Score a single agent submission against `cfg`.
@@ -160,6 +164,7 @@ pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
         beta: 0.0,
         calibration_brier,
         edge_half_life: edge_half_life_periods,
+        field_reality_check_p: 1.0,
     }
 }
 
@@ -196,6 +201,31 @@ pub fn rank(subs: &[AgentSubmission], cfg: &ScoreConfig) -> Vec<CompositeScore> 
             cs
         })
         .collect();
+
+    // Field-wide data-snooping significance (White's Reality Check): is the
+    // leader's edge real after accounting for how many agents were tried?
+    if min_len >= 2 {
+        let field_excess: Vec<Vec<f64>> = pooled
+            .iter()
+            .map(|p| {
+                p.iter()
+                    .take(min_len)
+                    .zip(market.iter())
+                    .map(|(a, m)| a - m)
+                    .collect()
+            })
+            .collect();
+        let rc_p = crate::significance::reality_check_pvalue(
+            &field_excess,
+            cfg.bootstrap_seed,
+            cfg.n_boot,
+            cfg.block_prob,
+        );
+        for cs in scores.iter_mut() {
+            cs.field_reality_check_p = rc_p;
+        }
+    }
+
     scores.sort_by(|a, b| {
         b.rank_eligible
             .cmp(&a.rank_eligible)

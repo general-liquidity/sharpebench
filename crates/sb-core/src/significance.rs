@@ -71,6 +71,55 @@ pub fn bootstrap_pvalue(excess: &[f64], seed: u64, n_boot: usize, block_prob: f6
     (at_least_as_large as f64 + 1.0) / (n_boot as f64 + 1.0)
 }
 
+/// White's Reality Check p-value (a Hansen-SPA-style data-snooping test): the
+/// probability that the BEST agent's outperformance over the field benchmark arose
+/// by chance, accounting for how many agents were tried. `field` rows are each
+/// agent's *excess* returns vs the benchmark (aligned, equal length). A shared
+/// stationary-bootstrap index path preserves cross-agent correlation. Low p ⇒ the
+/// field leader's edge is real, not the luckiest of many. Deterministic given `seed`.
+pub fn reality_check_pvalue(field: &[Vec<f64>], seed: u64, n_boot: usize, block_prob: f64) -> f64 {
+    if field.is_empty() || n_boot == 0 {
+        return 1.0;
+    }
+    let n = field.iter().map(Vec::len).min().unwrap_or(0);
+    if n < 2 {
+        return 1.0;
+    }
+    let sqrt_n = (n as f64).sqrt();
+    let means: Vec<f64> = field.iter().map(|f| mean(&f[..n])).collect();
+    let observed = means.iter().copied().fold(f64::NEG_INFINITY, f64::max) * sqrt_n;
+    if observed <= 0.0 {
+        return 1.0;
+    }
+    let mut rng = SplitMix64(seed ^ 0x2EA1_17C0_DEAD_BEEF);
+    let mut at_least_as_large = 0usize;
+    let mut idxs = vec![0usize; n];
+    for _ in 0..n_boot {
+        // Shared resample path across all agents (preserves cross-correlation).
+        let mut idx = rng.below(n);
+        for slot in idxs.iter_mut() {
+            *slot = idx;
+            if rng.unit() < block_prob {
+                idx = rng.below(n);
+            } else {
+                idx = (idx + 1) % n;
+            }
+        }
+        let mut v_star = f64::NEG_INFINITY;
+        for (ki, f) in field.iter().enumerate() {
+            let bmean = idxs.iter().map(|&j| f[j]).sum::<f64>() / n as f64;
+            let v = sqrt_n * (bmean - means[ki]); // centered under the null
+            if v > v_star {
+                v_star = v;
+            }
+        }
+        if v_star >= observed {
+            at_least_as_large += 1;
+        }
+    }
+    (at_least_as_large as f64 + 1.0) / (n_boot as f64 + 1.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,5 +149,31 @@ mod tests {
             bootstrap_pvalue(&r, 7, 500, 0.1),
             bootstrap_pvalue(&r, 7, 500, 0.1)
         );
+    }
+
+    #[test]
+    fn reality_check_flags_a_real_leader() {
+        let strong: Vec<f64> = (0..150)
+            .map(|i| 0.003 + 0.001 * (i as f64 * 0.5).sin())
+            .collect();
+        let mut field = vec![strong];
+        field.extend((0..5).map(|k| {
+            (0..150)
+                .map(|i| 0.002 * ((i + k) as f64 * 0.9).sin())
+                .collect()
+        }));
+        assert!(reality_check_pvalue(&field, 1, 1000, 0.1) < 0.1);
+    }
+
+    #[test]
+    fn reality_check_no_edge_is_insignificant() {
+        let field: Vec<Vec<f64>> = (0..6)
+            .map(|k| {
+                (0..150)
+                    .map(|i| 0.002 * ((i + k) as f64 * 0.9).sin())
+                    .collect()
+            })
+            .collect();
+        assert!(reality_check_pvalue(&field, 1, 1000, 0.1) > 0.1);
     }
 }
