@@ -65,6 +65,7 @@ pub fn run_backtest(
             trace,
             confidences,
             outcomes,
+            cost: 0.0,
         };
     }
 
@@ -164,6 +165,7 @@ pub fn run_backtest(
         trace,
         confidences,
         outcomes,
+        cost: 0.0,
     }
 }
 

@@ -31,6 +31,10 @@ pub struct Run {
     pub confidences: Vec<f64>,
     #[serde(default)]
     pub outcomes: Vec<bool>,
+    /// Compute/token cost incurred to produce this run (any consistent unit).
+    /// Used for cost-efficiency reporting; 0.0 = not reported.
+    #[serde(default)]
+    pub cost: f64,
 }
 
 /// An agent's full submission: many runs across seeds × windows.
@@ -163,6 +167,14 @@ pub struct CompositeScore {
     /// Whether the agent's outperformance survives Romano–Wolf step-down multiple
     /// testing across the field. Filled by [`rank`].
     pub step_down_significant: bool,
+    /// Conviction-weighted return: each run's return weighted by the confidence the
+    /// agent staked on it. Rewards sizing conviction with the outcome. Falls back to
+    /// the raw mean when no confidences are reported.
+    pub confidence_weighted_return: f64,
+    /// Total compute/token cost across all runs (0.0 if unreported).
+    pub cost: f64,
+    /// Raw mean return per unit cost — skill-per-dollar. `None` when cost is unreported.
+    pub return_per_cost: Option<f64>,
 }
 
 /// Pareto dominance on (return↑, drawdown↓, turnover↓).
@@ -239,6 +251,33 @@ pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
         .sum();
     let turnover = total_orders as f64 / sub.runs.len().max(1) as f64;
 
+    // Confidence-weighted return: weight each run's return by the conviction
+    // staked on it, so sizing-with-conviction beats flat-confidence trading.
+    let mut cw_num = 0.0;
+    let mut cw_den = 0.0;
+    for r in &sub.runs {
+        let w = if r.confidences.is_empty() {
+            1.0
+        } else {
+            mean(&r.confidences)
+        };
+        cw_num += w * mean(&r.returns);
+        cw_den += w;
+    }
+    let confidence_weighted_return = if cw_den > 0.0 {
+        cw_num / cw_den
+    } else {
+        raw_mean_return
+    };
+
+    // Cost-efficiency: skill per unit of compute/token spend.
+    let cost: f64 = sub.runs.iter().map(|r| r.cost).sum();
+    let return_per_cost = if cost > 0.0 {
+        Some(raw_mean_return / cost)
+    } else {
+        None
+    };
+
     let rank_eligible =
         dsr >= cfg.dsr_bar && passed_k && process_ok && bootstrap_p < cfg.alpha && mandate_ok;
     let composite = if rank_eligible { dsr } else { 0.0 };
@@ -263,6 +302,9 @@ pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
         turnover,
         pareto_optimal: false,
         step_down_significant: false,
+        confidence_weighted_return,
+        cost,
+        return_per_cost,
     }
 }
 
@@ -384,6 +426,7 @@ mod tests {
             trace: Trace::default(),
             confidences: Vec::new(),
             outcomes: Vec::new(),
+            cost: 0.0,
         }
     }
 
@@ -457,5 +500,47 @@ mod tests {
         // Yet the board ranks the skilled agent first.
         assert_eq!(board[0].agent_id, "skilled");
         assert!(board[0].rank_eligible && !board[1].rank_eligible);
+    }
+
+    #[test]
+    fn confidence_weighting_rewards_conviction() {
+        // Confident on the winning run, cautious on the losing one → the
+        // conviction-weighted return beats the flat raw mean.
+        let win = Run {
+            returns: vec![0.01; 30],
+            trace: Trace::default(),
+            confidences: vec![0.9; 30],
+            outcomes: Vec::new(),
+            cost: 0.0,
+        };
+        let lose = Run {
+            returns: vec![-0.005; 30],
+            trace: Trace::default(),
+            confidences: vec![0.1; 30],
+            outcomes: Vec::new(),
+            cost: 0.0,
+        };
+        let s = score_agent(&agent("conv", vec![win, lose]), &ScoreConfig::default());
+        assert!(
+            s.confidence_weighted_return > s.raw_mean_return,
+            "cwr {} should beat raw {}",
+            s.confidence_weighted_return,
+            s.raw_mean_return
+        );
+    }
+
+    #[test]
+    fn cost_efficiency_reported_only_with_cost() {
+        let mut r = run(0.002, 0.0005, 30);
+        r.cost = 4.0;
+        let s = score_agent(&agent("paid", vec![r]), &ScoreConfig::default());
+        assert_eq!(s.cost, 4.0);
+        assert!(s.return_per_cost.is_some());
+
+        let free = score_agent(
+            &agent("free", vec![run(0.002, 0.0005, 30)]),
+            &ScoreConfig::default(),
+        );
+        assert!(free.return_per_cost.is_none());
     }
 }

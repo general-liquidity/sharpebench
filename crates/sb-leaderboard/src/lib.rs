@@ -95,6 +95,7 @@ mod tests {
                 trace: Default::default(),
                 confidences: Vec::new(),
                 outcomes: Vec::new(),
+                cost: 0.0,
             }],
         }
     }
