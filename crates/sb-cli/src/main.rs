@@ -1,20 +1,18 @@
 //! `sharpebench` — the command-line entry point.
 //!
-//! Phase 0 ships the `score` subcommand: read a JSON array of agent submissions,
-//! rank them on the luck-robust composite, and print the leaderboard. The harness
-//! that *produces* those submissions (sim + agent protocol) lands in Phase 1.
-//!
-//! ```text
-//! sharpebench score <submissions.json>
-//! ```
+//! - `sharpebench run` — run the reference agents through the point-in-time
+//!   simulator (multiple windows × seeds, costs on) and rank them.
+//! - `sharpebench score <submissions.json>` — rank a JSON field of pre-computed
+//!   submissions on the luck-robust composite.
 
 use std::process::ExitCode;
 
-use sb_core::{rank, AgentSubmission, ScoreConfig};
+use sb_core::{rank, AgentSubmission, CompositeScore, ScoreConfig};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
+        Some("run") => run_demo(),
         Some("score") => match args.get(2) {
             Some(path) => run_score(path),
             None => {
@@ -23,9 +21,7 @@ fn main() -> ExitCode {
             }
         },
         Some("--help") | Some("-h") | None => {
-            println!("sharpebench — luck-robust benchmark for AI trading agents\n");
-            println!("USAGE:\n  sharpebench score <submissions.json>\n");
-            println!("A submission file is a JSON array of {{ agent_id, runs: [{{ returns, trace?, ... }}] }}.");
+            help();
             ExitCode::SUCCESS
         }
         Some(other) => {
@@ -33,6 +29,48 @@ fn main() -> ExitCode {
             ExitCode::from(2)
         }
     }
+}
+
+fn help() {
+    println!("sharpebench — luck-robust benchmark for AI trading agents\n");
+    println!("USAGE:");
+    println!("  sharpebench run                       run reference agents through the sim and rank them");
+    println!(
+        "  sharpebench score <submissions.json>  rank a JSON field of pre-computed submissions"
+    );
+}
+
+fn run_demo() -> ExitCode {
+    use sb_sim::{Agent, BuyAndHold, CostModel, Dataset, Momentum, Window};
+
+    let data = Dataset::synthetic(8, 180, 20_260_621);
+    let windows = [
+        Window {
+            start: 20,
+            end: 100,
+        },
+        Window {
+            start: 100,
+            end: 180,
+        },
+    ];
+    let seeds: Vec<u64> = (0..8).collect();
+    let costs = CostModel::default();
+
+    let bh = sb_harness::run_agent("buy-and-hold", &data, &windows, &seeds, costs, || {
+        Box::new(BuyAndHold) as Box<dyn Agent>
+    });
+    let mo = sb_harness::run_agent("momentum", &data, &windows, &seeds, costs, || {
+        Box::new(Momentum::default()) as Box<dyn Agent>
+    });
+
+    println!(
+        "SharpeBench — reference run ({} windows × {} seeds, costs on)\n",
+        windows.len(),
+        seeds.len()
+    );
+    print_board(&rank(&[bh, mo], &ScoreConfig::default()));
+    ExitCode::SUCCESS
 }
 
 fn run_score(path: &str) -> ExitCode {
@@ -50,10 +88,11 @@ fn run_score(path: &str) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    print_board(&rank(&subs, &ScoreConfig::default()));
+    ExitCode::SUCCESS
+}
 
-    let cfg = ScoreConfig::default();
-    let board = rank(&subs, &cfg);
-
+fn print_board(board: &[CompositeScore]) {
     println!(
         "{:<4} {:<18} {:>9} {:>8} {:>7} {:>6} {:>9} {:>10}",
         "#", "agent", "DSR", "PSR", "pass^k", "proc", "boot_p", "raw_ret"
@@ -82,7 +121,6 @@ fn run_score(path: &str) -> ExitCode {
         board.iter().filter(|s| s.rank_eligible).count(),
         board.len()
     );
-    ExitCode::SUCCESS
 }
 
 fn yn(b: bool) -> &'static str {

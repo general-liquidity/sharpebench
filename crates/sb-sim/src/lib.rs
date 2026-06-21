@@ -1,8 +1,18 @@
-//! sb-sim — point-in-time backtest engine (Phase 1, not yet implemented).
+//! sb-sim — point-in-time market simulator + reference agents (Phase 1).
 //!
-//! Will provide: a point-in-time data store that exposes only rows with
-//! `t <= decision_time` (look-ahead **unrepresentable** by construction rather
-//! than policed after the fact), cost / slippage / own-order-market-impact
-//! models, and multi-window OOS + walk-forward + regime tagging. The engine is
-//! deterministic given `(data, seed, decisions)`. Tracked in docs/PLAN.md §6.
+//! The engine feeds an [`Agent`] a [`sb_protocol::MarketObservation`] that only
+//! ever contains data at or before the decision date (look-ahead is structurally
+//! impossible — [`Dataset`] never hands out a future bar), applies the resulting
+//! orders with transaction costs and seeded execution slippage, and emits an
+//! [`sb_core::Run`] (per-period returns + decision trace) ready for scoring.
 #![forbid(unsafe_code)]
+
+pub mod agent;
+pub mod costs;
+pub mod data;
+pub mod engine;
+
+pub use agent::{Agent, BuyAndHold, Momentum};
+pub use costs::CostModel;
+pub use data::Dataset;
+pub use engine::{run_backtest, Window};
