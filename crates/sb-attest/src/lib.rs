@@ -17,6 +17,8 @@
 //! chain is tamper-evident.
 #![forbid(unsafe_code)]
 
+pub mod registry;
+
 use std::fmt::Write as _;
 
 use hmac::{Hmac, Mac};
