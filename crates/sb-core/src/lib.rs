@@ -23,6 +23,7 @@ pub mod calibration;
 pub mod composite;
 pub mod decay;
 pub mod deflated_sharpe;
+pub mod econrationality;
 pub mod pass_k;
 pub mod process;
 pub mod roles;
@@ -31,5 +32,6 @@ pub mod significance;
 pub mod stats;
 
 pub use composite::{rank, score_agent, AgentSubmission, CompositeScore, Run, ScoreConfig};
+pub use econrationality::{assess_rationality, DominanceChoice, EconRationalityReport};
 pub use process::{ProcessEvent, ProcessScore, Trace};
 pub use selfaudit::{run_self_audit, SelfAuditReport};
