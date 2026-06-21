@@ -6,7 +6,7 @@ use sb_core::{ProcessEvent, Run, Trace};
 use sb_protocol::{MarketObservation, PositionState, SymbolSnapshot};
 
 use crate::agent::Agent;
-use crate::costs::{market_impact_frac, CostModel, Rng};
+use crate::costs::{liquidity_capped_delta, market_impact_frac, CostModel, Rng};
 use crate::data::Dataset;
 
 const LOOKBACK: usize = 20;
@@ -117,7 +117,10 @@ pub fn run_backtest(
             }
             let target_value = ord.target_weight.max(0.0) * cur_nav;
             let cur_value = shares[&ord.symbol] * p;
-            let delta_value = target_value - cur_value;
+            // Liquidity cap: a trade larger than the per-step participation limit
+            // only partially fills; the rest is left for later steps.
+            let delta_value =
+                liquidity_capped_delta(target_value - cur_value, costs.max_participation, cur_nav);
             if delta_value.abs() < 1e-9 {
                 continue;
             }
@@ -151,8 +154,16 @@ pub fn run_backtest(
             }
         }
 
-        // 5) daily return = post-trade NAV vs the prior step's NAV (captures the
-        //    price move on held positions, dividends received, and trading costs).
+        // 5) financing: charge carry on any leveraged exposure above 1× NAV.
+        let positions_value: f64 = symbols.iter().map(|s| shares[s] * price(data, s, t)).sum();
+        let nav_now = cash + positions_value;
+        if nav_now > 1e-12 {
+            let gross = positions_value / nav_now;
+            cash -= crate::costs::financing_cost_frac(costs.financing_bps, gross) * nav_now;
+        }
+
+        // 6) daily return = post-trade NAV vs the prior step's NAV (captures the
+        //    price move on held positions, dividends, financing, and trading costs).
         let navc = nav(data, &symbols, &shares, cash, t);
         let ret = if prev_nav.abs() > 1e-12 {
             navc / prev_nav - 1.0
@@ -184,7 +195,25 @@ pub fn run_backtest(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::BuyAndHold;
+    use crate::agent::{Agent, BuyAndHold};
+    use sb_protocol::{Action, Decision, MarketObservation, Order};
+
+    /// Test-only agent: levers 2× into the first symbol (gross exposure 2× NAV).
+    struct Leveraged;
+    impl Agent for Leveraged {
+        fn decide(&mut self, obs: &MarketObservation) -> Decision {
+            let sym = obs.symbols[0].symbol.clone();
+            Decision {
+                orders: vec![Order {
+                    symbol: sym,
+                    action: Action::Buy,
+                    target_weight: 2.0,
+                    confidence: 0.5,
+                }],
+                reasoning: "2x leverage".to_string(),
+            }
+        }
+    }
 
     #[test]
     fn backtest_produces_returns_and_trace() {
@@ -229,6 +258,8 @@ mod tests {
             fee_bps: 0.0,
             slippage_bps: 0.0,
             impact_bps: 0.0,
+            financing_bps: 0.0,
+            max_participation: f64::INFINITY,
         };
         let plain = run_backtest(&base, &mut BuyAndHold, w, 0, no_costs);
         let div = run_backtest(&paying, &mut BuyAndHold, w, 0, no_costs);
@@ -237,6 +268,49 @@ mod tests {
         assert!(
             sum_div > sum_plain,
             "dividends should raise total return: {sum_div} vs {sum_plain}"
+        );
+    }
+
+    #[test]
+    fn financing_costs_reduce_leveraged_returns() {
+        let data = Dataset::synthetic(3, 120, 11);
+        let w = Window {
+            start: 20,
+            end: 120,
+        };
+        let no_fin = CostModel {
+            financing_bps: 0.0,
+            ..CostModel::default()
+        };
+        let with_fin = CostModel {
+            financing_bps: 50.0,
+            ..CostModel::default()
+        };
+        let a = run_backtest(&data, &mut Leveraged, w, 0, no_fin);
+        let b = run_backtest(&data, &mut Leveraged, w, 0, with_fin);
+        assert!(
+            b.returns.iter().sum::<f64>() < a.returns.iter().sum::<f64>(),
+            "financing should drag a leveraged book's return"
+        );
+    }
+
+    #[test]
+    fn liquidity_cap_changes_fills() {
+        let data = Dataset::synthetic(4, 120, 11);
+        let w = Window {
+            start: 20,
+            end: 120,
+        };
+        let uncapped = CostModel::default(); // max_participation = INF
+        let capped = CostModel {
+            max_participation: 0.05,
+            ..CostModel::default()
+        };
+        let a = run_backtest(&data, &mut BuyAndHold, w, 0, uncapped);
+        let b = run_backtest(&data, &mut BuyAndHold, w, 0, capped);
+        assert_ne!(
+            a.returns, b.returns,
+            "a tight liquidity cap must change fills"
         );
     }
 }

@@ -13,6 +13,14 @@ pub struct CostModel {
     /// grows with the square root of the trade's share of portfolio NAV, so an
     /// agent that wins by betting huge pays for the size it moves.
     pub impact_bps: f64,
+    /// Per-step financing cost (bps) charged on leveraged exposure above 1× NAV —
+    /// the cost of carrying borrowed money. Long-only, fully-invested books
+    /// (gross ≤ 1) pay nothing; leverage pays for the size it borrows.
+    pub financing_bps: f64,
+    /// Liquidity cap: the most an agent may trade in one step, as a fraction of
+    /// NAV. An order larger than this only **partially fills**; the remainder is
+    /// left for later steps. `f64::INFINITY` (the default) = unlimited liquidity.
+    pub max_participation: f64,
 }
 
 impl Default for CostModel {
@@ -21,8 +29,27 @@ impl Default for CostModel {
             fee_bps: 2.0,
             slippage_bps: 3.0,
             impact_bps: 50.0,
+            financing_bps: 5.0,
+            max_participation: f64::INFINITY,
         }
     }
+}
+
+/// Per-step financing cost as a fraction of NAV: `financing_bps` applied to the
+/// leveraged portion of gross exposure (everything above 1× NAV). Zero at or below
+/// full investment.
+pub fn financing_cost_frac(financing_bps: f64, gross_exposure: f64) -> f64 {
+    financing_bps / 10_000.0 * (gross_exposure - 1.0).max(0.0)
+}
+
+/// Apply the liquidity cap to a desired trade value: an order is clamped to
+/// `±max_participation × nav`, modelling a partial fill of the rest.
+pub fn liquidity_capped_delta(delta_value: f64, max_participation: f64, nav: f64) -> f64 {
+    if !max_participation.is_finite() {
+        return delta_value;
+    }
+    let cap = max_participation * nav.max(0.0);
+    delta_value.clamp(-cap, cap)
 }
 
 /// Own-order market impact as a return fraction: a concave (square-root law)
@@ -75,5 +102,22 @@ mod tests {
         let a = market_impact_frac(50.0, 0.1);
         let b = market_impact_frac(50.0, 0.2);
         assert!(b < 2.0 * a, "impact must be concave in size");
+    }
+
+    #[test]
+    fn financing_only_bites_above_full_investment() {
+        assert_eq!(financing_cost_frac(50.0, 1.0), 0.0);
+        assert_eq!(financing_cost_frac(50.0, 0.5), 0.0);
+        assert!(financing_cost_frac(50.0, 2.0) > 0.0);
+    }
+
+    #[test]
+    fn liquidity_cap_clamps_large_trades() {
+        // 5% of a 1000 NAV = 50 cap.
+        assert_eq!(liquidity_capped_delta(200.0, 0.05, 1000.0), 50.0);
+        assert_eq!(liquidity_capped_delta(-200.0, 0.05, 1000.0), -50.0);
+        // Small trades pass through, and an infinite cap never clamps.
+        assert_eq!(liquidity_capped_delta(30.0, 0.05, 1000.0), 30.0);
+        assert_eq!(liquidity_capped_delta(1e9, f64::INFINITY, 1000.0), 1e9);
     }
 }
