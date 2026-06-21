@@ -160,6 +160,9 @@ pub struct CompositeScore {
     /// Whether the agent is on the Pareto front over (return↑, drawdown↓,
     /// turnover↓). Filled by [`rank`].
     pub pareto_optimal: bool,
+    /// Whether the agent's outperformance survives Romano–Wolf step-down multiple
+    /// testing across the field. Filled by [`rank`].
+    pub step_down_significant: bool,
 }
 
 /// Pareto dominance on (return↑, drawdown↓, turnover↓).
@@ -259,6 +262,7 @@ pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
         mandate_ok,
         turnover,
         pareto_optimal: false,
+        step_down_significant: false,
     }
 }
 
@@ -317,6 +321,16 @@ pub fn rank(subs: &[AgentSubmission], cfg: &ScoreConfig) -> Vec<CompositeScore> 
         );
         for cs in scores.iter_mut() {
             cs.field_reality_check_p = rc_p;
+        }
+        let sd = crate::significance::step_down_significant(
+            &field_excess,
+            cfg.bootstrap_seed,
+            cfg.n_boot,
+            cfg.block_prob,
+            cfg.alpha,
+        );
+        for (cs, s) in scores.iter_mut().zip(sd) {
+            cs.step_down_significant = s;
         }
     }
 

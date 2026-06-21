@@ -120,6 +120,87 @@ pub fn reality_check_pvalue(field: &[Vec<f64>], seed: u64, n_boot: usize, block_
     (at_least_as_large as f64 + 1.0) / (n_boot as f64 + 1.0)
 }
 
+/// Romano–Wolf step-down multiple testing: per-agent significance that controls
+/// the family-wise error rate across the whole field, but is more powerful than
+/// the single-step Reality Check (it re-tests the survivors after removing
+/// confirmed winners). `field` rows are each agent's excess returns vs the
+/// benchmark. Returns, per agent, whether its outperformance is significant at
+/// `alpha` after accounting for every agent tested. Deterministic given `seed`.
+pub fn step_down_significant(
+    field: &[Vec<f64>],
+    seed: u64,
+    n_boot: usize,
+    block_prob: f64,
+    alpha: f64,
+) -> Vec<bool> {
+    let k = field.len();
+    if k == 0 {
+        return Vec::new();
+    }
+    let n = field.iter().map(Vec::len).min().unwrap_or(0);
+    if n < 2 || n_boot == 0 {
+        return vec![false; k];
+    }
+    let sqrt_n = (n as f64).sqrt();
+    let means: Vec<f64> = field.iter().map(|f| mean(&f[..n])).collect();
+    let t: Vec<f64> = means.iter().map(|m| sqrt_n * m).collect();
+
+    // Bootstrap centered statistics: boot[b][agent].
+    let mut rng = SplitMix64(seed ^ 0x57ED_0247_2026_5BA7);
+    let mut boot: Vec<Vec<f64>> = Vec::with_capacity(n_boot);
+    let mut idxs = vec![0usize; n];
+    for _ in 0..n_boot {
+        let mut idx = rng.below(n);
+        for slot in idxs.iter_mut() {
+            *slot = idx;
+            if rng.unit() < block_prob {
+                idx = rng.below(n);
+            } else {
+                idx = (idx + 1) % n;
+            }
+        }
+        let row: Vec<f64> = field
+            .iter()
+            .enumerate()
+            .map(|(ki, f)| {
+                let bmean = idxs.iter().map(|&j| f[j]).sum::<f64>() / n as f64;
+                sqrt_n * (bmean - means[ki])
+            })
+            .collect();
+        boot.push(row);
+    }
+
+    let mut rejected = vec![false; k];
+    let mut active: Vec<usize> = (0..k).collect();
+    let q_idx = (((1.0 - alpha) * n_boot as f64).ceil() as usize).min(n_boot - 1);
+    loop {
+        if active.is_empty() {
+            break;
+        }
+        // Critical value = (1-alpha) quantile of max over still-active agents.
+        let mut maxes: Vec<f64> = boot
+            .iter()
+            .map(|row| {
+                active
+                    .iter()
+                    .map(|&ki| row[ki])
+                    .fold(f64::NEG_INFINITY, f64::max)
+            })
+            .collect();
+        maxes.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let c = maxes[q_idx];
+        let newly: Vec<usize> = active.iter().copied().filter(|&ki| t[ki] > c).collect();
+        if newly.is_empty() {
+            break;
+        }
+        for ki in &newly {
+            rejected[*ki] = true;
+        }
+        active.retain(|ki| !newly.contains(ki));
+    }
+    rejected
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,5 +256,21 @@ mod tests {
             })
             .collect();
         assert!(reality_check_pvalue(&field, 1, 1000, 0.1) > 0.1);
+    }
+
+    #[test]
+    fn step_down_flags_the_real_winner_only() {
+        let strong: Vec<f64> = (0..150)
+            .map(|i| 0.004 + 0.001 * (i as f64 * 0.5).sin())
+            .collect();
+        let mut field = vec![strong];
+        field.extend((0..5).map(|k| {
+            (0..150)
+                .map(|i| 0.002 * ((i + k) as f64 * 0.9).sin())
+                .collect()
+        }));
+        let sig = step_down_significant(&field, 1, 1000, 0.1, 0.05);
+        assert!(sig[0], "the strong agent should be significant");
+        assert!(sig[1..].iter().all(|&s| !s), "noise agents should not be");
     }
 }
