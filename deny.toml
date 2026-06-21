@@ -1,0 +1,40 @@
+# cargo-deny — supply-chain gate for SharpeBench.
+#
+# A benchmark's credibility rests on reproducible, auditable builds, so the
+# dependency surface is kept deliberately tiny (serde, sha2, hmac, wasm-bindgen
+# and their transitive deps) and gated here. Run locally with `cargo deny check`;
+# CI runs it on every push (see .github/workflows/ci.yml).
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+# No ignored advisories — CI fails on any new RustSec advisory in the tree. Add an
+# entry here only with a reason and a removal condition.
+ignore = []
+
+[licenses]
+version = 2
+# Every license SPDX expression present in the current dependency tree (derived
+# from `cargo metadata`). Keep this tight; a new dep with a different license
+# should fail CI and force a conscious decision.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "Unicode-3.0",
+    "Unlicense",
+]
+confidence-threshold = 0.9
+
+[bans]
+# Duplicate versions are a warning (common and usually harmless transitively);
+# wildcard version requirements are denied — a benchmark must pin what it builds.
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
