@@ -22,6 +22,7 @@ fn main() -> ExitCode {
         },
         Some("commit") => run_commit(&args),
         Some("stress") => run_stress(),
+        Some("audit") => run_audit(),
         Some("sign") => run_sign(&args),
         Some("verify") => run_verify(&args),
         Some("--help") | Some("-h") | None => {
@@ -46,6 +47,7 @@ fn help() {
         "  sharpebench commit <agent> <window> <digest> <salt>  forward-attestation pre-registration"
     );
     println!("  sharpebench stress                    run the adversarial stress suite (masked)");
+    println!("  sharpebench audit                     self-audit: prove the scorer resists gaming");
     println!("  sharpebench sign <subs.json> <key> <out.json>  score + sign a board to a file");
     println!("  sharpebench verify <board.json> <key>  verify a signed board's chain");
 }
@@ -99,6 +101,29 @@ fn run_verify(args: &[String]) -> ExitCode {
         ExitCode::SUCCESS
     } else {
         eprintln!("FAIL — signature chain invalid (tampered or wrong key)");
+        ExitCode::FAILURE
+    }
+}
+
+fn run_audit() -> ExitCode {
+    let report = sb_core::run_self_audit();
+    println!("SharpeBench — benchmark self-audit (does the scorer resist gaming?)\n");
+    for c in &report.cases {
+        println!(
+            "[{}] {:<26} {}",
+            if c.defended { "DEFENDED" } else { "  GAMED " },
+            c.name,
+            c.detail
+        );
+    }
+    if report.all_defended {
+        println!(
+            "\nAll {} attacks demoted. The benchmark holds.",
+            report.cases.len()
+        );
+        ExitCode::SUCCESS
+    } else {
+        eprintln!("\nFAIL — an attack was not demoted; a gate has regressed.");
         ExitCode::FAILURE
     }
 }

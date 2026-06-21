@@ -26,8 +26,10 @@ pub mod deflated_sharpe;
 pub mod pass_k;
 pub mod process;
 pub mod roles;
+pub mod selfaudit;
 pub mod significance;
 pub mod stats;
 
 pub use composite::{rank, score_agent, AgentSubmission, CompositeScore, Run, ScoreConfig};
 pub use process::{ProcessEvent, ProcessScore, Trace};
+pub use selfaudit::{run_self_audit, SelfAuditReport};
