@@ -15,6 +15,12 @@ pub struct Dataset {
     pub dates: Vec<String>,
     /// symbol → closes, each `Vec` aligned to `dates`.
     pub closes: BTreeMap<String, Vec<f64>>,
+    /// symbol → per-share cash dividend paid at each step, aligned to `dates`.
+    /// Empty (the default) means no corporate actions. Stock splits need no entry
+    /// here: on a split-adjusted close series they are price-neutral by
+    /// construction, so only the cash dividend stream changes total return.
+    #[serde(default)]
+    pub dividends: BTreeMap<String, Vec<f64>>,
 }
 
 impl Dataset {
@@ -33,6 +39,30 @@ impl Dataset {
     /// Close for `symbol` at step `t`, or `None` if out of range.
     pub fn close_at(&self, symbol: &str, t: usize) -> Option<f64> {
         self.closes.get(symbol).and_then(|v| v.get(t)).copied()
+    }
+
+    /// Per-share cash dividend paid by `symbol` at step `t` (0.0 if none).
+    pub fn dividend_at(&self, symbol: &str, t: usize) -> f64 {
+        self.dividends
+            .get(symbol)
+            .and_then(|v| v.get(t))
+            .copied()
+            .unwrap_or(0.0)
+    }
+
+    /// Attach a constant dividend yield: every symbol pays `per_period_yield` of
+    /// its close as a cash dividend each step (e.g. an annual 4% yield on daily
+    /// bars ≈ `0.04 / 252`). Models the cash-flow half of corporate actions.
+    pub fn with_dividend_yield(mut self, per_period_yield: f64) -> Self {
+        self.dividends = self
+            .closes
+            .iter()
+            .map(|(sym, series)| {
+                let stream = series.iter().map(|&px| px * per_period_yield).collect();
+                (sym.clone(), stream)
+            })
+            .collect();
+        self
     }
 
     /// Trailing closes ending at step `t` (inclusive), at most `lookback` long.
@@ -77,7 +107,11 @@ impl Dataset {
             }
             closes.insert(format!("SYM{s:02}"), series);
         }
-        Dataset { dates, closes }
+        Dataset {
+            dates,
+            closes,
+            dividends: BTreeMap::new(),
+        }
     }
 
     /// Adversarial path: a synthetic series with a sudden one-day **flash crash**
@@ -120,7 +154,11 @@ impl Dataset {
             }
             closes.insert(format!("SYM{s:02}"), series);
         }
-        Dataset { dates, closes }
+        Dataset {
+            dates,
+            closes,
+            dividends: BTreeMap::new(),
+        }
     }
 
     /// A named adversarial stress suite — each scenario tests *survival*, not
@@ -144,7 +182,11 @@ impl Dataset {
             .enumerate()
             .map(|(i, series)| (format!("ASSET_{i:03}"), series.clone()))
             .collect();
-        Dataset { dates, closes }
+        Dataset {
+            dates,
+            closes,
+            dividends: BTreeMap::new(),
+        }
     }
 }
 
@@ -191,6 +233,16 @@ mod tests {
     #[test]
     fn stress_suite_has_scenarios() {
         assert_eq!(Dataset::stress_suite(1).len(), 2);
+    }
+
+    #[test]
+    fn dividend_yield_builder_pays_a_fraction_of_price() {
+        let d = Dataset::synthetic(2, 30, 3).with_dividend_yield(0.01);
+        let px = d.close_at("SYM00", 5).unwrap();
+        assert!((d.dividend_at("SYM00", 5) - px * 0.01).abs() < 1e-12);
+        // A symbol/step with no dividend stream returns 0.
+        let plain = Dataset::synthetic(2, 30, 3);
+        assert_eq!(plain.dividend_at("SYM00", 5), 0.0);
     }
 
     #[test]

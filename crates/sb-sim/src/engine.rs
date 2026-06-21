@@ -143,8 +143,16 @@ pub fn run_backtest(
             });
         }
 
-        // 4) daily return = post-trade NAV vs the prior step's NAV (captures both
-        //    the price move on held positions and today's trading costs).
+        // 4) corporate actions: credit cash dividends on post-trade holdings.
+        for s in &symbols {
+            let div = data.dividend_at(s, t);
+            if div != 0.0 {
+                cash += shares[s] * div;
+            }
+        }
+
+        // 5) daily return = post-trade NAV vs the prior step's NAV (captures the
+        //    price move on held positions, dividends received, and trading costs).
         let navc = nav(data, &symbols, &shares, cash, t);
         let ret = if prev_nav.abs() > 1e-12 {
             navc / prev_nav - 1.0
@@ -206,5 +214,29 @@ mod tests {
         let a = run_backtest(&data, &mut BuyAndHold, w, 1, CostModel::default());
         let b = run_backtest(&data, &mut BuyAndHold, w, 2, CostModel::default());
         assert_ne!(a.returns, b.returns, "execution seed should vary returns");
+    }
+
+    #[test]
+    fn dividends_lift_buy_and_hold_return() {
+        let base = Dataset::synthetic(3, 120, 11);
+        let paying = base.clone().with_dividend_yield(0.001); // 10 bps/step
+        let w = Window {
+            start: 20,
+            end: 120,
+        };
+        // No execution noise (zero costs) so the only difference is the dividend.
+        let no_costs = CostModel {
+            fee_bps: 0.0,
+            slippage_bps: 0.0,
+            impact_bps: 0.0,
+        };
+        let plain = run_backtest(&base, &mut BuyAndHold, w, 0, no_costs);
+        let div = run_backtest(&paying, &mut BuyAndHold, w, 0, no_costs);
+        let sum_plain: f64 = plain.returns.iter().sum();
+        let sum_div: f64 = div.returns.iter().sum();
+        assert!(
+            sum_div > sum_plain,
+            "dividends should raise total return: {sum_div} vs {sum_plain}"
+        );
     }
 }
