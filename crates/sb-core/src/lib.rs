@@ -25,6 +25,7 @@ pub mod decay;
 pub mod deflated_sharpe;
 pub mod pass_k;
 pub mod process;
+pub mod roles;
 pub mod significance;
 pub mod stats;
 
