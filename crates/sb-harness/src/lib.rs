@@ -88,6 +88,27 @@ pub fn luck_floor(
         .collect()
 }
 
+/// Segment a submission's runs by window and report out-of-sample edge decay.
+/// [`run_agent`] lays runs out window-major (all seeds of window 0, then window 1,
+/// …), so the first `runs.len()/n_windows` runs are the in-sample window and the
+/// rest are out-of-sample. Pools each window's returns and calls
+/// [`sb_core::oos_decay`].
+pub fn oos_decay_of(submission: &AgentSubmission, n_windows: usize) -> sb_core::OosDecayReport {
+    let n = submission.runs.len();
+    let per = n.checked_div(n_windows).unwrap_or(n).max(1);
+    let windows: Vec<Vec<f64>> = (0..n_windows)
+        .map(|w| {
+            let lo = (w * per).min(n);
+            let hi = ((w + 1) * per).min(n);
+            submission.runs[lo..hi]
+                .iter()
+                .flat_map(|r| r.returns.iter().copied())
+                .collect()
+        })
+        .collect();
+    sb_core::oos_decay(&windows)
+}
+
 /// One member of a trading team: a name plus a factory for fresh instances (the
 /// engine needs an independent agent per run).
 pub struct TeamMember {
@@ -193,6 +214,24 @@ mod tests {
         // The attribution analyzer accepts the produced series.
         let attr = attribute_roles(&team_pooled, &res.role_returns);
         assert_eq!(attr.len(), 2);
+    }
+
+    #[test]
+    fn oos_decay_segments_a_submission_by_window() {
+        let data = Dataset::synthetic(4, 160, 7);
+        let windows = [
+            Window { start: 20, end: 90 },
+            Window {
+                start: 90,
+                end: 160,
+            },
+        ];
+        let seeds: Vec<u64> = (0..3).collect();
+        let sub = run_agent("bh", &data, &windows, &seeds, CostModel::default(), || {
+            Box::new(BuyAndHold) as Box<dyn Agent>
+        });
+        let report = oos_decay_of(&sub, 2);
+        assert_eq!(report.window_metrics.len(), 2);
     }
 
     #[test]
