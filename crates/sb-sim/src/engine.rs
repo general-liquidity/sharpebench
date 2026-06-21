@@ -55,14 +55,16 @@ pub fn run_backtest(
     let mut rng = Rng::new(seed);
     let mut trace = Trace::default();
     let mut returns: Vec<f64> = Vec::new();
+    let mut confidences: Vec<f64> = Vec::new();
+    let mut outcomes: Vec<bool> = Vec::new();
 
     let end = window.end.min(data.len());
     if window.start >= end {
         return Run {
             returns,
             trace,
-            confidences: Vec::new(),
-            outcomes: Vec::new(),
+            confidences,
+            outcomes,
         };
     }
 
@@ -145,14 +147,23 @@ pub fn run_backtest(
             0.0
         };
         returns.push(ret);
+        // Capture the decision's stated conviction and whether the step paid off,
+        // so the scoring kernel's calibration axis is fed from the live run.
+        let avg_conf = if decision.orders.is_empty() {
+            0.5
+        } else {
+            decision.orders.iter().map(|o| o.confidence).sum::<f64>() / decision.orders.len() as f64
+        };
+        confidences.push(avg_conf);
+        outcomes.push(ret > 0.0);
         prev_nav = navc;
     }
 
     Run {
         returns,
         trace,
-        confidences: Vec::new(),
-        outcomes: Vec::new(),
+        confidences,
+        outcomes,
     }
 }
 
