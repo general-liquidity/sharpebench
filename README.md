@@ -6,6 +6,8 @@
 
 Ranks agents on risk-adjusted *skill that survives deflation* — not the luckiest run over one quarter.
 
+[![Crates.io](https://img.shields.io/crates/v/sharpebench.svg)](https://crates.io/crates/sharpebench)
+[![docs.rs](https://img.shields.io/docsrs/sharpebench-core)](https://docs.rs/sharpebench-core)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Status](https://img.shields.io/badge/status-active%20(pre--1.0)-brightgreen.svg)](docs/PLAN.md)
 [![Unsafe](https://img.shields.io/badge/unsafe-forbidden-success.svg)](#architecture)
