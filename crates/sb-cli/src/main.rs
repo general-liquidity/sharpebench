@@ -15,7 +15,7 @@ fn main() -> ExitCode {
     let json = raw.iter().any(|a| a == "--json");
     let args: Vec<String> = raw.into_iter().filter(|a| a != "--json").collect();
     match args.get(1).map(String::as_str) {
-        Some("run") => run_demo(json),
+        Some("run") => run_demo(&args, json),
         Some("score") => match args.get(2) {
             Some(path) => run_score(path, json),
             None => {
@@ -47,10 +47,38 @@ fn emit_json<T: serde::Serialize>(value: &T) {
     }
 }
 
+/// Value following a `--flag` in argv (e.g. `--http 127.0.0.1:8080`), if present.
+fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
+    args.iter()
+        .position(|a| a == flag)
+        .and_then(|i| args.get(i + 1))
+        .map(String::as_str)
+}
+
+/// Resolve a signing-key argument. To keep secrets out of process listings and
+/// shell history, `env:NAME` reads the key from an environment variable and
+/// `file:PATH` reads it from a file (trailing newline trimmed); anything else is
+/// used as the literal key.
+fn resolve_key(spec: &str) -> std::io::Result<Vec<u8>> {
+    if let Some(var) = spec.strip_prefix("env:") {
+        std::env::var(var)
+            .map(String::into_bytes)
+            .map_err(|_| std::io::Error::other(format!("env var {var} is not set")))
+    } else if let Some(path) = spec.strip_prefix("file:") {
+        Ok(std::fs::read_to_string(path)?
+            .trim_end()
+            .as_bytes()
+            .to_vec())
+    } else {
+        Ok(spec.as_bytes().to_vec())
+    }
+}
+
 fn help() {
     println!("sharpebench — luck-robust benchmark for AI trading agents\n");
     println!("USAGE:");
-    println!("  sharpebench run                       run reference agents through the sim and rank them");
+    println!("  sharpebench run [--http <addr>|--cmd \"<prog args>\"]  run agents through the sim and rank");
+    println!("                                       (no flag = reference agents; --http/--cmd adds YOUR agent)");
     println!(
         "  sharpebench score <submissions.json>  rank a JSON field of pre-computed submissions"
     );
@@ -61,6 +89,7 @@ fn help() {
     println!("  sharpebench audit                     self-audit: prove the scorer resists gaming");
     println!("  sharpebench sign <subs.json> <key> <out.json>  score + sign a board to a file");
     println!("  sharpebench verify <board.json> <key>  verify a signed board's chain");
+    println!("\n<key> accepts a literal, or env:NAME / file:PATH to keep secrets out of process listings.");
     println!("\nGlobal flags:");
     println!("  --json   emit machine-readable JSON instead of a human table (for agents / CI)");
 }
@@ -84,7 +113,14 @@ fn run_sign(args: &[String], json: bool) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let pb = sb_leaderboard::publish(&rank(&subs, &ScoreConfig::default()), args[3].as_bytes());
+    let key = match resolve_key(&args[3]) {
+        Ok(k) => k,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let pb = sb_leaderboard::publish(&rank(&subs, &ScoreConfig::default()), &key);
     match sb_leaderboard::save(&pb, &args[4]) {
         Ok(()) => {
             if json {
@@ -117,7 +153,14 @@ fn run_verify(args: &[String], json: bool) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let ok = sb_leaderboard::verify_board(&pb.chain, args[3].as_bytes());
+    let key = match resolve_key(&args[3]) {
+        Ok(k) => k,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let ok = sb_leaderboard::verify_board(&pb.chain, &key);
     if json {
         emit_json(&serde_json::json!({ "ok": ok, "entries": pb.chain.len() }));
     } else if ok {
@@ -216,8 +259,11 @@ fn run_commit(args: &[String]) -> ExitCode {
     }
 }
 
-fn run_demo(json: bool) -> ExitCode {
-    use sb_sim::{Agent, BuyAndHold, CostModel, Dataset, Momentum, Window};
+fn run_demo(args: &[String], json: bool) -> ExitCode {
+    use sb_sim::{
+        Agent, BuyAndHold, CostModel, Dataset, ExternalAgent, HoldAgent, HttpAgent, Momentum,
+        Window,
+    };
 
     let data = Dataset::synthetic(8, 180, 20_260_621);
     let windows = [
@@ -242,6 +288,40 @@ fn run_demo(json: bool) -> ExitCode {
     // The luck floor: random monkeys that show the zero-skill distribution.
     let mut field = vec![bh, mo];
     field.extend(sb_harness::luck_floor(&data, &windows, &seeds, costs, 3));
+
+    // Optionally drive a real external agent (yours) through the *same* sim and
+    // rank it into the field. `--http` hits a POST /decide endpoint; `--cmd` spawns
+    // a subprocess speaking newline-delimited JSON over stdio (see examples/reference-agent).
+    if let Some(addr) = flag_value(args, "--http") {
+        let addr = addr.to_string();
+        let label = format!("http:{addr}");
+        let sub = sb_harness::run_agent(&label, &data, &windows, &seeds, costs, move || {
+            Box::new(HttpAgent::new(addr.clone())) as Box<dyn Agent>
+        });
+        field.insert(0, sub);
+    } else if let Some(cmd) = flag_value(args, "--cmd") {
+        let parts: Vec<String> = cmd.split_whitespace().map(String::from).collect();
+        let Some((prog, rest)) = parts.split_first() else {
+            eprintln!("error: --cmd needs a program to run");
+            return ExitCode::from(2);
+        };
+        let prog = prog.clone();
+        let rest = rest.to_vec();
+        // Pre-flight: fail fast with a clear message if the agent won't spawn.
+        let rest_refs: Vec<&str> = rest.iter().map(String::as_str).collect();
+        if ExternalAgent::spawn(&prog, &rest_refs).is_err() {
+            eprintln!("error: cannot spawn agent `{cmd}`");
+            return ExitCode::FAILURE;
+        }
+        let label = format!("cmd:{prog}");
+        let sub = sb_harness::run_agent(&label, &data, &windows, &seeds, costs, move || {
+            let rest_refs: Vec<&str> = rest.iter().map(String::as_str).collect();
+            ExternalAgent::spawn(&prog, &rest_refs)
+                .map(|a| Box::new(a) as Box<dyn Agent>)
+                .unwrap_or_else(|_| Box::new(HoldAgent))
+        });
+        field.insert(0, sub);
+    }
 
     if !json {
         println!(

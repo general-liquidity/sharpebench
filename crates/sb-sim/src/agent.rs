@@ -81,6 +81,20 @@ impl Agent for BuyAndHold {
     }
 }
 
+/// The do-nothing agent: always holds (empty orders). A trivial baseline, and the
+/// graceful fallback when an external agent process can't be spawned mid-run —
+/// consistent with how the external transports already degrade to a hold on error.
+pub struct HoldAgent;
+
+impl Agent for HoldAgent {
+    fn decide(&mut self, _obs: &MarketObservation) -> Decision {
+        Decision {
+            orders: Vec::new(),
+            reasoning: "hold".to_string(),
+        }
+    }
+}
+
 /// A coin-flip "monkey": a fully-invested, long-only portfolio with random
 /// weights each step. Seeded so it is reproducible. Run many of these to draw the
 /// **luck floor** — the distribution of outcomes from zero skill that a genuine
