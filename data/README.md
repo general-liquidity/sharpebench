@@ -20,12 +20,26 @@ cargo run -p sb-cli -- run --data data/crypto-majors-1d.csv
 python3 scripts/ingest/fetch_binance.py > data/crypto-majors-1d.csv   # then update the .sha256 sidecar
 ```
 
+## `us-indices-1d.csv`
+
+- **Symbols:** SPX (S&P 500), DJI (Dow Jones Industrial Average), IXIC (Nasdaq Composite).
+- **Bars:** daily closes, ~2500 days (10 years).
+- **Source:** FRED public CSV endpoint (`fredgraph.csv`, no key) — **public domain**.
+- **Format:** long — `date,symbol,close` (aligned on the shared NYSE-calendar axis).
+- **Integrity:** `us-indices-1d.csv.sha256`.
+
+```bash
+cargo run -p sb-cli -- run --data data/us-indices-1d.csv
+python3 scripts/ingest/fetch_fred.py > data/us-indices-1d.csv         # then update the .sha256 sidecar
+```
+
 ## Adding sources
 
-Any source that produces aligned `date,symbol,close[,dividend]` rows works. Next up:
+Any source that produces aligned `date,symbol,close[,dividend]` rows works. Live now:
+crypto (Binance) and US equity indices (FRED). Next up:
 
-- **Equities** — Stooq EOD (daily) for DJIA / S&P parity *(needs a JS-capable fetch — its endpoint is behind a browser challenge)*.
+- **Single-name equities** — DJIA / S&P constituents need a keyed source (Tiingo, Nasdaq Data Link) or a JS-capable Stooq fetch; FRED carries indices, not single names.
 - **Fundamentals** — SEC EDGAR financial-statement datasets (public domain) → the `fundamentals` channel.
-- **Macro** — FRED (public domain).
+- **Macro / commodities** — more FRED series (rates, gold, oil).
 
 Keep new fetchers in `scripts/ingest/` (offline, polyglot) and the scoring path pure.
