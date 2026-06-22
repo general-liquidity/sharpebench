@@ -14,6 +14,10 @@ use sharpebench_protocol::{Decision, MarketObservation};
 
 use crate::agent::Agent;
 
+/// Cap on bytes read from an external agent's HTTP response, so a hostile or buggy
+/// endpoint can't exhaust the harness's memory.
+const MAX_AGENT_RESPONSE: u64 = 8 * 1024 * 1024;
+
 /// Drives an external agent subprocess over newline-delimited JSON.
 pub struct ExternalAgent {
     child: Child,
@@ -107,6 +111,10 @@ impl HttpAgent {
     fn decide_checked(&self, obs: &MarketObservation) -> std::io::Result<Decision> {
         let body = serde_json::to_string(obs).map_err(std::io::Error::other)?;
         let mut stream = TcpStream::connect((self.host.as_str(), self.port))?;
+        // Bound time so a slow/stalled agent endpoint can't hang the harness.
+        let timeout = std::time::Duration::from_secs(30);
+        stream.set_read_timeout(Some(timeout))?;
+        stream.set_write_timeout(Some(timeout))?;
         // `Connection: close` lets us read the whole response to EOF — no need to
         // parse Content-Length / chunked encoding for a one-shot request.
         let req = format!(
@@ -118,8 +126,11 @@ impl HttpAgent {
         );
         stream.write_all(req.as_bytes())?;
         stream.flush()?;
+        // Cap the response size so a hostile endpoint can't exhaust memory.
         let mut raw = String::new();
-        stream.read_to_string(&mut raw)?;
+        (&stream)
+            .take(MAX_AGENT_RESPONSE)
+            .read_to_string(&mut raw)?;
         let json = raw
             .split_once("\r\n\r\n")
             .map(|(_, b)| b)

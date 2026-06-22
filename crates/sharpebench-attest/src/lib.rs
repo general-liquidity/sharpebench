@@ -93,15 +93,37 @@ pub fn sign_result(payload: &str, prev_signature: &str, key: &[u8]) -> SignedRes
     }
 }
 
+/// Decode a hex string to bytes (`None` if malformed). Used so the HMAC can be
+/// compared in constant time via [`Mac::verify_slice`] instead of a variable-time
+/// string `==`, which would leak a timing signal about the secret key.
+fn from_hex(s: &str) -> Option<Vec<u8>> {
+    if !s.len().is_multiple_of(2) {
+        return None;
+    }
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok())
+        .collect()
+}
+
 /// Verify a full chain: every link's `prev_signature` must match the previous
-/// link's signature, and every signature must recompute. Tamper-evident.
+/// link's signature, and every signature must recompute. Tamper-evident. The MAC
+/// check is **constant-time** (`verify_slice`), so verification leaks no timing
+/// signal about the key even under repeated adversarial probing.
 pub fn verify_chain(results: &[SignedResult], key: &[u8]) -> bool {
     let mut prev = GENESIS.to_string();
     for r in results {
         if r.prev_signature != prev {
             return false;
         }
-        if sign_result(&r.payload, &r.prev_signature, key).signature != r.signature {
+        let Some(expected) = from_hex(&r.signature) else {
+            return false;
+        };
+        let mut mac = HmacSha256::new_from_slice(key).expect("HMAC accepts any key length");
+        mac.update(r.prev_signature.as_bytes());
+        mac.update(b"|");
+        mac.update(r.payload.as_bytes());
+        if mac.verify_slice(&expected).is_err() {
             return false;
         }
         prev = r.signature.clone();
