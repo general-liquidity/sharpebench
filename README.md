@@ -77,10 +77,10 @@ A runnable reference agent (stdio + a Dockerfile) and the full wire format live 
 
 ## Data
 
-The benchmark runs on **frozen, checksummed, point-in-time** datasets — no live API in the scoring path, so a score reproduces forever. A real **crypto-majors** set ships in [`data/`](data/) (BTC/ETH/SOL/BNB/XRP daily closes from Binance's public API), fetched by an offline, stdlib-only ingest script:
+The benchmark runs on **frozen, checksummed, point-in-time** datasets — no live API in the scoring path, so a score reproduces forever. A real **crypto-majors** set ships in [`data/`](data/) (BTC/ETH/SOL/BNB/XRP daily closes from Binance's public API), fetched and frozen by the offline Rust ingester (`xtask`, `publish = false` — its deps never reach the CLI):
 
 ```bash
-python3 scripts/ingest/fetch_binance.py > data/crypto-majors-1d.csv   # regenerate + re-checksum
+cargo run -p xtask -- crypto                                   # re-fetch + re-checksum the dataset
 cargo run -p sharpebench -- run --data data/crypto-majors-1d.csv
 ```
 

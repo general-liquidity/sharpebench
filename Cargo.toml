@@ -9,6 +9,7 @@ members = [
     "crates/sharpebench-harness",
     "crates/sharpebench-attest",
     "crates/sharpebench-leaderboard",
+    "xtask",
 ]
 
 [workspace.package]

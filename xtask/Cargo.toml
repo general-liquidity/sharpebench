@@ -1,0 +1,19 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "SharpeBench dev tasks: offline data ingestion (frozen, checksummed PIT datasets)."
+
+[dependencies]
+# native-tls uses the OS TLS (schannel / Security.framework / system OpenSSL), so no
+# `ring` — keeps the supply-chain (deny.toml) clean. These deps are dev-only:
+# publish = false, so they never reach the CLI or the published library crates.
+ureq = { version = "2", default-features = false, features = ["native-tls"] }
+native-tls = "0.2"
+serde_json = "1"
+sha2 = "0.10"
+
+[lints]
+workspace = true

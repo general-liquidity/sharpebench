@@ -2,7 +2,7 @@
 
 SharpeBench runs on **frozen, point-in-time, checksummed** datasets — never a live
 API in the scoring path, so a score reproduces byte-for-byte forever. Fetchers are
-offline (`scripts/ingest/`); the benchmark only ever loads the frozen artifact.
+offline (the `xtask` crate); the benchmark only ever loads the frozen artifact.
 
 ## `crypto-majors-1d.csv`
 
@@ -17,7 +17,7 @@ Run on it, or regenerate it:
 
 ```bash
 cargo run -p sharpebench -- run --data data/crypto-majors-1d.csv
-python3 scripts/ingest/fetch_binance.py > data/crypto-majors-1d.csv   # then update the .sha256 sidecar
+cargo run -p xtask -- crypto                                   # re-fetch + write the .sha256 sidecar
 ```
 
 ## `us-indices-1d.csv`
@@ -30,7 +30,7 @@ python3 scripts/ingest/fetch_binance.py > data/crypto-majors-1d.csv   # then upd
 
 ```bash
 cargo run -p sharpebench -- run --data data/us-indices-1d.csv
-python3 scripts/ingest/fetch_fred.py > data/us-indices-1d.csv         # then update the .sha256 sidecar
+cargo run -p xtask -- indices                                  # re-fetch + write the .sha256 sidecar
 ```
 
 ## Adding sources
@@ -42,4 +42,4 @@ crypto (Binance) and US equity indices (FRED). Next up:
 - **Fundamentals** — SEC EDGAR financial-statement datasets (public domain) → the `fundamentals` channel.
 - **Macro / commodities** — more FRED series (rates, gold, oil).
 
-Keep new fetchers in `scripts/ingest/` (offline, polyglot) and the scoring path pure.
+Add new fetchers to the `xtask` crate (offline, `publish = false`) and keep the scoring path pure.
