@@ -78,6 +78,96 @@ impl Dataset {
         }
     }
 
+    /// Load a frozen dataset from long-format CSV (`date,symbol,close[,dividend]`,
+    /// header required). The series are aligned on the **intersection** of every
+    /// symbol's dates, so `close_at(sym, t)` lines up across symbols; ISO
+    /// `YYYY-MM-DD` dates sort chronologically. Pure — no network. The benchmark
+    /// only ever reads *frozen* data (offline fetchers live in `scripts/ingest/`),
+    /// which is what keeps a score reproducible forever.
+    pub fn from_csv(text: &str) -> Result<Dataset, String> {
+        let mut per_symbol: BTreeMap<String, BTreeMap<String, f64>> = BTreeMap::new();
+        let mut per_div: BTreeMap<String, BTreeMap<String, f64>> = BTreeMap::new();
+
+        let mut lines = text.lines();
+        let header = lines.next().ok_or("empty CSV")?;
+        let cols: Vec<&str> = header.split(',').map(str::trim).collect();
+        let col = |name: &str| cols.iter().position(|c| *c == name);
+        let date_i = col("date").ok_or("CSV header missing 'date'")?;
+        let sym_i = col("symbol").ok_or("CSV header missing 'symbol'")?;
+        let close_i = col("close").ok_or("CSV header missing 'close'")?;
+        let div_i = col("dividend");
+
+        for (n, line) in lines.enumerate() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let f: Vec<&str> = line.split(',').map(str::trim).collect();
+            let field = |i: usize| {
+                f.get(i)
+                    .copied()
+                    .ok_or_else(|| format!("CSV row {}: too few columns", n + 2))
+            };
+            let date = field(date_i)?.to_string();
+            let symbol = field(sym_i)?.to_string();
+            let close: f64 = field(close_i)?
+                .parse()
+                .map_err(|_| format!("CSV row {}: non-numeric close", n + 2))?;
+            per_symbol
+                .entry(symbol.clone())
+                .or_default()
+                .insert(date.clone(), close);
+            if let Some(di) = div_i {
+                if let Some(Ok(d)) = f.get(di).map(|s| s.trim().parse::<f64>()) {
+                    per_div.entry(symbol).or_default().insert(date, d);
+                }
+            }
+        }
+        if per_symbol.is_empty() {
+            return Err("CSV has no data rows".to_string());
+        }
+
+        // Shared axis = the intersection of every symbol's dates (guarantees the
+        // per-symbol series are step-for-step aligned).
+        let mut axis: Option<std::collections::BTreeSet<String>> = None;
+        for m in per_symbol.values() {
+            let set: std::collections::BTreeSet<String> = m.keys().cloned().collect();
+            axis = Some(match axis {
+                Some(a) => a.intersection(&set).cloned().collect(),
+                None => set,
+            });
+        }
+        let dates: Vec<String> = axis.unwrap_or_default().into_iter().collect();
+        if dates.len() < 2 {
+            return Err("CSV has fewer than 2 dates common to all symbols".to_string());
+        }
+
+        let mut closes = BTreeMap::new();
+        let mut dividends = BTreeMap::new();
+        for (sym, m) in &per_symbol {
+            closes.insert(sym.clone(), dates.iter().map(|d| m[d]).collect());
+            if let Some(dm) = per_div.get(sym) {
+                let stream: Vec<f64> = dates
+                    .iter()
+                    .map(|d| dm.get(d).copied().unwrap_or(0.0))
+                    .collect();
+                if stream.iter().any(|&x| x != 0.0) {
+                    dividends.insert(sym.clone(), stream);
+                }
+            }
+        }
+        Ok(Dataset {
+            dates,
+            closes,
+            dividends,
+        })
+    }
+
+    /// Load a frozen dataset from a CSV file path. See [`Dataset::from_csv`].
+    pub fn from_csv_file(path: &str) -> Result<Dataset, String> {
+        let text = std::fs::read_to_string(path).map_err(|e| format!("cannot read {path}: {e}"))?;
+        Self::from_csv(&text)
+    }
+
     /// Build a deterministic synthetic dataset with mild momentum
     /// autocorrelation — enough to make the reference agents behave differently.
     /// Pure function of `seed` (no ambient RNG).
@@ -193,6 +283,29 @@ impl Dataset {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn from_csv_aligns_on_common_dates() {
+        // BBB is missing 2025-01-03, so the shared axis is the first two dates.
+        let csv = "date,symbol,close\n\
+                   2025-01-01,AAA,10\n2025-01-01,BBB,20\n\
+                   2025-01-02,AAA,11\n2025-01-02,BBB,19\n\
+                   2025-01-03,AAA,12\n";
+        let ds = Dataset::from_csv(csv).unwrap();
+        assert_eq!(ds.dates, vec!["2025-01-01", "2025-01-02"]);
+        assert_eq!(ds.closes["AAA"], vec![10.0, 11.0]);
+        assert_eq!(ds.closes["BBB"], vec![20.0, 19.0]);
+        assert_eq!(ds.close_at("AAA", 1), Some(11.0));
+    }
+
+    #[test]
+    fn from_csv_rejects_malformed_input() {
+        assert!(Dataset::from_csv("date,symbol\n2025-01-01,AAA").is_err()); // no close column
+        assert!(Dataset::from_csv("date,symbol,close\n2025-01-01,AAA,10").is_err()); // < 2 dates
+        assert!(
+            Dataset::from_csv("date,symbol,close\n2025-01-01,AAA,oops\n2025-01-02,AAA,11").is_err()
+        ); // non-numeric close
+    }
 
     #[test]
     fn history_is_point_in_time() {

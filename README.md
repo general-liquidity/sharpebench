@@ -34,7 +34,7 @@ Raw return is reported but is **never** the rank key. It also *reports* (without
 
 All eight crates are implemented, tested, and CI-green (fmt · clippy `-D warnings` · workspace tests · a determinism check · the self-audit · a docs build). The scoring kernel, point-in-time simulator, run harness, forward-attestation, leaderboard, WASM bridge, and CLI all work end-to-end on synthetic / reference data.
 
-**Not yet built** (need external infra or a decision): real market-data adapters, a live/forward public arena with hosting, and the public data-curation protocol. The repo is currently private. See [docs/PLAN.md](docs/PLAN.md).
+**Not yet built** (need external infra or a decision): equities / macro data adapters (a frozen **crypto-majors** dataset already ships in [`data/`](data/) — see [Data](#data)), a live / forward public arena with hosting, and the public data-curation protocol. See [docs/PLAN.md](docs/PLAN.md).
 
 ## Quickstart
 
@@ -43,6 +43,7 @@ cargo test --workspace                                  # all tests, incl. the l
 cargo run -p sb-cli -- run                              # run reference agents + the luck floor through the sim
 cargo run -p sb-cli -- score suites/example_submissions.json   # rank a JSON field of submissions
 cargo run -p sb-cli -- audit                           # prove the scorer resists 5 known gaming attacks
+cargo run -p sb-cli -- run --data data/crypto-majors-1d.csv   # run on real crypto-majors daily bars
 ```
 
 The example field includes a *skilled* agent, a *lucky* agent with a **higher raw return**, and a *process-violating* agent. The skilled agent ranks first; the other two are ineligible — which is the whole point. `run` adds a **luck floor** of random "monkey" agents so you can see the zero-skill distribution a real edge must clear.
@@ -51,7 +52,7 @@ The example field includes a *skilled* agent, a *lucky* agent with a **higher ra
 
 | Command | What it does |
 |---|---|
-| `run` (+ `--http <addr>` / `--cmd "<prog>"`) | Run agents through the point-in-time sim and rank them. No flag: the reference agents + luck floor. With `--http`/`--cmd`: drives **your** external agent (an HTTP `POST /decide` endpoint, or a stdio subprocess) into the field too. |
+| `run` (+ `--data <csv>`, `--http <addr>`/`--cmd "<prog>"`) | Run agents through the point-in-time sim and rank them. `--data` runs on a frozen real-data CSV (else synthetic); `--http`/`--cmd` drives **your** external agent (an HTTP `POST /decide` endpoint, or a stdio subprocess) into the field too. |
 | `score <subs.json>` | Rank a JSON field of pre-computed submissions. |
 | `stress` | Run the adversarial stress suite (flash-crash / whipsaw), contamination-masked. |
 | `audit` | Self-audit: fire 5 known gaming attacks at the scorer; non-zero exit if any is not demoted. |
@@ -73,6 +74,17 @@ cargo run -p sb-cli -- run --http 127.0.0.1:8080                               #
 A runnable reference agent (stdio + a Dockerfile) and the full wire format live in [`examples/reference-agent/`](examples/reference-agent/).
 
 > **Security — running untrusted agents.** The harness executes whatever agent you point it at (a subprocess, or an HTTP endpoint) **without sandboxing**. Only run agents you trust. Hosting third-party submissions safely — container isolation, CPU / memory / time limits, no network egress — is a Phase-2 item and is **not yet built**.
+
+## Data
+
+The benchmark runs on **frozen, checksummed, point-in-time** datasets — no live API in the scoring path, so a score reproduces forever. A real **crypto-majors** set ships in [`data/`](data/) (BTC/ETH/SOL/BNB/XRP daily closes from Binance's public API), fetched by an offline, stdlib-only ingest script:
+
+```bash
+python3 scripts/ingest/fetch_binance.py > data/crypto-majors-1d.csv   # regenerate + re-checksum
+cargo run -p sb-cli -- run --data data/crypto-majors-1d.csv
+```
+
+The format is long `date,symbol,close[,dividend]`; any aligned dataset works. Equities/macro adapters (Stooq · SEC EDGAR · FRED) are the next sources — see [`data/README.md`](data/README.md).
 
 ## Architecture
 

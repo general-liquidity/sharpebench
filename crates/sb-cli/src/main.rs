@@ -77,8 +77,10 @@ fn resolve_key(spec: &str) -> std::io::Result<Vec<u8>> {
 fn help() {
     println!("sharpebench — luck-robust benchmark for AI trading agents\n");
     println!("USAGE:");
-    println!("  sharpebench run [--http <addr>|--cmd \"<prog args>\"]  run agents through the sim and rank");
-    println!("                                       (no flag = reference agents; --http/--cmd adds YOUR agent)");
+    println!(
+        "  sharpebench run [--data <csv>] [--http <addr>|--cmd \"<prog>\"]  run agents and rank"
+    );
+    println!("                       --data: a frozen CSV (else synthetic) · --http/--cmd: add YOUR agent");
     println!(
         "  sharpebench score <submissions.json>  rank a JSON field of pre-computed submissions"
     );
@@ -265,17 +267,45 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
         Window,
     };
 
-    let data = Dataset::synthetic(8, 180, 20_260_621);
-    let windows = [
-        Window {
-            start: 20,
-            end: 100,
+    let (data, windows) = match flag_value(args, "--data") {
+        Some(path) => match Dataset::from_csv_file(path) {
+            Ok(d) => {
+                let n = d.len();
+                if n < 40 {
+                    eprintln!("error: dataset too short ({n} rows); need at least 40");
+                    return ExitCode::FAILURE;
+                }
+                // A warmup, then split the rest into an in-sample + out-of-sample window.
+                let warm = (n / 10).clamp(10, 30);
+                let mid = (warm + n) / 2;
+                let w = vec![
+                    Window {
+                        start: warm,
+                        end: mid,
+                    },
+                    Window { start: mid, end: n },
+                ];
+                (d, w)
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                return ExitCode::FAILURE;
+            }
         },
-        Window {
-            start: 100,
-            end: 180,
-        },
-    ];
+        None => (
+            Dataset::synthetic(8, 180, 20_260_621),
+            vec![
+                Window {
+                    start: 20,
+                    end: 100,
+                },
+                Window {
+                    start: 100,
+                    end: 180,
+                },
+            ],
+        ),
+    };
     let seeds: Vec<u64> = (0..8).collect();
     let costs = CostModel::default();
 
@@ -324,8 +354,10 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
     }
 
     if !json {
+        let src = flag_value(args, "--data").unwrap_or("synthetic");
         println!(
-            "SharpeBench — reference run ({} windows × {} seeds, costs on; incl. luck floor)\n",
+            "SharpeBench — run on {src} ({} symbols, {} windows × {} seeds, costs on; incl. luck floor)\n",
+            data.symbols().len(),
             windows.len(),
             seeds.len()
         );
