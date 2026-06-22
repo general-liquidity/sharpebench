@@ -32,9 +32,9 @@ Raw return is reported but is **never** the rank key. It also *reports* (without
 
 ## Status — active (pre-1.0)
 
-All eight crates are implemented, tested, and CI-green (fmt · clippy `-D warnings` · workspace tests · a determinism check · the self-audit · a docs build). The scoring kernel, point-in-time simulator, run harness, forward-attestation, leaderboard, WASM bridge, and CLI all work end-to-end on synthetic / reference data.
+All eight crates are implemented, tested, and CI-green (fmt · clippy `-D warnings` · workspace tests · a determinism check · the self-audit · a docs build). The scoring kernel, point-in-time simulator, run harness, forward-attestation, leaderboard, WASM bridge, and CLI all work end-to-end — on synthetic data and on **real frozen datasets** (crypto majors + US equity indices; see [Data](#data)).
 
-**Not yet built** (need external infra or a decision): equities / macro data adapters (a frozen **crypto-majors** dataset already ships in [`data/`](data/) — see [Data](#data)), a live / forward public arena with hosting, and the public data-curation protocol. See [docs/PLAN.md](docs/PLAN.md).
+**Not yet built** (need external infra or a decision): single-name equity data (index + crypto data already ship in [`data/`](data/); individual constituents need a keyed feed), a live / forward public arena with hosting, and the public data-curation protocol. See [docs/PLAN.md](docs/PLAN.md).
 
 ## Quickstart
 
@@ -84,7 +84,13 @@ python3 scripts/ingest/fetch_binance.py > data/crypto-majors-1d.csv   # regenera
 cargo run -p sharpebench -- run --data data/crypto-majors-1d.csv
 ```
 
-The format is long `date,symbol,close[,dividend]`; any aligned dataset works. Equities/macro adapters (Stooq · SEC EDGAR · FRED) are the next sources — see [`data/README.md`](data/README.md).
+A real **US equity-index** set ships too — SPX / DJI / IXIC daily closes from FRED (public domain):
+
+```bash
+cargo run -p sharpebench -- run --data data/us-indices-1d.csv
+```
+
+The format is long `date,symbol,close[,dividend]`; any aligned dataset works. Next source: single-name equities (a keyed feed). See [`data/README.md`](data/README.md).
 
 ## Architecture
 
@@ -113,7 +119,7 @@ The neutral home may already exist: the FINOS-governed [Open FinLLM Leaderboard]
 Full methodology — the gates, each significance test, process discipline, the
 submission formats, forward-attestation, and the integrity model — is in the
 mdBook under [`docs/book/`](docs/book/) (`mdbook serve docs/book`). Design and
-governance live in [docs/PLAN.md](docs/PLAN.md) and [docs/GOVERNANCE.md](docs/GOVERNANCE.md).
+governance live in [docs/PLAN.md](docs/PLAN.md) and [docs/GOVERNANCE.md](docs/GOVERNANCE.md); crates.io publishing is in [docs/PUBLISHING.md](docs/PUBLISHING.md).
 
 ## License
 
