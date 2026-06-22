@@ -51,7 +51,7 @@ The example field includes a *skilled* agent, a *lucky* agent with a **higher ra
 
 | Command | What it does |
 |---|---|
-| `run` | Run the reference agents + luck floor through the point-in-time sim and rank them. |
+| `run` (+ `--http <addr>` / `--cmd "<prog>"`) | Run agents through the point-in-time sim and rank them. No flag: the reference agents + luck floor. With `--http`/`--cmd`: drives **your** external agent (an HTTP `POST /decide` endpoint, or a stdio subprocess) into the field too. |
 | `score <subs.json>` | Rank a JSON field of pre-computed submissions. |
 | `stress` | Run the adversarial stress suite (flash-crash / whipsaw), contamination-masked. |
 | `audit` | Self-audit: fire 5 known gaming attacks at the scorer; non-zero exit if any is not demoted. |
@@ -60,6 +60,19 @@ The example field includes a *skilled* agent, a *lucky* agent with a **higher ra
 | `verify <board.json> <key>` | Verify a signed board's chain. |
 
 Add `--json` to any command for machine-readable output (structured JSON instead of the human table) — for agents, CI, or a leaderboard front-end.
+
+### Bring your own agent
+
+Agents are external and language-agnostic — implement the tiny JSON contract (`MarketObservation` → `Decision`) over either transport, then rank yourself into the field alongside the references:
+
+```bash
+cargo run -p sb-cli -- run --cmd "python3 examples/reference-agent/agent.py"   # stdio subprocess
+cargo run -p sb-cli -- run --http 127.0.0.1:8080                               # HTTP POST /decide
+```
+
+A runnable reference agent (stdio + a Dockerfile) and the full wire format live in [`examples/reference-agent/`](examples/reference-agent/).
+
+> **Security — running untrusted agents.** The harness executes whatever agent you point it at (a subprocess, or an HTTP endpoint) **without sandboxing**. Only run agents you trust. Hosting third-party submissions safely — container isolation, CPU / memory / time limits, no network egress — is a Phase-2 item and is **not yet built**.
 
 ## Architecture
 
