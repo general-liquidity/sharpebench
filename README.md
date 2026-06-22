@@ -67,7 +67,7 @@ Add `--json` to any command for machine-readable output (structured JSON instead
 Agents are external and language-agnostic — implement the tiny JSON contract (`MarketObservation` → `Decision`) over either transport, then rank yourself into the field alongside the references:
 
 ```bash
-cargo run -p sharpebench -- run --cmd "python3 examples/reference-agent/agent.py"   # stdio subprocess
+cargo run -p sharpebench -- run --cmd "cargo run -q -p reference-agent"             # stdio subprocess
 cargo run -p sharpebench -- run --http 127.0.0.1:8080                               # HTTP POST /decide
 ```
 

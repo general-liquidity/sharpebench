@@ -1,0 +1,16 @@
+[package]
+name = "reference-agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Reference SharpeBench agent (stdio JSON contract) — fork and replace `decide`."
+
+[dependencies]
+# Rust agents can use the published typed contract. Any other language just matches
+# the JSON shapes documented in README.md.
+sharpebench-protocol = { path = "../../crates/sharpebench-protocol", version = "0.0.1" }
+serde_json = "1"
+
+[lints]
+workspace = true

@@ -1,0 +1,3 @@
+# Keep the Docker build context small (the reference-agent image builds from repo root).
+/target
+.git

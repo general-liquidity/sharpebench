@@ -10,6 +10,7 @@ members = [
     "crates/sharpebench-attest",
     "crates/sharpebench-leaderboard",
     "xtask",
+    "examples/reference-agent",
 ]
 
 [workspace.package]

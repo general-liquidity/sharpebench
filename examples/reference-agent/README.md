@@ -7,8 +7,9 @@ two-message loop every decision step:
 1. harness → agent: a **`MarketObservation`** (JSON), point-in-time.
 2. agent → harness: a **`Decision`** (JSON).
 
-`agent.py` here is the minimal honest implementation (equal-weight buy-and-hold).
-Fork it, replace `decide`, ship it.
+`src/main.rs` here is the minimal honest implementation in Rust (equal-weight
+buy-and-hold) using the typed `sharpebench-protocol`. Fork it, replace `decide`,
+ship it. Any other language just matches the JSON shapes below.
 
 ## Transports
 
@@ -17,11 +18,14 @@ The harness supports two transports; the JSON payloads are identical across both
 ### stdio (this reference agent)
 
 One `MarketObservation` JSON object per line on **stdin**; one `Decision` JSON
-object per line on **stdout**. Keep stdout unbuffered/flushed (the loop is
-line-synchronous). Driven by `sharpebench_sim::ExternalAgent::spawn(program, args)`.
+object per line on **stdout**, flushed each line (the loop is line-synchronous).
+Driven by `sharpebench_sim::ExternalAgent::spawn(program, args)`.
 
 ```bash
-docker build -t sharpebench-reference-agent .
+cargo run -p reference-agent                  # run it directly
+
+# or containerize it (build from the repo root — it uses the workspace crate):
+docker build -f examples/reference-agent/Dockerfile -t sharpebench-reference-agent .
 docker run -i --rm sharpebench-reference-agent
 ```
 
