@@ -16,7 +16,7 @@ offline (`scripts/ingest/`); the benchmark only ever loads the frozen artifact.
 Run on it, or regenerate it:
 
 ```bash
-cargo run -p sb-cli -- run --data data/crypto-majors-1d.csv
+cargo run -p sharpebench -- run --data data/crypto-majors-1d.csv
 python3 scripts/ingest/fetch_binance.py > data/crypto-majors-1d.csv   # then update the .sha256 sidecar
 ```
 
@@ -29,7 +29,7 @@ python3 scripts/ingest/fetch_binance.py > data/crypto-majors-1d.csv   # then upd
 - **Integrity:** `us-indices-1d.csv.sha256`.
 
 ```bash
-cargo run -p sb-cli -- run --data data/us-indices-1d.csv
+cargo run -p sharpebench -- run --data data/us-indices-1d.csv
 python3 scripts/ingest/fetch_fred.py > data/us-indices-1d.csv         # then update the .sha256 sidecar
 ```
 

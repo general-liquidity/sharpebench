@@ -1,5 +1,5 @@
 [package]
-name = "sb-harness"
+name = "sharpebench-harness"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -7,9 +7,9 @@ description = "SharpeBench orchestration: drive an agent over seeds × windows a
 repository.workspace = true
 
 [dependencies]
-sb-core = { path = "../sb-core", version = "0.0.1" }
-sb-protocol = { path = "../sb-protocol", version = "0.0.1" }
-sb-sim = { path = "../sb-sim", version = "0.0.1" }
+sb-core = { package = "sharpebench-core", path = "../sb-core", version = "0.0.1" }
+sb-protocol = { package = "sharpebench-protocol", path = "../sb-protocol", version = "0.0.1" }
+sb-sim = { package = "sharpebench-sim", path = "../sb-sim", version = "0.0.1" }
 
 [lints]
 workspace = true

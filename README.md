@@ -40,10 +40,10 @@ All eight crates are implemented, tested, and CI-green (fmt · clippy `-D warnin
 
 ```bash
 cargo test --workspace                                  # all tests, incl. the luck-demotion proof
-cargo run -p sb-cli -- run                              # run reference agents + the luck floor through the sim
-cargo run -p sb-cli -- score suites/example_submissions.json   # rank a JSON field of submissions
-cargo run -p sb-cli -- audit                           # prove the scorer resists 5 known gaming attacks
-cargo run -p sb-cli -- run --data data/crypto-majors-1d.csv   # run on real crypto-majors daily bars
+cargo run -p sharpebench -- run                              # run reference agents + the luck floor through the sim
+cargo run -p sharpebench -- score suites/example_submissions.json   # rank a JSON field of submissions
+cargo run -p sharpebench -- audit                           # prove the scorer resists 5 known gaming attacks
+cargo run -p sharpebench -- run --data data/crypto-majors-1d.csv   # run on real crypto-majors daily bars
 ```
 
 The example field includes a *skilled* agent, a *lucky* agent with a **higher raw return**, and a *process-violating* agent. The skilled agent ranks first; the other two are ineligible — which is the whole point. `run` adds a **luck floor** of random "monkey" agents so you can see the zero-skill distribution a real edge must clear.
@@ -67,8 +67,8 @@ Add `--json` to any command for machine-readable output (structured JSON instead
 Agents are external and language-agnostic — implement the tiny JSON contract (`MarketObservation` → `Decision`) over either transport, then rank yourself into the field alongside the references:
 
 ```bash
-cargo run -p sb-cli -- run --cmd "python3 examples/reference-agent/agent.py"   # stdio subprocess
-cargo run -p sb-cli -- run --http 127.0.0.1:8080                               # HTTP POST /decide
+cargo run -p sharpebench -- run --cmd "python3 examples/reference-agent/agent.py"   # stdio subprocess
+cargo run -p sharpebench -- run --http 127.0.0.1:8080                               # HTTP POST /decide
 ```
 
 A runnable reference agent (stdio + a Dockerfile) and the full wire format live in [`examples/reference-agent/`](examples/reference-agent/).
@@ -81,7 +81,7 @@ The benchmark runs on **frozen, checksummed, point-in-time** datasets — no liv
 
 ```bash
 python3 scripts/ingest/fetch_binance.py > data/crypto-majors-1d.csv   # regenerate + re-checksum
-cargo run -p sb-cli -- run --data data/crypto-majors-1d.csv
+cargo run -p sharpebench -- run --data data/crypto-majors-1d.csv
 ```
 
 The format is long `date,symbol,close[,dividend]`; any aligned dataset works. Equities/macro adapters (Stooq · SEC EDGAR · FRED) are the next sources — see [`data/README.md`](data/README.md).
@@ -99,6 +99,8 @@ A Rust [Cargo workspace](Cargo.toml) (modular, à la Paradigm's Rust OSS — reu
 | **`sb-attest`** | forward-attestation: SHA-256 pre-registration commitments + HMAC tamper-evident signed result chains + an integer-epoch time-lock registry. |
 | **`sb-wasm`** | WASM bindings so Gordon (TypeScript) runs the *identical* scorer — internal eval and public benchmark can't drift. |
 | `sb-leaderboard` · `sb-cli` | leaderboard render / sign / persist · the `sharpebench` CLI. |
+
+> Crates publish to crates.io as **`sharpebench-*`** (the binary as **`sharpebench`** — `cargo install sharpebench`); the directories and `use sb_*::` import paths stay `sb_*`.
 
 ## Governance
 

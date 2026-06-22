@@ -1,5 +1,5 @@
 [package]
-name = "sb-cli"
+name = "sharpebench"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,11 +11,11 @@ name = "sharpebench"
 path = "src/main.rs"
 
 [dependencies]
-sb-core = { path = "../sb-core", version = "0.0.1" }
-sb-sim = { path = "../sb-sim", version = "0.0.1" }
-sb-harness = { path = "../sb-harness", version = "0.0.1" }
-sb-attest = { path = "../sb-attest", version = "0.0.1" }
-sb-leaderboard = { path = "../sb-leaderboard", version = "0.0.1" }
+sb-core = { package = "sharpebench-core", path = "../sb-core", version = "0.0.1" }
+sb-sim = { package = "sharpebench-sim", path = "../sb-sim", version = "0.0.1" }
+sb-harness = { package = "sharpebench-harness", path = "../sb-harness", version = "0.0.1" }
+sb-attest = { package = "sharpebench-attest", path = "../sb-attest", version = "0.0.1" }
+sb-leaderboard = { package = "sharpebench-leaderboard", path = "../sb-leaderboard", version = "0.0.1" }
 serde = "1"
 serde_json = "1"
 

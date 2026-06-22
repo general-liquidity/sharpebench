@@ -40,8 +40,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Same input → byte-identical leaderboard, twice
         run: |
-          cargo run -q -p sb-cli -- score suites/example_submissions.json > a.txt
-          cargo run -q -p sb-cli -- score suites/example_submissions.json > b.txt
+          cargo run -q -p sharpebench -- score suites/example_submissions.json > a.txt
+          cargo run -q -p sharpebench -- score suites/example_submissions.json > b.txt
           diff a.txt b.txt && echo "deterministic ✓"
 
   audit:
@@ -51,7 +51,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: The scorer resists every known gaming attack
-        run: cargo run -q -p sb-cli -- audit
+        run: cargo run -q -p sharpebench -- audit
 
   supply-chain:
     name: cargo-deny (licenses · advisories · bans · sources)

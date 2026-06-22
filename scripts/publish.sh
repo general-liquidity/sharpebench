@@ -10,10 +10,10 @@
 set -euo pipefail
 
 # Dependency-topological order: a crate must be live before its dependents resolve.
-ORDER=(sb-core sb-protocol sb-attest sb-sim sb-leaderboard sb-wasm sb-harness sb-cli)
+ORDER=(sharpebench-core sharpebench-protocol sharpebench-attest sharpebench-sim sharpebench-leaderboard sharpebench-wasm sharpebench-harness sharpebench)
 
 # The three leaf crates (no internal deps) can be package-verified standalone.
-LEAVES=(sb-core sb-protocol sb-attest)
+LEAVES=(sharpebench-core sharpebench-protocol sharpebench-attest)
 
 case "${1:-}" in
   --check)

@@ -7,7 +7,7 @@
 set -euo pipefail
 
 rustup target add wasm32-unknown-unknown
-cargo build -p sb-wasm --release --target wasm32-unknown-unknown
+cargo build -p sharpebench-wasm --release --target wasm32-unknown-unknown
 WASM="target/wasm32-unknown-unknown/release/sb_wasm.wasm"
 
 if command -v wasm-bindgen >/dev/null 2>&1; then

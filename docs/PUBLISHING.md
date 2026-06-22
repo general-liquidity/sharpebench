@@ -5,30 +5,25 @@ Publishing is **irreversible**: a version can be *yanked* (blocked from new
 dependents) but never deleted, and a crate **name is claimed forever**. Decide
 names *before* the first publish.
 
-## 0. Decide the published names (do this first — it is permanent)
+## 0. Published names — `sharpebench-*` (already applied)
 
-The crates are currently `sb-core`, `sb-sim`, … — short and generic. On crates.io
-names are flat + global, so they may be taken and they don't group under the
-project. Two options:
+The crates publish as **`sharpebench-core`, `sharpebench-protocol`, …** and the
+binary as **`sharpebench`** (so `cargo install sharpebench` reads cleanly). The
+rename touched only the package names — crate directories stay `crates/sb-*` and
+every `use sb_*::` import is unchanged, because each dependent keeps its `sb-*`
+dependency key and just aliases the package:
 
-- **Keep `sb-*`** if the names are free (check `https://crates.io/crates/sb-core`, …).
-- **Rename to `sharpebench-*`** (recommended) — groups on search and makes
-  `cargo install sharpebench` read cleanly. The low-risk rename touches *no*
-  `use sb_core::` imports — change only the package name, keep the lib name:
+```toml
+# crates/sb-core/Cargo.toml — package renamed
+[package]
+name = "sharpebench-core"
 
-  ```toml
-  # crates/sb-core/Cargo.toml
-  [package]
-  name = "sharpebench-core"     # the crates.io name
-  [lib]
-  name = "sb_core"              # internal import path stays `sb_core`
-  ```
+# in each dependent — key stays sb-core (so the import stays `sb_core`), package aliased
+sb-core = { package = "sharpebench-core", path = "../sb-core", version = "0.0.1" }
+```
 
-  and in each dependent, alias it back:
-
-  ```toml
-  sb_core = { package = "sharpebench-core", path = "../sb-core", version = "0.0.1" }
-  ```
+Names on crates.io are permanent (a version can be yanked but never deleted, and a
+name is claimed forever), so this is settled before the first publish.
 
 ## 1. Account + token
 
@@ -50,10 +45,10 @@ project. Two options:
 A crate must be live on crates.io before its dependents can resolve it:
 
 ```
-sb-core   sb-protocol   sb-attest        # no internal deps — publish first
-sb-sim    sb-leaderboard   sb-wasm       # depend on the row above
-sb-harness                               # depends on core / protocol / sim
-sb-cli                                   # depends on all of them (binary: `sharpebench`)
+sharpebench-core   sharpebench-protocol   sharpebench-attest    # no internal deps — first
+sharpebench-sim    sharpebench-leaderboard   sharpebench-wasm   # depend on the row above
+sharpebench-harness                                             # core / protocol / sim
+sharpebench                                                     # the binary; depends on all
 ```
 
 Helper script:

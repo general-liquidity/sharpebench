@@ -121,82 +121,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
 
 [[package]]
-name = "sb-attest"
-version = "0.0.1"
-dependencies = [
- "hmac",
- "serde",
- "sha2",
-]
-
-[[package]]
-name = "sb-cli"
-version = "0.0.1"
-dependencies = [
- "sb-attest",
- "sb-core",
- "sb-harness",
- "sb-leaderboard",
- "sb-sim",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "sb-core"
-version = "0.0.1"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "sb-harness"
-version = "0.0.1"
-dependencies = [
- "sb-core",
- "sb-protocol",
- "sb-sim",
-]
-
-[[package]]
-name = "sb-leaderboard"
-version = "0.0.1"
-dependencies = [
- "sb-attest",
- "sb-core",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "sb-protocol"
-version = "0.0.1"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "sb-sim"
-version = "0.0.1"
-dependencies = [
- "sb-core",
- "sb-protocol",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "sb-wasm"
-version = "0.0.1"
-dependencies = [
- "sb-core",
- "serde_json",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "serde"
 version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -248,6 +172,82 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest",
+]
+
+[[package]]
+name = "sharpebench"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sharpebench-attest",
+ "sharpebench-core",
+ "sharpebench-harness",
+ "sharpebench-leaderboard",
+ "sharpebench-sim",
+]
+
+[[package]]
+name = "sharpebench-attest"
+version = "0.0.1"
+dependencies = [
+ "hmac",
+ "serde",
+ "sha2",
+]
+
+[[package]]
+name = "sharpebench-core"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "sharpebench-harness"
+version = "0.0.1"
+dependencies = [
+ "sharpebench-core",
+ "sharpebench-protocol",
+ "sharpebench-sim",
+]
+
+[[package]]
+name = "sharpebench-leaderboard"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sharpebench-attest",
+ "sharpebench-core",
+]
+
+[[package]]
+name = "sharpebench-protocol"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "sharpebench-sim"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sharpebench-core",
+ "sharpebench-protocol",
+]
+
+[[package]]
+name = "sharpebench-wasm"
+version = "0.0.1"
+dependencies = [
+ "serde_json",
+ "sharpebench-core",
+ "wasm-bindgen",
 ]
 
 [[package]]
