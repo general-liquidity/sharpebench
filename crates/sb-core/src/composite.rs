@@ -183,6 +183,12 @@ pub struct CompositeScore {
     /// data-snooping tests (drops clearly-bad models from the null). Same value
     /// across the field; filled by [`rank`]. 1.0 from `score_agent` alone.
     pub field_spa_consistent_p: f64,
+    /// Crowdedness: the agent's mean Pearson correlation with the rest of the
+    /// field's return streams, in [-1, 1]. High = riding the same factor as
+    /// everyone else (a common beta that decays for the whole board at once);
+    /// low/negative = diversifying. Reported, not gating; filled by [`rank`].
+    /// `None` from `score_agent` alone (no field context) or with < 2 agents.
+    pub field_crowdedness: Option<f64>,
 }
 
 /// Pareto dominance on (return↑, drawdown↓, turnover↓).
@@ -315,6 +321,7 @@ pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
         return_per_cost,
         field_spa_p: 1.0,
         field_spa_consistent_p: 1.0,
+        field_crowdedness: None,
     }
 }
 
@@ -397,6 +404,23 @@ pub fn rank(subs: &[AgentSubmission], cfg: &ScoreConfig) -> Vec<CompositeScore> 
         );
         for (cs, s) in scores.iter_mut().zip(sd) {
             cs.step_down_significant = s;
+        }
+    }
+
+    // Crowdedness: how correlated is each agent's return stream with the rest of
+    // the field? High = riding the same factor as everyone else (a common beta
+    // that decays for the whole board at once); low/negative = diversifying skill.
+    // Reported, not gating — the field-relative sibling of decay/calibration.
+    if min_len >= 2 && pooled.len() >= 2 {
+        let aligned: Vec<&[f64]> = pooled.iter().map(|p| &p[..min_len]).collect();
+        for (idx, cs) in scores.iter_mut().enumerate() {
+            let peers: Vec<&[f64]> = aligned
+                .iter()
+                .enumerate()
+                .filter(|&(j, _)| j != idx)
+                .map(|(_, &p)| p)
+                .collect();
+            cs.field_crowdedness = crate::correlation::crowdedness(aligned[idx], &peers).mean_corr;
         }
     }
 
