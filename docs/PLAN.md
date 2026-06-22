@@ -38,7 +38,7 @@ sharpebench/
 ├── rust-toolchain.toml         # pinned channel (reproducibility)
 ├── flake.nix                   # hermetic toolchain (optional but recommended)
 ├── crates/
-│   ├── sb-core/                # THE SCORING KERNEL — pure, deterministic, #![forbid(unsafe_code)]
+│   ├── sharpebench-core/                # THE SCORING KERNEL — pure, deterministic, #![forbid(unsafe_code)]
 │   │   ├── types.rs            # Returns, Trajectory, Trace, ProcessEvent, Score, Ranking
 │   │   ├── deflated_sharpe.rs  # DSR + PSR
 │   │   ├── pass_k.rs           # pass^k (mode All/Any/Threshold)
@@ -48,24 +48,24 @@ sharpebench/
 │   │   ├── correlation.rs      # cross-agent correlation / crowdedness
 │   │   ├── calibration.rs      # Brier / reliability of stated confidence
 │   │   └── composite.rs        # gated composite score + leaderboard ranking
-│   ├── sb-wasm/                # wasm-bindgen façade over sb-core (Gordon/Bun consumes this)
-│   ├── sb-protocol/            # language-agnostic agent I/O: MarketObservation -> Decision (JSON schema)
-│   ├── sb-sim/                 # point-in-time market sim / backtest
+│   ├── sharpebench-wasm/                # wasm-bindgen façade over sharpebench-core (Gordon/Bun consumes this)
+│   ├── sharpebench-protocol/            # language-agnostic agent I/O: MarketObservation -> Decision (JSON schema)
+│   ├── sharpebench-sim/                 # point-in-time market sim / backtest
 │   │   ├── data.rs             # PIT store: exposes only t <= decision_time (look-ahead impossible)
 │   │   ├── engine.rs           # bar loop, order matching, fills
 │   │   ├── costs.rs            # slippage + market-impact (own-order) + fees
 │   │   └── windows.rs          # multi-window OOS, walk-forward, regime tags (bull/bear/chop)
-│   ├── sb-harness/             # orchestrate: drive agent over seeds×windows -> capture Trajectories -> score
-│   ├── sb-attest/              # pre-registration, time-locked commits, signed verifiable results
-│   ├── sb-leaderboard/         # storage + rendering + signed result chain (reuse Gordon's HMAC pattern)
-│   └── sb-cli/                 # `sharpebench` single static binary
+│   ├── sharpebench-harness/             # orchestrate: drive agent over seeds×windows -> capture Trajectories -> score
+│   ├── sharpebench-attest/              # pre-registration, time-locked commits, signed verifiable results
+│   ├── sharpebench-leaderboard/         # storage + rendering + signed result chain (reuse Gordon's HMAC pattern)
+│   └── sharpebench-cli/                 # `sharpebench` single static binary
 ├── suites/                     # benchmark suite definitions (universe × windows × baselines)
 ├── data/                       # curated PIT datasets (or checksummed pointers)
 ├── docs/                       # methodology, protocol spec, governance
 └── .github/workflows/          # reproducible CI: pinned toolchain, golden-score tests, SLSA-signed binary
 ```
 
-## 3. The scoring kernel (`sb-core`) — the crown jewel
+## 3. The scoring kernel (`sharpebench-core`) — the crown jewel
 
 **Invariants (this is what makes scores reproducible forever):**
 - Pure: no I/O, no system clock, no ambient RNG. Any randomness (bootstrap) takes an explicit seed argument.
@@ -86,25 +86,25 @@ pub fn rank(entries: &[CompositeScore]) -> Ranking;
 
 **Gating logic (composite):** an agent ranks only if it (a) clears the deflated-Sharpe / SPA significance bar, (b) passes pass^k on every seed×window, and (c) has zero block-severity process violations. A **random-agent "luck floor"** baseline runs on every board so the noise distribution is visible.
 
-## 4. `sb-wasm` — eat-our-own-dogfood bridge to Gordon
+## 4. `sharpebench-wasm` — eat-our-own-dogfood bridge to Gordon
 
-`wasm-bindgen` exports `sb-core` scoring to JS. Gordon (Bun) imports the WASM and uses the **identical** scorer inside its RULER harness → internal eval and the public benchmark cannot drift. This is the resolution to "TS product vs Rust benchmark": one kernel, two consumers.
+`wasm-bindgen` exports `sharpebench-core` scoring to JS. Gordon (Bun) imports the WASM and uses the **identical** scorer inside its RULER harness → internal eval and the public benchmark cannot drift. This is the resolution to "TS product vs Rust benchmark": one kernel, two consumers.
 
-## 5. `sb-protocol` — the adoption surface (must be dead-simple)
+## 5. `sharpebench-protocol` — the adoption surface (must be dead-simple)
 
 Agents are external — a container or HTTP endpoint, not Rust code. Per step:
 - Harness → agent: `MarketObservation` (PIT prices/fundamentals/news + portfolio state) as JSON.
 - Agent → harness: `Decision` { per-symbol action, target size, confidence, reasoning } as JSON.
 - Transports: stdio (container, `Dockerfile` contract) and HTTP. Ship a reference agent + a thin Gordon adapter.
 
-## 6. `sb-sim` — realistic, leak-proof backtest
+## 6. `sharpebench-sim` — realistic, leak-proof backtest
 
 - **Look-ahead impossible by construction:** the PIT data store only ever returns rows with `t <= decision_time` (don't police leakage after the fact — make it unrepresentable).
 - **Costs in:** slippage + market impact (own order moves price) + fees (fixes FinBen's frictionless fills).
 - **Multi-window OOS + walk-forward + regime tagging** (fixes StockBench's single window).
 - Deterministic given (data, seed, decisions).
 
-## 7. `sb-attest` — forward-attestation (the un-gameable spine, blunts vendor-conflict)
+## 7. `sharpebench-attest` — forward-attestation (the un-gameable spine, blunts vendor-conflict)
 
 - **Pre-register:** agent commits a hash of its binary/config before the eval window's data exists.
 - **Time-lock:** submission targets a future window; data revealed after the lock.
@@ -113,15 +113,15 @@ Agents are external — a container or HTTP endpoint, not Rust code. Per step:
 ## 8. Reproducibility & CI (the standard-hood layer)
 
 - `rust-toolchain.toml` pinned; `flake.nix` hermetic build; `cargo build --locked`.
-- Golden-score regression tests (numbers frozen). `#![forbid(unsafe_code)]` in `sb-core`/`sb-sim`.
+- Golden-score regression tests (numbers frozen). `#![forbid(unsafe_code)]` in `sharpebench-core`/`sharpebench-sim`.
 - Release the `sharpebench` binary as a **single static musl binary**, **cosign/SLSA-signed** (reuse the supply-chain discipline just built for Gordon).
 - Determinism CI: run the same suite twice, assert byte-identical scores.
 
 ## 9. Phased roadmap
 
-- **Phase 0 (wk 1–2) — `sb-core` + `sb-cli score` + `sb-wasm`.** The pure kernel + golden tests + composite ranking, validated on **synthetic agents** (skilled / lucky-noisy / process-violating / crowded-factor) proving deflation demotes luck. Ship the WASM so Gordon adopts the identical scorer immediately. *Crown jewel, all-math, lowest risk — the credible first artifact.*
-- **Phase 1 (wk 3–6) — `sb-sim` + `sb-protocol` + `sb-harness`.** PIT sim, costs, multi-window; the agent protocol + reference container; first real end-to-end run (Gordon as the agent).
-- **Phase 2 (wk 7–9) — `sb-attest` + `sb-leaderboard`.** Forward-attestation, signed verifiable results, public leaderboard. Gordon becomes competitor #1 (publish its rank — far stronger than a self-graded number).
+- **Phase 0 (wk 1–2) — `sharpebench-core` + `sharpebench-cli score` + `sharpebench-wasm`.** The pure kernel + golden tests + composite ranking, validated on **synthetic agents** (skilled / lucky-noisy / process-violating / crowded-factor) proving deflation demotes luck. Ship the WASM so Gordon adopts the identical scorer immediately. *Crown jewel, all-math, lowest risk — the credible first artifact.*
+- **Phase 1 (wk 3–6) — `sharpebench-sim` + `sharpebench-protocol` + `sharpebench-harness`.** PIT sim, costs, multi-window; the agent protocol + reference container; first real end-to-end run (Gordon as the agent).
+- **Phase 2 (wk 7–9) — `sharpebench-attest` + `sharpebench-leaderboard`.** Forward-attestation, signed verifiable results, public leaderboard. Gordon becomes competitor #1 (publish its rank — far stronger than a self-graded number).
 - **Phase 3 (ongoing) — data curation + methodology paper + public release + governance roadmap.** Data-prep may be a polyglot *offline* pipeline; harness/core/sim stay Rust. Roadmap to neutral governance / third-party verification.
 
 ## 10. Positioning

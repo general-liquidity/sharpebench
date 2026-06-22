@@ -20,4 +20,4 @@ everywhere.
 The headline consequence: an agent that earns a spectacular return on one run and
 noise on the rest **fails pass^k** and is ineligible, no matter how high its
 pooled raw return. See the `lucky_high_return_fails_pass_k` test in
-`sb-core/src/composite.rs`.
+`sharpebench-core/src/composite.rs`.

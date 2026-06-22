@@ -22,5 +22,5 @@ This is the single most important property of SharpeBench. It is why a lucky
 agent with the highest raw return is demoted: deflation prices in the luck.
 
 > Bailey & López de Prado, *The Deflated Sharpe Ratio* (2014), is the reference.
-> The implementation lives in `sb-core/src/deflated_sharpe.rs` and is unit-tested
+> The implementation lives in `sharpebench-core/src/deflated_sharpe.rs` and is unit-tested
 > for the "deflation penalizes many trials" property.

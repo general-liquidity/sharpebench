@@ -11,7 +11,7 @@ a sharper question:
 > Is this agent's edge **real skill**, or the luckiest draw out of many tries?
 
 It answers it without a judge. The scoring kernel is a pure, deterministic Rust
-library (`sb-core`): no I/O, no system clock, no ambient randomness, no `unsafe`.
+library (`sharpebench-core`): no I/O, no system clock, no ambient randomness, no `unsafe`.
 The same trajectories always produce byte-identical scores on any platform, so a
 result is reproducible forever — and a benchmark whose verdicts are assertions
 rather than opinions cannot be gamed by learning a judge's biases.
@@ -35,10 +35,10 @@ raw return get demoted below a steadily-skilled one.
 
 | Crate | Responsibility |
 |---|---|
-| `sb-core` | The pure scoring kernel (DSR/PSR/pass^k/significance/process/composite). |
-| `sb-sim` | Point-in-time simulator (look-ahead is structurally impossible) + reference agents. |
-| `sb-harness` | Drives agents across windows × seeds into submissions; team harness. |
-| `sb-attest` | Forward-attestation commitments + tamper-evident signed result chains. |
-| `sb-leaderboard` | Render + sign + persist a published board. |
-| `sb-wasm` | The identical kernel compiled to WASM, embeddable in any host. |
-| `sb-cli` | `sharpebench` — run / score / stress / audit / commit / sign / verify. |
+| `sharpebench-core` | The pure scoring kernel (DSR/PSR/pass^k/significance/process/composite). |
+| `sharpebench-sim` | Point-in-time simulator (look-ahead is structurally impossible) + reference agents. |
+| `sharpebench-harness` | Drives agents across windows × seeds into submissions; team harness. |
+| `sharpebench-attest` | Forward-attestation commitments + tamper-evident signed result chains. |
+| `sharpebench-leaderboard` | Render + sign + persist a published board. |
+| `sharpebench-wasm` | The identical kernel compiled to WASM, embeddable in any host. |
+| `sharpebench-cli` | `sharpebench` — run / score / stress / audit / commit / sign / verify. |

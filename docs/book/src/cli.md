@@ -1,6 +1,6 @@
 # CLI reference
 
-The `sharpebench` binary (crate `sb-cli`) is the command-line entry point.
+The `sharpebench` binary (crate `sharpebench-cli`) is the command-line entry point.
 
 ```text
 sharpebench run                       run reference agents through the sim and rank them

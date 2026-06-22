@@ -18,17 +18,17 @@ The harness supports two transports; the JSON payloads are identical across both
 
 One `MarketObservation` JSON object per line on **stdin**; one `Decision` JSON
 object per line on **stdout**. Keep stdout unbuffered/flushed (the loop is
-line-synchronous). Driven by `sb_sim::ExternalAgent::spawn(program, args)`.
+line-synchronous). Driven by `sharpebench_sim::ExternalAgent::spawn(program, args)`.
 
 ```bash
-docker build -t sb-reference-agent .
-docker run -i --rm sb-reference-agent
+docker build -t sharpebench-reference-agent .
+docker run -i --rm sharpebench-reference-agent
 ```
 
 ### HTTP
 
 A plain-HTTP endpoint that accepts `POST /decide` with a `MarketObservation`
-body and returns a `Decision` body. Driven by `sb_sim::HttpAgent::new("host:port")`
+body and returns a `Decision` body. Driven by `sharpebench_sim::HttpAgent::new("host:port")`
 (loopback / in-sandbox; no TLS). Pseudocode:
 
 ```

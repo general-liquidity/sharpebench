@@ -5,25 +5,15 @@ Publishing is **irreversible**: a version can be *yanked* (blocked from new
 dependents) but never deleted, and a crate **name is claimed forever**. Decide
 names *before* the first publish.
 
-## 0. Published names — `sharpebench-*` (already applied)
+## 0. Published names — `sharpebench-*`
 
-The crates publish as **`sharpebench-core`, `sharpebench-protocol`, …** and the
-binary as **`sharpebench`** (so `cargo install sharpebench` reads cleanly). The
-rename touched only the package names — crate directories stay `crates/sb-*` and
-every `use sb_*::` import is unchanged, because each dependent keeps its `sb-*`
-dependency key and just aliases the package:
-
-```toml
-# crates/sb-core/Cargo.toml — package renamed
-[package]
-name = "sharpebench-core"
-
-# in each dependent — key stays sb-core (so the import stays `sb_core`), package aliased
-sb-core = { package = "sharpebench-core", path = "../sb-core", version = "0.0.1" }
-```
+The crates are named consistently throughout — directory, package, and import all
+match: `crates/sharpebench-core`, package `sharpebench-core`, import
+`sharpebench_core`. The CLI crate's package is `sharpebench` (so `cargo install
+sharpebench` works). Nothing left to decide.
 
 Names on crates.io are permanent (a version can be yanked but never deleted, and a
-name is claimed forever), so this is settled before the first publish.
+name is claimed forever), so confirm availability before the first publish.
 
 ## 1. Account + token
 
@@ -37,7 +27,7 @@ name is claimed forever), so this is settled before the first publish.
 - [ ] `cargo deny check`, `cargo test --workspace`, `cargo clippy --workspace` all clean.
 - [ ] Every crate has `description` + `license` (✓ inherited: `MIT OR Apache-2.0`).
 - [ ] Path deps carry a `version` (✓ — crates.io requires it; path is ignored on publish).
-- [ ] Mark any internal-only crate `publish = false` (e.g. if `sb-wasm` stays Gordon-internal).
+- [ ] Mark any internal-only crate `publish = false` (e.g. if `sharpebench-wasm` stays Gordon-internal).
 - [ ] Clean working tree (`cargo publish` refuses a dirty tree).
 
 ## 3. Publish in dependency order

@@ -1,11 +1,11 @@
 //! In-process trading agents.
 //!
-//! External agents speak the JSON [`sb_protocol`] over a container/HTTP boundary;
+//! External agents speak the JSON [`sharpebench_protocol`] over a container/HTTP boundary;
 //! this trait is the in-process equivalent used for reference agents and tests.
 
 use std::collections::BTreeMap;
 
-use sb_protocol::{Action, Decision, MarketObservation, Order};
+use sharpebench_protocol::{Action, Decision, MarketObservation, Order};
 
 /// Something that turns a point-in-time observation into trading orders.
 pub trait Agent {
@@ -15,7 +15,7 @@ pub trait Agent {
 /// A trading *team*: several member agents whose target weights are averaged into
 /// one consensus decision (a symbol only one member likes is down-weighted by the
 /// whole team's size). Modelled on the TradingAgents multi-agent firm — the team
-/// is scored as a unit while [`sb_core::attribute_roles`] estimates each member's
+/// is scored as a unit while [`sharpebench_core::attribute_roles`] estimates each member's
 /// load on the team outcome.
 pub struct TeamAgent {
     pub members: Vec<Box<dyn Agent>>,

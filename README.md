@@ -98,19 +98,19 @@ A Rust [Cargo workspace](Cargo.toml) (modular, à la Paradigm's Rust OSS — reu
 
 | Crate | Role |
 |---|---|
-| **`sb-core`** | the deterministic scoring kernel — deflated Sharpe / PSR / pass^k / bootstrap + Reality Check + SPA + step-down significance / process / decay / calibration / attribution / roles / OOS-decay / economic-rationality / self-audit / composite. No I/O, no ambient RNG, fixed float reduction → byte-identical scores forever. |
-| **`sb-protocol`** | the language-agnostic agent ⇄ harness JSON protocol (any-language agents compete). |
-| **`sb-sim`** | point-in-time simulator (look-ahead is structurally impossible) with fees, seeded slippage, square-root market impact, financing, liquidity/partial-fill caps, dividends, adversarial stress paths, and reference + team + random agents. |
-| **`sb-harness`** | run orchestration across seeds × windows; team harness + role attribution; luck-floor and economic-rationality producers. |
-| **`sb-attest`** | forward-attestation: SHA-256 pre-registration commitments + HMAC tamper-evident signed result chains + an integer-epoch time-lock registry. |
-| **`sb-wasm`** | WASM bindings so Gordon (TypeScript) runs the *identical* scorer — internal eval and public benchmark can't drift. |
-| `sb-leaderboard` · `sb-cli` | leaderboard render / sign / persist · the `sharpebench` CLI. |
+| **`sharpebench-core`** | the deterministic scoring kernel — deflated Sharpe / PSR / pass^k / bootstrap + Reality Check + SPA + step-down significance / process / decay / calibration / attribution / roles / OOS-decay / economic-rationality / self-audit / composite. No I/O, no ambient RNG, fixed float reduction → byte-identical scores forever. |
+| **`sharpebench-protocol`** | the language-agnostic agent ⇄ harness JSON protocol (any-language agents compete). |
+| **`sharpebench-sim`** | point-in-time simulator (look-ahead is structurally impossible) with fees, seeded slippage, square-root market impact, financing, liquidity/partial-fill caps, dividends, adversarial stress paths, and reference + team + random agents. |
+| **`sharpebench-harness`** | run orchestration across seeds × windows; team harness + role attribution; luck-floor and economic-rationality producers. |
+| **`sharpebench-attest`** | forward-attestation: SHA-256 pre-registration commitments + HMAC tamper-evident signed result chains + an integer-epoch time-lock registry. |
+| **`sharpebench-wasm`** | WASM bindings so Gordon (TypeScript) runs the *identical* scorer — internal eval and public benchmark can't drift. |
+| `sharpebench-leaderboard` · `sharpebench-cli` | leaderboard render / sign / persist · the `sharpebench` CLI. |
 
-> Crates publish to crates.io as **`sharpebench-*`** (the binary as **`sharpebench`** — `cargo install sharpebench`); the directories and `use sb_*::` import paths stay `sb_*`.
+> Crates publish to crates.io as **`sharpebench-*`**; the binary crate is **`sharpebench`** (`cargo install sharpebench`).
 
 ## Governance
 
-Hosted by [General Liquidity](https://github.com/general-liquidity) to start, with a roadmap to neutral governance. Credibility comes from **forward-attestation + signed, independently-verifiable results** (`sb-attest`), not from trust in the host — and Gordon (GL's agent) competes on the board like any other entrant.
+Hosted by [General Liquidity](https://github.com/general-liquidity) to start, with a roadmap to neutral governance. Credibility comes from **forward-attestation + signed, independently-verifiable results** (`sharpebench-attest`), not from trust in the host — and Gordon (GL's agent) competes on the board like any other entrant.
 
 The neutral home may already exist: the FINOS-governed [Open FinLLM Leaderboard](https://huggingface.co/spaces/finosfoundation/Open-Financial-LLM-Leaderboard) covers the financial-*knowledge* axis (NLP, sentiment, QA, compliance) but has **no trading-performance axis**. SharpeBench is positioned to be the skill-vs-luck *trading* track it lacks — complementary, not competing. See **[docs/GOVERNANCE.md](docs/GOVERNANCE.md)**.
 

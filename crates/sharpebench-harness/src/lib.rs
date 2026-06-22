@@ -1,13 +1,13 @@
 //! sb-harness — run orchestration.
 //!
-//! Drives an [`Agent`](sb_sim::Agent) through the [`sb_sim`] backtest across every
+//! Drives an [`Agent`](sharpebench_sim::Agent) through the [`sharpebench_sim`] backtest across every
 //! window × seed, capturing each run's return series and decision trace into the
-//! [`sb_core::AgentSubmission`] format the scoring kernel consumes. Producing one
+//! [`sharpebench_core::AgentSubmission`] format the scoring kernel consumes. Producing one
 //! `Run` per (window, seed) is what makes pass^k and multi-window OOS meaningful.
 #![forbid(unsafe_code)]
 
-use sb_core::AgentSubmission;
-use sb_sim::{run_backtest, Agent, CostModel, Dataset, RandomAgent, TeamAgent, Window};
+use sharpebench_core::AgentSubmission;
+use sharpebench_sim::{run_backtest, Agent, CostModel, Dataset, RandomAgent, TeamAgent, Window};
 
 /// Run a fresh agent (produced by `make_agent`) across every `window` × `seed`
 /// and assemble the submission — one `Run` per (window, seed).
@@ -89,7 +89,7 @@ pub fn luck_floor(
 }
 
 /// Elicit dominance choices from a live agent to feed
-/// [`sb_core::assess_rationality`]. Each scenario presents `n_symbols` assets whose
+/// [`sharpebench_core::assess_rationality`]. Each scenario presents `n_symbols` assets whose
 /// trailing returns encode a known "value", with exactly one clearly-best asset
 /// rotated to a different position each time. The agent's choice is read off as the
 /// asset it allocates the most weight to. A return-seeking agent should pick the
@@ -98,8 +98,8 @@ pub fn probe_dominance(
     agent: &mut dyn Agent,
     n_scenarios: usize,
     n_symbols: usize,
-) -> Vec<sb_core::DominanceChoice> {
-    use sb_protocol::{MarketObservation, PositionState, SymbolSnapshot};
+) -> Vec<sharpebench_core::DominanceChoice> {
+    use sharpebench_protocol::{MarketObservation, PositionState, SymbolSnapshot};
     use std::collections::BTreeMap;
 
     (0..n_scenarios)
@@ -156,7 +156,7 @@ pub fn probe_dominance(
                     chosen = i;
                 }
             }
-            sb_core::DominanceChoice {
+            sharpebench_core::DominanceChoice {
                 options: values,
                 chosen,
             }
@@ -169,17 +169,20 @@ pub fn probe_rationality(
     agent: &mut dyn Agent,
     n_scenarios: usize,
     n_symbols: usize,
-) -> sb_core::EconRationalityReport {
+) -> sharpebench_core::EconRationalityReport {
     let choices = probe_dominance(agent, n_scenarios, n_symbols);
-    sb_core::assess_rationality(&choices, &[], n_symbols)
+    sharpebench_core::assess_rationality(&choices, &[], n_symbols)
 }
 
 /// Segment a submission's runs by window and report out-of-sample edge decay.
 /// [`run_agent`] lays runs out window-major (all seeds of window 0, then window 1,
 /// …), so the first `runs.len()/n_windows` runs are the in-sample window and the
 /// rest are out-of-sample. Pools each window's returns and calls
-/// [`sb_core::oos_decay`].
-pub fn oos_decay_of(submission: &AgentSubmission, n_windows: usize) -> sb_core::OosDecayReport {
+/// [`sharpebench_core::oos_decay`].
+pub fn oos_decay_of(
+    submission: &AgentSubmission,
+    n_windows: usize,
+) -> sharpebench_core::OosDecayReport {
     let n = submission.runs.len();
     let per = n.checked_div(n_windows).unwrap_or(n).max(1);
     let windows: Vec<Vec<f64>> = (0..n_windows)
@@ -192,7 +195,7 @@ pub fn oos_decay_of(submission: &AgentSubmission, n_windows: usize) -> sb_core::
                 .collect()
         })
         .collect();
-    sb_core::oos_decay(&windows)
+    sharpebench_core::oos_decay(&windows)
 }
 
 /// One member of a trading team: a name plus a factory for fresh instances (the
@@ -216,7 +219,7 @@ impl TeamMember {
 
 /// A team run: the team's own submission (scored as a unit) plus each member's
 /// solo pooled return series over the same windows × seeds — exactly the inputs
-/// [`sb_core::attribute_roles`] needs to estimate who carried the team.
+/// [`sharpebench_core::attribute_roles`] needs to estimate who carried the team.
 pub struct TeamResult {
     pub team: AgentSubmission,
     pub role_returns: Vec<(String, Vec<f64>)>,
@@ -264,8 +267,8 @@ pub fn run_team(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sb_core::roles::attribute_roles;
-    use sb_sim::{BuyAndHold, Momentum};
+    use sharpebench_core::roles::attribute_roles;
+    use sharpebench_sim::{BuyAndHold, Momentum};
 
     #[test]
     fn team_run_produces_alignable_role_series() {
@@ -341,7 +344,7 @@ mod tests {
 
     #[test]
     fn luck_floor_agents_do_not_clear_the_gates() {
-        use sb_core::{rank, ScoreConfig};
+        use sharpebench_core::{rank, ScoreConfig};
         let data = Dataset::synthetic(5, 120, 20_260_621);
         let windows = [Window {
             start: 20,

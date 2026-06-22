@@ -27,7 +27,7 @@ instead of shipping unnoticed. The same battery runs as a unit test
 
 ## Why determinism matters here
 
-Because `sb-core` is pure — no clock, no ambient RNG, fixed float reduction order —
+Because `sharpebench-core` is pure — no clock, no ambient RNG, fixed float reduction order —
 the audit's verdict is a property of the code, not of the machine or the run.
 Anyone can reproduce it byte-for-byte. A benchmark whose integrity proof is
 reproducible cannot be quietly degraded, and a leaderboard whose scorer is open and

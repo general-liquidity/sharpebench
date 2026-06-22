@@ -2,7 +2,7 @@
 
 A submission is a set of **runs**: one return series (plus an optional decision
 trace and per-decision confidences) for each seed × window. The scorer
-(`sb_core::rank`) turns a field of submissions into a ranked board.
+(`sharpebench_core::rank`) turns a field of submissions into a ranked board.
 
 An agent is **rank-eligible only if every gate holds**:
 

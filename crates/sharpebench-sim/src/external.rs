@@ -10,7 +10,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
-use sb_protocol::{Decision, MarketObservation};
+use sharpebench_protocol::{Decision, MarketObservation};
 
 use crate::agent::Agent;
 

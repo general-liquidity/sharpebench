@@ -2,8 +2,8 @@
 
 use std::collections::BTreeMap;
 
-use sb_core::{ProcessEvent, Run, Trace};
-use sb_protocol::{MarketObservation, PositionState, SymbolSnapshot};
+use sharpebench_core::{ProcessEvent, Run, Trace};
+use sharpebench_protocol::{MarketObservation, PositionState, SymbolSnapshot};
 
 use crate::agent::Agent;
 use crate::costs::{liquidity_capped_delta, market_impact_frac, CostModel, Rng};
@@ -41,7 +41,7 @@ fn nav(
 }
 
 /// Run a single backtest of `agent` over `window` with seeded execution noise,
-/// returning an [`sb_core::Run`] (per-period returns + decision trace).
+/// returning an [`sharpebench_core::Run`] (per-period returns + decision trace).
 pub fn run_backtest(
     data: &Dataset,
     agent: &mut dyn Agent,
@@ -196,7 +196,7 @@ pub fn run_backtest(
 mod tests {
     use super::*;
     use crate::agent::{Agent, BuyAndHold};
-    use sb_protocol::{Action, Decision, MarketObservation, Order};
+    use sharpebench_protocol::{Action, Decision, MarketObservation, Order};
 
     /// Test-only agent: levers 2× into the first symbol (gross exposure 2× NAV).
     struct Leveraged;

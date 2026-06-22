@@ -24,7 +24,7 @@
       in
       {
         # `nix build` — a reproducible, hermetic build of the single `sharpebench`
-        # binary (the sb-cli crate) from the committed Cargo.lock. No network, no
+        # binary (the sharpebench crate) from the committed Cargo.lock. No network, no
         # host toolchain: the same inputs yield the identical binary, forever.
         packages.default = rustPlatform.buildRustPackage {
           pname = "sharpebench";
@@ -34,8 +34,8 @@
           cargoLock.lockFile = ./Cargo.lock;
 
           # Build/test only the CLI binary crate out of the workspace.
-          cargoBuildFlags = [ "-p" "sb-cli" ];
-          cargoTestFlags = [ "-p" "sb-cli" ];
+          cargoBuildFlags = [ "-p" "sharpebench" ];
+          cargoTestFlags = [ "-p" "sharpebench" ];
           doCheck = true;
 
           meta = with pkgs.lib; {

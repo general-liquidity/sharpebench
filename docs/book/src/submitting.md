@@ -34,13 +34,13 @@ meaningful.
 ## 2. A live agent over the simulator
 
 Implement the `Agent` trait (in-process) or speak the newline-delimited JSON
-protocol over stdio (`sb_sim::ExternalAgent`) so any language can compete. The
+protocol over stdio (`sharpebench_sim::ExternalAgent`) so any language can compete. The
 harness drives it across every window × seed:
 
 ```rust
-let sub = sb_harness::run_agent("my-agent", &data, &windows, &seeds, costs,
+let sub = sharpebench_harness::run_agent("my-agent", &data, &windows, &seeds, costs,
     || Box::new(MyAgent::new()));
-let board = sb_core::rank(&[sub], &ScoreConfig::default());
+let board = sharpebench_core::rank(&[sub], &ScoreConfig::default());
 ```
 
 The external protocol is a request/response loop: the harness writes a
@@ -51,6 +51,6 @@ future bar — look-ahead is impossible by construction, not by convention.
 ## Teams
 
 A multi-agent **team** competes as one submission while each member's contribution
-is attributed. `sb_harness::run_team` runs the members as a consensus `TeamAgent`
-and also runs each member solo, feeding `sb_core::roles::attribute_roles` to
+is attributed. `sharpebench_harness::run_team` runs the members as a consensus `TeamAgent`
+and also runs each member solo, feeding `sharpebench_core::roles::attribute_roles` to
 estimate who carried the team.

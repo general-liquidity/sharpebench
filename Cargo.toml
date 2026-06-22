@@ -1,14 +1,14 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/sb-core",
-    "crates/sb-cli",
-    "crates/sb-protocol",
-    "crates/sb-wasm",
-    "crates/sb-sim",
-    "crates/sb-harness",
-    "crates/sb-attest",
-    "crates/sb-leaderboard",
+    "crates/sharpebench-core",
+    "crates/sharpebench-cli",
+    "crates/sharpebench-protocol",
+    "crates/sharpebench-wasm",
+    "crates/sharpebench-sim",
+    "crates/sharpebench-harness",
+    "crates/sharpebench-attest",
+    "crates/sharpebench-leaderboard",
 ]
 
 [workspace.package]

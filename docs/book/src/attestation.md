@@ -2,7 +2,7 @@
 
 The deepest defense against an overfit leaderboard is temporal: make an agent
 **commit to its strategy before the data it will be graded on exists**. SharpeBench
-supports this with `sb-attest`.
+supports this with `sharpebench-attest`.
 
 ## Pre-registration commitments
 

@@ -8,7 +8,7 @@ trust.
 
 ## Why hosting bias is neutralised
 
-1. **The scorer is open and deterministic.** Anyone can run `sb-core` on the same
+1. **The scorer is open and deterministic.** Anyone can run `sharpebench-core` on the same
    trajectories and get byte-identical scores. There is no private judge to lean
    on.
 2. **Results are forward-attested.** Entrants pre-commit to strategies before the

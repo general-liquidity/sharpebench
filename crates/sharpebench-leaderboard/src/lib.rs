@@ -1,7 +1,7 @@
 //! sb-leaderboard — render a scored field and sign it tamper-evidently.
 //!
 //! Rendering is cosmetic; the load-bearing part is [`sign_board`], which chains an
-//! HMAC signature over each ranked entry (via [`sb_attest`]) so a *published*
+//! HMAC signature over each ranked entry (via [`sharpebench_attest`]) so a *published*
 //! board can be independently verified — nobody, including the host, can quietly
 //! reorder or edit it after the fact.
 #![forbid(unsafe_code)]
@@ -10,8 +10,8 @@ use std::fmt::Write as _;
 
 use serde::{Deserialize, Serialize};
 
-use sb_attest::{sign_result, verify_chain, SignedResult, GENESIS};
-use sb_core::CompositeScore;
+use sharpebench_attest::{sign_result, verify_chain, SignedResult, GENESIS};
+use sharpebench_core::CompositeScore;
 
 /// Render a ranked field as a plain-text leaderboard.
 pub fn render(board: &[CompositeScore]) -> String {
@@ -85,7 +85,7 @@ pub fn load(path: &str) -> std::io::Result<PublishedBoard> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sb_core::{rank, AgentSubmission, Run, ScoreConfig};
+    use sharpebench_core::{rank, AgentSubmission, Run, ScoreConfig};
 
     fn sub(id: &str, m: f64) -> AgentSubmission {
         AgentSubmission {

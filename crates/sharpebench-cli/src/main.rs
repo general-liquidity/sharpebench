@@ -7,7 +7,7 @@
 
 use std::process::ExitCode;
 
-use sb_core::{rank, AgentSubmission, CompositeScore, ScoreConfig};
+use sharpebench_core::{rank, AgentSubmission, CompositeScore, ScoreConfig};
 
 fn main() -> ExitCode {
     // `--json` may appear anywhere; strip it so positional parsing is unaffected.
@@ -122,8 +122,8 @@ fn run_sign(args: &[String], json: bool) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let pb = sb_leaderboard::publish(&rank(&subs, &ScoreConfig::default()), &key);
-    match sb_leaderboard::save(&pb, &args[4]) {
+    let pb = sharpebench_leaderboard::publish(&rank(&subs, &ScoreConfig::default()), &key);
+    match sharpebench_leaderboard::save(&pb, &args[4]) {
         Ok(()) => {
             if json {
                 emit_json(&serde_json::json!({
@@ -148,7 +148,7 @@ fn run_verify(args: &[String], json: bool) -> ExitCode {
         eprintln!("usage: sharpebench verify <board.json> <key> [--json]");
         return ExitCode::from(2);
     }
-    let pb = match sb_leaderboard::load(&args[2]) {
+    let pb = match sharpebench_leaderboard::load(&args[2]) {
         Ok(b) => b,
         Err(e) => {
             eprintln!("error: cannot load {}: {e}", args[2]);
@@ -162,7 +162,7 @@ fn run_verify(args: &[String], json: bool) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let ok = sb_leaderboard::verify_board(&pb.chain, &key);
+    let ok = sharpebench_leaderboard::verify_board(&pb.chain, &key);
     if json {
         emit_json(&serde_json::json!({ "ok": ok, "entries": pb.chain.len() }));
     } else if ok {
@@ -178,7 +178,7 @@ fn run_verify(args: &[String], json: bool) -> ExitCode {
 }
 
 fn run_audit(json: bool) -> ExitCode {
-    let report = sb_core::run_self_audit();
+    let report = sharpebench_core::run_self_audit();
     if json {
         emit_json(&report);
     } else {
@@ -208,7 +208,7 @@ fn run_audit(json: bool) -> ExitCode {
 }
 
 fn run_stress(json: bool) -> ExitCode {
-    use sb_sim::{Agent, BuyAndHold, CostModel, Dataset, Momentum, Window};
+    use sharpebench_sim::{Agent, BuyAndHold, CostModel, Dataset, Momentum, Window};
 
     let seeds: Vec<u64> = (0..6).collect();
     let costs = CostModel::default();
@@ -222,12 +222,18 @@ fn run_stress(json: bool) -> ExitCode {
             start: 20,
             end: masked.len(),
         }];
-        let bh = sb_harness::run_agent("buy-and-hold", &masked, &windows, &seeds, costs, || {
-            Box::new(BuyAndHold) as Box<dyn Agent>
-        });
-        let mo = sb_harness::run_agent("momentum", &masked, &windows, &seeds, costs, || {
-            Box::new(Momentum::default()) as Box<dyn Agent>
-        });
+        let bh = sharpebench_harness::run_agent(
+            "buy-and-hold",
+            &masked,
+            &windows,
+            &seeds,
+            costs,
+            || Box::new(BuyAndHold) as Box<dyn Agent>,
+        );
+        let mo =
+            sharpebench_harness::run_agent("momentum", &masked, &windows, &seeds, costs, || {
+                Box::new(Momentum::default()) as Box<dyn Agent>
+            });
         let board = rank(&[bh, mo], &ScoreConfig::default());
         if json {
             scenarios.push(serde_json::json!({ "scenario": name, "board": board }));
@@ -248,7 +254,7 @@ fn run_commit(args: &[String]) -> ExitCode {
         eprintln!("usage: sharpebench commit <agent_id> <target_window> <artifact_digest> <salt>");
         return ExitCode::from(2);
     }
-    let c = sb_attest::make_commitment(&args[2], &args[3], &args[4], &args[5]);
+    let c = sharpebench_attest::make_commitment(&args[2], &args[3], &args[4], &args[5]);
     match serde_json::to_string_pretty(&c) {
         Ok(j) => {
             println!("{j}");
@@ -262,7 +268,7 @@ fn run_commit(args: &[String]) -> ExitCode {
 }
 
 fn run_demo(args: &[String], json: bool) -> ExitCode {
-    use sb_sim::{
+    use sharpebench_sim::{
         Agent, BuyAndHold, CostModel, Dataset, ExternalAgent, HoldAgent, HttpAgent, Momentum,
         Window,
     };
@@ -309,15 +315,17 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
     let seeds: Vec<u64> = (0..8).collect();
     let costs = CostModel::default();
 
-    let bh = sb_harness::run_agent("buy-and-hold", &data, &windows, &seeds, costs, || {
+    let bh = sharpebench_harness::run_agent("buy-and-hold", &data, &windows, &seeds, costs, || {
         Box::new(BuyAndHold) as Box<dyn Agent>
     });
-    let mo = sb_harness::run_agent("momentum", &data, &windows, &seeds, costs, || {
+    let mo = sharpebench_harness::run_agent("momentum", &data, &windows, &seeds, costs, || {
         Box::new(Momentum::default()) as Box<dyn Agent>
     });
     // The luck floor: random monkeys that show the zero-skill distribution.
     let mut field = vec![bh, mo];
-    field.extend(sb_harness::luck_floor(&data, &windows, &seeds, costs, 3));
+    field.extend(sharpebench_harness::luck_floor(
+        &data, &windows, &seeds, costs, 3,
+    ));
 
     // Optionally drive a real external agent (yours) through the *same* sim and
     // rank it into the field. `--http` hits a POST /decide endpoint; `--cmd` spawns
@@ -325,9 +333,10 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
     if let Some(addr) = flag_value(args, "--http") {
         let addr = addr.to_string();
         let label = format!("http:{addr}");
-        let sub = sb_harness::run_agent(&label, &data, &windows, &seeds, costs, move || {
-            Box::new(HttpAgent::new(addr.clone())) as Box<dyn Agent>
-        });
+        let sub =
+            sharpebench_harness::run_agent(&label, &data, &windows, &seeds, costs, move || {
+                Box::new(HttpAgent::new(addr.clone())) as Box<dyn Agent>
+            });
         field.insert(0, sub);
     } else if let Some(cmd) = flag_value(args, "--cmd") {
         let parts: Vec<String> = cmd.split_whitespace().map(String::from).collect();
@@ -344,12 +353,13 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
             return ExitCode::FAILURE;
         }
         let label = format!("cmd:{prog}");
-        let sub = sb_harness::run_agent(&label, &data, &windows, &seeds, costs, move || {
-            let rest_refs: Vec<&str> = rest.iter().map(String::as_str).collect();
-            ExternalAgent::spawn(&prog, &rest_refs)
-                .map(|a| Box::new(a) as Box<dyn Agent>)
-                .unwrap_or_else(|_| Box::new(HoldAgent))
-        });
+        let sub =
+            sharpebench_harness::run_agent(&label, &data, &windows, &seeds, costs, move || {
+                let rest_refs: Vec<&str> = rest.iter().map(String::as_str).collect();
+                ExternalAgent::spawn(&prog, &rest_refs)
+                    .map(|a| Box::new(a) as Box<dyn Agent>)
+                    .unwrap_or_else(|_| Box::new(HoldAgent))
+            });
         field.insert(0, sub);
     }
 

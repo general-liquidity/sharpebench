@@ -8,7 +8,7 @@ governance path we're explicit about.
 ## 1. Technical neutrality (today): verify, don't trust
 
 You should not have to trust General Liquidity's word for any number on the
-board. Two mechanisms in [`sb-attest`](../crates/sb-attest) make results
+board. Two mechanisms in [`sharpebench-attest`](../crates/sharpebench-attest) make results
 independently checkable:
 
 - **Forward-attestation.** An agent publishes a SHA-256 *commitment* binding its
@@ -19,7 +19,7 @@ independently checkable:
 - **Signed, tamper-evident results.** Every scored result is HMAC-signed over the
   previous one, forming a chain (the same construction Gordon uses for its audit
   log). Anyone can recompute a published rank from the pre-registered artifact
-  and the committed scoring kernel (`sb-core`, deterministic, `Cargo.lock`-pinned)
+  and the committed scoring kernel (`sharpebench-core`, deterministic, `Cargo.lock`-pinned)
   and confirm the chain wasn't altered.
 
 So the credible claim is not "trust us" — it's "**reproduce it**."
