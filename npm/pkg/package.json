@@ -1,0 +1,17 @@
+{
+  "name": "sharpebench-wasm",
+  "description": "WASM bindings for the SharpeBench scoring kernel (consumed by Gordon/Bun via the identical kernel).",
+  "version": "0.0.3",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/general-liquidity/sharpebench"
+  },
+  "files": [
+    "sharpebench_bg.wasm",
+    "sharpebench.js",
+    "sharpebench.d.ts"
+  ],
+  "main": "sharpebench.js",
+  "types": "sharpebench.d.ts"
+}

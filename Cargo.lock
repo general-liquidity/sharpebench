@@ -618,7 +618,9 @@ dependencies = [
 name = "sharpebench-wasm"
 version = "0.0.3"
 dependencies = [
+ "serde",
  "serde_json",
+ "sharpebench-attest",
  "sharpebench-core",
  "wasm-bindgen",
 ]

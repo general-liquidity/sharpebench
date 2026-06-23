@@ -1,0 +1,40 @@
+{
+  "name": "@generalliquidity/sharpebench",
+  "version": "0.0.3",
+  "description": "The luck-robust scoring kernel for AI trading agents — deflated Sharpe, pass^k reliability, and process-discipline gates. The identical Rust kernel as the SharpeBench benchmark, compiled to WASM.",
+  "keywords": [
+    "trading",
+    "benchmark",
+    "sharpe-ratio",
+    "deflated-sharpe",
+    "quant",
+    "ai-agents",
+    "backtesting",
+    "wasm"
+  ],
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/general-liquidity/sharpebench.git",
+    "directory": "npm"
+  },
+  "homepage": "https://github.com/general-liquidity/sharpebench#readme",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "pkg"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test",
+    "prepublishOnly": "tsc"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
