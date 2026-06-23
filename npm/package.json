@@ -1,6 +1,6 @@
 {
   "name": "@general-liquidity/sharpebench",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "The luck-robust scoring kernel for AI trading agents — deflated Sharpe, pass^k reliability, and process-discipline gates. The identical Rust kernel as the SharpeBench benchmark, compiled to WASM.",
   "keywords": [
     "trading",
@@ -29,7 +29,7 @@
   "scripts": {
     "build": "tsc",
     "test": "node --test test/",
-    "prepublishOnly": "tsc"
+    "prepublishOnly": "tsc && node -e \"require('fs').rmSync('pkg/.gitignore',{force:true})\""
   },
   "devDependencies": {
     "typescript": "^5.6.0"
