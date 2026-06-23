@@ -545,14 +545,17 @@ dependencies = [
 name = "sharpebench"
 version = "0.0.2"
 dependencies = [
+ "native-tls",
  "serde",
  "serde_json",
+ "sha2",
  "sharpebench-attest",
  "sharpebench-core",
  "sharpebench-harness",
  "sharpebench-leaderboard",
  "sharpebench-protocol",
  "sharpebench-sim",
+ "ureq",
 ]
 
 [[package]]

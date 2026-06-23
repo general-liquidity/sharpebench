@@ -81,6 +81,15 @@ A runnable reference agent (stdio + a Dockerfile) and the full wire format live 
 
 > **Security — running untrusted agents.** The harness executes whatever agent you point it at (a subprocess, or an HTTP endpoint) **without sandboxing**. Only run agents you trust. Hosting third-party submissions safely — container isolation, CPU / memory / time limits, no network egress — is a Phase-2 item and is **not yet built**.
 
+## Updating
+
+SharpeBench does not phone home, so there is no automatic update prompt by default. To upgrade:
+
+- **Installed via `cargo install`:** re-run `cargo install sharpebench` (it replaces an older version), or use [`cargo-update`](https://github.com/nabijaczleweli/cargo-update): `cargo install-update -a`.
+- **Using the static release binary:** download the latest [`sharpebench-x86_64-linux-musl`](https://github.com/general-liquidity/sharpebench/releases/latest) (verify its `.sha256`).
+
+An **opt-in build** adds a throttled "a newer version is available" nudge plus a self-replacing updater — install it with `cargo install sharpebench --features self-update`, then `sharpebench self-update` upgrades the binary in place (downloading the signed release asset and verifying its SHA-256 first). It is off by default so the standard install and the static binary stay dependency-free; set `SHARPEBENCH_NO_UPDATE_CHECK=1` to silence the nudge.
+
 ## Data
 
 The benchmark runs on **frozen, checksummed, point-in-time** datasets — no live API in the scoring path, so a score reproduces forever. A real **crypto-majors** set ships in [`data/`](data/) (BTC/ETH/SOL/BNB/XRP daily closes from Binance's public API), fetched and frozen by the offline Rust ingester (`xtask`, `publish = false` — its deps never reach the CLI):

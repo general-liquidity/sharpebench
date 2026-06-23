@@ -9,12 +9,21 @@ use std::process::ExitCode;
 
 use sharpebench_core::{rank, AgentSubmission, CompositeScore, ScoreConfig};
 
+#[cfg(feature = "self-update")]
+mod update;
+
 fn main() -> ExitCode {
     // `--json` may appear anywhere; strip it so positional parsing is unaffected.
     let raw: Vec<String> = std::env::args().collect();
     let json = raw.iter().any(|a| a == "--json");
     let args: Vec<String> = raw.into_iter().filter(|a| a != "--json").collect();
-    match args.get(1).map(String::as_str) {
+    let subcommand = args.get(1).map(String::as_str);
+
+    // Throttled, fail-soft "a newer version exists" nudge (opt-in build feature).
+    #[cfg(feature = "self-update")]
+    update::notify_if_outdated(json, subcommand);
+
+    match subcommand {
         Some("run") => run_demo(&args, json),
         Some("score") => match args.get(2) {
             Some(path) => run_score(path, json),
@@ -30,6 +39,7 @@ fn main() -> ExitCode {
         Some("verify") => run_verify(&args, json),
         Some("capture") => run_capture(&args, json),
         Some("verify-trajectory") => run_verify_trajectory(&args, json),
+        Some("self-update" | "update") => run_self_update(),
         Some("--help") | Some("-h") | None => {
             help();
             ExitCode::SUCCESS
@@ -38,6 +48,26 @@ fn main() -> ExitCode {
             eprintln!("unknown command: {other}\nrun `sharpebench --help`");
             ExitCode::from(2)
         }
+    }
+}
+
+/// Update the running binary in place. Only present (and only pulls a TLS stack)
+/// in `--features self-update` builds; the default build prints how to upgrade so
+/// the published CLI and the musl static binary stay dependency-free.
+fn run_self_update() -> ExitCode {
+    #[cfg(feature = "self-update")]
+    {
+        update::run_self_update()
+    }
+    #[cfg(not(feature = "self-update"))]
+    {
+        eprintln!(
+            "this build has self-update disabled.\n\
+             upgrade with `cargo install sharpebench`, re-download the binary from\n\
+             https://github.com/general-liquidity/sharpebench/releases/latest, or\n\
+             rebuild with `cargo install sharpebench --features self-update`."
+        );
+        ExitCode::from(2)
     }
 }
 
@@ -99,6 +129,7 @@ fn help() {
     println!(
         "  sharpebench verify-trajectory <traj.json> [--data <csv>]  replay a trajectory → recompute its score from raw decisions"
     );
+    println!("  sharpebench self-update               update the binary in place (--features self-update builds)");
     println!("\n<key> accepts a literal, or env:NAME / file:PATH to keep secrets out of process listings.");
     println!("\nGlobal flags:");
     println!("  --json   emit machine-readable JSON instead of a human table (for agents / CI)");
