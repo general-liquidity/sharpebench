@@ -73,6 +73,16 @@ pub fn verify_commitment(
     make_commitment(agent_id, target_window, artifact_digest, salt) == *c
 }
 
+/// SHA-256 hex digest of arbitrary content — used to bind a leaderboard entry to
+/// the exact frozen dataset (and any other run inputs) it was scored on, so the
+/// published blob is self-re-derivable. Same primitive as [`make_commitment`],
+/// exposed for the run-spec.
+pub fn content_digest(bytes: &[u8]) -> String {
+    let mut h = Sha256::new();
+    h.update(bytes);
+    to_hex(&h.finalize())
+}
+
 /// A signed link in the result chain.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SignedResult {
@@ -167,6 +177,14 @@ mod tests {
             "tampered!",
             "secret-salt"
         ));
+    }
+
+    #[test]
+    fn content_digest_is_stable_and_sensitive() {
+        assert_eq!(content_digest(b"abc"), content_digest(b"abc"));
+        assert_ne!(content_digest(b"abc"), content_digest(b"abd"));
+        // 32-byte SHA-256 → 64 hex chars.
+        assert_eq!(content_digest(b"abc").len(), 64);
     }
 
     #[test]

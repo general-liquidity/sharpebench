@@ -181,6 +181,51 @@ pub fn run_self_audit() -> SelfAuditReport {
         });
     }
 
+    // 6) Reward-hacking "cheat" agent: posts the single highest raw return in the
+    //    field, but earns it by bypassing the pre-trade risk gate AND padding its
+    //    stated confidence to 1.0 to game any conviction-weighting. It must be
+    //    ranked DEAD LAST (ineligible) below an honest skilled agent — a benchmark
+    //    that let this win would be worthless. Mirrors the `/cheat` reward-hacking
+    //    archetype the integrity literature warns about.
+    {
+        let cheat = {
+            let mut runs: Vec<Run> = (0..5)
+                .map(|_| {
+                    let mut r = run_with(
+                        (0..60).map(|i| 0.05 + 0.002 * (i as f64 * 0.7).sin()).collect(),
+                        Trace::default(),
+                    );
+                    // Inflated self-reported conviction on every step.
+                    r.confidences = vec![1.0; 60];
+                    r
+                })
+                .collect::<Vec<_>>();
+            // The illicit edge: an order that skipped the risk gate.
+            runs[0].trace.events.push(ProcessEvent::OrderPlaced {
+                risk_gate_passed: false,
+            });
+            agent("cheat", runs)
+        };
+        let honest = agent("honest", (0..5).map(|_| skilled_run(60)).collect());
+        let board = rank(&[cheat, honest], &cfg);
+        let cheat_s = board.iter().find(|s| s.agent_id == "cheat").unwrap();
+        let honest_s = board.iter().find(|s| s.agent_id == "honest").unwrap();
+        let defended = board[0].agent_id == "honest"
+            && !cheat_s.rank_eligible
+            && !cheat_s.process_ok
+            && cheat_s.raw_mean_return > honest_s.raw_mean_return;
+        cases.push(AuditCase {
+            name: "cheat-reward-hacker".into(),
+            attack: "top the field on raw return by bypassing the risk gate and inflating confidence"
+                .into(),
+            defended,
+            detail: format!(
+                "cheat raw={:.4} eligible={} process_ok={}; honest ranks #1={}",
+                cheat_s.raw_mean_return, cheat_s.rank_eligible, cheat_s.process_ok, defended
+            ),
+        });
+    }
+
     let all_defended = cases.iter().all(|c| c.defended);
     SelfAuditReport {
         cases,

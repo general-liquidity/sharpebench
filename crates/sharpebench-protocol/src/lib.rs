@@ -64,6 +64,10 @@ pub struct Order {
     /// Stated conviction in [0, 1]; scored for calibration.
     #[serde(default = "default_confidence")]
     pub confidence: f64,
+    /// Optional one-line rationale for *this* order, captured into the run trace
+    /// (audit trail). Defaults to empty so existing agents need no change.
+    #[serde(default)]
+    pub rationale: String,
 }
 
 /// Discrete action label (sizing is carried by `target_weight`).
@@ -160,11 +164,20 @@ mod tests {
                 action: Action::Buy,
                 target_weight: 0.5,
                 confidence: 0.9,
+                rationale: "trailing breakout".to_string(),
             }],
             reasoning: "r".to_string(),
         };
         let db: Decision = serde_json::from_str(&serde_json::to_string(&d).unwrap()).unwrap();
         assert_eq!(db.orders[0].action, Action::Buy);
+        // The per-order rationale survives the JSON round-trip into the trajectory.
+        assert_eq!(db.orders[0].rationale, "trailing breakout");
+
+        // Older agents that omit `rationale` still deserialize (default empty).
+        let legacy = r#"{"orders":[{"symbol":"A","action":"buy","target_weight":0.5}]}"#;
+        let parsed: Decision = serde_json::from_str(legacy).unwrap();
+        assert_eq!(parsed.orders[0].rationale, "");
+        assert!((parsed.orders[0].confidence - 0.5).abs() < 1e-12);
     }
 
     #[test]
@@ -185,6 +198,7 @@ mod tests {
                             action: Action::Buy,
                             target_weight: 0.25,
                             confidence: 0.8,
+                            rationale: String::new(),
                         }],
                         reasoning: "r".to_string(),
                     },

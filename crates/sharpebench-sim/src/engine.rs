@@ -141,6 +141,14 @@ pub fn run_backtest(
                 *sh += dshares;
             }
             cash -= dshares * exec_p + fee;
+            // Capture the order's stated rationale into the audit trail (score-neutral),
+            // so the frozen trace explains *why* each fill happened. Empty = omitted.
+            if !ord.rationale.is_empty() {
+                trace.events.push(ProcessEvent::DecisionRationale {
+                    symbol: ord.symbol.clone(),
+                    rationale: ord.rationale.clone(),
+                });
+            }
             trace.events.push(ProcessEvent::OrderPlaced {
                 risk_gate_passed: true,
             });
@@ -209,10 +217,48 @@ mod tests {
                     action: Action::Buy,
                     target_weight: 2.0,
                     confidence: 0.5,
+                    rationale: "2x leverage".to_string(),
                 }],
                 reasoning: "2x leverage".to_string(),
             }
         }
+    }
+
+    /// Test-only agent that buys the first symbol with a stated per-order rationale.
+    struct RationaleAgent;
+    impl Agent for RationaleAgent {
+        fn decide(&mut self, obs: &MarketObservation) -> Decision {
+            let sym = obs.symbols[0].symbol.clone();
+            Decision {
+                orders: vec![Order {
+                    symbol: sym,
+                    action: Action::Buy,
+                    target_weight: 0.2,
+                    confidence: 0.7,
+                    rationale: "momentum breakout".to_string(),
+                }],
+                reasoning: "single-name buy".to_string(),
+            }
+        }
+    }
+
+    #[test]
+    fn per_order_rationale_is_captured_into_the_trace() {
+        use sharpebench_core::ProcessEvent;
+        let data = Dataset::synthetic(3, 60, 5);
+        let run = run_backtest(
+            &data,
+            &mut RationaleAgent,
+            Window { start: 20, end: 60 },
+            1,
+            CostModel::default(),
+        );
+        let found = run.trace.events.iter().any(|e| {
+            matches!(e, ProcessEvent::DecisionRationale { rationale, .. } if rationale == "momentum breakout")
+        });
+        assert!(found, "the order rationale must land in the audit trace");
+        // It is score-neutral: the run is still process-clean.
+        assert!(sharpebench_core::process::process_score(&run.trace).is_clean());
     }
 
     #[test]

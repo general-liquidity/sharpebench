@@ -47,6 +47,7 @@ impl Agent for TeamAgent {
                     },
                     target_weight: avg_w,
                     confidence: conf[sym] / votes[sym].max(1.0),
+                    rationale: format!("team consensus weight {avg_w:.3}"),
                 }
             })
             .collect();
@@ -72,6 +73,7 @@ impl Agent for BuyAndHold {
                 action: Action::Buy,
                 target_weight: w,
                 confidence: 0.5,
+                rationale: "equal-weight hold".to_string(),
             })
             .collect();
         Decision {
@@ -126,6 +128,7 @@ impl Agent for RandomAgent {
                     action: if w > 0.0 { Action::Buy } else { Action::Close },
                     target_weight: w,
                     confidence: 0.5,
+                    rationale: "random allocation".to_string(),
                 }
             })
             .collect();
@@ -179,6 +182,11 @@ impl Agent for Momentum {
                     action: if positive { Action::Buy } else { Action::Close },
                     target_weight: if positive { w } else { 0.0 },
                     confidence: (0.5 + sc.abs()).min(1.0),
+                    rationale: if positive {
+                        format!("positive trailing return {sc:.3}")
+                    } else {
+                        "non-positive trailing return".to_string()
+                    },
                 }
             })
             .collect();
