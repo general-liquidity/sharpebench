@@ -22,13 +22,15 @@ Every existing financial-agent benchmark ranks on **raw** risk-adjusted metrics 
 
 SharpeBench adds, as **ranking gates**, the things none of them have:
 
-1. **Deflated Sharpe / PSR** — deflate the Sharpe by how many agents were tested × track length × return skew/kurtosis (Bailey & López de Prado).
+1. **Deflated Sharpe / PSR** — deflate the Sharpe by how many agents were tested × track length × return skew/kurtosis (Bailey & López de Prado), plus each agent's *own* declared in-sample trials, so a strategy mined from a thousand private backtests is deflated for that search too.
 2. **pass^k reliability** — the agent must clear the bar on *every* seed × window, not on average.
 3. **Field-wide significance** — a deterministic stationary bootstrap, White's Reality Check, Hansen's studentized & consistent SPA, and Romano–Wolf step-down; the edge must beat data-snooping, not just noise.
-4. **Process discipline** — placing an order that never passed the risk gate, ignoring a drawdown halt, or bypassing a deny-list **zeroes the entry**, however good the P&L looks.
-5. **Forward-attestation** — agents commit before the data exists, so there's nothing to overfit, and signed, tamper-evident result chains let anyone verify the board independently of the host.
+4. **Process discipline** — placing an order that never passed the risk gate, ignoring a drawdown halt, or bypassing a deny-list **zeroes the entry**, however good the P&L looks. The edge must also survive a **realistic execution cost** profile (typical or worst-case fees / slippage / impact / financing), not just a frictionless fill.
+5. **Forward-attestation** — agents commit before the data exists, so there's nothing to overfit, and signed, tamper-evident result chains let anyone verify the board independently of the host. Every run can be captured as a raw-decision **trajectory** and replayed by a separate verifier that recomputes a byte-identical score — a forged trajectory recomputes differently.
 
-Raw return is reported but is **never** the rank key. It also *reports* (without gating) alpha/beta attribution, confidence calibration, edge half-life, out-of-sample decay, turnover, Pareto-optimality, conviction-weighted return, cost-efficiency, and economic-rationality — so a high score is legible, not a black box.
+Raw return is reported but is **never** the rank key. It also *reports* (without gating) alpha/beta attribution, confidence calibration, edge half-life, out-of-sample decay, turnover, Pareto-optimality, conviction-weighted return, cost-efficiency (cost-normalized DSR), rolling-window worst-case Sharpe, selection robustness (best-vs-median DSR across an agent's candidate set), and economic-rationality — so a high score is legible, not a black box.
+
+**Contamination defenses.** Comparison is restricted to the **shared** instruments a set of agents actually traded (no winning by picking an easier universe), a rediscovery check flags a "novel" strategy that is really a cosine-near copy of a known one, and held-out datasets can be **sealed** (cryptographically committed, opened only at scoring) so they can't be trained on in advance.
 
 > Other leaderboards rank the luckiest run over one quarter. SharpeBench ranks the skill that survives deflation — and proves it forward.
 
@@ -44,7 +46,7 @@ All eight crates are implemented, tested, and CI-green (fmt · clippy `-D warnin
 cargo test --workspace                                  # all tests, incl. the luck-demotion proof
 cargo run -p sharpebench -- run                              # run reference agents + the luck floor through the sim
 cargo run -p sharpebench -- score suites/example_submissions.json   # rank a JSON field of submissions
-cargo run -p sharpebench -- audit                           # prove the scorer resists 5 known gaming attacks
+cargo run -p sharpebench -- audit                           # prove the scorer resists 6 known gaming attacks
 cargo run -p sharpebench -- run --data data/crypto-majors-1d.csv   # run on real crypto-majors daily bars
 ```
 
@@ -57,10 +59,12 @@ The example field includes a *skilled* agent, a *lucky* agent with a **higher ra
 | `run` (+ `--data <csv>`, `--http <addr>`/`--cmd "<prog>"`) | Run agents through the point-in-time sim and rank them. `--data` runs on a frozen real-data CSV (else synthetic); `--http`/`--cmd` drives **your** external agent (an HTTP `POST /decide` endpoint, or a stdio subprocess) into the field too. |
 | `score <subs.json>` | Rank a JSON field of pre-computed submissions. |
 | `stress` | Run the adversarial stress suite (flash-crash / whipsaw), contamination-masked. |
-| `audit` | Self-audit: fire 5 known gaming attacks at the scorer; non-zero exit if any is not demoted. |
+| `audit` | Self-audit: fire 6 known gaming attacks at the scorer; non-zero exit if any is not demoted. |
 | `commit <agent> <window> <digest> <salt>` | Forward-attestation pre-registration commitment. |
 | `sign <subs.json> <key> <out.json>` | Score + sign a board to a tamper-evident file. |
 | `verify <board.json> <key>` | Verify a signed board's chain. |
+| `capture <agent> <out.json> [--data <csv>]` | Run an agent and capture its raw per-seed×window **decision trajectory** to JSON. |
+| `verify-trajectory <traj.json> [--data <csv>]` | Replay a captured trajectory through the sim and recompute its score from the raw decisions — a forged trajectory recomputes to a different number. |
 
 Add `--json` to any command for machine-readable output (structured JSON instead of the human table) — for agents, CI, or a leaderboard front-end.
 
@@ -100,13 +104,13 @@ A Rust [Cargo workspace](Cargo.toml) (modular, à la Paradigm's Rust OSS — reu
 
 | Crate | Role |
 |---|---|
-| **`sharpebench-core`** | the deterministic scoring kernel — deflated Sharpe / PSR / pass^k / bootstrap + Reality Check + SPA + step-down significance / process / decay / calibration / attribution / roles / OOS-decay / economic-rationality / self-audit / composite. No I/O, no ambient RNG, fixed float reduction → byte-identical scores forever. |
-| **`sharpebench-protocol`** | the language-agnostic agent ⇄ harness JSON protocol (any-language agents compete). |
-| **`sharpebench-sim`** | point-in-time simulator (look-ahead is structurally impossible) with fees, seeded slippage, square-root market impact, financing, liquidity/partial-fill caps, dividends, adversarial stress paths, and reference + team + random agents. |
-| **`sharpebench-harness`** | run orchestration across seeds × windows; team harness + role attribution; luck-floor and economic-rationality producers. |
-| **`sharpebench-attest`** | forward-attestation: SHA-256 pre-registration commitments + HMAC tamper-evident signed result chains + an integer-epoch time-lock registry. |
+| **`sharpebench-core`** | the deterministic scoring kernel — deflated Sharpe / PSR (incl. in-sample-trial deflation) / pass^k / bootstrap + Reality Check + SPA + step-down significance / process + cost-normalized floor / rolling-Sharpe / decay / calibration / attribution / roles / OOS-decay / economic-rationality / selection-robustness / benchmark-comparison-sets / rediscovery / self-audit / composite. No I/O, no ambient RNG, fixed float reduction → byte-identical scores forever. |
+| **`sharpebench-protocol`** | the language-agnostic agent ⇄ harness JSON protocol (any-language agents compete), including the captured-trajectory artifact and per-order decision rationale. |
+| **`sharpebench-sim`** | point-in-time simulator (look-ahead is structurally impossible) with fees, seeded slippage, square-root market impact, financing, liquidity/partial-fill caps, dividends, selectable execution-cost profiles (none / typical / worst-case) + decision delay, adversarial stress paths, trajectory capture/replay, and reference + team + random agents. |
+| **`sharpebench-harness`** | run orchestration across seeds × windows; team harness + role attribution; luck-floor and economic-rationality producers; a runtime-vs-agent **failure taxonomy** (a crashed container is retried, never charged against pass^k; an agent fault becomes a failing sentinel run). |
+| **`sharpebench-attest`** | forward-attestation: SHA-256 pre-registration commitments + HMAC tamper-evident signed result chains + an integer-epoch time-lock registry + sealed held-out datasets (commit / seal / open / verify). |
 | **`sharpebench-wasm`** | WASM bindings so Gordon (TypeScript) runs the *identical* scorer — internal eval and public benchmark can't drift. |
-| `sharpebench-leaderboard` · `sharpebench-cli` | leaderboard render / sign / persist · the `sharpebench` CLI. |
+| `sharpebench-leaderboard` · `sharpebench-cli` | leaderboard render / sign / persist, incl. **self-describing** boards (the run-spec — dataset hash, costs, config, seeds — is bound into the signed chain) · the `sharpebench` CLI. |
 
 > Crates publish to crates.io as **`sharpebench-*`**; the binary crate is **`sharpebench`** (`cargo install sharpebench`).
 
