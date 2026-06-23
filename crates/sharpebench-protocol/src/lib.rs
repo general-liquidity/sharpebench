@@ -80,6 +80,55 @@ fn default_confidence() -> f64 {
     0.5
 }
 
+/// One captured decision step of a single backtest run: the agent's *raw* output
+/// at one point-in-time observation. This is the persisted artifact — it holds the
+/// agent's [`Decision`] (orders, sizing, conviction, reasoning) tagged with the
+/// observation it was made against, and deliberately stores **no** returns, NAV, or
+/// any self-reported metric. The score is recomputed by replaying these decisions
+/// through the engine, never read from the agent's word.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DecisionStep {
+    /// 0-based step index within the run's window (`window.start + step` is the
+    /// dataset index the observation was drawn from).
+    pub step: usize,
+    /// Stable id of the point-in-time observation this decision answered — the
+    /// observation's ISO date. Lets a verifier confirm the decision lines up with
+    /// the frozen dataset's bar at the replayed step.
+    pub observation_id: String,
+    /// The agent's raw decision at this step (orders + reasoning).
+    pub decision: Decision,
+}
+
+/// One captured backtest run (a single window × seed): the ordered sequence of the
+/// agent's raw decision steps, plus the (window, seed) coordinates needed to replay
+/// it through the identical point-in-time engine path.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RunTrajectory {
+    /// Inclusive window start (dataset index of the first decision step).
+    pub window_start: usize,
+    /// Exclusive window end.
+    pub window_end: usize,
+    /// Execution seed the run was driven with (governs slippage noise on replay).
+    pub seed: u64,
+    /// The raw decisions, in step order.
+    pub steps: Vec<DecisionStep>,
+}
+
+/// An agent's full captured trajectory: every (window × seed) run's raw decisions.
+/// Serde-(de)serializable to JSON; this is the on-disk artifact a separate verifier
+/// ingests to recompute the score from raw decisions alone.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct AgentTrajectory {
+    pub agent_id: String,
+    /// In-sample search budget the agent declared (mirrors `AgentSubmission`), so a
+    /// recomputed submission carries the same deflation footprint.
+    #[serde(default)]
+    pub in_sample_trials: u32,
+    /// One captured run per (window, seed), in the same order the harness produced
+    /// them (window-major: all seeds of window 0, then window 1, …).
+    pub runs: Vec<RunTrajectory>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -116,5 +165,38 @@ mod tests {
         };
         let db: Decision = serde_json::from_str(&serde_json::to_string(&d).unwrap()).unwrap();
         assert_eq!(db.orders[0].action, Action::Buy);
+    }
+
+    #[test]
+    fn trajectory_roundtrips_through_json() {
+        let traj = AgentTrajectory {
+            agent_id: "a".to_string(),
+            in_sample_trials: 7,
+            runs: vec![RunTrajectory {
+                window_start: 20,
+                window_end: 30,
+                seed: 3,
+                steps: vec![DecisionStep {
+                    step: 0,
+                    observation_id: "2025-001".to_string(),
+                    decision: Decision {
+                        orders: vec![Order {
+                            symbol: "A".to_string(),
+                            action: Action::Buy,
+                            target_weight: 0.25,
+                            confidence: 0.8,
+                        }],
+                        reasoning: "r".to_string(),
+                    },
+                }],
+            }],
+        };
+        let back: AgentTrajectory =
+            serde_json::from_str(&serde_json::to_string(&traj).unwrap()).unwrap();
+        assert_eq!(back.agent_id, "a");
+        assert_eq!(back.in_sample_trials, 7);
+        assert_eq!(back.runs[0].seed, 3);
+        assert_eq!(back.runs[0].steps[0].observation_id, "2025-001");
+        assert_eq!(back.runs[0].steps[0].decision.orders[0].target_weight, 0.25);
     }
 }

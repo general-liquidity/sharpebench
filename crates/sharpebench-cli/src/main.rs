@@ -28,6 +28,8 @@ fn main() -> ExitCode {
         Some("audit") => run_audit(json),
         Some("sign") => run_sign(&args, json),
         Some("verify") => run_verify(&args, json),
+        Some("capture") => run_capture(&args, json),
+        Some("verify-trajectory") => run_verify_trajectory(&args, json),
         Some("--help") | Some("-h") | None => {
             help();
             ExitCode::SUCCESS
@@ -91,6 +93,12 @@ fn help() {
     println!("  sharpebench audit                     self-audit: prove the scorer resists gaming");
     println!("  sharpebench sign <subs.json> <key> <out.json>  score + sign a board to a file");
     println!("  sharpebench verify <board.json> <key>  verify a signed board's chain");
+    println!(
+        "  sharpebench capture <agent> <out.json> [--data <csv>]  capture an agent's raw-decision trajectory artifact"
+    );
+    println!(
+        "  sharpebench verify-trajectory <traj.json> [--data <csv>]  replay a trajectory → recompute its score from raw decisions"
+    );
     println!("\n<key> accepts a literal, or env:NAME / file:PATH to keep secrets out of process listings.");
     println!("\nGlobal flags:");
     println!("  --json   emit machine-readable JSON instead of a human table (for agents / CI)");
@@ -373,6 +381,162 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
         );
     }
     emit_board(&rank(&field, &ScoreConfig::default()), json);
+    ExitCode::SUCCESS
+}
+
+/// Resolve the dataset + windows for the trajectory subcommands. Identical logic
+/// to `run_demo`'s resolver, so a `capture` and a `verify-trajectory` over the same
+/// `--data` (or both synthetic) replay against the byte-identical frozen dataset.
+fn resolve_dataset(
+    args: &[String],
+) -> Result<(sharpebench_sim::Dataset, Vec<sharpebench_sim::Window>), String> {
+    use sharpebench_sim::{Dataset, Window};
+    match flag_value(args, "--data") {
+        Some(path) => {
+            let d = Dataset::from_csv_file(path)?;
+            let n = d.len();
+            if n < 40 {
+                return Err(format!("dataset too short ({n} rows); need at least 40"));
+            }
+            let warm = (n / 10).clamp(10, 30);
+            let mid = (warm + n) / 2;
+            let w = vec![
+                Window {
+                    start: warm,
+                    end: mid,
+                },
+                Window { start: mid, end: n },
+            ];
+            Ok((d, w))
+        }
+        None => Ok((
+            Dataset::synthetic(8, 180, 20_260_621),
+            vec![
+                Window {
+                    start: 20,
+                    end: 100,
+                },
+                Window {
+                    start: 100,
+                    end: 180,
+                },
+            ],
+        )),
+    }
+}
+
+/// `capture` — run a reference agent through the sim and persist its raw-decision
+/// trajectory artifact (NOT its returns/metrics) to a JSON file.
+fn run_capture(args: &[String], json: bool) -> ExitCode {
+    use sharpebench_sim::{Agent, BuyAndHold, CostModel, Momentum};
+
+    if args.len() < 4 {
+        eprintln!(
+            "usage: sharpebench capture <buy-and-hold|momentum> <out.json> [--data <csv>] [--json]"
+        );
+        return ExitCode::from(2);
+    }
+    let agent_id = args[2].as_str();
+    let out = &args[3];
+    let (data, windows) = match resolve_dataset(args) {
+        Ok(dw) => dw,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let seeds: Vec<u64> = (0..8).collect();
+    let costs = CostModel::default();
+    let make: Box<dyn Fn() -> Box<dyn Agent>> = match agent_id {
+        "buy-and-hold" => Box::new(|| Box::new(BuyAndHold) as Box<dyn Agent>),
+        "momentum" => Box::new(|| Box::new(Momentum::default()) as Box<dyn Agent>),
+        other => {
+            eprintln!("error: unknown agent `{other}` (use buy-and-hold or momentum)");
+            return ExitCode::from(2);
+        }
+    };
+    let (_sub, traj) =
+        sharpebench_harness::run_agent_capture(agent_id, &data, &windows, &seeds, costs, || {
+            make()
+        });
+    let payload = match serde_json::to_string_pretty(&traj) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("error: serializing trajectory: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if let Err(e) = std::fs::write(out, payload) {
+        eprintln!("error: cannot write {out}: {e}");
+        return ExitCode::FAILURE;
+    }
+    if json {
+        emit_json(&serde_json::json!({
+            "captured": true,
+            "agent_id": agent_id,
+            "runs": traj.runs.len(),
+            "path": out,
+        }));
+    } else {
+        println!(
+            "captured trajectory for `{agent_id}` ({} runs) -> {out}",
+            traj.runs.len()
+        );
+    }
+    ExitCode::SUCCESS
+}
+
+/// `verify-trajectory` — the separate-verifier path: ingest a persisted trajectory
+/// artifact, replay its raw decisions through the frozen dataset's point-in-time
+/// engine, and recompute the score from those decisions alone (never the agent's
+/// self-reported metrics).
+fn run_verify_trajectory(args: &[String], json: bool) -> ExitCode {
+    use sharpebench_protocol::AgentTrajectory;
+    use sharpebench_sim::CostModel;
+
+    if args.len() < 3 {
+        eprintln!("usage: sharpebench verify-trajectory <trajectory.json> [--data <csv>] [--json]");
+        return ExitCode::from(2);
+    }
+    let text = match std::fs::read_to_string(&args[2]) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("error: cannot read {}: {e}", args[2]);
+            return ExitCode::FAILURE;
+        }
+    };
+    let traj: AgentTrajectory = match serde_json::from_str(&text) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("error: invalid trajectory JSON: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let (data, _windows) = match resolve_dataset(args) {
+        Ok(dw) => dw,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let result = sharpebench_harness::verify_trajectory(
+        &data,
+        &traj,
+        CostModel::default(),
+        &ScoreConfig::default(),
+    );
+    if json {
+        emit_json(&result);
+    } else {
+        println!(
+            "verified `{}` by replay — {} decisions across {} runs",
+            result.agent_id, result.decisions_replayed, result.runs_replayed
+        );
+        println!("  deflated Sharpe : {:.4}", result.score.deflated_sharpe);
+        println!("  raw mean return : {:.5}", result.score.raw_mean_return);
+        println!("  rank-eligible   : {}", yn(result.score.rank_eligible));
+        println!("\n{}", result.verification_explanation);
+    }
     ExitCode::SUCCESS
 }
 
