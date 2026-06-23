@@ -7,9 +7,9 @@ description = "SharpeBench orchestration: drive an agent over seeds × windows a
 repository.workspace = true
 
 [dependencies]
-sharpebench-core = { path = "../sharpebench-core", version = "0.0.2" }
-sharpebench-protocol = { path = "../sharpebench-protocol", version = "0.0.2" }
-sharpebench-sim = { path = "../sharpebench-sim", version = "0.0.2" }
+sharpebench-core = { path = "../sharpebench-core", version = "0.0.3" }
+sharpebench-protocol = { path = "../sharpebench-protocol", version = "0.0.3" }
+sharpebench-sim = { path = "../sharpebench-sim", version = "0.0.3" }
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
