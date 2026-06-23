@@ -7,7 +7,7 @@ description = "WASM bindings for the SharpeBench scoring kernel (consumed by Gor
 repository.workspace = true
 
 [dependencies]
-sharpebench-core = { path = "../sharpebench-core", version = "0.0.1" }
+sharpebench-core = { path = "../sharpebench-core", version = "0.0.2" }
 serde_json = "1"
 
 # wasm-bindgen is pulled in ONLY when building for the wasm target, so native

@@ -11,12 +11,12 @@ name = "sharpebench"
 path = "src/main.rs"
 
 [dependencies]
-sharpebench-core = { path = "../sharpebench-core", version = "0.0.1" }
-sharpebench-protocol = { path = "../sharpebench-protocol", version = "0.0.1" }
-sharpebench-sim = { path = "../sharpebench-sim", version = "0.0.1" }
-sharpebench-harness = { path = "../sharpebench-harness", version = "0.0.1" }
-sharpebench-attest = { path = "../sharpebench-attest", version = "0.0.1" }
-sharpebench-leaderboard = { path = "../sharpebench-leaderboard", version = "0.0.1" }
+sharpebench-core = { path = "../sharpebench-core", version = "0.0.2" }
+sharpebench-protocol = { path = "../sharpebench-protocol", version = "0.0.2" }
+sharpebench-sim = { path = "../sharpebench-sim", version = "0.0.2" }
+sharpebench-harness = { path = "../sharpebench-harness", version = "0.0.2" }
+sharpebench-attest = { path = "../sharpebench-attest", version = "0.0.2" }
+sharpebench-leaderboard = { path = "../sharpebench-leaderboard", version = "0.0.2" }
 serde = "1"
 serde_json = "1"
 
