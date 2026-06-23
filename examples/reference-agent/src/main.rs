@@ -23,6 +23,7 @@ fn decide(obs: &MarketObservation) -> Decision {
             action: Action::Buy,
             target_weight: weight,
             confidence: 0.5,
+            rationale: "equal-weight hold".to_string(),
         })
         .collect();
     Decision {

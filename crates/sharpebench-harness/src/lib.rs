@@ -6,6 +6,12 @@
 //! `Run` per (window, seed) is what makes pass^k and multi-window OOS meaningful.
 #![forbid(unsafe_code)]
 
+pub mod failure;
+
+pub use failure::{
+    failing_sentinel_run, run_with_retries, FailureKind, FailureLog, FailureRecord, RunOutcome,
+};
+
 use sharpebench_core::AgentSubmission;
 use sharpebench_sim::{run_backtest, Agent, CostModel, Dataset, RandomAgent, TeamAgent, Window};
 
@@ -63,6 +69,75 @@ where
         runs,
         in_sample_trials: 0,
         candidates: Vec::new(),
+    }
+}
+
+/// A submission assembled under the retry-vs-runtime-failure taxonomy: the runs
+/// that fed pass^k plus the harness-side [`FailureLog`].
+pub struct ResilientSubmission {
+    pub submission: AgentSubmission,
+    pub failures: FailureLog,
+}
+
+/// Like [`run_agent`], but resilient to container/runtime flakiness via the
+/// [`failure`] taxonomy. For each (window, seed) the `attempt` closure produces
+/// either a scorable [`sharpebench_core::Run`] or a typed [`FailureKind`]; runtime
+/// errors are retried up to `max_retries`, agent faults are not.
+///
+/// The invariant the scorer depends on: **only genuine agent pass/fail runs enter
+/// the submission's run pool.** An exhausted runtime error contributes *no* run
+/// (it is the harness's fault, logged but never scored), while a non-retryable
+/// agent fault contributes a failing sentinel run so it counts against pass^k.
+pub fn run_agent_resilient<F>(
+    agent_id: &str,
+    n_windows: usize,
+    seeds: &[u64],
+    max_retries: u32,
+    expected_run_len: usize,
+    mut attempt: F,
+) -> ResilientSubmission
+where
+    F: FnMut(usize, u64) -> Result<sharpebench_core::Run, FailureKind>,
+{
+    let mut runs = Vec::new();
+    let mut failures = FailureLog::default();
+    for w in 0..n_windows {
+        for &seed in seeds {
+            let (outcome, _) = run_with_retries(max_retries, || attempt(w, seed));
+            match outcome {
+                RunOutcome::Completed(run) => runs.push(run),
+                RunOutcome::Exhausted { last, attempts } => {
+                    // Harness fault: excluded from the pass^k pool entirely.
+                    failures.push(FailureRecord {
+                        window_index: w,
+                        seed,
+                        kind: last,
+                        attempts,
+                        runtime: true,
+                    });
+                }
+                RunOutcome::AgentFault(kind) => {
+                    // Agent fault: a genuine pass^k failure (failing sentinel run).
+                    failures.push(FailureRecord {
+                        window_index: w,
+                        seed,
+                        kind,
+                        attempts: 1,
+                        runtime: false,
+                    });
+                    runs.push(failing_sentinel_run(expected_run_len));
+                }
+            }
+        }
+    }
+    ResilientSubmission {
+        submission: AgentSubmission {
+            agent_id: agent_id.to_string(),
+            runs,
+            in_sample_trials: 0,
+            candidates: Vec::new(),
+        },
+        failures,
     }
 }
 
@@ -276,6 +351,62 @@ mod tests {
     use sharpebench_core::roles::attribute_roles;
     use sharpebench_sim::{BuyAndHold, Momentum};
 
+    /// A reward-hacking "cheat" agent: tries to exploit the simulator by placing an
+    /// absurd-size order (gaming the fill engine), with maxed-out self-reported
+    /// confidence. The sim flags the absurd weight as a `ManipulativeOrder`
+    /// (block-severity), so the scorer must rank it ineligible.
+    struct CheatAgent;
+    impl Agent for CheatAgent {
+        fn decide(
+            &mut self,
+            obs: &sharpebench_protocol::MarketObservation,
+        ) -> sharpebench_protocol::Decision {
+            use sharpebench_protocol::{Action, Decision, Order};
+            let sym = obs.symbols[0].symbol.clone();
+            Decision {
+                orders: vec![Order {
+                    symbol: sym,
+                    action: Action::Buy,
+                    target_weight: 1.0e9, // absurd size → sim-exploitation attempt
+                    confidence: 1.0,      // inflated conviction
+                    rationale: "exploit the fill engine".to_string(),
+                }],
+                reasoning: "cheat".to_string(),
+            }
+        }
+    }
+
+    #[test]
+    fn cheat_agent_is_demoted_and_never_ranks() {
+        use sharpebench_core::{rank, ScoreConfig};
+        let data = Dataset::synthetic(5, 120, 20_260_621);
+        let windows = [Window { start: 20, end: 120 }];
+        let seeds: Vec<u64> = (0..5).collect();
+        let costs = CostModel::default();
+
+        let cheat = run_agent("cheat", &data, &windows, &seeds, costs, || {
+            Box::new(CheatAgent) as Box<dyn Agent>
+        });
+        let honest = run_agent("momentum", &data, &windows, &seeds, costs, || {
+            Box::new(Momentum::default()) as Box<dyn Agent>
+        });
+        let board = rank(&[cheat, honest], &ScoreConfig::default());
+        let cheat_s = board.iter().find(|s| s.agent_id == "cheat").unwrap();
+        assert!(
+            !cheat_s.rank_eligible,
+            "a sim-exploiting cheat must never be rank-eligible: {cheat_s:?}"
+        );
+        assert!(
+            !cheat_s.process_ok,
+            "the manipulative order must mark the process dirty"
+        );
+        // And it must sort below any eligible honest agent.
+        assert!(
+            board[0].agent_id != "cheat",
+            "the cheat must not lead the board"
+        );
+    }
+
     #[test]
     fn team_run_produces_alignable_role_series() {
         let data = Dataset::synthetic(4, 80, 20_260_621);
@@ -346,6 +477,89 @@ mod tests {
         });
         let report = oos_decay_of(&sub, 2);
         assert_eq!(report.window_metrics.len(), 2);
+    }
+
+    #[test]
+    fn runtime_crash_is_not_counted_as_an_agent_failure() {
+        // A skilled agent whose container crashes (runtime error) on the first
+        // seed of each window, then recovers on retry. pass^k must see only the
+        // recovered, genuine runs — no failing run is injected for the crash.
+        let skilled = |_w: usize, _seed: u64| {
+            Ok(sharpebench_core::Run {
+                returns: (0..60).map(|i| 0.002 + 0.0005 * (i as f64 * 0.7).sin()).collect(),
+                trace: Default::default(),
+                confidences: Vec::new(),
+                outcomes: Vec::new(),
+                cost: 0.0,
+            })
+        };
+        let mut crash_then_ok_calls = 0u32;
+        let res = run_agent_resilient("flaky-but-skilled", 1, &[0, 1, 2], 3, 60, |w, seed| {
+            crash_then_ok_calls += 1;
+            // Crash on the very first attempt of the whole submission, recover after.
+            if crash_then_ok_calls == 1 {
+                Err(FailureKind::SpawnError)
+            } else {
+                skilled(w, seed)
+            }
+        });
+        // The spawn error was retried, not logged as exhausted, and every run pool
+        // entry is a genuine completed run (no sentinel injected).
+        assert!(res.failures.is_empty(), "a recovered crash logs nothing");
+        assert_eq!(res.submission.runs.len(), 3, "3 genuine runs feed pass^k");
+
+        use sharpebench_core::{score_agent, ScoreConfig};
+        let s = score_agent(&res.submission, &ScoreConfig::default());
+        assert!(s.passed_k, "recovered runs are all skilled → pass^k holds");
+    }
+
+    #[test]
+    fn exhausted_runtime_error_does_not_pollute_pass_k() {
+        // One seed's container never comes back; the other two are skilled. The
+        // dead seed contributes NO run (harness fault), so the surviving pass^k
+        // pool is the two genuine skilled runs.
+        let res = run_agent_resilient("one-dead-container", 1, &[0, 1, 2], 2, 60, |_w, seed| {
+            if seed == 1 {
+                Err(FailureKind::TransportError)
+            } else {
+                Ok(sharpebench_core::Run {
+                    returns: (0..60).map(|i| 0.002 + 0.0005 * (i as f64 * 0.7).sin()).collect(),
+                    trace: Default::default(),
+                    confidences: Vec::new(),
+                    outcomes: Vec::new(),
+                    cost: 0.0,
+                })
+            }
+        });
+        assert_eq!(res.failures.runtime_failures(), 1);
+        assert_eq!(res.failures.agent_faults(), 0);
+        assert_eq!(res.submission.runs.len(), 2, "dead container adds no run");
+    }
+
+    #[test]
+    fn agent_fault_counts_against_pass_k() {
+        // A malformed-output agent fault is the agent's own failure: it becomes a
+        // failing sentinel run and breaks pass^k, exactly as a genuine bad run would.
+        let res = run_agent_resilient("malformed-agent", 1, &[0, 1, 2], 3, 60, |_w, seed| {
+            if seed == 2 {
+                Err(FailureKind::AgentProtocolViolation)
+            } else {
+                Ok(sharpebench_core::Run {
+                    returns: (0..60).map(|i| 0.002 + 0.0005 * (i as f64 * 0.7).sin()).collect(),
+                    trace: Default::default(),
+                    confidences: Vec::new(),
+                    outcomes: Vec::new(),
+                    cost: 0.0,
+                })
+            }
+        });
+        assert_eq!(res.failures.agent_faults(), 1);
+        assert_eq!(res.failures.runtime_failures(), 0);
+        assert_eq!(res.submission.runs.len(), 3, "the fault becomes a sentinel run");
+
+        use sharpebench_core::{score_agent, ScoreConfig};
+        let s = score_agent(&res.submission, &ScoreConfig::default());
+        assert!(!s.passed_k, "an agent fault must break pass^k");
     }
 
     #[test]

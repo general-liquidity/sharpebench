@@ -25,6 +25,10 @@ pub enum ProcessEvent {
     /// The agent submitted an impossible/abusive order (non-finite or absurdly
     /// large target weight) — an attempt to exploit the simulator. Block severity.
     ManipulativeOrder,
+    /// A one-line decision rationale captured into the audit trail. **Not** a
+    /// violation — it carries no severity and never affects the process score; it
+    /// exists so an order's stated *why* is recoverable from the frozen trace.
+    DecisionRationale { symbol: String, rationale: String },
 }
 
 impl ProcessEvent {
@@ -123,6 +127,28 @@ mod tests {
             events: vec![ProcessEvent::ManipulativeOrder],
         };
         assert!(!process_score(&t).is_clean());
+    }
+
+    #[test]
+    fn decision_rationale_is_score_neutral() {
+        // A rationale annotation is part of the audit trail, not a violation: it
+        // must leave a clean trace clean and full-scored.
+        let t = Trace {
+            events: vec![
+                ProcessEvent::DecisionRationale {
+                    symbol: "SYM00".to_string(),
+                    rationale: "trend up".to_string(),
+                },
+                ProcessEvent::OrderPlaced {
+                    risk_gate_passed: true,
+                },
+            ],
+        };
+        let s = process_score(&t);
+        assert!(s.is_clean());
+        assert_eq!(s.score, 1.0);
+        assert_eq!(s.block_violations, 0);
+        assert_eq!(s.warn_violations, 0);
     }
 
     #[test]
