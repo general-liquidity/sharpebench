@@ -10,7 +10,15 @@ sharpebench stress                    run the adversarial stress suite (contamin
 sharpebench audit                     self-audit: prove the scorer resists gaming
 sharpebench sign <subs.json> <key> <out.json>         score + sign a board to a file
 sharpebench verify <board.json> <key> verify a signed board's chain
+sharpebench capture <agent> <out.json>                capture an agent's raw-decision trajectory
+sharpebench verify-trajectory <traj.json>             replay a trajectory → recompute its score
+sharpebench audit-briefing <briefing.json>            audit a shared briefing for salience bias
+sharpebench canary <seed>                             derive a do-not-train contamination tripwire
+sharpebench score-allocation <alloc.json>             score a weight-vector trajectory (turnover)
+sharpebench greeks <spot> <strike> <t> <r> <vol> <call|put>   Black-Scholes price + Greeks + tail-risk
 ```
+
+Add `--json` to any command for machine-readable output.
 
 ## `run`
 
@@ -39,3 +47,16 @@ is not demoted.
 
 The [forward-attestation](attestation.md) surface: pre-register a strategy digest,
 sign a published board, and verify a board's tamper-evident chain.
+
+## `capture` / `verify-trajectory`
+
+Capture an agent's raw per-seed×window decision trajectory to JSON, then have a
+separate verifier replay it through the sim and recompute the score from the raw
+decisions — a forged trajectory recomputes to a different number.
+
+## `audit-briefing` / `canary` / `score-allocation` / `greeks`
+
+Standalone analysis surfaces over the kernel: lint a shared briefing for
+input-side salience bias, derive a do-not-train contamination tripwire, score a
+target-allocation weight-vector trajectory (validity + L1 turnover), and price an
+option with its Greeks and short-gamma/vega tail-risk classification.

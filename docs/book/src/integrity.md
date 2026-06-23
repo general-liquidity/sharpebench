@@ -17,6 +17,8 @@ each is demoted:
 [DEFENDED] sim-exploitation           submit a manipulative / absurd-size order
 [DEFENDED] mandate-breach             exceed the drawdown mandate to chase return
 [DEFENDED] raw-return-cannot-buy-rank post the biggest raw return on only some runs
+[DEFENDED] cheat-reward-hacker        top raw return by bypassing the gate + padding confidence
+[DEFENDED] tail-seller                smooth linear returns earned by selling tail risk (naked short gamma)
 ```
 
 The command exits non-zero if **any** attack is not demoted. That makes the audit

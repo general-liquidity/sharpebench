@@ -21,8 +21,11 @@ buys rank.
 The composite also *reports* (without gating, to keep the default behaviour
 stable): alpha/beta attribution vs the field, calibration (Brier), edge half-life,
 the field-wide Reality Check p-value, the Romano–Wolf step-down verdict, max
-drawdown, turnover, Pareto-optimality, confidence-weighted return, and
-cost-efficiency.
+drawdown, turnover, Pareto-optimality, confidence-weighted return, cost-efficiency,
+rolling worst-case Sharpe, selection robustness, and the **Sortino ratio** with its
+downside deviation (excess return per unit of *downside* volatility, MAR = 0 — it
+rewards an edge that doesn't arrive with downside churn, where the Sharpe penalizes
+all volatility symmetrically).
 
 The following sections explain each gate.
 

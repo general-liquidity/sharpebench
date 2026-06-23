@@ -1,0 +1,87 @@
+name: npm
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  build-test:
+    name: build wasm + npm package + MCP server
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (pinned via rust-toolchain.toml) + wasm target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build the WASM kernel
+        run: wasm-pack build crates/sharpebench-wasm --target nodejs --out-dir ../../npm/pkg --out-name sharpebench
+
+      - name: Build + test the npm package
+        working-directory: npm
+        run: |
+          npm install
+          npm run build
+          npm test
+
+      - name: Build + test the MCP server
+        working-directory: npm/mcp
+        run: |
+          npm install
+          npm run build
+          npm test
+
+  publish:
+    name: publish to npm
+    needs: build-test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      # An automation token bypasses 2FA. Publish steps below skip cleanly when it
+      # is not set, so a release tag does not fail just because npm isn't wired yet.
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Install wasm-pack
+        if: env.NODE_AUTH_TOKEN != ''
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - name: Build the WASM kernel
+        if: env.NODE_AUTH_TOKEN != ''
+        run: wasm-pack build crates/sharpebench-wasm --target nodejs --out-dir ../../npm/pkg --out-name sharpebench
+
+      - name: Publish @general-liquidity/sharpebench
+        if: env.NODE_AUTH_TOKEN != ''
+        working-directory: npm
+        run: |
+          npm install
+          npm publish --access public
+
+      - name: Publish @general-liquidity/sharpebench-mcp
+        if: env.NODE_AUTH_TOKEN != ''
+        working-directory: npm/mcp
+        run: |
+          # Pin the local-link dependency to the just-published kernel version.
+          npm pkg set "dependencies.@general-liquidity/sharpebench=^$(node -p "require('../package.json').version")"
+          npm install
+          npm publish --access public
