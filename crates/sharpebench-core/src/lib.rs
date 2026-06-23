@@ -20,6 +20,7 @@
 
 pub mod attribution;
 pub mod calibration;
+pub mod comparison_sets;
 pub mod composite;
 pub mod correlation;
 pub mod decay;
@@ -29,14 +30,22 @@ pub mod oos;
 pub mod pass_k;
 pub mod percentile;
 pub mod process;
+pub mod rediscovery;
 pub mod roles;
 pub mod selection;
 pub mod selfaudit;
 pub mod significance;
 pub mod stats;
 
+pub use comparison_sets::{
+    comparison_set, qualifies, restrict_field, restrict_to_shared, ComparisonSet, TaggedRun,
+    TaggedSubmission,
+};
 pub use composite::{rank, score_agent, AgentSubmission, CompositeScore, Run, ScoreConfig};
 pub use correlation::{crowdedness, Crowdedness};
+pub use rediscovery::{
+    classify_rediscovery, cosine_similarity, RediscoveryVerdict, DEFAULT_REDISCOVERY_THRESHOLD,
+};
 pub use econrationality::{assess_rationality, DominanceChoice, EconRationalityReport};
 pub use oos::{oos_decay, OosDecayReport};
 pub use percentile::percentile_of;

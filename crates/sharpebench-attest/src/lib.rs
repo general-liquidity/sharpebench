@@ -18,6 +18,12 @@
 #![forbid(unsafe_code)]
 
 pub mod registry;
+pub mod sealed;
+
+pub use sealed::{
+    commit_dataset, content_hash, open_dataset, seal_dataset, verify_dataset, DatasetCommitment,
+    SealedDataset,
+};
 
 use std::fmt::Write as _;
 
@@ -131,7 +137,7 @@ pub fn verify_chain(results: &[SignedResult], key: &[u8]) -> bool {
     true
 }
 
-fn to_hex(bytes: &[u8]) -> String {
+pub(crate) fn to_hex(bytes: &[u8]) -> String {
     let mut s = String::with_capacity(bytes.len() * 2);
     for b in bytes {
         let _ = write!(s, "{b:02x}");
