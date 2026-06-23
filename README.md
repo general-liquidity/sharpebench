@@ -133,8 +133,8 @@ A Rust [Cargo workspace](Cargo.toml) (modular, à la Paradigm's Rust OSS — reu
 
 The identical Rust kernel ships compiled to WebAssembly, so you don't need Rust to score luck-robustly:
 
-- **npm** — [`@generalliquidity/sharpebench`](npm/): `npm i @generalliquidity/sharpebench`, then `score(submissions)`, `scoreAgent`, `selfAudit`, `greeks`, … with full TypeScript types. Pure, deterministic, no native add-on.
-- **MCP** — [`@generalliquidity/sharpebench-mcp`](npm/mcp/): an MCP server that exposes the kernel as agent-callable tools, so Claude (or any MCP client) can deflate a Sharpe / check pass^k / audit a briefing in its tool loop. Run via `npx -y @generalliquidity/sharpebench-mcp`.
+- **npm** — [`@general-liquidity/sharpebench`](npm/): `npm i @general-liquidity/sharpebench`, then `score(submissions)`, `scoreAgent`, `selfAudit`, `greeks`, … with full TypeScript types. Pure, deterministic, no native add-on.
+- **MCP** — [`@general-liquidity/sharpebench-mcp`](npm/mcp/): an MCP server that exposes the kernel as agent-callable tools, so Claude (or any MCP client) can deflate a Sharpe / check pass^k / audit a briefing in its tool loop. Run via `npx -y @general-liquidity/sharpebench-mcp`.
 
 ## Governance
 

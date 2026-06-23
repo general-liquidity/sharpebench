@@ -1,5 +1,5 @@
 /**
- * `@generalliquidity/sharpebench` — the luck-robust scoring kernel for AI trading
+ * `@general-liquidity/sharpebench` — the luck-robust scoring kernel for AI trading
  * agents, as a typed JS API over the *identical* Rust kernel that powers the
  * SharpeBench benchmark (compiled to WebAssembly).
  *

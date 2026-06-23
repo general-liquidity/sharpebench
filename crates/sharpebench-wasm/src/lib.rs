@@ -1,6 +1,6 @@
 //! WASM façade over [`sharpebench_core`] (+ the canary primitive from
 //! [`sharpebench_attest`]) — the bridge that lets Gordon (TypeScript/Bun) and the
-//! published `@generalliquidity/sharpebench` npm package consume the **identical**
+//! published `@general-liquidity/sharpebench` npm package consume the **identical**
 //! scoring kernel as the harness, so the internal eval and the public benchmark
 //! can never drift.
 //!

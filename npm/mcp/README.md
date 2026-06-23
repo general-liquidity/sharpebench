@@ -1,4 +1,4 @@
-# @generalliquidity/sharpebench-mcp
+# @general-liquidity/sharpebench-mcp
 
 An **MCP server** that exposes the [SharpeBench](https://github.com/general-liquidity/sharpebench) luck-robust scoring kernel as agent-callable tools. Point Claude (or any MCP client) at it and it can deflate a Sharpe, check pass^k reliability, audit a briefing for bias, or price an option's tail-risk — all from the deterministic Rust kernel, no network.
 
@@ -25,7 +25,7 @@ Add to your MCP client config (e.g. Claude Desktop's `mcpServers`):
   "mcpServers": {
     "sharpebench": {
       "command": "npx",
-      "args": ["-y", "@generalliquidity/sharpebench-mcp"]
+      "args": ["-y", "@general-liquidity/sharpebench-mcp"]
     }
   }
 }

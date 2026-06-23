@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import * as sb from "@generalliquidity/sharpebench";
+import * as sb from "@general-liquidity/sharpebench";
 
 type ToolResult = { content: Array<{ type: "text"; text: string }>; isError?: boolean };
 
