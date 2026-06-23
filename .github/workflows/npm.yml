@@ -45,13 +45,14 @@ jobs:
   publish:
     name: publish to npm
     needs: build-test
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Opt-in: set repo variable NPM_PUBLISH=true AND add the NPM_TOKEN secret (an
+    # npm Automation token, which bypasses 2FA). Until then this job is skipped
+    # cleanly, so a release tag never fails just because npm publishing isn't wired.
+    if: startsWith(github.ref, 'refs/tags/v') && vars.NPM_PUBLISH == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
     env:
-      # An automation token bypasses 2FA. Publish steps below skip cleanly when it
-      # is not set, so a release tag does not fail just because npm isn't wired yet.
       NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@v4
@@ -59,7 +60,6 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
       - name: Install wasm-pack
-        if: env.NODE_AUTH_TOKEN != ''
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
       - uses: actions/setup-node@v4
         with:
@@ -67,18 +67,15 @@ jobs:
           registry-url: https://registry.npmjs.org
 
       - name: Build the WASM kernel
-        if: env.NODE_AUTH_TOKEN != ''
         run: wasm-pack build crates/sharpebench-wasm --target nodejs --out-dir ../../npm/pkg --out-name sharpebench
 
       - name: Publish @general-liquidity/sharpebench
-        if: env.NODE_AUTH_TOKEN != ''
         working-directory: npm
         run: |
           npm install
           npm publish --access public
 
       - name: Publish @general-liquidity/sharpebench-mcp
-        if: env.NODE_AUTH_TOKEN != ''
         working-directory: npm/mcp
         run: |
           # Pin the local-link dependency to the just-published kernel version.
