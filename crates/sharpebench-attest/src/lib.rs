@@ -17,9 +17,11 @@
 //! chain is tamper-evident.
 #![forbid(unsafe_code)]
 
+pub mod canary;
 pub mod registry;
 pub mod sealed;
 
+pub use canary::{detect_leak, embed_canary, make_canary, verify_canary, Canary};
 pub use sealed::{
     commit_dataset, content_hash, open_dataset, seal_dataset, verify_dataset, DatasetCommitment,
     SealedDataset,

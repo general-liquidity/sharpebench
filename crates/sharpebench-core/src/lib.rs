@@ -18,7 +18,9 @@
 //! reported but never the rank key — see [`composite`].
 #![forbid(unsafe_code)]
 
+pub mod allocation;
 pub mod attribution;
+pub mod briefing;
 pub mod calibration;
 pub mod comparison_sets;
 pub mod composite;
@@ -26,6 +28,7 @@ pub mod correlation;
 pub mod decay;
 pub mod deflated_sharpe;
 pub mod econrationality;
+pub mod greeks;
 pub mod oos;
 pub mod pass_k;
 pub mod percentile;
@@ -38,6 +41,13 @@ pub mod selfaudit;
 pub mod significance;
 pub mod stats;
 
+pub use allocation::{
+    check_weights, score_allocation, turnover, AllocationPolicy, AllocationReport, AllocationStep,
+    AllocationTrajectory, WeightValidity, WeightViolation,
+};
+pub use briefing::{
+    audit_briefing, Briefing, BriefingAudit, BriefingPolicy, BriefingSection, BriefingViolation,
+};
 pub use comparison_sets::{
     comparison_set, qualifies, restrict_field, restrict_to_shared, ComparisonSet, TaggedRun,
     TaggedSubmission,
@@ -45,6 +55,10 @@ pub use comparison_sets::{
 pub use composite::{rank, score_agent, AgentSubmission, CompositeScore, Run, ScoreConfig};
 pub use correlation::{crowdedness, Crowdedness};
 pub use econrationality::{assess_rationality, DominanceChoice, EconRationalityReport};
+pub use greeks::{
+    bs_greeks, bs_price, classify_greeks_risk, portfolio_greeks, Greeks, GreeksPolicy, GreeksRisk,
+    Leg,
+};
 pub use oos::{oos_decay, OosDecayReport};
 pub use percentile::percentile_of;
 pub use process::{ProcessEvent, ProcessScore, Trace};
