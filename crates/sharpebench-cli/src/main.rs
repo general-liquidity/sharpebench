@@ -39,6 +39,10 @@ fn main() -> ExitCode {
         Some("verify") => run_verify(&args, json),
         Some("capture") => run_capture(&args, json),
         Some("verify-trajectory") => run_verify_trajectory(&args, json),
+        Some("audit-briefing") => run_audit_briefing(&args, json),
+        Some("canary") => run_canary(&args, json),
+        Some("score-allocation") => run_score_allocation(&args, json),
+        Some("greeks") => run_greeks(&args, json),
         Some("self-update" | "update") => run_self_update(),
         Some("--help") | Some("-h") | None => {
             help();
@@ -69,6 +73,140 @@ fn run_self_update() -> ExitCode {
         );
         ExitCode::from(2)
     }
+}
+
+fn run_audit_briefing(args: &[String], json: bool) -> ExitCode {
+    let Some(path) = args.get(2) else {
+        eprintln!("usage: sharpebench audit-briefing <briefing.json> [--json]");
+        return ExitCode::from(2);
+    };
+    let data = match std::fs::read_to_string(path) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("error: cannot read {path}: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let briefing: sharpebench_core::Briefing = match serde_json::from_str(&data) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("error: invalid briefing JSON: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let audit =
+        sharpebench_core::audit_briefing(&briefing, &sharpebench_core::BriefingPolicy::default());
+    if json {
+        emit_json(&audit);
+    } else if audit.balanced {
+        println!("BALANCED — no input-side salience bias detected");
+    } else {
+        println!("BIASED — {} violation(s):", audit.violations.len());
+        for v in &audit.violations {
+            println!("  - {v:?}");
+        }
+    }
+    if audit.balanced {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
+}
+
+fn run_canary(args: &[String], json: bool) -> ExitCode {
+    let Some(seed) = args.get(2) else {
+        eprintln!("usage: sharpebench canary <seed> [--json]");
+        return ExitCode::from(2);
+    };
+    let canary = sharpebench_attest::make_canary(seed.as_bytes());
+    if json {
+        emit_json(&canary);
+    } else {
+        println!("canary id:    {}", canary.id);
+        println!("canary token: {}", canary.token);
+        println!("\nEmbed the marker in the scenario artifact; if a model ever emits the token, the held-out set leaked into its training corpus.");
+    }
+    ExitCode::SUCCESS
+}
+
+fn run_score_allocation(args: &[String], json: bool) -> ExitCode {
+    let Some(path) = args.get(2) else {
+        eprintln!("usage: sharpebench score-allocation <allocation.json> [--json]");
+        return ExitCode::from(2);
+    };
+    let data = match std::fs::read_to_string(path) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("error: cannot read {path}: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let traj: sharpebench_core::AllocationTrajectory = match serde_json::from_str(&data) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("error: invalid allocation JSON: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let report =
+        sharpebench_core::score_allocation(&traj, &sharpebench_core::AllocationPolicy::default());
+    if json {
+        emit_json(&report);
+    } else {
+        println!(
+            "allocation: valid={} total_turnover={:.4} mean_turnover={:.4}",
+            report.valid, report.total_turnover, report.mean_turnover
+        );
+        for v in &report.weight_violations {
+            println!("  - {v:?}");
+        }
+    }
+    if report.valid {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
+}
+
+fn run_greeks(args: &[String], json: bool) -> ExitCode {
+    if args.len() < 8 {
+        eprintln!(
+            "usage: sharpebench greeks <spot> <strike> <t_years> <rate> <vol> <call|put> [--json]"
+        );
+        return ExitCode::from(2);
+    }
+    let nums: Result<Vec<f64>, _> = args[2..7].iter().map(|s| s.parse::<f64>()).collect();
+    let Ok(n) = nums else {
+        eprintln!("error: spot/strike/t/rate/vol must be numbers");
+        return ExitCode::from(2);
+    };
+    let is_call = match args[7].as_str() {
+        "call" => true,
+        "put" => false,
+        other => {
+            eprintln!("error: expected call|put, got {other}");
+            return ExitCode::from(2);
+        }
+    };
+    let (spot, strike, t, r, vol) = (n[0], n[1], n[2], n[3], n[4]);
+    let price = sharpebench_core::bs_price(spot, strike, t, r, vol, is_call);
+    let greeks = sharpebench_core::bs_greeks(spot, strike, t, r, vol, is_call);
+    let risk =
+        sharpebench_core::classify_greeks_risk(&greeks, &sharpebench_core::GreeksPolicy::default());
+    if json {
+        emit_json(&serde_json::json!({ "price": price, "greeks": greeks, "risk": risk }));
+    } else {
+        println!("price {price:.4}");
+        println!(
+            "delta {:.4}  gamma {:.4}  theta {:.4}  vega {:.4}  rho {:.4}",
+            greeks.delta, greeks.gamma, greeks.theta, greeks.vega, greeks.rho
+        );
+        println!(
+            "tail-risk: short_gamma={} unbounded_tail={} short_vega={}",
+            risk.naked_short_gamma, risk.unbounded_tail, risk.short_vega
+        );
+    }
+    ExitCode::SUCCESS
 }
 
 /// Print a value as pretty JSON to stdout (machine-readable mode).
@@ -128,6 +266,14 @@ fn help() {
     );
     println!(
         "  sharpebench verify-trajectory <traj.json> [--data <csv>]  replay a trajectory → recompute its score from raw decisions"
+    );
+    println!("  sharpebench audit-briefing <briefing.json>  audit a shared briefing for input-side salience bias");
+    println!("  sharpebench canary <seed>             derive a do-not-train contamination tripwire token");
+    println!(
+        "  sharpebench score-allocation <alloc.json>  score a weight-vector trajectory (validity + turnover)"
+    );
+    println!(
+        "  sharpebench greeks <spot> <strike> <t> <r> <vol> <call|put>  Black-Scholes price + Greeks + tail-risk"
     );
     println!("  sharpebench self-update               update the binary in place (--features self-update builds)");
     println!("\n<key> accepts a literal, or env:NAME / file:PATH to keep secrets out of process listings.");
