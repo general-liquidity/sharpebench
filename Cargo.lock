@@ -551,6 +551,7 @@ dependencies = [
  "sharpebench-core",
  "sharpebench-harness",
  "sharpebench-leaderboard",
+ "sharpebench-protocol",
  "sharpebench-sim",
 ]
 
@@ -575,6 +576,8 @@ dependencies = [
 name = "sharpebench-harness"
 version = "0.0.1"
 dependencies = [
+ "serde",
+ "serde_json",
  "sharpebench-core",
  "sharpebench-protocol",
  "sharpebench-sim",
