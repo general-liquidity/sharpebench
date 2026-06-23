@@ -28,7 +28,7 @@
   ],
   "scripts": {
     "build": "tsc",
-    "test": "node --test",
+    "test": "node --test test/",
     "prepublishOnly": "tsc"
   },
   "devDependencies": {
