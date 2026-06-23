@@ -18,6 +18,7 @@ use crate::deflated_sharpe::{deflated_sharpe_ratio, probabilistic_sharpe_ratio};
 use crate::pass_k::{pass_k, PassMode};
 use crate::percentile::percentile_of;
 use crate::process::{process_score, ProcessEvent, Trace};
+use crate::rolling::rolling_sharpe;
 use crate::selection::{selection_robustness, SelectionRobustness};
 use crate::significance::bootstrap_pvalue;
 use crate::stats::mean;
@@ -125,6 +126,15 @@ pub struct ScoreConfig {
     /// human track records) for percentile reporting. Empty = no percentile.
     #[serde(default)]
     pub reference_dsr_population: Vec<f64>,
+    /// Window length (in periods) for the rolling-Sharpe stability report over the
+    /// pooled track — worst-window Sharpe + fraction-of-positive-windows.
+    #[serde(default = "default_rolling_window")]
+    pub rolling_window: usize,
+}
+
+/// Default rolling-Sharpe window length (21 periods ≈ one trading month).
+fn default_rolling_window() -> usize {
+    21
 }
 
 impl Default for ScoreConfig {
@@ -141,6 +151,7 @@ impl Default for ScoreConfig {
             mandate: Mandate::default(),
             rank_key: RankKey::default(),
             reference_dsr_population: Vec::new(),
+            rolling_window: default_rolling_window(),
         }
     }
 }
@@ -222,6 +233,24 @@ pub struct CompositeScore {
     /// 1-based ordinal position among rank-eligible agents (scale-invariant rank
     /// mode). 0 = ineligible or scored outside a field. Filled by [`rank`].
     pub rank_ordinal: usize,
+    /// Worst (minimum) per-window Sharpe over the pooled track (non-annualized),
+    /// using `cfg.rolling_window`. Low/negative = the edge collapses in some
+    /// stretch. `None` when the pooled track is shorter than one window.
+    pub rolling_min_sharpe: Option<f64>,
+    /// Fraction of rolling windows whose Sharpe is positive, in [0, 1]. Near 1 =
+    /// the edge is everywhere; low = the deflated edge lives in a few lucky
+    /// windows. `None` when the track is too short.
+    pub rolling_frac_positive: Option<f64>,
+    /// Budget-normalized Deflated Sharpe: `deflated_sharpe / cost` — luck-robust
+    /// skill per unit of compute/token spend. `None` when cost is unreported.
+    pub dsr_per_cost: Option<f64>,
+    /// Whether the realized return was floored to a no-skill baseline because the
+    /// agent has a block-severity process violation (cheating shouldn't pay).
+    pub process_floored: bool,
+    /// The agent's realized return after the process floor: its raw mean when the
+    /// process is clean, else the no-skill baseline (0.0). Always reported
+    /// alongside `raw_mean_return`, which keeps the un-floored value.
+    pub realized_floored_return: f64,
 }
 
 /// Pareto dominance on (return↑, drawdown↓, turnover↓).
@@ -348,6 +377,22 @@ pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
         (Some(sr.median_dsr), Some(sr.selection_gap))
     };
 
+    // Rolling-Sharpe stability over the pooled track: is the deflated edge one
+    // lucky window, or present across the whole track?
+    let rolling = rolling_sharpe(&pooled, cfg.rolling_window);
+    let rolling_min_sharpe = rolling.map(|r| r.min_sharpe);
+    let rolling_frac_positive = rolling.map(|r| r.frac_positive);
+
+    // Budget-normalized Deflated Sharpe: luck-robust skill per unit of spend.
+    let dsr_per_cost = if cost > 0.0 { Some(dsr / cost) } else { None };
+
+    // Process floor: a block-severity violation forfeits any realized return —
+    // it is floored to the no-skill baseline (0.0) so cheating never pays, even
+    // for the (display-only) realized-return column. Eligibility logic below is
+    // unchanged; `process_ok` still independently disqualifies.
+    let process_floored = !process_ok;
+    let realized_floored_return = if process_floored { 0.0 } else { raw_mean_return };
+
     let rank_eligible =
         dsr >= cfg.dsr_bar && passed_k && process_ok && bootstrap_p < cfg.alpha && mandate_ok;
     let composite = if rank_eligible { dsr } else { 0.0 };
@@ -384,6 +429,11 @@ pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
         selection_median_dsr,
         selection_gap,
         rank_ordinal: 0,
+        rolling_min_sharpe,
+        rolling_frac_positive,
+        dsr_per_cost,
+        process_floored,
+        realized_floored_return,
     }
 }
 
@@ -698,6 +748,67 @@ mod tests {
             &cfg,
         );
         assert!(some.dsr_percentile.is_some());
+    }
+
+    #[test]
+    fn rolling_sharpe_reported_for_long_tracks() {
+        let s = score_agent(
+            &agent("roll", (0..5).map(|_| run(0.002, 0.0005, 60)).collect()),
+            &ScoreConfig::default(),
+        );
+        // 300 pooled points ≥ 21-window → both reported, steady edge is all-positive.
+        assert!(s.rolling_min_sharpe.is_some());
+        let fp = s.rolling_frac_positive.expect("reported");
+        assert!((fp - 1.0).abs() < 1e-12, "steady edge → all windows positive");
+    }
+
+    #[test]
+    fn rolling_sharpe_none_when_track_too_short() {
+        let cfg = ScoreConfig {
+            rolling_window: 100,
+            ..ScoreConfig::default()
+        };
+        let s = score_agent(&agent("short", vec![run(0.002, 0.0005, 30)]), &cfg);
+        assert!(s.rolling_min_sharpe.is_none());
+        assert!(s.rolling_frac_positive.is_none());
+    }
+
+    #[test]
+    fn dsr_per_cost_reported_only_with_cost() {
+        let mut r = run(0.002, 0.0005, 60);
+        r.cost = 5.0;
+        let paid = score_agent(&agent("paid", vec![r]), &ScoreConfig::default());
+        let dpc = paid.dsr_per_cost.expect("reported with cost");
+        assert!((dpc - paid.deflated_sharpe / 5.0).abs() < 1e-12);
+
+        let free = score_agent(
+            &agent("free", vec![run(0.002, 0.0005, 60)]),
+            &ScoreConfig::default(),
+        );
+        assert!(free.dsr_per_cost.is_none());
+    }
+
+    #[test]
+    fn process_violation_floors_realized_return() {
+        let mut runs: Vec<Run> = (0..5).map(|_| run(0.02, 0.0005, 60)).collect();
+        runs[0].trace.events.push(ProcessEvent::OrderPlaced {
+            risk_gate_passed: false,
+        });
+        let s = score_agent(&agent("cheater", runs), &ScoreConfig::default());
+        assert!(s.process_floored, "block violation must set the floor flag");
+        assert_eq!(s.realized_floored_return, 0.0, "floored to no-skill baseline");
+        assert!(s.raw_mean_return > 0.0, "raw return is preserved un-floored");
+        assert!(!s.rank_eligible, "eligibility logic intact");
+    }
+
+    #[test]
+    fn clean_process_is_not_floored() {
+        let s = score_agent(
+            &agent("clean", (0..5).map(|_| run(0.002, 0.0005, 60)).collect()),
+            &ScoreConfig::default(),
+        );
+        assert!(!s.process_floored);
+        assert_eq!(s.realized_floored_return, s.raw_mean_return);
     }
 
     #[test]

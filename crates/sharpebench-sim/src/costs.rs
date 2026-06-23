@@ -35,6 +35,61 @@ impl Default for CostModel {
     }
 }
 
+/// Execution-robustness profile: a named bundle of a [`CostModel`] plus a logical
+/// **decision-to-fill delay** (how many sim-bars an order waits before it becomes
+/// eligible to fill). Lets "score this agent under worst-case execution" be a
+/// single swappable axis rather than hand-tuned cost fields scattered per test.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CostProfile {
+    /// Frictionless: no fees, no slippage, no impact, no delay. The ceiling case.
+    None,
+    /// A realistic retail/institutional blend — the default-ish baseline.
+    Typical,
+    /// Stressed execution: wide fees + slippage + impact and a multi-bar fill delay.
+    WorstCase,
+}
+
+/// A cost profile resolved to a concrete [`CostModel`] and a decision-to-fill
+/// delay in sim-bars.
+#[derive(Clone, Copy, Debug)]
+pub struct ExecutionProfile {
+    pub costs: CostModel,
+    /// Bars an order waits after the decision before it is eligible to fill.
+    pub decision_delay_bars: usize,
+}
+
+impl CostProfile {
+    /// Resolve this profile to its [`CostModel`] and decision-to-fill delay.
+    pub fn resolve(self) -> ExecutionProfile {
+        match self {
+            CostProfile::None => ExecutionProfile {
+                costs: CostModel {
+                    fee_bps: 0.0,
+                    slippage_bps: 0.0,
+                    impact_bps: 0.0,
+                    financing_bps: 0.0,
+                    max_participation: f64::INFINITY,
+                },
+                decision_delay_bars: 0,
+            },
+            CostProfile::Typical => ExecutionProfile {
+                costs: CostModel::default(),
+                decision_delay_bars: 0,
+            },
+            CostProfile::WorstCase => ExecutionProfile {
+                costs: CostModel {
+                    fee_bps: 10.0,
+                    slippage_bps: 15.0,
+                    impact_bps: 150.0,
+                    financing_bps: 20.0,
+                    max_participation: 0.1,
+                },
+                decision_delay_bars: 2,
+            },
+        }
+    }
+}
+
 /// Per-step financing cost as a fraction of NAV: `financing_bps` applied to the
 /// leveraged portion of gross exposure (everything above 1× NAV). Zero at or below
 /// full investment.
@@ -109,6 +164,42 @@ mod tests {
         assert_eq!(financing_cost_frac(50.0, 1.0), 0.0);
         assert_eq!(financing_cost_frac(50.0, 0.5), 0.0);
         assert!(financing_cost_frac(50.0, 2.0) > 0.0);
+    }
+
+    #[test]
+    fn profile_none_is_frictionless() {
+        let p = CostProfile::None.resolve();
+        assert_eq!(p.costs.fee_bps, 0.0);
+        assert_eq!(p.costs.slippage_bps, 0.0);
+        assert_eq!(p.costs.impact_bps, 0.0);
+        assert_eq!(p.costs.financing_bps, 0.0);
+        assert!(!p.costs.max_participation.is_finite());
+        assert_eq!(p.decision_delay_bars, 0);
+    }
+
+    #[test]
+    fn profile_typical_matches_default_costs_no_delay() {
+        let p = CostProfile::Typical.resolve();
+        let d = CostModel::default();
+        assert_eq!(p.costs.fee_bps, d.fee_bps);
+        assert_eq!(p.costs.slippage_bps, d.slippage_bps);
+        assert_eq!(p.decision_delay_bars, 0);
+    }
+
+    #[test]
+    fn worst_case_is_strictly_harsher_with_delay() {
+        let none = CostProfile::None.resolve();
+        let typ = CostProfile::Typical.resolve();
+        let worst = CostProfile::WorstCase.resolve();
+        // Monotone friction across the three profiles.
+        assert!(none.costs.fee_bps <= typ.costs.fee_bps);
+        assert!(typ.costs.fee_bps < worst.costs.fee_bps);
+        assert!(typ.costs.slippage_bps < worst.costs.slippage_bps);
+        assert!(typ.costs.impact_bps < worst.costs.impact_bps);
+        // Worst-case caps liquidity and imposes a fill delay; the others don't.
+        assert!(worst.costs.max_participation.is_finite());
+        assert!(worst.decision_delay_bars > 0);
+        assert_eq!(typ.decision_delay_bars, 0);
     }
 
     #[test]
