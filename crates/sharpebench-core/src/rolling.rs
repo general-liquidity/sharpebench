@@ -79,10 +79,6 @@ mod tests {
         // The worst window is the all-negative one → negative Sharpe.
         assert!(rs.min_sharpe < 0.0, "min_sharpe={}", rs.min_sharpe);
         // Most windows live in the negative tail → far from all-positive.
-        assert!(
-            rs.frac_positive < 0.5,
-            "frac_positive={}",
-            rs.frac_positive
-        );
+        assert!(rs.frac_positive < 0.5, "frac_positive={}", rs.frac_positive);
     }
 }

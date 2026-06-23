@@ -391,7 +391,11 @@ pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
     // for the (display-only) realized-return column. Eligibility logic below is
     // unchanged; `process_ok` still independently disqualifies.
     let process_floored = !process_ok;
-    let realized_floored_return = if process_floored { 0.0 } else { raw_mean_return };
+    let realized_floored_return = if process_floored {
+        0.0
+    } else {
+        raw_mean_return
+    };
 
     let rank_eligible =
         dsr >= cfg.dsr_bar && passed_k && process_ok && bootstrap_p < cfg.alpha && mandate_ok;
@@ -759,7 +763,10 @@ mod tests {
         // 300 pooled points ≥ 21-window → both reported, steady edge is all-positive.
         assert!(s.rolling_min_sharpe.is_some());
         let fp = s.rolling_frac_positive.expect("reported");
-        assert!((fp - 1.0).abs() < 1e-12, "steady edge → all windows positive");
+        assert!(
+            (fp - 1.0).abs() < 1e-12,
+            "steady edge → all windows positive"
+        );
     }
 
     #[test]
@@ -796,8 +803,14 @@ mod tests {
         });
         let s = score_agent(&agent("cheater", runs), &ScoreConfig::default());
         assert!(s.process_floored, "block violation must set the floor flag");
-        assert_eq!(s.realized_floored_return, 0.0, "floored to no-skill baseline");
-        assert!(s.raw_mean_return > 0.0, "raw return is preserved un-floored");
+        assert_eq!(
+            s.realized_floored_return, 0.0,
+            "floored to no-skill baseline"
+        );
+        assert!(
+            s.raw_mean_return > 0.0,
+            "raw return is preserved un-floored"
+        );
         assert!(!s.rank_eligible, "eligibility logic intact");
     }
 

@@ -160,7 +160,10 @@ mod tests {
     #[test]
     fn capture_matches_a_plain_run() {
         let data = Dataset::synthetic(3, 100, 5);
-        let window = Window { start: 20, end: 100 };
+        let window = Window {
+            start: 20,
+            end: 100,
+        };
         let costs = CostModel::default();
         let plain = run_backtest(&data, &mut BuyAndHold, window, 1, costs);
         let (captured, _traj) = run_backtest_capture(&data, &mut BuyAndHold, window, 1, costs);

@@ -201,7 +201,11 @@ mod tests {
             DEFAULT_REDISCOVERY_THRESHOLD,
             false,
         );
-        assert_eq!(v.nearest_index, Some(1), "should match the target, not decoy");
+        assert_eq!(
+            v.nearest_index,
+            Some(1),
+            "should match the target, not decoy"
+        );
         assert!(v.is_rediscovery);
     }
 }

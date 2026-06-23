@@ -130,15 +130,17 @@ pub fn restrict_field(roster: &[String], subs: &[TaggedSubmission]) -> Vec<Agent
     let set = comparison_set(roster, subs);
     roster
         .iter()
-        .map(|agent_id| match subs.iter().find(|s| &s.agent_id == agent_id) {
-            Some(sub) => restrict_to_shared(&set, sub),
-            None => AgentSubmission {
-                agent_id: agent_id.clone(),
-                runs: Vec::new(),
-                in_sample_trials: 0,
-                candidates: Vec::new(),
+        .map(
+            |agent_id| match subs.iter().find(|s| &s.agent_id == agent_id) {
+                Some(sub) => restrict_to_shared(&set, sub),
+                None => AgentSubmission {
+                    agent_id: agent_id.clone(),
+                    runs: Vec::new(),
+                    in_sample_trials: 0,
+                    candidates: Vec::new(),
+                },
             },
-        })
+        )
         .collect()
 }
 
@@ -148,7 +150,9 @@ mod tests {
 
     fn run(mean_ret: f64, n: usize) -> Run {
         Run {
-            returns: (0..n).map(|i| mean_ret + 0.0005 * (i as f64 * 0.7).sin()).collect(),
+            returns: (0..n)
+                .map(|i| mean_ret + 0.0005 * (i as f64 * 0.7).sin())
+                .collect(),
             trace: Default::default(),
             confidences: Vec::new(),
             outcomes: Vec::new(),

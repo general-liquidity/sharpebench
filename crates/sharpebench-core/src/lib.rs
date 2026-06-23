@@ -44,13 +44,13 @@ pub use comparison_sets::{
 };
 pub use composite::{rank, score_agent, AgentSubmission, CompositeScore, Run, ScoreConfig};
 pub use correlation::{crowdedness, Crowdedness};
-pub use rediscovery::{
-    classify_rediscovery, cosine_similarity, RediscoveryVerdict, DEFAULT_REDISCOVERY_THRESHOLD,
-};
 pub use econrationality::{assess_rationality, DominanceChoice, EconRationalityReport};
 pub use oos::{oos_decay, OosDecayReport};
 pub use percentile::percentile_of;
 pub use process::{ProcessEvent, ProcessScore, Trace};
+pub use rediscovery::{
+    classify_rediscovery, cosine_similarity, RediscoveryVerdict, DEFAULT_REDISCOVERY_THRESHOLD,
+};
 pub use rolling::{rolling_sharpe, RollingSharpe};
 pub use selection::{selection_robustness, SelectionRobustness};
 pub use selfaudit::{run_self_audit, SelfAuditReport};

@@ -456,9 +456,7 @@ fn run_capture(args: &[String], json: bool) -> ExitCode {
         }
     };
     let (_sub, traj) =
-        sharpebench_harness::run_agent_capture(agent_id, &data, &windows, &seeds, costs, || {
-            make()
-        });
+        sharpebench_harness::run_agent_capture(agent_id, &data, &windows, &seeds, costs, || make());
     let payload = match serde_json::to_string_pretty(&traj) {
         Ok(p) => p,
         Err(e) => {

@@ -192,7 +192,9 @@ pub fn run_self_audit() -> SelfAuditReport {
             let mut runs: Vec<Run> = (0..5)
                 .map(|_| {
                     let mut r = run_with(
-                        (0..60).map(|i| 0.05 + 0.002 * (i as f64 * 0.7).sin()).collect(),
+                        (0..60)
+                            .map(|i| 0.05 + 0.002 * (i as f64 * 0.7).sin())
+                            .collect(),
                         Trace::default(),
                     );
                     // Inflated self-reported conviction on every step.
@@ -216,8 +218,9 @@ pub fn run_self_audit() -> SelfAuditReport {
             && cheat_s.raw_mean_return > honest_s.raw_mean_return;
         cases.push(AuditCase {
             name: "cheat-reward-hacker".into(),
-            attack: "top the field on raw return by bypassing the risk gate and inflating confidence"
-                .into(),
+            attack:
+                "top the field on raw return by bypassing the risk gate and inflating confidence"
+                    .into(),
             defended,
             detail: format!(
                 "cheat raw={:.4} eligible={} process_ok={}; honest ranks #1={}",

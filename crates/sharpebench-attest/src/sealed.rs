@@ -200,7 +200,7 @@ mod tests {
         let c = commit_dataset(&data, "canary");
         assert_eq!(c.len, data.len());
         assert_eq!(c.content_hash.len(), 64); // SHA-256 hex
-        // Anyone can later verify the revealed plaintext against the public hash.
+                                              // Anyone can later verify the revealed plaintext against the public hash.
         assert!(verify_dataset(&data, &c));
     }
 

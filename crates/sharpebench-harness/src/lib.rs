@@ -470,7 +470,10 @@ mod tests {
     fn cheat_agent_is_demoted_and_never_ranks() {
         use sharpebench_core::{rank, ScoreConfig};
         let data = Dataset::synthetic(5, 120, 20_260_621);
-        let windows = [Window { start: 20, end: 120 }];
+        let windows = [Window {
+            start: 20,
+            end: 120,
+        }];
         let seeds: Vec<u64> = (0..5).collect();
         let costs = CostModel::default();
 
@@ -593,8 +596,7 @@ mod tests {
 
         // Persist + reload the artifact (the verifier ingests JSON off disk).
         let json = serde_json::to_string(&traj).unwrap();
-        let reloaded: sharpebench_protocol::AgentTrajectory =
-            serde_json::from_str(&json).unwrap();
+        let reloaded: sharpebench_protocol::AgentTrajectory = serde_json::from_str(&json).unwrap();
 
         // Separate verifier: replay the raw decisions into a fresh submission and
         // score it. The recomputed score must match the direct-run score exactly.
@@ -652,7 +654,9 @@ mod tests {
         // recovered, genuine runs — no failing run is injected for the crash.
         let skilled = |_w: usize, _seed: u64| {
             Ok(sharpebench_core::Run {
-                returns: (0..60).map(|i| 0.002 + 0.0005 * (i as f64 * 0.7).sin()).collect(),
+                returns: (0..60)
+                    .map(|i| 0.002 + 0.0005 * (i as f64 * 0.7).sin())
+                    .collect(),
                 trace: Default::default(),
                 confidences: Vec::new(),
                 outcomes: Vec::new(),
@@ -689,7 +693,9 @@ mod tests {
                 Err(FailureKind::TransportError)
             } else {
                 Ok(sharpebench_core::Run {
-                    returns: (0..60).map(|i| 0.002 + 0.0005 * (i as f64 * 0.7).sin()).collect(),
+                    returns: (0..60)
+                        .map(|i| 0.002 + 0.0005 * (i as f64 * 0.7).sin())
+                        .collect(),
                     trace: Default::default(),
                     confidences: Vec::new(),
                     outcomes: Vec::new(),
@@ -711,7 +717,9 @@ mod tests {
                 Err(FailureKind::AgentProtocolViolation)
             } else {
                 Ok(sharpebench_core::Run {
-                    returns: (0..60).map(|i| 0.002 + 0.0005 * (i as f64 * 0.7).sin()).collect(),
+                    returns: (0..60)
+                        .map(|i| 0.002 + 0.0005 * (i as f64 * 0.7).sin())
+                        .collect(),
                     trace: Default::default(),
                     confidences: Vec::new(),
                     outcomes: Vec::new(),
@@ -721,7 +729,11 @@ mod tests {
         });
         assert_eq!(res.failures.agent_faults(), 1);
         assert_eq!(res.failures.runtime_failures(), 0);
-        assert_eq!(res.submission.runs.len(), 3, "the fault becomes a sentinel run");
+        assert_eq!(
+            res.submission.runs.len(),
+            3,
+            "the fault becomes a sentinel run"
+        );
 
         use sharpebench_core::{score_agent, ScoreConfig};
         let s = score_agent(&res.submission, &ScoreConfig::default());
