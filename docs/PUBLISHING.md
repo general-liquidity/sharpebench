@@ -59,3 +59,20 @@ scripts/publish.sh --execute    # real, ordered publish to crates.io
 - To automate later: add `CARGO_REGISTRY_TOKEN` as a repo secret and extend
   `release.yml` to run the ordered publish on tag. Do the **first** publish by hand
   — names are permanent, so verify everything once before automating.
+
+## 5. Cutting a release with cargo-release (preferred)
+
+`cargo-release` automates §3 plus the version bump and the inter-crate `version`
+pin rewrite — the one easy-to-miss step. Config lives in `release.toml`.
+
+```bash
+cargo install cargo-release            # once
+# verify green first — cargo-release does not run tests:
+cargo test --workspace && cargo clippy --workspace --all-targets && cargo deny check
+cargo release patch                    # DRY RUN: prints the bump, dep rewrites, publish order, tag
+cargo release patch --execute          # 0.0.1 -> 0.0.2: bump, rewrite pins, ordered publish, tag v0.0.2, push
+```
+
+`cargo login <token>` once (or set `CARGO_REGISTRY_TOKEN`) before `--execute`. The
+pushed `v0.0.2` tag triggers the signed musl binary build in `release.yml`. The
+manual `scripts/publish.sh` flow in §3 remains as a fallback.

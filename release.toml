@@ -1,0 +1,37 @@
+# SharpeBench release pipeline (cargo-release). See docs/PUBLISHING.md §5.
+#
+# One command cuts a full release: bump the shared workspace version, rewrite the
+# inter-crate `version = "x"` pins, publish every sharpebench-* crate in
+# dependency order, tag `vX.Y.Z`, and push the commit + tag (which triggers the
+# signed-binary build in .github/workflows/release.yml).
+#
+# Always run the green checks first — cargo-release will not:
+#   cargo test --workspace && cargo clippy --workspace --all-targets && cargo deny check
+#
+# Then:
+#   cargo release patch              # DRY RUN — prints exactly what would happen
+#   cargo release patch --execute    # 0.0.1 -> 0.0.2: bump, dep-rewrite, ordered publish, tag, push
+#
+# Do NOT release until all tier work is in. The version stays 0.0.1 on git until then.
+
+# Every sharpebench-* crate moves on a single version (matches `version.workspace = true`).
+shared-version = true
+
+# One release commit and one tag for the whole workspace, not one per crate.
+consolidate-commits = true
+
+# Rewrite each dependent crate's `version = "x"` requirement to the new version on
+# bump. This automates the one manual gotcha (those pins are NOT workspace-inherited).
+dependent-version = "upgrade"
+
+# A single workspace tag `vX.Y.Z` — this is what release.yml builds the binary on.
+tag-name = "v{{version}}"
+tag-message = "SharpeBench v{{version}}"
+pre-release-commit-message = "release: v{{version}}"
+
+# Publish to crates.io and push the release commit + tag.
+publish = true
+push = true
+
+# Guard rail: only ever release from main.
+allow-branch = ["main"]

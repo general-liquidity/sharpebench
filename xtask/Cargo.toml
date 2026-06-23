@@ -17,3 +17,8 @@ sha2 = "0.10"
 
 [lints]
 workspace = true
+
+[package.metadata.release]
+# Internal-only (publish = false): cargo-release ignores it; it inherits the
+# bumped workspace version via `version.workspace = true`.
+release = false
