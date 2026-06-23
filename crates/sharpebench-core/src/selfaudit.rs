@@ -229,6 +229,65 @@ pub fn run_self_audit() -> SelfAuditReport {
         });
     }
 
+    // 7) Tail-selling: an agent posts the smoothest, highest linear returns in the
+    //    field by running a NAKED short-gamma options book — selling tail risk. The
+    //    Greeks classifier flags the exposure and the harness records it as an
+    //    unhedged TailSellingExposure (block severity). The agent must rank below an
+    //    honest skilled agent and be ineligible — a linear-return Sharpe alone would
+    //    crown it.
+    {
+        use crate::greeks::{classify_greeks_risk, portfolio_greeks, GreeksPolicy, Leg};
+        // A naked short call is net-short gamma; confirm the classifier sees it.
+        let book = [Leg {
+            strike: 100.0,
+            t_years: 1.0,
+            is_call: true,
+            qty: -1.0,
+        }];
+        let risk = classify_greeks_risk(
+            &portfolio_greeks(&book, 100.0, 0.05, 0.2),
+            &GreeksPolicy::default(),
+        );
+        let vol_seller = {
+            let mut runs: Vec<Run> = (0..5)
+                .map(|_| {
+                    run_with(
+                        (0..60)
+                            .map(|i| 0.05 + 0.001 * (i as f64 * 0.7).sin())
+                            .collect(),
+                        Trace::default(),
+                    )
+                })
+                .collect();
+            if risk.naked_short_gamma {
+                runs[0]
+                    .trace
+                    .events
+                    .push(ProcessEvent::TailSellingExposure { hedged: false });
+            }
+            agent("vol-seller", runs)
+        };
+        let honest = agent("honest", (0..5).map(|_| skilled_run(60)).collect());
+        let board = rank(&[vol_seller, honest], &cfg);
+        let vs = board.iter().find(|s| s.agent_id == "vol-seller").unwrap();
+        let hs = board.iter().find(|s| s.agent_id == "honest").unwrap();
+        let defended = board[0].agent_id == "honest"
+            && risk.naked_short_gamma
+            && !vs.rank_eligible
+            && !vs.process_ok
+            && vs.raw_mean_return > hs.raw_mean_return;
+        cases.push(AuditCase {
+            name: "tail-seller".into(),
+            attack: "post the smoothest, highest linear returns by selling tail risk (naked short gamma)"
+                .into(),
+            defended,
+            detail: format!(
+                "vol-seller raw={:.4} eligible={} short_gamma={}; honest ranks #1={}",
+                vs.raw_mean_return, vs.rank_eligible, risk.naked_short_gamma, defended
+            ),
+        });
+    }
+
     let all_defended = cases.iter().all(|c| c.defended);
     SelfAuditReport {
         cases,

@@ -28,6 +28,38 @@ pub fn std_dev(xs: &[f64]) -> f64 {
     variance(xs).sqrt()
 }
 
+/// Downside deviation: the root-mean-square of shortfalls below `target` (the
+/// minimum-acceptable return). Upside dispersion is ignored — only returns under
+/// the target are penalized. The denominator is the full count `n` (the standard
+/// "target downside deviation" convention), so a track with rare-but-deep losses
+/// is not flattered by dividing through only its losing periods. 0.0 for fewer
+/// than 2 points or no shortfall.
+pub fn downside_deviation(xs: &[f64], target: f64) -> f64 {
+    if xs.len() < 2 {
+        return 0.0;
+    }
+    let ss: f64 = xs
+        .iter()
+        .map(|&x| {
+            let d = (x - target).min(0.0);
+            d * d
+        })
+        .sum();
+    (ss / xs.len() as f64).sqrt()
+}
+
+/// Sortino ratio: excess mean return over `target` per unit of [`downside_deviation`].
+/// Unlike the Sharpe, it does not punish upside volatility, so it rewards skill
+/// that arrives without downside churn. `None` when there is no downside (the ratio
+/// is undefined).
+pub fn sortino_ratio(xs: &[f64], target: f64) -> Option<f64> {
+    let dd = downside_deviation(xs, target);
+    if dd == 0.0 {
+        return None;
+    }
+    Some((mean(xs) - target) / dd)
+}
+
 /// Population skewness (third standardized moment). 0.0 if undefined.
 pub fn skewness(xs: &[f64]) -> f64 {
     let n = xs.len();
@@ -146,6 +178,45 @@ mod tests {
         let xs = [1.0, 2.0, 3.0, 4.0, 5.0];
         assert!(approx(mean(&xs), 3.0, 1e-12));
         assert!(approx(std_dev(&xs), 1.5811388300841898, 1e-9));
+    }
+
+    #[test]
+    fn downside_deviation_and_sortino() {
+        // xs = [0.01, -0.02, 0.03, -0.04], target 0:
+        //   shortfalls² = 0.02² + 0.04² = 0.0004 + 0.0016 = 0.002; /4 = 0.0005
+        //   downside_deviation = sqrt(0.0005) = 0.0223607
+        //   mean = -0.005 → sortino = -0.005 / 0.0223607 = -0.223607
+        let xs = [0.01, -0.02, 0.03, -0.04];
+        assert!(approx(
+            downside_deviation(&xs, 0.0),
+            0.0223606797749979,
+            1e-12
+        ));
+        assert!(approx(
+            sortino_ratio(&xs, 0.0).unwrap(),
+            -0.2236067977,
+            1e-9
+        ));
+    }
+
+    #[test]
+    fn sortino_is_none_without_downside() {
+        // All returns at or above target → no shortfall → undefined ratio.
+        assert_eq!(downside_deviation(&[0.01, 0.02, 0.03], 0.0), 0.0);
+        assert!(sortino_ratio(&[0.01, 0.02, 0.03], 0.0).is_none());
+    }
+
+    #[test]
+    fn sortino_ignores_upside_volatility() {
+        // Two tracks, same downside, but the second has wild *upside* swings. The
+        // Sortino is identical (upside is not punished); the Sharpe would differ.
+        let calm = [0.01, -0.01, 0.01, -0.01];
+        let spiky = [0.50, -0.01, 0.40, -0.01];
+        assert!(approx(
+            downside_deviation(&calm, 0.0),
+            downside_deviation(&spiky, 0.0),
+            1e-12
+        ));
     }
 
     #[test]

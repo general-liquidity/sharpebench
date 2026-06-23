@@ -241,6 +241,13 @@ pub struct CompositeScore {
     /// the edge is everywhere; low = the deflated edge lives in a few lucky
     /// windows. `None` when the track is too short.
     pub rolling_frac_positive: Option<f64>,
+    /// Sortino ratio over the pooled track (excess mean return per unit of
+    /// *downside* deviation, MAR = 0): rewards an edge that doesn't arrive with
+    /// downside churn. Reported, never the rank key. `None` with no downside.
+    pub sortino: Option<f64>,
+    /// Downside deviation (RMS of below-target returns) — the denominator of
+    /// `sortino`, reported so the figure is legible.
+    pub downside_deviation: f64,
     /// Budget-normalized Deflated Sharpe: `deflated_sharpe / cost` — luck-robust
     /// skill per unit of compute/token spend. `None` when cost is unreported.
     pub dsr_per_cost: Option<f64>,
@@ -383,6 +390,11 @@ pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
     let rolling_min_sharpe = rolling.map(|r| r.min_sharpe);
     let rolling_frac_positive = rolling.map(|r| r.frac_positive);
 
+    // Downside-risk view: the Sortino rewards an edge that doesn't arrive with
+    // downside volatility (reported alongside the Sharpe family, never a gate).
+    let sortino = crate::stats::sortino_ratio(&pooled, 0.0);
+    let downside_deviation = crate::stats::downside_deviation(&pooled, 0.0);
+
     // Budget-normalized Deflated Sharpe: luck-robust skill per unit of spend.
     let dsr_per_cost = if cost > 0.0 { Some(dsr / cost) } else { None };
 
@@ -435,6 +447,8 @@ pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
         rank_ordinal: 0,
         rolling_min_sharpe,
         rolling_frac_positive,
+        sortino,
+        downside_deviation,
         dsr_per_cost,
         process_floored,
         realized_floored_return,

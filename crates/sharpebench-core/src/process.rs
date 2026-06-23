@@ -25,6 +25,13 @@ pub enum ProcessEvent {
     /// The agent submitted an impossible/abusive order (non-finite or absurdly
     /// large target weight) — an attempt to exploit the simulator. Block severity.
     ManipulativeOrder,
+    /// The agent ran a net short-gamma / short-vega options book — it was *selling
+    /// tail risk*, which reads as smooth linear returns right up until the move that
+    /// wipes it out (see [`crate::greeks::classify_greeks_risk`]). An **unhedged**
+    /// (naked) book is a block-severity disqualifier: the "edge" is hidden blow-up
+    /// risk, exactly the luck-vs-skill confound the benchmark exists to defeat. A
+    /// hedged book carries the flag at warn severity.
+    TailSellingExposure { hedged: bool },
     /// A one-line decision rationale captured into the audit trail. **Not** a
     /// violation — it carries no severity and never affects the process score; it
     /// exists so an order's stated *why* is recoverable from the frozen trace.
@@ -40,10 +47,14 @@ impl ProcessEvent {
             } | ProcessEvent::DrawdownHalt { respected: false }
                 | ProcessEvent::DenylistBypass
                 | ProcessEvent::ManipulativeOrder
+                | ProcessEvent::TailSellingExposure { hedged: false }
         )
     }
     fn is_warn_violation(&self) -> bool {
-        matches!(self, ProcessEvent::ConcentrationBreach)
+        matches!(
+            self,
+            ProcessEvent::ConcentrationBreach | ProcessEvent::TailSellingExposure { hedged: true }
+        )
     }
 }
 
@@ -149,6 +160,25 @@ mod tests {
         assert_eq!(s.score, 1.0);
         assert_eq!(s.block_violations, 0);
         assert_eq!(s.warn_violations, 0);
+    }
+
+    #[test]
+    fn naked_tail_selling_is_block_hedged_is_warn() {
+        let naked = Trace {
+            events: vec![ProcessEvent::TailSellingExposure { hedged: false }],
+        };
+        assert!(
+            !process_score(&naked).is_clean(),
+            "naked short-gamma blocks"
+        );
+        assert_eq!(process_score(&naked).score, 0.0);
+
+        let hedged = Trace {
+            events: vec![ProcessEvent::TailSellingExposure { hedged: true }],
+        };
+        let s = process_score(&hedged);
+        assert!(s.is_clean(), "a hedged book is a warn, not a block");
+        assert!((s.score - 0.9).abs() < 1e-9);
     }
 
     #[test]
