@@ -30,7 +30,7 @@
     "prepublishOnly": "tsc"
   },
   "dependencies": {
-    "@general-liquidity/sharpebench": "file:..",
+    "@general-liquidity/sharpebench": "^0.0.5",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "zod": "^3.23.0"
   },
