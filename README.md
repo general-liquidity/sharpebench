@@ -30,7 +30,9 @@ SharpeBench adds, as **ranking gates**, the things none of them have:
 
 Raw return is reported but is **never** the rank key. It also *reports* (without gating) alpha/beta attribution, confidence calibration, edge half-life, out-of-sample decay, turnover, Pareto-optimality, conviction-weighted return, cost-efficiency (cost-normalized DSR), rolling-window worst-case Sharpe, selection robustness (best-vs-median DSR across an agent's candidate set), and economic-rationality — so a high score is legible, not a black box.
 
-**Contamination defenses.** Comparison is restricted to the **shared** instruments a set of agents actually traded (no winning by picking an easier universe), a rediscovery check flags a "novel" strategy that is really a cosine-near copy of a known one, and held-out datasets can be **sealed** (cryptographically committed, opened only at scoring) so they can't be trained on in advance.
+**Contamination defenses.** Comparison is restricted to the **shared** instruments a set of agents actually traded (no winning by picking an easier universe), a rediscovery check flags a "novel" strategy that is really a cosine-near copy of a known one, held-out datasets can be **sealed** (cryptographically committed, opened only at scoring) so they can't be trained on in advance, and a **canary** tripwire embeds a do-not-train marker in each scenario so a model that later reproduces it is provably contaminated.
+
+**Input-neutrality & beyond-linear scoring.** A briefing-neutrality audit lints the *shared input packet* for salience bias — per-asset attention caps, required counterbalancing uncertainties, no performance-sorted return tables — the one place a leading frame biases every agent at once. Two additive scoring contracts extend past linear spot: a portfolio-**allocation** path that scores a target-weight vector's validity and L1 turnover/churn, and an **options Greeks** layer (Black-Scholes pricing + position delta/gamma/theta/vega) that flags short-gamma / short-vega tail-selling a return-only Sharpe is blind to.
 
 > Other leaderboards rank the luckiest run over one quarter. SharpeBench ranks the skill that survives deflation — and proves it forward.
 
@@ -65,6 +67,10 @@ The example field includes a *skilled* agent, a *lucky* agent with a **higher ra
 | `verify <board.json> <key>` | Verify a signed board's chain. |
 | `capture <agent> <out.json> [--data <csv>]` | Run an agent and capture its raw per-seed×window **decision trajectory** to JSON. |
 | `verify-trajectory <traj.json> [--data <csv>]` | Replay a captured trajectory through the sim and recompute its score from the raw decisions — a forged trajectory recomputes to a different number. |
+| `audit-briefing <briefing.json>` | Lint a shared briefing artifact for input-side salience bias (attention caps, counterbalance, table ordering). |
+| `canary <seed>` | Derive a deterministic do-not-train contamination tripwire token for a held-out scenario. |
+| `score-allocation <alloc.json>` | Score a target-weight-vector trajectory: weight validity + L1 turnover/churn. |
+| `greeks <spot> <strike> <t> <r> <vol> <call\|put>` | Black-Scholes price + position Greeks + short-gamma/vega tail-risk classification. |
 
 Add `--json` to any command for machine-readable output (structured JSON instead of the human table) — for agents, CI, or a leaderboard front-end.
 
@@ -113,11 +119,11 @@ A Rust [Cargo workspace](Cargo.toml) (modular, à la Paradigm's Rust OSS — reu
 
 | Crate | Role |
 |---|---|
-| **`sharpebench-core`** | the deterministic scoring kernel — deflated Sharpe / PSR (incl. in-sample-trial deflation) / pass^k / bootstrap + Reality Check + SPA + step-down significance / process + cost-normalized floor / rolling-Sharpe / decay / calibration / attribution / roles / OOS-decay / economic-rationality / selection-robustness / benchmark-comparison-sets / rediscovery / self-audit / composite. No I/O, no ambient RNG, fixed float reduction → byte-identical scores forever. |
+| **`sharpebench-core`** | the deterministic scoring kernel — deflated Sharpe / PSR (incl. in-sample-trial deflation) / pass^k / bootstrap + Reality Check + SPA + step-down significance / process + cost-normalized floor / rolling-Sharpe / decay / calibration / attribution / roles / OOS-decay / economic-rationality / selection-robustness / benchmark-comparison-sets / rediscovery / briefing-neutrality audit / allocation-vector + turnover / options Black-Scholes + Greeks-exposure / self-audit / composite. No I/O, no ambient RNG, fixed float reduction → byte-identical scores forever. |
 | **`sharpebench-protocol`** | the language-agnostic agent ⇄ harness JSON protocol (any-language agents compete), including the captured-trajectory artifact and per-order decision rationale. |
 | **`sharpebench-sim`** | point-in-time simulator (look-ahead is structurally impossible) with fees, seeded slippage, square-root market impact, financing, liquidity/partial-fill caps, dividends, selectable execution-cost profiles (none / typical / worst-case) + decision delay, adversarial stress paths, trajectory capture/replay, and reference + team + random agents. |
 | **`sharpebench-harness`** | run orchestration across seeds × windows; team harness + role attribution; luck-floor and economic-rationality producers; a runtime-vs-agent **failure taxonomy** (a crashed container is retried, never charged against pass^k; an agent fault becomes a failing sentinel run). |
-| **`sharpebench-attest`** | forward-attestation: SHA-256 pre-registration commitments + HMAC tamper-evident signed result chains + an integer-epoch time-lock registry + sealed held-out datasets (commit / seal / open / verify). |
+| **`sharpebench-attest`** | forward-attestation: SHA-256 pre-registration commitments + HMAC tamper-evident signed result chains + an integer-epoch time-lock registry + sealed held-out datasets (commit / seal / open / verify) + a canary contamination tripwire (post-hoc training-leak detection). |
 | **`sharpebench-wasm`** | WASM bindings so Gordon (TypeScript) runs the *identical* scorer — internal eval and public benchmark can't drift. |
 | `sharpebench-leaderboard` · `sharpebench-cli` | leaderboard render / sign / persist, incl. **self-describing** boards (the run-spec — dataset hash, costs, config, seeds — is bound into the signed chain) · the `sharpebench` CLI. |
 
