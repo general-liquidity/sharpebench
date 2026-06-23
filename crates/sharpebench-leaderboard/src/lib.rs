@@ -97,6 +97,8 @@ mod tests {
                 outcomes: Vec::new(),
                 cost: 0.0,
             }],
+            in_sample_trials: 0,
+            candidates: Vec::new(),
         }
     }
 

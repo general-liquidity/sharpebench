@@ -16,7 +16,9 @@ use crate::calibration::brier_score;
 use crate::decay::edge_half_life;
 use crate::deflated_sharpe::{deflated_sharpe_ratio, probabilistic_sharpe_ratio};
 use crate::pass_k::{pass_k, PassMode};
+use crate::percentile::percentile_of;
 use crate::process::{process_score, ProcessEvent, Trace};
+use crate::selection::{selection_robustness, SelectionRobustness};
 use crate::significance::bootstrap_pvalue;
 use crate::stats::mean;
 
@@ -42,6 +44,16 @@ pub struct Run {
 pub struct AgentSubmission {
     pub agent_id: String,
     pub runs: Vec<Run>,
+    /// Number of in-sample backtests/configs the agent searched before submitting.
+    /// Folded into the deflation trial footprint so over-searching faces a higher
+    /// bar — records data-snooping up front. 0 = undeclared.
+    #[serde(default)]
+    pub in_sample_trials: u32,
+    /// Optional alternative candidate strategies the agent considered, each a
+    /// pooled return stream. Used for selection-robustness reporting (best vs
+    /// median candidate). Empty = not reported.
+    #[serde(default)]
+    pub candidates: Vec<Vec<f64>>,
 }
 
 /// What to rank eligible agents by.
@@ -109,6 +121,10 @@ pub struct ScoreConfig {
     /// What eligible agents are ranked by (default: deflated Sharpe).
     #[serde(default)]
     pub rank_key: RankKey,
+    /// Frozen reference population of Deflated-Sharpe values (e.g. real fund or
+    /// human track records) for percentile reporting. Empty = no percentile.
+    #[serde(default)]
+    pub reference_dsr_population: Vec<f64>,
 }
 
 impl Default for ScoreConfig {
@@ -124,6 +140,7 @@ impl Default for ScoreConfig {
             block_prob: 0.1,
             mandate: Mandate::default(),
             rank_key: RankKey::default(),
+            reference_dsr_population: Vec::new(),
         }
     }
 }
@@ -189,6 +206,22 @@ pub struct CompositeScore {
     /// low/negative = diversifying. Reported, not gating; filled by [`rank`].
     /// `None` from `score_agent` alone (no field context) or with < 2 agents.
     pub field_crowdedness: Option<f64>,
+    /// In-sample search budget the agent declared (configs tried before submission).
+    pub in_sample_trials: u32,
+    /// Effective deflation trial footprint = `cfg.n_trials + in_sample_trials`; the
+    /// Deflated Sharpe is computed against this, so over-searching raises the bar.
+    pub effective_n_trials: u32,
+    /// Percentile (0..=100) of the Deflated Sharpe within the frozen reference
+    /// population. `None` when no reference population is configured.
+    pub dsr_percentile: Option<f64>,
+    /// Deflated Sharpe of the median submitted candidate. `None` if none reported.
+    pub selection_median_dsr: Option<f64>,
+    /// Best-minus-median candidate Deflated Sharpe — the selection-luck gap.
+    /// `None` if no candidates were reported.
+    pub selection_gap: Option<f64>,
+    /// 1-based ordinal position among rank-eligible agents (scale-invariant rank
+    /// mode). 0 = ineligible or scored outside a field. Filled by [`rank`].
+    pub rank_ordinal: usize,
 }
 
 /// Pareto dominance on (return↑, drawdown↓, turnover↓).
@@ -210,7 +243,11 @@ pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
         .collect();
 
     let psr = probabilistic_sharpe_ratio(&pooled, 0.0);
-    let dsr = deflated_sharpe_ratio(&pooled, cfg.n_trials, cfg.trials_sr_std);
+    // Fold the agent's declared in-sample search budget into the deflation trial
+    // footprint: an agent that tried 5000 configs to find this strategy faces a
+    // higher bar than one that tried none (front-end data-snooping control).
+    let effective_n_trials = cfg.n_trials.saturating_add(sub.in_sample_trials);
+    let dsr = deflated_sharpe_ratio(&pooled, effective_n_trials, cfg.trials_sr_std);
 
     // pass^k: every run must individually clear the per-run PSR bar.
     let per_run: Vec<bool> = sub
@@ -292,6 +329,25 @@ pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
         None
     };
 
+    // Legibility: percentile of the Deflated Sharpe within the frozen reference
+    // population (e.g. real fund track records). None when unconfigured.
+    let dsr_percentile = if cfg.reference_dsr_population.is_empty() {
+        None
+    } else {
+        Some(percentile_of(dsr, &cfg.reference_dsr_population))
+    };
+
+    // Selection-axis luck: best vs median Deflated Sharpe of the agent's candidate
+    // strategies, deflated against the same effective trial footprint. A large gap
+    // means the headline result is a lucky pick, not a robust family of edges.
+    let (selection_median_dsr, selection_gap) = if sub.candidates.is_empty() {
+        (None, None)
+    } else {
+        let sr: SelectionRobustness =
+            selection_robustness(&sub.candidates, effective_n_trials, cfg.trials_sr_std);
+        (Some(sr.median_dsr), Some(sr.selection_gap))
+    };
+
     let rank_eligible =
         dsr >= cfg.dsr_bar && passed_k && process_ok && bootstrap_p < cfg.alpha && mandate_ok;
     let composite = if rank_eligible { dsr } else { 0.0 };
@@ -322,6 +378,12 @@ pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
         field_spa_p: 1.0,
         field_spa_consistent_p: 1.0,
         field_crowdedness: None,
+        in_sample_trials: sub.in_sample_trials,
+        effective_n_trials,
+        dsr_percentile,
+        selection_median_dsr,
+        selection_gap,
+        rank_ordinal: 0,
     }
 }
 
@@ -456,6 +518,16 @@ pub fn rank(subs: &[AgentSubmission], cfg: &ScoreConfig) -> Vec<CompositeScore> 
                     .unwrap_or(std::cmp::Ordering::Equal),
             )
     });
+
+    // 1-based ordinal rank among eligible agents (the scale-invariant rank mode,
+    // assigned in final sorted order). Ineligible agents keep ordinal 0.
+    let mut ord = 0usize;
+    for cs in scores.iter_mut() {
+        if cs.rank_eligible {
+            ord += 1;
+            cs.rank_ordinal = ord;
+        }
+    }
     scores
 }
 
@@ -482,6 +554,8 @@ mod tests {
         AgentSubmission {
             agent_id: id.to_string(),
             runs,
+            in_sample_trials: 0,
+            candidates: Vec::new(),
         }
     }
 
@@ -590,5 +664,52 @@ mod tests {
             &ScoreConfig::default(),
         );
         assert!(free.return_per_cost.is_none());
+    }
+
+    #[test]
+    fn in_sample_search_raises_the_deflation_bar() {
+        let runs: Vec<Run> = (0..5).map(|_| run(0.002, 0.0005, 60)).collect();
+        let base = score_agent(&agent("base", runs.clone()), &ScoreConfig::default());
+        let mut over = agent("over", runs);
+        over.in_sample_trials = 5000;
+        let s = score_agent(&over, &ScoreConfig::default());
+        assert_eq!(s.effective_n_trials, 5050);
+        assert!(
+            s.deflated_sharpe <= base.deflated_sharpe,
+            "more in-sample search must not raise DSR ({} vs {})",
+            s.deflated_sharpe,
+            base.deflated_sharpe
+        );
+    }
+
+    #[test]
+    fn percentile_reported_only_with_reference() {
+        let none = score_agent(
+            &agent("p", (0..5).map(|_| run(0.002, 0.0005, 60)).collect()),
+            &ScoreConfig::default(),
+        );
+        assert!(none.dsr_percentile.is_none());
+        let cfg = ScoreConfig {
+            reference_dsr_population: vec![0.0, 0.3, 0.6, 0.9],
+            ..ScoreConfig::default()
+        };
+        let some = score_agent(
+            &agent("p", (0..5).map(|_| run(0.002, 0.0005, 60)).collect()),
+            &cfg,
+        );
+        assert!(some.dsr_percentile.is_some());
+    }
+
+    #[test]
+    fn rank_ordinal_is_one_based_among_eligible() {
+        let skilled = agent("skilled", (0..5).map(|_| run(0.002, 0.0005, 60)).collect());
+        let lucky = {
+            let mut runs = vec![run(0.02, 0.002, 60)];
+            runs.extend((0..4).map(|_| run(0.0, 0.003, 60)));
+            agent("lucky", runs)
+        };
+        let board = rank(&[lucky, skilled], &ScoreConfig::default());
+        assert_eq!(board[0].rank_ordinal, 1, "leader is ordinal 1");
+        assert_eq!(board[1].rank_ordinal, 0, "ineligible gets ordinal 0");
     }
 }

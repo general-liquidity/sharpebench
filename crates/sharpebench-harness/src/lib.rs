@@ -32,6 +32,8 @@ where
     AgentSubmission {
         agent_id: agent_id.to_string(),
         runs,
+        in_sample_trials: 0,
+        candidates: Vec::new(),
     }
 }
 
@@ -59,6 +61,8 @@ where
     AgentSubmission {
         agent_id: agent_id.to_string(),
         runs,
+        in_sample_trials: 0,
+        candidates: Vec::new(),
     }
 }
 
@@ -246,6 +250,8 @@ pub fn run_team(
     let team = AgentSubmission {
         agent_id: team_id.to_string(),
         runs,
+        in_sample_trials: 0,
+        candidates: Vec::new(),
     };
 
     let role_returns = members

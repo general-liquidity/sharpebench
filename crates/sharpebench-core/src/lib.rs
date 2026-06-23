@@ -27,8 +27,10 @@ pub mod deflated_sharpe;
 pub mod econrationality;
 pub mod oos;
 pub mod pass_k;
+pub mod percentile;
 pub mod process;
 pub mod roles;
+pub mod selection;
 pub mod selfaudit;
 pub mod significance;
 pub mod stats;
@@ -37,5 +39,7 @@ pub use composite::{rank, score_agent, AgentSubmission, CompositeScore, Run, Sco
 pub use correlation::{crowdedness, Crowdedness};
 pub use econrationality::{assess_rationality, DominanceChoice, EconRationalityReport};
 pub use oos::{oos_decay, OosDecayReport};
+pub use percentile::percentile_of;
 pub use process::{ProcessEvent, ProcessScore, Trace};
+pub use selection::{selection_robustness, SelectionRobustness};
 pub use selfaudit::{run_self_audit, SelfAuditReport};

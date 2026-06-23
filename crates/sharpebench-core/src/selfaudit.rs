@@ -58,6 +58,8 @@ fn agent(id: &str, runs: Vec<Run>) -> AgentSubmission {
     AgentSubmission {
         agent_id: id.to_string(),
         runs,
+        in_sample_trials: 0,
+        candidates: Vec::new(),
     }
 }
 
