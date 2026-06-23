@@ -1,0 +1,35 @@
+{
+  "name": "@generalliquidity/sharpebench-mcp",
+  "version": "0.0.3",
+  "description": "MCP server exposing the SharpeBench luck-robust scoring kernel as agent-callable tools (deflated Sharpe, pass^k, process discipline, briefing audit, options Greeks).",
+  "keywords": ["mcp", "model-context-protocol", "trading", "sharpebench", "benchmark", "ai-agents"],
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/general-liquidity/sharpebench.git",
+    "directory": "npm/mcp"
+  },
+  "type": "module",
+  "bin": {
+    "sharpebench-mcp": "dist/server.js"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test",
+    "start": "node dist/server.js",
+    "prepublishOnly": "tsc"
+  },
+  "dependencies": {
+    "@generalliquidity/sharpebench": "file:..",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
