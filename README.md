@@ -129,6 +129,13 @@ A Rust [Cargo workspace](Cargo.toml) (modular, à la Paradigm's Rust OSS — reu
 
 > Crates publish to crates.io as **`sharpebench-*`**; the binary crate is **`sharpebench`** (`cargo install sharpebench`).
 
+## Use from JavaScript & agents
+
+The identical Rust kernel ships compiled to WebAssembly, so you don't need Rust to score luck-robustly:
+
+- **npm** — [`@generalliquidity/sharpebench`](npm/): `npm i @generalliquidity/sharpebench`, then `score(submissions)`, `scoreAgent`, `selfAudit`, `greeks`, … with full TypeScript types. Pure, deterministic, no native add-on.
+- **MCP** — [`@generalliquidity/sharpebench-mcp`](npm/mcp/): an MCP server that exposes the kernel as agent-callable tools, so Claude (or any MCP client) can deflate a Sharpe / check pass^k / audit a briefing in its tool loop. Run via `npx -y @generalliquidity/sharpebench-mcp`.
+
 ## Governance
 
 Hosted by [General Liquidity](https://github.com/general-liquidity) to start, with a roadmap to neutral governance. Credibility comes from **forward-attestation + signed, independently-verifiable results** (`sharpebench-attest`), not from trust in the host — and Gordon (GL's agent) competes on the board like any other entrant.
