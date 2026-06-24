@@ -67,7 +67,7 @@ One kernel, scored identically across every surface — the internal eval and th
 | <img height="14" align="top" src="https://cdn.simpleicons.org/rust/DEA584" />&nbsp; **Rust crate** | `cargo add sharpebench-core` | The pure scoring kernel — deterministic, `#![forbid(unsafe_code)]`. |
 | <img height="14" align="top" src="https://cdn.simpleicons.org/gnubash/4EAA25" />&nbsp; **CLI** | `cargo install sharpebench` | `run` / `score` / `audit` / `sign` / `verify` / `greeks` / … |
 | <img height="14" align="top" src="https://cdn.simpleicons.org/npm/CB3837" />&nbsp; **npm** | `npm i @general-liquidity/sharpebench` | Typed JS/TS API over the WASM kernel — `score`, `greeks`, `selfAudit`. |
-| <img height="14" align="top" src="https://cdn.simpleicons.org/anthropic/D97757" />&nbsp; **MCP** | `npx -y @general-liquidity/sharpebench-mcp` | An [MCP](https://modelcontextprotocol.io) server — agents call the kernel as tools. |
+| <img height="14" align="top" src="https://cdn.simpleicons.org/modelcontextprotocol" />&nbsp; **MCP** | `npx -y @general-liquidity/sharpebench-mcp` | An [MCP](https://modelcontextprotocol.io) server — agents call the kernel as tools. |
 | <img height="14" align="top" src="https://cdn.simpleicons.org/webassembly/654FF0" />&nbsp; **WASM** | `sharpebench-wasm` | The wasm-bindgen bridge the npm package and Gordon (Bun) embed. |
 
 ```ts
@@ -169,7 +169,7 @@ sharpebench-core ── the deterministic scoring kernel (no I/O, no ambient RNG
 | <img height="14" align="top" src="https://cdn.simpleicons.org/npm/CB3837" />&nbsp; [npm](https://www.npmjs.com/package/@general-liquidity/sharpebench) | JS/TS distribution of the scoring kernel |
 | <img height="14" align="top" src="https://cdn.simpleicons.org/serde/000000" />&nbsp; serde | Deterministic JSON for every submission, board, and config |
 | <img height="14" align="top" src="https://cdn.simpleicons.org/githubactions/2088FF" />&nbsp; GitHub Actions | CI: fmt · clippy · tests · determinism · self-audit · docs · npm |
-| <img height="14" align="top" src="https://cdn.simpleicons.org/anthropic/D97757" />&nbsp; [MCP](https://modelcontextprotocol.io) | Agents call the kernel as tools |
+| <img height="14" align="top" src="https://cdn.simpleicons.org/modelcontextprotocol" />&nbsp; [MCP](https://modelcontextprotocol.io) | Agents call the kernel as tools |
 | cargo-deny | Supply-chain gate (advisories · bans · licenses · sources) |
 
 ## Methodology & references
