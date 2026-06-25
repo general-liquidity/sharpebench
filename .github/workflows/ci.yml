@@ -13,7 +13,7 @@ jobs:
     name: fmt · clippy · test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust (pinned via rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@stable
@@ -36,7 +36,7 @@ jobs:
     name: scores are reproducible
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - name: Same input → byte-identical leaderboard, twice
         run: |
@@ -48,7 +48,7 @@ jobs:
     name: benchmark self-audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - name: The scorer resists every known gaming attack
         run: cargo run -q -p sharpebench -- audit
@@ -57,7 +57,7 @@ jobs:
     name: cargo-deny (licenses · advisories · bans · sources)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check
@@ -66,7 +66,7 @@ jobs:
     name: docs build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Install mdBook
         run: |
           mkdir -p "$HOME/.local/bin"

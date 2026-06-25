@@ -16,7 +16,7 @@ jobs:
     name: static binary (musl)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install Rust + musl target
         # Pin to the rust-toolchain.toml channel (1.96.0) so the musl target lands
@@ -53,7 +53,7 @@ jobs:
     name: crates.io publish dry-run (kernel)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - name: Verify the scoring kernel packages cleanly
         run: cargo package -p sharpebench-core --locked || cargo package -p sharpebench-core
