@@ -1,15 +1,24 @@
 name: Release
 
-# Tag a release (e.g. `git tag v0.1.0 && git push --tags`) to build a signed-by-
-# checksum static binary and verify the scoring kernel is crates.io-publishable.
-# Real `cargo publish` is intentionally NOT run here — it needs a maintainer's
-# CARGO_REGISTRY_TOKEN; publish manually once this workflow is green.
+# Tokenless publishing via OIDC "Trusted Publishing". There are NO secrets to
+# store or rotate: each registry trusts THIS workflow directly, and GitHub mints a
+# short-lived identity per run. You configure the trusted publisher once on each
+# registry's website (see RELEASING.md), then publishing is just a tag.
+#
+# SAFE BY DEFAULT: the registry jobs are gated on a repository VARIABLE, so with
+# nothing configured this workflow publishes only the GitHub binary. Opt a registry
+# in by setting the var:
+#   PUBLISH_CRATES=true · PUBLISH_NPM=true
+# Then push a tag (e.g. `v0.0.6`) or run the workflow manually.
+
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: write # attach the static binary to the GitHub Release
+  id-token: write # the OIDC identity used for crates.io trusted publishing
 
 jobs:
   binary:
@@ -49,11 +58,78 @@ jobs:
             target/x86_64-unknown-linux-musl/release/sharpebench-x86_64-linux-musl
             target/x86_64-unknown-linux-musl/release/sharpebench-x86_64-linux-musl.sha256
 
-  publish-check:
-    name: crates.io publish dry-run (kernel)
+  crates:
+    name: crates.io (8 sharpebench-* crates)
+    if: ${{ vars.PUBLISH_CRATES == 'true' }}
     runs-on: ubuntu-latest
+    # A dedicated publishing environment (configure protection rules under
+    # Settings → Environments → crates). Must match the crates.io trusted-publisher
+    # config registered for EACH of the 8 crates.
+    environment: crates
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Verify the scoring kernel packages cleanly
-        run: cargo package -p sharpebench-core --locked || cargo package -p sharpebench-core
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96.0"
+      # Exchanges the GitHub OIDC identity for a short-lived crates.io token.
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+      # `--workspace` resolves the dependency order (core/protocol/attest → sim →
+      # leaderboard/wasm/harness → sharpebench) and waits for indexing between
+      # crates. publish=false members (xtask, reference-agent) are skipped.
+      # Already-published versions abort the run, so bump the version before tagging.
+      - name: Publish the workspace to crates.io
+        run: cargo publish --workspace --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
+  npm:
+    name: npm (@general-liquidity/sharpebench + -mcp)
+    if: ${{ vars.PUBLISH_NPM == 'true' }}
+    runs-on: ubuntu-latest
+    # Must match the npm trusted-publisher config for both packages.
+    environment: npm
+    steps:
+      - uses: actions/checkout@v6
+
+      # The npm package ships the compiled WASM kernel (npm/pkg), so build it first.
+      - name: Install Rust (pinned) + wasm target
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96.0"
+          targets: wasm32-unknown-unknown
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - name: Build the WASM kernel
+        run: wasm-pack build crates/sharpebench-wasm --target nodejs --out-dir ../../npm/pkg --out-name sharpebench
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      # npm trusted publishing (OIDC) needs npm >= 11.5; provenance is automatic.
+      - run: npm install -g npm@latest
+
+      - name: Publish @general-liquidity/sharpebench (skip if version exists)
+        working-directory: npm
+        run: |
+          npm install
+          npm run build
+          V=$(node -p "require('./package.json').version")
+          if npm view "@general-liquidity/sharpebench@$V" version >/dev/null 2>&1; then
+            echo "@general-liquidity/sharpebench@$V already published — skipping"
+          else
+            npm publish --access public
+          fi
+
+      - name: Publish @general-liquidity/sharpebench-mcp (skip if version exists)
+        working-directory: npm/mcp
+        run: |
+          npm install
+          npm run build
+          V=$(node -p "require('./package.json').version")
+          if npm view "@general-liquidity/sharpebench-mcp@$V" version >/dev/null 2>&1; then
+            echo "@general-liquidity/sharpebench-mcp@$V already published — skipping"
+          else
+            npm publish --access public
+          fi
