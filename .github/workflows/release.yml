@@ -43,7 +43,7 @@ jobs:
           cp sharpebench sharpebench-x86_64-linux-musl
 
       - name: Attach to the release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             target/x86_64-unknown-linux-musl/release/sharpebench-x86_64-linux-musl
