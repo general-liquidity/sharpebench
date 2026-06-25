@@ -28,7 +28,7 @@
   ],
   "scripts": {
     "build": "tsc",
-    "test": "node --test test/",
+    "test": "node --test \"test/**/*.test.js\"",
     "prepublishOnly": "tsc && node -e \"require('fs').rmSync('pkg/.gitignore',{force:true})\""
   },
   "devDependencies": {
