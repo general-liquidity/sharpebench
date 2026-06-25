@@ -21,8 +21,9 @@ and never reach crates.io.
 
 ### crates.io dependency order
 
-`cargo publish --workspace` resolves this order automatically (and waits for the
-index between crates), but the **first, name-claiming** publish must follow it by hand:
+CI publishes the crates one-by-one in this order (`cargo publish -p <crate>`, each
+waiting for the index before the next), skipping any already live at the release
+version. The **first, name-claiming** publish must follow the same order by hand:
 
 ```
 Tier0  sharpebench-core   sharpebench-protocol   sharpebench-attest   # no intra-deps
@@ -63,7 +64,9 @@ cargo publish -p sharpebench-harness
 cargo publish -p sharpebench          # the CLI binary crate (package name `sharpebench`)
 ```
 
-(Equivalently, a single `cargo publish --workspace` resolves the same order.) After
+(Avoid `cargo publish --workspace` for this — its publish planner can deadlock
+part-way through with "no packages ready to publish but N packages remain… awaiting
+confirmation", leaving some crates unpublished; publish per-crate as above.) After
 each crate is live, add its trusted publisher on crates.io; thereafter CI publishes
 tokenlessly. See [`docs/PUBLISHING.md`](docs/PUBLISHING.md) for the manual token
 flow / name-availability notes.

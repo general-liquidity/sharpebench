@@ -74,14 +74,30 @@ jobs:
       # Exchanges the GitHub OIDC identity for a short-lived crates.io token.
       - uses: rust-lang/crates-io-auth-action@v1
         id: auth
-      # `--workspace` resolves the dependency order (core/protocol/attest → sim →
-      # leaderboard/wasm/harness → sharpebench) and waits for indexing between
-      # crates. publish=false members (xtask, reference-agent) are skipped.
-      # Already-published versions abort the run, so bump the version before tagging.
-      - name: Publish the workspace to crates.io
-        run: cargo publish --workspace --locked
+      # Publish each crate bottom-up. `cargo publish -p` waits for the crate to index
+      # before returning, so the next crate's deps resolve. We do NOT use `cargo publish
+      # --workspace`: its publish planner can deadlock part-way ("no packages ready to
+      # publish but N packages remain… awaiting confirmation"), which left harness + cli
+      # unpublished on a prior run. The per-crate skip-if-published guard makes a re-run
+      # idempotent — it finishes only the crates still missing at this version.
+      - name: Publish the crates to crates.io (dependency order, idempotent)
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+        run: |
+          UA="sharpebench-release (general-liquidity)" # crates.io rejects requests without a User-Agent
+          V="$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
+          # leaves first → CLI last (sim/leaderboard/wasm depend on core/protocol/attest;
+          # harness on sim; sharpebench on all). publish=false members are simply omitted.
+          for c in sharpebench-core sharpebench-protocol sharpebench-attest \
+                   sharpebench-sim sharpebench-leaderboard sharpebench-wasm \
+                   sharpebench-harness sharpebench; do
+            if curl -s -A "$UA" "https://crates.io/api/v1/crates/$c/$V" | grep -q "\"num\":\"$V\""; then
+              echo "✓ $c@$V already on crates.io — skipping"
+            else
+              echo "→ publishing $c@$V"
+              cargo publish -p "$c" --locked
+            fi
+          done
 
   npm:
     name: npm (@general-liquidity/sharpebench + -mcp)
@@ -125,6 +141,16 @@ jobs:
       - name: Publish @general-liquidity/sharpebench-mcp (skip if version exists)
         working-directory: npm/mcp
         run: |
+          # mcp depends on @general-liquidity/sharpebench@^0.0.x. When this run just
+          # published that dep, the registry read-path lags a few seconds, so `npm install`
+          # here can fail ETARGET ("No matching version") before it propagates. Wait for it.
+          DEPV="$(node -p "require('../package.json').version")"
+          for i in $(seq 1 30); do
+            if npm view "@general-liquidity/sharpebench@$DEPV" version >/dev/null 2>&1; then
+              echo "dep @general-liquidity/sharpebench@$DEPV available"; break
+            fi
+            echo "waiting for @general-liquidity/sharpebench@$DEPV to propagate ($i)…"; sleep 5
+          done
           npm install
           npm run build
           V=$(node -p "require('./package.json').version")
