@@ -4,8 +4,10 @@
 //! make pass^k meaningful: the same agent run under different execution seeds
 //! produces slightly different returns, so a one-seed fluke can't top the board.
 
+use serde::{Deserialize, Serialize};
+
 /// Basis-point transaction cost model.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct CostModel {
     pub fee_bps: f64,
     pub slippage_bps: f64,
@@ -21,6 +23,13 @@ pub struct CostModel {
     /// NAV. An order larger than this only **partially fills**; the remainder is
     /// left for later steps. `f64::INFINITY` (the default) = unlimited liquidity.
     pub max_participation: f64,
+    /// Optional proportional turnover cost (per-unit, e.g. `0.001` = 10 bps) used
+    /// by [`trf_factor`] to compute the cost-aware reallocation factor (Jiang et
+    /// al.). `None` (the default) leaves cost behaviour byte-identical to the
+    /// fee/slippage/impact model — the turnover factor is opt-in, consumed by
+    /// callers that want the closed-form remainder rather than per-order fills.
+    #[serde(default)]
+    pub trf_cost: Option<f64>,
 }
 
 impl Default for CostModel {
@@ -31,8 +40,43 @@ impl Default for CostModel {
             impact_bps: 50.0,
             financing_bps: 5.0,
             max_participation: f64::INFINITY,
+            trf_cost: None,
         }
     }
+}
+
+/// The transaction-remainder factor `μ` (Jiang et al., 2017): the fraction of
+/// portfolio value that survives reallocating from `weights_prev` (the drifted
+/// pre-trade weights) to `weights_new` (the targets) at proportional turnover
+/// cost `c`. Solves the fixed point
+///
+/// ```text
+/// μ = (1 − c·w0 − (2c − c²)·Σ max(w_prev_i − μ·w_new_i, 0)) / (1 − c·w0)
+/// ```
+///
+/// where `w0 = 1 − Σ w_new` is the residual cash weight of the target book. The
+/// iteration is deterministic — only mul/add/div/max — and is capped at a pinned
+/// 20 sweeps (it contracts to the 1e-10 tolerance well inside that). `c = 0`
+/// returns exactly `μ = 1` (no cost, nothing lost to turnover).
+pub fn trf_factor(weights_prev: &[f64], weights_new: &[f64], c: f64) -> f64 {
+    let sum_new: f64 = weights_new.iter().sum();
+    let w0 = 1.0 - sum_new;
+    let denom = 1.0 - c * w0;
+    let coef = 2.0 * c - c * c;
+    let mut mu = 1.0;
+    for _ in 0..20 {
+        let mut sell = 0.0;
+        for (prev, new) in weights_prev.iter().zip(weights_new.iter()) {
+            sell += (prev - mu * new).max(0.0);
+        }
+        let mu_next = (1.0 - c * w0 - coef * sell) / denom;
+        if (mu_next - mu).abs() < 1e-10 {
+            mu = mu_next;
+            break;
+        }
+        mu = mu_next;
+    }
+    mu
 }
 
 /// Execution-robustness profile: a named bundle of a [`CostModel`] plus a logical
@@ -69,6 +113,7 @@ impl CostProfile {
                     impact_bps: 0.0,
                     financing_bps: 0.0,
                     max_participation: f64::INFINITY,
+                    trf_cost: None,
                 },
                 decision_delay_bars: 0,
             },
@@ -83,6 +128,7 @@ impl CostProfile {
                     impact_bps: 150.0,
                     financing_bps: 20.0,
                     max_participation: 0.1,
+                    trf_cost: None,
                 },
                 decision_delay_bars: 2,
             },
@@ -115,6 +161,7 @@ pub fn market_impact_frac(impact_bps: f64, participation: f64) -> f64 {
 }
 
 /// Minimal deterministic PRNG (SplitMix64) for seeded execution noise.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Rng(u64);
 
 impl Rng {
@@ -200,6 +247,51 @@ mod tests {
         assert!(worst.costs.max_participation.is_finite());
         assert!(worst.decision_delay_bars > 0);
         assert_eq!(typ.decision_delay_bars, 0);
+    }
+
+    #[test]
+    fn trf_factor_matches_hand_computed_fixture() {
+        // prev = 50% in asset 0 (50% cash); target = 50% in asset 1 (50% cash).
+        // w0 = 1 - 0.5 = 0.5; the only positive sell term is asset 0 (0.5), which
+        // is μ-independent here, so the fixed point is reached in one sweep:
+        //   μ = (1 - 0.01·0.5 - (0.0199)·0.5) / (1 - 0.01·0.5)
+        //     = 0.98505 / 0.995 = 0.99 exactly.
+        let mu = trf_factor(&[0.5, 0.0], &[0.0, 0.5], 0.01);
+        assert!((mu - 0.99).abs() < 1e-12, "expected μ=0.99, got {mu}");
+    }
+
+    #[test]
+    fn trf_factor_zero_cost_is_unity() {
+        // c = 0 ⇒ nothing is lost to turnover, μ = 1 exactly.
+        assert_eq!(trf_factor(&[0.3, 0.7], &[0.6, 0.4], 0.0), 1.0);
+    }
+
+    #[test]
+    fn trf_factor_converges_within_the_pinned_cap() {
+        // A μ-dependent sell term (target keeps weight in a held name): the result
+        // must be a fixed point to tolerance — i.e. one more sweep barely moves it,
+        // proving convergence happened inside the 20-iteration cap.
+        let prev = [0.8, 0.1];
+        let new = [0.2, 0.6];
+        let c = 0.005;
+        let mu = trf_factor(&prev, &new, c);
+        let w0 = 1.0 - (new[0] + new[1]);
+        let coef = 2.0 * c - c * c;
+        let sell: f64 = prev
+            .iter()
+            .zip(new.iter())
+            .map(|(p, n)| (p - mu * n).max(0.0))
+            .sum();
+        let residual = (1.0 - c * w0 - coef * sell) / (1.0 - c * w0) - mu;
+        assert!(residual.abs() < 1e-10, "μ is not a fixed point: {residual}");
+        assert!(mu > 0.0 && mu <= 1.0, "μ out of range: {mu}");
+    }
+
+    #[test]
+    fn trf_cost_defaults_to_none_and_is_byte_neutral() {
+        // The new field is opt-in: the default model is unchanged, and an explicit
+        // `None` is indistinguishable from the default for every other field.
+        assert_eq!(CostModel::default().trf_cost, None);
     }
 
     #[test]

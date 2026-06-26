@@ -170,8 +170,33 @@ impl Dataset {
 
     /// Build a deterministic synthetic dataset with mild momentum
     /// autocorrelation — enough to make the reference agents behave differently.
-    /// Pure function of `seed` (no ambient RNG).
+    /// Pure function of `seed` (no ambient RNG). Thin wrapper over
+    /// [`Dataset::synthetic_parameterized`] at the calm-market parameters
+    /// (unit vol, no jumps) — byte-identical to the standalone generator it
+    /// replaced (pinned by `synthetic_is_byte_identical_golden`).
     pub fn synthetic(n_symbols: usize, n_days: usize, seed: u64) -> Dataset {
+        Dataset::synthetic_parameterized(n_symbols, n_days, seed, 1.0, 0.0, 0.0)
+    }
+
+    /// The continuous-vol / jump-diffusion generalization of [`Dataset::synthetic`]:
+    /// the same drift + AR(1)-momentum path, with each bar's Gaussian-ish shock
+    /// scaled by `vol_mult` and seeded **bounded-uniform jumps** of magnitude
+    /// `jump_size` injected with per-bar probability `jump_prob` (a fat-tail stress
+    /// knob). Pure function of `seed`; only mul/add/div/max (no `ln`/`exp`), so the
+    /// path is byte-identical across Rust/WASM/Python.
+    ///
+    /// Determinism note: the jump draws are taken **only** when `jump_prob > 0`, so
+    /// the no-jump call consumes the RNG identically to the original `synthetic`
+    /// (one draw per bar) — `vol_mult = 1.0, jump_prob = 0.0` reproduces it exactly.
+    /// Prices are kept strictly positive by flooring the per-bar growth factor.
+    pub fn synthetic_parameterized(
+        n_symbols: usize,
+        n_days: usize,
+        seed: u64,
+        vol_mult: f64,
+        jump_prob: f64,
+        jump_size: f64,
+    ) -> Dataset {
         let dates: Vec<String> = (0..n_days).map(|d| format!("2025-{:03}", d + 1)).collect();
         let mut closes = BTreeMap::new();
         let mut state = seed ^ 0x1234_5678_9ABC_DEF0;
@@ -189,10 +214,16 @@ impl Dataset {
             let drift = 0.0002 + 0.0004 * (s as f64 / n_symbols.max(1) as f64);
             let mut series = Vec::with_capacity(n_days);
             for _ in 0..n_days {
-                let shock = (next() - 0.5) * 0.02;
+                let shock = (next() - 0.5) * 0.02 * vol_mult;
                 momentum = 0.9 * momentum + 0.1 * shock; // autocorrelated component
-                let ret = drift + momentum + 0.5 * shock;
-                price *= 1.0 + ret;
+                let mut ret = drift + momentum + 0.5 * shock;
+                // Jumps are opt-in: the `&&` short-circuit only consumes RNG when
+                // armed, so the no-jump path leaves the calm stream byte-identical.
+                if jump_prob > 0.0 && next() < jump_prob {
+                    // Bounded-uniform jump in (-jump_size, jump_size).
+                    ret += (next() - 0.5) * 2.0 * jump_size;
+                }
+                price *= (1.0 + ret).max(1e-9); // floor keeps prices positive
                 series.push(price);
             }
             closes.insert(format!("SYM{s:02}"), series);
@@ -321,6 +352,55 @@ mod tests {
         let a = Dataset::synthetic(3, 40, 99);
         let b = Dataset::synthetic(3, 40, 99);
         assert_eq!(a.closes, b.closes);
+    }
+
+    /// Order-independent fold over every close (bit-exact) — a stand-in for a hash
+    /// that survives BTreeMap iteration order.
+    fn closes_fingerprint(d: &Dataset) -> u64 {
+        let mut h = 0xcbf2_9ce4_8422_2325u64; // FNV offset basis
+        for series in d.closes.values() {
+            for px in series {
+                h ^= px.to_bits();
+                h = h.wrapping_mul(0x0000_0100_0000_01b3); // FNV prime
+            }
+        }
+        h
+    }
+
+    /// Golden pin: the refactor that routed `synthetic` through
+    /// `synthetic_parameterized(.., 1.0, 0.0, 0.0)` must reproduce the original
+    /// generator bit-for-bit. The constant is the fingerprint captured *before*
+    /// the refactor (seed 99, 3×40); a regression flips it.
+    #[test]
+    fn synthetic_is_byte_identical_golden() {
+        let d = Dataset::synthetic(3, 40, 99);
+        assert_eq!(
+            closes_fingerprint(&d),
+            298_678_261_974_633_681,
+            "synthetic price path drifted from the pre-refactor golden"
+        );
+        // The parameterized generator at calm parameters is the same path.
+        let p = Dataset::synthetic_parameterized(3, 40, 99, 1.0, 0.0, 0.0);
+        assert_eq!(d.closes, p.closes);
+    }
+
+    #[test]
+    fn vol_mult_widens_the_path_and_jumps_perturb_it() {
+        let base = Dataset::synthetic_parameterized(2, 200, 7, 1.0, 0.0, 0.0);
+        let calm = Dataset::synthetic(2, 200, 7);
+        assert_eq!(base.closes, calm.closes, "calm params == synthetic");
+
+        // Higher vol multiplier must change the realized path.
+        let hot = Dataset::synthetic_parameterized(2, 200, 7, 3.0, 0.0, 0.0);
+        assert_ne!(base.closes, hot.closes, "vol_mult must move the path");
+
+        // Jumps must perturb the path and keep prices strictly positive.
+        let jumpy = Dataset::synthetic_parameterized(2, 200, 7, 1.0, 0.5, 0.1);
+        assert_ne!(base.closes, jumpy.closes, "jumps must perturb the path");
+        assert!(
+            jumpy.closes.values().flatten().all(|&px| px > 0.0),
+            "prices must stay positive through jumps"
+        );
     }
 
     #[test]

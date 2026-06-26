@@ -6,6 +6,7 @@
 //! (proven by `env_step_matches_run_backtest`). Look-ahead is impossible: the env
 //! owns the time cursor and only ever builds a point-in-time observation.
 
+use serde::{Deserialize, Serialize};
 use sharpebench_core::ProcessEvent;
 use sharpebench_protocol::{Decision, MarketObservation};
 
@@ -116,6 +117,38 @@ impl TradingEnv {
     fn obs_index(&self) -> usize {
         self.cursor.min(self.end.saturating_sub(1))
     }
+
+    /// Snapshot the mutable sim state (time cursor + book) in O(1) — no replay.
+    /// The returned [`EnvState`] is a value: clone it, stash it, restore it later
+    /// with [`restore_state`](Self::restore_state) to fork the env from this exact
+    /// point (e.g. tree search / what-if rollouts over the same frozen data). The
+    /// immutable config (data, window, costs, seed) is not snapshotted — it never
+    /// changes — so a snapshot is cheap and a restore is exact.
+    pub fn clone_state(&self) -> EnvState {
+        EnvState {
+            cursor: self.cursor,
+            book: self.book.clone(),
+        }
+    }
+
+    /// Restore a snapshot taken by [`clone_state`](Self::clone_state): the env
+    /// resumes producing the exact byte-identical trajectory it would have from the
+    /// snapshot point, including seeded execution noise (the RNG cursor is part of
+    /// the snapshot).
+    pub fn restore_state(&mut self, state: EnvState) {
+        self.cursor = state.cursor;
+        self.book = state.book;
+    }
+}
+
+/// An O(1), serializable snapshot of a [`TradingEnv`]'s mutable state — the time
+/// cursor plus the full [`Book`] (holdings, cash, RNG cursor, decision trace, prior
+/// NAV). Everything an env needs to resume an exact trajectory; the immutable
+/// config (frozen data, window, costs, seed) lives in the env and is not copied.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EnvState {
+    cursor: usize,
+    book: Book,
 }
 
 /// A named bundle of a dataset, the windows to evaluate over it, and the cost
@@ -234,6 +267,71 @@ mod tests {
                 break;
             }
         }
+    }
+
+    /// O(1) snapshot/restore reproduces an exact forward trajectory: step N, snap,
+    /// step on, then restore and re-step — the observations after the snapshot point
+    /// are byte-identical to the first continuation (RNG cursor included). This is
+    /// the replay-free fork the closed loop cannot offer.
+    #[test]
+    fn clone_restore_state_reproduces_trajectory() {
+        let data = Dataset::synthetic(4, 120, 11);
+        let window = Window {
+            start: 20,
+            end: 120,
+        };
+        let mut env = TradingEnv::new(data, window, CostModel::default(), 7);
+        let mut agent = BuyAndHold;
+
+        let mut obs = env.reset();
+        for _ in 0..30 {
+            obs = env.step(agent.decide(&obs)).observation;
+        }
+
+        // Snapshot here, then record the next 20 observations as the baseline.
+        let snap = env.clone_state();
+        let resume = obs.clone();
+        let mut baseline: Vec<String> = Vec::new();
+        let mut o = obs;
+        for _ in 0..20 {
+            o = env.step(agent.decide(&o)).observation;
+            baseline.push(serde_json::to_string(&o).unwrap());
+        }
+
+        // Restore and replay from the snapshot point — must match byte-for-byte.
+        env.restore_state(snap.clone());
+        let mut o2 = resume;
+        let mut replayed: Vec<String> = Vec::new();
+        for _ in 0..20 {
+            o2 = env.step(agent.decide(&o2)).observation;
+            replayed.push(serde_json::to_string(&o2).unwrap());
+        }
+
+        assert_eq!(baseline, replayed, "restore must reproduce the trajectory");
+        // Two snapshots of the same state are PartialEq-equal (Clone is exact).
+        env.restore_state(snap.clone());
+        assert_eq!(
+            snap,
+            env.clone_state(),
+            "an unstepped re-snapshot must match"
+        );
+    }
+
+    /// `EnvState` is serializable so a fork point can be persisted. A clean snapshot
+    /// (taken at reset — all exact values) survives a JSON round-trip unchanged.
+    #[test]
+    fn env_state_serializes_round_trip() {
+        let data = Dataset::synthetic(3, 60, 4);
+        let window = Window { start: 20, end: 60 };
+        let mut env = TradingEnv::new(data, window, CostModel::default(), 1);
+        env.reset();
+        let snap = env.clone_state();
+        let json = serde_json::to_string(&snap).unwrap();
+        let back: EnvState = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            snap, back,
+            "a clean EnvState must survive a serde round-trip"
+        );
     }
 
     /// The crisis suite bundles flash-crash + whipsaw datasets, each with a

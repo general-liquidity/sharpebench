@@ -59,7 +59,7 @@ impl ProcessEvent {
 }
 
 /// The recorded decision trace for one run.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct Trace {
     pub events: Vec<ProcessEvent>,
 }
