@@ -80,12 +80,26 @@ impl TradingEnv {
     pub fn step(&mut self, decision: Decision) -> StepResult {
         let t = self.obs_index();
         let events_before = self.book.trace.events.len();
-        let out = step_once(&self.data, &self.symbols, &mut self.book, &self.costs, t, &decision);
+        let out = step_once(
+            &self.data,
+            &self.symbols,
+            &mut self.book,
+            &self.costs,
+            t,
+            &decision,
+        );
         let events = self.book.trace.events[events_before..].to_vec();
-        let nav_after = nav(&self.data, &self.symbols, &self.book.shares, self.book.cash, t);
+        let nav_after = nav(
+            &self.data,
+            &self.symbols,
+            &self.book.shares,
+            self.book.cash,
+            t,
+        );
         self.cursor += 1;
         let done = self.cursor >= self.end;
-        let observation = build_observation(&self.data, &self.symbols, &self.book, self.obs_index());
+        let observation =
+            build_observation(&self.data, &self.symbols, &self.book, self.obs_index());
         StepResult {
             observation,
             reward: out.ret,
@@ -150,7 +164,10 @@ mod tests {
     #[test]
     fn env_step_matches_run_backtest() {
         let data = Dataset::synthetic(4, 120, 11);
-        let window = Window { start: 20, end: 120 };
+        let window = Window {
+            start: 20,
+            end: 120,
+        };
         let costs = CostModel::default();
         let seed = 7;
 
@@ -187,7 +204,10 @@ mod tests {
     #[test]
     fn env_observation_is_point_in_time() {
         let data = Dataset::synthetic(4, 120, 3);
-        let window = Window { start: 20, end: 120 };
+        let window = Window {
+            start: 20,
+            end: 120,
+        };
         let mut env = TradingEnv::new(data.clone(), window, CostModel::default(), 5);
         let mut agent = BuyAndHold;
 
@@ -224,7 +244,11 @@ mod tests {
         assert_eq!(scenarios.len(), 2, "flash crash + whipsaw");
         for sc in &scenarios {
             let window = sc.windows[0];
-            assert!(window.start < window.end, "{} has a non-empty window", sc.name);
+            assert!(
+                window.start < window.end,
+                "{} has a non-empty window",
+                sc.name
+            );
             let run = run_backtest(&sc.data, &mut BuyAndHold, window, 1, sc.costs);
             assert_eq!(run.returns.len(), window.end - window.start);
         }
