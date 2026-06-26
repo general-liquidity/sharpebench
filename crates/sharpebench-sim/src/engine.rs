@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use serde::{Deserialize, Serialize};
 use sharpebench_core::{ProcessEvent, Run, Trace};
 use sharpebench_protocol::{Decision, MarketObservation, PositionState, SymbolSnapshot};
 
@@ -44,6 +45,11 @@ pub(crate) fn nav(
 /// RNG, the accumulating decision trace, and the prior-step NAV used to book the
 /// per-step return. Shared by the closed-loop [`run_backtest`] and the open-loop
 /// [`crate::env::TradingEnv`] so the two stepping surfaces cannot drift.
+///
+/// `Clone + Serialize + Deserialize + PartialEq` make it the serializable payload
+/// of [`crate::env::EnvState`] — an O(1) snapshot/restore of the whole mutable sim
+/// state (holdings, cash, RNG cursor, trace, prior NAV).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Book {
     pub(crate) shares: BTreeMap<String, f64>,
     pub(crate) cash: f64,
@@ -358,6 +364,7 @@ mod tests {
             impact_bps: 0.0,
             financing_bps: 0.0,
             max_participation: f64::INFINITY,
+            trf_cost: None,
         };
         let plain = run_backtest(&base, &mut BuyAndHold, w, 0, no_costs);
         let div = run_backtest(&paying, &mut BuyAndHold, w, 0, no_costs);
