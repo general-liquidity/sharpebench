@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use sharpebench_core::{ProcessEvent, Run, Trace};
-use sharpebench_protocol::{MarketObservation, PositionState, SymbolSnapshot};
+use sharpebench_protocol::{Decision, MarketObservation, PositionState, SymbolSnapshot};
 
 use crate::agent::Agent;
 use crate::costs::{liquidity_capped_delta, market_impact_frac, CostModel, Rng};
@@ -27,7 +27,7 @@ fn price(data: &Dataset, symbol: &str, t: usize) -> f64 {
     data.close_at(symbol, t).unwrap_or(0.0)
 }
 
-fn nav(
+pub(crate) fn nav(
     data: &Dataset,
     symbols: &[String],
     shares: &BTreeMap<String, f64>,
@@ -40,8 +40,186 @@ fn nav(
         .sum::<f64>()
 }
 
+/// The mutable running state of a backtest: holdings, cash, the seeded execution
+/// RNG, the accumulating decision trace, and the prior-step NAV used to book the
+/// per-step return. Shared by the closed-loop [`run_backtest`] and the open-loop
+/// [`crate::env::TradingEnv`] so the two stepping surfaces cannot drift.
+pub(crate) struct Book {
+    pub(crate) shares: BTreeMap<String, f64>,
+    pub(crate) cash: f64,
+    pub(crate) rng: Rng,
+    pub(crate) trace: Trace,
+    pub(crate) prev_nav: f64,
+}
+
+impl Book {
+    pub(crate) fn new(symbols: &[String], seed: u64) -> Self {
+        Book {
+            shares: symbols.iter().map(|s| (s.clone(), 0.0)).collect(),
+            cash: 1.0_f64,
+            rng: Rng::new(seed),
+            trace: Trace::default(),
+            prev_nav: 1.0_f64,
+        }
+    }
+}
+
+/// Build the point-in-time observation handed to the agent at step `t`: trailing
+/// closes (≤ `t`), current holdings, and cash. No bar after `t` is reachable.
+pub(crate) fn build_observation(
+    data: &Dataset,
+    symbols: &[String],
+    book: &Book,
+    t: usize,
+) -> MarketObservation {
+    let snap: Vec<SymbolSnapshot> = symbols
+        .iter()
+        .map(|s| SymbolSnapshot {
+            symbol: s.clone(),
+            close_history: data.history(s, t, LOOKBACK),
+            fundamentals: BTreeMap::new(),
+            news: Vec::new(),
+        })
+        .collect();
+    let portfolio: Vec<PositionState> = symbols
+        .iter()
+        .map(|s| PositionState {
+            symbol: s.clone(),
+            shares: book.shares[s],
+            avg_price: 0.0,
+        })
+        .collect();
+    MarketObservation {
+        date: data.dates[t].clone(),
+        cash: book.cash,
+        symbols: snap,
+        portfolio,
+    }
+}
+
+/// What the engine records for one step: the realized return plus the calibration
+/// inputs (stated conviction and whether the step paid off).
+pub(crate) struct StepOutcome {
+    pub(crate) ret: f64,
+    pub(crate) confidence: f64,
+    pub(crate) outcome: bool,
+}
+
+/// Apply `decision` at step `t` and advance one bar: rebalance toward target
+/// weights with cost + seeded slippage + own-order market impact + partial fills,
+/// credit dividends, charge financing on leverage, then book the post-trade return
+/// vs the prior step's NAV. Mutates `book`. This is the single per-step body shared
+/// by [`run_backtest`] (closed loop) and [`crate::env::TradingEnv::step`] (open
+/// loop), so neither stepping surface can drift from the other.
+pub(crate) fn step_once(
+    data: &Dataset,
+    symbols: &[String],
+    book: &mut Book,
+    costs: &CostModel,
+    t: usize,
+    decision: &Decision,
+) -> StepOutcome {
+    let cur_nav = nav(data, symbols, &book.shares, book.cash, t);
+
+    // rebalance toward target weights with cost + seeded slippage.
+    for ord in &decision.orders {
+        let p = price(data, &ord.symbol, t);
+        if p <= 0.0 {
+            continue;
+        }
+        // Sim-exploitation guard: non-finite or absurd weights are gaming attempts.
+        if !ord.target_weight.is_finite() || ord.target_weight.abs() > HARD_WEIGHT_CAP {
+            book.trace.events.push(ProcessEvent::ManipulativeOrder);
+            continue;
+        }
+        if ord.target_weight.abs() > CONCENTRATION_CAP {
+            book.trace.events.push(ProcessEvent::ConcentrationBreach);
+        }
+        let target_value = ord.target_weight.max(0.0) * cur_nav;
+        let cur_value = book.shares[&ord.symbol] * p;
+        // Liquidity cap: a trade larger than the per-step participation limit
+        // only partially fills; the rest is left for later steps.
+        let delta_value =
+            liquidity_capped_delta(target_value - cur_value, costs.max_participation, cur_nav);
+        if delta_value.abs() < 1e-9 {
+            continue;
+        }
+        // Base seeded slippage plus own-order market impact: the bigger the
+        // trade relative to NAV, the more the fill moves against the agent.
+        let participation = delta_value.abs() / cur_nav.max(1e-9);
+        let slip = (costs.slippage_bps + book.rng.signed_unit().abs() * costs.slippage_bps)
+            / 10_000.0
+            + market_impact_frac(costs.impact_bps, participation);
+        let exec_p = if delta_value > 0.0 {
+            p * (1.0 + slip)
+        } else {
+            p * (1.0 - slip)
+        };
+        let dshares = delta_value / exec_p;
+        let fee = delta_value.abs() * (costs.fee_bps / 10_000.0);
+        if let Some(sh) = book.shares.get_mut(&ord.symbol) {
+            *sh += dshares;
+        }
+        book.cash -= dshares * exec_p + fee;
+        // Capture the order's stated rationale into the audit trail (score-neutral),
+        // so the frozen trace explains *why* each fill happened. Empty = omitted.
+        if !ord.rationale.is_empty() {
+            book.trace.events.push(ProcessEvent::DecisionRationale {
+                symbol: ord.symbol.clone(),
+                rationale: ord.rationale.clone(),
+            });
+        }
+        book.trace.events.push(ProcessEvent::OrderPlaced {
+            risk_gate_passed: true,
+        });
+    }
+
+    // corporate actions: credit cash dividends on post-trade holdings.
+    for s in symbols {
+        let div = data.dividend_at(s, t);
+        if div != 0.0 {
+            book.cash += book.shares[s] * div;
+        }
+    }
+
+    // financing: charge carry on any leveraged exposure above 1× NAV.
+    let positions_value: f64 = symbols
+        .iter()
+        .map(|s| book.shares[s] * price(data, s, t))
+        .sum();
+    let nav_now = book.cash + positions_value;
+    if nav_now > 1e-12 {
+        let gross = positions_value / nav_now;
+        book.cash -= crate::costs::financing_cost_frac(costs.financing_bps, gross) * nav_now;
+    }
+
+    // daily return = post-trade NAV vs the prior step's NAV (captures the price
+    // move on held positions, dividends, financing, and trading costs).
+    let navc = nav(data, symbols, &book.shares, book.cash, t);
+    let ret = if book.prev_nav.abs() > 1e-12 {
+        navc / book.prev_nav - 1.0
+    } else {
+        0.0
+    };
+    // Capture the decision's stated conviction and whether the step paid off, so
+    // the scoring kernel's calibration axis is fed from the live run.
+    let avg_conf = if decision.orders.is_empty() {
+        0.5
+    } else {
+        decision.orders.iter().map(|o| o.confidence).sum::<f64>() / decision.orders.len() as f64
+    };
+    book.prev_nav = navc;
+    StepOutcome {
+        ret,
+        confidence: avg_conf,
+        outcome: ret > 0.0,
+    }
+}
+
 /// Run a single backtest of `agent` over `window` with seeded execution noise,
 /// returning an [`sharpebench_core::Run`] (per-period returns + decision trace).
+/// The closed-loop driver: it owns the `decide → step` loop, calling the same
+/// [`step_once`] body the open-loop [`crate::env::TradingEnv`] uses.
 pub fn run_backtest(
     data: &Dataset,
     agent: &mut dyn Agent,
@@ -50,150 +228,24 @@ pub fn run_backtest(
     costs: CostModel,
 ) -> Run {
     let symbols = data.symbols();
-    let mut shares: BTreeMap<String, f64> = symbols.iter().map(|s| (s.clone(), 0.0)).collect();
-    let mut cash = 1.0_f64;
-    let mut rng = Rng::new(seed);
-    let mut trace = Trace::default();
+    let end = window.end.min(data.len());
+    let mut book = Book::new(&symbols, seed);
     let mut returns: Vec<f64> = Vec::new();
     let mut confidences: Vec<f64> = Vec::new();
     let mut outcomes: Vec<bool> = Vec::new();
 
-    let end = window.end.min(data.len());
-    if window.start >= end {
-        return Run {
-            returns,
-            trace,
-            confidences,
-            outcomes,
-            cost: 0.0,
-        };
-    }
-
-    let mut prev_nav = 1.0_f64;
-
     for t in window.start..end {
-        // 1) point-in-time observation (no bar after `t` is reachable).
-        let snap: Vec<SymbolSnapshot> = symbols
-            .iter()
-            .map(|s| SymbolSnapshot {
-                symbol: s.clone(),
-                close_history: data.history(s, t, LOOKBACK),
-                fundamentals: BTreeMap::new(),
-                news: Vec::new(),
-            })
-            .collect();
-        let portfolio: Vec<PositionState> = symbols
-            .iter()
-            .map(|s| PositionState {
-                symbol: s.clone(),
-                shares: shares[s],
-                avg_price: 0.0,
-            })
-            .collect();
-        let obs = MarketObservation {
-            date: data.dates[t].clone(),
-            cash,
-            symbols: snap,
-            portfolio,
-        };
-
-        // 2) agent decides.
+        let obs = build_observation(data, &symbols, &book, t);
         let decision = agent.decide(&obs);
-        let cur_nav = nav(data, &symbols, &shares, cash, t);
-
-        // 3) rebalance toward target weights with cost + seeded slippage.
-        for ord in &decision.orders {
-            let p = price(data, &ord.symbol, t);
-            if p <= 0.0 {
-                continue;
-            }
-            // Sim-exploitation guard: non-finite or absurd weights are gaming attempts.
-            if !ord.target_weight.is_finite() || ord.target_weight.abs() > HARD_WEIGHT_CAP {
-                trace.events.push(ProcessEvent::ManipulativeOrder);
-                continue;
-            }
-            if ord.target_weight.abs() > CONCENTRATION_CAP {
-                trace.events.push(ProcessEvent::ConcentrationBreach);
-            }
-            let target_value = ord.target_weight.max(0.0) * cur_nav;
-            let cur_value = shares[&ord.symbol] * p;
-            // Liquidity cap: a trade larger than the per-step participation limit
-            // only partially fills; the rest is left for later steps.
-            let delta_value =
-                liquidity_capped_delta(target_value - cur_value, costs.max_participation, cur_nav);
-            if delta_value.abs() < 1e-9 {
-                continue;
-            }
-            // Base seeded slippage plus own-order market impact: the bigger the
-            // trade relative to NAV, the more the fill moves against the agent.
-            let participation = delta_value.abs() / cur_nav.max(1e-9);
-            let slip = (costs.slippage_bps + rng.signed_unit().abs() * costs.slippage_bps)
-                / 10_000.0
-                + market_impact_frac(costs.impact_bps, participation);
-            let exec_p = if delta_value > 0.0 {
-                p * (1.0 + slip)
-            } else {
-                p * (1.0 - slip)
-            };
-            let dshares = delta_value / exec_p;
-            let fee = delta_value.abs() * (costs.fee_bps / 10_000.0);
-            if let Some(sh) = shares.get_mut(&ord.symbol) {
-                *sh += dshares;
-            }
-            cash -= dshares * exec_p + fee;
-            // Capture the order's stated rationale into the audit trail (score-neutral),
-            // so the frozen trace explains *why* each fill happened. Empty = omitted.
-            if !ord.rationale.is_empty() {
-                trace.events.push(ProcessEvent::DecisionRationale {
-                    symbol: ord.symbol.clone(),
-                    rationale: ord.rationale.clone(),
-                });
-            }
-            trace.events.push(ProcessEvent::OrderPlaced {
-                risk_gate_passed: true,
-            });
-        }
-
-        // 4) corporate actions: credit cash dividends on post-trade holdings.
-        for s in &symbols {
-            let div = data.dividend_at(s, t);
-            if div != 0.0 {
-                cash += shares[s] * div;
-            }
-        }
-
-        // 5) financing: charge carry on any leveraged exposure above 1× NAV.
-        let positions_value: f64 = symbols.iter().map(|s| shares[s] * price(data, s, t)).sum();
-        let nav_now = cash + positions_value;
-        if nav_now > 1e-12 {
-            let gross = positions_value / nav_now;
-            cash -= crate::costs::financing_cost_frac(costs.financing_bps, gross) * nav_now;
-        }
-
-        // 6) daily return = post-trade NAV vs the prior step's NAV (captures the
-        //    price move on held positions, dividends, financing, and trading costs).
-        let navc = nav(data, &symbols, &shares, cash, t);
-        let ret = if prev_nav.abs() > 1e-12 {
-            navc / prev_nav - 1.0
-        } else {
-            0.0
-        };
-        returns.push(ret);
-        // Capture the decision's stated conviction and whether the step paid off,
-        // so the scoring kernel's calibration axis is fed from the live run.
-        let avg_conf = if decision.orders.is_empty() {
-            0.5
-        } else {
-            decision.orders.iter().map(|o| o.confidence).sum::<f64>() / decision.orders.len() as f64
-        };
-        confidences.push(avg_conf);
-        outcomes.push(ret > 0.0);
-        prev_nav = navc;
+        let out = step_once(data, &symbols, &mut book, &costs, t, &decision);
+        returns.push(out.ret);
+        confidences.push(out.confidence);
+        outcomes.push(out.outcome);
     }
 
     Run {
         returns,
-        trace,
+        trace: book.trace,
         confidences,
         outcomes,
         cost: 0.0,

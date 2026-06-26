@@ -11,14 +11,16 @@ pub mod agent;
 pub mod costs;
 pub mod data;
 pub mod engine;
+pub mod env;
 pub mod external;
 pub mod trajectory;
 pub mod windows;
 
 pub use agent::{Agent, BuyAndHold, HoldAgent, Momentum, RandomAgent, TeamAgent};
-pub use costs::CostModel;
+pub use costs::{CostModel, CostProfile};
 pub use data::Dataset;
 pub use engine::{run_backtest, Window};
+pub use env::{Scenario, StepInfo, StepResult, TradingEnv};
 pub use external::{ExternalAgent, HttpAgent};
 pub use trajectory::{replay_run, replay_submission, run_backtest_capture};
 pub use windows::{tag_regime, walk_forward, Regime};
