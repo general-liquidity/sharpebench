@@ -38,10 +38,12 @@ jobs:
       - name: Build + test the MCP server
         working-directory: npm/mcp
         run: |
-          npm install
           # The MCP server depends on @general-liquidity/sharpebench, but a feature here can
-          # reference an export not yet on the registry. Overlay the locally-built sibling
-          # (from the step above) so CI tests against this commit, not the published version.
-          npm install ../ --no-save
+          # reference an export (or a version) not yet on the registry. Point the dep at the
+          # locally-built sibling for CI so it tests this commit, not the published copy.
+          # Ephemeral — runner only, never committed. At release time the sibling is published
+          # first, so release.yml's own mcp step resolves it from the registry normally.
+          npm pkg set "dependencies.@general-liquidity/sharpebench=file:../"
+          npm install
           npm run build
           npm test
