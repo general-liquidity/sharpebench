@@ -99,6 +99,74 @@ pub fn canary_json(seed: &str) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Parse a partial `HonestyConfig` blob: `n_trials` is required; the rest default
+/// (`trials_sr_std` → null, `confidence` → 0.95, `borderline` → 0.90,
+/// `sr_benchmark` → 0.0). Built field-by-field so callers can pass just
+/// `{"n_trials": N}`.
+fn parse_honesty_config(json: &str) -> Result<sharpebench_edge::HonestyConfig, String> {
+    let v: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
+    let n_trials = v
+        .get("n_trials")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or("missing or non-integer field: n_trials")? as u32;
+    let trials_sr_std = match v.get("trials_sr_std") {
+        None | Some(serde_json::Value::Null) => None,
+        Some(x) => Some(x.as_f64().ok_or("non-numeric field: trials_sr_std")?),
+    };
+    let confidence = v
+        .get("confidence")
+        .and_then(serde_json::Value::as_f64)
+        .unwrap_or(0.95);
+    let borderline = v
+        .get("borderline")
+        .and_then(serde_json::Value::as_f64)
+        .unwrap_or(0.90);
+    let sr_benchmark = v
+        .get("sr_benchmark")
+        .and_then(serde_json::Value::as_f64)
+        .unwrap_or(0.0);
+    Ok(sharpebench_edge::HonestyConfig {
+        n_trials,
+        trials_sr_std,
+        confidence,
+        borderline,
+        sr_benchmark,
+    })
+}
+
+/// LITE backtest-honesty verdict: "is my Sharpe real, or an artifact of luck and
+/// multiple testing?" Input: a JSON array of per-period returns + a (partial)
+/// `HonestyConfig`. Output: `HonestyVerdict` JSON.
+pub fn is_my_sharpe_real_json(returns_json: &str, config_json: &str) -> Result<String, String> {
+    let returns: Vec<f64> = serde_json::from_str(returns_json).map_err(|e| e.to_string())?;
+    let cfg = parse_honesty_config(config_json)?;
+    serde_json::to_string(&sharpebench_edge::is_my_sharpe_real(&returns, &cfg))
+        .map_err(|e| e.to_string())
+}
+
+/// FULL backtest-honesty verdict: the winner's LITE verdict plus the multiple-
+/// testing family (Reality Check / SPA / step-down) and PBO over the whole field.
+/// Input: a JSON N×T field (rows = candidate strategies), the winner's row index,
+/// and a (partial) `HonestyConfig`. Output: `FullVerdict` JSON.
+pub fn is_my_sharpe_real_full_json(
+    field_json: &str,
+    winner_idx: usize,
+    config_json: &str,
+) -> Result<String, String> {
+    let field: Vec<Vec<f64>> = serde_json::from_str(field_json).map_err(|e| e.to_string())?;
+    if winner_idx >= field.len() {
+        return Err(format!(
+            "winner_idx {winner_idx} out of bounds for field of {} strategies",
+            field.len()
+        ));
+    }
+    let cfg = parse_honesty_config(config_json)?;
+    serde_json::to_string(&sharpebench_edge::is_my_sharpe_real_full(
+        &field, winner_idx, &cfg,
+    ))
+    .map_err(|e| e.to_string())
+}
+
 /// The wasm-bindgen exports. Each returns the result JSON, or a `{"error":"..."}`
 /// JSON object on failure (never throws across the boundary).
 #[cfg(target_arch = "wasm32")]
@@ -148,6 +216,24 @@ mod wasm {
     #[wasm_bindgen]
     pub fn canary(seed: &str) -> String {
         wrap(super::canary_json(seed))
+    }
+
+    #[wasm_bindgen]
+    pub fn is_my_sharpe_real(returns_json: &str, config_json: &str) -> String {
+        wrap(super::is_my_sharpe_real_json(returns_json, config_json))
+    }
+
+    #[wasm_bindgen]
+    pub fn is_my_sharpe_real_full(
+        field_json: &str,
+        winner_idx: usize,
+        config_json: &str,
+    ) -> String {
+        wrap(super::is_my_sharpe_real_full_json(
+            field_json,
+            winner_idx,
+            config_json,
+        ))
     }
 }
 
@@ -212,5 +298,59 @@ mod tests {
     fn bad_json_is_an_error_not_a_panic() {
         assert!(score_json("not json", "").is_err());
         assert!(greeks_json("{}").is_err());
+    }
+
+    #[test]
+    fn is_my_sharpe_real_json_parses_and_carries_a_verdict() {
+        // A long, clean, single-trial edge → a verdict is present.
+        let returns: Vec<f64> = (0..400)
+            .map(|i| 0.001 + 0.00005 * ((i % 4) as f64 - 1.5))
+            .collect();
+        let returns_json = serde_json::to_string(&returns).unwrap();
+        let out = is_my_sharpe_real_json(&returns_json, r#"{"n_trials":1}"#).expect("verdict");
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("verdict").is_some());
+        assert!(v.get("deflated_sharpe").is_some());
+        assert!(v.get("haircut_sharpe").is_some());
+    }
+
+    #[test]
+    fn is_my_sharpe_real_json_defaults_optional_config() {
+        // Only n_trials supplied; the rest default without error.
+        let out = is_my_sharpe_real_json("[0.001,0.002,0.0015,0.0018]", r#"{"n_trials":10}"#)
+            .expect("verdict");
+        assert!(out.contains("\"n_trials\":10"));
+    }
+
+    #[test]
+    fn is_my_sharpe_real_json_missing_n_trials_is_error() {
+        assert!(is_my_sharpe_real_json("[0.001,0.002]", "{}").is_err());
+        assert!(is_my_sharpe_real_json("not json", r#"{"n_trials":1}"#).is_err());
+    }
+
+    #[test]
+    fn is_my_sharpe_real_full_json_runs_the_family() {
+        let field: Vec<Vec<f64>> = (0..5)
+            .map(|j| {
+                (0..80)
+                    .map(|i| {
+                        let edge = if j == 2 { 0.004 } else { 0.0005 };
+                        edge + 0.003 * (((i + j) % 6) as f64 - 2.5)
+                    })
+                    .collect()
+            })
+            .collect();
+        let field_json = serde_json::to_string(&field).unwrap();
+        let out = is_my_sharpe_real_full_json(&field_json, 2, r#"{"n_trials":5}"#).expect("full");
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("honesty").and_then(|h| h.get("verdict")).is_some());
+        assert!(v.get("pbo").is_some());
+        assert!(v.get("reality_check_p").is_some());
+    }
+
+    #[test]
+    fn is_my_sharpe_real_full_json_out_of_bounds_is_error() {
+        assert!(is_my_sharpe_real_full_json("[[0.1,0.2]]", 5, r#"{"n_trials":1}"#).is_err());
+        assert!(is_my_sharpe_real_full_json("not json", 0, r#"{"n_trials":1}"#).is_err());
     }
 }

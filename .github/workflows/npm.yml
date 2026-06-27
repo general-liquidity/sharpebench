@@ -39,5 +39,9 @@ jobs:
         working-directory: npm/mcp
         run: |
           npm install
+          # The MCP server depends on @general-liquidity/sharpebench, but a feature here can
+          # reference an export not yet on the registry. Overlay the locally-built sibling
+          # (from the step above) so CI tests against this commit, not the published version.
+          npm install ../ --no-save
           npm run build
           npm test
