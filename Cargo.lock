@@ -551,6 +551,7 @@ dependencies = [
  "sha2",
  "sharpebench-attest",
  "sharpebench-core",
+ "sharpebench-edge",
  "sharpebench-harness",
  "sharpebench-leaderboard",
  "sharpebench-protocol",
@@ -573,6 +574,14 @@ version = "0.0.8"
 dependencies = [
  "serde",
  "serde_json",
+ "sharpebench-stats",
+]
+
+[[package]]
+name = "sharpebench-edge"
+version = "0.0.8"
+dependencies = [
+ "serde",
  "sharpebench-stats",
 ]
 
