@@ -1,0 +1,16 @@
+[package]
+name = "sharpebench-edge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Backtest-honesty verdict over sharpebench-stats: is this Sharpe real, or an artifact of luck and multiple testing? PSR / deflated Sharpe / MinTRL / data-snooping / PBO."
+repository.workspace = true
+keywords = ["sharpe", "backtest", "overfitting", "honesty", "deflated"]
+categories = ["science", "finance"]
+
+[dependencies]
+sharpebench-stats = { path = "../sharpebench-stats", version = "0.0.8" }
+serde = { version = "1", features = ["derive"] }
+
+[lints]
+workspace = true

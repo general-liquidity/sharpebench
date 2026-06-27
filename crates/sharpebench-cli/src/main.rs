@@ -43,6 +43,7 @@ fn main() -> ExitCode {
         Some("canary") => run_canary(&args, json),
         Some("score-allocation") => run_score_allocation(&args, json),
         Some("greeks") => run_greeks(&args, json),
+        Some("check") => run_check(&args, json),
         Some("self-update" | "update") => run_self_update(),
         Some("--help") | Some("-h") | None => {
             help();
@@ -209,6 +210,137 @@ fn run_greeks(args: &[String], json: bool) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// `check` — backtest-honesty verdict over a column of per-period returns.
+/// `--trials N` is REQUIRED: a single backtest you kept is the survivor of every
+/// variant you discarded, so there is no honest default for the search footprint.
+fn run_check(args: &[String], json: bool) -> ExitCode {
+    use sharpebench_edge::{is_my_sharpe_real, HonestyConfig, Verdict};
+
+    let Some(path) = args.get(2).filter(|p| !p.starts_with('-')) else {
+        eprintln!("usage: sharpebench check <returns.csv> --trials N [--col NAME] [--confidence C] [--json]");
+        return ExitCode::from(2);
+    };
+    let Some(trials_str) = flag_value(args, "--trials") else {
+        eprintln!("error: --trials N is required (the number of strategies/configs tried before keeping this one). n_trials=1 is usually a lie.");
+        return ExitCode::from(2);
+    };
+    let Ok(n_trials) = trials_str.parse::<u32>() else {
+        eprintln!("error: --trials must be a positive integer, got `{trials_str}`");
+        return ExitCode::from(2);
+    };
+    let confidence = match flag_value(args, "--confidence") {
+        Some(c) => match c.parse::<f64>() {
+            Ok(v) if (0.0..1.0).contains(&v) => v,
+            _ => {
+                eprintln!("error: --confidence must be in (0, 1), got `{c}`");
+                return ExitCode::from(2);
+            }
+        },
+        None => 0.95,
+    };
+    let col = flag_value(args, "--col");
+
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("error: cannot read {path}: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let returns = match read_returns_column(&text, col) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if returns.len() < 2 {
+        eprintln!("error: need at least 2 returns, got {}", returns.len());
+        return ExitCode::FAILURE;
+    }
+
+    let cfg = HonestyConfig {
+        n_trials,
+        confidence,
+        ..HonestyConfig::default()
+    };
+    let v = is_my_sharpe_real(&returns, &cfg);
+
+    if json {
+        emit_json(&v);
+    } else {
+        let tag = match v.verdict {
+            Verdict::Pass => "PASS",
+            Verdict::Borderline => "BORDERLINE",
+            Verdict::Fail => "FAIL",
+        };
+        println!("Sharpe    : {:.4} ({} obs)", v.sharpe, v.n_obs);
+        println!(
+            "Deflated  : {:.4}  (n_trials={})",
+            v.deflated_sharpe, v.n_trials
+        );
+        println!("Haircut   : {:.4}", v.haircut);
+        let mintrl = if v.min_track_record_len.is_finite() {
+            format!("{:.0} periods", v.min_track_record_len)
+        } else {
+            "unreachable (Sharpe ≤ benchmark)".to_string()
+        };
+        println!("MinTRL    : {mintrl}");
+        println!("Verdict   : {tag}");
+        println!("\n{}", v.explanation);
+    }
+
+    match v.verdict {
+        Verdict::Pass => ExitCode::SUCCESS,
+        _ => ExitCode::FAILURE,
+    }
+}
+
+/// Read a single column of per-period returns from CSV text. With `col = None`
+/// the first numeric column is used (a header row is skipped if its first cell is
+/// non-numeric); with `Some(name)` the column under that header is read.
+fn read_returns_column(text: &str, col: Option<&str>) -> Result<Vec<f64>, String> {
+    let mut lines = text.lines().filter(|l| !l.trim().is_empty());
+    let Some(first) = lines.next() else {
+        return Err("empty file".to_string());
+    };
+    let header: Vec<&str> = first.split(',').map(str::trim).collect();
+
+    let (col_idx, skip_first) = match col {
+        Some(name) => {
+            let idx = header
+                .iter()
+                .position(|h| *h == name)
+                .ok_or_else(|| format!("column `{name}` not found in header"))?;
+            (idx, true)
+        }
+        None => {
+            // No column named: pick column 0. Skip the first row only if it is a
+            // non-numeric header.
+            let skip = header.first().map(|c| c.parse::<f64>().is_err()) == Some(true);
+            (0, skip)
+        }
+    };
+
+    let mut out = Vec::new();
+    let body = if skip_first { Vec::new() } else { vec![first] };
+    for line in body.into_iter().chain(lines) {
+        let cell = line
+            .split(',')
+            .nth(col_idx)
+            .map(str::trim)
+            .unwrap_or_default();
+        if cell.is_empty() {
+            continue;
+        }
+        let v = cell
+            .parse::<f64>()
+            .map_err(|_| format!("non-numeric value `{cell}` in returns column"))?;
+        out.push(v);
+    }
+    Ok(out)
+}
+
 /// Print a value as pretty JSON to stdout (machine-readable mode).
 fn emit_json<T: serde::Serialize>(value: &T) {
     match serde_json::to_string_pretty(value) {
@@ -274,6 +406,9 @@ fn help() {
     );
     println!(
         "  sharpebench greeks <spot> <strike> <t> <r> <vol> <call|put>  Black-Scholes price + Greeks + tail-risk"
+    );
+    println!(
+        "  sharpebench check <returns.csv> --trials N [--col NAME] [--confidence C]  is this Sharpe real? (deflated/MinTRL)"
     );
     println!("  sharpebench self-update               update the binary in place (--features self-update builds)");
     println!("\n<key> accepts a literal, or env:NAME / file:PATH to keep secrets out of process listings.");
