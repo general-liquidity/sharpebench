@@ -59,12 +59,13 @@ jobs:
             target/x86_64-unknown-linux-musl/release/sharpebench-x86_64-linux-musl.sha256
 
   crates:
-    name: crates.io (8 sharpebench-* crates)
+    name: crates.io (10 sharpebench-* crates)
     if: ${{ vars.PUBLISH_CRATES == 'true' }}
     runs-on: ubuntu-latest
     # A dedicated publishing environment (configure protection rules under
     # Settings → Environments → crates). Must match the crates.io trusted-publisher
-    # config registered for EACH of the 8 crates.
+    # config registered for EACH of the 10 crates (sharpebench-stats and
+    # sharpebench-edge are new in v0.0.9 and need their own trusted-publisher config).
     environment: crates
     steps:
       - uses: actions/checkout@v6
@@ -88,9 +89,9 @@ jobs:
           V="$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
           # leaves first → CLI last (sim/leaderboard/wasm depend on core/protocol/attest;
           # harness on sim; sharpebench on all). publish=false members are simply omitted.
-          for c in sharpebench-core sharpebench-protocol sharpebench-attest \
+          for c in sharpebench-stats sharpebench-core sharpebench-protocol sharpebench-attest \
                    sharpebench-sim sharpebench-leaderboard sharpebench-wasm \
-                   sharpebench-harness sharpebench; do
+                   sharpebench-harness sharpebench-edge sharpebench; do
             if curl -s -A "$UA" "https://crates.io/api/v1/crates/$c/$V" | grep -q "\"num\":\"$V\""; then
               echo "✓ $c@$V already on crates.io — skipping"
             else

@@ -430,7 +430,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "reference-agent"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "serde_json",
  "sharpebench-protocol",
@@ -543,7 +543,7 @@ dependencies = [
 
 [[package]]
 name = "sharpebench"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "native-tls",
  "serde",
@@ -561,7 +561,7 @@ dependencies = [
 
 [[package]]
 name = "sharpebench-attest"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "hmac",
  "serde",
@@ -570,7 +570,7 @@ dependencies = [
 
 [[package]]
 name = "sharpebench-core"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "serde",
  "serde_json",
@@ -579,7 +579,7 @@ dependencies = [
 
 [[package]]
 name = "sharpebench-edge"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "serde",
  "sharpebench-stats",
@@ -587,7 +587,7 @@ dependencies = [
 
 [[package]]
 name = "sharpebench-harness"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "serde",
  "serde_json",
@@ -598,7 +598,7 @@ dependencies = [
 
 [[package]]
 name = "sharpebench-leaderboard"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "serde",
  "serde_json",
@@ -608,7 +608,7 @@ dependencies = [
 
 [[package]]
 name = "sharpebench-protocol"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "serde",
  "serde_json",
@@ -616,7 +616,7 @@ dependencies = [
 
 [[package]]
 name = "sharpebench-sim"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "serde",
  "serde_json",
@@ -626,11 +626,11 @@ dependencies = [
 
 [[package]]
 name = "sharpebench-stats"
-version = "0.0.8"
+version = "0.0.9"
 
 [[package]]
 name = "sharpebench-wasm"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "serde",
  "serde_json",
@@ -831,7 +831,7 @@ checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
 
 [[package]]
 name = "xtask"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "native-tls",
  "serde_json",

@@ -9,7 +9,7 @@ keywords = ["sharpe", "backtest", "overfitting", "honesty", "deflated"]
 categories = ["science", "finance"]
 
 [dependencies]
-sharpebench-stats = { path = "../sharpebench-stats", version = "0.0.8" }
+sharpebench-stats = { path = "../sharpebench-stats", version = "0.0.9" }
 serde = { version = "1", features = ["derive"] }
 
 [lints]
