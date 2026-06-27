@@ -18,6 +18,11 @@
 //! reported but never the rank key — see [`composite`].
 #![forbid(unsafe_code)]
 
+// The pure statistics core lives in `sharpebench-stats`; re-export the modules so
+// every existing path (`crate::stats::…`, `sharpebench_core::deflated_sharpe::…`,
+// `…::significance::*`, `…::selection::*`) keeps resolving byte-for-byte.
+pub use sharpebench_stats::{deflated_sharpe, selection, significance, stats};
+
 pub mod allocation;
 pub mod attribution;
 pub mod briefing;
@@ -26,7 +31,6 @@ pub mod comparison_sets;
 pub mod composite;
 pub mod correlation;
 pub mod decay;
-pub mod deflated_sharpe;
 pub mod econrationality;
 pub mod greeks;
 pub mod oos;
@@ -36,10 +40,7 @@ pub mod process;
 pub mod rediscovery;
 pub mod roles;
 pub mod rolling;
-pub mod selection;
 pub mod selfaudit;
-pub mod significance;
-pub mod stats;
 
 pub use allocation::{
     check_weights, score_allocation, turnover, AllocationPolicy, AllocationReport, AllocationStep,

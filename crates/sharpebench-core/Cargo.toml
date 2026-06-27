@@ -10,6 +10,7 @@ categories = ["science", "finance"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
+sharpebench-stats = { path = "../sharpebench-stats", version = "0.0.8" }
 
 [dev-dependencies]
 serde_json = "1"

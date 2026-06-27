@@ -1,0 +1,12 @@
+[package]
+name = "sharpebench-stats"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Deterministic backtest-honesty statistics: PSR, deflated Sharpe, the data-snooping family (White RC / Hansen SPA / Romano-Wolf), and selection robustness. Extracted from sharpebench-core."
+repository.workspace = true
+keywords = ["sharpe", "statistics", "backtest", "bootstrap", "finance"]
+categories = ["science", "mathematics"]
+
+[lints]
+workspace = true
