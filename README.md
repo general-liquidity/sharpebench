@@ -78,6 +78,36 @@ const board = score(submissions);   // ranked CompositeScore[] — raw return ne
 greeks({ spot: 100, strike: 100, t_years: 1, rate: 0.05, vol: 0.2, is_call: true }).price; // 10.45
 ```
 
+### From Rust
+
+```rust
+// Is this Sharpe real, or an artifact of luck and multiple testing?
+use sharpebench_stats::{deflated_sharpe_ratio, probabilistic_sharpe_ratio, sharpe_ratio};
+
+let returns = [0.012, -0.004, 0.009, 0.011, -0.002, 0.008, 0.010, -0.001];
+let sr = sharpe_ratio(&returns);                     // observed, per-period
+let psr = probabilistic_sharpe_ratio(&returns, 0.0); // P(true Sharpe > 0)
+let dsr = deflated_sharpe_ratio(&returns, 200, 0.5); // deflated for 200 trials searched
+
+// Rank a field of agents. The deflated Sharpe sorts the board; raw return never does.
+use sharpebench_core::{rank, AgentSubmission, Run, ScoreConfig, Trace};
+let mk = |id: &str, returns: Vec<f64>, trials: u32| AgentSubmission {
+    agent_id: id.into(),
+    runs: vec![Run { returns, trace: Trace::default(), confidences: vec![], outcomes: vec![], cost: 0.0 }],
+    in_sample_trials: trials,
+    candidates: vec![],
+};
+let board = rank(&[
+    mk("skilled", vec![0.012, 0.008, 0.011, 0.009, 0.010], 1),
+    mk("lucky",   vec![0.090, -0.02, 0.001, -0.03, 0.05], 500), // bigger raw return, 500 trials
+], &ScoreConfig::default());
+for s in &board {
+    println!("{}  deflated={:.3}  eligible={}", s.agent_id, s.deflated_sharpe, s.rank_eligible);
+}
+```
+
+Both halves are compile-and-run-checked as doctests in `sharpebench-stats` and `sharpebench-core`, so they can't silently drift from the API.
+
 ### CLI commands
 
 | Command | What it does |

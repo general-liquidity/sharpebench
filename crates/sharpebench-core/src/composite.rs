@@ -457,6 +457,35 @@ pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
 
 /// Score and rank a field of agents. Eligible agents sort first (by composite
 /// desc); ineligible agents sort last (by raw return desc, for display only).
+///
+/// ```
+/// use sharpebench_core::{rank, AgentSubmission, Run, ScoreConfig, Trace};
+///
+/// let mk = |id: &str, returns: Vec<f64>, trials: u32| AgentSubmission {
+///     agent_id: id.into(),
+///     runs: vec![Run {
+///         returns,
+///         trace: Trace::default(),
+///         confidences: vec![],
+///         outcomes: vec![],
+///         cost: 0.0,
+///     }],
+///     in_sample_trials: trials,
+///     candidates: vec![],
+/// };
+///
+/// // "lucky" posts a bigger raw return but searched 500 strategies to find it.
+/// let board = rank(
+///     &[
+///         mk("skilled", vec![0.012, 0.008, 0.011, 0.009, 0.010], 1),
+///         mk("lucky", vec![0.090, -0.02, 0.001, -0.03, 0.05], 500),
+///     ],
+///     &ScoreConfig::default(),
+/// );
+///
+/// // One CompositeScore per agent; ranked by deflated Sharpe, not raw return.
+/// assert_eq!(board.len(), 2);
+/// ```
 pub fn rank(subs: &[AgentSubmission], cfg: &ScoreConfig) -> Vec<CompositeScore> {
     // Pooled returns per agent + an equal-weight market proxy (the field average),
     // used for performance attribution: alpha (skill) vs beta (market exposure).
