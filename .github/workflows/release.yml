@@ -88,10 +88,11 @@ jobs:
           UA="sharpebench-release (general-liquidity)" # crates.io rejects requests without a User-Agent
           V="$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
           # leaves first → CLI last (sim/leaderboard/wasm depend on core/protocol/attest;
-          # harness on sim; sharpebench on all). publish=false members are simply omitted.
-          for c in sharpebench-stats sharpebench-core sharpebench-protocol sharpebench-attest \
-                   sharpebench-sim sharpebench-leaderboard sharpebench-wasm \
-                   sharpebench-harness sharpebench-edge sharpebench; do
+          # harness on sim; sharpebench on all). edge depends on stats and is itself a dep of
+          # wasm + the CLI, so it MUST come before wasm. publish=false members are omitted.
+          for c in sharpebench-stats sharpebench-edge sharpebench-core sharpebench-protocol \
+                   sharpebench-attest sharpebench-sim sharpebench-leaderboard sharpebench-wasm \
+                   sharpebench-harness sharpebench; do
             if curl -s -A "$UA" "https://crates.io/api/v1/crates/$c/$V" | grep -q "\"num\":\"$V\""; then
               echo "✓ $c@$V already on crates.io — skipping"
             else
