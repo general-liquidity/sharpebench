@@ -64,6 +64,53 @@ function greeks(params_json) {
 exports.greeks = greeks;
 
 /**
+ * @param {string} returns_json
+ * @param {string} config_json
+ * @returns {string}
+ */
+function is_my_sharpe_real(returns_json, config_json) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(returns_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(config_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.is_my_sharpe_real(ptr0, len0, ptr1, len1);
+        deferred3_0 = ret[0];
+        deferred3_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+}
+exports.is_my_sharpe_real = is_my_sharpe_real;
+
+/**
+ * @param {string} field_json
+ * @param {number} winner_idx
+ * @param {string} config_json
+ * @returns {string}
+ */
+function is_my_sharpe_real_full(field_json, winner_idx, config_json) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(field_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(config_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.is_my_sharpe_real_full(ptr0, len0, winner_idx, ptr1, len1);
+        deferred3_0 = ret[0];
+        deferred3_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+}
+exports.is_my_sharpe_real_full = is_my_sharpe_real_full;
+
+/**
  * @param {string} submissions_json
  * @param {string} config_json
  * @returns {string}

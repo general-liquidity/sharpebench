@@ -54,3 +54,35 @@ test("auditBriefing and scoreAllocation bridge", () => {
     true,
   );
 });
+
+test("isMySharpeReal passes a long clean single-trial edge", () => {
+  const returns = Array.from(
+    { length: 400 },
+    (_, i) => 0.001 + 0.00005 * ((i % 4) - 1.5),
+  );
+  const v = sb.isMySharpeReal(returns, { nTrials: 1 });
+  assert.equal(v.verdict, "Pass");
+  assert.equal(typeof v.haircutSharpe, "number");
+  assert.equal(typeof v.deflatedSharpe, "number");
+  assert.ok(v.haircut >= 0 && v.haircut <= 1, `haircut=${v.haircut}`);
+});
+
+test("isMySharpeReal fails a short series mined over many trials", () => {
+  const returns = Array.from({ length: 30 }, (_, i) => 0.001 * ((i % 7) - 3));
+  const v = sb.isMySharpeReal(returns, { nTrials: 1000 });
+  assert.equal(v.verdict, "Fail");
+});
+
+test("isMySharpeRealFull runs the multiple-testing family + PBO", () => {
+  const field = Array.from({ length: 5 }, (_, j) =>
+    Array.from(
+      { length: 80 },
+      (_, i) => (j === 2 ? 0.004 : 0.0005) + 0.003 * (((i + j) % 6) - 2.5),
+    ),
+  );
+  const v = sb.isMySharpeRealFull(field, 2, { nTrials: 5 });
+  assert.ok(["Pass", "Borderline", "Fail"].includes(v.honesty.verdict));
+  assert.ok(v.pbo >= 0 && v.pbo <= 1, `pbo=${v.pbo}`);
+  assert.ok(v.realityCheckP >= 0 && v.realityCheckP <= 1);
+  assert.equal(v.stepDown.length, field.length);
+});

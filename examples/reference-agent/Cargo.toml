@@ -9,7 +9,7 @@ description = "Reference SharpeBench agent (stdio JSON contract) — fork and re
 [dependencies]
 # Rust agents can use the published typed contract. Any other language just matches
 # the JSON shapes documented in README.md.
-sharpebench-protocol = { path = "../../crates/sharpebench-protocol", version = "0.0.9" }
+sharpebench-protocol = { path = "../../crates/sharpebench-protocol", version = "0.0.10" }
 serde_json = "1"
 
 [lints]

@@ -19,8 +19,11 @@ import type {
   BriefingPolicy,
   Canary,
   CompositeScore,
+  FullVerdict,
   GreeksParams,
   GreeksResult,
+  HonestyOpts,
+  HonestyVerdict,
   ScoreConfig,
   SelfAuditReport,
 } from "./types.js";
@@ -96,4 +99,80 @@ export function greeks(params: GreeksParams): GreeksResult {
 /** Derive a deterministic do-not-train contamination tripwire from seed material. */
 export function canary(seed: string): Canary {
   return parse(kernel.canary(seed));
+}
+
+/** Map camelCase {@link HonestyOpts} → the snake_case `HonestyConfig` JSON the kernel reads. */
+function honestyConfigJson(opts: HonestyOpts): string {
+  const cfg: Record<string, unknown> = { n_trials: opts.nTrials };
+  if (opts.trialsSrStd !== undefined) cfg.trials_sr_std = opts.trialsSrStd;
+  if (opts.confidence !== undefined) cfg.confidence = opts.confidence;
+  if (opts.borderline !== undefined) cfg.borderline = opts.borderline;
+  if (opts.srBenchmark !== undefined) cfg.sr_benchmark = opts.srBenchmark;
+  return JSON.stringify(cfg);
+}
+
+/** Map the kernel's snake_case HonestyVerdict JSON → the camelCase {@link HonestyVerdict}. */
+function toHonestyVerdict(raw: Record<string, unknown>): HonestyVerdict {
+  return {
+    sharpe: raw.sharpe as number,
+    nObs: raw.n_obs as number,
+    skew: raw.skew as number,
+    kurtosis: raw.kurtosis as number,
+    nTrials: raw.n_trials as number,
+    expectedMaxSharpe: raw.expected_max_sharpe as number,
+    deflatedSharpe: raw.deflated_sharpe as number,
+    probabilisticSharpe: raw.probabilistic_sharpe as number,
+    haircut: raw.haircut as number,
+    haircutSharpe: raw.haircut_sharpe as number,
+    minTrackRecordLen: raw.min_track_record_len as number,
+    verdict: raw.verdict as HonestyVerdict["verdict"],
+    explanation: raw.explanation as string,
+    methodologyVersion: raw.methodology_version as string,
+  };
+}
+
+/**
+ * "Is my Sharpe real, or an artifact of luck and multiple testing?" — the LITE
+ * backtest-honesty verdict over one per-period return series. Deflates the observed
+ * Sharpe for `nTrials` (the search footprint), then renders Pass / Borderline / Fail
+ * with PSR, expected-max-Sharpe, haircut, and MinTRL.
+ */
+export function isMySharpeReal(
+  returns: number[],
+  opts: HonestyOpts,
+): HonestyVerdict {
+  const raw = parse<Record<string, unknown>>(
+    kernel.is_my_sharpe_real(JSON.stringify(returns), honestyConfigJson(opts)),
+  );
+  return toHonestyVerdict(raw);
+}
+
+/**
+ * The FULL verdict: the winner's LITE verdict plus the multiple-testing family
+ * (White's Reality Check, Hansen's SPA + consistent variant, Romano-Wolf step-down)
+ * and the CSCV Probability of Backtest Overfitting over the whole field.
+ *
+ * `field` is N rows (candidate strategies) × T cols (time); `winnerIdx` is the row
+ * whose LITE verdict is reported.
+ */
+export function isMySharpeRealFull(
+  field: number[][],
+  winnerIdx: number,
+  opts: HonestyOpts,
+): FullVerdict {
+  const raw = parse<Record<string, unknown>>(
+    kernel.is_my_sharpe_real_full(
+      JSON.stringify(field),
+      winnerIdx,
+      honestyConfigJson(opts),
+    ),
+  );
+  return {
+    honesty: toHonestyVerdict(raw.honesty as Record<string, unknown>),
+    realityCheckP: raw.reality_check_p as number,
+    spaP: raw.spa_p as number,
+    spaConsistentP: raw.spa_consistent_p as number,
+    stepDown: raw.step_down as boolean[],
+    pbo: raw.pbo as number,
+  };
 }

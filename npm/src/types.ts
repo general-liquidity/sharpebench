@@ -132,3 +132,63 @@ export interface Canary {
   id: string;
   token: string;
 }
+
+// --- Backtest-honesty verdict ("is my Sharpe real?") ------------------------
+
+/** The headline call: does the edge survive deflation for the search? */
+export type Verdict = "Pass" | "Borderline" | "Fail";
+
+/**
+ * Options for {@link isMySharpeReal}. `nTrials` is the multiple-testing footprint
+ * (how many strategies/configs were tried before this one was kept) and is the one
+ * the caller must think about — `nTrials = 1` is almost always a lie.
+ */
+export interface HonestyOpts {
+  /** Number of strategy trials behind this result. REQUIRED. */
+  nTrials: number;
+  /** Cross-trial Sharpe dispersion. Omit → estimated at 0.5 and flagged. */
+  trialsSrStd?: number;
+  /** Deflated-Sharpe threshold for a Pass. Default 0.95. */
+  confidence?: number;
+  /** Deflated-Sharpe threshold for Borderline. Default 0.90. */
+  borderline?: number;
+  /** PSR / MinTRL benchmark Sharpe to beat. Default 0.0. */
+  srBenchmark?: number;
+}
+
+/** The LITE verdict: everything derivable from one return series. */
+export interface HonestyVerdict {
+  sharpe: number;
+  nObs: number;
+  skew: number;
+  kurtosis: number;
+  nTrials: number;
+  expectedMaxSharpe: number;
+  deflatedSharpe: number;
+  probabilisticSharpe: number;
+  /** `1 - deflatedSharpe`: probability the edge is a search artifact. */
+  haircut: number;
+  /** `sharpe * deflatedSharpe`: Sharpe discounted by survival probability. */
+  haircutSharpe: number;
+  minTrackRecordLen: number;
+  verdict: Verdict;
+  explanation: string;
+  methodologyVersion: string;
+  [k: string]: unknown;
+}
+
+/** The FULL verdict: LITE on the winner plus the multiple-testing family + PBO. */
+export interface FullVerdict {
+  honesty: HonestyVerdict;
+  /** White's Reality Check p-value over the field. */
+  realityCheckP: number;
+  /** Hansen's SPA p-value (liberal/lower studentized variant). */
+  spaP: number;
+  /** Hansen's consistent SPA p-value. */
+  spaConsistentP: number;
+  /** Romano-Wolf step-down: which field members are significant at α. */
+  stepDown: boolean[];
+  /** CSCV Probability of Backtest Overfitting over the field. */
+  pbo: number;
+  [k: string]: unknown;
+}

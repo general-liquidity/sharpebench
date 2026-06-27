@@ -16,9 +16,32 @@ test("registers the kernel tools", async () => {
   const client = await connectedClient();
   const { tools } = await client.listTools();
   const names = tools.map((t) => t.name);
-  for (const expected of ["score", "score_agent", "self_audit", "greeks", "canary"]) {
+  for (const expected of [
+    "score",
+    "score_agent",
+    "self_audit",
+    "greeks",
+    "canary",
+    "is_my_sharpe_real",
+  ]) {
     assert.ok(names.includes(expected), `missing tool: ${expected}`);
   }
+  await client.close();
+});
+
+test("is_my_sharpe_real tool renders a verdict", async () => {
+  const client = await connectedClient();
+  const returns = Array.from(
+    { length: 400 },
+    (_, i) => 0.001 + 0.00005 * ((i % 4) - 1.5),
+  );
+  const res = await client.callTool({
+    name: "is_my_sharpe_real",
+    arguments: { returns, n_trials: 1 },
+  });
+  const parsed = JSON.parse(res.content[0].text);
+  assert.ok(["Pass", "Borderline", "Fail"].includes(parsed.verdict));
+  assert.equal(typeof parsed.haircutSharpe, "number");
   await client.close();
 });
 
