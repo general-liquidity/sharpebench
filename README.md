@@ -42,7 +42,7 @@ Raw return is reported but is **never** the rank key. The composite also *report
 
 ## Status — active (pre-1.0)
 
-All eight crates are implemented, tested, and CI-green (fmt · clippy `-D warnings` · workspace tests · a determinism check · the 7-attack self-audit · a docs build · an npm build/test). The scoring kernel, point-in-time simulator, run harness, forward-attestation, leaderboard, WASM bridge, npm package, MCP server, and CLI all work end-to-end — on synthetic data and on **real frozen datasets** (crypto majors + US equity indices).
+All nine crates are implemented, tested, and CI-green (fmt · clippy `-D warnings` · workspace tests · a determinism check · the 7-attack self-audit · a docs build · an npm build/test). The statistics kernel, scoring kernel, point-in-time simulator, run harness, forward-attestation, leaderboard, WASM bridge, npm package, MCP server, and CLI all work end-to-end — on synthetic data and on **real frozen datasets** (crypto majors + US equity indices).
 
 **Not yet built** (need external infra or a decision): single-name equity data (a keyed feed), a live / forward public arena with hosting, and the public data-curation protocol. See [docs/PLAN.md](docs/PLAN.md).
 
@@ -65,6 +65,7 @@ One kernel, scored identically across every surface — the internal eval and th
 | Surface | Get it | What it is |
 |:--|:--|:--|
 | <img height="14" align="top" src="https://cdn.simpleicons.org/rust/DEA584" />&nbsp; **Rust crate** | `cargo add sharpebench-core` | The pure scoring kernel — deterministic, `#![forbid(unsafe_code)]`. |
+| <img height="14" align="top" src="https://cdn.simpleicons.org/rust/DEA584" />&nbsp; **Rust (just the stats)** | `cargo add sharpebench-stats` | The standalone statistics kernel — PSR, deflated Sharpe, the data-snooping tests, selection. The same math the board ranks on, with no benchmark attached. |
 | <img height="14" align="top" src="https://cdn.simpleicons.org/gnubash/4EAA25" />&nbsp; **CLI** | `cargo install sharpebench` | `run` / `score` / `audit` / `sign` / `verify` / `greeks` / … |
 | <img height="14" align="top" src="https://cdn.simpleicons.org/npm/CB3837" />&nbsp; **npm** | `npm i @general-liquidity/sharpebench` | Typed JS/TS API over the WASM kernel — `score`, `greeks`, `selfAudit`. |
 | <img height="14" align="top" src="https://cdn.simpleicons.org/modelcontextprotocol" />&nbsp; **MCP** | `npx -y @general-liquidity/sharpebench-mcp` | An [MCP](https://modelcontextprotocol.io) server — agents call the kernel as tools. |
@@ -140,7 +141,10 @@ sharpebench run --data data/us-indices-1d.csv
 A Rust [Cargo workspace](Cargo.toml) (modular, à la Paradigm's Rust OSS — reuse any crate on its own). The whole tree is `#![forbid(unsafe_code)]`.
 
 ```
-sharpebench-core ── the deterministic scoring kernel (no I/O, no ambient RNG)
+sharpebench-stats ── the statistics kernel core builds on: PSR, expected-max-Sharpe,
+                     deflated Sharpe, the data-snooping family (bootstrap / White RC /
+                     Hansen SPA / Romano–Wolf), Sortino + moments, selection
+sharpebench-core ── the deterministic scoring kernel (no I/O, no ambient RNG); re-exports -stats
       │
       ├── sharpebench-protocol   language-agnostic agent ⇄ harness JSON
       ├── sharpebench-sim        point-in-time simulator (look-ahead impossible)
@@ -153,8 +157,9 @@ sharpebench-core ── the deterministic scoring kernel (no I/O, no ambient RNG
 
 | Crate | Role |
 |:--|:--|
-| **`sharpebench-core`** | deflated Sharpe / PSR / pass^k / bootstrap + Reality Check + SPA + step-down / process + cost floor / rolling + Sortino / decay / calibration / attribution / selection / comparison-sets / rediscovery / briefing-audit / allocation / options-Greeks / self-audit / composite. Byte-identical scores forever. |
-| **`sharpebench-sim`** | fees, seeded slippage, square-root impact, financing, liquidity caps, dividends, execution-cost profiles, adversarial stress paths, trajectory capture/replay. |
+| **`sharpebench-core`** | the scoring layer over `sharpebench-stats`: pass^k / process + cost floor / rolling / decay / calibration / attribution / comparison-sets / rediscovery / briefing-audit / allocation / options-Greeks / self-audit / composite, plus a re-export of the whole `-stats` kernel so existing `sharpebench_core::…` paths are unchanged. Byte-identical scores forever. |
+| **`sharpebench-stats`** | the deterministic statistics kernel, split out so any project can depend on just the math: PSR, expected-max-Sharpe, deflated Sharpe (Bailey & López de Prado), the data-snooping family (stationary bootstrap, White's Reality Check, Hansen SPA liberal + consistent, Romano–Wolf step-down), Sortino + moments + normal primitives, and selection robustness. No I/O, no ambient RNG, fixed reduction order. |
+| **`sharpebench-sim`** | fees, seeded slippage, square-root impact, financing, turnover (TRF) cost, liquidity caps, dividends, execution-cost profiles, a parameterized synthetic generator (volatility + jumps), adversarial stress paths, trajectory capture/replay, and O(1) `clone_state` / `restore_state` snapshots. |
 | **`sharpebench-attest`** | SHA-256 pre-registration commitments + HMAC signed result chains + time-lock registry + sealed held-out datasets + canary contamination tripwire. |
 | **`sharpebench-harness`** | seeds × windows orchestration; luck-floor producers; a runtime-vs-agent failure taxonomy. |
 | `protocol` · `leaderboard` · `wasm` · `cli` | the JSON contract · render/sign/self-describing boards · the WASM bridge · the CLI. |
