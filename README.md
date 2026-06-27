@@ -42,7 +42,7 @@ Raw return is reported but is **never** the rank key. The composite also *report
 
 ## Status — active (pre-1.0)
 
-All nine crates are implemented, tested, and CI-green (fmt · clippy `-D warnings` · workspace tests · a determinism check · the 7-attack self-audit · a docs build · an npm build/test). The statistics kernel, scoring kernel, point-in-time simulator, run harness, forward-attestation, leaderboard, WASM bridge, npm package, MCP server, and CLI all work end-to-end — on synthetic data and on **real frozen datasets** (crypto majors + US equity indices).
+All ten crates are implemented, tested, and CI-green (fmt · clippy `-D warnings` · workspace tests · a determinism check · the 7-attack self-audit · a docs build · an npm build/test). The statistics kernel, the backtest-honesty verdict, scoring kernel, point-in-time simulator, run harness, forward-attestation, leaderboard, WASM bridge, npm package, MCP server, and CLI all work end-to-end — on synthetic data and on **real frozen datasets** (crypto majors + US equity indices).
 
 **Not yet built** (need external infra or a decision): single-name equity data (a keyed feed), a live / forward public arena with hosting, and the public data-curation protocol. See [docs/PLAN.md](docs/PLAN.md).
 
@@ -114,6 +114,7 @@ Both halves are compile-and-run-checked as doctests in `sharpebench-stats` and `
 |:--|:--|
 | `run` (+ `--data <csv>`, `--http`/`--cmd`) | Run agents through the point-in-time sim and rank them; `--http`/`--cmd` drives **your** external agent into the field. |
 | `score <subs.json>` | Rank a JSON field of pre-computed submissions. |
+| `check <returns.csv> --trials N` | "Is my Sharpe real?" Prints deflated Sharpe / haircut / MinTRL / verdict for your own return series; `--trials` is required (no silent default). |
 | `audit` | Self-audit: fire 7 known gaming attacks at the scorer; non-zero exit if any survives. |
 | `stress` | Run the adversarial stress suite (flash-crash / whipsaw), contamination-masked. |
 | `commit` · `sign` · `verify` | Forward-attestation: pre-register a digest, sign a board, verify its chain. |
@@ -171,24 +172,25 @@ sharpebench run --data data/us-indices-1d.csv
 A Rust [Cargo workspace](Cargo.toml) (modular, à la Paradigm's Rust OSS — reuse any crate on its own). The whole tree is `#![forbid(unsafe_code)]`.
 
 ```
-sharpebench-stats ── the statistics kernel core builds on: PSR, expected-max-Sharpe,
-                     deflated Sharpe, the data-snooping family (bootstrap / White RC /
-                     Hansen SPA / Romano–Wolf), Sortino + moments, selection
-sharpebench-core ── the deterministic scoring kernel (no I/O, no ambient RNG); re-exports -stats
-      │
-      ├── sharpebench-protocol   language-agnostic agent ⇄ harness JSON
-      ├── sharpebench-sim        point-in-time simulator (look-ahead impossible)
-      ├── sharpebench-harness    orchestration across seeds × windows
-      ├── sharpebench-attest     SHA-256 commitments + signed chains + sealed data + canary
-      ├── sharpebench-leaderboard render / sign / self-describing boards
-      ├── sharpebench-wasm       the identical kernel for JS/TS (npm, Gordon, MCP)
-      └── sharpebench-cli        the `sharpebench` binary
+sharpebench-stats ── the statistics kernel: PSR, expected-max-Sharpe, deflated Sharpe, the
+                     data-snooping family (bootstrap / White RC / Hansen SPA / Romano–Wolf),
+                     Sortino + moments, selection
+      ├── sharpebench-core ── the deterministic scoring kernel (no I/O, no ambient RNG); re-exports -stats
+      │     ├── sharpebench-protocol   language-agnostic agent ⇄ harness JSON
+      │     ├── sharpebench-sim        point-in-time simulator (look-ahead impossible)
+      │     ├── sharpebench-harness    orchestration across seeds × windows
+      │     ├── sharpebench-attest     SHA-256 commitments + signed chains + sealed data + canary
+      │     ├── sharpebench-leaderboard render / sign / self-describing boards
+      │     ├── sharpebench-wasm       the identical kernel for JS/TS (npm, Gordon, MCP)
+      │     └── sharpebench-cli        the `sharpebench` binary
+      └── sharpebench-edge ── the "is my Sharpe real?" verdict: MinTRL + PBO + the two-tier honesty check
 ```
 
 | Crate | Role |
 |:--|:--|
 | **`sharpebench-core`** | the scoring layer over `sharpebench-stats`: pass^k / process + cost floor / rolling / decay / calibration / attribution / comparison-sets / rediscovery / briefing-audit / allocation / options-Greeks / self-audit / composite, plus a re-export of the whole `-stats` kernel so existing `sharpebench_core::…` paths are unchanged. Byte-identical scores forever. |
 | **`sharpebench-stats`** | the deterministic statistics kernel, split out so any project can depend on just the math: PSR, expected-max-Sharpe, deflated Sharpe (Bailey & López de Prado), the data-snooping family (stationary bootstrap, White's Reality Check, Hansen SPA liberal + consistent, Romano–Wolf step-down), Sortino + moments + normal primitives, and selection robustness. No I/O, no ambient RNG, fixed reduction order. |
+| **`sharpebench-edge`** | the "is my Sharpe real?" honesty layer over `-stats`: Minimum Track Record Length, Probability of Backtest Overfitting (CSCV), and the two-tier `is_my_sharpe_real` verdict (PSR / deflated Sharpe / MinTRL + haircut + Pass/Borderline/Fail; the full tier adds the data-snooping family + PBO). Powers `sharpebench check`. |
 | **`sharpebench-sim`** | fees, seeded slippage, square-root impact, financing, turnover (TRF) cost, liquidity caps, dividends, execution-cost profiles, a parameterized synthetic generator (volatility + jumps), adversarial stress paths, trajectory capture/replay, and O(1) `clone_state` / `restore_state` snapshots. |
 | **`sharpebench-attest`** | SHA-256 pre-registration commitments + HMAC signed result chains + time-lock registry + sealed held-out datasets + canary contamination tripwire. |
 | **`sharpebench-harness`** | seeds × windows orchestration; luck-floor producers; a runtime-vs-agent failure taxonomy. |
