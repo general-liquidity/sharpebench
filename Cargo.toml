@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/sharpebench-stats",
     "crates/sharpebench-core",
     "crates/sharpebench-cli",
     "crates/sharpebench-protocol",
