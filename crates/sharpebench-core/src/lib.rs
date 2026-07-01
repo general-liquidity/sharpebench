@@ -39,6 +39,7 @@ pub mod comparison_sets;
 pub mod composite;
 pub mod correlation;
 pub mod decay;
+pub mod disqualification;
 pub mod econrationality;
 pub mod greeks;
 pub mod oos;
@@ -63,6 +64,7 @@ pub use comparison_sets::{
 };
 pub use composite::{rank, score_agent, AgentSubmission, CompositeScore, Run, ScoreConfig};
 pub use correlation::{crowdedness, Crowdedness};
+pub use disqualification::{classify_disqualification, rollup, DisqualThresholds, FailReason};
 pub use econrationality::{assess_rationality, DominanceChoice, EconRationalityReport};
 pub use greeks::{
     bs_greeks, bs_price, classify_greeks_risk, portfolio_greeks, Greeks, GreeksPolicy, GreeksRisk,
