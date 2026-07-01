@@ -26,10 +26,12 @@
 //! White; Hansen; Romano-Wolf), never from any GPL/proprietary library.
 #![forbid(unsafe_code)]
 
+pub mod hlz;
 pub mod mintrl;
 pub mod pbo;
 pub mod verdict;
 
+pub use hlz::{HarveyLiuZhu, HlzGate, HLZ_DEFAULT_T_THRESHOLD};
 pub use mintrl::min_track_record_length;
 pub use pbo::probability_of_backtest_overfitting;
 pub use verdict::{
