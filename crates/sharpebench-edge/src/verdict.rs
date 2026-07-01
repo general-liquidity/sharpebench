@@ -6,10 +6,13 @@
 //!
 //! [`is_my_sharpe_real_full`] (FULL) adds the multiple-testing family over the
 //! whole field of candidate strategies: White's Reality Check, Hansen's SPA (and
-//! its consistent variant), Romano-Wolf step-down, and the CSCV Probability of
-//! Backtest Overfitting.
+//! its consistent variant), Romano-Wolf step-down, the CSCV Probability of
+//! Backtest Overfitting, and the Harvey-Liu-Zhu `|t| >= 3.0` factor gate on the
+//! winner.
 
 use serde::{Deserialize, Serialize};
+
+use crate::hlz::{HarveyLiuZhu, HlzGate};
 use sharpebench_stats::significance::{
     reality_check_pvalue, spa_consistent_pvalue, spa_pvalue, step_down_significant,
 };
@@ -116,6 +119,10 @@ pub struct FullVerdict {
     pub step_down: Vec<bool>,
     /// CSCV Probability of Backtest Overfitting over the field.
     pub pbo: f64,
+    /// Harvey-Liu-Zhu (2016) factor gate on the winner's t-statistic
+    /// (`sharpe * sqrt(n_obs)`): a hard `|t| >= 3.0` floor complementing the
+    /// deflated-Sharpe verdict.
+    pub hlz: HlzGate,
 }
 
 /// LITE: "is my Sharpe real?" from a single per-period return series.
@@ -212,6 +219,11 @@ pub fn is_my_sharpe_real_full(
     // Transpose N×T (strategy rows) → T×N (time rows) for CSCV.
     let pbo = probability_of_backtest_overfitting(&transpose(field), default_pbo_blocks());
 
+    // Harvey-Liu-Zhu factor gate on the winner. The t-statistic of a mean return
+    // is sharpe * sqrt(n) (per-period Sharpe = mean / std).
+    let winner_t = honesty.sharpe * (honesty.n_obs as f64).sqrt();
+    let hlz = HarveyLiuZhu::default().evaluate(winner_t);
+
     FullVerdict {
         honesty,
         reality_check_p,
@@ -219,6 +231,7 @@ pub fn is_my_sharpe_real_full(
         spa_consistent_p,
         step_down,
         pbo,
+        hlz,
     }
 }
 
@@ -379,6 +392,12 @@ mod tests {
         assert!((0.0..=1.0).contains(&full.spa_consistent_p));
         assert!((0.0..=1.0).contains(&full.pbo));
         assert_eq!(full.step_down.len(), field.len());
+        // The HLZ gate reports the winner's t-statistic against the 3.0 bar.
+        assert_eq!(full.hlz.t_threshold, 3.0);
+        assert_eq!(
+            full.hlz.t_stat,
+            full.honesty.sharpe * (full.honesty.n_obs as f64).sqrt()
+        );
     }
 
     #[test]
