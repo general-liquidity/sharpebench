@@ -37,8 +37,13 @@ pub mod deflated_sharpe;
 pub mod selection;
 pub mod significance;
 pub mod stats;
+pub mod stylized_facts;
 
 pub use deflated_sharpe::{
     deflated_sharpe_ratio, expected_max_sharpe, probabilistic_sharpe_ratio, sharpe_ratio,
 };
 pub use selection::{selection_robustness, SelectionRobustness};
+pub use stylized_facts::{
+    stylized_facts, validate_dataset, validate_dataset_with, RealismFailure, RealismThresholds,
+    RealismVerdict, StylizedFactsReport,
+};
