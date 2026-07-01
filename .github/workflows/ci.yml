@@ -53,6 +53,17 @@ jobs:
       - name: The scorer resists every known gaming attack
         run: cargo run -q -p sharpebench -- audit
 
+  realism:
+    name: frozen datasets behave like markets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - name: The scoring data exhibits Cont's stylized facts
+        run: |
+          cargo run -q -p sharpebench -- realism --data data/us-indices-1d.csv
+          cargo run -q -p sharpebench -- realism --data data/crypto-majors-1d.csv
+
   supply-chain:
     name: cargo-deny (licenses · advisories · bans · sources)
     runs-on: ubuntu-latest

@@ -35,6 +35,7 @@ fn main() -> ExitCode {
         Some("commit") => run_commit(&args),
         Some("stress") => run_stress(json),
         Some("audit") => run_audit(json),
+        Some("realism") => run_realism(&args, json),
         Some("sign") => run_sign(&args, json),
         Some("verify") => run_verify(&args, json),
         Some("capture") => run_capture(&args, json),
@@ -391,6 +392,7 @@ fn help() {
     );
     println!("  sharpebench stress                    run the adversarial stress suite (masked)");
     println!("  sharpebench audit                     self-audit: prove the scorer resists gaming");
+    println!("  sharpebench realism [--data <csv>]    prove a dataset behaves like a market (Cont's stylized facts)");
     println!("  sharpebench sign <subs.json> <key> <out.json>  score + sign a board to a file");
     println!("  sharpebench verify <board.json> <key>  verify a signed board's chain");
     println!(
@@ -521,6 +523,107 @@ fn run_audit(json: bool) -> ExitCode {
         }
     }
     if report.all_defended {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
+}
+
+/// `realism` — certify that a dataset exhibits Cont's stylized facts of asset
+/// returns (fat tails, volatility clustering, aggregational Gaussianity, and
+/// time-reversal/Zumbach asymmetry). Runs on a frozen `--data <csv>` (the intended
+/// use: prove the benchmark's scoring data behaves like a market) or the synthetic
+/// generator by default — so a generator that drifts into a Gaussian toy fails the
+/// proof instead of silently invalidating every score computed on it.
+fn run_realism(args: &[String], json: bool) -> ExitCode {
+    use sharpebench_sim::Dataset;
+
+    let (data, src) = match flag_value(args, "--data") {
+        Some(path) => match Dataset::from_csv_file(path) {
+            Ok(d) => (d, path.to_string()),
+            Err(e) => {
+                eprintln!("error: {e}");
+                return ExitCode::FAILURE;
+            }
+        },
+        None => (
+            Dataset::synthetic(8, 180, 20_260_621),
+            "synthetic".to_string(),
+        ),
+    };
+
+    // Pool every symbol's simple per-bar returns (BTreeMap iteration is ordered, so
+    // the pooled stream is deterministic).
+    let mut returns: Vec<f64> = Vec::new();
+    for series in data.closes.values() {
+        for w in series.windows(2) {
+            if w[0] != 0.0 {
+                returns.push(w[1] / w[0] - 1.0);
+            }
+        }
+    }
+    if returns.len() < 40 {
+        eprintln!(
+            "error: not enough returns to assess realism ({} < 40)",
+            returns.len()
+        );
+        return ExitCode::FAILURE;
+    }
+
+    let v = sharpebench_core::validate_dataset(&returns);
+    let r = &v.report;
+    if json {
+        emit_json(&serde_json::json!({
+            "source": src,
+            "n_returns": returns.len(),
+            "realistic": v.realistic,
+            "failures": v.failures.iter().map(|f| format!("{f:?}")).collect::<Vec<_>>(),
+            "report": {
+                "excess_kurtosis": r.excess_kurtosis,
+                "abs_return_autocorr": r.abs_return_autocorr,
+                "vol_clustering_acf": r.vol_clustering_acf,
+                "gain_loss_skew": r.gain_loss_skew,
+                "aggregational_gaussianity": r.aggregational_gaussianity,
+                "zumbach_asymmetry": r.zumbach_asymmetry,
+            },
+        }));
+    } else {
+        println!(
+            "SharpeBench — dataset realism proof ({src}, {} returns)\n",
+            returns.len()
+        );
+        println!(
+            "  excess kurtosis (fat tails)      : {:+.3}",
+            r.excess_kurtosis
+        );
+        println!(
+            "  |return| autocorr (clustering)   : {:+.3}",
+            r.abs_return_autocorr
+        );
+        println!(
+            "  squared-return ACF               : {:+.3}",
+            r.vol_clustering_acf
+        );
+        println!(
+            "  skew (gain/loss asymmetry)       : {:+.3}",
+            r.gain_loss_skew
+        );
+        println!(
+            "  kurtosis drop under aggregation  : {:+.3}",
+            r.aggregational_gaussianity
+        );
+        println!(
+            "  Zumbach time-reversal asymmetry  : {:+.4}",
+            r.zumbach_asymmetry
+        );
+        if v.realistic {
+            println!("\nREALISTIC — the dataset exhibits every gated stylized fact.");
+        } else {
+            println!("\nUNREALISTIC — missing: {:?}", v.failures);
+        }
+    }
+
+    if v.realistic {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
