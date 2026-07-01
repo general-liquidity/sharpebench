@@ -21,7 +21,15 @@
 // The pure statistics core lives in `sharpebench-stats`; re-export the modules so
 // every existing path (`crate::stats::…`, `sharpebench_core::deflated_sharpe::…`,
 // `…::significance::*`, `…::selection::*`) keeps resolving byte-for-byte.
-pub use sharpebench_stats::{deflated_sharpe, selection, significance, stats};
+pub use sharpebench_stats::{deflated_sharpe, selection, significance, stats, stylized_facts};
+
+// The dataset-realism validator (Cont's stylized facts) — certifies that a frozen
+// or synthetic dataset actually behaves like a market before any score is trusted.
+// The measurement fn stays reachable as `stylized_facts::stylized_facts`.
+pub use sharpebench_stats::{
+    validate_dataset, validate_dataset_with, RealismFailure, RealismThresholds, RealismVerdict,
+    StylizedFactsReport,
+};
 
 pub mod allocation;
 pub mod attribution;
@@ -31,6 +39,7 @@ pub mod comparison_sets;
 pub mod composite;
 pub mod correlation;
 pub mod decay;
+pub mod disqualification;
 pub mod econrationality;
 pub mod greeks;
 pub mod oos;
@@ -55,6 +64,7 @@ pub use comparison_sets::{
 };
 pub use composite::{rank, score_agent, AgentSubmission, CompositeScore, Run, ScoreConfig};
 pub use correlation::{crowdedness, Crowdedness};
+pub use disqualification::{classify_disqualification, rollup, DisqualThresholds, FailReason};
 pub use econrationality::{assess_rationality, DominanceChoice, EconRationalityReport};
 pub use greeks::{
     bs_greeks, bs_price, classify_greeks_risk, portfolio_greeks, Greeks, GreeksPolicy, GreeksRisk,
