@@ -43,6 +43,9 @@
 //!   cross-session dependency-satisfaction rate.
 //! - [`pit`] (E3) - point-in-time correctness: a no-lookahead compliance score per
 //!   arm, and whether the retrieval arm leaked future data.
+//! - [`confabulation`] (E6) - the self-reinforcing-error ("honest lying") metric: the
+//!   fraction of beliefs that were reinforced but never re-tested and later proved
+//!   wrong.
 //!
 //! ## Example
 //!
@@ -61,10 +64,12 @@
 //! ```
 #![forbid(unsafe_code)]
 
+pub mod confabulation;
 pub mod multisession;
 pub mod pit;
 pub mod poisoning;
 
+pub use confabulation::{confabulation_report, BeliefEvent, ConfabulationReport};
 pub use multisession::{
     multi_session_report, MultiSessionReport, SessionId, SessionLift, SessionScores,
 };
