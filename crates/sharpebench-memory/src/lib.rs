@@ -28,6 +28,16 @@
 //! - **No `unsafe`.** Inputs are validated only at the boundary
 //!   ([`ablation_report`] returns `Err` on empty or mismatched arms).
 //!
+//! ## Beyond the three arms
+//!
+//! The three-arm ablation answers "does retrieval help?". Further legs answer the
+//! questions a SOTA memory benchmark also has to, each pure, deterministic, and
+//! reusing [`sharpebench_stats`] for any significance test:
+//! - [`poisoning`] (E1) - does a set of injected corrupted records degrade outcomes
+//!   versus the clean-retrieval arm? Behavior-integrity delta, attack-success rate,
+//!   and bootstrap significance of the degradation. Money-memory is the
+//!   high-severity case.
+//!
 //! ## Example
 //!
 //! ```
@@ -45,15 +55,20 @@
 //! ```
 #![forbid(unsafe_code)]
 
+pub mod poisoning;
+
+pub use poisoning::{poisoning_report, PoisoningReport};
+
 use sharpebench_stats::{significance::bootstrap_pvalue, stats::mean};
 
 /// Fixed bootstrap parameters so the report is reproducible for a given input.
-/// A benchmark verdict must not move when re-run.
-const BOOTSTRAP_SEED: u64 = 0x5EED_A11A_B1E5_0001;
-const BOOTSTRAP_SAMPLES: usize = 4000;
+/// A benchmark verdict must not move when re-run. Shared with the poisoning and
+/// multi-session legs so every significance test in the crate resamples identically.
+pub(crate) const BOOTSTRAP_SEED: u64 = 0x5EED_A11A_B1E5_0001;
+pub(crate) const BOOTSTRAP_SAMPLES: usize = 4000;
 /// Per-step probability of starting a new block (expected block length = 1/p).
 /// ~0.1 is the standard stationary-bootstrap default for lightly serial data.
-const BOOTSTRAP_BLOCK_PROB: f64 = 0.1;
+pub(crate) const BOOTSTRAP_BLOCK_PROB: f64 = 0.1;
 
 /// Denominators below this magnitude are treated as zero when forming
 /// [`AblationReport::fraction_of_ceiling`].
@@ -68,6 +83,9 @@ pub enum Arm {
     Retrieval,
     /// Gold records only - perfect recall. The ceiling.
     Oracle,
+    /// The retrieval layer with corrupted records injected into memory - the
+    /// adversarial arm scored by [`poisoning::poisoning_report`].
+    Poisoned,
 }
 
 impl Arm {
@@ -77,6 +95,7 @@ impl Arm {
             Arm::Baseline => "baseline",
             Arm::Retrieval => "retrieval",
             Arm::Oracle => "oracle",
+            Arm::Poisoned => "poisoned",
         }
     }
 }
@@ -332,5 +351,6 @@ mod tests {
         assert_eq!(Arm::Baseline.as_str(), "baseline");
         assert_eq!(Arm::Retrieval.as_str(), "retrieval");
         assert_eq!(Arm::Oracle.as_str(), "oracle");
+        assert_eq!(Arm::Poisoned.as_str(), "poisoned");
     }
 }
