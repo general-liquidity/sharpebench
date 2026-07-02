@@ -37,6 +37,10 @@
 //!   versus the clean-retrieval arm? Behavior-integrity delta, attack-success rate,
 //!   and bootstrap significance of the degradation. Money-memory is the
 //!   high-severity case.
+//! - [`multisession`] (E2) - interdependent multi-session scoring, where a later
+//!   session's credit is conditioned on whether the memory an earlier session wrote
+//!   was actually retained (not a flat per-task vector). Per-session lift plus a
+//!   cross-session dependency-satisfaction rate.
 //!
 //! ## Example
 //!
@@ -55,8 +59,12 @@
 //! ```
 #![forbid(unsafe_code)]
 
+pub mod multisession;
 pub mod poisoning;
 
+pub use multisession::{
+    multi_session_report, MultiSessionReport, SessionId, SessionLift, SessionScores,
+};
 pub use poisoning::{poisoning_report, PoisoningReport};
 
 use sharpebench_stats::{significance::bootstrap_pvalue, stats::mean};
