@@ -1,0 +1,15 @@
+[package]
+name = "sharpebench-memory"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Three-arm memory ablation harness (baseline / retrieval / oracle): does a retrieval layer measurably improve downstream agent decisions? Significance reuses sharpebench-stats."
+repository.workspace = true
+keywords = ["ablation", "retrieval", "memory", "benchmark", "significance"]
+categories = ["science", "mathematics"]
+
+[dependencies]
+sharpebench-stats = { path = "../sharpebench-stats", version = "0.0.10" }
+
+[lints]
+workspace = true

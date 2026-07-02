@@ -11,6 +11,7 @@ members = [
     "crates/sharpebench-harness",
     "crates/sharpebench-attest",
     "crates/sharpebench-leaderboard",
+    "crates/sharpebench-memory",
     "xtask",
     "examples/reference-agent",
 ]
