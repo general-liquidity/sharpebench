@@ -41,6 +41,8 @@
 //!   session's credit is conditioned on whether the memory an earlier session wrote
 //!   was actually retained (not a flat per-task vector). Per-session lift plus a
 //!   cross-session dependency-satisfaction rate.
+//! - [`pit`] (E3) - point-in-time correctness: a no-lookahead compliance score per
+//!   arm, and whether the retrieval arm leaked future data.
 //!
 //! ## Example
 //!
@@ -60,11 +62,13 @@
 #![forbid(unsafe_code)]
 
 pub mod multisession;
+pub mod pit;
 pub mod poisoning;
 
 pub use multisession::{
     multi_session_report, MultiSessionReport, SessionId, SessionLift, SessionScores,
 };
+pub use pit::{pit_correctness_report, PitReport};
 pub use poisoning::{poisoning_report, PoisoningReport};
 
 use sharpebench_stats::{significance::bootstrap_pvalue, stats::mean};
