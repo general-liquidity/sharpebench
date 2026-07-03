@@ -2,7 +2,7 @@
 //!
 //! An external agent speaks JSON over a container/HTTP boundary, and any such
 //! boundary can blip: a connection resets, stdout closes, an endpoint stalls. The
-//! old behaviour degraded *every* such blip to an empty-orders hold — silently
+//! old behaviour degraded *every* such blip to an empty-orders hold - silently
 //! biasing the run's return series toward flat and making a transient failure
 //! indistinguishable from a deliberate hold. In a luck-robust *honesty* benchmark
 //! that is an eval-integrity hole.
@@ -21,13 +21,13 @@ use sharpebench_protocol::Decision;
 /// deliberate hold.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DecideError {
-    /// Connection reset, stdout closed, write failed, malformed framing — a runtime
+    /// Connection reset, stdout closed, write failed, malformed framing - a runtime
     /// transport error (retryable).
     Transport,
     /// The endpoint did not answer within the wall-clock budget (retryable).
     Timeout,
     /// The agent answered, but the bytes were not a parseable [`Decision`]. The
-    /// agent's own protocol violation — **not** retryable.
+    /// agent's own protocol violation - **not** retryable.
     Protocol,
 }
 
@@ -81,7 +81,7 @@ impl CircuitBreaker {
         }
     }
 
-    /// Record a clean decision — clears the consecutive-fault streak.
+    /// Record a clean decision - clears the consecutive-fault streak.
     pub fn record_success(&mut self) {
         self.consecutive = 0;
     }
@@ -109,7 +109,7 @@ impl CircuitBreaker {
 pub struct TransportHealth {
     /// Retryable transport / timeout faults that ultimately degraded to a hold.
     pub transport_faults: u32,
-    /// Agent protocol faults (unparseable output) — the agent's own fault.
+    /// Agent protocol faults (unparseable output) - the agent's own fault.
     pub protocol_faults: u32,
     /// Whether the per-endpoint circuit breaker has tripped.
     pub tripped: bool,
@@ -136,7 +136,7 @@ impl TransportHealth {
     }
 }
 
-/// Something whose per-decision transport health can be inspected after a run — the
+/// Something whose per-decision transport health can be inspected after a run - the
 /// seam the harness uses to convert a masked-hold run into an explicit failure.
 pub trait TransportDiagnostics {
     /// The rolling transport health accumulated across the run so far.

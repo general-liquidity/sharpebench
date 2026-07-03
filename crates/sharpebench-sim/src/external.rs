@@ -1,8 +1,8 @@
-//! External-process agent — speak the JSON protocol to an any-language agent.
+//! External-process agent - speak the JSON protocol to an any-language agent.
 //!
 //! The adoption surface: an agent is just a subprocess that reads one
 //! [`MarketObservation`] (JSON) per line on stdin and writes one [`Decision`]
-//! (JSON) per line on stdout. Python, TS, a hosted shim — anything that honors
+//! (JSON) per line on stdout. Python, TS, a hosted shim - anything that honors
 //! the contract competes.
 //!
 //! Transport integrity: a decision that fails at the wire is **not** silently
@@ -12,7 +12,7 @@
 //! [`TransportHealth`] the harness inspects to surface the failure as a typed
 //! [`sharpebench_harness`] `FailureKind` rather than a masked hold. When a decision
 //! still cannot be produced the call returns an empty-orders hold (the trait cannot
-//! signal an error), but that hold is now *flagged* in the health — the harness no
+//! signal an error), but that hold is now *flagged* in the health - the harness no
 //! longer mistakes it for a deliberate one.
 
 use std::io::{BufRead, BufReader, Read, Write};
@@ -143,11 +143,11 @@ impl Drop for ExternalAgent {
     }
 }
 
-/// Drives an external agent over HTTP/1.1 — one request/response per decision.
+/// Drives an external agent over HTTP/1.1 - one request/response per decision.
 ///
 /// Targets a plain-HTTP `host:port` endpoint that accepts `POST /decide` with a
 /// JSON [`MarketObservation`] body and returns a JSON [`Decision`]. Loopback /
-/// in-sandbox only (no TLS), so this is a dependency-free `std::net` client — the
+/// in-sandbox only (no TLS), so this is a dependency-free `std::net` client - the
 /// benchmark sim keeps its minimal, audited dependency tree. Each decision opens a
 /// fresh connection, so a transient blip is retried a bounded number of times before
 /// the fault is recorded and the breaker advances.
@@ -199,7 +199,7 @@ impl HttpAgent {
         stream
             .set_write_timeout(Some(timeout))
             .map_err(|e| classify_io(&e))?;
-        // `Connection: close` lets us read the whole response to EOF — no need to
+        // `Connection: close` lets us read the whole response to EOF - no need to
         // parse Content-Length / chunked encoding for a one-shot request.
         let req = format!(
             "POST /decide HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\n\

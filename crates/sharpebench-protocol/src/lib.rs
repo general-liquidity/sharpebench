@@ -54,7 +54,7 @@ pub struct Decision {
     pub reasoning: String,
     /// Optional self-reported compute/token spend for producing *this* decision.
     /// The engine accumulates it into the run's `cost`, which drives the
-    /// cost-normalized leaderboard columns (`return_per_cost` / `dsr_per_cost` —
+    /// cost-normalized leaderboard columns (`return_per_cost` / `dsr_per_cost` =
     /// skill-per-dollar-of-compute). `None` = not reported, so existing agents
     /// need no change and the cost columns stay `None` (back-compat).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -78,7 +78,7 @@ pub struct DecisionCost {
     pub tokens_out: u64,
     /// Reasoning/thinking tokens, reported as a legibility breakdown. Providers
     /// typically already bill these inside `tokens_out`, so they are *not* re-added
-    /// into the token total — they are surfaced separately, not double-counted.
+    /// into the token total; they are surfaced separately, not double-counted.
     #[serde(default)]
     pub reasoning_tokens: u64,
 }

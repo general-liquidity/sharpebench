@@ -310,7 +310,7 @@ mod tests {
     }
 
     /// Test-only agent that buys the first symbol AND self-reports a per-decision
-    /// compute cost — the external-LLM path the cost channel exists for.
+    /// compute cost, the external-LLM path the cost channel exists for.
     struct CostlyAgent;
     impl Agent for CostlyAgent {
         fn decide(&mut self, obs: &MarketObservation) -> Decision {
