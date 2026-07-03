@@ -384,6 +384,7 @@ fn help() {
         "  sharpebench run [--data <csv>] [--http <addr>|--cmd \"<prog>\"]  run agents and rank"
     );
     println!("                       --data: a frozen CSV (else synthetic) · --http/--cmd: add YOUR agent");
+    println!("                       --checkpoint <path>: resumable external-agent sweep (crash-tolerant)");
     println!(
         "  sharpebench score <submissions.json>  rank a JSON field of pre-computed submissions"
     );
@@ -773,19 +774,48 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
     // a subprocess speaking newline-delimited JSON over stdio (see examples/reference-agent).
     // Both go through the transport-honest path: a wire blip is retried and, if it
     // persists, surfaced as an explicit failure instead of a masked degrade-to-hold.
+    // `--checkpoint <path>` (external agents only) makes the sweep resumable: a crash
+    // mid-run resumes and finishes only the outstanding window × seed tasks.
     const EXTERNAL_MAX_RETRIES: u32 = 2;
+    let checkpoint = flag_value(args, "--checkpoint").map(std::path::PathBuf::from);
     if let Some(addr) = flag_value(args, "--http") {
         let addr = addr.to_string();
         let label = format!("http:{addr}");
-        let res = sharpebench_harness::run_external_agent(
-            &label,
-            &data,
-            &windows,
-            &seeds,
-            costs,
-            EXTERNAL_MAX_RETRIES,
-            || Some(HttpAgent::new(addr.clone())),
-        );
+        let res = if let Some(ckpt) = &checkpoint {
+            match sharpebench_harness::run_resumable_sweep(
+                ckpt,
+                &label,
+                &windows,
+                &seeds,
+                EXTERNAL_MAX_RETRIES,
+                |wi, seed| {
+                    let mut agent = HttpAgent::new(addr.clone());
+                    sharpebench_harness::run_external_backtest(
+                        &data,
+                        &mut agent,
+                        windows[wi],
+                        seed,
+                        costs,
+                    )
+                },
+            ) {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("error: checkpoint sweep failed: {e}");
+                    return ExitCode::FAILURE;
+                }
+            }
+        } else {
+            sharpebench_harness::run_external_agent(
+                &label,
+                &data,
+                &windows,
+                &seeds,
+                costs,
+                EXTERNAL_MAX_RETRIES,
+                || Some(HttpAgent::new(addr.clone())),
+            )
+        };
         report_transport_failures(&label, &res.failures, json);
         field.insert(0, res.submission);
     } else if let Some(cmd) = flag_value(args, "--cmd") {
@@ -803,18 +833,47 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
             return ExitCode::FAILURE;
         }
         let label = format!("cmd:{prog}");
-        let res = sharpebench_harness::run_external_agent(
-            &label,
-            &data,
-            &windows,
-            &seeds,
-            costs,
-            EXTERNAL_MAX_RETRIES,
-            || {
-                let rest_refs: Vec<&str> = rest.iter().map(String::as_str).collect();
-                ExternalAgent::spawn(&prog, &rest_refs).ok()
-            },
-        );
+        let res = if let Some(ckpt) = &checkpoint {
+            match sharpebench_harness::run_resumable_sweep(
+                ckpt,
+                &label,
+                &windows,
+                &seeds,
+                EXTERNAL_MAX_RETRIES,
+                |wi, seed| {
+                    let rest_refs: Vec<&str> = rest.iter().map(String::as_str).collect();
+                    match ExternalAgent::spawn(&prog, &rest_refs) {
+                        Ok(mut a) => sharpebench_harness::run_external_backtest(
+                            &data,
+                            &mut a,
+                            windows[wi],
+                            seed,
+                            costs,
+                        ),
+                        Err(_) => Err(sharpebench_harness::FailureKind::SpawnError),
+                    }
+                },
+            ) {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("error: checkpoint sweep failed: {e}");
+                    return ExitCode::FAILURE;
+                }
+            }
+        } else {
+            sharpebench_harness::run_external_agent(
+                &label,
+                &data,
+                &windows,
+                &seeds,
+                costs,
+                EXTERNAL_MAX_RETRIES,
+                || {
+                    let rest_refs: Vec<&str> = rest.iter().map(String::as_str).collect();
+                    ExternalAgent::spawn(&prog, &rest_refs).ok()
+                },
+            )
+        };
         report_transport_failures(&label, &res.failures, json);
         field.insert(0, res.submission);
     }

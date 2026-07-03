@@ -11,9 +11,11 @@ sharpebench-core = { path = "../sharpebench-core", version = "0.0.11" }
 sharpebench-protocol = { path = "../sharpebench-protocol", version = "0.0.11" }
 sharpebench-sim = { path = "../sharpebench-sim", version = "0.0.11" }
 serde = { version = "1", features = ["derive"] }
-
-[dev-dependencies]
-serde_json = "1"
+# `float_roundtrip`: the checkpoint persists each Run's f64 return series, and a
+# resumed sweep must reload it bit-identically to an uninterrupted one (determinism
+# + attestation). serde_json's default parser can land 1 ULP off; this feature makes
+# parse the exact inverse of serialize.
+serde_json = { version = "1", features = ["float_roundtrip"] }
 
 [lints]
 workspace = true

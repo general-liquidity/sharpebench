@@ -6,8 +6,10 @@
 //! `Run` per (window, seed) is what makes pass^k and multi-window OOS meaningful.
 #![forbid(unsafe_code)]
 
+pub mod checkpoint;
 pub mod failure;
 
+pub use checkpoint::{run_resumable_sweep, SweepCheckpoint, TaskRecord, TaskState};
 pub use failure::{
     failing_sentinel_run, run_with_retries, FailureKind, FailureLog, FailureRecord, RunOutcome,
 };
@@ -224,7 +226,7 @@ where
 
 /// Run an external agent across every `window` × `seed` under the resilient failure
 /// taxonomy, spawning a **fresh** agent per attempt via `spawn` (which returns `None`
-/// when the process/endpoint can't be created — a [`FailureKind::SpawnError`]). A
+/// when the process/endpoint can't be created - a [`FailureKind::SpawnError`]). A
 /// transport blip is retried up to `max_retries`; a persistent transport failure is
 /// logged and excluded from pass^k (harness fault), while an agent protocol fault
 /// becomes a failing sentinel run (counts against pass^k). This is the run/stress/
@@ -543,7 +545,7 @@ mod tests {
             _obs: &sharpebench_protocol::MarketObservation,
         ) -> sharpebench_protocol::Decision {
             if let Some(err) = self.fault {
-                // A transport blip degrades to a hold, but is *recorded* — the whole
+                // A transport blip degrades to a hold, but is *recorded* - the whole
                 // point: this hold is a masked fault, not a deliberate one.
                 self.health.record(err, false);
             }
