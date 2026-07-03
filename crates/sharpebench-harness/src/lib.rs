@@ -462,6 +462,7 @@ mod tests {
                     rationale: "exploit the fill engine".to_string(),
                 }],
                 reasoning: "cheat".to_string(),
+                cost: None,
             }
         }
     }

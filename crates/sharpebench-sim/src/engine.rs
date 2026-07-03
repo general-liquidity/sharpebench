@@ -239,10 +239,17 @@ pub fn run_backtest(
     let mut returns: Vec<f64> = Vec::new();
     let mut confidences: Vec<f64> = Vec::new();
     let mut outcomes: Vec<bool> = Vec::new();
+    // Accumulate the agent's self-reported *compute* cost (distinct from trading
+    // cost, which is already baked into `returns`). Feeds `Run.cost`, which drives
+    // the cost-normalized leaderboard columns (`return_per_cost` / `dsr_per_cost`).
+    let mut compute_cost = 0.0_f64;
 
     for t in window.start..end {
         let obs = build_observation(data, &symbols, &book, t);
         let decision = agent.decide(&obs);
+        if let Some(c) = &decision.cost {
+            compute_cost += c.billable_units();
+        }
         let out = step_once(data, &symbols, &mut book, &costs, t, &decision);
         returns.push(out.ret);
         confidences.push(out.confidence);
@@ -254,7 +261,7 @@ pub fn run_backtest(
         trace: book.trace,
         confidences,
         outcomes,
-        cost: 0.0,
+        cost: compute_cost,
     }
 }
 
@@ -278,6 +285,7 @@ mod tests {
                     rationale: "2x leverage".to_string(),
                 }],
                 reasoning: "2x leverage".to_string(),
+                cost: None,
             }
         }
     }
@@ -296,8 +304,71 @@ mod tests {
                     rationale: "momentum breakout".to_string(),
                 }],
                 reasoning: "single-name buy".to_string(),
+                cost: None,
             }
         }
+    }
+
+    /// Test-only agent that buys the first symbol AND self-reports a per-decision
+    /// compute cost — the external-LLM path the cost channel exists for.
+    struct CostlyAgent;
+    impl Agent for CostlyAgent {
+        fn decide(&mut self, obs: &MarketObservation) -> Decision {
+            use sharpebench_protocol::DecisionCost;
+            let sym = obs.symbols[0].symbol.clone();
+            Decision {
+                orders: vec![Order {
+                    symbol: sym,
+                    action: Action::Buy,
+                    target_weight: 0.2,
+                    confidence: 0.6,
+                    rationale: String::new(),
+                }],
+                reasoning: "costly".to_string(),
+                cost: Some(DecisionCost {
+                    cost_usd: 0.01,
+                    tokens_in: 100,
+                    tokens_out: 50,
+                    reasoning_tokens: 0,
+                }),
+            }
+        }
+    }
+
+    #[test]
+    fn self_reported_cost_populates_run_cost_and_dsr_per_cost() {
+        use sharpebench_core::{score_agent, AgentSubmission, ScoreConfig};
+        let data = Dataset::synthetic(3, 80, 7);
+        let window = Window { start: 20, end: 80 };
+        let run = run_backtest(&data, &mut CostlyAgent, window, 1, CostModel::default());
+        // 60 steps × $0.01 = $0.60 of self-reported compute cost.
+        assert!(
+            (run.cost - 0.60).abs() < 1e-9,
+            "each decision's cost must accumulate into Run.cost: got {}",
+            run.cost
+        );
+        // The cost-normalized leaderboard columns are now live (Some, not None).
+        let sub = AgentSubmission {
+            agent_id: "costly".to_string(),
+            runs: vec![run],
+            in_sample_trials: 0,
+            candidates: Vec::new(),
+        };
+        let score = score_agent(&sub, &ScoreConfig::default());
+        assert!(score.return_per_cost.is_some(), "return_per_cost goes live");
+        assert!(score.dsr_per_cost.is_some(), "dsr_per_cost goes live");
+
+        // A cost-silent agent leaves the columns None (back-compat).
+        let free = run_backtest(&data, &mut BuyAndHold, window, 1, CostModel::default());
+        assert_eq!(free.cost, 0.0);
+        let free_sub = AgentSubmission {
+            agent_id: "free".to_string(),
+            runs: vec![free],
+            in_sample_trials: 0,
+            candidates: Vec::new(),
+        };
+        let free_score = score_agent(&free_sub, &ScoreConfig::default());
+        assert!(free_score.dsr_per_cost.is_none());
     }
 
     #[test]

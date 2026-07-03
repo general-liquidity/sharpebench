@@ -29,6 +29,9 @@ fn decide(obs: &MarketObservation) -> Decision {
     Decision {
         orders,
         reasoning: "equal-weight buy-and-hold".to_string(),
+        // Set `cost: Some(DecisionCost { cost_usd, tokens_in, tokens_out, .. })` to
+        // feed the cost-normalized leaderboard columns. This baseline spends nothing.
+        cost: None,
     }
 }
 
@@ -36,6 +39,7 @@ fn hold(reason: &str) -> Decision {
     Decision {
         orders: Vec::new(),
         reasoning: reason.to_string(),
+        cost: None,
     }
 }
 

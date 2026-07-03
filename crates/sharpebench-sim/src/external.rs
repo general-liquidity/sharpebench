@@ -52,6 +52,7 @@ impl ExternalAgent {
         Decision {
             orders: Vec::new(),
             reasoning: "external agent error → hold".to_string(),
+            cost: None,
         }
     }
 }
@@ -144,6 +145,7 @@ impl Agent for HttpAgent {
         self.decide_checked(obs).unwrap_or_else(|_| Decision {
             orders: Vec::new(),
             reasoning: "http agent error → hold".to_string(),
+            cost: None,
         })
     }
 }

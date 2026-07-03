@@ -59,6 +59,7 @@ impl Agent for ReplayAgent {
             .unwrap_or_else(|| Decision {
                 orders: Vec::new(),
                 reasoning: "replay exhausted → hold".to_string(),
+                cost: None,
             })
     }
 }

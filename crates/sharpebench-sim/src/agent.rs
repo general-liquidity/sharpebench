@@ -54,6 +54,7 @@ impl Agent for TeamAgent {
         Decision {
             orders,
             reasoning: "team consensus (mean target weight)".to_string(),
+            cost: None,
         }
     }
 }
@@ -79,6 +80,7 @@ impl Agent for BuyAndHold {
         Decision {
             orders,
             reasoning: "equal-weight buy-and-hold".to_string(),
+            cost: None,
         }
     }
 }
@@ -93,6 +95,7 @@ impl Agent for HoldAgent {
         Decision {
             orders: Vec::new(),
             reasoning: "hold".to_string(),
+            cost: None,
         }
     }
 }
@@ -135,6 +138,7 @@ impl Agent for RandomAgent {
         Decision {
             orders,
             reasoning: "random allocation (luck floor)".to_string(),
+            cost: None,
         }
     }
 }
@@ -194,6 +198,7 @@ impl Agent for Momentum {
         Decision {
             orders,
             reasoning: "cross-sectional momentum".to_string(),
+            cost: None,
         }
     }
 }
