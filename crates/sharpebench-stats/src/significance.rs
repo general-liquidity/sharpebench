@@ -9,7 +9,8 @@
 //! The RNG is a seeded SplitMix64 so a given (data, seed) always yields the same
 //! p-value — a benchmark result must be reproducible.
 
-use crate::stats::mean;
+use crate::deflated_sharpe::deflated_sharpe_ratio;
+use crate::stats::{mean, norm_ppf};
 
 /// Minimal deterministic PRNG (SplitMix64). Not cryptographic — used only for a
 /// reproducible bootstrap.
@@ -69,6 +70,111 @@ pub fn bootstrap_pvalue(excess: &[f64], seed: u64, n_boot: usize, block_prob: f6
     }
     // +1 smoothing so the p-value is never exactly 0.
     (at_least_as_large as f64 + 1.0) / (n_boot as f64 + 1.0)
+}
+
+/// A bootstrapped confidence interval on the Deflated Sharpe Ratio: the sampling
+/// uncertainty of the DSR *point estimate* itself, so two boards separated by
+/// noise are not hard-ranked as if the difference were real.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DsrConfidence {
+    /// Point-estimate DSR on the observed track (equals [`deflated_sharpe_ratio`]).
+    pub point: f64,
+    /// Bootstrap standard error: the standard deviation of the resampled DSRs.
+    pub se: f64,
+    /// Lower bound of the two-sided `ci`-level percentile interval.
+    pub lower: f64,
+    /// Upper bound of the two-sided `ci`-level percentile interval.
+    pub upper: f64,
+}
+
+/// Percentile confidence interval and standard error for the Deflated Sharpe
+/// Ratio, via the **same stationary-bootstrap resampler** as [`bootstrap_pvalue`]
+/// but resampling the raw track (no centering), because here we want the
+/// sampling distribution of the statistic, not its null distribution. `ci` is the
+/// two-sided coverage (e.g. 0.90 → the 5th and 95th percentiles). Deterministic
+/// given `seed`. A degenerate track (< 2 points, or `n_boot == 0`) returns a
+/// zero-width interval at the point estimate.
+pub fn bootstrap_dsr_ci(
+    returns: &[f64],
+    n_trials: u32,
+    trials_sr_std: f64,
+    seed: u64,
+    n_boot: usize,
+    block_prob: f64,
+    ci: f64,
+) -> DsrConfidence {
+    let n = returns.len();
+    let point = deflated_sharpe_ratio(returns, n_trials, trials_sr_std);
+    if n < 2 || n_boot == 0 {
+        return DsrConfidence {
+            point,
+            se: 0.0,
+            lower: point,
+            upper: point,
+        };
+    }
+    let mut rng = SplitMix64(seed ^ 0x0DEF_1A7E_D5B0_07C1);
+    let mut boots: Vec<f64> = Vec::with_capacity(n_boot);
+    let mut resample = vec![0.0; n];
+    for _ in 0..n_boot {
+        // Stationary-bootstrap block path (identical structure to bootstrap_pvalue),
+        // but sampling the observed returns directly (no null-centering).
+        let mut idx = rng.below(n);
+        for slot in resample.iter_mut() {
+            *slot = returns[idx];
+            if rng.unit() < block_prob {
+                idx = rng.below(n);
+            } else {
+                idx = (idx + 1) % n;
+            }
+        }
+        boots.push(deflated_sharpe_ratio(&resample, n_trials, trials_sr_std));
+    }
+    let m = mean(&boots);
+    let var = boots.iter().map(|b| (b - m) * (b - m)).sum::<f64>() / boots.len() as f64;
+    let se = var.sqrt();
+    boots.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let ci = ci.clamp(0.0, 1.0);
+    let tail = (1.0 - ci) / 2.0;
+    let lo_idx = ((tail * n_boot as f64).floor() as usize).min(n_boot - 1);
+    let hi_idx = (((1.0 - tail) * n_boot as f64).ceil() as usize)
+        .saturating_sub(1)
+        .min(n_boot - 1);
+    DsrConfidence {
+        point,
+        se,
+        lower: boots[lo_idx],
+        upper: boots[hi_idx],
+    }
+}
+
+/// Runs (k) required to distinguish two Deflated Sharpe estimates separated by a
+/// standardized per-run effect `effect` (the DSR gap expressed in per-run
+/// standard-deviation units) at one-sided significance `alpha` and power `power`.
+///
+/// Inverts the √k shrinkage of the mean's standard error (SE ∝ 1/√k):
+///
+/// ```text
+/// k = ( (z_{1-alpha} + z_power) / effect )²
+/// ```
+///
+/// so the run count is principled rather than ad hoc. Returns the smallest integer
+/// `k` (rounded up, floored at 1); `usize::MAX` when the effect is non-positive or
+/// the requested power is unattainable in finite runs (e.g. `power == 1`).
+pub fn runs_for_power(effect: f64, alpha: f64, power: f64) -> usize {
+    if effect <= 0.0 {
+        return usize::MAX;
+    }
+    let za = norm_ppf((1.0 - alpha).clamp(0.0, 1.0));
+    let zb = norm_ppf(power.clamp(0.0, 1.0));
+    let k = ((za + zb) / effect).powi(2);
+    if k <= 1.0 {
+        return 1;
+    }
+    if !k.is_finite() {
+        return usize::MAX;
+    }
+    k.ceil() as usize
 }
 
 /// White's Reality Check p-value (a Hansen-SPA-style data-snooping test): the
@@ -461,6 +567,84 @@ mod tests {
         let l = spa_pvalue(&field, 1, 1000, 0.1);
         assert!(c <= l + 1e-12, "consistent {c} should be ≤ studentized {l}");
         assert!(c < 0.1, "should still flag the real leader");
+    }
+
+    #[test]
+    fn dsr_ci_brackets_point_and_is_deterministic() {
+        let r: Vec<f64> = (0..200)
+            .map(|i| 0.01 + 0.002 * (i as f64 * 0.5).sin())
+            .collect();
+        let a = bootstrap_dsr_ci(&r, 50, 0.5, 7, 800, 0.1, 0.90);
+        let b = bootstrap_dsr_ci(&r, 50, 0.5, 7, 800, 0.1, 0.90);
+        assert_eq!(a, b, "same (data, seed) must reproduce the CI");
+        assert!(a.se >= 0.0);
+        assert!(
+            a.lower <= a.point + 1e-9 && a.point <= a.upper + 1e-9,
+            "point {} should sit inside [{}, {}]",
+            a.point,
+            a.lower,
+            a.upper
+        );
+    }
+
+    #[test]
+    fn dsr_ci_is_wider_for_a_shorter_noisier_track() {
+        // A short, noisy track carries more sampling uncertainty than a long,
+        // steady one, so its bootstrapped DSR interval is wider.
+        let short_noisy: Vec<f64> = (0..24)
+            .map(|i| 0.004 + 0.03 * (i as f64 * 1.3).sin())
+            .collect();
+        let long_steady: Vec<f64> = (0..400)
+            .map(|i| 0.004 + 0.002 * (i as f64 * 0.5).sin())
+            .collect();
+        let wide = bootstrap_dsr_ci(&short_noisy, 50, 0.5, 3, 800, 0.1, 0.90);
+        let tight = bootstrap_dsr_ci(&long_steady, 50, 0.5, 3, 800, 0.1, 0.90);
+        assert!(
+            (wide.upper - wide.lower) > (tight.upper - tight.lower),
+            "short/noisy CI width {} should exceed long/steady width {}",
+            wide.upper - wide.lower,
+            tight.upper - tight.lower
+        );
+    }
+
+    #[test]
+    fn dsr_cis_separate_for_clearly_different_skill() {
+        // A genuine edge vs pure churn: their DSR intervals should not overlap.
+        let strong: Vec<f64> = (0..300)
+            .map(|i| 0.012 + 0.001 * (i as f64 * 0.5).sin())
+            .collect();
+        let weak: Vec<f64> = (0..300)
+            .map(|i| 0.0004 + 0.02 * (i as f64 * 0.9).sin())
+            .collect();
+        let s = bootstrap_dsr_ci(&strong, 2, 0.01, 11, 800, 0.1, 0.90);
+        let w = bootstrap_dsr_ci(&weak, 2, 0.01, 11, 800, 0.1, 0.90);
+        assert!(
+            w.upper < s.lower,
+            "weak CI upper {} should sit below strong CI lower {}",
+            w.upper,
+            s.lower
+        );
+    }
+
+    #[test]
+    fn runs_for_power_grows_as_effect_shrinks_and_power_rises() {
+        let big = runs_for_power(0.5, 0.05, 0.80);
+        let small = runs_for_power(0.1, 0.05, 0.80);
+        assert!(
+            small > big,
+            "a smaller effect needs more runs ({small} vs {big})"
+        );
+        let low_power = runs_for_power(0.2, 0.05, 0.80);
+        let high_power = runs_for_power(0.2, 0.05, 0.95);
+        assert!(
+            high_power > low_power,
+            "more power needs more runs ({high_power} vs {low_power})"
+        );
+        // Closed-form check: effect 0.5, alpha 0.05, power 0.80 →
+        // ((1.6449 + 0.8416)/0.5)² = 24.72 → ceil 25.
+        assert_eq!(big, 25);
+        // A non-positive effect is indistinguishable at any k.
+        assert_eq!(runs_for_power(0.0, 0.05, 0.80), usize::MAX);
     }
 
     #[test]

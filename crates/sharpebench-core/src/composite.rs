@@ -130,11 +130,21 @@ pub struct ScoreConfig {
     /// pooled track — worst-window Sharpe + fraction-of-positive-windows.
     #[serde(default = "default_rolling_window")]
     pub rolling_window: usize,
+    /// Two-sided coverage of the bootstrapped Deflated-Sharpe confidence interval
+    /// (e.g. 0.90 → 5th/95th percentiles). Drives the leaderboard tie band: entries
+    /// whose DSR CIs overlap are flagged statistically indistinguishable.
+    #[serde(default = "default_dsr_ci_level")]
+    pub dsr_ci_level: f64,
 }
 
 /// Default rolling-Sharpe window length (21 periods ≈ one trading month).
 fn default_rolling_window() -> usize {
     21
+}
+
+/// Default DSR confidence-interval coverage (a 90% two-sided interval).
+fn default_dsr_ci_level() -> f64 {
+    0.90
 }
 
 impl Default for ScoreConfig {
@@ -152,6 +162,7 @@ impl Default for ScoreConfig {
             rank_key: RankKey::default(),
             reference_dsr_population: Vec::new(),
             rolling_window: default_rolling_window(),
+            dsr_ci_level: default_dsr_ci_level(),
         }
     }
 }
@@ -258,6 +269,23 @@ pub struct CompositeScore {
     /// process is clean, else the no-skill baseline (0.0). Always reported
     /// alongside `raw_mean_return`, which keeps the un-floored value.
     pub realized_floored_return: f64,
+    /// Lower bound of the bootstrapped Deflated-Sharpe confidence interval (at
+    /// `cfg.dsr_ci_level`). The DSR point estimate is `deflated_sharpe`; this is
+    /// how far it might sink under resampling noise.
+    pub dsr_ci_low: f64,
+    /// Upper bound of the bootstrapped Deflated-Sharpe confidence interval.
+    pub dsr_ci_high: f64,
+    /// Bootstrap standard error of the Deflated Sharpe (the CI's scale).
+    pub dsr_se: f64,
+    /// 1-based tie-band index among rank-eligible agents: entries whose DSR
+    /// confidence intervals overlap share a band and are statistically
+    /// indistinguishable, so they are not hard-ranked against each other. 0 for
+    /// ineligible agents or an agent scored outside a field. Filled by [`rank`].
+    pub tie_group: usize,
+    /// Whether this entry shares its DSR tie band with at least one other eligible
+    /// agent (i.e. its rank is not statistically separable from a neighbor).
+    /// Filled by [`rank`].
+    pub dsr_tied: bool,
 }
 
 /// Pareto dominance on (return↑, drawdown↓, turnover↓).
@@ -409,6 +437,19 @@ pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
         raw_mean_return
     };
 
+    // Sampling uncertainty of the DSR point estimate: a bootstrapped CI + SE, so
+    // the leaderboard can flag noise-separated entries as tied rather than impose a
+    // false hard ordering. Reuses the stationary-bootstrap resampler.
+    let dsr_ci = crate::significance::bootstrap_dsr_ci(
+        &pooled,
+        effective_n_trials,
+        cfg.trials_sr_std,
+        cfg.bootstrap_seed,
+        cfg.n_boot,
+        cfg.block_prob,
+        cfg.dsr_ci_level,
+    );
+
     let rank_eligible =
         dsr >= cfg.dsr_bar && passed_k && process_ok && bootstrap_p < cfg.alpha && mandate_ok;
     let composite = if rank_eligible { dsr } else { 0.0 };
@@ -452,6 +493,11 @@ pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
         dsr_per_cost,
         process_floored,
         realized_floored_return,
+        dsr_ci_low: dsr_ci.lower,
+        dsr_ci_high: dsr_ci.upper,
+        dsr_se: dsr_ci.se,
+        tie_group: 0,
+        dsr_tied: false,
     }
 }
 
@@ -625,7 +671,45 @@ pub fn rank(subs: &[AgentSubmission], cfg: &ScoreConfig) -> Vec<CompositeScore> 
             cs.rank_ordinal = ord;
         }
     }
+
+    // DSR tie bands: walking the eligible agents in ranked order, an agent joins
+    // the previous band when their DSR confidence intervals overlap (a difference
+    // the resampling can't distinguish from noise). A new, separable agent opens a
+    // new band. Then flag every agent whose band holds more than one member: its
+    // rank is not statistically real. This is the whole point of the board: the
+    // "return-rank is luck" failure must not reappear at the DSR.
+    let mut group = 0usize;
+    let mut prev: Option<usize> = None;
+    for i in 0..scores.len() {
+        if !scores[i].rank_eligible {
+            continue;
+        }
+        let same_band = matches!(prev, Some(p) if ci_overlap(&scores[p], &scores[i]));
+        if !same_band {
+            group += 1;
+        }
+        scores[i].tie_group = group;
+        prev = Some(i);
+    }
+    let mut band_counts = vec![0usize; group + 1];
+    for cs in &scores {
+        if cs.rank_eligible {
+            band_counts[cs.tie_group] += 1;
+        }
+    }
+    for cs in scores.iter_mut() {
+        if cs.rank_eligible {
+            cs.dsr_tied = band_counts[cs.tie_group] > 1;
+        }
+    }
     scores
+}
+
+/// Do two agents' Deflated-Sharpe confidence intervals overlap? Overlapping CIs
+/// mean the difference in their DSR point estimates is within sampling noise, so
+/// they belong in the same tie band rather than being hard-ranked.
+fn ci_overlap(a: &CompositeScore, b: &CompositeScore) -> bool {
+    a.dsr_ci_low <= b.dsr_ci_high && b.dsr_ci_low <= a.dsr_ci_high
 }
 
 #[cfg(test)]
@@ -865,6 +949,50 @@ mod tests {
         );
         assert!(!s.process_floored);
         assert_eq!(s.realized_floored_return, s.raw_mean_return);
+    }
+
+    #[test]
+    fn overlapping_dsr_cis_flag_a_tie_and_separation_gets_a_distinct_band() {
+        // A bar low enough to admit a clearly-weaker (but still real) agent, so we
+        // can exhibit both an indistinguishable pair and a separable outsider.
+        let cfg = ScoreConfig {
+            n_trials: 2,
+            trials_sr_std: 0.01,
+            dsr_bar: 0.10,
+            per_run_psr_bar: 0.05,
+            alpha: 0.9,
+            n_boot: 600,
+            ..ScoreConfig::default()
+        };
+        // Two identical strong agents: same track ⇒ identical DSR CIs ⇒ tied.
+        let strong_a = agent("strong_a", (0..3).map(|_| run(0.01, 0.001, 60)).collect());
+        let strong_b = agent("strong_b", (0..3).map(|_| run(0.01, 0.001, 60)).collect());
+        // A much weaker but still-eligible agent: its DSR CI sits well below.
+        let weak = agent("weak", (0..3).map(|_| run(0.001, 0.02, 60)).collect());
+
+        let board = rank(&[strong_a, strong_b, weak], &cfg);
+        let get = |id: &str| board.iter().find(|s| s.agent_id == id).unwrap();
+        let (a, b, w) = (get("strong_a"), get("strong_b"), get("weak"));
+
+        assert!(
+            a.rank_eligible && b.rank_eligible && w.rank_eligible,
+            "all three should clear the (deliberately low) bar"
+        );
+        // Overlapping CIs ⇒ same tie band, both flagged indistinguishable.
+        assert_eq!(a.tie_group, b.tie_group, "identical CIs share a band");
+        assert!(a.dsr_tied && b.dsr_tied, "the pair is flagged tied");
+        // The weaker agent's CI is separable ⇒ its own band, not tied.
+        assert_ne!(
+            w.tie_group, a.tie_group,
+            "separable agent gets a distinct band"
+        );
+        assert!(!w.dsr_tied, "a distinct band is not a tie");
+        assert!(
+            w.dsr_ci_high < a.dsr_ci_low,
+            "weak CI upper {} should sit below strong CI lower {}",
+            w.dsr_ci_high,
+            a.dsr_ci_low
+        );
     }
 
     #[test]

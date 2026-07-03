@@ -71,7 +71,7 @@ pub use greeks::{
     Leg,
 };
 pub use oos::{oos_decay, OosDecayReport};
-pub use percentile::percentile_of;
+pub use percentile::{percentile_of, BaselineBand, HumanBaseline};
 pub use process::{ProcessEvent, ProcessScore, Trace};
 pub use rediscovery::{
     classify_rediscovery, cosine_similarity, RediscoveryVerdict, DEFAULT_REDISCOVERY_THRESHOLD,
