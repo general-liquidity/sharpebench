@@ -15,11 +15,20 @@
 //!   that bounds how much a retrieval layer could ever help.
 //!
 //! Each arm supplies a per-task outcome score (decision quality, realized reward,
-//! …). [`ablation_report`] returns the retrieval lift over baseline, the p-value
+//! …) and, optionally, its compute overhead ([`ArmCost`]: tokens + latency).
+//! [`ablation_report`] returns the retrieval lift over baseline, the p-value
 //! of that lift (a stationary-bootstrap test on the paired per-task differences,
 //! via [`sharpebench_stats::significance::bootstrap_pvalue`]), the remaining headroom to the
-//! oracle ceiling, and what fraction of the achievable ceiling the retrieval layer
+//! oracle ceiling, what fraction of the achievable ceiling the retrieval layer
 //! has captured - plus a significance verdict at a caller-chosen `alpha`.
+//!
+//! It also reports **cost-normalized lift** - the lift per extra token and per
+//! extra unit of latency the retrieval arm spent over baseline. This is what
+//! turns the opening claim ("improve decisions *rather than just adding tokens
+//! and latency*") from an assertion into a measurement: a layer that buys a 2%
+//! lift with 3x the latency now scores below a zero-overhead layer with the same
+//! lift, instead of scoring identically. It answers "does the memory layer pay
+//! for itself?".
 //!
 //! Design invariants, matching the rest of the SharpeBench family:
 //! - **Pure.** No I/O, no clock, no ambient randomness. The bootstrap seed is a
@@ -91,6 +100,12 @@ pub(crate) const BOOTSTRAP_BLOCK_PROB: f64 = 0.1;
 /// [`AblationReport::fraction_of_ceiling`].
 const CEILING_EPSILON: f64 = 1e-12;
 
+/// A retrieval-over-baseline cost overhead at or below this magnitude is treated
+/// as unreported (or non-positive), so the per-cost lift is `None` rather than a
+/// divide-by-~zero blow-up. Mirrors how the core scorer reports no per-cost
+/// figure when cost is unreported.
+const COST_EPSILON: f64 = 1e-12;
+
 /// Which arm of the ablation a score series belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Arm {
@@ -117,6 +132,27 @@ impl Arm {
     }
 }
 
+/// The compute overhead of running an arm, split into the two axes a retrieval
+/// layer trades outcome quality against. Mirrors `Run.cost` in the core scorer
+/// (`sharpebench-core`), but broken out so lift can be normalized per token and
+/// per unit of latency independently. Any consistent unit per axis; `0.0` = not
+/// reported. Caller-supplied — the crate does no timing or token accounting of
+/// its own, preserving the pure/deterministic invariant.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct ArmCost {
+    /// Tokens consumed (context + generation) to run the arm.
+    pub tokens: f64,
+    /// Wall-clock latency incurred to run the arm (any consistent time unit).
+    pub latency: f64,
+}
+
+impl ArmCost {
+    /// Construct a cost profile from token and latency spend.
+    pub fn new(tokens: f64, latency: f64) -> Self {
+        Self { tokens, latency }
+    }
+}
+
 /// Per-task outcome scores for one arm (decision quality, realized reward, …).
 /// One entry per task, in a caller-fixed task order. The baseline and retrieval
 /// arms must share that order and length so the ablation can pair them per task.
@@ -126,12 +162,27 @@ pub struct ArmScores {
     pub arm: Arm,
     /// One outcome score per task.
     pub scores: Vec<f64>,
+    /// The compute overhead of running this arm. Defaults to zero (unreported);
+    /// set via [`ArmScores::with_cost`]. The ablation normalizes the retrieval
+    /// lift by the retrieval arm's overhead *over baseline* so a layer that buys
+    /// its lift with 3x the tokens or latency no longer scores like a free one.
+    pub cost: ArmCost,
 }
 
 impl ArmScores {
-    /// Construct an arm's score series.
+    /// Construct an arm's score series with no reported cost.
     pub fn new(arm: Arm, scores: Vec<f64>) -> Self {
-        Self { arm, scores }
+        Self {
+            arm,
+            scores,
+            cost: ArmCost::default(),
+        }
+    }
+
+    /// Attach a compute-overhead profile to this arm (builder style).
+    pub fn with_cost(mut self, cost: ArmCost) -> Self {
+        self.cost = cost;
+        self
     }
 
     /// Number of tasks scored for this arm.
@@ -170,6 +221,36 @@ pub struct AblationReport {
     pub significant: bool,
     /// The significance threshold used for the verdict.
     pub alpha: f64,
+    /// Extra tokens the retrieval arm spent over baseline (`retrieval - baseline`).
+    /// The denominator of [`AblationReport::lift_per_token`]; negative/zero means
+    /// no measurable token overhead.
+    pub token_overhead: f64,
+    /// Extra latency the retrieval arm incurred over baseline
+    /// (`retrieval - baseline`). The denominator of
+    /// [`AblationReport::lift_per_latency`].
+    pub latency_overhead: f64,
+    /// Retrieval lift per extra token the memory layer spent over baseline:
+    /// `retrieval_lift / token_overhead`. This is the "does memory pay for
+    /// itself?" figure on the token axis — a layer that buys a small lift with a
+    /// large token overhead scores below a cheaper layer with the same lift.
+    /// `None` when the token overhead is unreported or non-positive.
+    pub lift_per_token: Option<f64>,
+    /// Retrieval lift per extra unit of latency over baseline:
+    /// `retrieval_lift / latency_overhead`. The latency-axis counterpart of
+    /// [`AblationReport::lift_per_token`]. `None` when latency overhead is
+    /// unreported or non-positive.
+    pub lift_per_latency: Option<f64>,
+}
+
+/// Lift per unit of cost overhead, or `None` when the overhead is unreported or
+/// non-positive (nothing to normalize against). Kept as a free function so both
+/// the token and latency axes share one guard.
+fn per_cost_lift(lift: f64, overhead: f64) -> Option<f64> {
+    if overhead > COST_EPSILON {
+        Some(lift / overhead)
+    } else {
+        None
+    }
 }
 
 /// Score a three-arm memory ablation and test whether the retrieval layer's lift
@@ -252,6 +333,16 @@ pub fn ablation_report(
         retrieval_lift / ceiling_gap
     };
 
+    // Cost-normalized lift: the retrieval layer's outcome lift per unit of the
+    // *extra* compute it spent over baseline. A memory layer only pays for itself
+    // if the lift justifies the overhead it adds, so the denominator is the
+    // marginal cost (retrieval - baseline), not the arm's absolute spend. A
+    // non-positive or unreported overhead yields `None` rather than a blow-up.
+    let token_overhead = retrieval.cost.tokens - baseline.cost.tokens;
+    let latency_overhead = retrieval.cost.latency - baseline.cost.latency;
+    let lift_per_token = per_cost_lift(retrieval_lift, token_overhead);
+    let lift_per_latency = per_cost_lift(retrieval_lift, latency_overhead);
+
     Ok(AblationReport {
         retrieval_lift,
         lift_pvalue,
@@ -259,6 +350,10 @@ pub fn ablation_report(
         fraction_of_ceiling,
         significant: lift_pvalue < alpha,
         alpha,
+        token_overhead,
+        latency_overhead,
+        lift_per_token,
+        lift_per_latency,
     })
 }
 
@@ -369,5 +464,104 @@ mod tests {
         assert_eq!(Arm::Retrieval.as_str(), "retrieval");
         assert_eq!(Arm::Oracle.as_str(), "oracle");
         assert_eq!(Arm::Poisoned.as_str(), "poisoned");
+    }
+
+    #[test]
+    fn cost_normalized_lift_penalizes_expensive_arms() {
+        // Two candidate memory layers, each scored against the same free baseline
+        // and oracle. The pricier layer wins more raw lift but spends far more to
+        // get it, so it must score *lower* on cost-normalized lift.
+        let b = baseline(vec![0.10, 0.10, 0.10, 0.10]);
+        let o = oracle(vec![0.95, 0.95, 0.95, 0.95]);
+
+        // Cheap arm: +0.20 lift for a 10-token / 5-latency overhead.
+        let cheap = retrieval(vec![0.30, 0.30, 0.30, 0.30]).with_cost(ArmCost::new(10.0, 5.0));
+        // Expensive arm: bigger +0.30 lift, but a 100-token / 60-latency overhead.
+        let pricey = retrieval(vec![0.40, 0.40, 0.40, 0.40]).with_cost(ArmCost::new(100.0, 60.0));
+
+        let cheap_rep = ablation_report(&b, &cheap, &o, 0.05).unwrap();
+        let pricey_rep = ablation_report(&b, &pricey, &o, 0.05).unwrap();
+
+        // Raw lift: the expensive arm is ahead.
+        assert!(pricey_rep.retrieval_lift > cheap_rep.retrieval_lift);
+
+        // Overhead is measured marginally, over baseline (baseline cost is zero).
+        assert!((cheap_rep.token_overhead - 10.0).abs() < EPS);
+        assert!((pricey_rep.token_overhead - 100.0).abs() < EPS);
+
+        // Cost-normalized lift: the expensive arm scores *below* the cheap one on
+        // both axes. Higher lift + much higher cost => lower lift-per-cost.
+        let cheap_tok = cheap_rep.lift_per_token.unwrap();
+        let pricey_tok = pricey_rep.lift_per_token.unwrap();
+        assert!(
+            pricey_tok < cheap_tok,
+            "expensive arm lift/token {pricey_tok} must be below cheap {cheap_tok}"
+        );
+        let cheap_lat = cheap_rep.lift_per_latency.unwrap();
+        let pricey_lat = pricey_rep.lift_per_latency.unwrap();
+        assert!(
+            pricey_lat < cheap_lat,
+            "expensive arm lift/latency {pricey_lat} must be below cheap {cheap_lat}"
+        );
+
+        // Exact values: lift / overhead.
+        assert!((cheap_tok - 0.20 / 10.0).abs() < EPS);
+        assert!((pricey_tok - 0.30 / 100.0).abs() < EPS);
+    }
+
+    #[test]
+    fn equal_cost_arms_rank_by_raw_lift() {
+        let b = baseline(vec![0.10, 0.10, 0.10, 0.10]);
+        let o = oracle(vec![0.95, 0.95, 0.95, 0.95]);
+        let cost = ArmCost::new(50.0, 20.0);
+
+        let strong = retrieval(vec![0.40, 0.40, 0.40, 0.40]).with_cost(cost);
+        let weak = retrieval(vec![0.20, 0.20, 0.20, 0.20]).with_cost(cost);
+
+        let strong_rep = ablation_report(&b, &strong, &o, 0.05).unwrap();
+        let weak_rep = ablation_report(&b, &weak, &o, 0.05).unwrap();
+
+        // Same overhead on both axes => cost-normalized ranking matches raw lift.
+        assert!((strong_rep.token_overhead - weak_rep.token_overhead).abs() < EPS);
+        assert!(strong_rep.retrieval_lift > weak_rep.retrieval_lift);
+        assert!(strong_rep.lift_per_token.unwrap() > weak_rep.lift_per_token.unwrap());
+        assert!(strong_rep.lift_per_latency.unwrap() > weak_rep.lift_per_latency.unwrap());
+    }
+
+    #[test]
+    fn overhead_is_marginal_over_baseline() {
+        // A no-memory baseline still burns tokens/latency; only the *extra* the
+        // retrieval layer adds is charged against its lift.
+        let b = baseline(vec![0.10, 0.10]).with_cost(ArmCost::new(30.0, 8.0));
+        let r = retrieval(vec![0.50, 0.50]).with_cost(ArmCost::new(45.0, 20.0));
+        let o = oracle(vec![0.90, 0.90]);
+
+        let rep = ablation_report(&b, &r, &o, 0.05).unwrap();
+        assert!((rep.token_overhead - 15.0).abs() < EPS); // 45 - 30
+        assert!((rep.latency_overhead - 12.0).abs() < EPS); // 20 - 8
+        assert!((rep.lift_per_token.unwrap() - 0.40 / 15.0).abs() < EPS);
+        assert!((rep.lift_per_latency.unwrap() - 0.40 / 12.0).abs() < EPS);
+    }
+
+    #[test]
+    fn unreported_or_nonpositive_overhead_yields_none() {
+        let b = baseline(vec![0.10, 0.10]);
+        let o = oracle(vec![0.90, 0.90]);
+
+        // No cost supplied on either arm => nothing to normalize against.
+        let free = ablation_report(&b, &retrieval(vec![0.50, 0.50]), &o, 0.05).unwrap();
+        assert!(free.lift_per_token.is_none());
+        assert!(free.lift_per_latency.is_none());
+        assert!((free.token_overhead - 0.0).abs() < EPS);
+
+        // Retrieval cheaper than baseline on latency => non-positive overhead => None.
+        let b2 = baseline(vec![0.10, 0.10]).with_cost(ArmCost::new(10.0, 50.0));
+        let r2 = retrieval(vec![0.50, 0.50]).with_cost(ArmCost::new(40.0, 20.0));
+        let rep = ablation_report(&b2, &r2, &o, 0.05).unwrap();
+        assert!(rep.lift_per_token.is_some(), "token overhead is positive");
+        assert!(
+            rep.lift_per_latency.is_none(),
+            "negative latency overhead is not normalizable"
+        );
     }
 }
