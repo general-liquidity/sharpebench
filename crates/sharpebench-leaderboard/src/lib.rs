@@ -43,23 +43,35 @@ pub struct RunSpec {
 }
 
 /// Render a ranked field as a plain-text leaderboard.
+///
+/// The rank column is the **tie band**, not a bare running integer: agents whose
+/// bootstrapped Deflated-Sharpe confidence intervals overlap share a band number
+/// and are marked `=` (statistically indistinguishable), so the board never
+/// imposes a hard ordering the sampling noise can't support. The DSR CI is printed
+/// alongside the point estimate.
 pub fn render(board: &[CompositeScore]) -> String {
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "{:<4} {:<18} {:>9} {:>7} {:>9}",
-        "#", "agent", "DSR", "elig", "raw_ret"
+        "{:<4} {:<18} {:>9} {:>19} {:>4} {:>7} {:>9}",
+        "#", "agent", "DSR", "DSR CI", "tie", "elig", "raw_ret"
     );
-    for (i, s) in board.iter().enumerate() {
+    for s in board.iter() {
         let pos = if s.rank_eligible {
-            (i + 1).to_string()
+            s.tie_group.to_string()
         } else {
             "-".to_string()
         };
+        let ci = format!("[{:.4},{:.4}]", s.dsr_ci_low, s.dsr_ci_high);
+        let tie = if s.rank_eligible && s.dsr_tied {
+            "="
+        } else {
+            ""
+        };
         let _ = writeln!(
             out,
-            "{:<4} {:<18} {:>9.4} {:>7} {:>9.5}",
-            pos, s.agent_id, s.deflated_sharpe, s.rank_eligible, s.raw_mean_return
+            "{:<4} {:<18} {:>9.4} {:>19} {:>4} {:>7} {:>9.5}",
+            pos, s.agent_id, s.deflated_sharpe, ci, tie, s.rank_eligible, s.raw_mean_return
         );
     }
     out
@@ -194,10 +206,41 @@ mod tests {
     #[test]
     fn render_and_sign_roundtrip() {
         let board = rank(&[sub("a", 0.002), sub("b", 0.0)], &ScoreConfig::default());
-        assert!(render(&board).contains("agent"));
+        let text = render(&board);
+        assert!(text.contains("agent"));
+        assert!(text.contains("DSR CI"), "the DSR CI column is rendered");
         let chain = sign_board(&board, b"key");
         assert!(verify_board(&chain, b"key"));
         assert!(!verify_board(&chain, b"wrong-key"));
+    }
+
+    #[test]
+    fn render_marks_tied_entries_with_a_shared_band() {
+        // Two identical strong agents ⇒ identical DSR CIs ⇒ one tie band, both `=`.
+        let strong = |id: &str| AgentSubmission {
+            agent_id: id.to_string(),
+            runs: (0..3)
+                .map(|_| Run {
+                    returns: (0..60).map(|i| 0.01 + 0.001 * (i as f64).sin()).collect(),
+                    trace: Default::default(),
+                    confidences: Vec::new(),
+                    outcomes: Vec::new(),
+                    cost: 0.0,
+                })
+                .collect(),
+            in_sample_trials: 0,
+            candidates: Vec::new(),
+        };
+        let board = rank(&[strong("a"), strong("b")], &ScoreConfig::default());
+        assert!(board.iter().all(|s| s.rank_eligible && s.dsr_tied));
+        assert_eq!(board[0].tie_group, board[1].tie_group);
+        let text = render(&board);
+        // Both eligible rows print the same band index and the tie marker.
+        assert_eq!(
+            text.matches('=').count(),
+            2,
+            "both tied rows carry `=`\n{text}"
+        );
     }
 
     fn demo_spec() -> RunSpec {
