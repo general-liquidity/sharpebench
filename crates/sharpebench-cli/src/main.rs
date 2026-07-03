@@ -690,10 +690,28 @@ fn run_commit(args: &[String]) -> ExitCode {
     }
 }
 
+/// Surface external-agent transport failures instead of hiding them: an unrecovered
+/// wire blip (runtime) or an agent protocol fault is printed to stderr so the
+/// operator sees that some decisions did not come from the agent honestly, rather
+/// than a silently-flattened return series.
+fn report_transport_failures(label: &str, failures: &sharpebench_harness::FailureLog, json: bool) {
+    if failures.is_empty() {
+        return;
+    }
+    if !json {
+        eprintln!(
+            "note: {} transport failure(s) surfaced for {label} ({} runtime, {} agent-fault); \
+             affected runs were not scored as holds",
+            failures.records.len(),
+            failures.runtime_failures(),
+            failures.agent_faults(),
+        );
+    }
+}
+
 fn run_demo(args: &[String], json: bool) -> ExitCode {
     use sharpebench_sim::{
-        Agent, BuyAndHold, CostModel, Dataset, ExternalAgent, HoldAgent, HttpAgent, Momentum,
-        Window,
+        Agent, BuyAndHold, CostModel, Dataset, ExternalAgent, HttpAgent, Momentum, Window,
     };
 
     let (data, windows) = match flag_value(args, "--data") {
@@ -753,14 +771,23 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
     // Optionally drive a real external agent (yours) through the *same* sim and
     // rank it into the field. `--http` hits a POST /decide endpoint; `--cmd` spawns
     // a subprocess speaking newline-delimited JSON over stdio (see examples/reference-agent).
+    // Both go through the transport-honest path: a wire blip is retried and, if it
+    // persists, surfaced as an explicit failure instead of a masked degrade-to-hold.
+    const EXTERNAL_MAX_RETRIES: u32 = 2;
     if let Some(addr) = flag_value(args, "--http") {
         let addr = addr.to_string();
         let label = format!("http:{addr}");
-        let sub =
-            sharpebench_harness::run_agent(&label, &data, &windows, &seeds, costs, move || {
-                Box::new(HttpAgent::new(addr.clone())) as Box<dyn Agent>
-            });
-        field.insert(0, sub);
+        let res = sharpebench_harness::run_external_agent(
+            &label,
+            &data,
+            &windows,
+            &seeds,
+            costs,
+            EXTERNAL_MAX_RETRIES,
+            || Some(HttpAgent::new(addr.clone())),
+        );
+        report_transport_failures(&label, &res.failures, json);
+        field.insert(0, res.submission);
     } else if let Some(cmd) = flag_value(args, "--cmd") {
         let parts: Vec<String> = cmd.split_whitespace().map(String::from).collect();
         let Some((prog, rest)) = parts.split_first() else {
@@ -769,21 +796,27 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
         };
         let prog = prog.clone();
         let rest = rest.to_vec();
-        // Pre-flight: fail fast with a clear message if the agent won't spawn.
+        // Pre-flight: fail fast with a clear message if the agent won't spawn at all.
         let rest_refs: Vec<&str> = rest.iter().map(String::as_str).collect();
         if ExternalAgent::spawn(&prog, &rest_refs).is_err() {
             eprintln!("error: cannot spawn agent `{cmd}`");
             return ExitCode::FAILURE;
         }
         let label = format!("cmd:{prog}");
-        let sub =
-            sharpebench_harness::run_agent(&label, &data, &windows, &seeds, costs, move || {
+        let res = sharpebench_harness::run_external_agent(
+            &label,
+            &data,
+            &windows,
+            &seeds,
+            costs,
+            EXTERNAL_MAX_RETRIES,
+            || {
                 let rest_refs: Vec<&str> = rest.iter().map(String::as_str).collect();
-                ExternalAgent::spawn(&prog, &rest_refs)
-                    .map(|a| Box::new(a) as Box<dyn Agent>)
-                    .unwrap_or_else(|_| Box::new(HoldAgent))
-            });
-        field.insert(0, sub);
+                ExternalAgent::spawn(&prog, &rest_refs).ok()
+            },
+        );
+        report_transport_failures(&label, &res.failures, json);
+        field.insert(0, res.submission);
     }
 
     if !json {
