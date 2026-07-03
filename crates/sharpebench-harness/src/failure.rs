@@ -19,10 +19,12 @@
 //! genuine agent pass/fail outcomes** ([`RunOutcome::Completed`]). Runtime errors
 //! are diverted into the log, never into the score.
 
+use serde::{Deserialize, Serialize};
 use sharpebench_core::Run;
 
 /// Why a single run attempt failed to produce a scorable [`Run`].
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum FailureKind {
     /// The agent process/endpoint could not be created (e.g. container failed to
     /// spawn). A harness/runtime error — retryable.

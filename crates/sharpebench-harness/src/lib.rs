@@ -6,8 +6,10 @@
 //! `Run` per (window, seed) is what makes pass^k and multi-window OOS meaningful.
 #![forbid(unsafe_code)]
 
+pub mod checkpoint;
 pub mod failure;
 
+pub use checkpoint::{run_resumable_sweep, SweepCheckpoint, TaskRecord, TaskState};
 pub use failure::{
     failing_sentinel_run, run_with_retries, FailureKind, FailureLog, FailureRecord, RunOutcome,
 };
@@ -15,7 +17,8 @@ pub use failure::{
 use sharpebench_core::AgentSubmission;
 use sharpebench_protocol::{AgentTrajectory, RunTrajectory};
 use sharpebench_sim::{
-    run_backtest, run_backtest_capture, Agent, CostModel, Dataset, RandomAgent, TeamAgent, Window,
+    run_backtest, run_backtest_capture, Agent, CostModel, Dataset, RandomAgent, TeamAgent,
+    TransportDiagnostics, TransportHealth, Window,
 };
 
 /// Run a fresh agent (produced by `make_agent`) across every `window` × `seed`
@@ -182,6 +185,80 @@ where
         },
         failures,
     }
+}
+
+/// Map an external agent's post-run [`TransportHealth`] to the failure taxonomy, so
+/// a masked degrade-to-hold surfaces as a typed failure instead of a flat (and
+/// silently mis-attributed) return series. A protocol fault is the agent's own and
+/// counts against pass^k ([`FailureKind::AgentProtocolViolation`]); an unrecovered
+/// transport blip or a tripped breaker is the harness's fault and is retried at the
+/// run level ([`FailureKind::TransportError`]). `None` when the run was clean.
+pub fn transport_failure(health: &TransportHealth) -> Option<FailureKind> {
+    if health.protocol_faults > 0 {
+        Some(FailureKind::AgentProtocolViolation)
+    } else if health.tripped || health.transport_faults > 0 {
+        Some(FailureKind::TransportError)
+    } else {
+        None
+    }
+}
+
+/// Drive an external agent through one backtest, **surfacing** transport failures as
+/// a typed [`FailureKind`] instead of letting a masked degrade-to-hold silently bias
+/// the return series flat. Returns the scorable [`sharpebench_core::Run`] only when
+/// the run was transport-clean; otherwise the classified failure.
+pub fn run_external_backtest<A>(
+    data: &Dataset,
+    agent: &mut A,
+    window: Window,
+    seed: u64,
+    costs: CostModel,
+) -> Result<sharpebench_core::Run, FailureKind>
+where
+    A: Agent + TransportDiagnostics,
+{
+    let run = run_backtest(data, agent, window, seed, costs);
+    match transport_failure(agent.health()) {
+        Some(kind) => Err(kind),
+        None => Ok(run),
+    }
+}
+
+/// Run an external agent across every `window` × `seed` under the resilient failure
+/// taxonomy, spawning a **fresh** agent per attempt via `spawn` (which returns `None`
+/// when the process/endpoint can't be created - a [`FailureKind::SpawnError`]). A
+/// transport blip is retried up to `max_retries`; a persistent transport failure is
+/// logged and excluded from pass^k (harness fault), while an agent protocol fault
+/// becomes a failing sentinel run (counts against pass^k). This is the run/stress/
+/// capture path made transport-honest: no masked holds enter the score.
+pub fn run_external_agent<A, F>(
+    agent_id: &str,
+    data: &Dataset,
+    windows: &[Window],
+    seeds: &[u64],
+    costs: CostModel,
+    max_retries: u32,
+    mut spawn: F,
+) -> ResilientSubmission
+where
+    A: Agent + TransportDiagnostics,
+    F: FnMut() -> Option<A>,
+{
+    let expected_len = windows
+        .first()
+        .map(|w| w.end.saturating_sub(w.start))
+        .unwrap_or(0);
+    run_agent_resilient(
+        agent_id,
+        windows.len(),
+        seeds,
+        max_retries,
+        expected_len,
+        |wi, seed| match spawn() {
+            Some(mut agent) => run_external_backtest(data, &mut agent, windows[wi], seed, costs),
+            None => Err(FailureKind::SpawnError),
+        },
+    )
 }
 
 /// Produce `n_agents` random "monkey" submissions — the **luck floor**. Each is a
@@ -439,7 +516,157 @@ pub fn run_team(
 mod tests {
     use super::*;
     use sharpebench_core::roles::attribute_roles;
-    use sharpebench_sim::{BuyAndHold, Momentum};
+    use sharpebench_sim::{BuyAndHold, DecideError, Momentum};
+
+    /// A mock external agent whose per-decision transport health is scripted, so we
+    /// can exercise the surface-vs-mask path without a real subprocess / socket. It
+    /// always returns a hold, but records a fault into its health when told to.
+    struct MockExternal {
+        fault: Option<DecideError>,
+        health: TransportHealth,
+    }
+    impl MockExternal {
+        fn clean() -> Self {
+            Self {
+                fault: None,
+                health: TransportHealth::default(),
+            }
+        }
+        fn faulty(err: DecideError) -> Self {
+            Self {
+                fault: Some(err),
+                health: TransportHealth::default(),
+            }
+        }
+    }
+    impl Agent for MockExternal {
+        fn decide(
+            &mut self,
+            _obs: &sharpebench_protocol::MarketObservation,
+        ) -> sharpebench_protocol::Decision {
+            if let Some(err) = self.fault {
+                // A transport blip degrades to a hold, but is *recorded* - the whole
+                // point: this hold is a masked fault, not a deliberate one.
+                self.health.record(err, false);
+            }
+            sharpebench_protocol::Decision {
+                orders: Vec::new(),
+                reasoning: "mock".to_string(),
+                cost: None,
+            }
+        }
+    }
+    impl TransportDiagnostics for MockExternal {
+        fn health(&self) -> &TransportHealth {
+            &self.health
+        }
+    }
+
+    #[test]
+    fn transport_fault_surfaces_as_a_distinct_failure_not_a_hold() {
+        let data = Dataset::synthetic(3, 60, 5);
+        let window = Window { start: 20, end: 60 };
+        let costs = CostModel::default();
+
+        // A clean external agent scores as a normal run.
+        let mut clean = MockExternal::clean();
+        assert!(run_external_backtest(&data, &mut clean, window, 1, costs).is_ok());
+
+        // A transport blip is surfaced as TransportError, NOT an indistinguishable
+        // hold that would silently flatten the return series.
+        let mut faulty = MockExternal::faulty(DecideError::Transport);
+        assert_eq!(
+            run_external_backtest(&data, &mut faulty, window, 1, costs).unwrap_err(),
+            FailureKind::TransportError,
+        );
+
+        // A protocol fault is the agent's own → AgentProtocolViolation.
+        let mut bad = MockExternal::faulty(DecideError::Protocol);
+        assert_eq!(
+            run_external_backtest(&data, &mut bad, window, 1, costs).unwrap_err(),
+            FailureKind::AgentProtocolViolation,
+        );
+    }
+
+    #[test]
+    fn run_external_agent_retries_a_transient_blip_then_recovers() {
+        let data = Dataset::synthetic(3, 60, 5);
+        let windows = [Window { start: 20, end: 60 }];
+        let seeds = [0u64];
+        // The first spawned instance faults its whole run; a fresh respawn is clean.
+        let mut spawned = 0u32;
+        let res = run_external_agent(
+            "flaky-endpoint",
+            &data,
+            &windows,
+            &seeds,
+            CostModel::default(),
+            2,
+            || {
+                spawned += 1;
+                if spawned == 1 {
+                    Some(MockExternal::faulty(DecideError::Transport))
+                } else {
+                    Some(MockExternal::clean())
+                }
+            },
+        );
+        // Retried at the run level and recovered → a genuine completed run, nothing
+        // logged as a failure.
+        assert!(res.failures.is_empty(), "a recovered blip logs no failure");
+        assert_eq!(
+            res.submission.runs.len(),
+            1,
+            "the recovered run feeds pass^k"
+        );
+    }
+
+    #[test]
+    fn run_external_agent_fails_a_dead_endpoint_explicitly() {
+        let data = Dataset::synthetic(3, 60, 5);
+        let windows = [Window { start: 20, end: 60 }];
+        let seeds = [0u64, 1u64];
+        // Every respawn is still broken → the transport error exhausts its retries
+        // and is logged as a runtime failure, excluded from the pass^k pool (rather
+        // than masquerading as a stream of holds).
+        let res = run_external_agent(
+            "dead-endpoint",
+            &data,
+            &windows,
+            &seeds,
+            CostModel::default(),
+            2,
+            || Some(MockExternal::faulty(DecideError::Transport)),
+        );
+        assert_eq!(
+            res.failures.runtime_failures(),
+            2,
+            "both seeds fail explicitly"
+        );
+        assert_eq!(res.failures.agent_faults(), 0);
+        assert!(
+            res.submission.runs.is_empty(),
+            "no masked-hold run enters the score"
+        );
+    }
+
+    #[test]
+    fn run_external_agent_spawn_failure_is_a_runtime_error() {
+        let data = Dataset::synthetic(3, 60, 5);
+        let windows = [Window { start: 20, end: 60 }];
+        let seeds = [0u64];
+        let res = run_external_agent::<MockExternal, _>(
+            "unspawnable",
+            &data,
+            &windows,
+            &seeds,
+            CostModel::default(),
+            1,
+            || None,
+        );
+        assert_eq!(res.failures.runtime_failures(), 1);
+        assert!(res.submission.runs.is_empty());
+    }
 
     /// A reward-hacking "cheat" agent: tries to exploit the simulator by placing an
     /// absurd-size order (gaming the fill engine), with maxed-out self-reported
@@ -462,6 +689,7 @@ mod tests {
                     rationale: "exploit the fill engine".to_string(),
                 }],
                 reasoning: "cheat".to_string(),
+                cost: None,
             }
         }
     }

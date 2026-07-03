@@ -14,6 +14,7 @@ pub mod engine;
 pub mod env;
 pub mod external;
 pub mod trajectory;
+pub mod transport;
 pub mod windows;
 
 pub use agent::{Agent, BuyAndHold, HoldAgent, Momentum, RandomAgent, TeamAgent};
@@ -23,4 +24,7 @@ pub use engine::{run_backtest, Window};
 pub use env::{EnvState, Scenario, StepInfo, StepResult, TradingEnv};
 pub use external::{ExternalAgent, HttpAgent};
 pub use trajectory::{replay_run, replay_submission, run_backtest_capture};
+pub use transport::{
+    decide_with_retry, CircuitBreaker, DecideError, TransportDiagnostics, TransportHealth,
+};
 pub use windows::{tag_regime, walk_forward, Regime};

@@ -52,6 +52,50 @@ pub struct Decision {
     /// Free-text rationale, captured into the trajectory for auditability.
     #[serde(default)]
     pub reasoning: String,
+    /// Optional self-reported compute/token spend for producing *this* decision.
+    /// The engine accumulates it into the run's `cost`, which drives the
+    /// cost-normalized leaderboard columns (`return_per_cost` / `dsr_per_cost` =
+    /// skill-per-dollar-of-compute). `None` = not reported, so existing agents
+    /// need no change and the cost columns stay `None` (back-compat).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost: Option<DecisionCost>,
+}
+
+/// An agent's self-reported spend to produce one decision. Every field defaults to
+/// zero so a partial report (e.g. tokens only, no dollar figure) still deserializes.
+/// The engine reduces this to a single scalar via [`DecisionCost::billable_units`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct DecisionCost {
+    /// Dollar cost of the compute/tokens spent on this decision. The preferred
+    /// unit for skill-per-dollar reporting.
+    #[serde(default)]
+    pub cost_usd: f64,
+    /// Prompt/input tokens consumed.
+    #[serde(default)]
+    pub tokens_in: u64,
+    /// Completion/output tokens produced.
+    #[serde(default)]
+    pub tokens_out: u64,
+    /// Reasoning/thinking tokens, reported as a legibility breakdown. Providers
+    /// typically already bill these inside `tokens_out`, so they are *not* re-added
+    /// into the token total; they are surfaced separately, not double-counted.
+    #[serde(default)]
+    pub reasoning_tokens: u64,
+}
+
+impl DecisionCost {
+    /// The single scalar the engine folds into `Run.cost` (any consistent unit,
+    /// matching the leaderboard's cost column). Prefers the reported dollar figure;
+    /// with no dollars reported it falls back to total billable tokens
+    /// (`tokens_in + tokens_out`). Reasoning tokens are a sub-breakdown of the
+    /// output and are not added again.
+    pub fn billable_units(&self) -> f64 {
+        if self.cost_usd > 0.0 {
+            self.cost_usd
+        } else {
+            (self.tokens_in + self.tokens_out) as f64
+        }
+    }
 }
 
 /// A single per-instrument instruction.
@@ -167,6 +211,7 @@ mod tests {
                 rationale: "trailing breakout".to_string(),
             }],
             reasoning: "r".to_string(),
+            cost: None,
         };
         let db: Decision = serde_json::from_str(&serde_json::to_string(&d).unwrap()).unwrap();
         assert_eq!(db.orders[0].action, Action::Buy);
@@ -178,6 +223,39 @@ mod tests {
         let parsed: Decision = serde_json::from_str(legacy).unwrap();
         assert_eq!(parsed.orders[0].rationale, "");
         assert!((parsed.orders[0].confidence - 0.5).abs() < 1e-12);
+        // A legacy decision omits `cost` entirely (back-compat → None).
+        assert!(parsed.cost.is_none());
+    }
+
+    #[test]
+    fn decision_cost_channel_parses_and_reduces() {
+        // An agent self-reporting spend: dollars present → billable = dollars.
+        let with_cost = r#"{"orders":[],"reasoning":"","cost":{"cost_usd":0.42,
+            "tokens_in":1200,"tokens_out":300,"reasoning_tokens":180}}"#;
+        let d: Decision = serde_json::from_str(with_cost).unwrap();
+        let c = d.cost.expect("cost channel present");
+        assert!((c.cost_usd - 0.42).abs() < 1e-12);
+        assert_eq!(c.tokens_in, 1200);
+        assert!((c.billable_units() - 0.42).abs() < 1e-12);
+
+        // Tokens-only report (no dollars) → billable = tokens_in + tokens_out;
+        // reasoning tokens are a sub-breakdown of the output, not re-added.
+        let tokens_only = DecisionCost {
+            cost_usd: 0.0,
+            tokens_in: 1000,
+            tokens_out: 250,
+            reasoning_tokens: 200,
+        };
+        assert!((tokens_only.billable_units() - 1250.0).abs() < 1e-12);
+
+        // `cost` round-trips through JSON.
+        let d2 = Decision {
+            orders: Vec::new(),
+            reasoning: String::new(),
+            cost: Some(tokens_only),
+        };
+        let back: Decision = serde_json::from_str(&serde_json::to_string(&d2).unwrap()).unwrap();
+        assert_eq!(back.cost, Some(tokens_only));
     }
 
     #[test]
@@ -201,6 +279,7 @@ mod tests {
                             rationale: String::new(),
                         }],
                         reasoning: "r".to_string(),
+                        cost: None,
                     },
                 }],
             }],
