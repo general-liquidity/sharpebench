@@ -42,7 +42,7 @@ Raw return is reported but is **never** the rank key. The composite also *report
 
 ## Status — active (pre-1.0)
 
-All ten crates are implemented, tested, and CI-green (fmt · clippy `-D warnings` · workspace tests · a determinism check · the 7-attack self-audit · a docs build · an npm build/test). The statistics kernel, the backtest-honesty verdict, scoring kernel, point-in-time simulator, run harness, forward-attestation, leaderboard, WASM bridge, npm package, MCP server, and CLI all work end-to-end — on synthetic data and on **real frozen datasets** (crypto majors + US equity indices).
+All eleven crates are implemented, tested, and CI-green (fmt · clippy `-D warnings` · workspace tests · a determinism check · the 7-attack self-audit · a docs build · an npm build/test). The statistics kernel, the backtest-honesty verdict, scoring kernel, point-in-time simulator, run harness, forward-attestation, leaderboard, WASM bridge, npm package, MCP server, and CLI all work end-to-end — on synthetic data and on **real frozen datasets** (crypto majors + US equity indices).
 
 **Not yet built** (need external infra or a decision): single-name equity data (a keyed feed), a live / forward public arena with hosting, and the public data-curation protocol. See [docs/PLAN.md](docs/PLAN.md).
 
@@ -183,7 +183,8 @@ sharpebench-stats ── the statistics kernel: PSR, expected-max-Sharpe, deflat
       │     ├── sharpebench-leaderboard render / sign / self-describing boards
       │     ├── sharpebench-wasm       the identical kernel for JS/TS (npm, Gordon, MCP)
       │     └── sharpebench-cli        the `sharpebench` binary
-      └── sharpebench-edge ── the "is my Sharpe real?" verdict: MinTRL + PBO + the two-tier honesty check
+      ├── sharpebench-edge ── the "is my Sharpe real?" verdict: MinTRL + PBO + the two-tier honesty check
+      └── sharpebench-memory ── the memory/retrieval benchmark: 3-arm ablation + poisoning + PIT + multi-session + confabulation, significance via -stats
 ```
 
 | Crate | Role |
@@ -191,10 +192,24 @@ sharpebench-stats ── the statistics kernel: PSR, expected-max-Sharpe, deflat
 | **`sharpebench-core`** | the scoring layer over `sharpebench-stats`: pass^k / process + cost floor / rolling / decay / calibration / attribution / comparison-sets / rediscovery / briefing-audit / allocation / options-Greeks / self-audit / composite, plus a **disqualification-reason taxonomy** (a typed `FailReason` rollup over the signals the scorer already computes, so a suite of submissions is legible as "X failed on luck/pass^k, Y on process, Z on deflation/overfit-decay") and a re-export of the whole `-stats` kernel so existing `sharpebench_core::…` paths are unchanged. Byte-identical scores forever. |
 | **`sharpebench-stats`** | the deterministic statistics kernel, split out so any project can depend on just the math: PSR, expected-max-Sharpe, deflated Sharpe (Bailey & López de Prado), the data-snooping family (stationary bootstrap, White's Reality Check, Hansen SPA liberal + consistent, Romano–Wolf step-down), Sortino + moments + normal primitives, selection robustness, and a **stylized-facts realism validator** (Cont battery: fat tails, volatility clustering, gain/loss skew, aggregational Gaussianity, Zumbach time-reversal asymmetry) that certifies a frozen dataset is market-realistic, wired into a `sharpebench realism` CLI + CI gate so a drifted generator fails the build. No I/O, no ambient RNG, fixed reduction order. |
 | **`sharpebench-edge`** | the "is my Sharpe real?" honesty layer over `-stats`: Minimum Track Record Length, Probability of Backtest Overfitting (CSCV), and the two-tier `is_my_sharpe_real` verdict (PSR / deflated Sharpe / MinTRL + haircut + Pass/Borderline/Fail; the full tier adds the data-snooping family + PBO). Powers `sharpebench check`. |
+| **`sharpebench-memory`** | the memory/retrieval benchmark over `-stats`: the three-arm ablation (baseline / retrieval / oracle) with retrieval lift, stationary-bootstrap significance, and fraction-of-ceiling, plus four legs a SOTA memory benchmark also has to answer - **E1** poisoning (integrity delta / attack-success rate / degradation significance), **E2** interdependent multi-session (per-session conditioned lift + dependency-satisfaction rate + pooled significance), **E3** point-in-time correctness (per-arm no-lookahead compliance + leak flag), and **E6** confabulation (regret over reinforced-but-never-re-tested false beliefs). Pure and deterministic; significance delegated to `-stats`; it scores caller-supplied outcome vectors, with no live agent runner. |
 | **`sharpebench-sim`** | fees, seeded slippage, square-root impact, financing, turnover (TRF) cost, liquidity caps, dividends, execution-cost profiles, a parameterized synthetic generator (volatility + jumps), adversarial stress paths, trajectory capture/replay, and O(1) `clone_state` / `restore_state` snapshots. |
 | **`sharpebench-attest`** | SHA-256 pre-registration commitments + HMAC signed result chains + time-lock registry + sealed held-out datasets + canary contamination tripwire. |
 | **`sharpebench-harness`** | seeds × windows orchestration; luck-floor producers; a runtime-vs-agent failure taxonomy. |
 | `protocol` · `leaderboard` · `wasm` · `cli` | the JSON contract · render/sign/self-describing boards · the WASM bridge · the CLI. |
+
+### Memory benchmark (`sharpebench-memory`)
+
+The same skill-vs-luck discipline, pointed at a memory or retrieval layer. Proving a memory layer helps (rather than just adding tokens and latency) is an ablation, so the crate scores the three-arm ablation - baseline (no memory, the floor), retrieval (the layer under test), and oracle (gold records only, the ceiling) - and reports the retrieval lift, its stationary-bootstrap significance (delegated to `sharpebench-stats`, not reinvented), and the fraction of the oracle ceiling captured.
+
+Around that floor and ceiling it adds the four legs a memory benchmark also has to answer, each pure and deterministic:
+
+- **E1 poisoning.** Inject corrupted records and measure the behavior-integrity delta, the attack-success rate, and the bootstrap significance of the degradation. Money-memory (a forged limit, a wrong balance, a spoofed venue) is the high-severity case.
+- **E2 multi-session.** Model sessions as a dependency graph; a later session's lift is credited only when the memory an earlier session wrote was actually retained. Reports per-session conditioned lift, the cross-session dependency-satisfaction rate, and pooled significance.
+- **E3 point-in-time correctness.** Score no-lookahead compliance per arm from recall-audit counts and flag whether the retrieval arm leaked future data. It takes counts only, so it stays decoupled from any enforcement layer - a bi-temporal store, a replay harness, or a hand audit can feed it.
+- **E6 confabulation.** The "honest lying" metric: among beliefs that were reinforced but never re-tested and have since resolved, the fraction that proved wrong.
+
+Together these cover the union a SOTA memory benchmark has to prove in one place: statistical significance (stationary bootstrap via `-stats`), point-in-time no-lookahead, poison-resistance, cross-session dependency, and confabulation. Like the scoring kernel it consumes caller-supplied outcome vectors and has **no live agent runner** in this crate; 36 unit tests, `#![forbid(unsafe_code)]`, and a fixed bootstrap seed so a verdict never moves when re-run.
 
 ## Tech stack
 
