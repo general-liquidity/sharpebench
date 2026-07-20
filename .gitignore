@@ -1,6 +1,15 @@
 # Rust build output
 /target
+# crates/sharpebench-py is excluded from the workspace (pyo3 extension-module), so it
+# builds into its own target dir, which the root-anchored rule above does not cover.
+/crates/sharpebench-py/target
 **/*.rs.bk
+
+# Python build/test scratch from the sharpebench-py binding
+__pycache__/
+.pytest_cache/
+*.pyd
+*.so
 
 # Generated WASM JS bindings (run scripts/build-wasm.sh)
 /pkg

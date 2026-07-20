@@ -15,6 +15,7 @@ GitHub Release. The crates.io and npm jobs only run when you opt them in.
 | **GitHub Release** | `sharpebench-x86_64-linux-musl` static binary + `.sha256` | every `v*` tag (always) |
 | **crates.io** | the **8** `sharpebench-*` crates (see order below) | `v*` tag **and** `PUBLISH_CRATES=true` |
 | **npm** | `@general-liquidity/sharpebench` + `@general-liquidity/sharpebench-mcp` | `v*` tag **and** `PUBLISH_NPM=true` |
+| **PyPI** | `sharpebench` (pyo3 wheels, CPython 3.10-3.13, + sdist) | `v*` tag **and** `PUBLISH_PYPI=true` |
 
 The `xtask` and `examples/reference-agent` workspace members are `publish = false`
 and never reach crates.io.
@@ -78,13 +79,14 @@ In **Settings → Variables → Actions**, set the flag(s):
 ```
 PUBLISH_CRATES=true
 PUBLISH_NPM=true
+PUBLISH_PYPI=true
 ```
 
 With a variable unset, that job is skipped — so the workflow is safe to land before
 anything is configured (the binary job still runs).
 
-Create two **GitHub Environments** (Settings → Environments) named `crates` and
-`npm`. They scope the OIDC identity and let you add protection rules (required
+Create three **GitHub Environments** (Settings → Environments) named `crates`,
+`npm` and `pypi`. They scope the OIDC identity and let you add protection rules (required
 reviewers, branch restrictions) to the publishing steps. Their names must match the
 `environment:` fields in `release.yml` and the trusted-publisher configs.
 

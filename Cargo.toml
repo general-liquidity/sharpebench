@@ -15,6 +15,9 @@ members = [
     "xtask",
     "examples/reference-agent",
 ]
+# pyo3 extension-module crate: it needs a Python interpreter at build time and is
+# built by maturin, not `cargo --workspace`. Excluded so the Rust-only CI stays green.
+exclude = ["crates/sharpebench-py"]
 
 [workspace.package]
 version = "0.0.12"

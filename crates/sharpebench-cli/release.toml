@@ -32,3 +32,41 @@ file = "../../npm/pkg/package.json"
 search = '"version": "[0-9]+\.[0-9]+\.[0-9]+"'
 replace = '"version": "{{version}}"'
 exactly = 1
+
+# The PyPI surface. crates/sharpebench-py is a pyo3 extension-module, so it is
+# `exclude`d from the workspace (it needs a Python interpreter at build time), which
+# also means cargo-release never sees it as a member and neither `shared-version` nor
+# `dependent-version` touches it. Both its manifests are rewritten here instead, for the
+# same reason as the npm ones: a stale version would make the publish step find that
+# version already on PyPI and "skip", reporting green while shipping nothing.
+[[pre-release-replacements]]
+file = "../sharpebench-py/pyproject.toml"
+search = '(?m)^version = "[0-9]+\.[0-9]+\.[0-9]+"'
+replace = 'version = "{{version}}"'
+exactly = 1
+
+[[pre-release-replacements]]
+file = "../sharpebench-py/Cargo.toml"
+search = '(?m)^version = "[0-9]+\.[0-9]+\.[0-9]+"'
+replace = 'version = "{{version}}"'
+exactly = 1
+
+# Its three path deps carry explicit `version` pins (needed for the maturin sdist), and
+# being outside the workspace they are not rewritten by `dependent-version = "upgrade"`.
+[[pre-release-replacements]]
+file = "../sharpebench-py/Cargo.toml"
+search = 'sharpebench-stats = \{ path = "\.\./sharpebench-stats", version = "[0-9]+\.[0-9]+\.[0-9]+" \}'
+replace = 'sharpebench-stats = { path = "../sharpebench-stats", version = "{{version}}" }'
+exactly = 1
+
+[[pre-release-replacements]]
+file = "../sharpebench-py/Cargo.toml"
+search = 'sharpebench-edge = \{ path = "\.\./sharpebench-edge", version = "[0-9]+\.[0-9]+\.[0-9]+" \}'
+replace = 'sharpebench-edge = { path = "../sharpebench-edge", version = "{{version}}" }'
+exactly = 1
+
+[[pre-release-replacements]]
+file = "../sharpebench-py/Cargo.toml"
+search = 'sharpebench-core = \{ path = "\.\./sharpebench-core", version = "[0-9]+\.[0-9]+\.[0-9]+" \}'
+replace = 'sharpebench-core = { path = "../sharpebench-core", version = "{{version}}" }'
+exactly = 1
