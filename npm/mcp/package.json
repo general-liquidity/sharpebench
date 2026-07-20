@@ -1,6 +1,6 @@
 {
   "name": "@general-liquidity/sharpebench-mcp",
-  "version": "0.0.10",
+  "version": "0.0.12",
   "description": "MCP server exposing the SharpeBench luck-robust scoring kernel as agent-callable tools (deflated Sharpe, pass^k, process discipline, briefing audit, options Greeks).",
   "keywords": [
     "mcp",
@@ -30,7 +30,7 @@
     "prepublishOnly": "tsc"
   },
   "dependencies": {
-    "@general-liquidity/sharpebench": "^0.0.10",
+    "@general-liquidity/sharpebench": "^0.0.12",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "zod": "^4.0.0"
   },
