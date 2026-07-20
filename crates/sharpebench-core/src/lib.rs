@@ -34,6 +34,7 @@ pub use sharpebench_stats::{
 pub mod allocation;
 pub mod attribution;
 pub mod briefing;
+pub mod budget_curve;
 pub mod calibration;
 pub mod comparison_sets;
 pub mod composite;
@@ -58,6 +59,7 @@ pub use allocation::{
 pub use briefing::{
     audit_briefing, Briefing, BriefingAudit, BriefingPolicy, BriefingSection, BriefingViolation,
 };
+pub use budget_curve::{budget_curve, BudgetCurveOpts, BudgetCurveReport, BudgetPoint};
 pub use comparison_sets::{
     comparison_set, qualifies, restrict_field, restrict_to_shared, ComparisonSet, TaggedRun,
     TaggedSubmission,

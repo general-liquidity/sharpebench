@@ -20,6 +20,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3::wrap_pyfunction;
 
+use sharpebench_core::budget_curve::{budget_curve as core_budget_curve, BudgetCurveOpts};
 use sharpebench_core::pass_k::{pass_k as core_pass_k, PassMode};
 use sharpebench_edge::{
     is_my_sharpe_real as core_lite, is_my_sharpe_real_full as core_full,
@@ -471,6 +472,78 @@ fn moments<'py>(py: Python<'py>, returns: Vec<f64>, target: f64) -> PyResult<Bou
     Ok(d)
 }
 
+/// Luck-robust performance-vs-budget curve: the honest, out-of-sample inversion of
+/// an in-distribution scaling law. `points` is an ordered list of
+/// `(budget, held_out_returns)` for the **same** agent at increasing training/compute
+/// budget, each point's returns drawn from a window disjoint from that point's
+/// training set (you enforce the split).
+///
+/// Returns a dict `{"n_budget_points", "peak_budget", "peak_dsr",
+/// "peak_dsr_deflated_for_selection", "overfit_onset", "is_monotone_improving",
+/// "points"}` where each point is `{"budget", "n_returns", "oos_dsr", "oos_sharpe",
+/// "oos_sharpe_annualized", "oos_p_value", "marginal_dsr_per_budget"}`.
+/// `peak_dsr_deflated_for_selection` pays for the search over budgets and is `<=`
+/// the naive `peak_dsr`; `overfit_onset` / `marginal_dsr_per_budget` are `None` where
+/// they do not apply. No monotone law is fitted: the curve is reported, not gated.
+#[pyfunction]
+#[pyo3(signature = (
+    points,
+    periods_per_year = 252.0,
+    base_n_trials = 1,
+    trials_sr_std = DEFAULT_TRIALS_SR_STD,
+    seed = DEFAULT_SEED,
+    n_boot = 2000,
+    block_prob = 0.1,
+))]
+#[allow(clippy::too_many_arguments)]
+fn budget_curve<'py>(
+    py: Python<'py>,
+    points: Vec<(f64, Vec<f64>)>,
+    periods_per_year: f64,
+    base_n_trials: u32,
+    trials_sr_std: f64,
+    seed: u64,
+    n_boot: usize,
+    block_prob: f64,
+) -> PyResult<Bound<'py, PyDict>> {
+    let borrowed: Vec<(f64, &[f64])> = points.iter().map(|(b, r)| (*b, r.as_slice())).collect();
+    let opts = BudgetCurveOpts {
+        periods_per_year,
+        base_n_trials,
+        trials_sr_std,
+        bootstrap_seed: seed,
+        n_boot,
+        block_prob,
+    };
+    let report = core_budget_curve(&borrowed, &opts).map_err(PyValueError::new_err)?;
+
+    let pts = pyo3::types::PyList::empty(py);
+    for p in &report.points {
+        let pd = PyDict::new(py);
+        pd.set_item("budget", p.budget)?;
+        pd.set_item("n_returns", p.n_returns)?;
+        pd.set_item("oos_dsr", p.oos_dsr)?;
+        pd.set_item("oos_sharpe", p.oos_sharpe)?;
+        pd.set_item("oos_sharpe_annualized", p.oos_sharpe_annualized)?;
+        pd.set_item("oos_p_value", p.oos_p_value)?;
+        pd.set_item("marginal_dsr_per_budget", p.marginal_dsr_per_budget)?;
+        pts.append(pd)?;
+    }
+
+    let d = PyDict::new(py);
+    d.set_item("n_budget_points", report.n_budget_points)?;
+    d.set_item("peak_budget", report.peak_budget)?;
+    d.set_item("peak_dsr", report.peak_dsr)?;
+    d.set_item(
+        "peak_dsr_deflated_for_selection",
+        report.peak_dsr_deflated_for_selection,
+    )?;
+    d.set_item("overfit_onset", report.overfit_onset)?;
+    d.set_item("is_monotone_improving", report.is_monotone_improving)?;
+    d.set_item("points", pts)?;
+    Ok(d)
+}
+
 /// The `sharpebench_py` native module (imported as `sharpebench.sharpebench_py`).
 #[pymodule]
 fn sharpebench_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -495,6 +568,7 @@ fn sharpebench_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(runs_for_power, m)?)?;
     m.add_function(wrap_pyfunction!(pass_k, m)?)?;
     m.add_function(wrap_pyfunction!(moments, m)?)?;
+    m.add_function(wrap_pyfunction!(budget_curve, m)?)?;
     m.add("METHODOLOGY_VERSION", METHODOLOGY_VERSION)?;
     m.add(
         "__doc__",

@@ -18,6 +18,7 @@ from sharpebench import (  # noqa: E402
     benjamini_hochberg,
     bootstrap_dsr_ci,
     bootstrap_pvalue,
+    budget_curve,
     deflated_sharpe_ratio,
     expected_max_sharpe,
     fdr_verdict,
@@ -313,3 +314,58 @@ def test_pass_k_rejects_bad_modes():
         pass_k([True], "most")
     with pytest.raises(ValueError):
         pass_k([True], "at_least")
+
+
+# ---------------------------------------------------------------- budget curve
+
+
+def wiggle(mean: float, amp: float, n: int = 40) -> list:
+    """A deterministic window: constant-amplitude sine wiggle around a mean, so the
+    deflated Sharpe is strictly monotone in the mean and never saturates at 1.0."""
+    return [mean + amp * math.sin(i * 0.7) for i in range(n)]
+
+
+def test_budget_curve_flags_the_overfit_turn_down():
+    # Held-out edge rises to budget 3 then falls: peak precedes the max budget and
+    # the overfit onset is the first budget where more compute stopped helping.
+    points = [
+        (1.0, wiggle(0.0007, 0.02)),
+        (2.0, wiggle(0.0014, 0.02)),
+        (3.0, wiggle(0.0020, 0.02)),
+        (4.0, wiggle(0.0013, 0.02)),
+        (5.0, wiggle(0.0006, 0.02)),
+    ]
+    r = budget_curve(points)
+    assert r["n_budget_points"] == 5
+    assert r["peak_budget"] == 3.0
+    assert r["peak_budget"] < 5.0  # the differentiator vs a monotone scaling law
+    assert r["overfit_onset"] == 4.0
+    assert r["is_monotone_improving"] is False
+    # Selecting the best of N budgets is a search over N: the honest peak is lower.
+    assert r["peak_dsr_deflated_for_selection"] < r["peak_dsr"]
+    # First point has no marginal; later points do.
+    assert r["points"][0]["marginal_dsr_per_budget"] is None
+    assert r["points"][3]["marginal_dsr_per_budget"] < 0.0
+    assert r["points"][0]["n_returns"] == 40
+
+
+def test_budget_curve_monotone_improving_curve():
+    points = [
+        (1.0, wiggle(0.0006, 0.02)),
+        (2.0, wiggle(0.0013, 0.02)),
+        (3.0, wiggle(0.0020, 0.02)),
+    ]
+    r = budget_curve(points)
+    assert r["is_monotone_improving"] is True
+    assert r["overfit_onset"] is None
+
+
+def test_budget_curve_rejects_degenerate_input():
+    with pytest.raises(ValueError):
+        budget_curve([])
+    with pytest.raises(ValueError):
+        budget_curve([(1.0, wiggle(0.001, 0.02))])  # single point
+    with pytest.raises(ValueError):
+        budget_curve([(2.0, wiggle(0.001, 0.02)), (2.0, wiggle(0.001, 0.02))])  # not increasing
+    with pytest.raises(ValueError):
+        budget_curve([(1.0, wiggle(0.001, 0.02)), (2.0, [])])  # empty returns
