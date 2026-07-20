@@ -35,3 +35,34 @@ push = true
 
 # Guard rail: only ever release from main.
 allow-branch = ["main"]
+
+# The npm manifests are NOT workspace-inherited, so without these they silently keep
+# the previous version: the release job reads the version out of package.json, finds it
+# already on the registry, and "skips" — a green run that published nothing. That is how
+# npm stalled at 0.0.10 while the crates went to 0.0.11. Cargo.toml is the only place a
+# version is authored; everything else is rewritten from it here.
+[[pre-release-replacements]]
+file = "npm/package.json"
+search = '"version": "[0-9]+\.[0-9]+\.[0-9]+"'
+replace = '"version": "{{version}}"'
+exactly = 1
+
+[[pre-release-replacements]]
+file = "npm/mcp/package.json"
+search = '"version": "[0-9]+\.[0-9]+\.[0-9]+"'
+replace = '"version": "{{version}}"'
+exactly = 1
+
+# The MCP package depends on the main npm package, so its pin moves in lockstep too.
+[[pre-release-replacements]]
+file = "npm/mcp/package.json"
+search = '"@general-liquidity/sharpebench": "\^[0-9]+\.[0-9]+\.[0-9]+"'
+replace = '"@general-liquidity/sharpebench": "^{{version}}"'
+exactly = 1
+
+# wasm-pack regenerates this on build, but keep the committed copy honest.
+[[pre-release-replacements]]
+file = "npm/pkg/package.json"
+search = '"version": "[0-9]+\.[0-9]+\.[0-9]+"'
+replace = '"version": "{{version}}"'
+exactly = 1

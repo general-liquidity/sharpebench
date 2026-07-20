@@ -128,6 +128,25 @@ jobs:
       # npm trusted publishing (OIDC) needs npm >= 11.5; provenance is automatic.
       - run: npm install -g npm@latest
 
+      # cargo-release rewrites the npm manifests from Cargo.toml, so they must already
+      # equal the tag. If they do not, the steps below read a stale version, find it
+      # already on the registry, and "skip" — a green run that shipped nothing. That is
+      # exactly how npm stalled at 0.0.10 while the crates went to 0.0.11.
+      - name: Assert npm manifests match the release tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          fail=0
+          for f in package.json mcp/package.json; do
+            V=$(node -p "require('./$f').version")
+            if [ "$V" != "$TAG" ]; then
+              echo "::error file=npm/$f::version $V does not match tag $TAG — the manifest is stale, cut the release with 'cargo release' so pre-release-replacements rewrite it"
+              fail=1
+            fi
+          done
+          exit $fail
+        working-directory: npm
+
       - name: Publish @general-liquidity/sharpebench (skip if version exists)
         working-directory: npm
         run: |
@@ -161,3 +180,51 @@ jobs:
           else
             npm publish --access public
           fi
+
+  # Every publish step above is skip-if-present, which makes re-runs idempotent but also
+  # lets a surface that shipped nothing still report green. This job asks the registries
+  # directly, so an incomplete release fails the run instead of passing quietly.
+  verify:
+    name: verify every registry serves the release
+    needs: [crates, npm]
+    if: always() && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Assert crates.io and npm both serve the tag version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          UA="sharpebench-release (general-liquidity)" # crates.io rejects requests without a User-Agent
+          fail=0
+
+          if [ "${{ vars.PUBLISH_CRATES }}" = "true" ]; then
+            for c in sharpebench-stats sharpebench-edge sharpebench-core sharpebench-protocol \
+                     sharpebench-attest sharpebench-sim sharpebench-leaderboard sharpebench-wasm \
+                     sharpebench-harness sharpebench; do
+              if curl -s -A "$UA" "https://crates.io/api/v1/crates/$c/$TAG" | grep -q "\"num\":\"$TAG\""; then
+                echo "ok   crates.io $c@$TAG"
+              else
+                echo "::error::crates.io is not serving $c@$TAG"; fail=1
+              fi
+            done
+          fi
+
+          if [ "${{ vars.PUBLISH_NPM }}" = "true" ]; then
+            for p in @general-liquidity/sharpebench @general-liquidity/sharpebench-mcp; do
+              ok=0
+              # the registry read-path lags a few seconds behind a publish
+              for i in $(seq 1 20); do
+                if [ "$(npm view "$p@$TAG" version 2>/dev/null)" = "$TAG" ]; then ok=1; break; fi
+                sleep 5
+              done
+              if [ "$ok" = "1" ]; then
+                echo "ok   npm $p@$TAG"
+              else
+                echo "::error::npm is not serving $p@$TAG"; fail=1
+              fi
+            done
+          fi
+
+          exit $fail
