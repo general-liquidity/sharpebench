@@ -1,9 +1,9 @@
 # SharpeBench release pipeline (cargo-release). See docs/PUBLISHING.md §5.
 #
 # One command cuts a full release: bump the shared workspace version, rewrite the
-# inter-crate `version = "x"` pins, publish every sharpebench-* crate in
-# dependency order, tag `vX.Y.Z`, and push the commit + tag (which triggers the
-# signed-binary build in .github/workflows/release.yml).
+# inter-crate `version = "x"` pins and the npm manifests, tag `vX.Y.Z`, and push the
+# commit + tag. Publishing itself happens in .github/workflows/release.yml, which the
+# tag triggers: crates.io over OIDC, npm, and the signed binary.
 #
 # Always run the green checks first — cargo-release will not:
 #   cargo test --workspace && cargo clippy --workspace --all-targets && cargo deny check
@@ -29,8 +29,11 @@ tag-name = "v{{version}}"
 tag-message = "SharpeBench v{{version}}"
 pre-release-commit-message = "release: v{{version}}"
 
-# Publish to crates.io and push the release commit + tag.
-publish = true
+# These crates are set to Trusted-Publishing-only on crates.io, so a token upload from
+# a laptop is refused with 403 and the local machine cannot publish at all. Cutting a
+# release therefore only bumps, rewrites, commits, tags and pushes; the `v*` tag is what
+# makes CI publish over OIDC (see .github/workflows/release.yml).
+publish = false
 push = true
 
 # Guard rail: only ever release from main.
