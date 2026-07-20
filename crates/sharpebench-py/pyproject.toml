@@ -1,0 +1,35 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "sharpebench"
+version = "0.0.12"
+description = "SharpeBench honest-backtest statistics: deflated Sharpe, PSR, PBO/CSCV, Reality Check, SPA, BH-FDR and pass^k for your own return series."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT OR Apache-2.0" }
+authors = [{ name = "General Liquidity, Inc." }]
+keywords = [
+    "backtest",
+    "deflated-sharpe",
+    "overfitting",
+    "quant",
+    "sharpe-ratio",
+    "statistics",
+    "trading",
+]
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: 3",
+    "Topic :: Office/Business :: Financial :: Investment",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
+
+[tool.maturin]
+# Mixed Rust/Python layout: the pure-Python package lives under `python/sharpebench`,
+# and the compiled pyo3 extension is placed inside it as `sharpebench.sharpebench_py`.
+module-name = "sharpebench.sharpebench_py"
+python-source = "python"
+manifest-path = "Cargo.toml"
+features = ["pyo3/extension-module"]
