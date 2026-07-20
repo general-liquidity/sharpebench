@@ -1,0 +1,34 @@
+# Version rewrites for the npm surface, attached to this crate because cargo-release
+# resolves `file` relative to the crate being processed, not to the workspace root.
+# This crate publishes as `sharpebench`, the npm package's Rust counterpart, so the
+# rules belong here; the shared release settings stay in the workspace release.toml.
+#
+# Without these the manifests keep the previous version across a bump, the publish step
+# finds that version already on the registry, and skips - reporting success while
+# shipping nothing. Cargo.toml is the only place a version is authored.
+
+[[pre-release-replacements]]
+file = "../../npm/package.json"
+search = '"version": "[0-9]+\.[0-9]+\.[0-9]+"'
+replace = '"version": "{{version}}"'
+exactly = 1
+
+[[pre-release-replacements]]
+file = "../../npm/mcp/package.json"
+search = '"version": "[0-9]+\.[0-9]+\.[0-9]+"'
+replace = '"version": "{{version}}"'
+exactly = 1
+
+# The MCP package depends on the main npm package, so its pin moves in lockstep.
+[[pre-release-replacements]]
+file = "../../npm/mcp/package.json"
+search = '"@general-liquidity/sharpebench": "\^[0-9]+\.[0-9]+\.[0-9]+"'
+replace = '"@general-liquidity/sharpebench": "^{{version}}"'
+exactly = 1
+
+# wasm-pack regenerates this on build, but keep the committed copy honest.
+[[pre-release-replacements]]
+file = "../../npm/pkg/package.json"
+search = '"version": "[0-9]+\.[0-9]+\.[0-9]+"'
+replace = '"version": "{{version}}"'
+exactly = 1
