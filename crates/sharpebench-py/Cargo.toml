@@ -5,7 +5,7 @@
 # the pre-release-replacements in crates/sharpebench-cli/release.toml.
 [package]
 name = "sharpebench-py"
-version = "0.0.12"
+version = "0.0.13"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "Python bindings (pyo3) for SharpeBench's honest-backtest statistics."
@@ -16,9 +16,9 @@ name = "sharpebench_py"
 crate-type = ["cdylib"]
 
 [dependencies]
-sharpebench-stats = { path = "../sharpebench-stats", version = "0.0.12" }
-sharpebench-edge = { path = "../sharpebench-edge", version = "0.0.12" }
-sharpebench-core = { path = "../sharpebench-core", version = "0.0.12" }
+sharpebench-stats = { path = "../sharpebench-stats", version = "0.0.13" }
+sharpebench-edge = { path = "../sharpebench-edge", version = "0.0.13" }
+sharpebench-core = { path = "../sharpebench-core", version = "0.0.13" }
 
 [dependencies.pyo3]
 version = "0.29"
