@@ -32,6 +32,47 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+  python:
+    name: sharpebench-py (fmt, clippy, maturin, pytest)
+    runs-on: ubuntu-latest
+    # crates/sharpebench-py is `exclude`d from the workspace (pyo3 needs a Python
+    # interpreter at build time), so the `check` job above never sees it: root
+    # `cargo fmt --all` / `cargo clippy --all-targets` resolve against workspace
+    # members only. Without this job a broken binding is first discovered by the
+    # release workflow at publish time. Every command here runs from inside the
+    # crate directory, which is the only way to reach an excluded crate.
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust 1.96.0 (matches rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96.0"
+          components: rustfmt, clippy
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Format
+        working-directory: crates/sharpebench-py
+        run: cargo fmt -- --check
+
+      - name: Clippy (deny warnings)
+        working-directory: crates/sharpebench-py
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: maturin develop + pytest (in a venv)
+        working-directory: crates/sharpebench-py
+        # maturin refuses to install without an active virtualenv ("Couldn't find a
+        # virtualenv or conda environment"), hence the venv rather than a bare pip.
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          pip install --upgrade pip maturin pytest numpy
+          maturin develop
+          python -m pytest tests -q
+
   determinism:
     name: scores are reproducible
     runs-on: ubuntu-latest
