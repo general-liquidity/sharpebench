@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "sharpebench"
-version = "0.0.13"
+version = "0.0.14"
 description = "SharpeBench honest-backtest statistics: deflated Sharpe, PSR, PBO/CSCV, Reality Check, SPA, BH-FDR and pass^k for your own return series."
 readme = "README.md"
 requires-python = ">=3.9"

@@ -9,7 +9,7 @@ keywords = ["ablation", "retrieval", "memory", "benchmark", "significance"]
 categories = ["science", "mathematics"]
 
 [dependencies]
-sharpebench-stats = { path = "../sharpebench-stats", version = "0.0.13" }
+sharpebench-stats = { path = "../sharpebench-stats", version = "0.0.14" }
 
 [lints]
 workspace = true

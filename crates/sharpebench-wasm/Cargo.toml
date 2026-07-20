@@ -7,9 +7,9 @@ description = "WASM bindings for the SharpeBench scoring kernel (consumed by Gor
 repository.workspace = true
 
 [dependencies]
-sharpebench-core = { path = "../sharpebench-core", version = "0.0.13" }
-sharpebench-attest = { path = "../sharpebench-attest", version = "0.0.13" }
-sharpebench-edge = { path = "../sharpebench-edge", version = "0.0.13" }
+sharpebench-core = { path = "../sharpebench-core", version = "0.0.14" }
+sharpebench-attest = { path = "../sharpebench-attest", version = "0.0.14" }
+sharpebench-edge = { path = "../sharpebench-edge", version = "0.0.14" }
 serde = "1"
 serde_json = "1"
 
