@@ -54,6 +54,42 @@ fn skilled_run(n: usize) -> Run {
     )
 }
 
+/// The adversarial-input agent's realized per-period return as a function of one
+/// input feature `u`. Below the knife edge at 0.5 the rule earns a steady edge
+/// that grows with distance from the edge. At or past it the position inverts and
+/// the same move lands on the wrong side of the book.
+///
+/// The cliff sits *inside* the observed in-sample range of `u`, which is the
+/// whole point: nothing in the presented series says it is there.
+fn fragile_response(u: f64) -> f64 {
+    if u < 0.5 {
+        0.003 + 0.005 * (0.5 - u)
+    } else {
+        -0.05
+    }
+}
+
+/// One run of the adversarial-input agent. `shift` is the perturbation applied to
+/// the input feature: 0.0 is the presented series, a small positive value is the
+/// perturbed one. Every input stays inside [0, 1], the range the agent was fitted
+/// over, so the perturbed series is not out-of-sample by inspection.
+///
+/// The forecast head keeps working under the perturbation: the agent still calls
+/// the direction of the input right on all but a handful of periods, and stakes
+/// 0.9 conviction on it. That is the source paper's end-to-end finding in a
+/// single run: forecast error alone does not explain where the money went.
+fn adversarial_input_run(shift: f64, n: usize) -> Run {
+    let mut r = run_with(
+        (0..n)
+            .map(|i| fragile_response(0.30 + 0.15 * (i as f64 * 0.7).sin() + shift))
+            .collect(),
+        Trace::default(),
+    );
+    r.confidences = vec![0.9; n];
+    r.outcomes = (0..n).map(|i| i % 20 != 0).collect();
+    r
+}
+
 fn agent(id: &str, runs: Vec<Run>) -> AgentSubmission {
     AgentSubmission {
         agent_id: id.to_string(),
@@ -288,6 +324,79 @@ pub fn run_self_audit() -> SelfAuditReport {
         });
     }
 
+    // 8) Adversarial input: an agent that looks excellent on the presented series
+    //    and collapses under a small perturbation of its inputs that stays inside
+    //    the observed in-sample range. Adapted from "Interpretability in
+    //    Safety-Critical Financial Trading Systems" (Deza, Travers, Rowat,
+    //    Papernot), where a gradient-based search finds seemingly in-sample input
+    //    settings that shift the return distribution sharply negative, and where
+    //    the load-bearing result is end-to-end: errors in the forecasting model
+    //    alone are NOT sufficient for the resulting trades to lose money.
+    //
+    //    So this attack keeps the forecast head accurate on every run, including
+    //    the one that blows up. An agent graded on forecast accuracy passes it
+    //    with room to spare. The assertions below therefore check three things
+    //    together: the agent is demoted, the demotion comes from realized returns
+    //    rather than from any process violation, and its excellent calibration
+    //    cannot buy eligibility back. A benchmark that scored conviction quality
+    //    without scoring the P&L it produced would crown this agent.
+    //
+    //    The standing limitation this case cannot repair: the perturbed series is
+    //    visible to the scorer only because the harness, not the agent, chooses
+    //    the seeds x windows. A fragility that no submitted run ever exercises is
+    //    not observable to a deterministic scoring kernel, and nothing here
+    //    detects it. What the audit proves is narrower and still worth proving:
+    //    once the perturbation is run even once, no amount of forecast accuracy
+    //    or raw return rescues the agent.
+    {
+        use crate::calibration::distributional_uncertainty;
+
+        let fragile = {
+            let mut runs: Vec<Run> = (0..4).map(|_| adversarial_input_run(0.0, 60)).collect();
+            runs.push(adversarial_input_run(0.06, 60));
+            agent("adversarial-input", runs)
+        };
+        let honest = agent("honest", (0..5).map(|_| skilled_run(60)).collect());
+        let board = rank(&[fragile, honest], &cfg);
+        let ai = board
+            .iter()
+            .find(|s| s.agent_id == "adversarial-input")
+            .unwrap();
+        let hs = board.iter().find(|s| s.agent_id == "honest").unwrap();
+
+        // The forecast head really is good: well under the always-0.5 baseline of
+        // 0.25, so the demotion cannot be blamed on bad forecasting.
+        let brier = ai.calibration_brier.unwrap_or(1.0);
+        // And the perturbed run really is a different animal from the presented
+        // ones, which is what a distributional-uncertainty read catches even while
+        // every forecast-accuracy signal reads clean.
+        let presented: Vec<f64> = (0..4)
+            .flat_map(|_| adversarial_input_run(0.0, 60).returns)
+            .collect();
+        let perturbed = adversarial_input_run(0.06, 60).returns;
+        let novelty = distributional_uncertainty(&perturbed, &presented);
+
+        let defended = board[0].agent_id == "honest"
+            && hs.rank_eligible
+            && !ai.rank_eligible
+            && !ai.passed_k
+            && ai.process_ok
+            && brier < 0.10
+            && novelty > 0.5
+            && ai.raw_mean_return > hs.raw_mean_return;
+        cases.push(AuditCase {
+            name: "adversarial-input".into(),
+            attack:
+                "look excellent in-sample with an accurate forecast head, then collapse under a small in-range input perturbation"
+                    .into(),
+            defended,
+            detail: format!(
+                "adversarial raw={:.4} eligible={} passed_k={} process_ok={} brier={:.3} novelty={:.2}; honest ranks #1={}",
+                ai.raw_mean_return, ai.rank_eligible, ai.passed_k, ai.process_ok, brier, novelty, defended
+            ),
+        });
+    }
+
     let all_defended = cases.iter().all(|c| c.defended);
     SelfAuditReport {
         cases,
@@ -306,5 +415,62 @@ mod tests {
             assert!(c.defended, "undefended attack: {} — {}", c.name, c.detail);
         }
         assert!(report.all_defended);
+    }
+
+    #[test]
+    fn adversarial_input_case_is_present_and_defended() {
+        let report = run_self_audit();
+        let c = report
+            .cases
+            .iter()
+            .find(|c| c.name == "adversarial-input")
+            .expect("the adversarial-input attack must be in the battery");
+        assert!(c.defended, "undefended: {}", c.detail);
+    }
+
+    /// The perturbation has to be the thing the source paper describes: small, and
+    /// inside the range the agent already saw. If the perturbed inputs left [0, 1]
+    /// the case would be a plain out-of-sample test and would prove nothing.
+    #[test]
+    fn perturbed_inputs_stay_inside_the_observed_range() {
+        let shift = 0.06;
+        let inputs: Vec<f64> = (0..60)
+            .map(|i| 0.30 + 0.15 * (i as f64 * 0.7).sin() + shift)
+            .collect();
+        assert!(
+            inputs.iter().all(|&u| (0.0..=1.0).contains(&u)),
+            "perturbed inputs must stay in the in-sample range"
+        );
+        // The presented series never reaches the cliff; the perturbed one does.
+        let presented_max = (0..60)
+            .map(|i| 0.30 + 0.15 * (i as f64 * 0.7).sin())
+            .fold(f64::MIN, f64::max);
+        let perturbed_max = inputs.iter().copied().fold(f64::MIN, f64::max);
+        assert!(presented_max < 0.5, "presented series stays clear of it");
+        assert!(perturbed_max >= 0.5, "the perturbation crosses it");
+    }
+
+    /// The end-to-end point of the attack: the forecast stays accurate while the
+    /// money goes away. If the Brier score degraded under the perturbation, the
+    /// case would only be showing that bad forecasts lose money.
+    #[test]
+    fn forecast_stays_accurate_while_returns_collapse() {
+        use crate::calibration::brier_score;
+        use crate::stats::mean;
+
+        let clean = adversarial_input_run(0.0, 60);
+        let perturbed = adversarial_input_run(0.06, 60);
+        let b_clean = brier_score(&clean.confidences, &clean.outcomes);
+        let b_perturbed = brier_score(&perturbed.confidences, &perturbed.outcomes);
+        assert!(
+            (b_clean - b_perturbed).abs() < 1e-12,
+            "forecast quality is unchanged by the perturbation"
+        );
+        assert!(b_perturbed < 0.10, "and it is good: {b_perturbed}");
+        assert!(mean(&clean.returns) > 0.0, "presented series is profitable");
+        assert!(
+            mean(&perturbed.returns) < 0.0,
+            "perturbed series loses money anyway"
+        );
     }
 }
