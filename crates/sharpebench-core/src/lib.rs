@@ -48,6 +48,7 @@ pub mod pass_k;
 pub mod percentile;
 pub mod process;
 pub mod rediscovery;
+pub mod regime_compare;
 pub mod roles;
 pub mod rolling;
 pub mod selfaudit;
@@ -77,6 +78,9 @@ pub use percentile::{percentile_of, BaselineBand, HumanBaseline};
 pub use process::{ProcessEvent, ProcessScore, Trace};
 pub use rediscovery::{
     classify_rediscovery, cosine_similarity, RediscoveryVerdict, DEFAULT_REDISCOVERY_THRESHOLD,
+};
+pub use regime_compare::{
+    compare_by_regime, RegimeCompareOpts, RegimeComparison, RegimeDistributionReport, ZagaSplit,
 };
 pub use rolling::{rolling_sharpe, RollingSharpe};
 pub use selection::{selection_robustness, SelectionRobustness};
