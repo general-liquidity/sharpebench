@@ -2,13 +2,14 @@
 
 \paragraph{Skill and luck in finance.} The distinction the benchmark operationalizes is old. Applying a false-discovery correction to two decades of mutual funds, \citet{barras2010false} find that roughly three quarters had no genuine alpha and that most apparent winners were false positives; \citet{fama2010luck} reach the same conclusion by a different route. \citet{bailey2014pseudo} show that a high backtest Sharpe is trivially achievable by trying enough configurations, and \citet{harvey2015backtesting} turn the observation into a haircut that scales with the number of strategies tried. The deflated Sharpe ratio of \citet{bailey2014deflated} is the instrument this benchmark uses; the Reality Check of \citet{white2000reality}, the superior-predictive-ability test of \citet{hansen2005spa} and the step-down procedure of \citet{romano2005stepwise} are the field-wide tests it reports. \citet{arnott2019protocol} set out the reporting protocol a backtest should follow in the era of machine learning, and \cref{sec:experiments} follows it: every Sharpe is reported beside its number of trials, its track length, and the cost profile it was earned under.
 
-\paragraph{Benchmarks for financial agents.} \Cref{tab:related} positions the benchmark against the boards it is most often compared with. The axes are the ones the principles in \cref{sec:principles} make load-bearing. Each mark records what the cited paper states about itself, not an inference. FinBen \citep{finben2024} ranks GPT-4 first on its trading task with a reported Sharpe of $1.51 \pm 1.08$, and reports buy-and-hold on the same task at $0.02 \pm 0.87$; the two intervals overlap, so the board cannot separate its leader from the baseline it is meant to beat. StockBench \citep{stockbench2025} evaluates on a single four-month post-cutoff window and ranks on cumulative return and drawdown, with three seeds per model and no deflation. QuantBench \citep{quantbench2025} names overfitting as an open problem and ranks pipeline performance with no luck-corrected metric. The FINOS Open Financial LLM Leaderboard \citep{openfinllm} measures financial knowledge, scored on accuracy and F1, and has no trading-performance axis. A 2026 evidence map of LLM-trading research \citep{llmtradingaudit2026} coded its nineteen primary empirical studies for reproducibility and found that none reached the top tier. The re-scoring experiment this comparison invites, taking a rival board's published field and ranking it under these gates, is now one command: an import adapter converts per-period return series into scoreable submissions, embedding the caveat that imported fields carry no audit trace and unknown trial counts understate deflation, so any demotion shown is a lower bound. The investigation it forced is itself a finding: StockBench publishes environment inputs and summary statistics but no per-agent return series, so the experiment awaits either the authors' raw artifacts or a reproduction with their harness.
+\paragraph{Benchmarks for financial agents.} \Cref{tab:related} positions the benchmark against the boards it is most often compared with, on the axes the principles in \cref{sec:principles} make load-bearing. A comparison drawn only on one's own axes is advertising, so \cref{tab:related-inverse} draws the same comparison on the axes the rivals hold: every one of them scores real LLM agents, most present a far richer information environment, StockBench runs single-name equities on a genuinely post-cutoff window with a live board, and the Open FinLLM Leaderboard is hosted under neutral governance. SharpeBench's row in that table is empty, its empty cells are the limitations of \cref{sec:limitations}, and the two tables together state the actual trade: statistical and adversarial guarantees were bought at the price of field breadth, and the program of \cref{sec:limitations} is to pay that price back without giving up the guarantees. Each mark in both tables records what the cited paper or its public board states, not an inference. FinBen \citep{finben2024} ranks GPT-4 first on its trading task with a reported Sharpe of $1.51 \pm 1.08$, and reports buy-and-hold on the same task at $0.02 \pm 0.87$; the two intervals overlap, so the board cannot separate its leader from the baseline it is meant to beat. StockBench \citep{stockbench2025} evaluates on a single four-month post-cutoff window and ranks on cumulative return and drawdown, with three seeds per model and no deflation. QuantBench \citep{quantbench2025} names overfitting as an open problem and ranks pipeline performance with no luck-corrected metric. The FINOS Open Financial LLM Leaderboard \citep{openfinllm} measures financial knowledge, scored on accuracy and F1, and has no trading-performance axis. A 2026 evidence map of LLM-trading research \citep{llmtradingaudit2026} coded its nineteen primary empirical studies for reproducibility and found that none reached the top tier. The re-scoring experiment this comparison invites, taking a rival board's published field and ranking it under these gates, is now one command: an import adapter converts per-period return series into scoreable submissions, embedding the caveat that imported fields carry no audit trace and unknown trial counts understate deflation, so any demotion shown is a lower bound. The investigation it forced is itself a finding: StockBench publishes environment inputs and summary statistics but no per-agent return series, so the experiment awaits either the authors' raw artifacts or a reproduction with their harness.
 
 \begin{table}[t]
 \centering
-\small
-\caption{Positioning against benchmarks that score financial agents. A mark means the cited paper states the property of itself. Empty means it does not claim it.}
+\footnotesize
+\caption{Positioning along the axes this benchmark adds. A mark means the cited paper states the property of itself; empty means it does not claim it. Read together with \cref{tab:related-inverse}: a comparison drawn only on one's own axes is advertising.}
 \label{tab:related}
+\setlength{\tabcolsep}{4pt}
 \begin{tabular}{lcccccc}
 \toprule
  & Deflates & $\text{pass}^{k}$ & Process gate & Costs & Deterministic & Forward commit \\
@@ -19,6 +20,26 @@ QuantBench \citep{quantbench2025} & & & & & & \\
 Open FinLLM \citep{openfinllm} & & & & & & \\
 $\tau$-bench \citep{taubench2024} & & \checkmark & & & & \\
 SharpeBench (this paper) & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[t]
+\centering
+\footnotesize
+\caption{The same comparison on the axes the rival benchmarks hold. A mark means the cited paper or its public board states the property; empty means it does not. SharpeBench's empty cells are its limitations (\cref{sec:limitations}), and three of them, the missing LLM field, the thin information environment, and the absent live board, are the price paid for the guarantees in \cref{tab:related}.}
+\label{tab:related-inverse}
+\setlength{\tabcolsep}{4.5pt}
+\begin{tabular}{lccccc}
+\toprule
+ & LLM agents & Rich info & Single names & Live board & Post-cutoff run \\
+\midrule
+FinBen \citep{finben2024} & \checkmark & \checkmark & & & \\
+StockBench \citep{stockbench2025} & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark \\
+QuantBench \citep{quantbench2025} & \checkmark & & & & \\
+Open FinLLM \citep{openfinllm} & \checkmark & \checkmark & & \checkmark & \\
+$\tau$-bench \citep{taubench2024} & \checkmark & & & & \\
+SharpeBench (this paper) & & & & & \\
 \bottomrule
 \end{tabular}
 \end{table}
