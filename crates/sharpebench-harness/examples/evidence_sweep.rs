@@ -33,16 +33,20 @@ use sharpebench_sim::{
 
 /// Frozen datasets, their asset class and bar size. Timeframe is what the deflation
 /// depends on: the same annualized Sharpe has a different track length at 1h and 1d.
-const DATASETS: &[(&str, &str, &str)] = &[
-    ("us-indices-1d", "equity-index", "1d"),
-    ("us-indices-1w", "equity-index", "1w"),
-    ("crypto-majors-1h", "crypto", "1h"),
-    ("crypto-majors-4h", "crypto", "4h"),
-    ("crypto-majors-1d", "crypto", "1d"),
-    ("crypto-majors-1w", "crypto", "1w"),
-    ("fx-majors-1d", "fx", "1d"),
-    ("commodities-1d", "commodities", "1d"),
-    ("rates-1d", "rates", "1d"),
+/// The fourth column is periods per year, which is what the annualized deflation
+/// prior is converted with. Getting it wrong is the single most consequential
+/// misconfiguration in the benchmark, so it is pinned here per dataset rather
+/// than inferred.
+const DATASETS: &[(&str, &str, &str, f64)] = &[
+    ("us-indices-1d", "equity-index", "1d", 252.0),
+    ("us-indices-1w", "equity-index", "1w", 52.0),
+    ("crypto-majors-1h", "crypto", "1h", 8760.0),
+    ("crypto-majors-4h", "crypto", "4h", 2190.0),
+    ("crypto-majors-1d", "crypto", "1d", 365.0),
+    ("crypto-majors-1w", "crypto", "1w", 52.0),
+    ("fx-majors-1d", "fx", "1d", 252.0),
+    ("commodities-1d", "commodities", "1d", 252.0),
+    ("rates-1d", "rates", "1d", 252.0),
 ];
 
 const DSR_BARS: &[f64] = &[0.80, 0.90, 0.95, 0.99];
@@ -58,6 +62,7 @@ struct Record<'a> {
     dataset: &'a str,
     asset_class: &'a str,
     timeframe: &'a str,
+    periods_per_year: f64,
     n_bars: usize,
     n_symbols: usize,
     n_windows: usize,
@@ -139,7 +144,18 @@ fn main() {
     let mut w = BufWriter::new(File::create(&out).expect("create output"));
     let mut n_records = 0usize;
 
-    for (name, class, tf) in DATASETS {
+    // Optional second argument: run only the named dataset. The sweep is
+    // embarrassingly parallel across datasets and the hourly crypto file alone
+    // takes longer than the other eight together, so one process per dataset is
+    // how the evidence is actually produced. Results are identical to a serial
+    // run because every seed is pinned.
+    let only = env::args().nth(2);
+    for (name, class, tf, ppy) in DATASETS {
+        if let Some(ref o) = only {
+            if o != name {
+                continue;
+            }
+        }
         let path = format!("data/{name}.csv");
         let data = match Dataset::from_csv_file(&path) {
             Ok(d) => d,
@@ -167,7 +183,7 @@ fn main() {
                     let mut cfg = ScoreConfig {
                         dsr_bar,
                         n_trials,
-                        ..ScoreConfig::default()
+                        ..ScoreConfig::for_periods_per_year(*ppy)
                     };
                     if let Some(x) = pinned {
                         cfg.trials_sr_std = x;
@@ -179,6 +195,7 @@ fn main() {
                             dataset: name,
                             asset_class: class,
                             timeframe: tf,
+                            periods_per_year: *ppy,
                             n_bars: n,
                             n_symbols: data.symbols().len(),
                             n_windows: windows.len(),
