@@ -70,7 +70,7 @@ Crypto 1w & buy-and-hold & 0.745 & no & 0.671 & no & no \\
 Crypto 1d & buy-and-hold & 0.144 & no & 0.476 & no & no \\
 US indices 1d & buy-and-hold & 0.000 & no & 0.336 & no & no \\
 Crypto 4h & buy-and-hold & 0.000 & no & 0.479 & no & no \\
-Crypto 1h & buy-and-hold & {pending} & no & {pending} & no & no \\
+Crypto 1h & buy-and-hold & 0.000 & no & 0.490 & no & no \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -81,7 +81,7 @@ This is strictness, not breakage. The default mode does not ask whether an agent
 
 Whether the reliability gate should mean profitable in every regime or never catastrophic in any regime is a design question, and the kernel was extended so that both are expressible from configuration and the ablation is reproducible. The never-catastrophic preset sets the pass mode to any run and adds a per-run drawdown bound of 20 percent, with the edge tested on the pooled track. It is a weaker safety claim, and a test pins its cost: a synthetic agent with one spectacular run and four noise runs is refused by the default only through $\text{pass}^{k}$ and is admitted by the preset.
 
-On the real datasets the preset admits nobody. The last column of \cref{tab:eligibility} is identical to the one before it, and the worst-run drawdown column says why. The US index drew down 32 percent in its worst weekly window. Crypto buy-and-hold drew down between 48 and 67 percent. The weekly crypto momentum agent clears the deflation bar at $0.978$ and is refused on a 56 percent drawdown in one window. A raw-return leaderboard ranks that agent first. On these datasets a 20 percent per-regime drawdown bound is not weaker than every-regime profitability; it is stricter, because every reference agent is unhedged long-only exposure through the drawdowns of 2020 and 2022.
+On the real datasets the preset admits nobody. The last column of \cref{tab:eligibility} is identical to the one before it, and the worst-run drawdown column says why. The US index drew down 32 percent in its worst weekly window. Crypto buy-and-hold drew down between 48 and 67 percent, and hourly momentum lost 99.3 percent of its value in a single window, the starkest case for a per-regime bound in the grid. The weekly crypto momentum agent clears the deflation bar at $0.978$ and is refused on a 56 percent drawdown in one window. A raw-return leaderboard ranks that agent first. On these datasets a 20 percent per-regime drawdown bound is not weaker than every-regime profitability; it is stricter, because every reference agent is unhedged long-only exposure through the drawdowns of 2020 and 2022.
 
 One correction to how the per-run bound is naturally described. Drawdown is multiplicative, so a run's own drawdown never exceeds the pooled track's, because every within-run peak-to-trough pair is also a pooled pair. A per-run bound at the same value as the pooled bound therefore catches nothing the pooled bound misses. It bites when set below the pooled cap: a loose whole-track budget with a tight per-regime bound. The preset is configured that way, and the test that proves the bound is not redundant constructs exactly that case.
 
