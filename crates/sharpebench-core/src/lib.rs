@@ -67,7 +67,7 @@ pub use comparison_sets::{
 };
 pub use composite::{
     per_period_sr_std, per_run_psr_benchmark, rank, score_agent, AgentSubmission, CompositeScore,
-    Run, ScoreConfig, TrialsSrStdSource,
+    Mandate, Run, ScoreConfig, TrialsSrStdSource,
 };
 pub use correlation::{crowdedness, Crowdedness};
 pub use disqualification::{classify_disqualification, rollup, DisqualThresholds, FailReason};
@@ -77,6 +77,7 @@ pub use greeks::{
     Leg,
 };
 pub use oos::{oos_decay, OosDecayReport};
+pub use pass_k::{pass_k, PassMode};
 pub use percentile::{percentile_of, BaselineBand, HumanBaseline};
 pub use process::{ProcessEvent, ProcessScore, Trace};
 pub use rediscovery::{

@@ -3,10 +3,19 @@
 //! ranks the lucky single run is measuring noise. For safety-relevant suites use
 //! [`PassMode::All`] (after Sierra's τ²-bench pass^k).
 
+use serde::{Deserialize, Serialize};
+
 /// How many of the `k` runs must pass.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// Serialized in snake case (`"all"`, `"any"`, `{"at_least": 3}`) so the mode
+/// can be named from a `ScoreConfig` file: an ablation that changes the
+/// reliability verdict must be reproducible from config, not from a patched
+/// binary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PassMode {
     /// Every run must pass (the strict, safety-grade default).
+    #[default]
     All,
     /// At least one run passes.
     Any,
@@ -40,5 +49,18 @@ mod tests {
         assert!(!pass_k(&runs, PassMode::AtLeast(4)));
         assert!(pass_k(&[true, true, true], PassMode::All));
         assert!(!pass_k(&[], PassMode::Any));
+    }
+
+    #[test]
+    fn serde_round_trips_in_snake_case() {
+        for (mode, json) in [
+            (PassMode::All, "\"all\""),
+            (PassMode::Any, "\"any\""),
+            (PassMode::AtLeast(3), "{\"at_least\":3}"),
+        ] {
+            assert_eq!(serde_json::to_string(&mode).unwrap(), json);
+            assert_eq!(serde_json::from_str::<PassMode>(json).unwrap(), mode);
+        }
+        assert_eq!(PassMode::default(), PassMode::All);
     }
 }

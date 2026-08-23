@@ -2,7 +2,8 @@
 //!
 //! An agent ranks **only if** every gate holds:
 //! 1. its pooled Deflated Sharpe clears `dsr_bar` (survives multiple-testing),
-//! 2. it passes the per-run bar on *every* seed×window (`pass^k`, mode All),
+//! 2. it passes the per-run bar on enough seed×window runs (`pass^k`; every run
+//!    under the default `PassMode::All`),
 //! 3. it has zero block-severity process violations in any run,
 //! 4. its bootstrap p-value beats `alpha` (the edge isn't noise).
 //!
@@ -79,12 +80,40 @@ pub enum RankKey {
 pub struct Mandate {
     /// Max tolerable drawdown over the pooled track (e.g. 0.20). 1.0 = unconstrained.
     pub max_drawdown: f64,
+    /// Max tolerable drawdown of any single run (one window times one seed), in
+    /// [0, 1]. 1.0 = unconstrained, the default.
+    ///
+    /// The pooled bound is a whole-track budget, and it cannot tell a track that
+    /// loses 15% in one bear window and nothing elsewhere from one that loses
+    /// 4% in each of five windows: both sit inside a 20% cap, and they are
+    /// different agents to hand capital to. This bound is checked on every run
+    /// separately, from that run's own starting equity, so it says what the
+    /// pooled cap cannot: no single regime, under any execution seed, may lose
+    /// more than this. It is the safety half of the "never catastrophic in any
+    /// regime" verdict (see [`ScoreConfig::reliability_never_catastrophic`]).
+    ///
+    /// Drawdown is multiplicative, so a run's own drawdown is never above the
+    /// pooled track's (every within-run peak-to-trough pair is also a pooled
+    /// pair). The bound therefore only bites when set below `max_drawdown`,
+    /// which is how it is meant to be used: a loose whole-track budget and a
+    /// tight per-regime one.
+    #[serde(default = "default_max_run_drawdown")]
+    pub max_run_drawdown: f64,
 }
 
 impl Default for Mandate {
     fn default() -> Self {
-        Self { max_drawdown: 1.0 }
+        Self {
+            max_drawdown: 1.0,
+            max_run_drawdown: default_max_run_drawdown(),
+        }
     }
+}
+
+/// Unconstrained per-run drawdown. Configs serialized before the field existed
+/// deserialize to this, so the mandate they expressed is unchanged.
+fn default_max_run_drawdown() -> f64 {
+    1.0
 }
 
 /// Maximum drawdown of the equity curve implied by a return series, in [0, 1].
@@ -167,6 +196,18 @@ pub struct ScoreConfig {
     /// in units that mean the same thing on every timeframe.
     #[serde(default)]
     pub per_run_min_annual_sharpe: f64,
+    /// How many of the per-run tests must pass for pass^k. The default
+    /// [`PassMode::All`] is the eligibility gate the benchmark has always run: a
+    /// money agent that is safe on average is not safe, so every window and every
+    /// seed must clear the bar. It is also why a long-only agent is ineligible on
+    /// any dataset with a bear window. That is the right verdict for "profitable
+    /// in every regime", and the wrong question for "has an edge and never blows
+    /// up", which is what [`PassMode::Any`] or [`PassMode::AtLeast`] combined
+    /// with `mandate.max_run_drawdown` asks. The mode is a config field, not a
+    /// constant, so the two verdicts can be produced from two configs and shown
+    /// side by side; it is not a knob to turn quietly.
+    #[serde(default)]
+    pub pass_mode: PassMode,
     /// How many return periods make a year on the dataset being scored: the unit
     /// conversion between the annualized thresholds above and the per-period
     /// statistics the kernel computes. Daily equities 252, daily crypto 365,
@@ -299,6 +340,7 @@ impl Default for ScoreConfig {
             dsr_bar: 0.95,
             per_run_psr_bar: 0.90,
             per_run_min_annual_sharpe: 0.0,
+            pass_mode: PassMode::default(),
             periods_per_year: default_periods_per_year(),
             alpha: 0.05,
             bootstrap_seed: 0x5BA7_2026,
@@ -323,6 +365,44 @@ impl ScoreConfig {
     pub fn for_periods_per_year(periods_per_year: f64) -> Self {
         Self {
             periods_per_year,
+            ..Self::default()
+        }
+    }
+
+    /// The "never catastrophic in any regime" reliability verdict, as one named
+    /// preset so an ablation against the default is a one-line change of config
+    /// rather than a patched binary.
+    ///
+    /// The default config certifies *profitable in every regime with 90%
+    /// confidence*: pass^k in [`PassMode::All`] requires every window and every
+    /// seed to clear the per-run PSR bar. This preset certifies something
+    /// different: *never draws down more than `max_run_dd` in any regime, with the
+    /// edge tested on the pooled track*. It sets `pass_mode` to [`PassMode::Any`]
+    /// (one run clearing the per-run bar is enough) and
+    /// `mandate.max_run_drawdown` to `max_run_dd`, and leaves every other gate
+    /// where the default has it: the pooled Deflated Sharpe must still clear
+    /// `dsr_bar`, the bootstrap edge test must still reject noise, the process
+    /// must still be clean, and the pooled drawdown mandate still applies. The
+    /// edge is therefore tested once, on the whole track, and reliability is
+    /// asked of the loss side only.
+    ///
+    /// This is a **weaker safety claim** than the default. It admits a
+    /// regime-dependent edge such as equity beta, which the default correctly
+    /// refuses because owning the index is not safe in a bear market. It also
+    /// admits an agent whose edge lives in one run, provided that run is large
+    /// enough for the pooled track to survive deflation and the bootstrap; the
+    /// default refuses that agent through pass^k, and this preset has given that
+    /// refusal up. That is the point of running both: which agents clear which
+    /// gate, on which asset class and timeframe, is the table the paper is for.
+    /// It is suitable for an ablation, not as the default for a money agent, and
+    /// nothing here changes the default.
+    pub fn reliability_never_catastrophic(max_run_dd: f64) -> Self {
+        Self {
+            pass_mode: PassMode::Any,
+            mandate: Mandate {
+                max_run_drawdown: max_run_dd,
+                ..Mandate::default()
+            },
             ..Self::default()
         }
     }
@@ -357,8 +437,15 @@ pub struct CompositeScore {
     pub field_reality_check_p: f64,
     /// Maximum drawdown over the pooled track, in [0, 1].
     pub max_drawdown: f64,
-    /// Whether the agent respected its mandate (e.g. the drawdown cap).
+    /// Whether the agent respected its mandate: both the pooled drawdown cap and
+    /// the per-run cap.
     pub mandate_ok: bool,
+    /// The largest maximum drawdown of any single run, in [0, 1], each run
+    /// measured from its own starting equity: the number the per-run mandate
+    /// bound is checked against. Never above `max_drawdown`, the pooled figure,
+    /// which also counts losing streaks that span runs. 0.0 with no runs.
+    #[serde(default)]
+    pub worst_run_drawdown: f64,
     /// Turnover proxy: average orders placed per run (trading frequency / capacity).
     pub turnover: f64,
     /// Whether the agent is on the Pareto front over (return↑, drawdown↓,
@@ -547,7 +634,7 @@ fn score_agent_with(sub: &AgentSubmission, cfg: &ScoreConfig, defl: Deflation) -
         .iter()
         .map(|r| probabilistic_sharpe_ratio(&r.returns, per_run_benchmark) >= cfg.per_run_psr_bar)
         .collect();
-    let passed_k = pass_k(&per_run, PassMode::All);
+    let passed_k = pass_k(&per_run, cfg.pass_mode);
 
     // process: a single block-severity violation in any run is disqualifying.
     let process_ok = sub.runs.iter().all(|r| process_score(&r.trace).is_clean());
@@ -576,9 +663,17 @@ fn score_agent_with(sub: &AgentSubmission, cfg: &ScoreConfig, defl: Deflation) -
     let per_run_edge: Vec<f64> = sub.runs.iter().map(|r| mean(&r.returns)).collect();
     let edge_half_life_periods = edge_half_life(&per_run_edge);
 
-    // Mandate adherence: does the drawdown respect the mandate's cap?
+    // Mandate adherence: the pooled track must respect the whole-track cap and
+    // every run must respect the per-run cap. Both default to 1.0, under which
+    // the check is the pooled one the benchmark always ran.
     let mdd = max_drawdown(&pooled);
-    let mandate_ok = mdd <= cfg.mandate.max_drawdown;
+    let worst_run_drawdown = sub
+        .runs
+        .iter()
+        .map(|r| max_drawdown(&r.returns))
+        .fold(0.0, f64::max);
+    let mandate_ok =
+        mdd <= cfg.mandate.max_drawdown && worst_run_drawdown <= cfg.mandate.max_run_drawdown;
 
     // Turnover proxy: average number of orders placed per run.
     let total_orders: usize = sub
@@ -699,6 +794,7 @@ fn score_agent_with(sub: &AgentSubmission, cfg: &ScoreConfig, defl: Deflation) -
         field_reality_check_p: 1.0,
         max_drawdown: mdd,
         mandate_ok,
+        worst_run_drawdown,
         turnover,
         pareto_optimal: false,
         step_down_significant: false,
@@ -1703,5 +1799,198 @@ mod tests {
             !score_agent(&weak, &strict).passed_k,
             "a minimum annualized Sharpe of 3.0 must fail a 0.0005/0.004 track"
         );
+    }
+    /// A mixed field: two agents that clear every run, one that fails a single
+    /// run. A `Run` that fails the per-run PSR bar is the point of pass^k.
+    fn field_with_one_single_run_failure() -> Vec<AgentSubmission> {
+        let clean = |id: &str| agent(id, (0..6).map(|_| run(0.002, 0.0005, 60)).collect());
+        let mut runs: Vec<Run> = (0..5).map(|_| run(0.002, 0.0005, 60)).collect();
+        runs.push(run(-0.002, 0.0005, 60));
+        vec![clean("a"), agent("one_bad_run", runs), clean("b")]
+    }
+
+    /// `pass_mode` defaults to `All`, and under it the eligibility vector of a
+    /// mixed field is exactly what the hard-coded `PassMode::All` produced: an
+    /// agent that fails a single run is ineligible, every clean agent is not.
+    #[test]
+    fn default_pass_mode_is_all_and_matches_the_old_gate() {
+        let cfg = ScoreConfig::default();
+        assert_eq!(cfg.pass_mode, PassMode::All);
+        assert_eq!(cfg.mandate.max_run_drawdown, 1.0);
+
+        let field = field_with_one_single_run_failure();
+        let board = rank(&field, &cfg);
+        let benchmark = per_run_psr_benchmark(&cfg);
+        for s in &board {
+            let sub = field.iter().find(|a| a.agent_id == s.agent_id).unwrap();
+            let old_per_run: Vec<bool> = sub
+                .runs
+                .iter()
+                .map(|r| probabilistic_sharpe_ratio(&r.returns, benchmark) >= cfg.per_run_psr_bar)
+                .collect();
+            let old_passed_k = pass_k(&old_per_run, PassMode::All);
+            assert_eq!(s.passed_k, old_passed_k, "{}", s.agent_id);
+            let old_eligible = s.deflated_sharpe >= cfg.dsr_bar
+                && old_passed_k
+                && s.process_ok
+                && s.bootstrap_p < cfg.alpha
+                && s.max_drawdown <= cfg.mandate.max_drawdown;
+            assert_eq!(s.rank_eligible, old_eligible, "{}", s.agent_id);
+        }
+        let get = |id: &str| board.iter().find(|s| s.agent_id == id).unwrap();
+        assert!(get("a").rank_eligible && get("b").rank_eligible);
+        assert!(!get("one_bad_run").rank_eligible);
+        assert!(!get("one_bad_run").passed_k);
+    }
+
+    /// A regime-dependent edge: profitable on five of six runs, losing on one.
+    /// `All` refuses it (not profitable in every regime); `Any` admits it once it
+    /// also clears the DSR, the bootstrap, the process check and both drawdown
+    /// bounds, which is the "edge tested on the pooled track" half of the preset.
+    #[test]
+    fn any_mode_admits_a_regime_dependent_edge_the_all_mode_rejects() {
+        let mut runs: Vec<Run> = (0..5).map(|_| run(0.003, 0.0005, 60)).collect();
+        runs.push(run(-0.001, 0.0005, 60));
+        let sub = agent("regime_edge", runs);
+
+        let all = score_agent(&sub, &ScoreConfig::default());
+        assert!(!all.passed_k && !all.rank_eligible, "{all:?}");
+
+        let any = score_agent(&sub, &ScoreConfig::reliability_never_catastrophic(0.20));
+        // Every other gate holds on its own, so pass^k is the only thing that moved.
+        assert!(any.deflated_sharpe >= 0.95);
+        assert!(any.bootstrap_p < 0.05 && any.process_ok && any.mandate_ok);
+        assert!(any.worst_run_drawdown < 0.20 && any.max_drawdown < 0.20);
+        assert!(any.passed_k && any.rank_eligible, "{any:?}");
+    }
+
+    /// The reason the per-run bound exists: a track whose pooled drawdown is
+    /// inside the pooled cap can still contain one run that draws down past the
+    /// per-run cap, because a strong earlier run lifts the pooled peak. The
+    /// pooled bound misses it; the per-run bound must not.
+    #[test]
+    fn per_run_drawdown_bound_rejects_one_catastrophic_run_that_the_pooled_bound_misses() {
+        // Five strong runs, then a run that falls 14% from its own start. The
+        // pooled cap is a whole-track budget of 20%, which this track respects;
+        // the per-run cap says no single regime may lose more than 10%, which
+        // it does not.
+        let mut runs: Vec<Run> = (0..5).map(|_| run(0.004, 0.0005, 60)).collect();
+        let mut crash = run(0.004, 0.0005, 60);
+        for r in &mut crash.returns[10..15] {
+            *r = -0.03;
+        }
+        runs.push(crash);
+        let sub = agent("one_blowup", runs);
+
+        let loose_pooled = ScoreConfig {
+            mandate: Mandate {
+                max_drawdown: 0.20,
+                max_run_drawdown: 1.0,
+            },
+            pass_mode: PassMode::Any,
+            ..ScoreConfig::default()
+        };
+        let pooled_only = score_agent(&sub, &loose_pooled);
+        assert!(pooled_only.max_drawdown <= 0.20, "{pooled_only:?}");
+        assert!(
+            pooled_only.mandate_ok && pooled_only.rank_eligible,
+            "{pooled_only:?}"
+        );
+
+        let mut preset = ScoreConfig::reliability_never_catastrophic(0.10);
+        preset.mandate.max_drawdown = 0.20;
+        let bounded = score_agent(&sub, &preset);
+        assert!(bounded.worst_run_drawdown > 0.10, "{bounded:?}");
+        assert!(bounded.max_drawdown <= 0.20, "the pooled bound still holds");
+        assert!(bounded.passed_k, "pass^k is not what rejects it");
+        assert!(!bounded.mandate_ok && !bounded.rank_eligible, "{bounded:?}");
+    }
+
+    /// Eligibility under the preset is a superset of eligibility under the
+    /// default on the same field: the preset relaxes pass^k, keeps every other
+    /// gate, and the per-run bound is chosen loose enough that a default-eligible
+    /// agent (which clears PSR 0.90 on every run) cannot trip it.
+    ///
+    /// Every agent submits six runs so the shared-cell restriction is the
+    /// identity, and the field stays below the measured-deflation floor so the
+    /// two boards differ only in the gates under test.
+    #[test]
+    fn never_catastrophic_preset_is_weaker_than_the_default() {
+        let mut field = field_with_one_single_run_failure();
+        field.pop();
+        let mut runs: Vec<Run> = (0..5).map(|_| run(0.004, 0.0005, 60)).collect();
+        let mut crash = run(0.004, 0.0005, 60);
+        crash.returns[10] = -0.30;
+        runs.push(crash);
+        field.push(agent("blowup", runs));
+        let mut lucky = vec![run(0.02, 0.002, 60)];
+        lucky.extend((0..5).map(|_| run(0.0, 0.003, 60)));
+        field.push(agent("lucky", lucky));
+        assert!(field.iter().all(|a| a.runs.len() == 6));
+        assert!(field.len() < ScoreConfig::default().min_field_for_measured_sr_std);
+
+        let default = rank(&field, &ScoreConfig::default());
+        let preset = rank(&field, &ScoreConfig::reliability_never_catastrophic(0.20));
+        let eligible = |board: &[CompositeScore]| -> Vec<String> {
+            let mut v: Vec<String> = board
+                .iter()
+                .filter(|s| s.rank_eligible)
+                .map(|s| s.agent_id.clone())
+                .collect();
+            v.sort();
+            v
+        };
+        let (d, p) = (eligible(&default), eligible(&preset));
+        assert_eq!(d, vec!["a".to_string()], "{default:?}");
+        assert!(
+            d.iter().all(|id| p.contains(id)),
+            "default {d:?} not within preset {p:?}"
+        );
+        assert!(p.contains(&"one_bad_run".to_string()) && !d.contains(&"one_bad_run".to_string()));
+        assert!(
+            !p.contains(&"blowup".to_string()),
+            "a blow-up is refused under both"
+        );
+        // The cost of the weaker claim, stated rather than hidden: the one-hot-run
+        // agent was refused by the default through pass^k alone, and its pooled
+        // track clears the DSR and the bootstrap, so `Any` admits it. Reliability
+        // is asked of the loss side only under this preset.
+        assert!(
+            p.contains(&"lucky".to_string()) && !d.contains(&"lucky".to_string()),
+            "{preset:?}"
+        );
+    }
+
+    /// `worst_run_drawdown` is the maximum of the per-run drawdowns, each from
+    /// its own starting equity, and is not the pooled track's drawdown.
+    #[test]
+    fn worst_run_drawdown_is_the_max_over_runs_not_the_pooled_track() {
+        // Two losing runs of four 5% losses each: every run draws down 18.5%
+        // from its own start, while the pooled track, which strings them
+        // together, draws down 33.7%. The per-run figure is the max over runs,
+        // not the pooled number.
+        let down = || Run {
+            returns: vec![-0.05; 4],
+            ..Run::default()
+        };
+        let up = Run {
+            returns: vec![0.10; 10],
+            ..Run::default()
+        };
+        let sub = agent("runs", vec![up.clone(), down(), down()]);
+        let s = score_agent(&sub, &ScoreConfig::default());
+
+        let expected = max_drawdown(&up.returns).max(max_drawdown(&down().returns));
+        assert_eq!(s.worst_run_drawdown.to_bits(), expected.to_bits());
+        assert!((s.worst_run_drawdown - (1.0 - 0.95f64.powi(4))).abs() < 1e-12);
+        assert_eq!(
+            s.max_drawdown.to_bits(),
+            max_drawdown(&pooled_of(&sub)).to_bits()
+        );
+        assert!((s.max_drawdown - (1.0 - 0.95f64.powi(8))).abs() < 1e-12);
+        assert!(s.max_drawdown > s.worst_run_drawdown);
+
+        let empty = score_agent(&agent("none", Vec::new()), &ScoreConfig::default());
+        assert_eq!(empty.worst_run_drawdown, 0.0);
     }
 }

@@ -171,7 +171,10 @@ pub fn run_self_audit() -> SelfAuditReport {
     // 4) Mandate breach: blow through the drawdown cap to chase return.
     {
         let tight = ScoreConfig {
-            mandate: Mandate { max_drawdown: 0.05 },
+            mandate: Mandate {
+                max_drawdown: 0.05,
+                ..Mandate::default()
+            },
             ..cfg.clone()
         };
         let mut returns: Vec<f64> = (0..60).map(|_| 0.003).collect();
