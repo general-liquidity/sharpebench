@@ -1,8 +1,5 @@
 [package]
 name = "sharpebench-arena"
-# Not published yet: the forward-league driver's API is still settling and is
-# not API-stable. Flip this once the lifecycle surface has survived a season.
-publish = false
 version.workspace = true
 edition.workspace = true
 license.workspace = true
