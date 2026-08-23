@@ -25,6 +25,7 @@ use std::io::{BufWriter, Write};
 use serde::Serialize;
 use sharpebench_core::composite::{rank, ScoreConfig, TrialsSrStdSource};
 use sharpebench_core::AgentSubmission;
+use sharpebench_core::PassMode;
 use sharpebench_harness::luck_floor;
 use sharpebench_sim::{
     run_backtest, tag_regime, walk_forward, Agent, BuyAndHold, CostModel, Dataset, HoldAgent,
@@ -56,6 +57,9 @@ const SR_STD: &[Option<f64>] = &[None, Some(0.20), Some(0.35), Some(0.50)];
 
 const EXEC_SEEDS: [u64; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
 const LUCK_FLOOR_AGENTS: usize = 5;
+/// Per-run drawdown bound for the never-catastrophic ablation. 20 percent is the
+/// pooled cap the mandate docs use as their example, applied per regime.
+const NEVER_CATASTROPHIC_RUN_DD: f64 = 0.20;
 
 #[derive(Serialize)]
 struct Record<'a> {
@@ -80,6 +84,11 @@ struct Record<'a> {
     bootstrap_p: f64,
     raw_mean_return: f64,
     rank_eligible: bool,
+    /// The same cell scored under the never-catastrophic preset: pass_mode Any
+    /// and a 20 percent per-run drawdown bound. The two verdicts side by side are
+    /// the ablation the paper turns on.
+    eligible_never_catastrophic: bool,
+    worst_run_drawdown: f64,
     field_reality_check_p: f64,
     step_down_significant: bool,
     trials_sr_std_used: f64,
@@ -190,7 +199,15 @@ fn main() {
                         // usize::MAX disables measurement: the field can never be that large.
                         cfg.min_field_for_measured_sr_std = usize::MAX;
                     }
+                    let mut cfg_nc = cfg.clone();
+                    cfg_nc.pass_mode = PassMode::Any;
+                    cfg_nc.mandate.max_run_drawdown = NEVER_CATASTROPHIC_RUN_DD;
+                    let scored_nc = rank(&subs, &cfg_nc);
                     for s in rank(&subs, &cfg) {
+                        let nc = scored_nc
+                            .iter()
+                            .find(|x| x.agent_id == s.agent_id)
+                            .expect("same field under both gates");
                         let rec = Record {
                             dataset: name,
                             asset_class: class,
@@ -213,6 +230,8 @@ fn main() {
                             bootstrap_p: s.bootstrap_p,
                             raw_mean_return: s.raw_mean_return,
                             rank_eligible: s.rank_eligible,
+                            eligible_never_catastrophic: nc.rank_eligible,
+                            worst_run_drawdown: s.worst_run_drawdown,
                             field_reality_check_p: s.field_reality_check_p,
                             step_down_significant: s.step_down_significant,
                             trials_sr_std_used: s.trials_sr_std,
