@@ -1,0 +1,28 @@
+[package]
+name = "sharpebench-arena"
+# Not published yet: the forward-league driver's API is still settling and is
+# not API-stable. Flip this once the lifecycle surface has survived a season.
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SharpeBench forward-league driver: file-backed arena windows over the attest + leaderboard primitives."
+repository.workspace = true
+
+[dependencies]
+sharpebench-core = { path = "../sharpebench-core", version = "0.4.0" }
+sharpebench-attest = { path = "../sharpebench-attest", version = "0.4.0" }
+sharpebench-leaderboard = { path = "../sharpebench-leaderboard", version = "0.4.0" }
+# For the sandboxed external-agent transport only (`sandbox.rs` wraps
+# `sharpebench_sim::ExternalAgent`). sim depends on core + protocol and never on
+# arena, so arena -> sim introduces no cycle.
+sharpebench-sim = { path = "../sharpebench-sim", version = "0.4.0" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+# Observation/decision types for the sandbox transport smoke test.
+sharpebench-protocol = { path = "../sharpebench-protocol", version = "0.4.0" }
+
+[lints]
+workspace = true
