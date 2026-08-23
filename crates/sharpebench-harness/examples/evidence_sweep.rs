@@ -1,0 +1,217 @@
+//! Evidence sweep for the SharpeBench paper.
+//!
+//! Scores every frozen dataset with the reference agents plus a luck floor, across
+//! a grid of scoring parameters, and writes one JSON record per (dataset, config,
+//! agent) cell. The CLI's `run` hard-codes two windows, eight seeds and the default
+//! `ScoreConfig`, which cannot answer the question the paper has to answer: on real
+//! data, across asset classes and bar sizes, when is the deflated-Sharpe bar
+//! satisfiable at all, and by whom? This goes through the same public API the
+//! golden tests use, so every number is recomputable by anyone.
+//!
+//! Deterministic: no clock, no ambient RNG. Seeds and every parameter are pinned
+//! below and emitted with each record. Run with
+//!
+//!   cargo run --release -p sharpebench-harness --example evidence_sweep -- <out.jsonl>
+//!
+//! The grid: dsr_bar in {0.80, 0.90, 0.95, 0.99}, n_trials in {1, 10, 50, 200},
+//! and trials_sr_std measured from the field when the field is large enough (the
+//! 0.2.0 default) or pinned to each of {0.20, 0.35, 0.50} with measurement off, so
+//! the sensitivity of eligibility to that prior is visible rather than assumed.
+
+use std::env;
+use std::fs::File;
+use std::io::{BufWriter, Write};
+
+use serde::Serialize;
+use sharpebench_core::composite::{rank, ScoreConfig, TrialsSrStdSource};
+use sharpebench_core::AgentSubmission;
+use sharpebench_harness::luck_floor;
+use sharpebench_sim::{
+    run_backtest, tag_regime, walk_forward, Agent, BuyAndHold, CostModel, Dataset, HoldAgent,
+    Momentum, Window,
+};
+
+/// Frozen datasets, their asset class and bar size. Timeframe is what the deflation
+/// depends on: the same annualized Sharpe has a different track length at 1h and 1d.
+const DATASETS: &[(&str, &str, &str)] = &[
+    ("us-indices-1d", "equity-index", "1d"),
+    ("us-indices-1w", "equity-index", "1w"),
+    ("crypto-majors-1h", "crypto", "1h"),
+    ("crypto-majors-4h", "crypto", "4h"),
+    ("crypto-majors-1d", "crypto", "1d"),
+    ("crypto-majors-1w", "crypto", "1w"),
+    ("fx-majors-1d", "fx", "1d"),
+    ("commodities-1d", "commodities", "1d"),
+    ("rates-1d", "rates", "1d"),
+];
+
+const DSR_BARS: &[f64] = &[0.80, 0.90, 0.95, 0.99];
+const N_TRIALS: &[u32] = &[1, 10, 50, 200];
+/// `None` = measure from the field (the 0.2.0 default); `Some(x)` = pin the prior.
+const SR_STD: &[Option<f64>] = &[None, Some(0.20), Some(0.35), Some(0.50)];
+
+const EXEC_SEEDS: [u64; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
+const LUCK_FLOOR_AGENTS: usize = 5;
+
+#[derive(Serialize)]
+struct Record<'a> {
+    dataset: &'a str,
+    asset_class: &'a str,
+    timeframe: &'a str,
+    n_bars: usize,
+    n_symbols: usize,
+    n_windows: usize,
+    window_len: usize,
+    n_seeds: usize,
+    regimes: Vec<String>,
+    dsr_bar: f64,
+    n_trials: u32,
+    sr_std_pinned: Option<f64>,
+    agent_id: String,
+    deflated_sharpe: f64,
+    psr: f64,
+    passed_k: bool,
+    process_ok: bool,
+    bootstrap_p: f64,
+    raw_mean_return: f64,
+    rank_eligible: bool,
+    field_reality_check_p: f64,
+    step_down_significant: bool,
+    trials_sr_std_used: f64,
+    trials_sr_std_source: String,
+}
+
+type AgentFactory = Box<dyn Fn() -> Box<dyn Agent>>;
+
+/// Walk-forward windows sized to the dataset. Warmup and window scale with length so
+/// a 24 000-bar hourly file and a 300-bar weekly file both get several disjoint
+/// out-of-sample windows rather than one.
+fn windows_for(n: usize) -> (Vec<Window>, usize) {
+    let warmup = (n / 10).clamp(20, 60);
+    let test = ((n - warmup) / 6).max(20);
+    (walk_forward(n, warmup, test, test), test)
+}
+
+fn field(data: &Dataset, windows: &[Window]) -> Vec<AgentSubmission> {
+    let agents: Vec<(&str, AgentFactory)> = vec![
+        ("buy-and-hold", Box::new(|| Box::new(BuyAndHold))),
+        ("momentum", Box::new(|| Box::new(Momentum::default()))),
+        ("hold", Box::new(|| Box::new(HoldAgent))),
+    ];
+    let mut subs: Vec<AgentSubmission> = agents
+        .into_iter()
+        .map(|(id, make)| {
+            let mut runs = Vec::new();
+            for w in windows {
+                for seed in EXEC_SEEDS {
+                    let mut agent = make();
+                    runs.push(run_backtest(
+                        data,
+                        agent.as_mut(),
+                        *w,
+                        seed,
+                        CostModel::default(),
+                    ));
+                }
+            }
+            AgentSubmission {
+                agent_id: id.to_string(),
+                runs,
+                in_sample_trials: 0,
+                candidates: Vec::new(),
+            }
+        })
+        .collect();
+    subs.extend(luck_floor(
+        data,
+        windows,
+        &EXEC_SEEDS,
+        CostModel::default(),
+        LUCK_FLOOR_AGENTS,
+    ));
+    subs
+}
+
+fn main() {
+    let out = env::args()
+        .nth(1)
+        .unwrap_or_else(|| "evidence.jsonl".to_string());
+    let mut w = BufWriter::new(File::create(&out).expect("create output"));
+    let mut n_records = 0usize;
+
+    for (name, class, tf) in DATASETS {
+        let path = format!("data/{name}.csv");
+        let data = match Dataset::from_csv_file(&path) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("skip {name}: {e}");
+                continue;
+            }
+        };
+        let n = data.len();
+        let (windows, window_len) = windows_for(n);
+        let regimes: Vec<String> = windows
+            .iter()
+            .map(|w| format!("{:?}", tag_regime(&data, *w)))
+            .collect();
+        eprintln!(
+            "{name}: {n} bars, {} symbols, {} windows of {window_len}",
+            data.symbols().len(),
+            windows.len()
+        );
+        let subs = field(&data, &windows);
+
+        for &dsr_bar in DSR_BARS {
+            for &n_trials in N_TRIALS {
+                for &pinned in SR_STD {
+                    let mut cfg = ScoreConfig {
+                        dsr_bar,
+                        n_trials,
+                        ..ScoreConfig::default()
+                    };
+                    if let Some(x) = pinned {
+                        cfg.trials_sr_std = x;
+                        // usize::MAX disables measurement: the field can never be that large.
+                        cfg.min_field_for_measured_sr_std = usize::MAX;
+                    }
+                    for s in rank(&subs, &cfg) {
+                        let rec = Record {
+                            dataset: name,
+                            asset_class: class,
+                            timeframe: tf,
+                            n_bars: n,
+                            n_symbols: data.symbols().len(),
+                            n_windows: windows.len(),
+                            window_len,
+                            n_seeds: EXEC_SEEDS.len(),
+                            regimes: regimes.clone(),
+                            dsr_bar,
+                            n_trials,
+                            sr_std_pinned: pinned,
+                            agent_id: s.agent_id.clone(),
+                            deflated_sharpe: s.deflated_sharpe,
+                            psr: s.psr,
+                            passed_k: s.passed_k,
+                            process_ok: s.process_ok,
+                            bootstrap_p: s.bootstrap_p,
+                            raw_mean_return: s.raw_mean_return,
+                            rank_eligible: s.rank_eligible,
+                            field_reality_check_p: s.field_reality_check_p,
+                            step_down_significant: s.step_down_significant,
+                            trials_sr_std_used: s.trials_sr_std,
+                            trials_sr_std_source: match s.trials_sr_std_source {
+                                TrialsSrStdSource::Measured => "measured".into(),
+                                TrialsSrStdSource::Configured => "configured".into(),
+                            },
+                        };
+                        serde_json::to_writer(&mut w, &rec).expect("write record");
+                        w.write_all(b"\n").expect("newline");
+                        n_records += 1;
+                    }
+                }
+            }
+        }
+    }
+    w.flush().expect("flush");
+    eprintln!("wrote {n_records} records to {out}");
+}
