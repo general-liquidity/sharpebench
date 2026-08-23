@@ -17,9 +17,11 @@ use crate::calibration::brier_score;
 use crate::comparison_sets::{comparison_set, restrict_to_shared, TaggedRun, TaggedSubmission};
 use crate::decay::edge_half_life;
 use crate::deflated_sharpe::{deflated_sharpe_ratio, probabilistic_sharpe_ratio, sharpe_ratio};
+use crate::econrationality::{elicit_revealed_selection, rationality_score};
 use crate::pass_k::{pass_k, PassMode};
 use crate::percentile::percentile_of;
-use crate::process::{process_score, ProcessEvent, Trace};
+use crate::process::{process_score, ProcessEvent, ProcessScore, Trace};
+use crate::roles::{attribute_behavior_roles, RoleContribution};
 use crate::rolling::rolling_sharpe;
 use crate::selection::{selection_robustness, SelectionRobustness};
 use crate::significance::bootstrap_pvalue;
@@ -560,6 +562,48 @@ pub struct CompositeScore {
     /// alone or for a field where every agent completed the same cells.
     #[serde(default)]
     pub runs_scored: usize,
+    /// Graded process-discipline scalar over all runs' concatenated traces, in
+    /// [0, 1]: any block-severity violation zeroes it; each warn-severity event
+    /// costs 0.1 (floored at 0). **Reported, never eligibility**: the only
+    /// binary process gate remains `process_ok` (zero block violations). Warn
+    /// events additionally order agents within a DSR tie band in [`rank`]:
+    /// ordering within statistical ties only, because warn events are real
+    /// information but not calibrated enough to gate. Scores archived before
+    /// this field existed deserialize to the clean value 1.0; `process_ok`
+    /// stays authoritative for them.
+    #[serde(default = "default_process_score")]
+    pub process_score: f64,
+    /// Count of warn-severity process events across all runs (concentration
+    /// breaches, hedged tail-selling). Reported, never eligibility.
+    #[serde(default)]
+    pub process_warnings: usize,
+    /// Economic-rationality score of the submission's one recorded choice:
+    /// submitting this track out of its declared candidate set, valued by
+    /// per-period Sharpe (see [`crate::econrationality`]). 1.0 = the pick
+    /// respected first-order dominance, 0.0 = a declared candidate strictly
+    /// dominated it. `None` when the submission declared no comparable
+    /// candidates. Reported, never gating.
+    #[serde(default)]
+    pub econ_rationality_score: Option<f64>,
+    /// Count of first-order-dominance violations in the recorded selection
+    /// choice (0 or 1, since one choice is recorded per submission). `None` when
+    /// nothing was elicitable. Reported, never gating.
+    #[serde(default)]
+    pub econ_dominance_violations: Option<usize>,
+    /// Behavior-role attribution over the recorded runs (see
+    /// [`crate::roles::attribute_behavior_roles`]): the regression loading of
+    /// each populated behavior class (clean-active / idle / warned /
+    /// block-violating) on the equal-weight team stream. Empty when not
+    /// estimable. Reported, never gating.
+    #[serde(default)]
+    pub role_contributions: Vec<RoleContribution>,
+}
+
+/// Scores archived before `process_score` existed carry no graded scalar; they
+/// deserialize to the clean 1.0 (with `process_warnings` 0), and `process_ok`
+/// remains the authoritative record of whether the trace was clean.
+fn default_process_score() -> f64 {
+    1.0
 }
 
 /// Pareto dominance on (return↑, drawdown↓, turnover↓).
@@ -637,7 +681,22 @@ fn score_agent_with(sub: &AgentSubmission, cfg: &ScoreConfig, defl: Deflation) -
     let passed_k = pass_k(&per_run, cfg.pass_mode);
 
     // process: a single block-severity violation in any run is disqualifying.
-    let process_ok = sub.runs.iter().all(|r| process_score(&r.trace).is_clean());
+    // Alongside the binary gate, the graded scalar and the warn count are
+    // reported: warn-severity events (concentration breaches, hedged
+    // tail-selling) are real information, but not calibrated enough to gate, so
+    // they never touch `rank_eligible`; they surface in the score and, in
+    // [`rank`], order agents within a DSR tie band only.
+    let per_run_process: Vec<ProcessScore> =
+        sub.runs.iter().map(|r| process_score(&r.trace)).collect();
+    let process_ok = per_run_process.iter().all(ProcessScore::is_clean);
+    let process_warnings: usize = per_run_process.iter().map(|p| p.warn_violations).sum();
+    // The graded score of the concatenated trace: any block zeroes it, each
+    // warn costs 0.1 (floored at 0), the same schedule as the per-trace scorer.
+    let graded_process_score = if process_ok {
+        (1.0 - process_warnings as f64 * 0.1).max(0.0)
+    } else {
+        0.0
+    };
 
     let bootstrap_p = bootstrap_pvalue(&pooled, cfg.bootstrap_seed, cfg.n_boot, cfg.block_prob);
     let raw_mean_return = mean(&pooled);
@@ -773,6 +832,25 @@ fn score_agent_with(sub: &AgentSubmission, cfg: &ScoreConfig, defl: Deflation) -
         cfg.dsr_ci_level,
     );
 
+    // Economic rationality, elicited from the one choice a frozen submission
+    // records: submitting this track out of the declared candidate set (see
+    // [`crate::econrationality::elicit_revealed_selection`]). Reported, never
+    // gating; `None` when the submission declared nothing comparable.
+    let econ_choice = elicit_revealed_selection(&sub.candidates, &pooled);
+    let (econ_rationality_score, econ_dominance_violations) = match econ_choice {
+        Some(choice) => {
+            let violations = usize::from(choice.is_dominated());
+            (Some(rationality_score(&[choice])), Some(violations))
+        }
+        None => (None, None),
+    };
+
+    // Behavior-role attribution over the recorded runs (see
+    // [`crate::roles::attribute_behavior_roles`]): which behavior class
+    // (clean-active, idle, warned, block-violating) is load-bearing for the
+    // pooled result. Reported, never gating; empty when not estimable.
+    let role_contributions = attribute_behavior_roles(&sub.runs);
+
     let rank_eligible =
         dsr >= cfg.dsr_bar && passed_k && process_ok && bootstrap_p < cfg.alpha && mandate_ok;
     let composite = if rank_eligible { dsr } else { 0.0 };
@@ -827,6 +905,11 @@ fn score_agent_with(sub: &AgentSubmission, cfg: &ScoreConfig, defl: Deflation) -
         trials_sr_std_source: defl.source,
         runs_submitted: sub.runs.len(),
         runs_scored: sub.runs.len(),
+        process_score: graded_process_score,
+        process_warnings,
+        econ_rationality_score,
+        econ_dominance_violations,
+        role_contributions,
     }
 }
 
@@ -1082,16 +1165,6 @@ pub fn rank(subs: &[AgentSubmission], cfg: &ScoreConfig) -> Vec<CompositeScore> 
             )
     });
 
-    // 1-based ordinal rank among eligible agents (the scale-invariant rank mode,
-    // assigned in final sorted order). Ineligible agents keep ordinal 0.
-    let mut ord = 0usize;
-    for cs in scores.iter_mut() {
-        if cs.rank_eligible {
-            ord += 1;
-            cs.rank_ordinal = ord;
-        }
-    }
-
     // DSR tie bands: walking the eligible agents in ranked order, an agent joins
     // the previous band when their DSR confidence intervals overlap (a difference
     // the resampling can't distinguish from noise). A new, separable agent opens a
@@ -1111,6 +1184,46 @@ pub fn rank(subs: &[AgentSubmission], cfg: &ScoreConfig) -> Vec<CompositeScore> 
         scores[i].tie_group = group;
         prev = Some(i);
     }
+
+    // Within a tie band the DSR ordering is statistical noise, so a cleaner
+    // process breaks the tie: eligible band members reorder by graded process
+    // score (descending) ahead of the DSR order they arrived in. This is
+    // **ordering within statistical ties only, never eligibility**: warn
+    // events are real information, but not calibrated enough to gate, and
+    // block-severity gating is untouched. Band membership itself was fixed
+    // above from the DSR-sorted walk; the stable sort keeps the DSR order for
+    // members with equal process scores, so an all-clean board is unchanged.
+    // Eligible agents sort first and bands are assigned in one forward walk,
+    // so each band is a contiguous slice.
+    let mut i = 0;
+    while i < scores.len() {
+        if !scores[i].rank_eligible {
+            i += 1;
+            continue;
+        }
+        let band = scores[i].tie_group;
+        let mut j = i + 1;
+        while j < scores.len() && scores[j].rank_eligible && scores[j].tie_group == band {
+            j += 1;
+        }
+        scores[i..j].sort_by(|a, b| {
+            b.process_score
+                .partial_cmp(&a.process_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        i = j;
+    }
+
+    // 1-based ordinal rank among eligible agents (the scale-invariant rank mode,
+    // assigned in final sorted order). Ineligible agents keep ordinal 0.
+    let mut ord = 0usize;
+    for cs in scores.iter_mut() {
+        if cs.rank_eligible {
+            ord += 1;
+            cs.rank_ordinal = ord;
+        }
+    }
+
     let mut band_counts = vec![0usize; group + 1];
     for cs in &scores {
         if cs.rank_eligible {
@@ -1959,6 +2072,217 @@ mod tests {
             p.contains(&"lucky".to_string()) && !d.contains(&"lucky".to_string()),
             "{preset:?}"
         );
+    }
+
+    /// Warn-severity events lower the reported graded process score and count,
+    /// and change **nothing** about eligibility: the predicate the paper states
+    /// (zero block-severity violations) is untouched by warns.
+    #[test]
+    fn warn_events_lower_process_score_and_count_but_not_eligibility() {
+        let clean = agent("clean", (0..5).map(|_| run(0.002, 0.0005, 60)).collect());
+        let mut warned_runs: Vec<Run> = (0..5).map(|_| run(0.002, 0.0005, 60)).collect();
+        warned_runs[0]
+            .trace
+            .events
+            .push(ProcessEvent::ConcentrationBreach);
+        warned_runs[3]
+            .trace
+            .events
+            .push(ProcessEvent::ConcentrationBreach);
+        let warned = agent("warned", warned_runs);
+
+        let cfg = ScoreConfig::default();
+        let c = score_agent(&clean, &cfg);
+        let w = score_agent(&warned, &cfg);
+
+        assert_eq!(c.process_warnings, 0);
+        assert_eq!(c.process_score, 1.0);
+        assert_eq!(w.process_warnings, 2);
+        assert!((w.process_score - 0.8).abs() < 1e-9);
+
+        // Eligibility and every gate input are identical with and without warns.
+        assert!(c.process_ok && w.process_ok);
+        assert_eq!(c.rank_eligible, w.rank_eligible);
+        assert!(w.rank_eligible);
+        assert_eq!(c.deflated_sharpe.to_bits(), w.deflated_sharpe.to_bits());
+        assert_eq!(c.composite.to_bits(), w.composite.to_bits());
+    }
+
+    /// A block-severity violation zeroes the graded scalar too (not just the gate).
+    #[test]
+    fn block_violation_zeroes_graded_process_score() {
+        let mut runs: Vec<Run> = (0..3).map(|_| run(0.002, 0.0005, 60)).collect();
+        runs[1].trace.events.push(ProcessEvent::DenylistBypass);
+        runs[2].trace.events.push(ProcessEvent::ConcentrationBreach);
+        let s = score_agent(&agent("blocked", runs), &ScoreConfig::default());
+        assert_eq!(s.process_score, 0.0);
+        assert_eq!(s.process_warnings, 1, "warns are still counted");
+        assert!(!s.process_ok && !s.rank_eligible);
+    }
+
+    /// Within a DSR tie band, the cleaner process ranks first, regardless of
+    /// submission order. This is ordering within statistical ties only: both
+    /// agents stay eligible, tied, and in the same band.
+    #[test]
+    fn tie_band_orders_cleaner_process_first() {
+        let cfg = ScoreConfig {
+            n_trials: 2,
+            trials_sr_std: 0.01,
+            dsr_bar: 0.10,
+            per_run_psr_bar: 0.05,
+            alpha: 0.9,
+            n_boot: 600,
+            ..ScoreConfig::default()
+        };
+        let clean = agent("clean", (0..3).map(|_| run(0.01, 0.001, 60)).collect());
+        let mut warned_runs: Vec<Run> = (0..3).map(|_| run(0.01, 0.001, 60)).collect();
+        warned_runs[0]
+            .trace
+            .events
+            .push(ProcessEvent::ConcentrationBreach);
+        let warned = agent("warned", warned_runs);
+
+        for field in [
+            vec![clean.clone(), warned.clone()],
+            vec![warned.clone(), clean.clone()],
+        ] {
+            let board = rank(&field, &cfg);
+            assert_eq!(board[0].agent_id, "clean", "cleaner process leads the band");
+            assert_eq!(board[1].agent_id, "warned");
+            assert_eq!(board[0].rank_ordinal, 1);
+            assert_eq!(board[1].rank_ordinal, 2);
+            // Ordering within a statistical tie only, never eligibility.
+            assert!(board[0].rank_eligible && board[1].rank_eligible);
+            assert_eq!(board[0].tie_group, board[1].tie_group);
+            assert!(board[0].dsr_tied && board[1].dsr_tied);
+        }
+    }
+
+    /// The process tie-break never crosses bands: a separably stronger agent
+    /// with a warn still ranks above a weaker clean agent in another band.
+    #[test]
+    fn process_tie_break_never_crosses_tie_bands() {
+        let cfg = ScoreConfig {
+            n_trials: 2,
+            trials_sr_std: 0.01,
+            dsr_bar: 0.10,
+            per_run_psr_bar: 0.05,
+            alpha: 0.9,
+            n_boot: 600,
+            ..ScoreConfig::default()
+        };
+        let mut strong_runs: Vec<Run> = (0..3).map(|_| run(0.01, 0.001, 60)).collect();
+        strong_runs[0]
+            .trace
+            .events
+            .push(ProcessEvent::ConcentrationBreach);
+        let strong_warned = agent("strong_warned", strong_runs);
+        let weak_clean = agent("weak_clean", (0..3).map(|_| run(0.001, 0.02, 60)).collect());
+
+        let board = rank(&[weak_clean, strong_warned], &cfg);
+        assert!(board.iter().all(|s| s.rank_eligible));
+        assert_eq!(board[0].agent_id, "strong_warned");
+        assert_ne!(board[0].tie_group, board[1].tie_group, "separable bands");
+        assert!(board[0].process_score < board[1].process_score);
+    }
+
+    /// The econ-rationality axis is elicited from the declared candidate set and
+    /// reported only.
+    #[test]
+    fn econ_rationality_reported_from_declared_candidates() {
+        let cfg = ScoreConfig::default();
+        let runs: Vec<Run> = (0..5).map(|_| run(0.002, 0.0005, 60)).collect();
+
+        // No declared candidates: nothing elicitable.
+        let none = score_agent(&agent("plain", runs.clone()), &cfg);
+        assert!(none.econ_rationality_score.is_none());
+        assert!(none.econ_dominance_violations.is_none());
+
+        // A declared candidate with a strictly higher Sharpe than the submitted
+        // pooled track: the recorded selection is dominated.
+        let mut dominated = agent("dominated", runs.clone());
+        dominated.candidates = vec![(0..300)
+            .map(|i| 0.01 + 0.0005 * (i as f64 * 0.7).sin())
+            .collect()];
+        let d = score_agent(&dominated, &cfg);
+        assert_eq!(d.econ_rationality_score, Some(0.0));
+        assert_eq!(d.econ_dominance_violations, Some(1));
+
+        // Submitting the best of one's declared set is rational.
+        let mut rational = agent("rational", runs);
+        rational.candidates = vec![(0..300)
+            .map(|i| 0.0001 + 0.0005 * (i as f64 * 0.7).sin())
+            .collect()];
+        let r = score_agent(&rational, &cfg);
+        assert_eq!(r.econ_rationality_score, Some(1.0));
+        assert_eq!(r.econ_dominance_violations, Some(0));
+
+        // Reported only: the elicited verdict never moves eligibility.
+        assert_eq!(d.rank_eligible, r.rank_eligible);
+    }
+
+    /// Behavior-role attribution is reported on the score, deterministic, and
+    /// keyed by the trace's order patterns.
+    #[test]
+    fn behavior_role_contributions_are_reported() {
+        let mut runs: Vec<Run> = (0..3).map(|_| run(0.002, 0.0005, 60)).collect();
+        for r in &mut runs {
+            r.trace.events.push(ProcessEvent::OrderPlaced {
+                risk_gate_passed: true,
+            });
+        }
+        runs[2].trace.events.push(ProcessEvent::ConcentrationBreach);
+        let s = score_agent(&agent("mixed", runs), &ScoreConfig::default());
+        let names: Vec<&str> = s
+            .role_contributions
+            .iter()
+            .map(|c| c.role.as_str())
+            .collect();
+        assert_eq!(names, vec!["clean_active", "warned"]);
+        let again = score_agent(
+            &agent("mixed", {
+                let mut runs: Vec<Run> = (0..3).map(|_| run(0.002, 0.0005, 60)).collect();
+                for r in &mut runs {
+                    r.trace.events.push(ProcessEvent::OrderPlaced {
+                        risk_gate_passed: true,
+                    });
+                }
+                runs[2].trace.events.push(ProcessEvent::ConcentrationBreach);
+                runs
+            }),
+            &ScoreConfig::default(),
+        );
+        assert_eq!(s.role_contributions, again.role_contributions);
+
+        let empty = score_agent(&agent("none", Vec::new()), &ScoreConfig::default());
+        assert!(empty.role_contributions.is_empty());
+    }
+
+    /// Scores archived before the reported fields existed still parse, with the
+    /// documented defaults.
+    #[test]
+    fn archived_scores_without_new_fields_deserialize_with_defaults() {
+        let s = score_agent(
+            &agent("archived", (0..3).map(|_| run(0.002, 0.0005, 60)).collect()),
+            &ScoreConfig::default(),
+        );
+        let mut v = serde_json::to_value(&s).expect("serialize");
+        let obj = v.as_object_mut().expect("object");
+        for field in [
+            "process_score",
+            "process_warnings",
+            "econ_rationality_score",
+            "econ_dominance_violations",
+            "role_contributions",
+        ] {
+            assert!(obj.remove(field).is_some(), "{field} should be present");
+        }
+        let parsed: CompositeScore = serde_json::from_value(v).expect("archived JSON parses");
+        assert_eq!(parsed.process_score, 1.0);
+        assert_eq!(parsed.process_warnings, 0);
+        assert!(parsed.econ_rationality_score.is_none());
+        assert!(parsed.econ_dominance_violations.is_none());
+        assert!(parsed.role_contributions.is_empty());
     }
 
     /// `worst_run_drawdown` is the maximum of the per-run drawdowns, each from

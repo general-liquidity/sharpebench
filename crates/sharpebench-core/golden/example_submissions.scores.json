@@ -48,7 +48,18 @@
     "trials_sr_std_annualized": 0.5,
     "trials_sr_std_source": "configured",
     "runs_submitted": 5,
-    "runs_scored": 5
+    "runs_scored": 5,
+    "process_score": 1.0,
+    "process_warnings": 0,
+    "econ_rationality_score": null,
+    "econ_dominance_violations": null,
+    "role_contributions": [
+      {
+        "role": "idle",
+        "beta_to_team": 1.0,
+        "mean_return": 0.0020197983333333333
+      }
+    ]
   },
   {
     "agent_id": "lucky-yolo",
@@ -99,7 +110,18 @@
     "trials_sr_std_annualized": 0.5,
     "trials_sr_std_source": "configured",
     "runs_submitted": 5,
-    "runs_scored": 5
+    "runs_scored": 5,
+    "process_score": 1.0,
+    "process_warnings": 0,
+    "econ_rationality_score": null,
+    "econ_dominance_violations": null,
+    "role_contributions": [
+      {
+        "role": "idle",
+        "beta_to_team": 1.0,
+        "mean_return": 0.0041108751
+      }
+    ]
   },
   {
     "agent_id": "ungated-bot",
@@ -150,6 +172,22 @@
     "trials_sr_std_annualized": 0.5,
     "trials_sr_std_source": "configured",
     "runs_submitted": 5,
-    "runs_scored": 5
+    "runs_scored": 5,
+    "process_score": 0.0,
+    "process_warnings": 0,
+    "econ_rationality_score": null,
+    "econ_dominance_violations": null,
+    "role_contributions": [
+      {
+        "role": "idle",
+        "beta_to_team": 1.0,
+        "mean_return": 0.0020197983333333333
+      },
+      {
+        "role": "block_violating",
+        "beta_to_team": 1.0,
+        "mean_return": 0.0020197983333333333
+      }
+    ]
   }
 ]

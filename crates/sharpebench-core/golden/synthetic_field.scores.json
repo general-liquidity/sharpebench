@@ -48,7 +48,18 @@
     "trials_sr_std_annualized": 0.5,
     "trials_sr_std_source": "configured",
     "runs_submitted": 6,
-    "runs_scored": 6
+    "runs_scored": 6,
+    "process_score": 0.0,
+    "process_warnings": 70,
+    "econ_rationality_score": null,
+    "econ_dominance_violations": null,
+    "role_contributions": [
+      {
+        "role": "warned",
+        "beta_to_team": 1.0,
+        "mean_return": 0.0006696032261068504
+      }
+    ]
   },
   {
     "agent_id": "buy-and-hold",
@@ -99,7 +110,18 @@
     "trials_sr_std_annualized": 0.5,
     "trials_sr_std_source": "configured",
     "runs_submitted": 6,
-    "runs_scored": 6
+    "runs_scored": 6,
+    "process_score": 1.0,
+    "process_warnings": 0,
+    "econ_rationality_score": null,
+    "econ_dominance_violations": null,
+    "role_contributions": [
+      {
+        "role": "clean_active",
+        "beta_to_team": 1.0,
+        "mean_return": 0.00034531174541982027
+      }
+    ]
   },
   {
     "agent_id": "hold",
@@ -150,7 +172,18 @@
     "trials_sr_std_annualized": 0.5,
     "trials_sr_std_source": "configured",
     "runs_submitted": 6,
-    "runs_scored": 6
+    "runs_scored": 6,
+    "process_score": 1.0,
+    "process_warnings": 0,
+    "econ_rationality_score": null,
+    "econ_dominance_violations": null,
+    "role_contributions": [
+      {
+        "role": "idle",
+        "beta_to_team": 0.0,
+        "mean_return": 0.0
+      }
+    ]
   },
   {
     "agent_id": "random",
@@ -201,6 +234,17 @@
     "trials_sr_std_annualized": 0.5,
     "trials_sr_std_source": "configured",
     "runs_submitted": 6,
-    "runs_scored": 6
+    "runs_scored": 6,
+    "process_score": 0.0,
+    "process_warnings": 42,
+    "econ_rationality_score": null,
+    "econ_dominance_violations": null,
+    "role_contributions": [
+      {
+        "role": "warned",
+        "beta_to_team": 1.0,
+        "mean_return": -0.0015686723180891725
+      }
+    ]
   }
 ]

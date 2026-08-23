@@ -39,7 +39,7 @@ pub enum ProcessEvent {
 }
 
 impl ProcessEvent {
-    fn is_block_violation(&self) -> bool {
+    pub(crate) fn is_block_violation(&self) -> bool {
         matches!(
             self,
             ProcessEvent::OrderPlaced {
@@ -50,7 +50,7 @@ impl ProcessEvent {
                 | ProcessEvent::TailSellingExposure { hedged: false }
         )
     }
-    fn is_warn_violation(&self) -> bool {
+    pub(crate) fn is_warn_violation(&self) -> bool {
         matches!(
             self,
             ProcessEvent::ConcentrationBreach | ProcessEvent::TailSellingExposure { hedged: true }

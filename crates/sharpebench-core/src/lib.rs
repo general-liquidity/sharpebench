@@ -71,7 +71,9 @@ pub use composite::{
 };
 pub use correlation::{crowdedness, Crowdedness};
 pub use disqualification::{classify_disqualification, rollup, DisqualThresholds, FailReason};
-pub use econrationality::{assess_rationality, DominanceChoice, EconRationalityReport};
+pub use econrationality::{
+    assess_rationality, elicit_revealed_selection, DominanceChoice, EconRationalityReport,
+};
 pub use greeks::{
     bs_greeks, bs_price, classify_greeks_risk, portfolio_greeks, Greeks, GreeksPolicy, GreeksRisk,
     Leg,
@@ -85,6 +87,9 @@ pub use rediscovery::{
 };
 pub use regime_compare::{
     compare_by_regime, RegimeCompareOpts, RegimeComparison, RegimeDistributionReport, ZagaSplit,
+};
+pub use roles::{
+    attribute_behavior_roles, attribute_roles, elicit_behavior_roles, RoleContribution,
 };
 pub use rolling::{rolling_sharpe, RollingSharpe};
 pub use selection::{selection_robustness, SelectionRobustness};
