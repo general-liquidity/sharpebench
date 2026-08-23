@@ -30,9 +30,9 @@ SharpeBench adds, as **ranking gates**, the things none of the others have:
 
 1. **Deflated Sharpe / PSR** — deflate the Sharpe by how many agents were tested × track length × return skew/kurtosis (Bailey & López de Prado), plus each agent's *own* declared in-sample trials, so a strategy mined from a thousand private backtests is deflated for that search too.
 2. **pass^k reliability** — the agent must clear the bar on *every* seed × window, not on average.
-3. **Field-wide significance** — a deterministic stationary bootstrap, White's Reality Check, Hansen's studentized & consistent SPA, and Romano–Wolf step-down; the edge must beat data-snooping, not just noise.
+3. **Significance** — a deterministic stationary bootstrap is the gate: each agent's edge must beat the bootstrap null at `alpha`, not just noise. The field-wide data-snooping tests (White's Reality Check, Hansen's studentized & consistent SPA, Romano–Wolf step-down) are computed over the whole field and reported on every row, so a reader can see whether the edge also survives the search across agents.
 4. **Process discipline** — placing an order that never passed the risk gate, ignoring a drawdown halt, bypassing a deny-list, or **selling tail risk with a naked short-gamma book zeroes the entry**, however good the P&L looks. The edge must also survive a realistic execution-cost profile (typical or worst-case fees / slippage / impact / financing), not just a frictionless fill.
-5. **Forward-attestation** — agents commit before the data exists, so there's nothing to overfit, and signed, tamper-evident result chains let anyone verify the board independently of the host. Every run can be captured as a raw-decision **trajectory** and replayed by a separate verifier that recomputes a byte-identical score — a forged trajectory recomputes differently.
+5. **Forward-attestation** — agents commit before the data exists, so there's nothing to overfit, and result chains are signed so a board is tamper-evident: the HMAC chain lets any key-holder detect a modified row, and Ed25519 public-key signing (new in 0.1.0) lets anyone with the host's public key verify the board independently of the host, without sharing a secret. Every run can be captured as a raw-decision **trajectory** and replayed by a separate verifier that recomputes a byte-identical score — a forged trajectory recomputes differently.
 
 Raw return is reported but is **never** the rank key. The composite also *reports* (without gating) alpha/beta attribution, calibration, edge half-life, OOS decay, turnover, Pareto-optimality, conviction-weighted return, cost-efficiency (cost-normalized DSR), rolling-window worst-case Sharpe, selection robustness, and the **Sortino ratio** (downside-only risk) — so a high score is legible, not a black box.
 
@@ -42,7 +42,7 @@ Raw return is reported but is **never** the rank key. The composite also *report
 
 ## Status — active (pre-1.0)
 
-All eleven crates are implemented, tested, and CI-green (fmt · clippy `-D warnings` · workspace tests · a determinism check · the 7-attack self-audit · a docs build · an npm build/test). The statistics kernel, the backtest-honesty verdict, scoring kernel, point-in-time simulator, run harness, forward-attestation, leaderboard, WASM bridge, npm package, MCP server, and CLI all work end-to-end — on synthetic data and on **real frozen datasets** (crypto majors + US equity indices).
+All twelve crates are implemented, tested, and CI-green (fmt · clippy `-D warnings` · workspace tests · a determinism check · the 8-attack self-audit · a docs build · an npm build/test · a maturin build + pytest for the Python bindings). The statistics kernel, the backtest-honesty verdict, scoring kernel, point-in-time simulator, run harness, forward-attestation, leaderboard, WASM bridge, npm package, MCP server, and CLI all work end-to-end — on synthetic data and on **real frozen datasets** (crypto majors + US equity indices).
 
 **Not yet built** (need external infra or a decision): single-name equity data (a keyed feed), a live / forward public arena with hosting, and the public data-curation protocol. See [docs/PLAN.md](docs/PLAN.md).
 
@@ -52,7 +52,7 @@ All eleven crates are implemented, tested, and CI-green (fmt · clippy `-D warni
 cargo install sharpebench                                    # the CLI
 sharpebench run                                              # reference agents + a luck floor, ranked
 sharpebench score suites/example_submissions.json           # rank a JSON field of submissions
-sharpebench audit                                           # prove the scorer resists 7 known gaming attacks
+sharpebench audit                                           # prove the scorer resists 8 known gaming attacks
 sharpebench run --data data/crypto-majors-1d.csv            # run on real crypto-majors daily bars
 ```
 
@@ -66,7 +66,7 @@ One kernel, scored identically across every surface — the internal eval and th
 |:--|:--|:--|
 | <img height="14" align="top" src="https://cdn.simpleicons.org/rust/DEA584" />&nbsp; **Rust crate** | `cargo add sharpebench-core` | The pure scoring kernel — deterministic, `#![forbid(unsafe_code)]`. |
 | <img height="14" align="top" src="https://cdn.simpleicons.org/rust/DEA584" />&nbsp; **Rust (just the stats)** | `cargo add sharpebench-stats` | The standalone statistics kernel — PSR, deflated Sharpe, the data-snooping tests, selection. The same math the board ranks on, with no benchmark attached. |
-| <img height="14" align="top" src="https://cdn.simpleicons.org/gnubash/4EAA25" />&nbsp; **CLI** | `cargo install sharpebench` | `run` / `score` / `audit` / `sign` / `verify` / `greeks` / … |
+| <img height="14" align="top" src="https://cdn.simpleicons.org/gnubash/4EAA25" />&nbsp; **CLI** | `cargo install sharpebench` | `run` / `score` / `check` / `regime` / `audit` / `sign` / `verify` / `greeks` / … |
 | <img height="14" align="top" src="https://cdn.simpleicons.org/npm/CB3837" />&nbsp; **npm** | `npm i @general-liquidity/sharpebench` | Typed JS/TS API over the WASM kernel — `score`, `greeks`, `selfAudit`. |
 | <img height="14" align="top" src="https://cdn.simpleicons.org/modelcontextprotocol" />&nbsp; **MCP** | `npx -y @general-liquidity/sharpebench-mcp` | An [MCP](https://modelcontextprotocol.io) server — agents call the kernel as tools. |
 | <img height="14" align="top" src="https://cdn.simpleicons.org/webassembly/654FF0" />&nbsp; **WASM** | `sharpebench-wasm` | The wasm-bindgen bridge the npm package and Gordon (Bun) embed. |
@@ -115,7 +115,8 @@ Both halves are compile-and-run-checked as doctests in `sharpebench-stats` and `
 | `run` (+ `--data <csv>`, `--http`/`--cmd`) | Run agents through the point-in-time sim and rank them; `--http`/`--cmd` drives **your** external agent into the field. |
 | `score <subs.json>` | Rank a JSON field of pre-computed submissions. |
 | `check <returns.csv> --trials N` | "Is my Sharpe real?" Prints deflated Sharpe / haircut / MinTRL / verdict for your own return series; `--trials` is required (no silent default). |
-| `audit` | Self-audit: fire 7 known gaming attacks at the scorer; non-zero exit if any survives. |
+| `regime <a.csv> <b.csv> <regimes.csv>` | Compare two return series *within* each market regime (zero-mass / continuous split, KS statistic, sign reversals the pooled mean hides). Regime labels are an input, one per period; nothing is inferred. |
+| `audit` | Self-audit: fire 8 known gaming attacks at the scorer; non-zero exit if any survives. |
 | `stress` | Run the adversarial stress suite (flash-crash / whipsaw), contamination-masked. |
 | `commit` · `sign` · `verify` | Forward-attestation: pre-register a digest, sign a board, verify its chain. |
 | `capture` · `verify-trajectory` | Capture an agent's raw-decision trajectory, then replay it to recompute the score. |
@@ -145,7 +146,7 @@ An agent is **rank-eligible only if every gate holds**; eligible agents then sor
 |:--|:--|:--|
 | **Deflated Sharpe / PSR** | edge survives deflation for trials × length × skew/kurtosis | data-snooping, lucky search |
 | **pass^k** | clears the bar on *every* seed × window | one-lucky-seed wins |
-| **Significance** | beats bootstrap + Reality Check + SPA + step-down | multiple-testing false positives |
+| **Significance** | beats the stationary-bootstrap null at `alpha` (Reality Check, SPA, and step-down are reported per row, not gating) | multiple-testing false positives |
 | **Process** | zero block-severity trace violations | gate-bypass, naked tail-selling, manipulation |
 | **Mandate** | respected the drawdown cap | blowing risk to chase return |
 
@@ -177,7 +178,7 @@ sharpebench-stats ── the statistics kernel: PSR, expected-max-Sharpe, deflat
                      Sortino + moments, selection
       ├── sharpebench-core ── the deterministic scoring kernel (no I/O, no ambient RNG); re-exports -stats
       │     ├── sharpebench-protocol   language-agnostic agent ⇄ harness JSON
-      │     ├── sharpebench-sim        point-in-time simulator (look-ahead impossible)
+      │     ├── sharpebench-sim        point-in-time simulator (look-ahead unrepresentable at the agent boundary)
       │     ├── sharpebench-harness    orchestration across seeds × windows
       │     ├── sharpebench-attest     SHA-256 commitments + signed chains + sealed data + canary
       │     ├── sharpebench-leaderboard render / sign / self-describing boards
@@ -189,12 +190,12 @@ sharpebench-stats ── the statistics kernel: PSR, expected-max-Sharpe, deflat
 
 | Crate | Role |
 |:--|:--|
-| **`sharpebench-core`** | the scoring layer over `sharpebench-stats`: pass^k / process + cost floor / rolling / decay / calibration / attribution / comparison-sets / rediscovery / briefing-audit / allocation / options-Greeks / self-audit / composite, plus a **disqualification-reason taxonomy** (a typed `FailReason` rollup over the signals the scorer already computes, so a suite of submissions is legible as "X failed on luck/pass^k, Y on process, Z on deflation/overfit-decay") and a re-export of the whole `-stats` kernel so existing `sharpebench_core::…` paths are unchanged. Byte-identical scores forever. |
+| **`sharpebench-core`** | the scoring layer over `sharpebench-stats`: pass^k / process + cost floor / rolling / decay / calibration / attribution / comparison-sets / rediscovery / briefing-audit / allocation / regime-conditional comparison / options-Greeks / self-audit / composite, plus a **disqualification-reason taxonomy** (a typed `FailReason` rollup over the signals the scorer already computes, so a suite of submissions is legible as "X failed on luck/pass^k, Y on process, Z on deflation/overfit-decay") and a re-export of the whole `-stats` kernel so existing `sharpebench_core::…` paths are unchanged. Byte-identical scores forever. |
 | **`sharpebench-stats`** | the deterministic statistics kernel, split out so any project can depend on just the math: PSR, expected-max-Sharpe, deflated Sharpe (Bailey & López de Prado), the data-snooping family (stationary bootstrap, White's Reality Check, Hansen SPA liberal + consistent, Romano–Wolf step-down), Sortino + moments + normal primitives, selection robustness, and a **stylized-facts realism validator** (Cont battery: fat tails, volatility clustering, gain/loss skew, aggregational Gaussianity, Zumbach time-reversal asymmetry) that certifies a frozen dataset is market-realistic, wired into a `sharpebench realism` CLI + CI gate so a drifted generator fails the build. No I/O, no ambient RNG, fixed reduction order. |
 | **`sharpebench-edge`** | the "is my Sharpe real?" honesty layer over `-stats`: Minimum Track Record Length, Probability of Backtest Overfitting (CSCV), and the two-tier `is_my_sharpe_real` verdict (PSR / deflated Sharpe / MinTRL + haircut + Pass/Borderline/Fail; the full tier adds the data-snooping family + PBO). Powers `sharpebench check`. |
 | **`sharpebench-memory`** | the memory/retrieval benchmark over `-stats`: the three-arm ablation (baseline / retrieval / oracle) with retrieval lift, stationary-bootstrap significance, and fraction-of-ceiling, plus four legs a SOTA memory benchmark also has to answer - **E1** poisoning (integrity delta / attack-success rate / degradation significance), **E2** interdependent multi-session (per-session conditioned lift + dependency-satisfaction rate + pooled significance), **E3** point-in-time correctness (per-arm no-lookahead compliance + leak flag), and **E6** confabulation (regret over reinforced-but-never-re-tested false beliefs). Pure and deterministic; significance delegated to `-stats`; it scores caller-supplied outcome vectors, with no live agent runner. |
 | **`sharpebench-sim`** | fees, seeded slippage, square-root impact, financing, turnover (TRF) cost, liquidity caps, dividends, execution-cost profiles, a parameterized synthetic generator (volatility + jumps), adversarial stress paths, trajectory capture/replay, and O(1) `clone_state` / `restore_state` snapshots. |
-| **`sharpebench-attest`** | SHA-256 pre-registration commitments + HMAC signed result chains + time-lock registry + sealed held-out datasets + canary contamination tripwire. |
+| **`sharpebench-attest`** | SHA-256 pre-registration commitments + signed result chains (HMAC for key-holders, Ed25519 for public verification) + time-lock registry + sealed held-out datasets + canary contamination tripwire. |
 | **`sharpebench-harness`** | seeds × windows orchestration; luck-floor producers; a runtime-vs-agent failure taxonomy. |
 | `protocol` · `leaderboard` · `wasm` · `cli` | the JSON contract · render/sign/self-describing boards · the WASM bridge · the CLI. |
 

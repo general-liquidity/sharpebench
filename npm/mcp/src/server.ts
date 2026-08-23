@@ -7,6 +7,7 @@
  * Every tool is read-only and deterministic (the kernel has no I/O), so the
  * server is safe to expose without sandboxing.
  */
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -26,9 +27,36 @@ function run(fn: () => unknown): ToolResult {
   }
 }
 
+// The server's version is the package's version, read from package.json at
+// load time so a release bump (cargo-release rewrites npm/mcp/package.json from
+// the workspace version) is the single source of truth and nothing here drifts.
+const { version: PACKAGE_VERSION } = createRequire(import.meta.url)("../package.json") as {
+  version: string;
+};
+
+/**
+ * Regime-conditional comparison lives in `sharpebench-core::regime_compare`.
+ * The WASM bridge does not export it yet, so the tool is resolved against the
+ * kernel at call time: once `@general-liquidity/sharpebench` ships
+ * `regimeCompare`, the tool works unchanged; until then it returns a typed error
+ * instead of silently reimplementing the math in TypeScript (one kernel, one
+ * answer).
+ */
+type RegimeCompareFn = (a: number[], b: number[], regimes: string[], opts?: unknown) => unknown;
+function kernelRegimeCompare(): RegimeCompareFn {
+  const fn = (sb as unknown as { regimeCompare?: RegimeCompareFn }).regimeCompare;
+  if (typeof fn !== "function") {
+    throw new Error(
+      "regime_compare is not exported by this build of @general-liquidity/sharpebench; " +
+        "use `sharpebench regime <a.csv> <b.csv> <regimes.csv>` from the CLI",
+    );
+  }
+  return fn;
+}
+
 /** Build the SharpeBench MCP server with all kernel tools registered. */
 export function createServer(): McpServer {
-  const server = new McpServer({ name: "sharpebench", version: "0.0.3" });
+  const server = new McpServer({ name: "sharpebench", version: PACKAGE_VERSION });
 
   server.tool(
     "score",
@@ -104,6 +132,27 @@ export function createServer(): McpServer {
           confidence,
           borderline,
           srBenchmark: sr_benchmark,
+        }),
+      ),
+  );
+
+  server.tool(
+    "regime_compare",
+    "Compare two strategies' per-period returns WITHIN each market regime rather than pooled: per regime, the zero/no-trade mass vs the continuous part (ZAGA split), mean/sd/median, sign share, moment-matched gamma on magnitudes, a two-sample KS statistic, and whether the pooled mean gap hides a sign reversal. Regime labels are an input (one per period); nothing is inferred and no GAMLSS is fitted.",
+    {
+      returns_a: z.array(z.number()),
+      returns_b: z.array(z.number()),
+      regimes: z.array(z.string()),
+      zero_tol: z.number().optional(),
+      min_periods: z.number().optional(),
+      tie_tol: z.number().optional(),
+    },
+    async ({ returns_a, returns_b, regimes, zero_tol, min_periods, tie_tol }) =>
+      run(() =>
+        kernelRegimeCompare()(returns_a, returns_b, regimes, {
+          zeroTol: zero_tol,
+          minPeriods: min_periods,
+          tieTol: tie_tol,
         }),
       ),
   );

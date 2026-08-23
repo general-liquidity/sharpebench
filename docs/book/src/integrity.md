@@ -19,6 +19,7 @@ each is demoted:
 [DEFENDED] raw-return-cannot-buy-rank post the biggest raw return on only some runs
 [DEFENDED] cheat-reward-hacker        top raw return by bypassing the gate + padding confidence
 [DEFENDED] tail-seller                smooth linear returns earned by selling tail risk (naked short gamma)
+[DEFENDED] adversarial-input          look excellent in-sample with an accurate forecast head, then collapse under a small in-range input perturbation
 ```
 
 The command exits non-zero if **any** attack is not demoted. That makes the audit

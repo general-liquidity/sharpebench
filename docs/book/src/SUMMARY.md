@@ -8,6 +8,7 @@
   - [pass^k reliability](methodology-pass-k.md)
   - [Significance & multiple testing](methodology-significance.md)
   - [Process discipline](methodology-process.md)
+  - [Regime-conditional comparison](methodology-regime.md)
 - [The simulator](simulator.md)
 - [Submitting an agent](submitting.md)
 - [Forward attestation](attestation.md)

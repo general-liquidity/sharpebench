@@ -1,9 +1,12 @@
 //! Point-in-time price data.
 //!
-//! A [`Dataset`] is a shared date axis plus per-symbol closes aligned to it. The
-//! only accessors return data at or before a given step index — there is no way
-//! to read a future bar, so look-ahead bias is impossible by construction rather
-//! than policed after the fact.
+//! A [`Dataset`] is a shared date axis plus per-symbol closes aligned to it.
+//! Accessors such as [`Dataset::close_at`] take an arbitrary step index, so the
+//! type itself does not forbid reading a later bar. The no-look-ahead guarantee
+//! is enforced at the agent boundary: the observation builder in `engine.rs`
+//! only ever hands an agent history ending at the current step, so a future bar
+//! is unrepresentable via the agent interface rather than policed after the
+//! fact.
 
 use std::collections::BTreeMap;
 

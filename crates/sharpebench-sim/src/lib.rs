@@ -1,8 +1,9 @@
 //! sb-sim — point-in-time market simulator + reference agents (Phase 1).
 //!
 //! The engine feeds an [`Agent`] a [`sharpebench_protocol::MarketObservation`] that only
-//! ever contains data at or before the decision date (look-ahead is structurally
-//! impossible — [`Dataset`] never hands out a future bar), applies the resulting
+//! ever contains data at or before the decision date (look-ahead is
+//! unrepresentable via the agent interface: the observation builder only hands
+//! an agent history ending at the current step), applies the resulting
 //! orders with transaction costs and seeded execution slippage, and emits an
 //! [`sharpebench_core::Run`] (per-period returns + decision trace) ready for scoring.
 #![forbid(unsafe_code)]

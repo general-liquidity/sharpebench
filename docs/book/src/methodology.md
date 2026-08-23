@@ -27,9 +27,11 @@ downside deviation (excess return per unit of *downside* volatility, MAR = 0 —
 rewards an edge that doesn't arrive with downside churn, where the Sharpe penalizes
 all volatility symmetrically).
 
-The following sections explain each gate.
+The following sections explain each gate, then one reported-only diagnostic that
+the pooled gates cannot see.
 
 - [Deflated Sharpe & PSR](methodology-deflated-sharpe.md)
 - [pass^k reliability](methodology-pass-k.md)
 - [Significance & multiple testing](methodology-significance.md)
 - [Process discipline](methodology-process.md)
+- [Regime-conditional comparison](methodology-regime.md) (reported, never gating)

@@ -54,6 +54,18 @@ Capture an agent's raw per-seed×window decision trajectory to JSON, then have a
 separate verifier replay it through the sim and recompute the score from the raw
 decisions — a forged trajectory recomputes to a different number.
 
+## `regime`
+
+```bash
+sharpebench regime returns_a.csv returns_b.csv regimes.csv [--col NAME] [--json]
+```
+
+Compares two strategies' per-period returns *within* each market regime instead
+of pooled. See [Regime-conditional comparison](methodology-regime.md). The three
+CSVs are aligned by row; `regimes.csv` carries one label per period and is an
+input, not something the CLI infers. Exit code is 0 whenever the report is
+produced; read `pooled_hides_reversal` for the verdict.
+
 ## `audit-briefing` / `canary` / `score-allocation` / `greeks`
 
 Standalone analysis surfaces over the kernel: lint a shared briefing for

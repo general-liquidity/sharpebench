@@ -1,8 +1,9 @@
 //! Edge decay — does the agent's signal survive forward in time, or is it a
 //! one-regime fluke? We estimate the half-life of the absolute information
-//! coefficient by regressing `ln|IC|` on time; a fast-decaying edge is penalized
-//! by the composite even if its average looks good. (After QuantBench's IC
-//! half-life.)
+//! coefficient by regressing `ln|IC|` on time. The half-life is reported on the
+//! composite so a fast-decaying edge is visible even when its average looks
+//! good; it is never read by the eligibility predicate and does not affect
+//! rank. (After QuantBench's IC half-life.)
 //!
 //! [`edge_half_life`] is purely empirical: it reads the decay out of the track.
 //! The second half of this module is its complement, an *expected* half-life
