@@ -159,6 +159,10 @@ fn main() {
     // how the evidence is actually produced. Results are identical to a serial
     // run because every seed is pinned.
     let only = env::args().nth(2);
+    // Optional third argument: restrict to one dsr_bar, so the 64-config grid of a
+    // single large dataset can be split across processes. The intraday crypto
+    // files are the long pole; four processes per file instead of one.
+    let only_bar: Option<f64> = env::args().nth(3).map(|b| b.parse().expect("dsr_bar"));
     for (name, class, tf, ppy) in DATASETS {
         if let Some(ref o) = only {
             if o != name {
@@ -187,6 +191,11 @@ fn main() {
         let subs = field(&data, &windows);
 
         for &dsr_bar in DSR_BARS {
+            if let Some(b) = only_bar {
+                if (dsr_bar - b).abs() > 1e-9 {
+                    continue;
+                }
+            }
             for &n_trials in N_TRIALS {
                 for &pinned in SR_STD {
                     let mut cfg = ScoreConfig {
