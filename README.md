@@ -51,7 +51,7 @@ We ran the benchmark against the market itself: nine frozen datasets, four asset
 
 Every number reproduces from committed data via the commands in the paper's appendix. A benchmark that publishes what its own evidence found against itself is the credibility claim.
 
-## Status — active, four releases in one day of evidence work
+## Status — active, evidence-tested
 
 All thirteen crates are implemented, tested, and CI-green on Linux, macOS and Windows (fmt · clippy `-D warnings` · workspace tests · cross-platform golden-score fixtures · WASM-native parity · the 8-attack self-audit · a docs build · an npm build/test · a maturin build + pytest for the Python bindings). The statistics kernel, the backtest-honesty verdict, scoring kernel, point-in-time simulator, run harness, forward arena, leaderboard, WASM bridge, npm package, MCP server, Python ranker, and CLI all work end-to-end on synthetic data and on **nine real frozen datasets** across four asset classes and four bar sizes. The version on crates.io, npm and PyPI is always the latest `v*` tag; every registry is checked by the release pipeline's verify job.
 
