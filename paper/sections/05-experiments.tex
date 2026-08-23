@@ -85,6 +85,36 @@ On the real datasets the preset admits nobody. The last column of \cref{tab:elig
 
 One correction to how the per-run bound is naturally described. Drawdown is multiplicative, so a run's own drawdown never exceeds the pooled track's, because every within-run peak-to-trough pair is also a pooled pair. A per-run bound at the same value as the pooled bound therefore catches nothing the pooled bound misses. It bites when set below the pooled cap: a loose whole-track budget with a tight per-regime bound. The preset is configured that way, and the test that proves the bound is not redundant constructs exactly that case.
 
+\subsection{Finding 4: a disciplined agent without alpha is refused on deflation alone}\label{sec:riskmanaged}
+
+The findings above show the gates refusing unhedged exposure, which leaves open whether eligibility is attainable at all. To probe that without inventing alpha, a risk-managed reference agent was added to the field: long the equal-weight basket only when it trades above its trailing mean, gross exposure scaled to an inverse-volatility target, and fully flat after a 10 percent drawdown with re-entry only on a fresh trend signal. It is textbook risk management and deliberately nothing more; every parameter is a documented default and none was tuned against the gate.
+
+The result is a negative that sharpens the benchmark's claim. The agent is rank-eligible nowhere, under either reliability verdict, and the manner of its failure is the finding. On weekly US indices it clears the bootstrap null ($p = 0.0005$), the probabilistic Sharpe ($0.9998$), the process gate, and the per-run drawdown bound, and is refused solely on a deflated Sharpe of $0.30$ against the $0.95$ bar. On seven of the nine datasets its worst-window drawdown is the smallest of any trading agent (\cref{fig:drawdowns}), so the discipline registers where it was designed to. What discipline does not manufacture is a deflation-surviving edge.
+
+The two exceptions are themselves evidence. On hourly crypto the trend filter is whipsawed into an $87$ percent drawdown in one window, far worse than buy-and-hold's $49$, and on daily FX its $33$ percent trails buy-and-hold's $20$: the same rules that protect capital on daily and weekly equity bars amplify losses where the trend signal churns. Risk management is frequency-dependent, and a benchmark that scores per window is what makes that visible instead of averaged away.
+
+Together with \cref{sec:passk} this shows the gates discriminate rather than blanket-refuse: unhedged beta fails on reliability, and discipline without alpha fails on deflation, each with the quantity that justifies it on the same row. The eligibility bar is therefore not vacuous against the entrants that should fail it. Whether an agent with genuine edge passes is the one question this field of reference agents cannot answer, and \cref{sec:limitations} states it as the outstanding experiment.
+
+\begin{figure}[t]
+\centering
+\begin{subfigure}[b]{0.48\linewidth}
+\includegraphics[width=\linewidth]{evidence-drawdowns.pdf}
+\caption{Worst single-window drawdowns.}
+\label{fig:drawdowns}
+\end{subfigure}
+\hfill
+\begin{subfigure}[b]{0.48\linewidth}
+\includegraphics[width=\linewidth]{evidence-luck-deflation.pdf}
+\caption{Deflation against zero-skill agents.}
+\label{fig:luckdeflation}
+\end{subfigure}
+\caption{Computed from the committed evidence records by a committed script. (a) The risk-managed agent posts the smallest worst-window drawdown of any trading agent on seven of nine datasets, while both long-only references breach the 20 percent per-regime bound almost everywhere and hourly momentum loses 99.3 percent in one window; the two exceptions, hourly crypto and daily FX, are where the trend filter itself whipsaws. (b) The best zero-skill agent's deflated Sharpe as the trial count grows: near certainty at $N = 1$ on short weekly tracks, under $0.43$ everywhere by $N = 50$. Deflation is what separates these curves from the bar.}
+\end{figure}
+
+\subsection{Robustness under perturbation}\label{sec:perturb}
+
+The self-audit's adversarial-input attack records its own limit: fragility that no submitted run exercises is invisible to a deterministic kernel. The harness now generates perturbed datasets whose bar-to-bar moves are nudged within the empirical range of the original series, a constraint asserted per bar, so every perturbed path is one the market could have printed. Scoring a field across perturbations reports each agent's spread between best and worst per-run PSR. On weekly US indices the risk-managed agent and buy-and-hold both show spreads under $10^{-3}$, and a deliberately fragile synthetic agent, one that latches onto an exact price value, shows more than twice the reference spread, which is the separation the diagnostic exists to produce.
+
 \subsection{The falsification leg}\label{sec:falsify}
 
 A benchmark whose gates are strict can still be wrong in the other direction, by rewarding noise. On every dataset the luck floor's best agent has a lower raw return than the best reference agent, with zero exceptions in nine, and at the default configuration no random agent reaches a DSR above $0.423$. The floor behaves as a floor.

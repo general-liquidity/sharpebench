@@ -40,11 +40,22 @@ Raw return is reported but is **never** the rank key. The composite also *report
 
 > An agent does not rank on raw return. It ranks only if its edge survives deflation, reliability, significance, and process discipline — and it proves all of it forward.
 
+## What the evidence shows
+
+We ran the benchmark against the market itself: nine frozen datasets, four asset classes, four bar sizes, a field of reference agents plus a luck floor of random agents on each, 4,608 scored cells. The methodology paper in [`paper/`](paper/) reports four findings, two of which **corrected the benchmark**:
+
+- **The shipped deflation prior was in the wrong units.** Annualized, applied per period, it demanded an annualized Sharpe of **18 on daily bars and 106 on hourly bars** before anything could rank. Fixed in v0.3.0: thresholds are stated annualized and converted once via `periods_per_year`.
+- **No reference agent is eligible anywhere.** Every dataset contains a bear window and pass^k demands profitability in every window, so the benchmark declines to certify that owning the index is safe in a downturn. A weaker per-window drawdown gate refuses the same agents, which drew down **32 to 99 percent** in their worst windows.
+- **The gates discriminate.** A risk-managed agent (trend filter, vol targeting, drawdown halt, no tuning) clears the bootstrap, the PSR, process, and the drawdown bound on weekly US indices and is refused **solely on deflation** (0.30 vs the 0.95 bar). Beta fails reliability; discipline without edge fails deflation.
+- **The luck floor behaves.** No random agent ever beats a reference agent on raw return, and with deflation off (N=1) a random agent reaches a deflated Sharpe of **0.999** on a short weekly track. Deflation is the difference.
+
+Every number reproduces from committed data via the commands in the paper's appendix. A benchmark that publishes what its own evidence found against itself is the credibility claim.
+
 ## Status — active (pre-1.0)
 
-All twelve crates are implemented, tested, and CI-green (fmt · clippy `-D warnings` · workspace tests · a determinism check · the 8-attack self-audit · a docs build · an npm build/test · a maturin build + pytest for the Python bindings). The statistics kernel, the backtest-honesty verdict, scoring kernel, point-in-time simulator, run harness, forward-attestation, leaderboard, WASM bridge, npm package, MCP server, and CLI all work end-to-end — on synthetic data and on **real frozen datasets** (crypto majors + US equity indices).
+All thirteen crates are implemented, tested, and CI-green (fmt · clippy `-D warnings` · workspace tests · a determinism check · the 8-attack self-audit · a docs build · an npm build/test · a maturin build + pytest for the Python bindings). The statistics kernel, the backtest-honesty verdict, scoring kernel, point-in-time simulator, run harness, forward-attestation, leaderboard, WASM bridge, npm package, MCP server, and CLI all work end-to-end — on synthetic data and on **real frozen datasets** (crypto majors + US equity indices).
 
-**Not yet built** (need external infra or a decision): single-name equity data (a keyed feed), a live / forward public arena with hosting, and the public data-curation protocol. See [docs/PLAN.md](docs/PLAN.md).
+**Not yet built** (need external infra or a decision): single-name equity data (a keyed feed), hosted arena intake and a scheduler (the arena lifecycle itself is built and test-driven, see below), and the public data-curation protocol. See [docs/PLAN.md](docs/PLAN.md).
 
 ## Quickstart
 
@@ -54,6 +65,9 @@ sharpebench run                                              # reference agents 
 sharpebench score suites/example_submissions.json           # rank a JSON field of submissions
 sharpebench audit                                           # prove the scorer resists 8 known gaming attacks
 sharpebench run --data data/crypto-majors-1d.csv            # run on real crypto-majors daily bars
+sharpebench uncertainty returns.csv --confidences conf.csv  # aleatoric / epistemic / distributional split
+sharpebench import csv my_field/ --out subs.json            # re-score a rival board's return series
+sharpebench arena init league && sharpebench arena verify league   # the forward league, file-backed
 ```
 
 Prefer a prebuilt binary? Each release attaches a static Linux binary (`sharpebench-x86_64-linux-musl`) with SLSA build provenance; verify it with `gh attestation verify sharpebench-x86_64-linux-musl --repo general-liquidity/sharpebench`.
@@ -70,6 +84,7 @@ One kernel, scored identically across every surface — the internal eval and th
 | <img height="14" align="top" src="https://cdn.simpleicons.org/rust/DEA584" />&nbsp; **Rust (just the stats)** | `cargo add sharpebench-stats` | The standalone statistics kernel — PSR, deflated Sharpe, the data-snooping tests, selection. The same math the board ranks on, with no benchmark attached. |
 | <img height="14" align="top" src="https://cdn.simpleicons.org/gnubash/4EAA25" />&nbsp; **CLI** | `cargo install sharpebench` | `run` / `score` / `check` / `regime` / `audit` / `sign` / `verify` / `greeks` / … |
 | <img height="14" align="top" src="https://cdn.simpleicons.org/npm/CB3837" />&nbsp; **npm** | `npm i @general-liquidity/sharpebench` | Typed JS/TS API over the WASM kernel — `score`, `greeks`, `selfAudit`. |
+| <img height="14" align="top" src="https://cdn.simpleicons.org/python/3776AB" />&nbsp; **Python** | `pip install sharpebench` | The stats kernel **plus the ranker**: `rank_board` / `rank_returns` take and return the same wire JSON as the CLI. |
 | <img height="14" align="top" src="https://cdn.simpleicons.org/modelcontextprotocol" />&nbsp; **MCP** | `npx -y @general-liquidity/sharpebench-mcp` | An [MCP](https://modelcontextprotocol.io) server — agents call the kernel as tools. |
 | <img height="14" align="top" src="https://cdn.simpleicons.org/webassembly/654FF0" />&nbsp; **WASM** | `sharpebench-wasm` | The wasm-bindgen bridge the npm package and Gordon (Bun) embed. |
 
@@ -124,6 +139,11 @@ Both halves are compile-and-run-checked as doctests in `sharpebench-stats` and `
 | `capture` · `verify-trajectory` | Capture an agent's raw-decision trajectory, then replay it to recompute the score. |
 | `audit-briefing` · `canary` | Audit a shared briefing for salience bias; derive a do-not-train contamination tripwire. |
 | `score-allocation` · `greeks` | Score a weight-vector trajectory (turnover); price an option + Greeks + tail-risk. |
+| `arena <init·open·commit·advance·score·publish·verify>` | Drive a forward window end to end: rules fixed before entries exist, commitments refused after the deadline, Ed25519 boards that **chain across windows** into one verifiable history. |
+| `import <csv·stockbench> --out subs.json` | Convert a rival board's per-period return series into a scoreable field (caveats embedded: no trace, unknown trials understate deflation, so demotions are a lower bound). |
+| `select <candidates.csv...>` | Pick a candidate on a bootstrap **percentile** instead of the observed best; reports the optimism gap that separates lucky from robust. |
+| `disqualify` · `rediscover` | Classify each agent's hard gates vs advisory flags; flag a submission cosine-near a known strategy. |
+| `uncertainty` · `decay-prior` | Split uncertainty into aleatoric / epistemic / distributional legs; compare measured edge decay to the crowding prior (model prior, reported never gating). |
 
 Add `--json` to any command for machine-readable output.
 
@@ -138,7 +158,7 @@ sharpebench run --http 127.0.0.1:8080                     # HTTP POST /decide
 
 A runnable reference agent (stdio + Dockerfile) and the wire format live in [`examples/reference-agent/`](examples/reference-agent/).
 
-> **Security — running untrusted agents.** The harness executes whatever agent you point it at **without sandboxing**. Only run agents you trust. Safe hosting of third-party submissions is a Phase-2 item and is **not yet built**.
+> **Security — running untrusted agents.** `sharpebench run` executes whatever agent you point it at **without sandboxing**; only run agents you trust. The arena runs external agents in a network-isolated Docker container with bounded CPU and memory, and refuses (rather than silently falling back) when Docker is absent. Container isolation is the boundary; multi-tenant hosting of untrusted submissions is **not yet built**.
 
 ## What it measures
 
@@ -184,6 +204,7 @@ sharpebench-stats ── the statistics kernel: PSR, expected-max-Sharpe, deflat
       │     ├── sharpebench-harness    orchestration across seeds × windows
       │     ├── sharpebench-attest     SHA-256 commitments + signed chains + sealed data + canary
       │     ├── sharpebench-leaderboard render / sign / self-describing boards
+      │     ├── sharpebench-arena      the forward league: windowed commitments, sandboxed runs, chained Ed25519 boards
       │     ├── sharpebench-wasm       the identical kernel for JS/TS (npm, Gordon, MCP)
       │     └── sharpebench-cli        the `sharpebench` binary
       ├── sharpebench-edge ── the "is my Sharpe real?" verdict: MinTRL + PBO + the two-tier honesty check

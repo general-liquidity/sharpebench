@@ -1,0 +1,219 @@
+\begin{thebibliography}{25}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[Arnott et~al.(2019)Arnott, Harvey, and Markowitz]{arnott2019protocol}
+Robert~D. Arnott, Campbell~R. Harvey, and Harry Markowitz.
+\newblock A backtesting protocol in the era of {Machine Learning}.
+\newblock \emph{The Journal of Financial Data Science}, 1\penalty0
+  (1):\penalty0 64--74, 2019.
+\newblock URL
+  \url{https://papers.ssrn.com/sol3/papers.cfm?abstract_id=3275654}.
+
+\bibitem[Bailey and L{\'o}pez~de Prado(2014)]{bailey2014deflated}
+David~H. Bailey and Marcos L{\'o}pez~de Prado.
+\newblock The {Deflated Sharpe} ratio: Correcting for selection bias,
+  {Backtest} overfitting, and non-normality.
+\newblock \emph{The Journal of Portfolio Management}, 40\penalty0 (5):\penalty0
+  94--107, 2014.
+\newblock \doi{10.3905/jpm.2014.40.5.094}.
+
+\bibitem[Bailey et~al.(2014)Bailey, Borwein, L{\'o}pez~de Prado, and
+  Zhu]{bailey2014pseudo}
+David~H. Bailey, Jonathan~M. Borwein, Marcos L{\'o}pez~de Prado, and Qiji~Jim
+  Zhu.
+\newblock Pseudo-mathematics and {Financial} charlatanism: The effects of
+  {Backtest} overfitting on out-of-sample performance.
+\newblock \emph{Notices of the American Mathematical Society}, 61\penalty0
+  (5):\penalty0 458--471, 2014.
+\newblock URL \url{https://www.ams.org/notices/201405/rnoti-p458.pdf}.
+
+\bibitem[Barras et~al.(2010)Barras, Scaillet, and Wermers]{barras2010false}
+Laurent Barras, Olivier Scaillet, and Russ Wermers.
+\newblock False discoveries in {Mutual Fund} performance: Measuring luck in
+  estimated alphas.
+\newblock \emph{The Journal of Finance}, 65\penalty0 (1):\penalty0 179--216,
+  2010.
+\newblock \doi{10.1111/j.1540-6261.2009.01527.x}.
+
+\bibitem[Bean et~al.(2025)Bean, Kearns, Romanou, Hafner, Mayne, Batzner,
+  Foroutan, Schmitz, Korgul, Batra, Deb, Beharry, Emde, Foster, Gausen,
+  Grandury, Han, Hofmann, Ibrahim, Kim, Kirk, Lin, Liu, Luettgau, Magomere,
+  Rystr{\o}m, Sotnikova, Yang, Zhao, Bibi, Bosselut, Clark, Cohan, Foerster,
+  Gal, Hale, Raji, Summerfield, Torr, Ududec, Rocher, and
+  Mahdi]{constructvalidity2025}
+Andrew~M. Bean, Ryan~Othniel Kearns, Angelika Romanou, Franziska~Sofia Hafner,
+  Harry Mayne, Jan Batzner, Negar Foroutan, Chris Schmitz, Karolina Korgul,
+  Hunar Batra, Oishi Deb, Emma Beharry, Cornelius Emde, Thomas Foster, Anna
+  Gausen, Mar{\'i}a Grandury, Simeng Han, Valentin Hofmann, Lujain Ibrahim,
+  Hazel Kim, Hannah~Rose Kirk, Fangru Lin, Gabrielle Kaili-May Liu, Lennart
+  Luettgau, Jabez Magomere, Jonathan Rystr{\o}m, Anna Sotnikova, Yushi Yang,
+  Yilun Zhao, Adel Bibi, Antoine Bosselut, Ronald Clark, Arman Cohan, Jakob
+  Foerster, Yarin Gal, Scott~A. Hale, Inioluwa~Deborah Raji, Christopher
+  Summerfield, Philip H.~S. Torr, Cozmin Ududec, Luc Rocher, and Adam Mahdi.
+\newblock Measuring what matters: Construct validity in large language model
+  benchmarks.
+\newblock In \emph{Advances in Neural Information Processing Systems 38,
+  Datasets and Benchmarks Track}, 2025.
+\newblock URL \url{https://arxiv.org/abs/2511.04703}.
+
+\bibitem[Chen et~al.(2025)Chen, Yao, Liu, Xin, Ye, Yu, Hou, and
+  Li]{stockbench2025}
+Yanxu Chen, Zijun Yao, Yantao Liu, Amy Xin, Jin Ye, Jianing Yu, Lei Hou, and
+  Juanzi Li.
+\newblock {StockBench}: Can {LLM} agents trade stocks profitably in real-world
+  markets?
+\newblock \emph{arXiv preprint arXiv:2510.02209}, 2025.
+\newblock URL \url{https://arxiv.org/abs/2510.02209}.
+
+\bibitem[Cont(2001)]{cont2001empirical}
+Rama Cont.
+\newblock Empirical properties of asset returns: Stylized facts and statistical
+  issues.
+\newblock \emph{Quantitative Finance}, 1\penalty0 (2):\penalty0 223--236, 2001.
+\newblock \doi{10.1080/713665670}.
+
+\bibitem[Deza et~al.(2021)Deza, Travers, Rowat, and
+  Papernot]{deza2021interpretability}
+Gabriel Deza, Adelin Travers, Colin Rowat, and Nicolas Papernot.
+\newblock Interpretability in safety-critical {Financial} trading systems.
+\newblock In \emph{arXiv preprint arXiv:2109.15112}, 2021.
+\newblock URL \url{https://arxiv.org/abs/2109.15112}.
+
+\bibitem[Fama and French(2010)]{fama2010luck}
+Eugene~F. Fama and Kenneth~R. French.
+\newblock Luck versus skill in the {Cross-Section} of {Mutual Fund} returns.
+\newblock \emph{The Journal of Finance}, 65\penalty0 (5):\penalty0 1915--1947,
+  2010.
+\newblock \doi{10.1111/j.1540-6261.2010.01598.x}.
+
+\bibitem[{FINOS Foundation}(2025)]{openfinllm}
+{FINOS Foundation}.
+\newblock Open {Financial} {LLM} leaderboard.
+\newblock
+  \url{https://huggingface.co/spaces/finosfoundation/Open-Financial-LLM-Leaderboard},
+  2025.
+\newblock Financial-knowledge axis only; no trading-performance axis.
+
+\bibitem[Hansen(2005)]{hansen2005spa}
+Peter~Reinhard Hansen.
+\newblock A test for {Superior Predictive Ability}.
+\newblock \emph{Journal of Business \& Economic Statistics}, 23\penalty0
+  (4):\penalty0 365--380, 2005.
+\newblock \doi{10.1198/073500105000000063}.
+
+\bibitem[Harvey and Liu(2015)]{harvey2015backtesting}
+Campbell~R. Harvey and Yan Liu.
+\newblock Backtesting.
+\newblock \emph{The Journal of Portfolio Management}, 42\penalty0 (1):\penalty0
+  13--28, 2015.
+\newblock URL
+  \url{https://people.duke.edu/~charvey/Research/Published_Papers/P120_Backtesting.PDF}.
+
+\bibitem[Josefsson and Liusvaara(2017)]{rfc8032}
+Simon Josefsson and Ilari Liusvaara.
+\newblock Edwards-curve digital signature algorithm ({EdDSA}).
+\newblock RFC 8032, Internet Engineering Task Force, 2017.
+
+\bibitem[Kapoor et~al.(2024)Kapoor, Stroebl, Siegel, Nadgir, and
+  Narayanan]{kapoor2025agents}
+Sayash Kapoor, Benedikt Stroebl, Zachary~S. Siegel, Nitya Nadgir, and Arvind
+  Narayanan.
+\newblock {AI} agents that matter.
+\newblock \emph{arXiv preprint arXiv:2407.01502}, 2024.
+\newblock URL \url{https://arxiv.org/abs/2407.01502}.
+
+\bibitem[Miller(2024)]{miller2024errorbars}
+Evan Miller.
+\newblock Adding error bars to evals: A statistical approach to language model
+  evaluations.
+\newblock \emph{arXiv preprint arXiv:2411.00640}, 2024.
+\newblock URL \url{https://arxiv.org/abs/2411.00640}.
+
+\bibitem[Nguyen and Pham(2026)]{finmultiagentsurvey2026}
+Phat Nguyen and Thang Pham.
+\newblock Toward reliable evaluation of {LLM}-based {Financial} multi-agent
+  systems: Taxonomy, coordination primacy, and cost awareness.
+\newblock In \emph{DMO-FinTech Workshop, PAKDD 2026}, 2026.
+\newblock URL \url{https://arxiv.org/abs/2603.27539}.
+
+\bibitem[Politis and Romano(1994)]{politis1994stationary}
+Dimitris~N. Politis and Joseph~P. Romano.
+\newblock The {Stationary Bootstrap}.
+\newblock \emph{Journal of the American Statistical Association}, 89\penalty0
+  (428):\penalty0 1303--1313, 1994.
+\newblock \doi{10.1080/01621459.1994.10476870}.
+
+\bibitem[Rabanser et~al.(2026)Rabanser, Kapoor, Kirgis, Liu, Utpala, and
+  Narayanan]{agentreliability2026}
+Stephan Rabanser, Sayash Kapoor, Peter Kirgis, Kangheng Liu, Saiteja Utpala,
+  and Arvind Narayanan.
+\newblock Towards a science of {AI} agent reliability.
+\newblock \emph{arXiv preprint arXiv:2602.16666}, 2026.
+\newblock URL \url{https://arxiv.org/abs/2602.16666}.
+\newblock Accepted at ICML 2026.
+
+\bibitem[Reuel et~al.(2024)Reuel, Hardy, Smith, Lamparth, Hardy, and
+  Kochenderfer]{betterbench2024}
+Anka Reuel, Amelia Hardy, Chandler Smith, Max Lamparth, Malcolm Hardy, and
+  Mykel~J. Kochenderfer.
+\newblock {BetterBench}: Assessing {AI} benchmarks, uncovering issues, and
+  establishing best practices.
+\newblock In \emph{Advances in Neural Information Processing Systems 37}, 2024.
+\newblock URL \url{https://arxiv.org/abs/2411.12990}.
+\newblock Spotlight.
+
+\bibitem[Romano and Wolf(2005)]{romano2005stepwise}
+Joseph~P. Romano and Michael Wolf.
+\newblock {Stepwise} multiple testing as formalized {Data Snooping}.
+\newblock \emph{Econometrica}, 73\penalty0 (4):\penalty0 1237--1282, 2005.
+\newblock \doi{10.1111/j.1468-0262.2005.00615.x}.
+
+\bibitem[Wang et~al.(2025)Wang, Kong, Guo, Hua, Qi, Zhou, Zheng, Wang, Ni, and
+  Guo]{quantbench2025}
+Saizhuo Wang, Hao Kong, Jiadong Guo, Fengrui Hua, Yiyan Qi, Wanyun Zhou, Jiahao
+  Zheng, Xinyu Wang, Lionel~M. Ni, and Jian Guo.
+\newblock {QuantBench}: Benchmarking {AI} methods for quantitative investment.
+\newblock \emph{arXiv preprint arXiv:2504.18600}, 2025.
+\newblock URL \url{https://arxiv.org/abs/2504.18600}.
+
+\bibitem[White(2000)]{white2000reality}
+Halbert White.
+\newblock A {Reality Check} for {Data Snooping}.
+\newblock \emph{Econometrica}, 68\penalty0 (5):\penalty0 1097--1126, 2000.
+\newblock URL \url{https://users.ssc.wisc.edu/~bhansen/718/White2000.pdf}.
+
+\bibitem[Xia et~al.(2026)Xia, You, Wang, Liu, Qi, Wu, and
+  Zhang]{llmtradingaudit2026}
+Yihan Xia, Panpan You, Taotao Wang, Fang Liu, Han Qi, Xiaoxiao Wu, and Shengli
+  Zhang.
+\newblock Agentic trading: When {LLM} agents meet {Financial} markets.
+\newblock \emph{arXiv preprint arXiv:2605.19337}, 2026.
+\newblock URL \url{https://arxiv.org/abs/2605.19337}.
+
+\bibitem[Xie et~al.(2024)Xie, Han, Chen, Xiang, Zhang, He, Xiao, Li, Dai, Feng,
+  Xu, Kang, Kuang, Yuan, Yang, Luo, Zhang, Liu, Xiong, Deng, Jiang, Yao, Li,
+  Yu, Hu, Huang, Liu, Lopez-Lira, Wang, Lai, Wang, Peng, Ananiadou, and
+  Huang]{finben2024}
+Qianqian Xie, Weiguang Han, Zhengyu Chen, Ruoyu Xiang, Xiao Zhang, Yueru He,
+  Mengxi Xiao, Dong Li, Yongfu Dai, Duanyu Feng, Yijing Xu, Haoqiang Kang,
+  Ziyan Kuang, Chenhan Yuan, Kailai Yang, Zheheng Luo, Tianlin Zhang, Zhiwei
+  Liu, Guojun Xiong, Zhiyang Deng, Yuechen Jiang, Zhiyuan Yao, Haohang Li,
+  Yangyang Yu, Gang Hu, Jiajia Huang, Xiao-Yang Liu, Alejandro Lopez-Lira,
+  Benyou Wang, Yanzhao Lai, Hao Wang, Min Peng, Sophia Ananiadou, and Jimin
+  Huang.
+\newblock {FinBen}: A holistic {Financial} benchmark for large language models.
+\newblock \emph{arXiv preprint arXiv:2402.12659}, 2024.
+\newblock URL \url{https://arxiv.org/abs/2402.12659}.
+
+\bibitem[Yao et~al.(2024)Yao, Shinn, Razavi, and Narasimhan]{taubench2024}
+Shunyu Yao, Noah Shinn, Pedram Razavi, and Karthik Narasimhan.
+\newblock $\tau$-bench: A benchmark for tool-agent-user interaction in
+  real-world domains.
+\newblock \emph{arXiv preprint arXiv:2406.12045}, 2024.
+\newblock URL \url{https://arxiv.org/abs/2406.12045}.
+
+\end{thebibliography}
