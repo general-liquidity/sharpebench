@@ -143,6 +143,192 @@ impl Agent for RandomAgent {
     }
 }
 
+/// A **risk-managed** reference agent: textbook trend filter + inverse-volatility
+/// sizing + a drawdown halt, composed exactly as a risk-management primer would.
+/// This is deliberately *not* alpha — it is a reference implementation of standard
+/// risk discipline, built so the eligibility gates are exercised by at least one
+/// entrant that is not unhedged long-only (the methodology paper's first stated
+/// limitation). Everything is computed from the observation history alone
+/// (point-in-time by construction), fully deterministic, no RNG.
+///
+/// Rules, in order, each bar:
+/// 1. **Trend filter** — build an equal-weight basket index from the trailing
+///    common history (each symbol normalized to its first trailing close). The
+///    filter is positive when the latest basket value is strictly above its
+///    trailing `trend_lookback`-bar mean (default **15**; the engine's
+///    observation carries a 20-bar trailing window, and the agent needs
+///    `lookback + 1` bars, so the default must fit inside that).
+/// 2. **Inverse-vol sizing** — gross exposure = `target_vol / realized_vol`,
+///    capped at **1.0**, where `realized_vol` is the standard deviation of the
+///    basket's last `vol_lookback` bar-to-bar returns (default **15**) and
+///    `target_vol` is a per-bar volatility target (default **0.01**, roughly 16%
+///    annualized on daily bars). Zero realized vol sizes at the cap.
+/// 3. **Drawdown halt** — track own equity (cash + marked positions) from the
+///    observation; when it falls more than `max_drawdown` (default **0.10**)
+///    below its running peak, go fully flat and stay flat until the trend filter
+///    *turns* positive again (a fresh negative-to-positive transition, not merely
+///    an already-positive reading). Re-entry resets the equity peak.
+///
+/// When the trend filter is negative, or the agent is halted, or the trailing
+/// history is shorter than the lookbacks require, the agent is fully flat.
+pub struct RiskManaged {
+    pub trend_lookback: usize,
+    pub vol_lookback: usize,
+    /// Per-bar realized-volatility target for inverse-vol sizing.
+    pub target_vol: f64,
+    /// Peak-to-trough fraction of own equity beyond which the agent halts.
+    pub max_drawdown: f64,
+    peak_equity: f64,
+    halted: bool,
+    prev_trend_positive: bool,
+}
+
+impl Default for RiskManaged {
+    fn default() -> Self {
+        Self {
+            trend_lookback: 15,
+            vol_lookback: 15,
+            target_vol: 0.01,
+            max_drawdown: 0.10,
+            peak_equity: f64::NAN,
+            halted: false,
+            prev_trend_positive: false,
+        }
+    }
+}
+
+impl RiskManaged {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_config(
+        trend_lookback: usize,
+        vol_lookback: usize,
+        target_vol: f64,
+        max_drawdown: f64,
+    ) -> Self {
+        Self {
+            trend_lookback,
+            vol_lookback,
+            target_vol,
+            max_drawdown,
+            ..Self::default()
+        }
+    }
+}
+
+impl Agent for RiskManaged {
+    fn decide(&mut self, obs: &MarketObservation) -> Decision {
+        // Own equity, marked from the observation's point-in-time closes.
+        let mut equity = obs.cash;
+        for p in &obs.portfolio {
+            if let Some(s) = obs.symbols.iter().find(|s| s.symbol == p.symbol) {
+                if let Some(&px) = s.close_history.last() {
+                    equity += p.shares * px;
+                }
+            }
+        }
+        if !self.peak_equity.is_finite() {
+            self.peak_equity = equity;
+        }
+
+        // Equal-weight basket over the trailing history common to every symbol.
+        let min_len = obs
+            .symbols
+            .iter()
+            .map(|s| s.close_history.len())
+            .min()
+            .unwrap_or(0);
+        let need = self.trend_lookback.max(self.vol_lookback) + 1;
+        let mut trend_positive = false;
+        let mut gross = 0.0;
+        if !obs.symbols.is_empty() && min_len >= need {
+            let n_sym = obs.symbols.len() as f64;
+            let basket: Vec<f64> = (0..min_len)
+                .map(|t| {
+                    obs.symbols
+                        .iter()
+                        .map(|s| {
+                            let h = &s.close_history;
+                            let tail = &h[h.len() - min_len..];
+                            if tail[0] > 0.0 {
+                                tail[t] / tail[0]
+                            } else {
+                                1.0
+                            }
+                        })
+                        .sum::<f64>()
+                        / n_sym
+                })
+                .collect();
+            let last = *basket.last().expect("min_len >= need > 0");
+            let mean = basket[basket.len() - self.trend_lookback..]
+                .iter()
+                .sum::<f64>()
+                / self.trend_lookback as f64;
+            trend_positive = last > mean;
+
+            let rets: Vec<f64> = basket
+                .windows(2)
+                .map(|w| if w[0] > 0.0 { w[1] / w[0] - 1.0 } else { 0.0 })
+                .collect();
+            let tail = &rets[rets.len() - self.vol_lookback..];
+            let m = tail.iter().sum::<f64>() / tail.len() as f64;
+            let var = tail.iter().map(|r| (r - m) * (r - m)).sum::<f64>() / tail.len() as f64;
+            let vol = var.sqrt();
+            gross = if vol > 0.0 {
+                (self.target_vol / vol).min(1.0)
+            } else {
+                1.0
+            };
+        }
+
+        // Drawdown halt on own equity; re-enter only on a fresh trend turn.
+        if !self.halted {
+            if equity > self.peak_equity {
+                self.peak_equity = equity;
+            }
+            if self.peak_equity > 0.0 && equity < self.peak_equity * (1.0 - self.max_drawdown) {
+                self.halted = true;
+            }
+        } else if trend_positive && !self.prev_trend_positive {
+            self.halted = false;
+            self.peak_equity = equity;
+        }
+        self.prev_trend_positive = trend_positive;
+
+        let invested = trend_positive && !self.halted && gross > 0.0;
+        let w = if invested {
+            gross / obs.symbols.len().max(1) as f64
+        } else {
+            0.0
+        };
+        let orders = obs
+            .symbols
+            .iter()
+            .map(|s| Order {
+                symbol: s.symbol.clone(),
+                action: if invested { Action::Buy } else { Action::Close },
+                target_weight: w,
+                confidence: 0.5,
+                rationale: if invested {
+                    format!("trend up, vol-scaled gross {gross:.3}")
+                } else if self.halted {
+                    "drawdown halt".to_string()
+                } else {
+                    "trend filter negative or warming up".to_string()
+                },
+            })
+            .collect();
+        Decision {
+            orders,
+            reasoning: "risk-managed trend + inverse-vol + drawdown halt".to_string(),
+            cost: None,
+        }
+    }
+}
+
 /// Cross-sectional momentum: equal-weight the symbols with positive trailing return.
 pub struct Momentum {
     pub lookback: usize,
@@ -199,6 +385,137 @@ impl Agent for Momentum {
             orders,
             reasoning: "cross-sectional momentum".to_string(),
             cost: None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sharpebench_protocol::{MarketObservation, PositionState, SymbolSnapshot};
+
+    fn obs(histories: &[(&str, Vec<f64>)], cash: f64) -> MarketObservation {
+        let symbols: Vec<SymbolSnapshot> = histories
+            .iter()
+            .map(|(sym, h)| SymbolSnapshot {
+                symbol: sym.to_string(),
+                close_history: h.clone(),
+                fundamentals: BTreeMap::new(),
+                news: Vec::new(),
+            })
+            .collect();
+        let portfolio = symbols
+            .iter()
+            .map(|s| PositionState {
+                symbol: s.symbol.clone(),
+                shares: 0.0,
+                avg_price: 0.0,
+            })
+            .collect();
+        MarketObservation {
+            date: "t".to_string(),
+            cash,
+            symbols,
+            portfolio,
+        }
+    }
+
+    fn geometric(start: f64, per_bar: f64, n: usize) -> Vec<f64> {
+        (0..n)
+            .map(|t| start * (1.0 + per_bar).powi(t as i32))
+            .collect()
+    }
+
+    fn gross_of(d: &Decision) -> f64 {
+        d.orders.iter().map(|o| o.target_weight).sum()
+    }
+
+    #[test]
+    fn risk_managed_is_flat_in_a_downtrend() {
+        let mut a = RiskManaged::default();
+        let d = a.decide(&obs(&[("A", geometric(100.0, -0.01, 30))], 100.0));
+        assert_eq!(gross_of(&d), 0.0, "downtrend must be fully flat");
+        assert!(d.orders.iter().all(|o| matches!(o.action, Action::Close)));
+    }
+
+    #[test]
+    fn risk_managed_is_flat_during_warmup() {
+        let mut a = RiskManaged::default();
+        // 10 bars of strong uptrend: shorter than the lookbacks require.
+        let d = a.decide(&obs(&[("A", geometric(100.0, 0.02, 10))], 100.0));
+        assert_eq!(gross_of(&d), 0.0, "insufficient history must be flat");
+    }
+
+    #[test]
+    fn risk_managed_scales_gross_down_with_volatility() {
+        // Calm uptrend: constant +1% per bar, zero realized vol → full gross.
+        let mut calm = RiskManaged::default();
+        let g_calm = gross_of(&calm.decide(&obs(&[("A", geometric(100.0, 0.01, 30))], 100.0)));
+        assert!((g_calm - 1.0).abs() < 1e-12, "zero vol sizes at the cap");
+
+        // Volatile uptrend: +10% / -6% alternating (std 0.08 per bar) → gross
+        // targeted at 0.01 / 0.08 = 0.125.
+        let mut px = 100.0;
+        let noisy: Vec<f64> = (0..30)
+            .map(|t| {
+                px *= if t % 2 == 0 { 1.10 } else { 0.94 };
+                px
+            })
+            .collect();
+        let mut hot = RiskManaged::default();
+        let g_hot = gross_of(&hot.decide(&obs(&[("A", noisy)], 100.0)));
+        assert!(g_hot > 0.0, "uptrend must be invested");
+        assert!(
+            g_hot < 0.2,
+            "high vol must scale gross well below the cap: {g_hot}"
+        );
+        assert!(g_hot < g_calm);
+    }
+
+    #[test]
+    fn risk_managed_halts_on_drawdown_and_reenters_on_fresh_trend() {
+        let up = geometric(100.0, 0.01, 30);
+        let down = geometric(100.0, -0.01, 30);
+        let mut a = RiskManaged::default();
+
+        // Invested in the uptrend; equity peak 100.
+        let d1 = a.decide(&obs(&[("A", up.clone())], 100.0));
+        assert!(gross_of(&d1) > 0.0);
+
+        // Equity drops 15% (beyond the 10% default halt) while the trend is
+        // still positive → fully flat.
+        let d2 = a.decide(&obs(&[("A", up.clone())], 85.0));
+        assert_eq!(gross_of(&d2), 0.0, "drawdown halt must go flat");
+
+        // Trend still positive on the next bar: no fresh turn, still halted.
+        let d3 = a.decide(&obs(&[("A", up.clone())], 85.0));
+        assert_eq!(
+            gross_of(&d3),
+            0.0,
+            "an already-positive trend is not a re-entry"
+        );
+
+        // Trend turns negative, then positive again → re-enter.
+        let d4 = a.decide(&obs(&[("A", down)], 85.0));
+        assert_eq!(gross_of(&d4), 0.0);
+        let d5 = a.decide(&obs(&[("A", up)], 85.0));
+        assert!(gross_of(&d5) > 0.0, "fresh trend turn must re-enter");
+    }
+
+    #[test]
+    fn risk_managed_is_deterministic() {
+        let seq = [
+            obs(&[("A", geometric(100.0, 0.01, 30))], 100.0),
+            obs(&[("A", geometric(100.0, 0.005, 30))], 95.0),
+            obs(&[("A", geometric(100.0, -0.01, 30))], 90.0),
+            obs(&[("A", geometric(100.0, 0.02, 30))], 92.0),
+        ];
+        let mut a = RiskManaged::default();
+        let mut b = RiskManaged::default();
+        for o in &seq {
+            let da = a.decide(o);
+            let db = b.decide(o);
+            assert_eq!(format!("{da:?}"), format!("{db:?}"));
         }
     }
 }

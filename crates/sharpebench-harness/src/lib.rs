@@ -8,6 +8,7 @@
 
 pub mod checkpoint;
 pub mod failure;
+pub mod perturb;
 
 pub use checkpoint::{run_resumable_sweep, SweepCheckpoint, TaskRecord, TaskState};
 pub use failure::{
