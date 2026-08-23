@@ -26,11 +26,16 @@ use crate::pbo::probability_of_backtest_overfitting;
 
 /// The statistics version stamped into every verdict, so an archived result is
 /// reproducible against the exact `sharpebench-stats` math that produced it.
-pub const METHODOLOGY_VERSION: &str = "sharpebench-stats/0.0.8";
+/// Taken from the crate version at compile time: `sharpebench-stats` and this
+/// crate share the workspace version, so the stamp cannot go stale on a release.
+pub const METHODOLOGY_VERSION: &str = concat!("sharpebench-stats/", env!("CARGO_PKG_VERSION"));
 
 /// Default cross-trial Sharpe dispersion used when the caller doesn't supply one.
-/// 0.5 is the López de Prado working assumption; the verdict flags that it was
-/// estimated, never reported.
+/// 0.5 is a **modelling prior, not a measurement** — the working value López de
+/// Prado uses in worked examples. A LITE verdict sees one return series and has
+/// no field to measure dispersion on, so the prior is all it can use; the
+/// explanation flags that it was estimated. When a field exists, measure it
+/// (`sharpebench_core::rank` does) and pass the value in `trials_sr_std`.
 const DEFAULT_TRIALS_SR_STD: f64 = 0.5;
 
 /// Fixed bootstrap settings for the FULL data-snooping family. Held constant so a

@@ -13,19 +13,25 @@
 use serde::{Deserialize, Serialize};
 
 use crate::calibration::brier_score;
+use crate::comparison_sets::{comparison_set, restrict_to_shared, TaggedRun, TaggedSubmission};
 use crate::decay::edge_half_life;
-use crate::deflated_sharpe::{deflated_sharpe_ratio, probabilistic_sharpe_ratio};
+use crate::deflated_sharpe::{deflated_sharpe_ratio, probabilistic_sharpe_ratio, sharpe_ratio};
 use crate::pass_k::{pass_k, PassMode};
 use crate::percentile::percentile_of;
 use crate::process::{process_score, ProcessEvent, Trace};
 use crate::rolling::rolling_sharpe;
 use crate::selection::{selection_robustness, SelectionRobustness};
 use crate::significance::bootstrap_pvalue;
-use crate::stats::mean;
+use crate::stats::{mean, std_dev};
 
 /// One seed×window run of an agent: its per-period returns plus the decision
 /// trace and (optionally) per-decision confidences/outcomes.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+///
+/// A submission's runs are laid out **window-major** (all seeds of window 0, then
+/// window 1, …), the order `sharpebench-harness` produces for every agent in a
+/// sweep. Position `i` is therefore the same (window, seed) cell for every agent
+/// in a field, which is what lets [`rank`] compare agents on their shared cells.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Run {
     pub returns: Vec<f64>,
     #[serde(default)]
@@ -41,7 +47,7 @@ pub struct Run {
 }
 
 /// An agent's full submission: many runs across seeds × windows.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct AgentSubmission {
     pub agent_id: String,
     pub runs: Vec<Run>,
@@ -106,6 +112,19 @@ fn max_drawdown(returns: &[f64]) -> f64 {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ScoreConfig {
     pub n_trials: u32,
+    /// Cross-trial dispersion of Sharpe ratios — the `sqrt(V[SR])` term in Bailey
+    /// & López de Prado's expected-maximum Sharpe, which sets how far the bar
+    /// rises with `n_trials`. It materially decides who is rank-eligible.
+    ///
+    /// The default 0.5 is a **modelling prior, not a measurement**: it is the
+    /// working value López de Prado uses in worked examples, adopted before any
+    /// field existed to measure it on. [`rank`] therefore prefers the *measured*
+    /// path — the sample standard deviation of per-period Sharpe ratios across the
+    /// submitted field, which is exactly the quantity the formula asks for — and
+    /// falls back to this configured value only when the field is too small to
+    /// estimate it (see `min_field_for_measured_sr_std`). [`score_agent`] has no
+    /// field and always uses this value. Whichever applied is stamped on every
+    /// [`CompositeScore`] as `trials_sr_std` + `trials_sr_std_source`.
     pub trials_sr_std: f64,
     /// Deflated-Sharpe bar an agent must clear to be rank-eligible (e.g. 0.95).
     pub dsr_bar: f64,
@@ -135,6 +154,26 @@ pub struct ScoreConfig {
     /// whose DSR CIs overlap are flagged statistically indistinguishable.
     #[serde(default = "default_dsr_ci_level")]
     pub dsr_ci_level: f64,
+    /// Compare agents only on the (window × seed) cells **every** agent in the
+    /// field completed (default: on). Runs carry no window ids, so [`rank`] keys
+    /// each run by its position in the window-major layout (see [`Run`]) and
+    /// restricts every submission to the positions all agents completed — the
+    /// [`crate::comparison_sets`] intersection, applied by default instead of
+    /// left to the caller. For a field where every agent completed the same cells
+    /// this is the identity. Agents with no runs at all are scored as-is
+    /// (ineligible by construction) and do not define the shared set, so one
+    /// empty submission cannot blank the board. Off only reproduces the old
+    /// unrestricted behaviour, where an agent scored on an easy subset of cells
+    /// could outrank one scored on all of them.
+    #[serde(default = "default_shared_run_set")]
+    pub shared_run_set: bool,
+    /// Minimum number of agents with a finite pooled Sharpe before [`rank`]
+    /// *measures* `trials_sr_std` from the field instead of using the configured
+    /// value. The relative standard error of a sample standard deviation is about
+    /// `1 / sqrt(2 (n - 1))`: 50% at three agents, 35% at five. Below five the
+    /// estimate is noisier than the prior it would replace, so five is the floor.
+    #[serde(default = "default_min_field_for_measured_sr_std")]
+    pub min_field_for_measured_sr_std: usize,
 }
 
 /// Default rolling-Sharpe window length (21 periods ≈ one trading month).
@@ -145,6 +184,30 @@ fn default_rolling_window() -> usize {
 /// Default DSR confidence-interval coverage (a 90% two-sided interval).
 fn default_dsr_ci_level() -> f64 {
     0.90
+}
+
+/// Shared-cell comparison is on by default: fairness is a property of the board,
+/// not an opt-in.
+fn default_shared_run_set() -> bool {
+    true
+}
+
+/// Default minimum field size for measuring `trials_sr_std` (see the field doc).
+fn default_min_field_for_measured_sr_std() -> usize {
+    5
+}
+
+/// Where the `trials_sr_std` that deflated a score came from.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TrialsSrStdSource {
+    /// `ScoreConfig::trials_sr_std` — a configured prior (the default 0.5 is a
+    /// modelling assumption, not a measurement).
+    #[default]
+    Configured,
+    /// The sample standard deviation of pooled per-period Sharpe ratios across the
+    /// ranked field — what the deflation formula actually asks for.
+    Measured,
 }
 
 impl Default for ScoreConfig {
@@ -163,12 +226,14 @@ impl Default for ScoreConfig {
             reference_dsr_population: Vec::new(),
             rolling_window: default_rolling_window(),
             dsr_ci_level: default_dsr_ci_level(),
+            shared_run_set: default_shared_run_set(),
+            min_field_for_measured_sr_std: default_min_field_for_measured_sr_std(),
         }
     }
 }
 
 /// The scored result for one agent.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CompositeScore {
     pub agent_id: String,
     pub deflated_sharpe: f64,
@@ -286,6 +351,21 @@ pub struct CompositeScore {
     /// agent (i.e. its rank is not statistically separable from a neighbor).
     /// Filled by [`rank`].
     pub dsr_tied: bool,
+    /// The cross-trial Sharpe dispersion this score was deflated with.
+    #[serde(default)]
+    pub trials_sr_std: f64,
+    /// Whether `trials_sr_std` was measured from the field or taken from the
+    /// configured prior. Always `Configured` from `score_agent` alone.
+    #[serde(default)]
+    pub trials_sr_std_source: TrialsSrStdSource,
+    /// Runs the agent submitted, before any shared-cell restriction.
+    #[serde(default)]
+    pub runs_submitted: usize,
+    /// Runs actually scored: the submitted runs on the field's shared cells (see
+    /// `ScoreConfig::shared_run_set`). Equals `runs_submitted` from `score_agent`
+    /// alone or for a field where every agent completed the same cells.
+    #[serde(default)]
+    pub runs_scored: usize,
 }
 
 /// Pareto dominance on (return↑, drawdown↓, turnover↓).
@@ -498,11 +578,86 @@ pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
         dsr_se: dsr_ci.se,
         tie_group: 0,
         dsr_tied: false,
+        trials_sr_std: cfg.trials_sr_std,
+        trials_sr_std_source: TrialsSrStdSource::Configured,
+        runs_submitted: sub.runs.len(),
+        runs_scored: sub.runs.len(),
     }
+}
+
+/// Restrict a field to the run positions every non-empty submission completed —
+/// the [`crate::comparison_sets`] intersection keyed by window-major position.
+/// Output order matches `subs`; empty submissions pass through untouched.
+fn restrict_to_shared_positions(subs: &[AgentSubmission]) -> Vec<AgentSubmission> {
+    // Zero-padded so the ids sort in position order; `restrict_to_shared` keeps
+    // run order anyway, the padding only makes `shared_windows` legible.
+    let tag = |i: usize| format!("{i:08}");
+    let tagged: Vec<TaggedSubmission> = subs
+        .iter()
+        .filter(|s| !s.runs.is_empty())
+        .map(|s| TaggedSubmission {
+            agent_id: s.agent_id.clone(),
+            runs: s
+                .runs
+                .iter()
+                .enumerate()
+                .map(|(i, run)| TaggedRun {
+                    window_id: tag(i),
+                    run: run.clone(),
+                })
+                .collect(),
+            in_sample_trials: s.in_sample_trials,
+            candidates: s.candidates.clone(),
+        })
+        .collect();
+    let roster: Vec<String> = tagged.iter().map(|s| s.agent_id.clone()).collect();
+    let set = comparison_set(&roster, &tagged);
+    // `tagged` holds the non-empty submissions in `subs` order, so walking it in
+    // lockstep (rather than looking up by id) is exact even if ids repeat.
+    let mut tagged_iter = tagged.iter();
+    subs.iter()
+        .map(|s| {
+            if s.runs.is_empty() {
+                return s.clone();
+            }
+            let t = tagged_iter
+                .next()
+                .expect("one tagged submission per non-empty submission");
+            restrict_to_shared(&set, t)
+        })
+        .collect()
+}
+
+/// The field-measured `trials_sr_std`: the sample standard deviation of pooled
+/// per-period Sharpe ratios across agents with a finite Sharpe, or `None` when
+/// fewer than `min_field` agents qualify. Sharpes are sorted before summing so
+/// the submission order of the field cannot move the deflation bar by an ULP.
+fn measured_trials_sr_std(pooled: &[Vec<f64>], min_field: usize) -> Option<f64> {
+    let mut sharpes: Vec<f64> = pooled
+        .iter()
+        .filter(|p| p.len() >= 2)
+        .map(|p| sharpe_ratio(p))
+        .filter(|sr| sr.is_finite())
+        .collect();
+    if sharpes.len() < min_field.max(2) {
+        return None;
+    }
+    sharpes.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    Some(std_dev(&sharpes))
 }
 
 /// Score and rank a field of agents. Eligible agents sort first (by composite
 /// desc); ineligible agents sort last (by raw return desc, for display only).
+///
+/// Two field-level controls run before any agent is scored, so neither is left
+/// for a caller to remember:
+/// - **Shared cells** (`cfg.shared_run_set`, default on): every submission is
+///   restricted to the run positions all agents completed, so an agent scored on
+///   an easy subset of cells is compared on the same cells as everyone else.
+/// - **Measured deflation** (`cfg.min_field_for_measured_sr_std`): with enough
+///   agents, `trials_sr_std` is the measured Sharpe dispersion of the field rather
+///   than the configured prior. Smaller fields use the configured value, byte for
+///   byte as before. Which applied is stamped on every score.
 ///
 /// ```
 /// use sharpebench_core::{rank, AgentSubmission, Run, ScoreConfig, Trace};
@@ -533,9 +688,20 @@ pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
 /// assert_eq!(board.len(), 2);
 /// ```
 pub fn rank(subs: &[AgentSubmission], cfg: &ScoreConfig) -> Vec<CompositeScore> {
+    // Shared-cell restriction first: everything below — attribution, the
+    // data-snooping family, crowdedness and the scores themselves — must see the
+    // same field, or the fairness control would apply to the rank key only.
+    let restricted;
+    let field: &[AgentSubmission] = if cfg.shared_run_set {
+        restricted = restrict_to_shared_positions(subs);
+        &restricted
+    } else {
+        subs
+    };
+
     // Pooled returns per agent + an equal-weight market proxy (the field average),
     // used for performance attribution: alpha (skill) vs beta (market exposure).
-    let pooled: Vec<Vec<f64>> = subs
+    let pooled: Vec<Vec<f64>> = field
         .iter()
         .map(|s| {
             s.runs
@@ -550,11 +716,28 @@ pub fn rank(subs: &[AgentSubmission], cfg: &ScoreConfig) -> Vec<CompositeScore> 
         .map(|i| pooled.iter().map(|p| p[i]).sum::<f64>() / n_agents)
         .collect();
 
-    let mut scores: Vec<CompositeScore> = subs
+    // Measured deflation: with enough agents the field's own Sharpe dispersion
+    // replaces the configured prior. A small field scores against `cfg` itself,
+    // so the configured path stays byte-identical.
+    let measured = measured_trials_sr_std(&pooled, cfg.min_field_for_measured_sr_std);
+    let measured_cfg = measured.map(|sr_std| ScoreConfig {
+        trials_sr_std: sr_std,
+        ..cfg.clone()
+    });
+    let eff_cfg = measured_cfg.as_ref().unwrap_or(cfg);
+    let sr_std_source = if measured.is_some() {
+        TrialsSrStdSource::Measured
+    } else {
+        TrialsSrStdSource::Configured
+    };
+
+    let mut scores: Vec<CompositeScore> = field
         .iter()
         .enumerate()
         .map(|(idx, s)| {
-            let mut cs = score_agent(s, cfg);
+            let mut cs = score_agent(s, eff_cfg);
+            cs.trials_sr_std_source = sr_std_source;
+            cs.runs_submitted = subs[idx].runs.len();
             if min_len >= 2 {
                 let (alpha, beta) = crate::attribution::alpha_beta(&pooled[idx], &market);
                 cs.alpha = alpha;
@@ -1006,5 +1189,181 @@ mod tests {
         let board = rank(&[lucky, skilled], &ScoreConfig::default());
         assert_eq!(board[0].rank_ordinal, 1, "leader is ordinal 1");
         assert_eq!(board[1].rank_ordinal, 0, "ineligible gets ordinal 0");
+    }
+
+    /// A field where every agent completed the identical cells must rank exactly
+    /// as it did before the shared-cell restriction existed: the restriction is
+    /// the identity there, down to the last bit of every statistic.
+    #[test]
+    fn homogeneous_field_is_unchanged_by_shared_run_set() {
+        let skilled = agent("skilled", (0..5).map(|_| run(0.002, 0.0005, 60)).collect());
+        let lucky = {
+            let mut runs = vec![run(0.02, 0.002, 60)];
+            runs.extend((0..4).map(|_| run(0.0, 0.003, 60)));
+            agent("lucky", runs)
+        };
+        let steady = agent("steady", (0..5).map(|_| run(0.001, 0.001, 60)).collect());
+        let field = [lucky, skilled, steady];
+        let on = rank(&field, &ScoreConfig::default());
+        let off = rank(
+            &field,
+            &ScoreConfig {
+                shared_run_set: false,
+                ..ScoreConfig::default()
+            },
+        );
+        assert_eq!(on, off, "identical cells ⇒ identical board");
+        assert!(on
+            .iter()
+            .all(|s| s.runs_scored == 5 && s.runs_submitted == 5));
+    }
+
+    /// The fairness property: an entrant whose runs cover only the easy cells is
+    /// compared on the shared cells and gains no rank from the subset.
+    #[test]
+    fn easy_subset_entrant_is_compared_on_the_shared_cells() {
+        // Cells 0–1 are easy (steady edge), cells 2–4 are hard (noisy, no edge).
+        // The veteran completed all five; the entrant only the two easy ones, with
+        // returns identical to the veteran's on those cells.
+        let easy = || run(0.004, 0.0005, 60);
+        let hard = || run(0.0, 0.004, 60);
+        let veteran = agent("veteran", vec![easy(), easy(), hard(), hard(), hard()]);
+        let entrant = agent("entrant", vec![easy(), easy()]);
+        let field = [veteran, entrant];
+
+        // Unrestricted, the subset pays: the entrant clears every gate while the
+        // veteran's hard cells sink it.
+        let off = rank(
+            &field,
+            &ScoreConfig {
+                shared_run_set: false,
+                ..ScoreConfig::default()
+            },
+        );
+        assert_eq!(off[0].agent_id, "entrant");
+        assert!(off[0].rank_eligible && !off[1].rank_eligible);
+
+        // On the shared cells both are scored on exactly the two easy runs, so
+        // their statistics coincide and the entrant holds no rank over the veteran.
+        let on = rank(&field, &ScoreConfig::default());
+        let get = |id: &str| on.iter().find(|s| s.agent_id == id).unwrap();
+        let (v, e) = (get("veteran"), get("entrant"));
+        assert_eq!(v.runs_scored, 2);
+        assert_eq!(e.runs_scored, 2);
+        assert_eq!(v.runs_submitted, 5);
+        assert_eq!(e.runs_submitted, 2);
+        assert_eq!(v.deflated_sharpe.to_bits(), e.deflated_sharpe.to_bits());
+        assert_eq!(v.rank_eligible, e.rank_eligible);
+        assert_eq!(v.tie_group, e.tie_group, "indistinguishable ⇒ one band");
+        assert!(v.dsr_tied && e.dsr_tied);
+        assert!(
+            e.rank_ordinal == 0 || v.rank_ordinal <= e.rank_ordinal,
+            "the entrant must not rank above the veteran"
+        );
+    }
+
+    /// An empty submission is ineligible by construction and must not blank the
+    /// shared set for everyone else.
+    #[test]
+    fn empty_submission_does_not_empty_the_shared_cells() {
+        let skilled = agent("skilled", (0..5).map(|_| run(0.002, 0.0005, 60)).collect());
+        let ghost = agent("ghost", Vec::new());
+        let board = rank(&[ghost, skilled], &ScoreConfig::default());
+        let get = |id: &str| board.iter().find(|s| s.agent_id == id).unwrap();
+        assert_eq!(get("skilled").runs_scored, 5);
+        assert!(get("skilled").rank_eligible);
+        assert!(!get("ghost").rank_eligible);
+    }
+
+    /// Below the measurement floor the configured `trials_sr_std` applies and the
+    /// board is byte-identical to scoring each agent alone with the same config.
+    #[test]
+    fn small_field_keeps_the_configured_sr_std_byte_identical() {
+        let cfg = ScoreConfig::default();
+        let field: Vec<AgentSubmission> = (0..4)
+            .map(|i| {
+                let m = 0.001 + 0.001 * i as f64;
+                agent(
+                    &format!("a{i}"),
+                    (0..5).map(|_| run(m, 0.001, 60)).collect(),
+                )
+            })
+            .collect();
+        let board = rank(&field, &cfg);
+        assert_eq!(board.len(), 4);
+        for s in &board {
+            assert_eq!(s.trials_sr_std_source, TrialsSrStdSource::Configured);
+            assert_eq!(s.trials_sr_std.to_bits(), cfg.trials_sr_std.to_bits());
+            let alone = score_agent(
+                field.iter().find(|a| a.agent_id == s.agent_id).unwrap(),
+                &cfg,
+            );
+            assert_eq!(s.deflated_sharpe.to_bits(), alone.deflated_sharpe.to_bits());
+            assert_eq!(s.dsr_ci_low.to_bits(), alone.dsr_ci_low.to_bits());
+        }
+        // Pinning the measured path off reproduces the same board exactly.
+        let pinned = rank(
+            &field,
+            &ScoreConfig {
+                min_field_for_measured_sr_std: usize::MAX,
+                ..cfg
+            },
+        );
+        assert_eq!(board, pinned);
+    }
+
+    /// With enough agents the deflation uses the field's measured Sharpe
+    /// dispersion, every score says so, and submission order cannot move it.
+    #[test]
+    fn large_field_measures_trials_sr_std_from_the_field() {
+        let cfg = ScoreConfig::default();
+        // Moderate Sharpes (roughly 0.1 to 0.7 per period) keep the PSR in its
+        // sensitive range, so a change in the deflation bar shows in the DSR.
+        let field: Vec<AgentSubmission> = (0..5)
+            .map(|i| {
+                let m = 0.0002 + 0.0003 * i as f64;
+                agent(
+                    &format!("a{i}"),
+                    (0..5).map(|_| run(m, 0.003, 60)).collect(),
+                )
+            })
+            .collect();
+        let board = rank(&field, &cfg);
+
+        // Hand-computed reference: sample std of sorted pooled Sharpes.
+        let mut sharpes: Vec<f64> = field
+            .iter()
+            .map(|a| {
+                let pooled: Vec<f64> = a
+                    .runs
+                    .iter()
+                    .flat_map(|r| r.returns.iter().copied())
+                    .collect();
+                sharpe_ratio(&pooled)
+            })
+            .collect();
+        sharpes.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let expected = std_dev(&sharpes);
+        assert!(expected > 0.0 && expected.is_finite());
+
+        let mut moved = false;
+        for s in &board {
+            assert_eq!(s.trials_sr_std_source, TrialsSrStdSource::Measured);
+            assert_eq!(s.trials_sr_std.to_bits(), expected.to_bits());
+            let alone = score_agent(
+                field.iter().find(|a| a.agent_id == s.agent_id).unwrap(),
+                &cfg,
+            );
+            moved |= s.deflated_sharpe.to_bits() != alone.deflated_sharpe.to_bits();
+        }
+        assert!(
+            moved,
+            "measured dispersion must actually move the deflation"
+        );
+
+        let mut reversed = field.clone();
+        reversed.reverse();
+        let again = rank(&reversed, &cfg);
+        assert_eq!(again[0].trials_sr_std.to_bits(), expected.to_bits());
     }
 }
