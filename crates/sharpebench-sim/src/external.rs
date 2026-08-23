@@ -17,7 +17,9 @@
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::time::Duration;
 
 use sharpebench_protocol::{Decision, MarketObservation};
 
@@ -35,6 +37,12 @@ const DEFAULT_BREAKER_THRESHOLD: u32 = 3;
 
 /// Default bounded per-decision retries on a transient HTTP transport blip.
 const DEFAULT_HTTP_RETRIES: u32 = 2;
+
+/// Wall-clock budget for one stdio decision. Pipes have no OS-level read
+/// timeout (unlike sockets), so a subprocess that consumes the observation but
+/// never answers - a shell entrypoint, a wedged agent - would block the harness
+/// forever without this bound.
+const STDIO_DECIDE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// An empty-orders hold emitted when a decision could not be produced. The health
 /// (not this value) carries whether it was a masked fault vs. a deliberate hold.
@@ -57,10 +65,17 @@ fn classify_io(err: &std::io::Error) -> DecideError {
 }
 
 /// Drives an external agent subprocess over newline-delimited JSON.
+///
+/// stdout is drained by a dedicated reader thread and consumed through a
+/// channel, because a pipe cannot carry an OS read timeout the way the HTTP
+/// transport's socket can: `recv_timeout` is the only way to bound how long a
+/// silent subprocess can stall a decision. The thread exits on EOF, which the
+/// child's death (see [`Drop`]) guarantees.
 pub struct ExternalAgent {
     child: Child,
     stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
+    lines: Receiver<std::io::Result<String>>,
+    timeout: Duration,
     breaker: CircuitBreaker,
     health: TransportHealth,
 }
@@ -81,27 +96,54 @@ impl ExternalAgent {
             .stdout
             .take()
             .ok_or_else(|| std::io::Error::other("no stdout"))?;
+        let (tx, lines) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut reader = BufReader::new(stdout);
+            loop {
+                let mut line = String::new();
+                match reader.read_line(&mut line) {
+                    Ok(0) => break,
+                    Ok(_) => {
+                        if tx.send(Ok(line)).is_err() {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tx.send(Err(e));
+                        break;
+                    }
+                }
+            }
+        });
         Ok(Self {
             child,
             stdin,
-            stdout: BufReader::new(stdout),
+            lines,
+            timeout: STDIO_DECIDE_TIMEOUT,
             breaker: CircuitBreaker::new(DEFAULT_BREAKER_THRESHOLD),
             health: TransportHealth::default(),
         })
     }
 
+    /// Override the per-decision wall-clock budget (default 30s).
+    pub fn with_decide_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
+
     /// One decision attempt over the stdio pipe, returning a typed [`DecideError`]
     /// rather than degrading to a hold. A closed stdout (EOF) or a broken pipe is a
-    /// transport fault; unparseable output is the agent's protocol fault.
+    /// transport fault; unparseable output is the agent's protocol fault; a
+    /// subprocess that stays silent past [`STDIO_DECIDE_TIMEOUT`] is a timeout.
     fn decide_once(&mut self, obs: &MarketObservation) -> Result<Decision, DecideError> {
         let line = serde_json::to_string(obs).map_err(|_| DecideError::Transport)?;
         writeln!(self.stdin, "{line}").map_err(|e| classify_io(&e))?;
         self.stdin.flush().map_err(|e| classify_io(&e))?;
-        let mut resp = String::new();
-        match self.stdout.read_line(&mut resp) {
-            Ok(0) => Err(DecideError::Transport),
-            Ok(_) => serde_json::from_str(&resp).map_err(|_| DecideError::Protocol),
-            Err(e) => Err(classify_io(&e)),
+        match self.lines.recv_timeout(self.timeout) {
+            Ok(Ok(resp)) => serde_json::from_str(&resp).map_err(|_| DecideError::Protocol),
+            Ok(Err(_)) => Err(DecideError::Transport),
+            Err(RecvTimeoutError::Timeout) => Err(DecideError::Timeout),
+            Err(RecvTimeoutError::Disconnected) => Err(DecideError::Transport),
         }
     }
 }
@@ -249,5 +291,53 @@ impl Agent for HttpAgent {
 impl TransportDiagnostics for HttpAgent {
     fn health(&self) -> &TransportHealth {
         &self.health
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Spawn a subprocess that consumes its stdin but never writes a line to
+    /// stdout - the shape of a wedged agent (or a shell entrypoint that talks
+    /// only to stderr).
+    fn spawn_silent_agent() -> ExternalAgent {
+        #[cfg(windows)]
+        let agent = ExternalAgent::spawn(
+            "powershell",
+            &[
+                "-NoProfile",
+                "-Command",
+                "$null = [Console]::In.ReadLine(); Start-Sleep -Seconds 60",
+            ],
+        );
+        #[cfg(not(windows))]
+        let agent = ExternalAgent::spawn("sh", &["-c", "read line; sleep 60"]);
+        agent.expect("spawning the platform shell must work")
+    }
+
+    #[test]
+    fn a_silent_subprocess_times_out_instead_of_hanging_the_harness() {
+        let mut agent = spawn_silent_agent().with_decide_timeout(Duration::from_millis(300));
+        let obs = MarketObservation {
+            date: "2026-01-01".to_string(),
+            cash: 1000.0,
+            symbols: Vec::new(),
+            portfolio: Vec::new(),
+        };
+        let start = std::time::Instant::now();
+        let decision = agent.decide(&obs);
+        assert!(
+            start.elapsed() < Duration::from_secs(30),
+            "the decision must return within the wall-clock budget, not block on the pipe"
+        );
+        assert!(decision.orders.is_empty(), "a timed-out decision is a hold");
+        let health = agent.health();
+        assert_eq!(
+            health.last_error,
+            Some(DecideError::Timeout),
+            "the stall is recorded as a timeout fault, not mistaken for a deliberate hold"
+        );
+        assert!(health.degraded());
     }
 }

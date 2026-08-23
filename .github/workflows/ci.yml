@@ -8,10 +8,17 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+# A superseded push has nothing left to prove; cancel its runs so the newest
+# commit gets the runners. Release tags run their own workflow, unaffected.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     name: fmt · clippy
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
 
@@ -23,6 +30,8 @@ jobs:
         with:
           toolchain: "1.96.0"
           components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
 
       - name: Format
         run: cargo fmt --all --check
@@ -41,6 +50,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
 
@@ -48,6 +58,8 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.96.0"
+
+      - uses: Swatinem/rust-cache@v2
 
       - name: Build
         run: cargo build --workspace --locked || cargo build --workspace
@@ -58,6 +70,7 @@ jobs:
   python:
     name: sharpebench-py (fmt, clippy, maturin, pytest)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     # crates/sharpebench-py is `exclude`d from the workspace (pyo3 needs a Python
     # interpreter at build time), so the `check` job above never sees it: root
     # `cargo fmt --all` / `cargo clippy --all-targets` resolve against workspace
@@ -72,6 +85,10 @@ jobs:
         with:
           toolchain: "1.96.0"
           components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/sharpebench-py
 
       - uses: actions/setup-python@v5
         with:
@@ -103,11 +120,13 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.96.0"
+      - uses: Swatinem/rust-cache@v2
       - name: Same input → byte-identical leaderboard, twice
         shell: bash
         run: |
@@ -128,22 +147,26 @@ jobs:
   audit:
     name: benchmark self-audit
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.96.0"
+      - uses: Swatinem/rust-cache@v2
       - name: The scorer resists every known gaming attack
         run: cargo run -q -p sharpebench -- audit
 
   realism:
     name: frozen datasets behave like markets
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.96.0"
+      - uses: Swatinem/rust-cache@v2
       - name: The scoring data exhibits Cont's stylized facts
         run: |
           cargo run -q -p sharpebench -- realism --data data/us-indices-1d.csv
@@ -152,6 +175,7 @@ jobs:
   supply-chain:
     name: cargo-deny (licenses · advisories · bans · sources)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
       - uses: EmbarkStudios/cargo-deny-action@v2
@@ -161,6 +185,7 @@ jobs:
   docs:
     name: docs build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       - name: Install mdBook
