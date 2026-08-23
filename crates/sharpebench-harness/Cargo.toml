@@ -7,9 +7,9 @@ description = "SharpeBench orchestration: drive an agent over seeds × windows a
 repository.workspace = true
 
 [dependencies]
-sharpebench-core = { path = "../sharpebench-core", version = "0.2.1" }
-sharpebench-protocol = { path = "../sharpebench-protocol", version = "0.2.1" }
-sharpebench-sim = { path = "../sharpebench-sim", version = "0.2.1" }
+sharpebench-core = { path = "../sharpebench-core", version = "0.3.0" }
+sharpebench-protocol = { path = "../sharpebench-protocol", version = "0.3.0" }
+sharpebench-sim = { path = "../sharpebench-sim", version = "0.3.0" }
 serde = { version = "1", features = ["derive"] }
 # `float_roundtrip`: the checkpoint persists each Run's f64 return series, and a
 # resumed sweep must reload it bit-identically to an uninterrupted one (determinism
