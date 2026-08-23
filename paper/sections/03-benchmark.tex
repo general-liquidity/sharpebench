@@ -1,34 +1,22 @@
 \section{The benchmark}\label{sec:benchmark}
 
-A submission is a set of runs: one per-period return series, with an optional decision trace and per-decision confidences, for each execution seed and each out-of-sample window. The scorer turns a field of submissions into a ranked board. This section states what it computes, in the units it computes it, and which statistics decide rank.
-
-\subsection{Contract}\label{sec:contract}
-
-The harness sends a point-in-time market observation and the agent returns a decision. That is the entire interface. An agent is any program that reads the observation and writes the decision, over standard input or an HTTP endpoint, in any language. The observation carries only history at or before the decision time, which is the property \cref{sec:integrity} examines.
+A submission is a set of runs: one per-period return series, with an optional decision trace and per-decision confidences, for each execution seed and each out-of-sample window. The scorer turns a field of submissions into a ranked board. The harness sends a point-in-time observation and the agent returns a decision, over standard input or an HTTP endpoint, in any language; that is the entire contract. This section states what the scorer computes, in the units it computes it, and which statistics decide rank.
 
 \subsection{Statistics}\label{sec:stats}
 
-Every Sharpe ratio below is computed on per-period returns and is not annualized. The distinction is the subject of the first empirical finding in \cref{sec:experiments}, so it is stated here once and relied on throughout.
+Every Sharpe ratio below is computed on per-period returns and is not annualized. The distinction is the subject of the first finding in \cref{sec:experiments}, so it is stated once here and relied on throughout.
 
-\paragraph{Probabilistic Sharpe ratio.} For an observed per-period Sharpe $\widehat{SR}$ over a track of length $n$ with sample skewness $\hat{\gamma}_3$ and kurtosis $\hat{\gamma}_4$, the probability that the true Sharpe exceeds a benchmark $SR^{*}$ is \citep{bailey2014deflated}
+\paragraph{Probabilistic and deflated Sharpe.} For an observed per-period Sharpe $\widehat{SR}$ over a track of length $n$ with sample skewness $\hat{\gamma}_3$ and kurtosis $\hat{\gamma}_4$, the probability that the true Sharpe exceeds a benchmark $SR^{*}$ is \citep{bailey2014deflated}
 \begin{equation}\label{eq:psr}
 \widehat{PSR}(SR^{*}) = \Phi\left(\frac{(\widehat{SR}-SR^{*})\sqrt{n-1}}{\sqrt{1-\hat{\gamma}_3\,\widehat{SR}+\frac{\hat{\gamma}_4-1}{4}\,\widehat{SR}^{2}}}\right).
 \end{equation}
-Fat tails and negative skew lower the PSR for the same headline Sharpe. Those are the signatures of strategies that work until they do not.
-
-\paragraph{Deflated Sharpe ratio.} The deflated Sharpe is the PSR evaluated against the Sharpe one expects from the best of $N$ independent trials. With $\sigma_{\text{trials}}$ the dispersion of Sharpe ratios across those trials,
+Fat tails and negative skew lower it for the same headline Sharpe. The deflated Sharpe is the PSR evaluated against the Sharpe one expects from the best of $N$ trials with dispersion $\sigma_{\text{trials}}$,
 \begin{equation}\label{eq:deflation}
 SR^{*}_{0} = \sigma_{\text{trials}}\left[(1-\gamma)\,Z^{-1}\!\left(1-\tfrac{1}{N}\right) + \gamma\,Z^{-1}\!\left(1-\tfrac{1}{Ne}\right)\right],
 \end{equation}
-where $\gamma$ is the Euler--Mascheroni constant and $Z^{-1}$ the standard normal quantile. Every additional strategy tried raises the bar the survivor must clear. The scorer takes $N$ as the field size plus each agent's declared in-sample trials, so a strategy mined from a thousand private backtests is deflated for that search too.
+with $\gamma$ the Euler--Mascheroni constant and $Z^{-1}$ the normal quantile. $N$ is the field size plus each agent's declared in-sample trials, so a strategy mined from a thousand private backtests is deflated for that search. $\sigma_{\text{trials}}$ is annualized in the literature it comes from and per period inside \cref{eq:deflation}; the scorer takes it annualized and divides by $\sqrt{\text{periods per year}}$ once at the point of use. When the field holds at least five agents it instead measures the dispersion of per-period Sharpes across the field, which needs no conversion, and records which path was taken on every score.
 
-$\sigma_{\text{trials}}$ is an annualized quantity in the literature it comes from and a per-period quantity inside \cref{eq:deflation}. The scorer therefore takes it annualized and divides by $\sqrt{\text{periods per year}}$ at the point of use. When the field holds at least five agents it instead measures the dispersion of per-period Sharpes across the field directly, which needs no conversion, and records which path was taken on every score.
-
-\paragraph{Reliability.} Following the $\text{pass}^{k}$ metric of \citet{taubench2024}, each run passes if its own PSR against a per-run benchmark clears a bar, and the agent passes if the runs pass under a mode. The default mode requires every run, across every seed and every window, because an agent that is safe on average is not safe. An agent that earns a spectacular return on one run and noise on the rest fails, however high its pooled return.
-
-\paragraph{Significance.} A stationary block bootstrap \citep{politis1994stationary} with a fixed seed tests each agent's excess return against a null of no edge, preserving serial correlation so autocorrelated returns do not fool it. Across the field it also computes White's Reality Check \citep{white2000reality}, Hansen's test for superior predictive ability \citep{hansen2005spa}, and the Romano--Wolf step-down procedure \citep{romano2005stepwise}. Only the per-agent bootstrap decides eligibility. The three field-wide tests are computed and reported on every row; they do not gate. Earlier documentation of the benchmark described them as gates. They were not, and this paper states the predicate exactly.
-
-\paragraph{Process.} Each run emits an audit trace. An order that skipped the pre-trade risk gate, an order of absurd or non-finite size, an action on a denylisted instrument, or trading through a drawdown halt is a block-severity violation, and one such event in any run makes the submission ineligible regardless of its return.
+\paragraph{Reliability, significance, process.} Following $\text{pass}^{k}$ \citep{taubench2024}, each run passes if its own PSR clears a per-run bar and the agent passes under a mode; the default requires every run across every seed and window, because an agent that is safe on average is not safe. A stationary block bootstrap \citep{politis1994stationary} with a fixed seed tests each agent against a null of no edge while preserving serial correlation. The field-wide Reality Check \citep{white2000reality}, superior-predictive-ability test \citep{hansen2005spa} and Romano--Wolf step-down \citep{romano2005stepwise} are computed and reported on every row; they do not gate, and earlier documentation that called them gates was wrong. Each run emits an audit trace, and one block-severity event in any run, an order that skipped the risk gate, an absurd-size order, a denylisted action, or trading through a drawdown halt, makes the submission ineligible regardless of return.
 
 \subsection{The eligibility predicate}\label{sec:predicate}
 
@@ -36,38 +24,30 @@ An agent is rank-eligible if and only if
 \begin{equation}\label{eq:eligible}
 \text{DSR} \ge \beta \;\wedge\; \text{pass}^{k} \;\wedge\; \text{process} \;\wedge\; p_{\text{boot}} < \alpha \;\wedge\; \text{mandate},
 \end{equation}
-with defaults $\beta = 0.95$, $\alpha = 0.05$, a per-run PSR bar of $0.90$, and a mandate of a maximum drawdown over the pooled track and over any single run. Eligible agents sort by deflated Sharpe. Ineligible agents sort last, by raw return, for display only. Raw return never buys rank.
+with defaults $\beta = 0.95$, $\alpha = 0.05$, a per-run PSR bar of $0.90$, and a mandate bounding drawdown over the pooled track and over any single run. Eligible agents sort by deflated Sharpe; ineligible agents sort last by raw return, for display only. Raw return never buys rank. Everything else the scorer computes, alpha and beta against the field, calibration, the half-life of the information coefficient, the three field-wide tests, drawdown, turnover, Sortino and a rolling worst-window Sharpe, is reported beside the rank and does not move it, so a high score is legible because its reasons are on the same row.
 
-The predicate is five terms. Everything else the scorer computes is reported beside the rank and does not move it: alpha and beta against the field, calibration of stated confidence against outcomes, the half-life of the information coefficient, the three field-wide significance tests, maximum drawdown, turnover, the Sortino ratio, and a rolling worst-window Sharpe. A high score is legible because the reasons it is high are on the same row.
+\subsection{Simulator and data}\label{sec:simdata}
 
-\subsection{Simulator and cost model}\label{sec:sim}
-
-The data store returns rows at or before the decision index. Execution charges a per-trade fee, seeded slippage, own-order impact that scales with the square root of participation, and financing on gross exposure above one times net asset value. Fills can be capped at a fraction of participation with the remainder deferred. Three named cost profiles ship: none, typical, and worst case. The typical profile is 2 basis points fee, 3 slippage, 50 impact and 5 financing; worst case is 10, 15, 150 and 20 with a participation cap of 10 percent and a two-bar delay. All experiments in this paper use the typical profile. The seeded slippage is what makes different execution seeds produce different runs and gives $\text{pass}^{k}$ something to measure.
-
-\subsection{Data}\label{sec:data}
-
-Nine frozen datasets ship with the benchmark, every one keyless and redistributable, each with a SHA-256 sidecar and a deterministic fetch script whose check mode reproduces the committed bytes. \Cref{tab:data} lists them. Before any agent is scored on a dataset, the dataset is scored: a battery of stylized facts after \citet{cont2001empirical} tests excess kurtosis, volatility clustering, gain-loss asymmetry, aggregational Gaussianity and time-reversal asymmetry, and issues a verdict. Seven of the nine pass. Weekly US indices fail the aggregation test because 522 bars is too short for it, and FX majors fail time-reversal asymmetry, which is known to be weak in that market. Both ship with the verdict recorded. A realism gate that never fails is not a gate.
+Execution charges fees, seeded slippage, square-root own-order impact and financing under three named cost profiles; all experiments use the typical profile, and the seeded slippage is what gives $\text{pass}^{k}$ different runs to measure. Nine keyless, hash-pinned datasets ship across four asset classes and four bar sizes (\cref{tab:data}), and each is scored against the stylized facts of \citet{cont2001empirical} before any agent is scored on it. Seven pass. Weekly US indices fail the aggregation test because 522 bars is too short for it, and FX majors fail time-reversal asymmetry, which is weak in that market; both ship with the verdict recorded, because a realism gate that never fails is not a gate. Single-name equities are absent for want of a keyless feed. \Cref{app:simdata} gives the cost parameters and the data caveats.
 
 \begin{table}[t]
 \centering
 \small
-\caption{Frozen datasets. Rows are per symbol. Periods per year is the value every annualized threshold is converted with.}
+\caption{Frozen datasets. Bars are per symbol. Periods per year is what every annualized threshold is converted with.}
 \label{tab:data}
-\begin{tabular}{llrrrl}
+\begin{tabular}{llrrl}
 \toprule
-Dataset & Symbols & Bars & Periods/yr & Range & Realism \\
+Dataset & Symbols & Bars & Periods/yr & Realism \\
 \midrule
-US indices, daily & SPX DJI IXIC & 7540 & 252 & 2016--2026 & pass \\
-US indices, weekly & same & 522 & 52 & 2016--2026 & fail (n) \\
-Crypto majors, 1h & BTC ETH SOL BNB XRP & 24000 & 8760 & 2023--2026 & pass \\
-Crypto majors, 4h & same & 6000 & 2190 & 2023--2026 & pass \\
-Crypto majors, daily & same & 5001 & 365 & 2023--2026 & pass \\
-Crypto majors, weekly & same & 307 & 52 & 2020--2026 & pass \\
-FX majors, daily & EUR GBP JPY AUD CHF vs USD & 4157 & 252 & 2010--2026 & fail (Zumbach) \\
-Commodities, daily & WTI Brent & 4126 & 252 & 2010--2026 & pass \\
-Rates, daily & 10y Treasury yield & 4157 & 252 & 2010--2026 & pass \\
+US indices 1d & SPX DJI IXIC & 7540 & 252 & pass \\
+US indices 1w & same & 522 & 52 & fail, short \\
+Crypto majors 1h & BTC ETH SOL BNB XRP & 24000 & 8760 & pass \\
+Crypto majors 4h & same & 6000 & 2190 & pass \\
+Crypto majors 1d & same & 5001 & 365 & pass \\
+Crypto majors 1w & same & 307 & 52 & pass \\
+FX majors 1d & EUR GBP JPY AUD CHF vs USD & 4157 & 252 & fail, Zumbach \\
+Commodities 1d & WTI Brent & 4126 & 252 & pass \\
+Rates 1d & 10y Treasury yield & 4157 & 252 & pass \\
 \bottomrule
 \end{tabular}
 \end{table}
-
-Two datasets carry caveats the scripts document. The commodities file keeps the WTI close of $-36.98$ on 20 April 2020 as published, which dominates its moments; a start date of May 2020 is the documented opt-out. The rates file's close column is a yield in percent, not a price. Single-name equities are absent because no keyless feed exists for them; that is the known gap in coverage.

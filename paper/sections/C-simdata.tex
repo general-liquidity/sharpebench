@@ -1,0 +1,46 @@
+\section{Simulator, data, replay and contamination}\label{app:simdata}
+
+\subsection{Simulator and cost model}
+
+The data store returns rows at or before the decision index. Execution charges a per-trade fee, seeded slippage, own-order impact that scales with the square root of participation, and financing on gross exposure above one times net asset value. Fills can be capped at a fraction of participation with the remainder deferred. Three named cost profiles ship: none, typical, and worst case. The typical profile is 2 basis points fee, 3 slippage, 50 impact and 5 financing; worst case is 10, 15, 150 and 20 with a participation cap of 10 percent and a two-bar delay. All experiments in this paper use the typical profile. The seeded slippage is what makes different execution seeds produce different runs and gives $\text{pass}^{k}$ something to measure.
+
+\subsection{Data}\label{sec:data}
+
+Nine frozen datasets ship with the benchmark, every one keyless and redistributable, each with a SHA-256 sidecar and a deterministic fetch script whose check mode reproduces the committed bytes. \Cref{tab:data} lists them. Before any agent is scored on a dataset, the dataset is scored: a battery of stylized facts after \citet{cont2001empirical} tests excess kurtosis, volatility clustering, gain-loss asymmetry, aggregational Gaussianity and time-reversal asymmetry, and issues a verdict. Seven of the nine pass. Weekly US indices fail the aggregation test because 522 bars is too short for it, and FX majors fail time-reversal asymmetry, which is known to be weak in that market. Both ship with the verdict recorded. A realism gate that never fails is not a gate.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Frozen datasets. Rows are per symbol. Periods per year is the value every annualized threshold is converted with.}
+\label{tab:data}
+\begin{tabular}{llrrrl}
+\toprule
+Dataset & Symbols & Bars & Periods/yr & Range & Realism \\
+\midrule
+US indices, daily & SPX DJI IXIC & 7540 & 252 & 2016--2026 & pass \\
+US indices, weekly & same & 522 & 52 & 2016--2026 & fail (n) \\
+Crypto majors, 1h & BTC ETH SOL BNB XRP & 24000 & 8760 & 2023--2026 & pass \\
+Crypto majors, 4h & same & 6000 & 2190 & 2023--2026 & pass \\
+Crypto majors, daily & same & 5001 & 365 & 2023--2026 & pass \\
+Crypto majors, weekly & same & 307 & 52 & 2020--2026 & pass \\
+FX majors, daily & EUR GBP JPY AUD CHF vs USD & 4157 & 252 & 2010--2026 & fail (Zumbach) \\
+Commodities, daily & WTI Brent & 4126 & 252 & 2010--2026 & pass \\
+Rates, daily & 10y Treasury yield & 4157 & 252 & 2010--2026 & pass \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Two datasets carry caveats the scripts document. The commodities file keeps the WTI close of $-36.98$ on 20 April 2020 as published, which dominates its moments; a start date of May 2020 is the documented opt-out. The rates file's close column is a yield in percent, not a price. Single-name equities are absent because no keyless feed exists for them; that is the known gap in coverage.
+
+\subsection{Replay and recompute}\label{sec:replay}
+
+A run can be captured as a trajectory holding only the agent's raw decisions, the window, and the execution seed, and never any return or self-reported statistic. A separate verifier replays the decisions through the same engine against the frozen dataset and recomputes the score. Capture and replay share one code path, so the round trip is exact by construction, and a test asserts that doubling every order in a captured trajectory recomputes to different returns. An artifact therefore cannot lie about its returns. What it cannot do is prove that the committed strategy produced those decisions; that is the job of the commitment in the next subsection, and the two mechanisms are not yet joined by code.
+
+
+\subsection{Contamination}\label{sec:contamination}
+
+Two defenses ship. A held-out dataset can be sealed under a published commitment to its hash, so the benchmark can prove later that the data a model was scored on is the data it committed to before scoring. A canary token with the standard training-corpus warning is embedded beside it, so post-hoc detection of a model that trained on the scenarios is possible. Separately, a masked view of any dataset renames symbols and dates to opaque identifiers, which defeats an agent that pattern-matches memorized tickers.
+
+\subsection{The units correction, in detail}\label{app:unitsfix}
+
+The fix, shipped in v0.3.0, leaves the per-period kernel untouched and gives the configuration a periods-per-year field so that $\sigma_{\text{trials}}$ is stated annualized and converted once at the point of use. A test asserts the conversion is applied exactly once on the configured path and never on the measured path. Another asserts that an SPX-like series is eligible under an annualized prior of $0.1$ at 252 periods per year and ineligible under the same prior at one period per year, which reproduces the old units exactly. A test that the same series clears the original $0.5$ prior was not written, because it cannot: $0.5$ annualized at 50 trials is a benchmark of $1.14$ annualized, and the index sits below it at any track length. That is the correct verdict for that prior, and the benchmark now states it in units a reader can check.

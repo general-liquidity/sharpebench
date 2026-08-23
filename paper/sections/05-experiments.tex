@@ -4,7 +4,7 @@ Every number in this section is produced by the commands in \cref{app:commands} 
 
 \subsection{The demonstration that motivated the benchmark}\label{sec:demo}
 
-\Cref{fig:demotion} shows the three-agent field the benchmark shipped with. A skilled momentum agent, a lucky agent that swung big, and a bot that matched the skilled return but placed one order that never passed its risk gate. The lucky agent has twice the raw return of the winner and fails $\text{pass}^{k}$. The ungated bot has an identical deflated Sharpe of $1.000$ and is zeroed by the process gate. The agent with the highest raw return ranks last.
+\Cref{fig:demotion} shows the three-agent field the benchmark shipped with: a skilled momentum agent, a lucky agent with twice its raw return that fails $\text{pass}^{k}$, and a bot that matched the skilled return but placed one order that never passed its risk gate and is zeroed by the process gate. The agent with the highest raw return ranks last. \Cref{fig:deflation} shows why: one fixed track, scored against a growing pool of trials, crosses the eligibility bar between 32 and 64 trials and collapses past a few hundred. The agent did not change; the context did. Both figures are true and both are computed on synthetic returns. The rest of this section asks what happens on the market.
 
 \begin{figure}[t]
 \centering
@@ -19,12 +19,8 @@ Every number in this section is produced by the commands in \cref{app:commands} 
 \caption{One track, ever more trials.}
 \label{fig:deflation}
 \end{subfigure}
-\caption{(a) The shipped demonstration: the agent with the highest raw return ranks last. (b) The same return track scored against a growing pool of trials, per-period Sharpe $0.85$ over 150 periods with normal moments. It is convincing as a one-off and indistinguishable from luck once it is the survivor of hundreds of attempts. Both computed with the kernel's own formulas.}
+\caption{(a) The shipped demonstration. (b) The same track scored against a growing pool of trials, per-period Sharpe $0.85$ over 150 periods, normal moments. Both computed with the kernel's own formulas.}
 \end{figure}
-
-\Cref{fig:deflation} shows why. Holding one agent's returns fixed and growing the number of strategies tried before it was selected, the deflated score is near certainty when the track stands alone, crosses the eligibility bar between 32 and 64 trials, and collapses toward zero past a few hundred. The agent did not change. The context did.
-
-These two figures are the argument the benchmark was built on, and they are true. They are also both computed on synthetic returns. The rest of this section asks what happens on the market.
 
 \subsection{Finding 1: the deflation prior was in the wrong units}\label{sec:units}
 
@@ -51,7 +47,7 @@ The kernel computes every Sharpe per period. The default $\sigma_{\text{trials}}
 
 The rival benchmarks in \cref{sec:related} report annualized Sharpe without deflating. This benchmark deflated without annualizing. Both are unit errors, in opposite directions, and the second is harder to notice because it produces a benchmark that appears admirably strict. It also explains, completely, why the demonstration in \cref{sec:demo} had only ever been shown on synthetic inputs: those had per-period returns large enough to clear an annualized bar.
 
-The fix, shipped in v0.3.0, leaves the per-period kernel untouched and gives the configuration a periods-per-year field so that $\sigma_{\text{trials}}$ is stated annualized and converted once at the point of use. A test asserts the conversion is applied exactly once on the configured path and never on the measured path. Another asserts that an SPX-like series is eligible under an annualized prior of $0.1$ at 252 periods per year and ineligible under the same prior at one period per year, which reproduces the old units exactly. A test that the same series clears the original $0.5$ prior was not written, because it cannot: $0.5$ annualized at 50 trials is a benchmark of $1.14$ annualized, and the index sits below it at any track length. That is the correct verdict for that prior, and the benchmark now states it in units a reader can check.
+The fix, shipped in v0.3.0, leaves the per-period kernel untouched and states the prior annualized with a periods-per-year field that converts it once at the point of use; \cref{app:simdata} gives the tests that pin it.
 
 \subsection{Finding 2: on every real dataset, the reliability gate is the one that bites}\label{sec:passk}
 
