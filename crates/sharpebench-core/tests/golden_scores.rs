@@ -10,25 +10,30 @@
 //! assert. The same test file runs on every OS in the CI matrix, which is what
 //! turns "byte-identical on any platform" from an architectural claim into a check.
 //!
+//! This file exercises the scoring kernel only. `synthetic_field.input.json` is a
+//! committed trajectory set; the test that proves the simulator still produces
+//! those exact bytes lives in `sharpebench-sim/tests/golden_input.rs`, because
+//! `sim` depends on `core` and a dev-dependency the other way is a cycle that
+//! `cargo publish` rejects (it resolves dev-deps, and `sim` is not on the registry
+//! yet when `core` is packaged). Keeping the simulator out of this crate's tests
+//! also isolates kernel drift from simulator drift: if this file fails and that
+//! one passes, the scorer moved.
+//!
 //! Regenerating fixtures (deliberately, after a scoring change):
 //!
 //! ```text
 //! SHARPEBENCH_UPDATE_GOLDEN=1 cargo test -p sharpebench-core --test golden_scores
 //! ```
 //!
-//! Setting that variable in CI is refused, so a fixture can only change in a
-//! commit a human reviewed.
+//! That rewrites the two `*.scores.json` fixtures from the committed inputs. To
+//! regenerate the input itself after a simulator change, run the `sim` test with
+//! the same variable. Setting it in CI is refused, so a fixture can only change
+//! in a commit a human reviewed.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use sharpebench_core::{rank, AgentSubmission, ScoreConfig};
-use sharpebench_sim::{
-    run_backtest, walk_forward, Agent, BuyAndHold, CostModel, Dataset, HoldAgent, Momentum,
-    RandomAgent,
-};
-
-type AgentFactory = Box<dyn Fn() -> Box<dyn Agent>>;
+use sharpebench_core::{rank, AgentSubmission, CompositeScore, ScoreConfig};
 
 const UPDATE_ENV: &str = "SHARPEBENCH_UPDATE_GOLDEN";
 
@@ -52,20 +57,21 @@ fn update_requested() -> bool {
     requested
 }
 
-/// In update mode every fixture is rewritten exactly once, before any test reads
-/// one. Tests run in parallel, so without this a read-only leg could observe a
-/// half-written file from another thread.
+/// In update mode every score fixture is rewritten exactly once, before any test
+/// reads one. Tests run in parallel, so without this a read-only leg could observe
+/// a half-written file from another thread.
 fn regenerate_all_once() {
     static DONE: OnceLock<()> = OnceLock::new();
     DONE.get_or_init(|| {
-        let field = synthetic_field();
         for (name, contents) in [
             (
                 "example_submissions.scores.json",
                 score_pretty(&example_submissions()),
             ),
-            ("synthetic_field.input.json", pretty_with_newline(&field)),
-            ("synthetic_field.scores.json", score_pretty(&field)),
+            (
+                "synthetic_field.scores.json",
+                score_pretty(&committed_synthetic_input()),
+            ),
         ] {
             let path = golden_dir().join(name);
             std::fs::write(&path, contents)
@@ -75,7 +81,7 @@ fn regenerate_all_once() {
     });
 }
 
-/// Read a committed fixture (regenerating the whole set first if requested).
+/// Read a committed fixture (regenerating the score fixtures first if requested).
 fn golden(name: &str) -> String {
     if update_requested() {
         regenerate_all_once();
@@ -120,53 +126,13 @@ fn example_submissions() -> Vec<AgentSubmission> {
     serde_json::from_str(&raw).expect("suites/example_submissions.json parses")
 }
 
-/// A field built entirely from the public simulator API: one synthetic dataset,
-/// walk-forward windows, four reference agents, two execution-noise seeds each.
-/// Pure function of the constants below — no I/O, no clock.
-fn synthetic_field() -> Vec<AgentSubmission> {
-    const SYMBOLS: usize = 4;
-    const DAYS: usize = 160;
-    const DATA_SEED: u64 = 2026;
-    const EXEC_SEEDS: [u64; 2] = [1, 2];
-
-    let data = Dataset::synthetic(SYMBOLS, DAYS, DATA_SEED);
-    let windows = walk_forward(DAYS, 20, 40, 40);
-    assert!(
-        !windows.is_empty(),
-        "walk_forward must yield at least one window"
-    );
-
-    let agents: Vec<(&str, AgentFactory)> = vec![
-        ("buy-and-hold", Box::new(|| Box::new(BuyAndHold))),
-        ("momentum", Box::new(|| Box::new(Momentum::default()))),
-        ("hold", Box::new(|| Box::new(HoldAgent))),
-        ("random", Box::new(|| Box::new(RandomAgent::new(7)))),
-    ];
-
-    agents
-        .into_iter()
-        .map(|(id, make)| {
-            let mut runs = Vec::new();
-            for window in &windows {
-                for seed in EXEC_SEEDS {
-                    let mut agent = make();
-                    runs.push(run_backtest(
-                        &data,
-                        agent.as_mut(),
-                        *window,
-                        seed,
-                        CostModel::default(),
-                    ));
-                }
-            }
-            AgentSubmission {
-                agent_id: id.to_string(),
-                runs,
-                in_sample_trials: 0,
-                candidates: Vec::new(),
-            }
-        })
-        .collect()
+/// The committed simulator output. Read as plain JSON, never regenerated here:
+/// the kernel has no business knowing how these trajectories were produced.
+fn committed_synthetic_input() -> Vec<AgentSubmission> {
+    let path = golden_dir().join("synthetic_field.input.json");
+    let raw =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    serde_json::from_str(&raw).expect("synthetic_field.input.json parses")
 }
 
 #[test]
@@ -177,32 +143,12 @@ fn example_submissions_score_is_byte_identical_to_golden() {
     );
 }
 
-/// Pins the simulator side separately from the scorer, so a drift in
-/// `Dataset::synthetic` / `run_backtest` is reported as such rather than as a
-/// scoring regression.
-#[test]
-fn synthetic_backtest_input_is_byte_identical_to_golden() {
-    assert_matches_golden(
-        "synthetic_field.input.json",
-        &pretty_with_newline(&synthetic_field()),
-    );
-}
-
-#[test]
-fn synthetic_backtest_score_is_byte_identical_to_golden() {
-    assert_matches_golden(
-        "synthetic_field.scores.json",
-        &score_pretty(&synthetic_field()),
-    );
-}
-
-/// The committed input fixture, re-scored, must also match — this is the leg that
-/// does not depend on the simulator at all, so it isolates the scoring kernel.
 #[test]
 fn committed_synthetic_input_rescored_is_byte_identical_to_golden() {
-    let raw = golden("synthetic_field.input.json");
-    let subs: Vec<AgentSubmission> = serde_json::from_str(&raw).expect("golden input parses");
-    assert_matches_golden("synthetic_field.scores.json", &score_pretty(&subs));
+    assert_matches_golden(
+        "synthetic_field.scores.json",
+        &score_pretty(&committed_synthetic_input()),
+    );
 }
 
 #[test]
@@ -212,8 +158,8 @@ fn golden_fixtures_are_valid_composite_scores() {
         "synthetic_field.scores.json",
     ] {
         let raw = golden(name);
-        let scores: Vec<sharpebench_core::CompositeScore> = serde_json::from_str(&raw)
-            .unwrap_or_else(|e| panic!("{name} is not a CompositeScore list: {e}"));
-        assert!(!scores.is_empty(), "{name} is empty");
+        let scores: Vec<CompositeScore> =
+            serde_json::from_str(&raw).unwrap_or_else(|e| panic!("{name} parses: {e}"));
+        assert!(!scores.is_empty(), "{name} must contain at least one score");
     }
 }
