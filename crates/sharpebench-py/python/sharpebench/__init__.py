@@ -15,6 +15,14 @@ The whole surface is a pyo3 binding over the same Rust kernel the SharpeBench CL
 and the ``@general-liquidity/sharpebench`` npm package use, so a number computed
 here is byte-identical to the one the benchmark reports.
 
+The leaderboard surface is here too: ``rank_board`` / ``score_one`` take the same
+JSON wire format ``sharpebench score`` reads (a serde array of agent submissions)
+and return the full composite scores as JSON, so a board ranked from Python is
+the board the CLI prints. ``default_score_config`` and
+``never_catastrophic_config`` serialize the config presets so no field name has
+to be guessed, and ``rank_returns`` builds a board straight from a mapping of
+agent id to per-run return arrays.
+
 Scope: this package scores *arbitrary* return series. It does not run agents. The
 sibling ``sharpearena`` package hosts the leak-free RL environment and scores runs
 of it via ``score_run``; the two are complementary, since arena produces the track,
@@ -27,6 +35,7 @@ from .sharpebench_py import (
     bootstrap_dsr_ci,
     bootstrap_pvalue,
     budget_curve,
+    default_score_config,
     deflated_sharpe_ratio,
     expected_max_sharpe,
     fdr_verdict,
@@ -35,11 +44,15 @@ from .sharpebench_py import (
     is_my_sharpe_real_full,
     min_track_record_length,
     moments,
+    never_catastrophic_config,
     pass_k,
     probability_of_backtest_overfitting,
     probabilistic_sharpe_ratio,
+    rank_board,
+    rank_returns,
     reality_check_pvalue,
     runs_for_power,
+    score_one,
     selection_robustness,
     sharpe_ratio,
     spa_consistent_pvalue,
@@ -53,6 +66,7 @@ __all__ = [
     "bootstrap_dsr_ci",
     "bootstrap_pvalue",
     "budget_curve",
+    "default_score_config",
     "deflated_sharpe_ratio",
     "expected_max_sharpe",
     "fdr_verdict",
@@ -61,11 +75,15 @@ __all__ = [
     "is_my_sharpe_real_full",
     "min_track_record_length",
     "moments",
+    "never_catastrophic_config",
     "pass_k",
     "probabilistic_sharpe_ratio",
     "probability_of_backtest_overfitting",
+    "rank_board",
+    "rank_returns",
     "reality_check_pvalue",
     "runs_for_power",
+    "score_one",
     "selection_robustness",
     "sharpe_ratio",
     "spa_consistent_pvalue",

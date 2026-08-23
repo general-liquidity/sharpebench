@@ -9,7 +9,9 @@
 //! `sharpebench-stats` (deflated / probabilistic Sharpe, the data-snooping
 //! bootstrap family, BH-FDR, selection robustness), `sharpebench-edge` (the
 //! two-tier honesty verdict, MinTRL, CSCV PBO, the Harvey-Liu-Zhu gate) and
-//! `sharpebench-core` (pass^k).
+//! `sharpebench-core` (pass^k, plus the composite leaderboard: [`rank_board`],
+//! [`score_one`] and the config helpers speak the benchmark's JSON wire format
+//! directly, so a board ranked from Python is the board the CLI prints).
 //!
 //! `#![forbid(unsafe_code)]` is deliberately absent: pyo3's `#[pymodule]` /
 //! `#[pyfunction]` macros expand to `unsafe` FFI glue. Every crate this binding
@@ -21,6 +23,9 @@ use pyo3::types::PyDict;
 use pyo3::wrap_pyfunction;
 
 use sharpebench_core::budget_curve::{budget_curve as core_budget_curve, BudgetCurveOpts};
+use sharpebench_core::composite::{
+    rank as core_rank, score_agent as core_score_agent, AgentSubmission, Run, ScoreConfig,
+};
 use sharpebench_core::pass_k::{pass_k as core_pass_k, PassMode};
 use sharpebench_edge::{
     is_my_sharpe_real as core_lite, is_my_sharpe_real_full as core_full,
@@ -544,6 +549,120 @@ fn budget_curve<'py>(
     Ok(d)
 }
 
+/// Parse an optional `ScoreConfig` JSON string, defaulting when absent. Every
+/// board entry point funnels through here so a malformed config is always a
+/// `ValueError` naming the serde failure, never a panic across the FFI boundary.
+fn parse_score_config(config_json: Option<&str>) -> PyResult<ScoreConfig> {
+    match config_json {
+        None => Ok(ScoreConfig::default()),
+        Some(s) => serde_json::from_str(s)
+            .map_err(|e| PyValueError::new_err(format!("invalid ScoreConfig JSON: {e}"))),
+    }
+}
+
+/// Serialize a scoring result back to JSON. serde_json refuses non-finite
+/// floats, so a degenerate input surfaces as a `ValueError` rather than a panic.
+fn to_json<T: serde::Serialize>(value: &T) -> PyResult<String> {
+    serde_json::to_string(value)
+        .map_err(|e| PyValueError::new_err(format!("result not serializable to JSON: {e}")))
+}
+
+/// Rank a whole board: a JSON array of `AgentSubmission` in, the full ranked
+/// `Vec<CompositeScore>` out, both as JSON strings.
+///
+/// The wire format is exactly the one `sharpebench score <file>` reads (serde of
+/// the Rust types: `agent_id`, `runs` with `returns`/`trace`/`confidences`/
+/// `outcomes`/`cost`, optional `in_sample_trials` and `candidates`), and the
+/// output is the same `CompositeScore` array the CLI prints with `--json`, so a
+/// number computed here is the number the benchmark reports. JSON-in/JSON-out is
+/// deliberate: one wire format, no parallel Python class hierarchy to drift.
+/// `config_json` is a serde `ScoreConfig` (see [`default_score_config`] for the
+/// field names); `None` scores with the default config. Deterministic given the
+/// config's `bootstrap_seed`.
+#[pyfunction]
+#[pyo3(signature = (submissions_json, config_json = None))]
+fn rank_board(submissions_json: &str, config_json: Option<&str>) -> PyResult<String> {
+    let subs: Vec<AgentSubmission> = serde_json::from_str(submissions_json)
+        .map_err(|e| PyValueError::new_err(format!("invalid AgentSubmission array JSON: {e}")))?;
+    let cfg = parse_score_config(config_json)?;
+    to_json(&core_rank(&subs, &cfg))
+}
+
+/// Score a single `AgentSubmission` (JSON in, one `CompositeScore` as JSON out)
+/// without a field. Field-relative columns (alpha/beta, the data-snooping
+/// p-values, crowdedness, ordinals, tie bands) keep their fieldless defaults, and
+/// the deflation dispersion is always the configured prior, exactly as
+/// `score_agent` documents.
+#[pyfunction]
+#[pyo3(signature = (submission_json, config_json = None))]
+fn score_one(submission_json: &str, config_json: Option<&str>) -> PyResult<String> {
+    let sub: AgentSubmission = serde_json::from_str(submission_json)
+        .map_err(|e| PyValueError::new_err(format!("invalid AgentSubmission JSON: {e}")))?;
+    let cfg = parse_score_config(config_json)?;
+    to_json(&core_score_agent(&sub, &cfg))
+}
+
+/// The default `ScoreConfig`, serialized to JSON: the discoverable list of every
+/// config field and its default value. Load it, edit a field, and hand it back to
+/// [`rank_board`] / [`score_one`] instead of guessing field names.
+#[pyfunction]
+fn default_score_config() -> PyResult<String> {
+    to_json(&ScoreConfig::default())
+}
+
+/// The "never catastrophic in any regime" preset
+/// (`ScoreConfig::reliability_never_catastrophic`), serialized to JSON. Relative
+/// to the default config it changes exactly two fields: `pass_mode` becomes
+/// `"any"` and `mandate.max_run_drawdown` becomes `max_run_dd`. It is a weaker
+/// safety claim than the default (see the Rust docs); suitable for an ablation
+/// shown next to the default board, not as a replacement for it.
+#[pyfunction]
+fn never_catastrophic_config(max_run_dd: f64) -> PyResult<String> {
+    to_json(&ScoreConfig::reliability_never_catastrophic(max_run_dd))
+}
+
+/// Rank a board straight from arrays: `returns` maps `agent_id` to a list of
+/// per-run return series (window-major, the same cell order for every agent).
+/// Returns the ranked `CompositeScore` array as JSON, like [`rank_board`].
+///
+/// Each run is built with an empty trace, no confidences/outcomes and zero cost,
+/// and each agent with `in_sample_trials = 0` and no candidates. The process gate
+/// and the trace-derived columns (turnover, calibration) therefore pass/default
+/// trivially: that is a property of the input, not of the scorer, and the
+/// statistical gates (deflation, pass^k, the bootstrap edge test, the mandate)
+/// still apply in full. Submit real traces through [`rank_board`] to score
+/// process. Agents are scored in dict insertion order, which only matters for
+/// which submission a shared-cell restriction attributes to which agent id.
+#[pyfunction]
+#[pyo3(signature = (returns, config_json = None))]
+fn rank_returns(returns: &Bound<'_, PyDict>, config_json: Option<&str>) -> PyResult<String> {
+    let cfg = parse_score_config(config_json)?;
+    let mut subs: Vec<AgentSubmission> = Vec::with_capacity(returns.len());
+    for (key, value) in returns.iter() {
+        let agent_id: String = key
+            .extract()
+            .map_err(|_| PyValueError::new_err("returns keys must be str agent ids"))?;
+        let run_returns: Vec<Vec<f64>> = value.extract().map_err(|_| {
+            PyValueError::new_err(format!(
+                "returns[{agent_id:?}] must be a list of per-run float series"
+            ))
+        })?;
+        subs.push(AgentSubmission {
+            agent_id,
+            runs: run_returns
+                .into_iter()
+                .map(|r| Run {
+                    returns: r,
+                    ..Run::default()
+                })
+                .collect(),
+            in_sample_trials: 0,
+            candidates: Vec::new(),
+        });
+    }
+    to_json(&core_rank(&subs, &cfg))
+}
+
 /// The `sharpebench_py` native module (imported as `sharpebench.sharpebench_py`).
 #[pymodule]
 fn sharpebench_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -569,6 +688,11 @@ fn sharpebench_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(pass_k, m)?)?;
     m.add_function(wrap_pyfunction!(moments, m)?)?;
     m.add_function(wrap_pyfunction!(budget_curve, m)?)?;
+    m.add_function(wrap_pyfunction!(rank_board, m)?)?;
+    m.add_function(wrap_pyfunction!(score_one, m)?)?;
+    m.add_function(wrap_pyfunction!(default_score_config, m)?)?;
+    m.add_function(wrap_pyfunction!(never_catastrophic_config, m)?)?;
+    m.add_function(wrap_pyfunction!(rank_returns, m)?)?;
     m.add("METHODOLOGY_VERSION", METHODOLOGY_VERSION)?;
     m.add(
         "__doc__",

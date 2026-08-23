@@ -16,6 +16,12 @@ name = "sharpebench_py"
 crate-type = ["cdylib"]
 
 [dependencies]
+serde = "1"
+# serde_json's default parser can land 1 ULP off the correctly-rounded float;
+# this feature makes parsing exact, so a submission ranked from JSON is
+# bit-identical to the same submission ranked from in-memory arrays
+# (`rank_returns` vs `rank_board`), matching sharpebench-harness's choice.
+serde_json = { version = "1", features = ["float_roundtrip"] }
 sharpebench-stats = { path = "../sharpebench-stats", version = "0.4.0" }
 sharpebench-edge = { path = "../sharpebench-edge", version = "0.4.0" }
 sharpebench-core = { path = "../sharpebench-core", version = "0.4.0" }
