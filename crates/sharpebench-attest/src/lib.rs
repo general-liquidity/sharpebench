@@ -7,21 +7,32 @@
 //!    window, a digest of its frozen artifact, a salt). There is nothing to
 //!    overfit because the data isn't out yet; revealing the pre-image later
 //!    proves the agent wasn't tuned to the window.
-//! 2. **Signed result chain** — each scored result is HMAC-signed over the
-//!    previous signature, forming a tamper-evident chain (the same pattern
-//!    Gordon uses for its audit log). Anyone holding the key can verify that a
-//!    published leaderboard wasn't altered after the fact.
+//! 2. **Signed result chain** — each scored result is signed over the previous
+//!    signature, forming a tamper-evident chain (the same pattern Gordon uses
+//!    for its audit log). Two schemes share one link shape ([`SignedResult`]):
+//!    - **HMAC-SHA256** ([`sign_result`] / [`verify_chain`]): symmetric. Anyone
+//!      holding the key can verify the chain, and anyone holding the key can
+//!      forge it. Integrity for key-holders; the host's own audit trail.
+//!    - **Ed25519** ([`public`]): asymmetric. The host signs with a private key
+//!      and publishes the verifying key inside the board, so anyone with the
+//!      document can check it and nobody without the signing key can forge it.
+//!      This is what "verify the board, don't trust the host" actually needs.
 //!
 //! Together these let a *host-operated* benchmark be *independently trusted*:
 //! the numbers are reproducible from a pre-registered artifact and the published
-//! chain is tamper-evident.
+//! chain is publicly verifiable.
 #![forbid(unsafe_code)]
 
 pub mod canary;
+pub mod public;
 pub mod registry;
 pub mod sealed;
 
 pub use canary::{detect_leak, embed_canary, make_canary, verify_canary, Canary};
+pub use public::{
+    publish_public_chain, sign_result_public, verify_chain_public, verify_public_chain,
+    verify_public_chain_with, PublicChain, SigningKey, VerifyingKey, ED25519_SCHEME,
+};
 pub use sealed::{
     commit_dataset, content_hash, open_dataset, seal_dataset, verify_dataset, DatasetCommitment,
     SealedDataset,
@@ -92,7 +103,9 @@ pub struct SignedResult {
     pub payload: String,
     /// Signature of the previous link, or `"genesis"` for the first.
     pub prev_signature: String,
-    /// Hex HMAC-SHA256 over `prev_signature | payload`.
+    /// Hex signature over `prev_signature | payload`: HMAC-SHA256 (32 bytes) in
+    /// a [`sign_result`] chain, Ed25519 (64 bytes) in a [`sign_result_public`]
+    /// chain. Same wire shape, so the two chains are link-for-link comparable.
     pub signature: String,
 }
 
@@ -114,7 +127,7 @@ pub fn sign_result(payload: &str, prev_signature: &str, key: &[u8]) -> SignedRes
 /// Decode a hex string to bytes (`None` if malformed). Used so the HMAC can be
 /// compared in constant time via [`Mac::verify_slice`] instead of a variable-time
 /// string `==`, which would leak a timing signal about the secret key.
-fn from_hex(s: &str) -> Option<Vec<u8>> {
+pub(crate) fn from_hex(s: &str) -> Option<Vec<u8>> {
     if !s.len().is_multiple_of(2) {
         return None;
     }

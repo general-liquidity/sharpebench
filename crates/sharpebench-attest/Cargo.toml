@@ -3,15 +3,30 @@ name = "sharpebench-attest"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "SharpeBench forward-attestation: pre-registration commitments + signed, verifiable result chains."
+description = "SharpeBench forward-attestation: pre-registration commitments + signed, publicly verifiable result chains."
 repository.workspace = true
-keywords = ["attestation", "commitment", "hmac", "benchmark", "integrity"]
+keywords = ["attestation", "commitment", "hmac", "ed25519", "benchmark"]
 categories = ["cryptography", "science"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 hmac = "0.12"
+# Public verifiability of the result chain (see `public.rs`). Pure Rust, no
+# unsafe in its public surface, and Ed25519 is deterministic by construction
+# (RFC 8032) so it keeps the kernel reproducible. Pinned to the 2.x line so it
+# shares the crate's existing `sha2 0.10` / `digest 0.10` instead of pulling a
+# duplicate hash stack.
+ed25519-dalek = "2"
+
+[dev-dependencies]
+serde_json = "1"
 
 [lints]
 workspace = true
+
+# OS entropy for fresh keypairs only. Target-gated because `getrandom` has no
+# default backend on `wasm32-unknown-unknown` (the `sharpebench-wasm` build);
+# the wasm kernel only ever needs seed-derived keys and verification.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+getrandom = "0.4"

@@ -45,6 +45,7 @@ fn main() -> ExitCode {
         Some("score-allocation") => run_score_allocation(&args, json),
         Some("greeks") => run_greeks(&args, json),
         Some("check") => run_check(&args, json),
+        Some("regime") => run_regime(&args, json),
         Some("self-update" | "update") => run_self_update(),
         Some("--help") | Some("-h") | None => {
             help();
@@ -297,6 +298,140 @@ fn run_check(args: &[String], json: bool) -> ExitCode {
     }
 }
 
+/// `sharpebench regime <a.csv> <b.csv> <regimes.csv>`: compare two strategies'
+/// per-period returns inside each market regime. The three files are aligned by
+/// row; the regimes file carries one label per period (string column, header
+/// optional). Labels are an input: nothing here infers a regime.
+fn run_regime(args: &[String], json: bool) -> ExitCode {
+    let (Some(path_a), Some(path_b), Some(path_r)) = (args.get(2), args.get(3), args.get(4)) else {
+        eprintln!(
+            "usage: sharpebench regime <returns_a.csv> <returns_b.csv> <regimes.csv> [--col NAME] [--json]"
+        );
+        return ExitCode::from(2);
+    };
+    let col = flag_value(args, "--col");
+
+    let read = |path: &str| -> Result<String, ExitCode> {
+        std::fs::read_to_string(path).map_err(|e| {
+            eprintln!("error: cannot read {path}: {e}");
+            ExitCode::FAILURE
+        })
+    };
+    let (text_a, text_b, text_r) = match (read(path_a), read(path_b), read(path_r)) {
+        (Ok(a), Ok(b), Ok(r)) => (a, b, r),
+        (Err(c), _, _) | (_, Err(c), _) | (_, _, Err(c)) => return c,
+    };
+    let (a, b) = match (
+        read_returns_column(&text_a, col),
+        read_returns_column(&text_b, col),
+    ) {
+        (Ok(a), Ok(b)) => (a, b),
+        (Err(e), _) | (_, Err(e)) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let labels = read_label_column(&text_r, col);
+    if a.is_empty() || b.is_empty() || labels.is_empty() {
+        eprintln!(
+            "error: need at least one aligned period, got a={} b={} regimes={}",
+            a.len(),
+            b.len(),
+            labels.len()
+        );
+        return ExitCode::FAILURE;
+    }
+    if a.len() != b.len() || a.len() != labels.len() {
+        eprintln!(
+            "warning: lengths differ (a={} b={} regimes={}); comparing the first {} periods",
+            a.len(),
+            b.len(),
+            labels.len(),
+            a.len().min(b.len()).min(labels.len())
+        );
+    }
+
+    let regimes: Vec<&str> = labels.iter().map(String::as_str).collect();
+    let report = sharpebench_core::compare_by_regime(
+        &a,
+        &b,
+        &regimes,
+        sharpebench_core::RegimeCompareOpts::default(),
+    );
+
+    if json {
+        emit_json(&report);
+    } else {
+        println!(
+            "Pooled mean gap (A-B): {:+.6}  sign={:+}",
+            report.pooled_mean_gap, report.pooled_edge_sign
+        );
+        println!(
+            "{:<14} {:>5} {:>9} {:>9} {:>10} {:>10} {:>7} {:>5} counted",
+            "regime", "n", "zero_a", "zero_b", "mean_gap", "cont_gap", "ks", "edge"
+        );
+        for r in &report.regimes {
+            println!(
+                "{:<14} {:>5} {:>9.3} {:>9.3} {:>+10.6} {:>+10.6} {:>7.3} {:>+5} {}",
+                r.regime,
+                r.n_periods,
+                r.a.zero_mass,
+                r.b.zero_mass,
+                r.mean_gap,
+                r.cont_mean_gap,
+                r.ks_statistic,
+                r.edge_sign,
+                if r.counted { "yes" } else { "no" }
+            );
+        }
+        println!(
+            "Edge dispersion across counted regimes: {:.6}",
+            report.edge_dispersion
+        );
+        if report.pooled_hides_reversal {
+            println!(
+                "REVERSAL: the pooled sign is contradicted in {}",
+                report.reversal_regimes.join(", ")
+            );
+        } else {
+            println!("No sign reversal among counted regimes.");
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+/// Read a column of regime labels from CSV text, one per period. With
+/// `col = None` column 0 is used and a first row whose cell reads `regime` or
+/// `label` (case-insensitive) is treated as a header; with `Some(name)` the
+/// column under that header is read. Empty cells are skipped.
+fn read_label_column(text: &str, col: Option<&str>) -> Vec<String> {
+    let mut lines = text.lines().filter(|l| !l.trim().is_empty());
+    let Some(first) = lines.next() else {
+        return Vec::new();
+    };
+    let header: Vec<&str> = first.split(',').map(str::trim).collect();
+    let (col_idx, skip_first) = match col {
+        Some(name) => match header.iter().position(|h| *h == name) {
+            Some(idx) => (idx, true),
+            None => (0, false),
+        },
+        None => {
+            let skip = header
+                .first()
+                .map(|c| c.eq_ignore_ascii_case("regime") || c.eq_ignore_ascii_case("label"))
+                == Some(true);
+            (0, skip)
+        }
+    };
+    let body = if skip_first { Vec::new() } else { vec![first] };
+    body.into_iter()
+        .chain(lines)
+        .filter_map(|line| line.split(',').nth(col_idx).map(str::trim))
+        .filter(|cell| !cell.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 /// Read a single column of per-period returns from CSV text. With `col = None`
 /// the first numeric column is used (a header row is skipped if its first cell is
 /// non-numeric); with `Some(name)` the column under that header is read.
@@ -394,8 +529,13 @@ fn help() {
     println!("  sharpebench stress                    run the adversarial stress suite (masked)");
     println!("  sharpebench audit                     self-audit: prove the scorer resists gaming");
     println!("  sharpebench realism [--data <csv>]    prove a dataset behaves like a market (Cont's stylized facts)");
-    println!("  sharpebench sign <subs.json> <key> <out.json>  score + sign a board to a file");
-    println!("  sharpebench verify <board.json> <key>  verify a signed board's chain");
+    println!(
+        "  sharpebench sign <subs.json> <key> <out.json> [--ed25519 <secret>]  score + sign a board to a file"
+    );
+    println!("                       --ed25519: also embed a publicly verifiable Ed25519 chain + its verifying key");
+    println!("  sharpebench verify <board.json> <key>  verify a signed board's HMAC chain (needs the secret)");
+    println!("  sharpebench verify <board.json> --pubkey <hex>  verify the Ed25519 chain with the public key only");
+    println!("  sharpebench verify <board.json> --public  verify the Ed25519 chain with the key embedded in the board");
     println!(
         "  sharpebench capture <agent> <out.json> [--data <csv>]  capture an agent's raw-decision trajectory artifact"
     );
@@ -413,15 +553,26 @@ fn help() {
     println!(
         "  sharpebench check <returns.csv> --trials N [--col NAME] [--confidence C]  is this Sharpe real? (deflated/MinTRL)"
     );
+    println!(
+        "  sharpebench regime <a.csv> <b.csv> <regimes.csv> [--col NAME]  compare two return series within each regime (labels are an input)"
+    );
     println!("  sharpebench self-update               update the binary in place (--features self-update builds)");
-    println!("\n<key> accepts a literal, or env:NAME / file:PATH to keep secrets out of process listings.");
+    println!("\n<key>, <secret> and --pubkey accept a literal, or env:NAME / file:PATH to keep secrets out of process listings.");
+    println!("HMAC <key> holders can both verify and forge; an Ed25519 verifying key can only verify, so publish it.");
     println!("\nGlobal flags:");
     println!("  --json   emit machine-readable JSON instead of a human table (for agents / CI)");
 }
 
+/// JSON key under which a board carries its Ed25519 chain. Sits beside the
+/// HMAC `chain` so `sharpebench_leaderboard::load` (which ignores unknown
+/// fields) still reads the board exactly as before.
+const PUBLIC_CHAIN_FIELD: &str = "public_chain";
+
 fn run_sign(args: &[String], json: bool) -> ExitCode {
     if args.len() < 5 {
-        eprintln!("usage: sharpebench sign <submissions.json> <key> <out.json> [--json]");
+        eprintln!(
+            "usage: sharpebench sign <submissions.json> <key> <out.json> [--ed25519 <secret>] [--json]"
+        );
         return ExitCode::from(2);
     }
     let data = match std::fs::read_to_string(&args[2]) {
@@ -446,16 +597,63 @@ fn run_sign(args: &[String], json: bool) -> ExitCode {
         }
     };
     let pb = sharpebench_leaderboard::publish(&rank(&subs, &ScoreConfig::default()), &key);
-    match sharpebench_leaderboard::save(&pb, &args[4]) {
+
+    // Without --ed25519 the output is byte-identical to the pre-Ed25519 CLI.
+    let Some(secret_spec) = flag_value(args, "--ed25519") else {
+        return match sharpebench_leaderboard::save(&pb, &args[4]) {
+            Ok(()) => {
+                if json {
+                    emit_json(&serde_json::json!({
+                        "signed": true,
+                        "entries": pb.chain.len(),
+                        "path": args[4],
+                    }));
+                } else {
+                    println!("signed board ({} entries) -> {}", pb.chain.len(), args[4]);
+                }
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                ExitCode::FAILURE
+            }
+        };
+    };
+
+    let signing_key = match resolve_key(secret_spec) {
+        Ok(s) => sharpebench_attest::SigningKey::derive(&s),
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    // Sign exactly the payloads the HMAC chain signed, so the two chains are
+    // link-for-link comparable and a reader can cross-check one against the other.
+    let payloads: Vec<String> = pb.chain.iter().map(|r| r.payload.clone()).collect();
+    let public = sharpebench_attest::publish_public_chain(&payloads, &signing_key);
+    let verifying_key = public.verifying_key.clone();
+    let mut doc = serde_json::to_value(&pb).unwrap_or_default();
+    doc[PUBLIC_CHAIN_FIELD] = serde_json::to_value(&public).unwrap_or_default();
+    let written = serde_json::to_string_pretty(&doc)
+        .map_err(std::io::Error::other)
+        .and_then(|s| std::fs::write(&args[4], s));
+    match written {
         Ok(()) => {
             if json {
                 emit_json(&serde_json::json!({
                     "signed": true,
                     "entries": pb.chain.len(),
                     "path": args[4],
+                    "scheme": sharpebench_attest::ED25519_SCHEME,
+                    "verifying_key": verifying_key,
                 }));
             } else {
-                println!("signed board ({} entries) -> {}", pb.chain.len(), args[4]);
+                println!(
+                    "signed board ({} entries, HMAC + Ed25519) -> {}",
+                    pb.chain.len(),
+                    args[4]
+                );
+                println!("verifying key (publish this): {verifying_key}");
             }
             ExitCode::SUCCESS
         }
@@ -466,10 +664,94 @@ fn run_sign(args: &[String], json: bool) -> ExitCode {
     }
 }
 
+/// `verify --pubkey <spec>` / `verify --public`: check the Ed25519 chain with
+/// no secret. `--pubkey` pins the key (the embedded one must match, so a board
+/// re-signed under a swapped key is rejected); `--public` trusts the embedded
+/// key and only proves the document is self-consistent.
+fn run_verify_public(path: &str, pubkey_spec: Option<&str>, json: bool) -> ExitCode {
+    let doc: serde_json::Value = match std::fs::read_to_string(path)
+        .map_err(std::io::Error::other)
+        .and_then(|s| serde_json::from_str(&s).map_err(std::io::Error::other))
+    {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("error: cannot load {path}: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let public: sharpebench_attest::PublicChain =
+        match serde_json::from_value(doc[PUBLIC_CHAIN_FIELD].clone()) {
+            Ok(p) => p,
+            Err(_) => {
+                eprintln!(
+                    "error: {path} carries no `{PUBLIC_CHAIN_FIELD}` (sign it with --ed25519 first)"
+                );
+                return ExitCode::FAILURE;
+            }
+        };
+    let pinned = match pubkey_spec {
+        Some(spec) => match resolve_key(spec) {
+            Ok(bytes) => {
+                let hex = String::from_utf8_lossy(&bytes).trim().to_string();
+                match sharpebench_attest::VerifyingKey::from_hex(&hex) {
+                    Some(vk) => Some(vk),
+                    None => {
+                        eprintln!("error: --pubkey is not a valid 64-hex-char Ed25519 key");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                return ExitCode::FAILURE;
+            }
+        },
+        None => None,
+    };
+    let ok = match &pinned {
+        Some(vk) => sharpebench_attest::verify_public_chain_with(&public, vk),
+        None => sharpebench_attest::verify_public_chain(&public),
+    };
+    if json {
+        emit_json(&serde_json::json!({
+            "ok": ok,
+            "entries": public.chain.len(),
+            "scheme": public.scheme,
+            "verifying_key": public.verifying_key,
+            "pinned": pinned.is_some(),
+        }));
+    } else if ok {
+        println!(
+            "OK — {} entries, Ed25519 chain valid under {} key {}",
+            public.chain.len(),
+            if pinned.is_some() {
+                "pinned"
+            } else {
+                "embedded"
+            },
+            public.verifying_key
+        );
+    } else {
+        eprintln!("FAIL — Ed25519 chain invalid (tampered, or the key does not match)");
+    }
+    if ok {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
+}
+
 fn run_verify(args: &[String], json: bool) -> ExitCode {
-    if args.len() < 4 {
-        eprintln!("usage: sharpebench verify <board.json> <key> [--json]");
+    let public_mode =
+        args.iter().any(|a| a == "--public") || flag_value(args, "--pubkey").is_some();
+    if args.len() < 4 || (!public_mode && args[3].starts_with("--")) {
+        eprintln!(
+            "usage: sharpebench verify <board.json> <key> | --pubkey <hex> | --public [--json]"
+        );
         return ExitCode::from(2);
+    }
+    if public_mode {
+        return run_verify_public(&args[2], flag_value(args, "--pubkey"), json);
     }
     let pb = match sharpebench_leaderboard::load(&args[2]) {
         Ok(b) => b,
