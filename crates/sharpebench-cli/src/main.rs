@@ -9,6 +9,9 @@ use std::process::ExitCode;
 
 use sharpebench_core::{rank, AgentSubmission, CompositeScore, ScoreConfig};
 
+mod analysis_cmd;
+mod arena_cmd;
+mod import_cmd;
 #[cfg(feature = "self-update")]
 mod update;
 
@@ -46,6 +49,11 @@ fn main() -> ExitCode {
         Some("greeks") => run_greeks(&args, json),
         Some("check") => run_check(&args, json),
         Some("regime") => run_regime(&args, json),
+        Some("arena") => ExitCode::from(arena_cmd::run(&args, json).clamp(0, 255) as u8),
+        Some("import") => ExitCode::from(import_cmd::run(&args, json).clamp(0, 255) as u8),
+        Some(sub @ ("select" | "disqualify" | "rediscover" | "uncertainty" | "decay-prior")) => {
+            ExitCode::from(analysis_cmd::run(sub, &args, json).clamp(0, 255) as u8)
+        }
         Some("self-update" | "update") => run_self_update(),
         Some("--help") | Some("-h") | None => {
             help();
@@ -556,6 +564,27 @@ fn help() {
     );
     println!(
         "  sharpebench regime <a.csv> <b.csv> <regimes.csv> [--col NAME]  compare two return series within each regime (labels are an input)"
+    );
+    println!(
+        "  sharpebench arena <init|open|commit|advance|score|publish|verify> ...  drive a forward-attested scoring window (see docs/book/src/arena.md)"
+    );
+    println!(
+        "  sharpebench import <csv|stockbench> ... --out subs.json     convert a rival board's return series into a scoreable field"
+    );
+    println!(
+        "  sharpebench select <candidates.csv...> [--alpha A]          pick a candidate on a bootstrap percentile instead of the observed best"
+    );
+    println!(
+        "  sharpebench disqualify <subs.json>                          classify each agent's hard gates and advisory flags"
+    );
+    println!(
+        "  sharpebench rediscover <submitted.csv> <known.csv...>       flag a submission cosine-near a known strategy"
+    );
+    println!(
+        "  sharpebench uncertainty <returns.csv> [--confidences ...]   split uncertainty into aleatoric, epistemic and distributional legs"
+    );
+    println!(
+        "  sharpebench decay-prior --measured-ic <csv> --adoption X --theta Y --delta-max Z  compare measured edge decay to the crowding prior (reported, never gating)"
     );
     println!("  sharpebench self-update               update the binary in place (--features self-update builds)");
     println!("\n<key>, <secret> and --pubkey accept a literal, or env:NAME / file:PATH to keep secrets out of process listings.");

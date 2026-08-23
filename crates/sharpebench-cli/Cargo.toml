@@ -18,6 +18,7 @@ sharpebench-harness = { path = "../sharpebench-harness", version = "0.4.0" }
 sharpebench-attest = { path = "../sharpebench-attest", version = "0.4.0" }
 sharpebench-leaderboard = { path = "../sharpebench-leaderboard", version = "0.4.0" }
 sharpebench-edge = { path = "../sharpebench-edge", version = "0.4.0" }
+sharpebench-arena = { path = "../sharpebench-arena", version = "0.4.0" }
 serde = "1"
 serde_json = "1"
 

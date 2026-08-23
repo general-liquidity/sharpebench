@@ -12,6 +12,8 @@
 - [The simulator](simulator.md)
 - [Submitting an agent](submitting.md)
 - [Forward attestation](attestation.md)
+- [The arena](arena.md)
+- [Importing a rival field](importing.md)
 - [Benchmark integrity](integrity.md)
 - [CLI reference](cli.md)
 - [Embedding the kernel (WASM)](wasm.md)

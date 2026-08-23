@@ -673,6 +673,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "sharpebench-arena",
  "sharpebench-attest",
  "sharpebench-core",
  "sharpebench-edge",
@@ -681,6 +682,19 @@ dependencies = [
  "sharpebench-protocol",
  "sharpebench-sim",
  "ureq",
+]
+
+[[package]]
+name = "sharpebench-arena"
+version = "0.4.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sharpebench-attest",
+ "sharpebench-core",
+ "sharpebench-leaderboard",
+ "sharpebench-protocol",
+ "sharpebench-sim",
 ]
 
 [[package]]
