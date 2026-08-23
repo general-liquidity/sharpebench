@@ -1,0 +1,56 @@
+\section{Commands that produce every number}\label{app:commands}
+
+All commands run from the repository root at the tagged version. The kernel is deterministic, so each command produces the same bytes on any platform.
+
+\paragraph{Version.} Findings 1 and 2 were first observed at v0.2.1. The units fix is v0.3.0. The configurable reliability gate, the per-run drawdown bound, and the evidence sweep that scores both verdicts on identical trajectories are in the release after it. \Cref{tab:units} was computed against v0.2.1; every other table and figure against the later kernel.
+
+\paragraph{The shipped demonstration (\cref{fig:demotion}).}
+\begin{verbatim}
+sharpebench score suites/example_submissions.json
+\end{verbatim}
+
+\paragraph{The deflation curve (\cref{fig:deflation}) and the demotion chart.}
+\begin{verbatim}
+python paper/src/make-figures.py
+\end{verbatim}
+The script reimplements the kernel's PSR, expected-maximum-Sharpe and normal-quantile functions in Python and states that it does; the figures are the kernel's formulas, not an independent computation.
+
+\paragraph{The self-audit (\cref{tab:attacks}).}
+\begin{verbatim}
+sharpebench audit
+\end{verbatim}
+
+\paragraph{Data realism (\cref{tab:data}).}
+\begin{verbatim}
+sharpebench realism --data data/<dataset>.csv
+\end{verbatim}
+
+\paragraph{Regenerating any dataset and checking its hash.}
+\begin{verbatim}
+python scripts/data/fetch_crypto.py --interval 1h --check
+python scripts/data/fetch_fred.py fx --check
+python scripts/data/derive_weekly.py --check
+\end{verbatim}
+
+\paragraph{The evidence sweep (\cref{tab:eligibility}, \cref{sec:units}, \cref{sec:passk}, \cref{sec:ablation}, \cref{sec:falsify}).}
+\begin{verbatim}
+cargo run --release -p sharpebench-harness \
+  --example evidence_sweep -- out.jsonl [dataset] [dsr_bar]
+\end{verbatim}
+One JSON record per (dataset, configuration, agent), 512 per dataset. The grid, seeds, window rule, cost profile and both reliability configurations are constants in the source and are emitted on every record. The optional arguments restrict a run to one dataset or one deflation bar so the grid can be split across processes; because every seed is pinned, the concatenation of parts is identical to a serial run. The analysis that turns the records into the tables is a short script committed beside them under \texttt{paper/evidence/}.
+
+\paragraph{Golden fixtures and the parity test.}
+\begin{verbatim}
+cargo test -p sharpebench-core --test golden_scores
+cargo test -p sharpebench-sim  --test golden_input
+cargo test -p sharpebench-wasm --test native_parity
+\end{verbatim}
+Regeneration requires \texttt{SHARPEBENCH\_UPDATE\_GOLDEN=1} and refuses to run when \texttt{CI} is set.
+
+\paragraph{Signing and verifying a board.}
+\begin{verbatim}
+sharpebench sign   subs.json <hmac-key> board.json --ed25519 <secret>
+sharpebench verify board.json --public
+sharpebench verify board.json --pubkey <hex>
+\end{verbatim}
+The second form verifies from the document alone. The third pins the key and rejects a board re-signed under a different one.

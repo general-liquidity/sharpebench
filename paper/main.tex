@@ -1,0 +1,61 @@
+\documentclass{article}
+
+% NeurIPS 2026 Evaluations and Datasets track. [preprint] for the arXiv
+% version; drop the option for an anonymized submission, [final] for camera
+% ready. Every empirical number in this paper is produced by a command
+% listed in Appendix A and recomputable from the committed data.
+\usepackage[preprint]{neurips_2026}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{xcolor}
+\usepackage{algorithm2e}
+\usepackage{enumitem}
+\usepackage[hidelinks,breaklinks]{hyperref}
+\usepackage[capitalise,noabbrev]{cleveref}
+
+\sisetup{
+  table-format = 1.4,
+  round-mode = places,
+  round-precision = 4,
+  detect-weight = true,
+}
+
+\graphicspath{{figures/}}
+
+\title{SharpeBench: Ranking Trading Agents by the Skill That Survives Deflation}
+
+\author{%
+  Tiberiu Toca \\
+  General Liquidity \\
+  \texttt{tibi.toca@gmail.com}
+}
+
+\begin{document}
+
+\maketitle
+
+\input{sections/00-abstract}
+\input{sections/01-introduction}
+\input{sections/02-principles}
+\input{sections/03-benchmark}
+\input{sections/04-integrity}
+\input{sections/05-experiments}
+\input{sections/06-related}
+\input{sections/07-limitations}
+\input{sections/08-reproducibility}
+
+\bibliographystyle{plainnat}
+\bibliography{refs}
+
+\appendix
+\input{sections/A-commands}
+\input{sections/B-checklist}
+
+\end{document}

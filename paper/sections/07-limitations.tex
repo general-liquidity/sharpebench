@@ -1,0 +1,23 @@
+\section{Limitations}\label{sec:limitations}
+
+\paragraph{No real agent has competed.} Every entrant in \cref{sec:experiments} is a reference agent with no risk management: buy-and-hold, cross-sectional momentum, hold, and random weights. The evidence shows the gate refusing all of them with the drawdown that justifies each refusal. It does not show the gate admitting anyone. A benchmark whose eligibility is never attained could be vacuous, and the experiment that settles the question, a hedged or risk-managed agent competing under forward attestation, has not been run. This is the most important open item and it is listed first on purpose.
+
+\paragraph{Coverage.} Single-name equities are absent because no keyless, redistributable feed exists for them. Gold is absent because the public daily series were withdrawn. Nine datasets across four asset classes is wider than the two the benchmark shipped with and narrower than a claim about markets in general. Two of the nine fail the realism battery and ship with the verdict recorded.
+
+\paragraph{Thin observations.} The agent sees twenty trailing closes and nothing else. The protocol carries fields for fundamentals and news, and the simulator leaves them empty. A benchmark that presents a richer information environment, as FinBen and StockBench do, is asking a different question of the agent, and head-to-head comparison on the same inputs has not been done.
+
+\paragraph{No comparison on shared data.} The positioning in \cref{tab:related} is built from what each benchmark states about itself. The missing experiment is to take a rival board's published field, re-score it under these gates, and report how the ranking changes. Nothing in this paper does that.
+
+\paragraph{The reliability gate is strict by construction.} $\text{pass}^{k}$ in its default mode certifies profitability in every regime. \Cref{sec:passk} shows that this refuses every long-only agent on every dataset containing a downturn, and \cref{sec:ablation} shows that a per-run drawdown bound refuses them as well. Whether either is the right definition of safe for a given mandate is a choice the operator makes, and the benchmark now exposes it as configuration rather than hiding it as a constant. The paper does not claim to have found the right default. On short windows the per-run PSR bar is also weak by construction, because the statistic scales with $\sqrt{n-1}$; a 78-bar window needs an annualized Sharpe above one to pass, which is a property of the PSR and not a choice.
+
+\paragraph{The measured dispersion is a field statistic.} When the field is large enough, $\sigma_{\text{trials}}$ is measured as the dispersion of per-period Sharpes across the submitted agents. A field of reference agents that all lose money has a small dispersion, which lowers the bar. The measured value is reported on every score so a reader can see it, but a field can in principle be assembled to move it.
+
+\paragraph{Forward attestation is built and unexercised.} The commitment, registry, signed chain and sealed dataset all exist and are tested. No commitment has been registered against a real window, no epoch has been advanced by a live feed, and no board has been published. The machinery for a forward league is present; the league is not.
+
+\paragraph{Adversarial-input detection is bounded by what runs.} The self-audit's eighth attack demonstrates that the kernel demotes an agent whose fragility is exercised by a submitted run. A fragility that no submitted run exercises is invisible to a deterministic kernel with no model, and the harness does not yet generate perturbed windows to look for one.
+
+\paragraph{No sandbox.} The harness executes whatever agent it is pointed at, in process or over a transport, without isolation. Hosting third-party submissions safely is not built, and a public arena depends on it.
+
+\paragraph{The epistemic calibration leg is a lower bound.} The calibration module's decomposition reads agreement among an agent's confidence streams as low epistemic uncertainty. Unanimous-but-wrong and correlated signals both read as agreement, so the leg is informative only when it reads high. The module documents this and it is repeated here.
+
+\paragraph{What changed during this paper.} Two of the three findings in \cref{sec:experiments} are corrections to the benchmark as it shipped: a deflation prior in the wrong units, and a documentation claim that field-wide significance tests gated rank when they did not. A third correction, that the HMAC chain was not publicly verifiable, is in \cref{sec:attest}. These are reported as findings rather than omitted because a benchmark paper that hides what its own evidence found is the thing the benchmark exists to prevent.

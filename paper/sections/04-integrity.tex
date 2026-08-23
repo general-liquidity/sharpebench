@@ -1,0 +1,58 @@
+\section{Threats to validity and the integrity protocol}\label{sec:integrity}
+
+A benchmark that scores capital allocation is a target. This section lists the ways it could be gamed or could mislead, and for each one says what the benchmark does about it and how a reader can check.
+
+\subsection{Look-ahead}\label{sec:lookahead}
+
+The simulator's observation builder hands the agent the trailing window of history at or before the decision index, and the agent never holds a handle to the dataset. A future bar is therefore unrepresentable through the agent interface. This is a precise claim and a deliberately narrower one than earlier documentation made: the dataset type itself exposes a close-at-index accessor that accepts any index, so look-ahead is prevented at the agent boundary rather than by the type system. It holds for every shipped transport. A reader auditing the claim should read the observation builder, not the data model.
+
+\subsection{Determinism}\label{sec:determinism}
+
+The scoring kernel performs no input or output, reads no clock, draws no ambient randomness, and sums floating-point values in a fixed order. Every bootstrap takes an explicit seed. Symbol, date and holding maps are ordered trees rather than hash maps, so iteration order cannot vary between runs or platforms. Golden fixtures commit the full ranked output of two fields at full floating-point precision; a change of one unit in the last place of any statistic fails the test, and the fixtures can be regenerated only by a deliberate local command that refuses to run under continuous integration. The same fixtures are checked on Linux, macOS and Windows on every commit. A separate test scores one field through the WebAssembly build and through the native kernel and asserts byte equality, so the number an agent developer sees in a browser and the number the board reports cannot drift apart.
+
+Before this paper, the cross-platform claim was architectural and the continuous-integration check compared a run to itself on one machine. Both are now checks.
+
+\subsection{Self-audit}\label{sec:selfaudit}
+
+The surveys of benchmark integrity that motivate this section \citep{betterbench2024,kapoor2025agents} find that benchmarks with a model judge or a single tunable target get gamed. This benchmark has no judge and is deterministic, so its resistance is something to run rather than to claim. The command \texttt{sharpebench audit} constructs eight attacking submissions, scores each against the live kernel, and exits non-zero if any one is not demoted. The battery also runs as a unit test on every commit, so a change that silently weakens a gate fails the build. \Cref{tab:attacks} lists the attacks.
+
+\begin{table}[t]
+\centering
+\small
+\caption{The self-audit battery. Every attack is constructed to beat the honest reference agent on raw return and is demoted by the gate named. All eight are demoted on every commit.}
+\label{tab:attacks}
+\begin{tabular}{lll}
+\toprule
+Attack & What it exploits & Demoted by \\
+\midrule
+luck-not-skill & one lucky seed, highest raw return & $\text{pass}^{k}$ \\
+risk-gate-bypass & an order that skipped the risk gate & process \\
+sim-exploitation & an absurd-size order & process \\
+mandate-breach & exceeding the drawdown mandate for return & mandate \\
+raw-return-cannot-buy-rank & top raw return on some runs only & $\text{pass}^{k}$ \\
+cheat-reward-hacker & gate bypass plus padded confidence & process \\
+tail-seller & smooth returns from selling tail risk & process \\
+adversarial-input & accurate forecasts, collapse under perturbation & $\text{pass}^{k}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The eighth attack is adapted from \citet{deza2021interpretability}, whose finding is that errors in a forecasting model are not sufficient for the trades made on it to lose money, so a trading system must be tested end to end. The attacking agent posts excellent returns on the presented series and collapses under a small perturbation of its inputs that stays inside the observed in-sample range, while its forecast head keeps working: identical stated confidences and a Brier score of $0.05$ against a baseline of $0.25$. Its pooled raw return exceeds the honest agent's. The kernel demotes it through $\text{pass}^{k}$ because the perturbed run misses the per-run bar, and the audit asserts that the demotion came from realized returns and not from any process violation, and that excellent calibration could not buy eligibility back. The scorer already defended this case; no scoring change was needed to pass it, which is the result a self-audit should produce.
+
+The audit records its own limit. A fragility that no submitted run exercises is invisible to a deterministic kernel with no model. Closing that would require the harness to generate perturbed windows, which it does not yet do.
+
+\subsection{Replay and recompute}\label{sec:replay}
+
+A run can be captured as a trajectory holding only the agent's raw decisions, the window, and the execution seed, and never any return or self-reported statistic. A separate verifier replays the decisions through the same engine against the frozen dataset and recomputes the score. Capture and replay share one code path, so the round trip is exact by construction, and a test asserts that doubling every order in a captured trajectory recomputes to different returns. An artifact therefore cannot lie about its returns. What it cannot do is prove that the committed strategy produced those decisions; that is the job of the commitment in the next subsection, and the two mechanisms are not yet joined by code.
+
+\subsection{Forward attestation}\label{sec:attest}
+
+Every backtest-based score shares a weakness: the reader must trust that the strategy was not tuned to the window after the window was seen. Before a target window's data exists, an entrant publishes a SHA-256 commitment to a digest of its frozen artifact together with a salt. The commitment reveals nothing. After scoring, the entrant reveals the artifact and salt, and anyone can verify the match. There is nothing to overfit to at commitment time because the data is not out yet.
+
+Published boards are signed chains: each entry is signed over the previous signature, genesis-anchored, so an altered or reordered row breaks the chain. Two schemes are provided and they guarantee different things. The HMAC chain is tamper-evident to any holder of the shared key, and because HMAC is symmetric the set of parties who can verify it is exactly the set who can forge it. The Ed25519 chain is publicly verifiable: a board carries its own verifying key, anyone holding that key can check the chain, and no one without the signing key can forge an entry. Ed25519 signatures are deterministic by construction \citep{rfc8032}, which is why the scheme fits a kernel whose output must be reproducible. The benchmark shipped with only the HMAC chain and described it as publicly verifiable; it was not, and this paper corrects the claim.
+
+The commitment registry advances by an explicit integer epoch rather than a wall clock, so scoring stays deterministic. Nothing in the shipped code advances that epoch: the live feed and hosting that would drive a forward league are out of scope here, and \cref{sec:limitations} says so.
+
+\subsection{Contamination}\label{sec:contamination}
+
+Two defenses ship. A held-out dataset can be sealed under a published commitment to its hash, so the benchmark can prove later that the data a model was scored on is the data it committed to before scoring. A canary token with the standard training-corpus warning is embedded beside it, so post-hoc detection of a model that trained on the scenarios is possible. Separately, a masked view of any dataset renames symbols and dates to opaque identifiers, which defeats an agent that pattern-matches memorized tickers.

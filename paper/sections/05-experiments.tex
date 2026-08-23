@@ -1,0 +1,100 @@
+\section{Experiments}\label{sec:experiments}
+
+Every number in this section is produced by the commands in \cref{app:commands} from the committed data and the kernel at the stated version. All runs use the typical cost profile, eight execution seeds, and six disjoint walk-forward windows sized to the dataset, with a warmup of one tenth of the series clamped to between 20 and 60 bars. The field on every dataset is three reference agents (buy-and-hold, cross-sectional momentum, and hold, which never trades) plus a luck floor of five seeded random agents that are fully invested in random weights each period. The luck floor is the zero-skill distribution an edge must clear. The scoring grid is $\beta \in \{0.80, 0.90, 0.95, 0.99\}$, $N \in \{1, 10, 50, 200\}$, and $\sigma_{\text{trials}}$ either measured from the field or pinned to one of three annualized priors, 64 configurations per dataset, 512 records per dataset, 4{,}608 records in all.
+
+\subsection{The demonstration that motivated the benchmark}\label{sec:demo}
+
+\Cref{fig:demotion} shows the three-agent field the benchmark shipped with. A skilled momentum agent, a lucky agent that swung big, and a bot that matched the skilled return but placed one order that never passed its risk gate. The lucky agent has twice the raw return of the winner and fails $\text{pass}^{k}$. The ungated bot has an identical deflated Sharpe of $1.000$ and is zeroed by the process gate. The agent with the highest raw return ranks last.
+
+\begin{figure}[t]
+\centering
+\begin{subfigure}[b]{0.48\linewidth}
+\includegraphics[width=\linewidth]{sharpebench-luck-demotion.pdf}
+\caption{Three agents, one board.}
+\label{fig:demotion}
+\end{subfigure}
+\hfill
+\begin{subfigure}[b]{0.48\linewidth}
+\includegraphics[width=\linewidth]{sharpebench-deflation-curve.pdf}
+\caption{One track, ever more trials.}
+\label{fig:deflation}
+\end{subfigure}
+\caption{(a) The shipped demonstration: the agent with the highest raw return ranks last. (b) The same return track scored against a growing pool of trials, per-period Sharpe $0.85$ over 150 periods with normal moments. It is convincing as a one-off and indistinguishable from luck once it is the survivor of hundreds of attempts. Both computed with the kernel's own formulas.}
+\end{figure}
+
+\Cref{fig:deflation} shows why. Holding one agent's returns fixed and growing the number of strategies tried before it was selected, the deflated score is near certainty when the track stands alone, crosses the eligibility bar between 32 and 64 trials, and collapses toward zero past a few hundred. The agent did not change. The context did.
+
+These two figures are the argument the benchmark was built on, and they are true. They are also both computed on synthetic returns. The rest of this section asks what happens on the market.
+
+\subsection{Finding 1: the deflation prior was in the wrong units}\label{sec:units}
+
+The first run of the full grid on the two original daily datasets produced zero rank-eligible agents in every one of the 128 cells. Buy-and-hold on US indices posted a PSR of $1.0000$ against zero and a bootstrap $p$ of $0.0005$, and scored a deflated Sharpe of exactly $0.0000$. A PSR of one and a DSR of zero on the same series cannot both be verdicts about the data. They are a verdict about the threshold.
+
+The kernel computes every Sharpe per period. The default $\sigma_{\text{trials}} = 0.5$ is the worked example from \citet{bailey2014deflated}, and it is an annualized dispersion. Substituted per period into \cref{eq:deflation} at $N = 50$ it sets $SR^{*}_{0} = 1.14$ per period. \Cref{tab:units} converts that bar back into the annualized Sharpe an agent would need to reach it. On daily bars the requirement was an annualized Sharpe of $18$; on hourly bars, $106$. The US equity index is near $0.6$. Renaissance's Medallion fund is commonly cited near $2$ to $3$. The bar was not high. It was unreachable, and it grew with the square root of the number of periods per year, which is why the same index scores a DSR of $0.984$ on weekly bars and $0.000$ on daily bars with nothing about the market having changed.
+
+\begin{table}[t]
+\centering
+\small
+\caption{The annualized Sharpe an agent had to exceed to reach the deflation benchmark at $N = 50$, for each prior as it was applied (per period) and each bar size. Kernel at v0.2.1. The value measured from a real field was $0.070$.}
+\label{tab:units}
+\begin{tabular}{S[table-format=1.3] S[table-format=1.3] S[table-format=3.1] S[table-format=2.1] S[table-format=2.1] S[table-format=1.1]}
+\toprule
+{$\sigma_{\text{trials}}$ as applied} & {$SR^{*}_{0}$ per period} & {1h} & {4h} & {1d} & {1w} \\
+\midrule
+0.070 & 0.159 & 14.9 & 7.5 & 2.5 & 1.1 \\
+0.200 & 0.455 & 42.6 & 21.3 & 7.2 & 3.3 \\
+0.350 & 0.797 & 74.6 & 37.3 & 12.6 & 5.7 \\
+0.500 & 1.138 & 106.5 & 53.3 & 18.1 & 8.2 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The rival benchmarks in \cref{sec:related} report annualized Sharpe without deflating. This benchmark deflated without annualizing. Both are unit errors, in opposite directions, and the second is harder to notice because it produces a benchmark that appears admirably strict. It also explains, completely, why the demonstration in \cref{sec:demo} had only ever been shown on synthetic inputs: those had per-period returns large enough to clear an annualized bar.
+
+The fix, shipped in v0.3.0, leaves the per-period kernel untouched and gives the configuration a periods-per-year field so that $\sigma_{\text{trials}}$ is stated annualized and converted once at the point of use. A test asserts the conversion is applied exactly once on the configured path and never on the measured path. Another asserts that an SPX-like series is eligible under an annualized prior of $0.1$ at 252 periods per year and ineligible under the same prior at one period per year, which reproduces the old units exactly. A test that the same series clears the original $0.5$ prior was not written, because it cannot: $0.5$ annualized at 50 trials is a benchmark of $1.14$ annualized, and the index sits below it at any track length. That is the correct verdict for that prior, and the benchmark now states it in units a reader can check.
+
+\subsection{Finding 2: on every real dataset, the reliability gate is the one that bites}\label{sec:passk}
+
+With the units corrected, the full grid was rerun on all nine datasets. \Cref{tab:eligibility} reports the default configuration on each. The deflated Sharpe column is unchanged from before the fix on every real dataset, and that is expected: each field holds eight agents, so the scorer measures $\sigma_{\text{trials}}$ from the field, and the measured path was already per period. The values it reports are the true verdict of the statistic. On weekly bars the US index and the crypto momentum agent clear $\beta = 0.95$. On daily bars nothing does, because a 50-trial benchmark against a measured per-period dispersion of $0.070$ sits at $0.159$ per period and the daily index is near $0.036$.
+
+Still, zero agents are eligible at any of the 576 cells. The column that explains it is $\text{pass}^{k}$, and the reason is visible in the regime labels the simulator assigns to each window: every dataset contains at least one bear window. The default reliability mode requires a per-run PSR of $0.90$ on every window. A long-only agent has a negative realized Sharpe in a bear window and cannot clear any positive bar there. Buy-and-hold, the baseline every agent is meant to beat, is therefore structurally ineligible on every real dataset the benchmark ships. Weekly US indices isolates the two gates cleanly: a DSR of $0.984$ clears the deflation bar and the agent fails on $\text{pass}^{k}$ alone.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Default configuration ($\beta = 0.95$, $N = 50$, $\sigma_{\text{trials}}$ measured) on every dataset, kernel v0.3.0. Worst run DD is the largest drawdown in any single window. No agent is rank-eligible on any dataset under either reliability verdict. The luck floor never beats a reference agent on raw return.}
+\label{tab:eligibility}
+\begin{tabular}{llS[table-format=1.3]cS[table-format=1.3]cc}
+\toprule
+Dataset & Agent & {DSR} & $\text{pass}^{k}$ & {Worst run DD} & Every regime & Never catastrophic \\
+\midrule
+US indices 1w & buy-and-hold & 0.984 & no & 0.320 & no & no \\
+Crypto 1w & momentum & 0.978 & no & 0.563 & no & no \\
+Crypto 1w & buy-and-hold & 0.745 & no & 0.671 & no & no \\
+Crypto 1d & buy-and-hold & 0.144 & no & 0.476 & no & no \\
+US indices 1d & buy-and-hold & 0.000 & no & 0.336 & no & no \\
+Crypto 4h & buy-and-hold & 0.000 & no & 0.479 & no & no \\
+Crypto 1h & buy-and-hold & {pending} & no & {pending} & no & no \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+This is strictness, not breakage. The default mode does not ask whether an agent has an edge. It asks whether the agent is profitable with 90 percent confidence in every regime and under every execution seed. A regime-dependent edge such as equity beta correctly fails that question. The benchmark is declining to certify that owning the index is safe in a bear market, which it is not.
+
+\subsection{Finding 3: a weaker reliability gate admits nobody either}\label{sec:ablation}
+
+Whether the reliability gate should mean profitable in every regime or never catastrophic in any regime is a design question, and the kernel was extended so that both are expressible from configuration and the ablation is reproducible. The never-catastrophic preset sets the pass mode to any run and adds a per-run drawdown bound of 20 percent, with the edge tested on the pooled track. It is a weaker safety claim, and a test pins its cost: a synthetic agent with one spectacular run and four noise runs is refused by the default only through $\text{pass}^{k}$ and is admitted by the preset.
+
+On the real datasets the preset admits nobody. The last column of \cref{tab:eligibility} is identical to the one before it, and the worst-run drawdown column says why. The US index drew down 32 percent in its worst weekly window. Crypto buy-and-hold drew down between 48 and 67 percent. The weekly crypto momentum agent clears the deflation bar at $0.978$ and is refused on a 56 percent drawdown in one window. A raw-return leaderboard ranks that agent first. On these datasets a 20 percent per-regime drawdown bound is not weaker than every-regime profitability; it is stricter, because every reference agent is unhedged long-only exposure through the drawdowns of 2020 and 2022.
+
+One correction to how the per-run bound is naturally described. Drawdown is multiplicative, so a run's own drawdown never exceeds the pooled track's, because every within-run peak-to-trough pair is also a pooled pair. A per-run bound at the same value as the pooled bound therefore catches nothing the pooled bound misses. It bites when set below the pooled cap: a loose whole-track budget with a tight per-regime bound. The preset is configured that way, and the test that proves the bound is not redundant constructs exactly that case.
+
+\subsection{The falsification leg}\label{sec:falsify}
+
+A benchmark whose gates are strict can still be wrong in the other direction, by rewarding noise. On every dataset the luck floor's best agent has a lower raw return than the best reference agent, with zero exceptions in nine, and at the default configuration no random agent reaches a DSR above $0.423$. The floor behaves as a floor.
+
+The grid's loosest corner is the more instructive one. At $N = 1$, which is no deflation at all, a random agent reaches a DSR of $0.999$ on weekly crypto and $0.993$ on the rates series. A zero-skill agent, scored without a selection correction on a short weekly track, looks nearly certain to have an edge. At $N = 50$ on the same datasets the same agents score $0.423$ and $0.000$. Neither is eligible at any $N$, because $\text{pass}^{k}$ refuses them independently. That gap is the deflation doing the work the benchmark exists to do, measured on the market rather than on a synthetic track, and it is the counterpart to \cref{fig:deflation}: there the track was fixed and the trials grew; here the trials are fixed and the agent is noise.
+
+\subsection{What the evidence supports}\label{sec:claims}
+
+Taken together, the three findings support one claim and decline another. The claim: applied to the market itself across four asset classes and four bar sizes, the benchmark does not certify any unhedged long-only strategy as safe to hand capital under either definition of reliability, and it reports the drawdown that justifies the refusal. The luck floor never beats a reference agent, the self-audit demotes all eight attacks, and every number here recomputes byte-identically on three operating systems. The claim it declines: that eligibility is attainable by a real agent. Every entrant in these fields is a reference agent with no risk management. Showing that a hedged or risk-managed agent clears the gate, and that the gate is therefore not vacuous, requires such an agent to compete, and \cref{sec:limitations} lists it as the outstanding experiment.
