@@ -109,27 +109,78 @@ fn max_drawdown(returns: &[f64]) -> f64 {
 
 /// Scoring configuration. `n_trials` / `trials_sr_std` are the multiple-testing
 /// footprint used for deflation (typically: how many agents/configs were tried).
+///
+/// Units. The kernel computes every Sharpe ratio **per period** (see
+/// `sharpebench-stats`, which refuses to pre-annualize). The thresholds an
+/// operator reasons about, however, are quoted **annualized**, because that is
+/// the unit the literature and every track record use. `periods_per_year` is
+/// the bridge: the annualized inputs (`trials_sr_std`,
+/// `per_run_min_annual_sharpe`) are converted to per-period exactly once, at the
+/// point of use, through [`per_period_sr_std`] and [`per_run_psr_benchmark`].
+/// Nothing else in the kernel knows what a period is.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ScoreConfig {
     pub n_trials: u32,
-    /// Cross-trial dispersion of Sharpe ratios — the `sqrt(V[SR])` term in Bailey
-    /// & López de Prado's expected-maximum Sharpe, which sets how far the bar
-    /// rises with `n_trials`. It materially decides who is rank-eligible.
+    /// **Annualized** cross-trial dispersion of Sharpe ratios: the `sqrt(V[SR])`
+    /// term in Bailey & López de Prado's expected-maximum Sharpe, which sets how
+    /// far the bar rises with `n_trials`. It materially decides who is
+    /// rank-eligible.
     ///
     /// The default 0.5 is a **modelling prior, not a measurement**: it is the
     /// working value López de Prado uses in worked examples, adopted before any
-    /// field existed to measure it on. [`rank`] therefore prefers the *measured*
-    /// path — the sample standard deviation of per-period Sharpe ratios across the
-    /// submitted field, which is exactly the quantity the formula asks for — and
-    /// falls back to this configured value only when the field is too small to
-    /// estimate it (see `min_field_for_measured_sr_std`). [`score_agent`] has no
-    /// field and always uses this value. Whichever applied is stamped on every
-    /// [`CompositeScore`] as `trials_sr_std` + `trials_sr_std_source`.
+    /// field existed to measure it on. That worked example is in annualized
+    /// units, and so is this field; the kernel divides it by
+    /// `sqrt(periods_per_year)` before it touches a per-period statistic (see
+    /// [`per_period_sr_std`]). Applied per period unconverted, 0.5 made the
+    /// deflation benchmark an annualized Sharpe of 18 on daily bars and 106 on
+    /// hourly bars, which no agent (and no market) has ever cleared. It means
+    /// "the best of `n_trials` lucky strategies looks like an annualized Sharpe
+    /// of about 1.14 at fifty trials", which is a high bar, not an unreachable
+    /// one.
+    ///
+    /// [`rank`] prefers the *measured* path, the sample standard deviation of
+    /// per-period Sharpe ratios across the submitted field, which is exactly the
+    /// quantity the formula asks for and is already per-period, so it is never
+    /// converted. It falls back to this configured value only when the field is
+    /// too small to estimate it (see `min_field_for_measured_sr_std`).
+    /// [`score_agent`] has no field and always uses this value. Whichever applied
+    /// is stamped on every [`CompositeScore`] as `trials_sr_std` (per period, as
+    /// used), `trials_sr_std_annualized` and `trials_sr_std_source`.
     pub trials_sr_std: f64,
     /// Deflated-Sharpe bar an agent must clear to be rank-eligible (e.g. 0.95).
     pub dsr_bar: f64,
-    /// Per-run PSR bar each individual run must clear for pass^k.
+    /// Per-run PSR bar each individual run must clear for pass^k: the confidence
+    /// with which the run's true Sharpe must exceed `per_run_min_annual_sharpe`.
+    ///
+    /// PSR scales with `sqrt(n - 1)` of the run's length, so on short windows this
+    /// gate is necessarily weak for any bar: a 78-bar window needs an annualized
+    /// Sharpe of about 2.3 to reach 0.90 against zero, a 250-bar window about 1.3.
+    /// That is a property of the statistic (short tracks carry little evidence),
+    /// not a unit error, and it is why pass^k fails whenever any out-of-sample
+    /// window is short. Either score longer windows or lower this bar knowingly.
     pub per_run_psr_bar: f64,
+    /// **Annualized** Sharpe each run's true Sharpe must exceed with
+    /// `per_run_psr_bar` confidence for pass^k. Converted to per period through
+    /// [`per_run_psr_benchmark`]. The default 0.0 is the no-edge null, under which
+    /// the per-run test is exactly `PSR(returns, 0) >= per_run_psr_bar`; an
+    /// operator who wants "beats an annualized 0.5 on every run" sets 0.5 here,
+    /// in units that mean the same thing on every timeframe.
+    #[serde(default)]
+    pub per_run_min_annual_sharpe: f64,
+    /// How many return periods make a year on the dataset being scored: the unit
+    /// conversion between the annualized thresholds above and the per-period
+    /// statistics the kernel computes. Daily equities 252, daily crypto 365,
+    /// 4-hour bars 2190, hourly bars 8760, weekly bars 52.
+    ///
+    /// Getting this wrong is the single most consequential misconfiguration in
+    /// the benchmark: the deflation bar scales with `1 / sqrt(periods_per_year)`,
+    /// so scoring hourly crypto with the daily default makes the bar about six
+    /// times too demanding, and scoring weekly bars with it makes it about half as
+    /// demanding as intended. The default is 252 (daily equities), which is what
+    /// every score before this field existed silently assumed. The CLI prints the
+    /// value it used in every run header for the same reason.
+    #[serde(default = "default_periods_per_year")]
+    pub periods_per_year: f64,
     /// Significance level for the bootstrap edge test.
     pub alpha: f64,
     pub bootstrap_seed: u64,
@@ -197,6 +248,36 @@ fn default_min_field_for_measured_sr_std() -> usize {
     5
 }
 
+/// Default periods per year: daily equity bars, the benchmark's historical
+/// assumption. Configs serialized before the field existed deserialize to this,
+/// so their meaning is unchanged.
+fn default_periods_per_year() -> f64 {
+    252.0
+}
+
+/// The per-period cross-trial Sharpe dispersion the kernel deflates with on the
+/// configured path: `cfg.trials_sr_std / sqrt(cfg.periods_per_year)`.
+///
+/// A Sharpe ratio scales with the square root of the number of periods, so a
+/// dispersion of Sharpes does too; dividing by `sqrt(periods_per_year)` takes
+/// the annualized prior to the frequency the statistic is computed at. This is
+/// the only place that conversion happens. Every deflation call site in this
+/// module reads it from here so the prior can neither be converted twice nor
+/// reach a per-period statistic unconverted. The *measured* path in [`rank`]
+/// never calls it: the dispersion it measures across the field is already a
+/// dispersion of per-period Sharpes.
+pub fn per_period_sr_std(cfg: &ScoreConfig) -> f64 {
+    cfg.trials_sr_std / cfg.periods_per_year.sqrt()
+}
+
+/// The per-period Sharpe benchmark each run's PSR is tested against for
+/// pass^k: `cfg.per_run_min_annual_sharpe / sqrt(cfg.periods_per_year)`. The
+/// default 0.0 converts to 0.0 on every timeframe, so the default per-run test
+/// is the plain `PSR(returns, 0) >= per_run_psr_bar`.
+pub fn per_run_psr_benchmark(cfg: &ScoreConfig) -> f64 {
+    cfg.per_run_min_annual_sharpe / cfg.periods_per_year.sqrt()
+}
+
 /// Where the `trials_sr_std` that deflated a score came from.
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -217,6 +298,8 @@ impl Default for ScoreConfig {
             trials_sr_std: 0.5,
             dsr_bar: 0.95,
             per_run_psr_bar: 0.90,
+            per_run_min_annual_sharpe: 0.0,
+            periods_per_year: default_periods_per_year(),
             alpha: 0.05,
             bootstrap_seed: 0x5BA7_2026,
             n_boot: 2000,
@@ -228,6 +311,19 @@ impl Default for ScoreConfig {
             dsr_ci_level: default_dsr_ci_level(),
             shared_run_set: default_shared_run_set(),
             min_field_for_measured_sr_std: default_min_field_for_measured_sr_std(),
+        }
+    }
+}
+
+impl ScoreConfig {
+    /// The default configuration for a dataset with `periods_per_year` bars per
+    /// year. Prefer this to `Default::default()` whenever the data is not daily
+    /// equities: it is the one field that has to match the dataset, and naming it
+    /// at construction is harder to forget than patching it afterwards.
+    pub fn for_periods_per_year(periods_per_year: f64) -> Self {
+        Self {
+            periods_per_year,
+            ..Self::default()
         }
     }
 }
@@ -351,9 +447,20 @@ pub struct CompositeScore {
     /// agent (i.e. its rank is not statistically separable from a neighbor).
     /// Filled by [`rank`].
     pub dsr_tied: bool,
-    /// The cross-trial Sharpe dispersion this score was deflated with.
+    /// The **per-period** cross-trial Sharpe dispersion this score was actually
+    /// deflated with: the value handed to the expected-maximum-Sharpe formula.
+    /// On the configured path it is `ScoreConfig::trials_sr_std` divided by
+    /// `sqrt(periods_per_year)`; on the measured path it is the field's measured
+    /// dispersion, unconverted.
     #[serde(default)]
     pub trials_sr_std: f64,
+    /// The annualized prior `trials_sr_std` was converted from: `Some` of
+    /// `ScoreConfig::trials_sr_std` on the configured path, `None` on the measured
+    /// path, where the dispersion was measured per period and no annualized prior
+    /// exists. Reported so a score is legible in the units operators quote
+    /// without any reader having to redo the conversion.
+    #[serde(default)]
+    pub trials_sr_std_annualized: Option<f64>,
     /// Whether `trials_sr_std` was measured from the field or taken from the
     /// configured prior. Always `Configured` from `score_agent` alone.
     #[serde(default)]
@@ -378,8 +485,47 @@ fn dominates(a: &CompositeScore, b: &CompositeScore) -> bool {
             || a.turnover < b.turnover)
 }
 
-/// Score a single agent submission against `cfg`.
+/// The resolved per-period deflation dispersion a score is computed with, and
+/// where it came from. Built exactly once per scoring call so the configured
+/// prior is converted in one place ([`per_period_sr_std`]) and the measured
+/// dispersion is never converted at all.
+#[derive(Clone, Copy)]
+struct Deflation {
+    /// Per period, as handed to the expected-maximum-Sharpe formula.
+    sr_std: f64,
+    /// The annualized prior `sr_std` came from; `None` when it was measured.
+    annualized: Option<f64>,
+    source: TrialsSrStdSource,
+}
+
+impl Deflation {
+    fn configured(cfg: &ScoreConfig) -> Self {
+        Self {
+            sr_std: per_period_sr_std(cfg),
+            annualized: Some(cfg.trials_sr_std),
+            source: TrialsSrStdSource::Configured,
+        }
+    }
+
+    /// `sr_std` is the field's measured dispersion of per-period Sharpes: already
+    /// in the kernel's units, so it must not pass through the conversion.
+    fn measured(sr_std: f64) -> Self {
+        Self {
+            sr_std,
+            annualized: None,
+            source: TrialsSrStdSource::Measured,
+        }
+    }
+}
+
+/// Score a single agent submission against `cfg`. With no field to measure the
+/// cross-trial dispersion on, the configured annualized prior applies, converted
+/// to per period once.
 pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
+    score_agent_with(sub, cfg, Deflation::configured(cfg))
+}
+
+fn score_agent_with(sub: &AgentSubmission, cfg: &ScoreConfig, defl: Deflation) -> CompositeScore {
     let pooled: Vec<f64> = sub
         .runs
         .iter()
@@ -391,13 +537,15 @@ pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
     // footprint: an agent that tried 5000 configs to find this strategy faces a
     // higher bar than one that tried none (front-end data-snooping control).
     let effective_n_trials = cfg.n_trials.saturating_add(sub.in_sample_trials);
-    let dsr = deflated_sharpe_ratio(&pooled, effective_n_trials, cfg.trials_sr_std);
+    let dsr = deflated_sharpe_ratio(&pooled, effective_n_trials, defl.sr_std);
 
-    // pass^k: every run must individually clear the per-run PSR bar.
+    // pass^k: every run must individually clear the per-run PSR bar against the
+    // per-period benchmark the annualized minimum converts to (0 by default).
+    let per_run_benchmark = per_run_psr_benchmark(cfg);
     let per_run: Vec<bool> = sub
         .runs
         .iter()
-        .map(|r| probabilistic_sharpe_ratio(&r.returns, 0.0) >= cfg.per_run_psr_bar)
+        .map(|r| probabilistic_sharpe_ratio(&r.returns, per_run_benchmark) >= cfg.per_run_psr_bar)
         .collect();
     let passed_k = pass_k(&per_run, PassMode::All);
 
@@ -488,7 +636,7 @@ pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
         (None, None)
     } else {
         let sr: SelectionRobustness =
-            selection_robustness(&sub.candidates, effective_n_trials, cfg.trials_sr_std);
+            selection_robustness(&sub.candidates, effective_n_trials, defl.sr_std);
         (Some(sr.median_dsr), Some(sr.selection_gap))
     };
 
@@ -523,7 +671,7 @@ pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
     let dsr_ci = crate::significance::bootstrap_dsr_ci(
         &pooled,
         effective_n_trials,
-        cfg.trials_sr_std,
+        defl.sr_std,
         cfg.bootstrap_seed,
         cfg.n_boot,
         cfg.block_prob,
@@ -578,8 +726,9 @@ pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
         dsr_se: dsr_ci.se,
         tie_group: 0,
         dsr_tied: false,
-        trials_sr_std: cfg.trials_sr_std,
-        trials_sr_std_source: TrialsSrStdSource::Configured,
+        trials_sr_std: defl.sr_std,
+        trials_sr_std_annualized: defl.annualized,
+        trials_sr_std_source: defl.source,
         runs_submitted: sub.runs.len(),
         runs_scored: sub.runs.len(),
     }
@@ -717,26 +866,18 @@ pub fn rank(subs: &[AgentSubmission], cfg: &ScoreConfig) -> Vec<CompositeScore> 
         .collect();
 
     // Measured deflation: with enough agents the field's own Sharpe dispersion
-    // replaces the configured prior. A small field scores against `cfg` itself,
-    // so the configured path stays byte-identical.
-    let measured = measured_trials_sr_std(&pooled, cfg.min_field_for_measured_sr_std);
-    let measured_cfg = measured.map(|sr_std| ScoreConfig {
-        trials_sr_std: sr_std,
-        ..cfg.clone()
-    });
-    let eff_cfg = measured_cfg.as_ref().unwrap_or(cfg);
-    let sr_std_source = if measured.is_some() {
-        TrialsSrStdSource::Measured
-    } else {
-        TrialsSrStdSource::Configured
-    };
+    // replaces the configured prior. The measured value is a dispersion of
+    // per-period Sharpes, so it goes in as-is; only the configured prior is
+    // annualized and needs converting. A small field scores exactly as
+    // `score_agent` would, so the configured path stays byte-identical.
+    let defl = measured_trials_sr_std(&pooled, cfg.min_field_for_measured_sr_std)
+        .map_or_else(|| Deflation::configured(cfg), Deflation::measured);
 
     let mut scores: Vec<CompositeScore> = field
         .iter()
         .enumerate()
         .map(|(idx, s)| {
-            let mut cs = score_agent(s, eff_cfg);
-            cs.trials_sr_std_source = sr_std_source;
+            let mut cs = score_agent_with(s, cfg, defl);
             cs.runs_submitted = subs[idx].runs.len();
             if min_len >= 2 {
                 let (alpha, beta) = crate::attribution::alpha_beta(&pooled[idx], &market);
@@ -898,6 +1039,7 @@ fn ci_overlap(a: &CompositeScore, b: &CompositeScore) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::deflated_sharpe::expected_max_sharpe;
     use crate::process::ProcessEvent;
 
     /// Deterministic run: mean drift + a sinusoidal wiggle (no RNG → reproducible).
@@ -1293,7 +1435,8 @@ mod tests {
         assert_eq!(board.len(), 4);
         for s in &board {
             assert_eq!(s.trials_sr_std_source, TrialsSrStdSource::Configured);
-            assert_eq!(s.trials_sr_std.to_bits(), cfg.trials_sr_std.to_bits());
+            assert_eq!(s.trials_sr_std.to_bits(), per_period_sr_std(&cfg).to_bits());
+            assert_eq!(s.trials_sr_std_annualized, Some(cfg.trials_sr_std));
             let alone = score_agent(
                 field.iter().find(|a| a.agent_id == s.agent_id).unwrap(),
                 &cfg,
@@ -1350,6 +1493,7 @@ mod tests {
         for s in &board {
             assert_eq!(s.trials_sr_std_source, TrialsSrStdSource::Measured);
             assert_eq!(s.trials_sr_std.to_bits(), expected.to_bits());
+            assert_eq!(s.trials_sr_std_annualized, None);
             let alone = score_agent(
                 field.iter().find(|a| a.agent_id == s.agent_id).unwrap(),
                 &cfg,
@@ -1365,5 +1509,199 @@ mod tests {
         reversed.reverse();
         let again = rank(&reversed, &cfg);
         assert_eq!(again[0].trials_sr_std.to_bits(), expected.to_bits());
+    }
+
+    /// A deterministic, roughly Gaussian return series with *exactly* the
+    /// requested per-period mean and sample standard deviation (a 64-bit LCG
+    /// feeding a sum of twelve uniforms, then re-standardized), so a test can
+    /// state an agent's per-period Sharpe to the digit without an RNG dependency.
+    fn gaussian_like(n: usize, mean_ret: f64, sd: f64, seed: u64) -> Vec<f64> {
+        let mut state = seed;
+        let mut next = || {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (state >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let raw: Vec<f64> = (0..n)
+            .map(|_| (0..12).map(|_| next()).sum::<f64>() - 6.0)
+            .collect();
+        let (m, s) = (mean(&raw), std_dev(&raw));
+        raw.iter().map(|x| mean_ret + sd * (x - m) / s).collect()
+    }
+
+    fn pooled_of(sub: &AgentSubmission) -> Vec<f64> {
+        sub.runs
+            .iter()
+            .flat_map(|r| r.returns.iter().copied())
+            .collect()
+    }
+
+    /// The configured prior is annualized; the value the deflation actually sees
+    /// is that prior divided by `sqrt(periods_per_year)`, exactly once.
+    #[test]
+    fn annualized_prior_is_converted_per_period_once() {
+        let cfg = ScoreConfig {
+            trials_sr_std: 0.5,
+            periods_per_year: 8760.0,
+            ..ScoreConfig::default()
+        };
+        let expected = 0.5 / 8760f64.sqrt();
+        assert_eq!(per_period_sr_std(&cfg).to_bits(), expected.to_bits());
+
+        // A moderate Sharpe (about 0.09 per period) keeps the DSR off its 0/1
+        // saturation so the three candidate conversions are distinguishable.
+        let sub = agent("a", (0..5).map(|_| run(0.0002, 0.003, 300)).collect());
+        let s = score_agent(&sub, &cfg);
+        assert_eq!(s.trials_sr_std_source, TrialsSrStdSource::Configured);
+        assert_eq!(s.trials_sr_std.to_bits(), expected.to_bits());
+        assert_eq!(s.trials_sr_std_annualized, Some(0.5));
+        // The DSR was computed with the converted value: not with the raw prior,
+        // and not with the prior converted twice.
+        let pooled = pooled_of(&sub);
+        let once = deflated_sharpe_ratio(&pooled, cfg.n_trials, expected);
+        let raw = deflated_sharpe_ratio(&pooled, cfg.n_trials, 0.5);
+        let twice = deflated_sharpe_ratio(&pooled, cfg.n_trials, expected / 8760f64.sqrt());
+        assert_eq!(s.deflated_sharpe.to_bits(), once.to_bits());
+        assert_ne!(s.deflated_sharpe.to_bits(), raw.to_bits());
+        assert_ne!(s.deflated_sharpe.to_bits(), twice.to_bits());
+    }
+
+    /// The measured path measures a dispersion of per-period Sharpes, so it is
+    /// reported and used as-is: `periods_per_year` must not touch it.
+    #[test]
+    fn measured_sr_std_is_never_reconverted() {
+        let field: Vec<AgentSubmission> = (0..5)
+            .map(|i| {
+                let m = 0.0002 + 0.0003 * i as f64;
+                agent(
+                    &format!("a{i}"),
+                    (0..5).map(|_| run(m, 0.003, 60)).collect(),
+                )
+            })
+            .collect();
+        let mut sharpes: Vec<f64> = field.iter().map(|a| sharpe_ratio(&pooled_of(a))).collect();
+        sharpes.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let raw_measured = std_dev(&sharpes);
+
+        for ppy in [1.0, 252.0, 8760.0] {
+            let cfg = ScoreConfig::for_periods_per_year(ppy);
+            let board = rank(&field, &cfg);
+            for s in &board {
+                assert_eq!(s.trials_sr_std_source, TrialsSrStdSource::Measured);
+                assert_eq!(s.trials_sr_std.to_bits(), raw_measured.to_bits());
+                assert_eq!(s.trials_sr_std_annualized, None);
+                let pooled = pooled_of(field.iter().find(|a| a.agent_id == s.agent_id).unwrap());
+                let expected = deflated_sharpe_ratio(&pooled, cfg.n_trials, raw_measured);
+                assert_eq!(s.deflated_sharpe.to_bits(), expected.to_bits());
+            }
+        }
+    }
+
+    /// The regression the unit fix protects: a daily index-like track (per-period
+    /// mean 0.0004, sd 0.011, a Sharpe of 0.036 per day or about 0.57 annualized)
+    /// scored with a deflation prior it can legitimately clear is rank-eligible
+    /// once the prior is read as annualized, and was not when the same number was
+    /// applied per period (`periods_per_year = 1` reproduces the old units).
+    ///
+    /// The prior here is 0.1 annualized at fifty trials (a field of similar
+    /// index strategies), not the 0.5 default: at 0.5 the expected best-of-fifty
+    /// luck is an annualized Sharpe of about 1.14, which the index itself sits
+    /// below, so no track length clears it. That is the correct verdict for that
+    /// prior, and it is the reason the default must be read as annualized: per
+    /// period, the same 0.5 demanded an annualized 18.
+    #[test]
+    fn daily_buy_and_hold_clears_the_corrected_bar() {
+        let runs: Vec<Run> = (0..3)
+            .map(|i| Run {
+                returns: gaussian_like(2500, 0.0004, 0.011, 0x5B_A7 + i),
+                ..Run::default()
+            })
+            .collect();
+        let index = agent("buy-and-hold", runs);
+        let cfg = ScoreConfig {
+            n_trials: 50,
+            trials_sr_std: 0.1,
+            periods_per_year: 252.0,
+            ..ScoreConfig::default()
+        };
+        let s = score_agent(&index, &cfg);
+        assert!(s.psr > 0.99, "the index is clearly positive: {s:?}");
+        assert!(
+            s.rank_eligible,
+            "an index-like daily track must clear an annualized 0.1 prior: {s:?}"
+        );
+
+        let old_units = ScoreConfig {
+            periods_per_year: 1.0,
+            ..cfg
+        };
+        let old = score_agent(&index, &old_units);
+        assert!(
+            !old.rank_eligible && old.deflated_sharpe < 0.05,
+            "applied per period the same prior was unreachable: {old:?}"
+        );
+    }
+
+    /// Pins the direction of the conversion: the same annualized prior spread
+    /// over more periods per year is a smaller per-period dispersion, so the
+    /// per-period deflation benchmark is lower on hourly bars than on daily.
+    #[test]
+    fn hourly_bar_is_stricter_per_period_than_daily_for_the_same_annualized_prior() {
+        let daily = ScoreConfig::for_periods_per_year(252.0);
+        let hourly = ScoreConfig::for_periods_per_year(8760.0);
+        let star = |cfg: &ScoreConfig| expected_max_sharpe(per_period_sr_std(cfg), cfg.n_trials);
+        assert!(star(&hourly) > 0.0 && star(&daily) > 0.0);
+        assert!(
+            star(&hourly) < star(&daily),
+            "hourly sr_star {} must be below daily {}",
+            star(&hourly),
+            star(&daily)
+        );
+        // And the annualized benchmark they imply is the same number.
+        let ann_h = star(&hourly) * 8760f64.sqrt();
+        let ann_d = star(&daily) * 252f64.sqrt();
+        assert!((ann_h - ann_d).abs() < 1e-12, "{ann_h} vs {ann_d}");
+    }
+
+    /// With the default `per_run_min_annual_sharpe = 0.0` the per-run test is the
+    /// one the benchmark always ran, `PSR(returns, 0) >= per_run_psr_bar`, on
+    /// every timeframe.
+    #[test]
+    fn default_min_annual_sharpe_is_identical_to_the_old_per_run_test() {
+        let mut runs = vec![run(0.02, 0.002, 60), run(0.0, 0.003, 60)];
+        runs.extend((0..3).map(|_| run(0.002, 0.0005, 60)));
+        let sub = agent("mixed", runs);
+        let clean = agent("clean", (0..3).map(|_| run(0.002, 0.0005, 60)).collect());
+        for ppy in [52.0, 252.0, 8760.0] {
+            let cfg = ScoreConfig::for_periods_per_year(ppy);
+            assert_eq!(per_run_psr_benchmark(&cfg).to_bits(), 0f64.to_bits());
+            let old: Vec<bool> = sub
+                .runs
+                .iter()
+                .map(|r| probabilistic_sharpe_ratio(&r.returns, 0.0) >= cfg.per_run_psr_bar)
+                .collect();
+            assert!(old.iter().any(|&p| p) && old.iter().any(|&p| !p));
+            assert_eq!(
+                score_agent(&sub, &cfg).passed_k,
+                pass_k(&old, PassMode::All)
+            );
+            assert!(score_agent(&clean, &cfg).passed_k);
+        }
+        // A non-zero annualized minimum converts per period and raises the bar.
+        let strict = ScoreConfig {
+            per_run_min_annual_sharpe: 3.0,
+            ..ScoreConfig::for_periods_per_year(252.0)
+        };
+        assert_eq!(
+            per_run_psr_benchmark(&strict).to_bits(),
+            (3.0 / 252f64.sqrt()).to_bits()
+        );
+        let weak = agent("weak", (0..3).map(|_| run(0.0005, 0.004, 60)).collect());
+        assert!(score_agent(&weak, &ScoreConfig::for_periods_per_year(252.0)).passed_k);
+        assert!(
+            !score_agent(&weak, &strict).passed_k,
+            "a minimum annualized Sharpe of 3.0 must fail a 0.0005/0.004 track"
+        );
     }
 }

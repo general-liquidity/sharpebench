@@ -65,7 +65,10 @@ pub use comparison_sets::{
     comparison_set, qualifies, restrict_field, restrict_to_shared, ComparisonSet, TaggedRun,
     TaggedSubmission,
 };
-pub use composite::{rank, score_agent, AgentSubmission, CompositeScore, Run, ScoreConfig};
+pub use composite::{
+    per_period_sr_std, per_run_psr_benchmark, rank, score_agent, AgentSubmission, CompositeScore,
+    Run, ScoreConfig, TrialsSrStdSource,
+};
 pub use correlation::{crowdedness, Crowdedness};
 pub use disqualification::{classify_disqualification, rollup, DisqualThresholds, FailReason};
 pub use econrationality::{assess_rationality, DominanceChoice, EconRationalityReport};

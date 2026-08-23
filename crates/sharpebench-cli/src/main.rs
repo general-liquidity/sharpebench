@@ -520,6 +520,7 @@ fn help() {
     );
     println!("                       --data: a frozen CSV (else synthetic) · --http/--cmd: add YOUR agent");
     println!("                       --checkpoint <path>: resumable external-agent sweep (crash-tolerant)");
+    println!("                       --periods-per-year N: bars per year of the dataset (default 252; 1h crypto 8760, 4h 2190, 1d crypto 365, 1w 52)");
     println!(
         "  sharpebench score <submissions.json>  rank a JSON field of pre-computed submissions"
     );
@@ -1036,6 +1037,25 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
             ],
         ),
     };
+    // `--periods-per-year N` tells the scorer what a bar is, so the annualized
+    // thresholds in `ScoreConfig` convert to the dataset's frequency. The shipped
+    // datasets: us-indices-1d, fx-majors-1d, commodities-1d, rates-1d 252;
+    // crypto-majors-1d 365; crypto-majors-4h 2190; crypto-majors-1h 8760;
+    // us-indices-1w and crypto-majors-1w 52. Scoring hourly bars with the daily
+    // default makes the deflation bar about six times too demanding, so the value
+    // used is printed in the run header rather than left implicit.
+    let periods_per_year = match flag_value(args, "--periods-per-year") {
+        Some(raw) => match raw.parse::<f64>() {
+            Ok(p) if p.is_finite() && p > 0.0 => p,
+            _ => {
+                eprintln!("error: --periods-per-year must be a positive number, got `{raw}`");
+                return ExitCode::from(2);
+            }
+        },
+        None => ScoreConfig::default().periods_per_year,
+    };
+    let cfg = ScoreConfig::for_periods_per_year(periods_per_year);
+
     let seeds: Vec<u64> = (0..8).collect();
     let costs = CostModel::default();
 
@@ -1163,13 +1183,13 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
     if !json {
         let src = flag_value(args, "--data").unwrap_or("synthetic");
         println!(
-            "SharpeBench — run on {src} ({} symbols, {} windows × {} seeds, costs on; incl. luck floor)\n",
+            "SharpeBench — run on {src} ({} symbols, {} windows × {} seeds, {periods_per_year} periods/year, costs on; incl. luck floor)\n",
             data.symbols().len(),
             windows.len(),
             seeds.len()
         );
     }
-    emit_board(&rank(&field, &ScoreConfig::default()), json);
+    emit_board(&rank(&field, &cfg), json);
     ExitCode::SUCCESS
 }
 
