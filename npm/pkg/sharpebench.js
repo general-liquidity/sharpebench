@@ -44,6 +44,69 @@ function canary(seed) {
 exports.canary = canary;
 
 /**
+ * @param {string} submissions_json
+ * @param {string} config_json
+ * @returns {string}
+ */
+function classify_disqualification(submissions_json, config_json) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(submissions_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(config_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.classify_disqualification(ptr0, len0, ptr1, len1);
+        deferred3_0 = ret[0];
+        deferred3_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+}
+exports.classify_disqualification = classify_disqualification;
+
+/**
+ * @param {string} params_json
+ * @returns {string}
+ */
+function crowding_half_life(params_json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(params_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.crowding_half_life(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+exports.crowding_half_life = crowding_half_life;
+
+/**
+ * @param {string} input_json
+ * @returns {string}
+ */
+function decompose_uncertainty(input_json) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(input_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.decompose_uncertainty(ptr0, len0);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+exports.decompose_uncertainty = decompose_uncertainty;
+
+/**
  * @param {string} params_json
  * @returns {string}
  */
@@ -109,6 +172,29 @@ function is_my_sharpe_real_full(field_json, winner_idx, config_json) {
     }
 }
 exports.is_my_sharpe_real_full = is_my_sharpe_real_full;
+
+/**
+ * @param {string} candidates_json
+ * @param {string} params_json
+ * @returns {string}
+ */
+function percentile_selection(candidates_json, params_json) {
+    let deferred3_0;
+    let deferred3_1;
+    try {
+        const ptr0 = passStringToWasm0(candidates_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(params_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.percentile_selection(ptr0, len0, ptr1, len1);
+        deferred3_0 = ret[0];
+        deferred3_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+    }
+}
+exports.percentile_selection = percentile_selection;
 
 /**
  * @param {string} submissions_json

@@ -177,6 +177,155 @@ export interface HonestyVerdict {
   [k: string]: unknown;
 }
 
+// --- Percentile selection ----------------------------------------------------
+
+/** What a candidate is scored on inside {@link percentileSelection}. */
+export type SelectionUtility = "mean_return" | "sharpe";
+
+/** Options for {@link percentileSelection}. Omit for the recommended defaults. */
+export interface PercentileSelectionOpts {
+  /** Utility each candidate is scored on. Default `"mean_return"`. */
+  utility?: SelectionUtility;
+  /**
+   * Percentile of the bootstrapped utility distribution to rank on, in [0, 1].
+   * Default 0.5 (the middle of the band). Below 0.3 the result carries
+   * `alphaWarning: true`: the extreme lower tail is decided by a handful of
+   * unlucky resamples. The result is still computed; the warning flags a
+   * choice, it does not veto one.
+   */
+  alpha?: number;
+  /** PRNG seed; the result is deterministic given (data, seed). Default 0. */
+  seed?: number;
+  /** Bootstrap resamples per candidate. Default 2000. */
+  nBoot?: number;
+  /** Stationary-bootstrap block-restart probability. Default 0.1. */
+  blockProb?: number;
+}
+
+/** Per-candidate result inside a {@link PercentileSelectionResult}. */
+export interface CandidateUtility {
+  /** Position of this candidate in the input array. */
+  index: number;
+  /** Utility on the observed path: the number a naive argmax would rank on. */
+  point_utility: number;
+  /** The alpha percentile of the bootstrapped utility distribution. */
+  percentile_utility: number;
+  /** `point_utility - percentile_utility`: how much of the headline number fails to survive resampling. */
+  optimism_gap: number;
+}
+
+/** Selection on a percentile of a bootstrapped utility distribution. */
+export interface PercentileSelectionResult {
+  /** The percentile actually used, clamped to [0, 1]. */
+  alpha: number;
+  /** True when alpha sits below the recommended floor of 0.3. */
+  alpha_warning: boolean;
+  /** Every candidate, in input order. */
+  candidates: CandidateUtility[];
+  /** Index of the candidate with the best percentile utility (the robust pick), or null for empty input. */
+  selected: number | null;
+  /** Index of the candidate with the best point utility (the naive pick), or null for empty input. */
+  point_argmax: number | null;
+  /** Whether the two picks agree. Disagreement is the interesting case. */
+  agrees_with_point_argmax: boolean;
+  /** Optimism gap of the point winner: report this next to any headline utility. */
+  point_winner_optimism: number;
+  [k: string]: unknown;
+}
+
+// --- Uncertainty decomposition ----------------------------------------------
+
+/** Inputs for {@link decomposeUncertainty}. Every field is optional; a missing leg's input reads as empty. */
+export interface UncertaintyInput {
+  /** Realized binary outcomes (true or 1 = the call was right). Drives the aleatoric leg. */
+  outcomes?: Array<boolean | number>;
+  /** Independent per-decision confidence streams for the same decisions. Drives the epistemic leg. */
+  signals?: number[][];
+  /** The case's per-period returns. Drives the distributional leg (with the reference). */
+  caseReturns?: number[];
+  /** The reference per-period returns the case is compared against. */
+  referenceReturns?: number[];
+}
+
+/**
+ * The three legs of uncertainty behind one scored case, each on [0, 1] and
+ * reported side by side, never summed. High aleatoric says stop looking, high
+ * epistemic says keep looking, high distributional says the case is outside
+ * what the reference can speak to.
+ */
+export interface UncertaintySplit {
+  /** Irreducible outcome noise (base-rate variance; 1 = a fair coin). */
+  aleatoric: number;
+  /** Reducible ignorance, from signal disagreement plus evidence thinness. */
+  epistemic: number;
+  /** Unlikeness to the reference series (location or dispersion shift). */
+  distributional: number;
+  /**
+   * Load-bearing limitation, spelled out by the kernel: the epistemic leg is a
+   * lower bound, never an upper one. Unanimous or correlated signals understate
+   * it, so treat only high readings as informative.
+   */
+  epistemic_caveat: string;
+  [k: string]: unknown;
+}
+
+// --- Crowding decay prior ----------------------------------------------------
+
+/**
+ * Parameters of the crowding decay model. All rates are per period of the
+ * caller's IC series; there is deliberately no default calibration, because a
+ * stock calibration would smuggle a modelled number in as if it were measured.
+ */
+export interface CrowdingParams {
+  /** Natural mean-reversion rate of the edge at zero adoption. */
+  theta: number;
+  /** Crowding decay rate at full adoption. */
+  deltaMax: number;
+  /** Exponent on adoption (1 = linear). Default 1. */
+  curvature?: number;
+}
+
+/** The expected half-life implied by the crowding model: a prior, not a measurement. */
+export interface CrowdingDecayPrior {
+  /** Adoption used, clamped to [0, 1]. */
+  adoption: number;
+  /** theta, echoed back. */
+  natural_reversion: number;
+  /** The adoption-driven decay component delta(phi). */
+  crowding_decay: number;
+  /** `ln2 / (theta + delta(phi))` in periods, or null when the model says the edge never decays. */
+  expected_half_life: number | null;
+  /** Names what this is: a model prior, reported never gating. */
+  note: string;
+  [k: string]: unknown;
+}
+
+// --- Disqualification-reason taxonomy ---------------------------------------
+
+/**
+ * A reason an agent was (or should be) demoted. The first five mirror the hard
+ * eligibility gates in the scorer; the last three are advisory quality flags
+ * that never gate.
+ */
+export type FailReason =
+  | "failed_pass_k"
+  | "dsr_below_bar"
+  | "process_violation"
+  | "bootstrap_insignificant"
+  | "mandate_breached"
+  | "high_selection_gap"
+  | "is_rediscovery"
+  | "oos_decay";
+
+/** Every disqualification/quality signal that fired for one scored agent. */
+export interface DisqualificationReport {
+  agent_id: string;
+  rank_eligible: boolean;
+  /** Reasons in stable order; empty means no signal fired. */
+  reasons: FailReason[];
+  [k: string]: unknown;
+}
+
 /** The FULL verdict: LITE on the winner plus the multiple-testing family + PBO. */
 export interface FullVerdict {
   honesty: HonestyVerdict;

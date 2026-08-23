@@ -19,13 +19,20 @@ import type {
   BriefingPolicy,
   Canary,
   CompositeScore,
+  CrowdingDecayPrior,
+  CrowdingParams,
+  DisqualificationReport,
   FullVerdict,
   GreeksParams,
   GreeksResult,
   HonestyOpts,
   HonestyVerdict,
+  PercentileSelectionOpts,
+  PercentileSelectionResult,
   ScoreConfig,
   SelfAuditReport,
+  UncertaintyInput,
+  UncertaintySplit,
 } from "./types.js";
 
 export * from "./types.js";
@@ -175,4 +182,94 @@ export function isMySharpeRealFull(
     stepDown: raw.step_down as boolean[],
     pbo: raw.pbo as number,
   };
+}
+
+/**
+ * Rank candidate return streams on a percentile of their bootstrapped utility
+ * instead of the point-estimate argmax, so the winner has to be good on most
+ * resampled histories rather than on the one that happened to be observed.
+ *
+ * `candidates` is one per-period return array per candidate. The result names
+ * both the point winner and the percentile winner; disagreement between them is
+ * the interesting case, and the point winner's `optimism_gap` is the number to
+ * report next to any headline utility. An `alpha` below 0.3 still computes but
+ * sets `alpha_warning` (the extreme lower tail is decided by a handful of
+ * unlucky resamples). Deterministic given (candidates, seed).
+ */
+export function percentileSelection(
+  candidates: number[][],
+  opts?: PercentileSelectionOpts,
+): PercentileSelectionResult {
+  const params: Record<string, unknown> = {};
+  if (opts?.utility !== undefined) params.utility = opts.utility;
+  if (opts?.alpha !== undefined) params.alpha = opts.alpha;
+  if (opts?.seed !== undefined) params.seed = opts.seed;
+  if (opts?.nBoot !== undefined) params.n_boot = opts.nBoot;
+  if (opts?.blockProb !== undefined) params.block_prob = opts.blockProb;
+  return parse(
+    kernel.percentile_selection(JSON.stringify(candidates), optJson(params)),
+  );
+}
+
+/**
+ * Decompose the uncertainty behind one scored case into three legs, reported
+ * side by side and never summed: aleatoric (irreducible outcome noise; stop
+ * looking), epistemic (reducible ignorance; keep looking), and distributional
+ * (the reference cannot vouch for this case). Any input may be omitted; the
+ * matching leg then reports what it honestly can on no evidence.
+ *
+ * The result's `epistemic_caveat` is load-bearing: the epistemic leg is a lower
+ * bound, never an upper one, because unanimous or correlated signals understate
+ * it. Treat only high readings as informative.
+ */
+export function decomposeUncertainty(input: UncertaintyInput): UncertaintySplit {
+  return parse(
+    kernel.decompose_uncertainty(
+      JSON.stringify({
+        outcomes: input.outcomes,
+        signals: input.signals,
+        case_returns: input.caseReturns,
+        reference_returns: input.referenceReturns,
+      }),
+    ),
+  );
+}
+
+/**
+ * Expected edge half-life under a crowding decay model:
+ * `ln2 / (theta + deltaMax * adoption^curvature)`, in periods of the caller's
+ * IC series. The output is a model prior, reported never gating: it comes out
+ * of a model, not out of a dataset, and nothing should rank on it. There is
+ * deliberately no default calibration; the caller owns every rate.
+ */
+export function crowdingHalfLife(
+  adoption: number,
+  params: CrowdingParams,
+): CrowdingDecayPrior {
+  const cfg: Record<string, unknown> = {
+    adoption,
+    theta: params.theta,
+    delta_max: params.deltaMax,
+  };
+  if (params.curvature !== undefined) cfg.curvature = params.curvature;
+  return parse(kernel.crowding_half_life(JSON.stringify(cfg)));
+}
+
+/**
+ * Name every disqualification/quality signal that fired for each agent in a
+ * field of submissions (the same input {@link score} takes). Pure legibility
+ * over the composite score: the first five reasons mirror the scorer's hard
+ * eligibility gates, the advisory ones (high_selection_gap, is_rediscovery,
+ * oos_decay) never gate, and nothing here changes eligibility semantics.
+ */
+export function classifyDisqualification(
+  submissions: AgentSubmission[],
+  config?: ScoreConfig,
+): DisqualificationReport[] {
+  return parse(
+    kernel.classify_disqualification(
+      JSON.stringify(submissions),
+      optJson(config),
+    ),
+  );
 }

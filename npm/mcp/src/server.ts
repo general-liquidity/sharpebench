@@ -157,6 +157,69 @@ export function createServer(): McpServer {
       ),
   );
 
+  server.tool(
+    "percentile_selection",
+    "Rank candidate return streams on a percentile of their bootstrapped utility instead of the point-estimate argmax, so the winner has to be good on most resampled histories rather than on the one that was observed. Names the point winner vs the percentile winner (disagreement is the interesting case) and each candidate's optimism gap: how much of the headline number fails to survive resampling. alpha below 0.3 still computes but sets alpha_warning. Deterministic given (candidates, seed).",
+    {
+      candidates: z.array(z.array(z.number())),
+      utility: z.enum(["mean_return", "sharpe"]).optional(),
+      alpha: z.number().optional(),
+      seed: z.number().optional(),
+      n_boot: z.number().optional(),
+      block_prob: z.number().optional(),
+    },
+    async ({ candidates, utility, alpha, seed, n_boot, block_prob }) =>
+      run(() =>
+        sb.percentileSelection(candidates, {
+          utility,
+          alpha,
+          seed,
+          nBoot: n_boot,
+          blockProb: block_prob,
+        }),
+      ),
+  );
+
+  server.tool(
+    "decompose_uncertainty",
+    "Decompose the uncertainty behind one scored case into three legs, reported side by side and never summed: aleatoric (irreducible outcome noise; more evidence will not reduce it), epistemic (reducible ignorance, from disagreement between independent confidence streams plus evidence thinness), and distributional (unlikeness to a reference return series). Every input is optional; a missing leg reads what it honestly can on no evidence. The epistemic leg is a LOWER BOUND: unanimous or correlated signals understate it, so treat only high readings as informative.",
+    {
+      outcomes: z.array(z.union([z.boolean(), z.number()])).optional(),
+      signals: z.array(z.array(z.number())).optional(),
+      case_returns: z.array(z.number()).optional(),
+      reference_returns: z.array(z.number()).optional(),
+    },
+    async ({ outcomes, signals, case_returns, reference_returns }) =>
+      run(() =>
+        sb.decomposeUncertainty({
+          outcomes,
+          signals,
+          caseReturns: case_returns,
+          referenceReturns: reference_returns,
+        }),
+      ),
+  );
+
+  server.tool(
+    "crowding_half_life",
+    "Expected edge half-life under a crowding decay model: ln2 / (theta + delta_max * adoption^curvature), in periods of the caller's IC series. The output is a model prior, reported never gating: it comes out of a model, not out of a dataset, and nothing should rank on it. All rates are per period and caller-supplied; there is deliberately no default calibration.",
+    {
+      adoption: z.number(),
+      theta: z.number(),
+      delta_max: z.number(),
+      curvature: z.number().optional(),
+    },
+    async ({ adoption, theta, delta_max, curvature }) =>
+      run(() => sb.crowdingHalfLife(adoption, { theta, deltaMax: delta_max, curvature })),
+  );
+
+  server.tool(
+    "classify_disqualification",
+    "Name every disqualification/quality signal that fired for each agent in a field of submissions (the same input the score tool takes). Pure legibility over the composite score: five reasons mirror the scorer's hard eligibility gates (failed_pass_k, dsr_below_bar, process_violation, bootstrap_insignificant, mandate_breached); the advisory flags (high_selection_gap, is_rediscovery, oos_decay) never gate. Empty reasons = no signal fired.",
+    { submissions: z.array(z.any()), config: z.any().optional() },
+    async ({ submissions, config }) => run(() => sb.classifyDisqualification(submissions, config)),
+  );
+
   return server;
 }
 

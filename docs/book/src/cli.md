@@ -72,3 +72,95 @@ Standalone analysis surfaces over the kernel: lint a shared briefing for
 input-side salience bias, derive a do-not-train contamination tripwire, score a
 target-allocation weight-vector trajectory (validity + L1 turnover), and price an
 option with its Greeks and short-gamma/vega tail-risk classification.
+
+## `select`
+
+```bash
+sharpebench select <candidates.csv...> [--alpha A] [--utility mean_return|sharpe] [--seed N] [--boot N] [--block-prob P] [--json]
+```
+
+Ranks candidate strategies on a percentile of their bootstrapped utility instead
+of the point-estimate argmax, so the winner has to be good on most resampled
+histories rather than on the one that happened to be observed. Pass one CSV per
+candidate (first column read), or a single CSV whose columns are the candidates.
+
+The output names both the point winner and the percentile winner, whether they
+agree (disagreement is the whole reason to run this), and each candidate's
+optimism gap: how much of its headline utility fails to survive resampling. The
+point winner's gap is the number to report next to any headline result.
+
+`--alpha` defaults to 0.5, the middle of the band. An alpha below 0.3 still
+computes but prints a warning: the extreme lower tail of a bootstrap
+distribution is decided by a handful of unlucky resamples nobody has real data
+for. The warning flags a choice; it does not veto one. Deterministic given
+(data, `--seed`).
+
+## `disqualify`
+
+```bash
+sharpebench disqualify <submissions.json> [--json]
+```
+
+Scores a JSON field of submissions (same format as `score`) and names every
+disqualification/quality signal that fired for each agent, instead of the
+single rank-eligible verdict. Five reasons mirror the scorer's hard eligibility
+gates (`FailedPassK`, `DsrBelowBar`, `ProcessViolation`,
+`BootstrapInsignificant`, `MandateBreached`); the advisory flags
+(`HighSelectionGap`, `IsRediscovery`, `OosDecay`) are reported but never gate.
+Pure legibility: nothing here changes eligibility semantics.
+
+## `rediscover`
+
+```bash
+sharpebench rediscover <submitted.csv> <known.csv...> [--threshold T] [--center] [--json]
+```
+
+Screens a submitted pooled return stream against a library of known prior
+strategy streams and flags near-duplicates on `|cosine|` similarity. A stream
+must be all but collinear with a known one to flag (default threshold 0.97);
+leveraged and inverted variants of a known stream flag too, while
+correlated-but-distinct strategies do not. `--center` de-means first (Pearson);
+the default compares raw direction, because for return streams the direction is
+the strategy. Novelty screening only: it says nothing about skill.
+
+## `uncertainty`
+
+```bash
+sharpebench uncertainty <returns.csv> [--reference <csv>] [--outcomes <csv>] [--confidences <csv>]... [--json]
+```
+
+Decomposes the uncertainty behind one scored case into three legs, printed side
+by side and never summed:
+
+- **aleatoric** (from `--outcomes`, 0/1 per decision): irreducible outcome
+  noise; more evidence will not reduce it. High reading: stop looking.
+- **epistemic** (from repeatable `--confidences` streams): reducible ignorance,
+  read off disagreement between independent confidence streams plus how thin
+  the evidence behind them is. High reading: keep looking.
+- **distributional** (case returns vs `--reference`): unlikeness to the
+  reference series, as a location or dispersion shift. High reading: the
+  reference cannot vouch for this case.
+
+The epistemic leg is a lower bound, never an upper one: unanimous or correlated
+signals understate it, so a low reading is weak evidence of knowledge and only
+high readings are informative. The command prints this caveat with every
+result. Inputs you omit are reported as not measured, not as zero risk.
+
+## `decay-prior`
+
+```bash
+sharpebench decay-prior --measured-ic <ic.csv> --adoption X --theta Y --delta-max Z [--curvature C] [--anomaly-ratio R] [--json]
+```
+
+Measures the edge's half-life from its IC series (regressing `ln|IC|` on time)
+and sets it against the expected half-life from a crowding model,
+`ln2 / (theta + delta_max * adoption^curvature)`. The expected half-life is a
+model prior, reported never gating: it comes out of a crowding model, not out
+of a dataset, and nothing ranks on it. All rates are per period of the supplied
+IC series, and there is deliberately no default calibration; the caller owns
+every rate.
+
+A measured/expected ratio below `--anomaly-ratio` (default 0.5) flags the decay
+as too fast for crowding to be the whole story, which usually points at
+overfitting, a broken data pipeline, or a regime the strategy was never fit
+for. The flag is a diagnostic, not a verdict.
