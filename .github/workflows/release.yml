@@ -24,6 +24,12 @@ jobs:
   binary:
     name: static binary (musl)
     runs-on: ubuntu-latest
+    # Job-level permissions override the workflow-level block, so contents: write
+    # must be restated here for the release-attach step.
+    permissions:
+      contents: write # attach the static binary to the GitHub Release
+      id-token: write # OIDC identity for the provenance attestation
+      attestations: write # store the attestation on the repo
     steps:
       - uses: actions/checkout@v6
 
@@ -50,6 +56,18 @@ jobs:
           cd target/x86_64-unknown-linux-musl/release
           sha256sum sharpebench > sharpebench-x86_64-linux-musl.sha256
           cp sharpebench sharpebench-x86_64-linux-musl
+
+      # SLSA build provenance for the release binary + its checksum, via GitHub's
+      # native attestation rather than cosign: keyless (no keypair or secret to
+      # manage or rotate) and verifiable with the GitHub CLI alone:
+      #   gh attestation verify sharpebench-x86_64-linux-musl --repo general-liquidity/sharpebench
+      # This matches the OIDC-everywhere pattern the registry jobs below already use.
+      - name: Attest build provenance (SLSA)
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: |
+            target/x86_64-unknown-linux-musl/release/sharpebench-x86_64-linux-musl
+            target/x86_64-unknown-linux-musl/release/sharpebench-x86_64-linux-musl.sha256
 
       - name: Attach to the release
         uses: softprops/action-gh-release@v3

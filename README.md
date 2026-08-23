@@ -56,6 +56,8 @@ sharpebench audit                                           # prove the scorer r
 sharpebench run --data data/crypto-majors-1d.csv            # run on real crypto-majors daily bars
 ```
 
+Prefer a prebuilt binary? Each release attaches a static Linux binary (`sharpebench-x86_64-linux-musl`) with SLSA build provenance; verify it with `gh attestation verify sharpebench-x86_64-linux-musl --repo general-liquidity/sharpebench`.
+
 The example field includes a *skilled* agent, a *lucky* agent with a **higher raw return**, and a *process-violating* agent. The skilled agent ranks first; the other two are ineligible — which is the whole point. `run` adds a **luck floor** of random "monkey" agents so you can see the zero-skill distribution a real edge must clear.
 
 ## Use it from anywhere

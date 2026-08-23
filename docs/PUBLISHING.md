@@ -54,8 +54,15 @@ scripts/publish.sh --execute    # real, ordered publish to crates.io
 
 ## 4. After publishing
 
-- `cargo install sharpebench` installs the CLI. The signed static **musl** binary
-  also ships via GitHub Releases (`.github/workflows/release.yml`, on `git tag v*`).
+- `cargo install sharpebench` installs the CLI. The static **musl** binary also
+  ships via GitHub Releases (`.github/workflows/release.yml`, on `git tag v*`) with
+  SLSA build provenance attached via GitHub's native attestation
+  (`actions/attest-build-provenance`: keyless OIDC, no signing keys to manage).
+  Anyone can verify a downloaded binary with one command:
+
+  ```bash
+  gh attestation verify sharpebench-x86_64-linux-musl --repo general-liquidity/sharpebench
+  ```
 - To automate later: add `CARGO_REGISTRY_TOKEN` as a repo secret and extend
   `release.yml` to run the ordered publish on tag. Do the **first** publish by hand
   — names are permanent, so verify everything once before automating.
@@ -74,5 +81,5 @@ cargo release patch --execute          # 0.0.1 -> 0.0.2: bump, rewrite pins, ord
 ```
 
 `cargo login <token>` once (or set `CARGO_REGISTRY_TOKEN`) before `--execute`. The
-pushed `v0.0.2` tag triggers the signed musl binary build in `release.yml`. The
+pushed `v0.0.2` tag triggers the attested musl binary build in `release.yml`. The
 manual `scripts/publish.sh` flow in §3 remains as a fallback.
