@@ -1,8 +1,8 @@
 \section{Commands that produce every number}\label{app:commands}
 
-All commands run from the repository root at the tagged version. The kernel is deterministic, so each command produces the same bytes on any platform.
+All commands run from the repository root at the tagged version. The kernel is deterministic, so each command produces the same bytes on the three CI targets (Linux, macOS, Windows).
 
-\paragraph{Version.} Findings 1 and 2 were first observed at v0.2.1. The units fix is v0.3.0. The configurable reliability gate, the per-run drawdown bound, and the evidence sweep that scores both verdicts on identical trajectories are in the release after it. \Cref{tab:units} was computed against v0.2.1; every other table and figure against the later kernel.
+\paragraph{Version.} Findings 1 and 2 were first observed at v0.2.1, and \cref{tab:units} was computed against v0.2.1 deliberately, since it documents that kernel's error. The units fix shipped in v0.3.0. Every other table and figure in this revision, including all of \texttt{paper/evidence/final/}, was regenerated at kernel v0.5.1, which is v0.5.0 plus the single-symbol luck-floor redefinition of \cref{sec:falsify}; that tag is the version of record, and \cref{tab:eligibility}'s caption names the same version.
 
 \paragraph{The shipped demonstration (\cref{fig:demotion}).}
 \begin{verbatim}
@@ -39,12 +39,22 @@ cargo run --release -p sharpebench-harness \
 \end{verbatim}
 One JSON record per (dataset, configuration, agent), 512 per dataset. The grid, seeds, window rule, cost profile and both reliability configurations are constants in the source and are emitted on every record. The optional arguments restrict a run to one dataset or one deflation bar so the grid can be split across processes; because every seed is pinned, the concatenation of parts is identical to a serial run. The analysis that turns the records into the tables is a short script committed beside them under \texttt{paper/evidence/}.
 
-\paragraph{The risk-managed agent (\cref{sec:riskmanaged}) and perturbation report (\cref{sec:perturb}).}
+\paragraph{The risk-managed agent (\cref{sec:riskmanaged}), its deflation N-sensitivity, and the perturbation report (\cref{sec:perturb}).}
 \begin{verbatim}
 cargo run --release -p sharpebench-harness \
   --example risk_managed_eval -- out.jsonl
 \end{verbatim}
-Runs the risk-managed agent beside buy-and-hold and the luck floor on all nine datasets with the documented defaults, both reliability verdicts per row, and appends the perturbation spread report for weekly US indices.
+Runs the risk-managed agent beside buy-and-hold and the luck floor on all nine datasets with the documented defaults, both reliability verdicts per row; emits the \texttt{n\_sensitivity} records for weekly US indices at $N \in \{7, 10, 25, 50, 100\}$; and appends the perturbation spread report for weekly US indices. The fragile-agent perturbation separation quoted in \cref{sec:perturb} is produced by a unit test on synthetic data, not by this command:
+\begin{verbatim}
+cargo test -p sharpebench-harness perturb
+\end{verbatim}
+
+\paragraph{The synthetic pass witness (\cref{sec:witness}).}
+\begin{verbatim}
+cargo run --release -p sharpebench-harness \
+  --example pass_witness -- pass-witness.jsonl
+\end{verbatim}
+Sweeps a family of injected-edge agents (known per-period Sharpe by construction) beside a five-agent zero-edge field through the shipped default configuration on two window geometries, and writes one record per (shape, edge, agent).
 
 \paragraph{The evidence figures (\cref{fig:drawdowns}, \cref{fig:luckdeflation}).}
 \begin{verbatim}

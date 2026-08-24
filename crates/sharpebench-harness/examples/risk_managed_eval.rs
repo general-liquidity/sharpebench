@@ -43,6 +43,11 @@ const EXEC_SEEDS: [u64; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
 const LUCK_FLOOR_AGENTS: usize = 5;
 const NEVER_CATASTROPHIC_RUN_DD: f64 = 0.20;
 
+/// Trial counts for the deflation N-sensitivity report on the Finding-4 anchor
+/// dataset: the honest field size (7 agents), 10, 25, the default 50, and 100.
+const N_SENSITIVITY: &[u32] = &[7, 10, 25, 50, 100];
+const N_SENSITIVITY_DATASET: &str = "us-indices-1w";
+
 /// Dataset for the perturbation report: small enough to sweep quickly, real data.
 const PERTURB_DATASET: &str = "us-indices-1w";
 const PERTURB_PPY: f64 = 52.0;
@@ -67,6 +72,18 @@ struct GateRecord<'a> {
     worst_run_drawdown: f64,
     rank_eligible: bool,
     eligible_never_catastrophic: bool,
+}
+
+#[derive(Serialize)]
+struct NSensitivityRecord<'a> {
+    kind: &'static str,
+    dataset: &'a str,
+    n_trials: u32,
+    agent_id: String,
+    deflated_sharpe: f64,
+    rank_eligible: bool,
+    eligible_never_catastrophic: bool,
+    trials_sr_std_used: f64,
 }
 
 #[derive(Serialize)]
@@ -183,6 +200,44 @@ fn main() {
             };
             serde_json::to_writer(&mut w, &rec).expect("write record");
             w.write_all(b"\n").expect("newline");
+        }
+
+        // Deflation N-sensitivity on the Finding-4 anchor: the same field scored
+        // with the declared trial count varied, under both reliability verdicts.
+        if *name == N_SENSITIVITY_DATASET {
+            println!("\n== {name}: deflation N-sensitivity ==");
+            for &n_trials in N_SENSITIVITY {
+                let mut cfg_n = cfg.clone();
+                cfg_n.n_trials = n_trials;
+                let mut cfg_n_nc = cfg_nc.clone();
+                cfg_n_nc.n_trials = n_trials;
+                let scored_n = rank(&subs, &cfg_n);
+                let scored_n_nc = rank(&subs, &cfg_n_nc);
+                for s in &scored_n {
+                    let nc = scored_n_nc
+                        .iter()
+                        .find(|x| x.agent_id == s.agent_id)
+                        .expect("same field under both gates");
+                    if s.agent_id == "risk-managed" {
+                        println!(
+                            "N={n_trials:<4} dsr {:>7.4} eligible {:>5} never-catastrophic {:>5}",
+                            s.deflated_sharpe, s.rank_eligible, nc.rank_eligible
+                        );
+                    }
+                    let rec = NSensitivityRecord {
+                        kind: "n_sensitivity",
+                        dataset: name,
+                        n_trials,
+                        agent_id: s.agent_id.clone(),
+                        deflated_sharpe: s.deflated_sharpe,
+                        rank_eligible: s.rank_eligible,
+                        eligible_never_catastrophic: nc.rank_eligible,
+                        trials_sr_std_used: s.trials_sr_std,
+                    };
+                    serde_json::to_writer(&mut w, &rec).expect("write record");
+                    w.write_all(b"\n").expect("newline");
+                }
+            }
         }
     }
 

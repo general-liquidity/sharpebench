@@ -56,7 +56,8 @@ def default_cell(recs, dataset=None):
     already the default cell."""
     return [
         r for r in recs
-        if r.get("dsr_bar", 0.95) == 0.95 and r.get("n_trials", 50) == 50
+        if r.get("kind", "gate") == "gate"
+        and r.get("dsr_bar", 0.95) == 0.95 and r.get("n_trials", 50) == 50
         and r.get("sr_std_pinned") is None
         and (dataset is None or r["dataset"] == dataset)
     ]

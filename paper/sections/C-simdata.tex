@@ -6,31 +6,9 @@ The data store returns rows at or before the decision index. Execution charges a
 
 \subsection{Data}\label{sec:data}
 
-Nine frozen datasets ship with the benchmark, every one keyless and redistributable, each with a SHA-256 sidecar and a deterministic fetch script whose check mode reproduces the committed bytes. \Cref{tab:data} lists them. Before any agent is scored on a dataset, the dataset is scored: a battery of stylized facts after \citet{cont2001empirical} tests excess kurtosis, volatility clustering, gain-loss asymmetry, aggregational Gaussianity and time-reversal asymmetry, and issues a verdict. Seven of the nine pass. Weekly US indices fail the aggregation test because 522 bars is too short for it, and FX majors fail time-reversal asymmetry, which is known to be weak in that market. Both ship with the verdict recorded. A realism gate that never fails is not a gate.
+Nine frozen datasets ship with the benchmark, every one keyless and redistributable, each with a SHA-256 sidecar and a deterministic fetch script whose check mode reproduces the committed bytes. \Cref{tab:data} in \cref{sec:simdata} lists them, including each dataset's frozen date range; the table is not repeated here. Before any agent is scored on a dataset, the dataset is scored: a battery of stylized facts after \citet{cont2001empirical} tests excess kurtosis, volatility clustering, gain-loss asymmetry, aggregational Gaussianity and time-reversal asymmetry, and issues a verdict. Seven of the nine pass. Weekly US indices fail the aggregation test because 522 bars is too short for it, and FX majors fail time-reversal asymmetry, which is known to be weak in that market. Both ship with the verdict recorded. A realism gate that never fails is not a gate.
 
-\begin{table}[t]
-\centering
-\footnotesize
-\caption{Frozen datasets. Rows are per symbol. Periods per year is the value every annualized threshold is converted with.}
-\label{tab:data}
-\begin{tabular}{llrrrl}
-\toprule
-Dataset & Symbols & Bars & Periods/yr & Range & Realism \\
-\midrule
-US indices, daily & SPX DJI IXIC & 7540 & 252 & 2016--2026 & pass \\
-US indices, weekly & same & 522 & 52 & 2016--2026 & fail (n) \\
-Crypto majors, 1h & BTC ETH SOL BNB XRP & 24000 & 8760 & 2023--2026 & pass \\
-Crypto majors, 4h & same & 6000 & 2190 & 2023--2026 & pass \\
-Crypto majors, daily & same & 5001 & 365 & 2023--2026 & pass \\
-Crypto majors, weekly & same & 307 & 52 & 2020--2026 & pass \\
-FX majors, daily & EUR GBP JPY AUD CHF vs USD & 4157 & 252 & 2010--2026 & fail (Zumbach) \\
-Commodities, daily & WTI Brent & 4126 & 252 & 2010--2026 & pass \\
-Rates, daily & 10y Treasury yield & 4157 & 252 & 2010--2026 & pass \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-Two datasets carry caveats the scripts document. The commodities file keeps the WTI close of $-36.98$ on 20 April 2020 as published, which dominates its moments; a start date of May 2020 is the documented opt-out. The rates file's close column is a yield in percent, not a price. Single-name equities are absent because no keyless feed exists for them; that is the known gap in coverage.
+Two datasets carry caveats the scripts document. The commodities file keeps the WTI close of $-36.98$ on 20 April 2020 as published, which dominates its moments, so every commodities statistic in the paper inherits that outlier; a start date of May 2020 is the documented opt-out and removes it. The rates file's close column is a yield in percent, not a price. A Sharpe ratio on yield changes is therefore a statistic about a duration-unhedged directional rates position, not about any tradable instrument's return, and the dataset is best read as a stress case for the protocol on a one-symbol universe: cross-sectional momentum is undefined there, and the luck floor requires the single-symbol randomization of \cref{sec:falsify} to be a control at all. Single-name equities are absent because no keyless feed exists for them; that is the known gap in coverage.
 
 \subsection{Replay and recompute}\label{sec:replay}
 

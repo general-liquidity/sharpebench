@@ -100,10 +100,12 @@ impl Agent for HoldAgent {
     }
 }
 
-/// A coin-flip "monkey": a fully-invested, long-only portfolio with random
-/// weights each step. Seeded so it is reproducible. Run many of these to draw the
-/// **luck floor** — the distribution of outcomes from zero skill that a genuine
-/// agent must clear to be rank-eligible.
+/// A coin-flip "monkey": a long-only portfolio with random weights each step —
+/// fully invested on multi-symbol universes, random gross exposure (flat or a
+/// uniform long weight) on one-symbol universes, where full investment would
+/// degenerate into buy-and-hold. Seeded so it is reproducible. Run many of these
+/// to draw the **luck floor** — the distribution of outcomes from zero skill
+/// that a genuine agent must clear to be rank-eligible.
 pub struct RandomAgent {
     rng: crate::costs::Rng,
 }
@@ -120,12 +122,28 @@ impl Agent for RandomAgent {
     fn decide(&mut self, obs: &MarketObservation) -> Decision {
         let raws: Vec<f64> = obs.symbols.iter().map(|_| self.rng.unit()).collect();
         let total: f64 = raws.iter().sum();
+        let single = obs.symbols.len() == 1;
         let orders = obs
             .symbols
             .iter()
             .zip(&raws)
             .map(|(s, &r)| {
-                let w = if total > 0.0 { r / total } else { 0.0 };
+                // On a one-symbol universe, fully-invested normalized weights are
+                // deterministically r / r = 1.0 — every seed collapses into
+                // buy-and-hold and the luck floor is no floor at all. Draw the
+                // gross exposure itself instead: flat half the time, otherwise a
+                // uniform long weight, so zero-skill outcomes genuinely vary.
+                let w = if single {
+                    if r < 0.5 {
+                        0.0
+                    } else {
+                        (r - 0.5) * 2.0
+                    }
+                } else if total > 0.0 {
+                    r / total
+                } else {
+                    0.0
+                };
                 Order {
                     symbol: s.symbol.clone(),
                     action: if w > 0.0 { Action::Buy } else { Action::Close },
@@ -517,5 +535,33 @@ mod tests {
             let db = b.decide(o);
             assert_eq!(format!("{da:?}"), format!("{db:?}"));
         }
+    }
+
+    /// Regression for the single-symbol luck-floor degeneracy: fully-invested
+    /// normalized weights on a one-symbol universe are deterministically 1.0,
+    /// which made every luck-floor agent a bit-identical clone of buy-and-hold
+    /// on the rates dataset. The random exposure path must vary per period and
+    /// per seed.
+    #[test]
+    fn random_agent_varies_on_single_symbol_universe() {
+        let o = obs(&[("A", geometric(100.0, 0.001, 30))], 100.0);
+        let weights = |seed: u64| -> Vec<f64> {
+            let mut a = RandomAgent::new(seed);
+            (0..64)
+                .map(|_| a.decide(&o).orders[0].target_weight)
+                .collect()
+        };
+        let w1 = weights(1);
+        let w2 = weights(2);
+        assert!(
+            w1.iter().any(|&w| (w - w1[0]).abs() > 1e-12),
+            "single-symbol random exposure must vary across periods"
+        );
+        assert_ne!(w1, w2, "different seeds must produce different exposure");
+        assert!(w1.iter().chain(&w2).all(|&w| (0.0..=1.0).contains(&w)));
+        assert!(
+            w1.contains(&0.0) && w1.iter().any(|&w| w > 0.0),
+            "the mixture must include both flat and long periods"
+        );
     }
 }

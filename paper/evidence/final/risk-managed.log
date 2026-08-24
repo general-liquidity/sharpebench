@@ -20,6 +20,13 @@ luck-floor-03      0.0132   0.9819   false     true   0.0040    0.3539     false
 luck-floor-01      0.0045   0.9562   false     true   0.0155    0.3460     false   false
 luck-floor-04      0.0031   0.9444   false     true   0.0210    0.3509     false   false
 risk-managed       0.3015   0.9998   false     true   0.0005    0.1132     false   false
+
+== us-indices-1w: deflation N-sensitivity ==
+N=7    dsr  0.8589 eligible false never-catastrophic false
+N=10   dsr  0.7699 eligible false never-catastrophic false
+N=25   dsr  0.4923 eligible false never-catastrophic false
+N=50   dsr  0.3015 eligible false never-catastrophic false
+N=100  dsr  0.1645 eligible false never-catastrophic false
 crypto-majors-1h: 24000 bars, 6 windows
 
 == crypto-majors-1h (1h, ppy 8760) ==
@@ -91,12 +98,12 @@ rates-1d: 4157 bars, 6 windows
 == rates-1d (1d, ppy 252) ==
 agent                 dsr      psr  pass^k  process   boot_p  worst_dd  eligible      nc
 buy-and-hold       0.0000   0.9931   false     true   0.0035    0.8395     false   false
-luck-floor-00      0.0000   0.9931   false     true   0.0035    0.8395     false   false
-luck-floor-01      0.0000   0.9931   false     true   0.0035    0.8395     false   false
-luck-floor-02      0.0000   0.9931   false     true   0.0035    0.8395     false   false
-luck-floor-03      0.0000   0.9931   false     true   0.0035    0.8395     false   false
-luck-floor-04      0.0000   0.9931   false     true   0.0035    0.8395     false   false
 risk-managed       0.0000   0.0000   false     true   1.0000    0.4585     false   false
+luck-floor-03      0.0000   0.0000   false     true   1.0000    0.8328     false   false
+luck-floor-02      0.0000   0.0000   false     true   1.0000    0.7943     false   false
+luck-floor-00      0.0000   0.0000   false     true   1.0000    0.8709     false   false
+luck-floor-04      0.0000   0.0000   false     true   1.0000    0.8386     false   false
+luck-floor-01      0.0000   0.0000   false     true   1.0000    0.8223     false   false
 
 == perturbation report: us-indices-1w (5 variants, seed 7) ==
 agent              orig_psr       best      worst     spread
