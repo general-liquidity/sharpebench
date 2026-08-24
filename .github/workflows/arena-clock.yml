@@ -48,7 +48,9 @@ jobs:
             echo "No windows have been opened."
             exit 0
           fi
-          NEXT="$(jq -r --argjson now "$EPOCH" '
+          # -s slurps the window files into one array; without it .[] walks each
+          # object's values and jq aborts on the first numeric field.
+          NEXT="$(jq -s -r --argjson now "$EPOCH" '
             [.[]
              | select((.status == "open" and .commit_deadline <= $now)
                    or (.status == "committed" and .data_reveal_epoch <= $now))

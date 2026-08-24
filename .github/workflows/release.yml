@@ -134,7 +134,10 @@ jobs:
               echo "✓ $c@$V already on crates.io — skipping"
             else
               echo "→ publishing $c@$V"
-              cargo publish -p "$c" --locked
+              if ! cargo publish -p "$c" --locked; then
+                echo "::error::publish of $c@$V failed. If crates.io answered 403 'not valid for crate', the crate has no trusted-publisher config: add repository general-liquidity/sharpebench, workflow release.yml, environment crates under https://crates.io/crates/$c/settings/new-trusted-publisher, then re-dispatch this workflow with release_tag=v$V"
+                exit 1
+              fi
             fi
           done
 
@@ -172,7 +175,7 @@ jobs:
       # already on the registry, and "skip" — a green run that shipped nothing. That is
       # exactly how npm stalled at 0.0.10 while the crates went to 0.0.11.
       - name: Assert npm manifests match the release tag
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
         run: |
           TAG="${{ inputs.release_tag || github.ref_name }}"
           TAG="${TAG#v}"
@@ -279,7 +282,9 @@ jobs:
   verify:
     name: verify every registry serves the release
     needs: [crates, npm, pypi]
-    if: always() && startsWith(github.ref, 'refs/tags/v')
+    # Recovery runs dispatched with release_tag must verify too; a recovery that
+    # skips verification reports success without proving the registries serve it.
+    if: always() && (startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != '')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/setup-node@v6
