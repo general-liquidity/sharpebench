@@ -1,0 +1,78 @@
+name: Forward arena clock
+
+on:
+  schedule:
+    - cron: "17 0 * * *"
+  workflow_dispatch:
+    inputs:
+      arena_dir:
+        description: Arena directory committed in this repository
+        required: false
+        default: arena
+        type: string
+      epoch:
+        description: Optional explicit UTC-day epoch (defaults to today)
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: forward-arena-clock
+  cancel-in-progress: false
+
+jobs:
+  advance-at-transition:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96.0"
+      - uses: Swatinem/rust-cache@v2
+      - name: Advance only when a recorded deadline has arrived
+        env:
+          ARENA_DIR: ${{ inputs.arena_dir || 'arena' }}
+          EXPLICIT_EPOCH: ${{ inputs.epoch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "$ARENA_DIR/state.json"
+          EPOCH="${EXPLICIT_EPOCH:-$(( $(date -u +%s) / 86400 ))}"
+          mapfile -d '' WINDOWS < <(find "$ARENA_DIR/windows" -name window.json -print0)
+          if [ "${#WINDOWS[@]}" -eq 0 ]; then
+            echo "No windows have been opened."
+            exit 0
+          fi
+          NEXT="$(jq -r --argjson now "$EPOCH" '
+            [.[]
+             | select((.status == "open" and .commit_deadline <= $now)
+                   or (.status == "committed" and .data_reveal_epoch <= $now))
+             | if .status == "open" then .commit_deadline else .data_reveal_epoch end]
+            | min // empty' "${WINDOWS[@]}")"
+          if [ -z "$NEXT" ]; then
+            echo "No forward-arena lifecycle transition is due at epoch $EPOCH."
+            exit 0
+          fi
+          cargo run -q -p sharpebench -- arena advance "$ARENA_DIR" "$EPOCH"
+      - name: Commit a lifecycle transition
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- arena; then
+            echo "No arena state change to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add arena
+          git commit -m "chore(arena): advance committed forward-window clock"
+          git push origin HEAD:main
+
+# Scoring and publishing intentionally are not automated here. They require a
+# sealed dataset/entry bundle and an Ed25519 signing key; a workflow that guessed
+# either would turn a forward commitment into an operator-controlled backtest.
