@@ -1,0 +1,120 @@
+us-indices-1d: 2513 bars, 6 windows
+
+== us-indices-1d (1d, ppy 252, 6 windows: Bull Bull Bull Bear Bull Bull) ==
+agent                 dsr      psr   boot_p  worst_dd  win_default win_relative  elig_def  elig_rel
+buy-and-hold       0.0021   1.0000   0.0005    0.3361       P...P.       ......     false     false
+hold               0.0000   0.5000   1.0000    0.0000       ......       ......     false     false
+risk-managed       0.0000   0.1111   1.0000    0.2383       ......       ......     false     false
+momentum           0.0000   0.0000   1.0000    0.4075       ......       ......     false     false
+luck-floor-00      0.0000   0.0000   1.0000    0.6445       ......       ......     false     false
+luck-floor-02      0.0000   0.0000   1.0000    0.6494       ......       ......     false     false
+luck-floor-03      0.0000   0.0000   1.0000    0.6601       ......       ......     false     false
+luck-floor-01      0.0000   0.0000   1.0000    0.6551       ......       ......     false     false
+luck-floor-04      0.0000   0.0000   1.0000    0.6578       ......       ......     false     false
+us-indices-1w: 522 bars, 6 windows
+
+== us-indices-1w (1w, ppy 52, 6 windows: Bull Bull Bull Bear Bull Bull) ==
+agent                 dsr      psr   boot_p  worst_dd  win_default win_relative  elig_def  elig_rel
+buy-and-hold       0.0046   1.0000   0.0005    0.3198       ..P.P.       ......     false     false
+momentum           0.0000   0.9999   0.0005    0.2289       ..P.P.       ......     false     false
+luck-floor-02      0.0000   0.9838   0.0035    0.3416       ......       ......     false     false
+luck-floor-00      0.0000   0.9837   0.0035    0.3390       ......       ......     false     false
+luck-floor-03      0.0000   0.9819   0.0040    0.3539       ......       ......     false     false
+luck-floor-01      0.0000   0.9562   0.0155    0.3460       ......       ......     false     false
+luck-floor-04      0.0000   0.9444   0.0210    0.3509       ......       ......     false     false
+risk-managed       0.0000   0.9998   0.0005    0.1132       ......       ......     false     false
+hold               0.0000   0.5000   1.0000    0.0000       ......       ......     false     false
+crypto-majors-1h: 24000 bars, 6 windows
+
+== crypto-majors-1h (1h, ppy 8760, 6 windows: Bull Bear Bull Bull Bear Bear) ==
+agent                 dsr      psr   boot_p  worst_dd  win_default win_relative  elig_def  elig_rel
+buy-and-hold       0.0000   1.0000   0.0005    0.4896       P.P...       ......     false     false
+hold               0.0000   0.5000   1.0000    0.0000       ......       .....P     false     false
+risk-managed       0.0000   0.0000   1.0000    0.8736       ......       ......     false     false
+momentum           0.0000   0.0000   1.0000    0.9930       ......       ......     false     false
+luck-floor-02      0.0000   0.0000   1.0000    0.9996       ......       ......     false     false
+luck-floor-00      0.0000   0.0000   1.0000    0.9996       ......       ......     false     false
+luck-floor-04      0.0000   0.0000   1.0000    0.9996       ......       ......     false     false
+luck-floor-03      0.0000   0.0000   1.0000    0.9996       ......       ......     false     false
+luck-floor-01      0.0000   0.0000   1.0000    0.9996       ......       ......     false     false
+crypto-majors-4h: 6000 bars, 6 windows
+
+== crypto-majors-4h (4h, ppy 2190, 6 windows: Bull Bear Bull Bull Bear Bear) ==
+agent                 dsr      psr   boot_p  worst_dd  win_default win_relative  elig_def  elig_rel
+buy-and-hold       0.0000   1.0000   0.0005    0.4787       P.P...       ......     false     false
+hold               0.0000   0.5000   1.0000    0.0000       ......       .....P     false     false
+risk-managed       0.0000   0.0000   1.0000    0.4460       ......       ......     false     false
+momentum           0.0000   0.0000   1.0000    0.7378       ......       ......     false     false
+luck-floor-00      0.0000   0.0000   1.0000    0.9102       ......       ......     false     false
+luck-floor-02      0.0000   0.0000   1.0000    0.9087       ......       ......     false     false
+luck-floor-04      0.0000   0.0000   1.0000    0.9108       ......       ......     false     false
+luck-floor-03      0.0000   0.0000   1.0000    0.9106       ......       ......     false     false
+luck-floor-01      0.0000   0.0000   1.0000    0.9128       ......       ......     false     false
+crypto-majors-1d: 1000 bars, 6 windows
+
+== crypto-majors-1d (1d, ppy 365, 6 windows: Bull Chop Bull Bull Bear Bear) ==
+agent                 dsr      psr   boot_p  worst_dd  win_default win_relative  elig_def  elig_rel
+buy-and-hold       0.0285   0.9994   0.0015    0.4760       P..P..       ......     false     false
+risk-managed       0.0118   0.9980   0.0045    0.1697       P..P..       .....P     false     false
+hold               0.0000   0.5000   1.0000    0.0000       ......       .....P     false     false
+luck-floor-01      0.0000   0.0390   1.0000    0.6028       ......       ......     false     false
+momentum           0.0000   0.0173   1.0000    0.5161       ......       ......     false     false
+luck-floor-03      0.0000   0.0254   1.0000    0.6088       ......       ......     false     false
+luck-floor-00      0.0000   0.0238   1.0000    0.6167       ......       ......     false     false
+luck-floor-04      0.0000   0.0213   1.0000    0.6144       ......       ......     false     false
+luck-floor-02      0.0000   0.0147   1.0000    0.6154       ......       ......     false     false
+crypto-majors-1w: 307 bars, 6 windows
+
+== crypto-majors-1w (1w, ppy 52, 6 windows: Bull Bear Bull Bull Bull Bear) ==
+agent                 dsr      psr   boot_p  worst_dd  win_default win_relative  elig_def  elig_rel
+momentum           0.0235   1.0000   0.0005    0.5634       P..P..       P....P     false     false
+buy-and-hold       0.0006   1.0000   0.0005    0.6714       ..PPP.       ......     false     false
+luck-floor-02      0.0000   0.9995   0.0010    0.7375       ......       ......     false     false
+luck-floor-04      0.0000   0.9992   0.0010    0.7462       ......       ......     false     false
+luck-floor-03      0.0000   0.9988   0.0015    0.7290       ......       ......     false     false
+luck-floor-01      0.0000   0.9985   0.0015    0.7602       ......       ......     false     false
+luck-floor-00      0.0000   0.9985   0.0030    0.7394       ......       ......     false     false
+risk-managed       0.0000   0.5945   0.4233    0.0889       ......       .....P     false     false
+hold               0.0000   0.5000   1.0000    0.0000       ......       .....P     false     false
+fx-majors-1d: 4157 bars, 6 windows
+
+== fx-majors-1d (1d, ppy 252, 6 windows: Bull Bear Chop Bull Bear Bull) ==
+agent                 dsr      psr   boot_p  worst_dd  win_default win_relative  elig_def  elig_rel
+hold               0.0000   0.5000   1.0000    0.0000       ......       .P....     false     false
+buy-and-hold       0.0000   0.1618   1.0000    0.1988       ......       ......     false     false
+risk-managed       0.0000   0.0000   1.0000    0.3251       ......       ......     false     false
+momentum           0.0000   0.0000   1.0000    0.6476       ......       ......     false     false
+luck-floor-02      0.0000   0.0000   1.0000    0.7723       ......       ......     false     false
+luck-floor-00      0.0000   0.0000   1.0000    0.7754       ......       ......     false     false
+luck-floor-03      0.0000   0.0000   1.0000    0.7787       ......       ......     false     false
+luck-floor-01      0.0000   0.0000   1.0000    0.7741       ......       ......     false     false
+luck-floor-04      0.0000   0.0000   1.0000    0.7853       ......       ......     false     false
+commodities-1d: 4126 bars, 6 windows
+
+== commodities-1d (1d, ppy 252, 6 windows: Bull Bear Bull Bear Bull Chop) ==
+agent                 dsr      psr   boot_p  worst_dd  win_default win_relative  elig_def  elig_rel
+buy-and-hold       0.0002   1.0000   0.0030    0.9571       ..PP..       ......     false     false
+luck-floor-04      0.0000   0.7292   0.2649    0.9977       ......       ......     false     false
+hold               0.0000   0.5000   1.0000    0.0000       ......       .P....     false     false
+risk-managed       0.0000   0.0002   1.0000    0.3476       ......       .P....     false     false
+momentum           0.0000   0.0000   1.0000    0.5601       ......       ......     false     false
+luck-floor-03      0.0000   0.3325   1.0000    1.0744       ......       ......     false     false
+luck-floor-02      0.0000   0.0000   1.0000    1.0524       ......       ......     false     false
+luck-floor-01      0.0000   0.0000   1.0000    1.0210       ......       ......     false     false
+luck-floor-00      0.0000   0.0149   1.0000    1.0922       ......       ......     false     false
+rates-1d: 4157 bars, 6 windows
+
+== rates-1d (1d, ppy 252, 6 windows: Bear Bull Bull Bear Bull Bull) ==
+agent                 dsr      psr   boot_p  worst_dd  win_default win_relative  elig_def  elig_rel
+buy-and-hold       0.0000   0.9931   0.0035    0.8395       ....P.       ......     false     false
+hold               0.0000   0.5000   1.0000    0.0000       ......       ......     false     false
+risk-managed       0.0000   0.0000   1.0000    0.4585       ......       ......     false     false
+momentum           0.0000   0.0000   1.0000    0.6752       ......       ......     false     false
+luck-floor-03      0.0000   0.0000   1.0000    0.8328       ......       ......     false     false
+luck-floor-02      0.0000   0.0000   1.0000    0.7943       ......       ......     false     false
+luck-floor-00      0.0000   0.0000   1.0000    0.8709       ......       ......     false     false
+luck-floor-04      0.0000   0.0000   1.0000    0.8386       ......       ......     false     false
+luck-floor-01      0.0000   0.0000   1.0000    0.8223       ......       ......     false     false
+
+wrote 81 records to paper/evidence/final/relative-mandate.jsonl
+exit=0
