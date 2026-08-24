@@ -48,12 +48,16 @@ We ran the benchmark against the market itself: nine frozen datasets, four asset
 - **No reference agent is eligible anywhere.** Every dataset contains a bear window and pass^k demands profitability in every window, so the benchmark declines to certify that owning the index is safe in a downturn. A weaker per-window drawdown gate refuses the same agents, which drew down **32 to 99 percent** in their worst windows.
 - **The gates discriminate.** A risk-managed agent (trend filter, vol targeting, drawdown halt, no tuning) clears the bootstrap, the PSR, process, and the drawdown bound on weekly US indices and is refused **solely on deflation** (0.30 vs the 0.95 bar). Beta fails reliability; discipline without edge fails deflation.
 - **The luck floor behaves.** No random agent ever beats a reference agent on raw return, and with deflation off (N=1) a random agent reaches a deflated Sharpe of **0.999** on a short weekly track. Deflation is the difference.
+- **The thousand-agent tail stays below the gate.** Across 1,000 random agents on each of two daily datasets, none is eligible; the largest measured-path DSR is **0.047**, versus the 0.95 bar.
+- **Field-measured deflation has a known Sybil gap.** Two hundred near-clone entries shrink measured trial dispersion from **0.335 to 0.057** and lift a borderline agent's DSR from **0.000 to 0.973**. The ninth audit case reproduces and labels the exposure; it does not pretend the unwired rediscovery diagnostic is a defense.
+
+The first forward operating window is open under rules committed before its data reveal: commitments close 2026-09-14 and scoring occurs 2026-09-23. This is an operating record, not yet a result. The paid frontier-model evaluation is also still pending; the included three-model runner fails closed on provider, credit, or budget errors, so partial API runs cannot become evidence.
 
 Every number reproduces from committed data via the commands in the paper's appendix. A benchmark that publishes what its own evidence found against itself is the credibility claim.
 
 ## Status — active, evidence-tested
 
-All thirteen crates are implemented, tested, and CI-green on Linux, macOS and Windows (fmt · clippy `-D warnings` · workspace tests · cross-platform golden-score fixtures · WASM-native parity · the 8-attack self-audit · a docs build · an npm build/test · a maturin build + pytest for the Python bindings). The statistics kernel, the backtest-honesty verdict, scoring kernel, point-in-time simulator, run harness, forward arena, leaderboard, WASM bridge, npm package, MCP server, Python ranker, and CLI all work end-to-end on synthetic data and on **nine real frozen datasets** across four asset classes and four bar sizes. The version on crates.io, npm and PyPI is always the latest `v*` tag; every registry is checked by the release pipeline's verify job.
+All thirteen crates are implemented, tested, and CI-green on Linux, macOS and Windows (fmt · clippy `-D warnings` · workspace tests · cross-platform golden-score fixtures · WASM-native parity · the self-audit's 8 defended attacks plus 1 explicit known-gap case · a docs build · an npm build/test · a maturin build + pytest for the Python bindings). The statistics kernel, the backtest-honesty verdict, scoring kernel, point-in-time simulator, run harness, forward arena, leaderboard, WASM bridge, npm package, MCP server, Python ranker, and CLI all work end-to-end on synthetic data and on **nine real frozen datasets** across four asset classes and four bar sizes. The version on crates.io, npm and PyPI is always the latest `v*` tag; every registry is checked by the release pipeline's verify job.
 
 **Not yet built** (need external infra or a decision): single-name equity data (a keyed feed), hosted arena intake and a scheduler (the arena lifecycle itself is built and test-driven, see below), and the public data-curation protocol. See [docs/PLAN.md](docs/PLAN.md).
 
@@ -63,7 +67,7 @@ All thirteen crates are implemented, tested, and CI-green on Linux, macOS and Wi
 cargo install sharpebench                                    # the CLI
 sharpebench run                                              # reference agents + a luck floor, ranked
 sharpebench score suites/example_submissions.json           # rank a JSON field of submissions
-sharpebench audit                                           # prove the scorer resists 8 known gaming attacks
+sharpebench audit                                           # 8 defenses + 1 measured known gap
 sharpebench run --data data/crypto-majors-1d.csv            # run on real crypto-majors daily bars
 sharpebench uncertainty returns.csv --confidences conf.csv  # aleatoric / epistemic / distributional split
 sharpebench import csv my_field/ --out subs.json            # re-score a rival board's return series
@@ -133,7 +137,7 @@ Both halves are compile-and-run-checked as doctests in `sharpebench-stats` and `
 | `score <subs.json>` | Rank a JSON field of pre-computed submissions. |
 | `check <returns.csv> --trials N` | "Is my Sharpe real?" Prints deflated Sharpe / haircut / MinTRL / verdict for your own return series; `--trials` is required (no silent default). |
 | `regime <a.csv> <b.csv> <regimes.csv>` | Compare two return series *within* each market regime (zero-mass / continuous split, KS statistic, sign reversals the pooled mean hides). Regime labels are an input, one per period; nothing is inferred. |
-| `audit` | Self-audit: fire 8 known gaming attacks at the scorer; non-zero exit if any survives. |
+| `audit` | Self-audit: require 8 claimed defenses to demote their attacks and reproduce 1 explicitly expected-vulnerable Sybil case; non-zero exit if a claimed defense regresses. |
 | `stress` | Run the adversarial stress suite (flash-crash / whipsaw), contamination-masked. |
 | `commit` · `sign` · `verify` | Forward-attestation: pre-register a digest, sign a board, verify its chain. |
 | `capture` · `verify-trajectory` | Capture an agent's raw-decision trajectory, then replay it to recompute the score. |

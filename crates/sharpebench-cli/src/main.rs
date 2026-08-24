@@ -821,16 +821,27 @@ fn run_audit(json: bool) -> ExitCode {
         for c in &report.cases {
             println!(
                 "[{}] {:<26} {}",
-                if c.defended { "DEFENDED" } else { "  GAMED " },
+                if c.defended {
+                    "DEFENDED "
+                } else if c.expected_vulnerable {
+                    "KNOWN GAP"
+                } else {
+                    "  GAMED  "
+                },
                 c.name,
                 c.detail
             );
         }
         if report.all_defended {
-            println!(
-                "\nAll {} attacks demoted. The benchmark holds.",
-                report.cases.len()
-            );
+            let defended = report.cases.len() - report.known_gaps;
+            if report.known_gaps > 0 {
+                println!(
+                    "\n{defended} attacks demoted; {} known gap(s) documented, not defended. The benchmark holds where it claims to.",
+                    report.known_gaps
+                );
+            } else {
+                println!("\nAll {defended} attacks demoted. The benchmark holds.");
+            }
         } else {
             eprintln!("\nFAIL — an attack was not demoted; a gate has regressed.");
         }

@@ -158,7 +158,7 @@ dependencies = [
 
 [[package]]
 name = "sharpebench-core"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "serde",
  "sharpebench-stats",
@@ -166,7 +166,7 @@ dependencies = [
 
 [[package]]
 name = "sharpebench-edge"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "serde",
  "sharpebench-stats",
@@ -174,7 +174,7 @@ dependencies = [
 
 [[package]]
 name = "sharpebench-py"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "pyo3",
  "serde",
@@ -186,7 +186,7 @@ dependencies = [
 
 [[package]]
 name = "sharpebench-stats"
-version = "0.4.0"
+version = "0.5.0"
 
 [[package]]
 name = "syn"

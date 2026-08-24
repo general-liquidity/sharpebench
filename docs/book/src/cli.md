@@ -40,7 +40,7 @@ contamination-masking so an agent can't fingerprint the scenario.
 
 ## `audit`
 
-Runs the [benchmark self-audit](integrity.md). Exits non-zero if any known attack
+Runs the [benchmark self-audit](integrity.md). Exits non-zero if any claimed defense
 is not demoted.
 
 ## `commit` / `sign` / `verify`

@@ -8,6 +8,13 @@ claim.
 
 ## The self-audit
 
+The live battery has nine cases. Eight are claimed defenses and must be demoted
+on every commit. The ninth is deliberately marked `expected_vulnerable`: a
+near-clone Sybil field can shrink measured trial dispersion and lower the
+deflation bar. It reproduces the known gap instead of counting it as a pass;
+when ranking gains a field-level defense, the stale expected-vulnerable marking
+must be removed.
+
 `sharpebench audit` fires a battery of known attacks at the live scorer and checks
 each is demoted:
 

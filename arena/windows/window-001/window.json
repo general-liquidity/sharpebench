@@ -1,0 +1,33 @@
+{
+  "id": "window-001",
+  "commit_deadline": 20710,
+  "data_reveal_epoch": 20719,
+  "status": "open",
+  "score_config": {
+    "n_trials": 50,
+    "trials_sr_std": 0.5,
+    "dsr_bar": 0.95,
+    "per_run_psr_bar": 0.9,
+    "per_run_min_annual_sharpe": 0.0,
+    "pass_mode": "all",
+    "periods_per_year": 252.0,
+    "alpha": 0.05,
+    "bootstrap_seed": 1537679398,
+    "n_boot": 2000,
+    "block_prob": 0.1,
+    "mandate": {
+      "max_drawdown": 1.0,
+      "max_run_drawdown": 1.0
+    },
+    "rank_key": "deflated_sharpe",
+    "reference_dsr_population": [],
+    "rolling_window": 21,
+    "dsr_ci_level": 0.9,
+    "shared_run_set": true,
+    "min_field_for_measured_sr_std": 5
+  },
+  "commitments": [],
+  "refusals": [],
+  "dataset_hash": null,
+  "scores": []
+}

@@ -2,7 +2,7 @@
 
 All commands run from the repository root at the tagged version. The kernel is deterministic, so each command produces the same bytes on the three CI targets (Linux, macOS, Windows).
 
-\paragraph{Version.} Findings 1 and 2 were first observed at v0.2.1, and \cref{tab:units} was computed against v0.2.1 deliberately, since it documents that kernel's error. The units fix shipped in v0.3.0. Every other table and figure in this revision, including all of \texttt{paper/evidence/final/}, was regenerated at kernel v0.5.1, which is v0.5.0 plus the single-symbol luck-floor redefinition of \cref{sec:falsify}; that tag is the version of record, and \cref{tab:eligibility}'s caption names the same version.
+\paragraph{Version.} Findings 1 and 2 were first observed at v0.2.1, and \cref{tab:units} was computed against v0.2.1 deliberately, since it documents that kernel's error. The units fix shipped in v0.3.0. Every other table and figure in this revision was regenerated on the v0.6.0 source tree; the original nine-dataset sweep remains byte-identical except for the documented single-symbol luck-floor correction, while the Sybil audit and thousand-agent file are new at v0.6.0.
 
 \paragraph{The shipped demonstration (\cref{fig:demotion}).}
 \begin{verbatim}
@@ -19,6 +19,7 @@ The script reimplements the kernel's PSR, expected-maximum-Sharpe and normal-qua
 \begin{verbatim}
 sharpebench audit
 \end{verbatim}
+The command reports eight defended cases and one expected-vulnerable Sybil case. A claimed defense that regresses or a known-gap marking that stops reproducing fails its commit-time tests.
 
 \paragraph{Data realism (\cref{tab:data}).}
 \begin{verbatim}
@@ -61,6 +62,14 @@ Sweeps a family of injected-edge agents (known per-period Sharpe by construction
 python paper/src/make-evidence-figures.py
 \end{verbatim}
 Every bar and point is a reduction over the committed records; no number is typed into the script.
+
+\paragraph{The thousand-agent luck floor (\cref{sec:luck1000}).}
+\begin{verbatim}
+cargo run --release -p sharpebench-harness \
+  --example luck_floor_1000 -- \
+  paper/evidence/final/luck-floor-1000.jsonl
+\end{verbatim}
+The file contains one row per agent and one explicit summary row for each of the two daily datasets; the first five agents reproduce the shipped floor inside the same run.
 
 \paragraph{The forward arena (\cref{sec:attest}).}
 \begin{verbatim}

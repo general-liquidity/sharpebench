@@ -24,6 +24,13 @@ pub struct AuditCase {
     pub attack: String,
     /// Whether the scorer demoted the attack as intended.
     pub defended: bool,
+    /// True for an attack the kernel is KNOWN not to defend against: the case
+    /// demonstrates the exposure honestly instead of asserting a defense that
+    /// does not exist. An expected-vulnerable case reports `defended: false`
+    /// without failing the audit; if the kernel later gains the defense, the
+    /// demonstration stops reproducing and the audit's own test flags the
+    /// marking as stale.
+    pub expected_vulnerable: bool,
     pub detail: String,
 }
 
@@ -31,7 +38,12 @@ pub struct AuditCase {
 #[derive(Clone, Debug, Serialize)]
 pub struct SelfAuditReport {
     pub cases: Vec<AuditCase>,
+    /// Every attack the kernel claims to defend against was demoted. Cases
+    /// marked `expected_vulnerable` are documented gaps, not defenses, and do
+    /// not count against this.
     pub all_defended: bool,
+    /// Number of `expected_vulnerable` cases: known, documented gaps.
+    pub known_gaps: usize,
 }
 
 fn run_with(returns: Vec<f64>, trace: Trace) -> Run {
@@ -133,6 +145,7 @@ pub fn run_self_audit() -> SelfAuditReport {
             name: "luck-not-skill".into(),
             attack: "win on a single lucky seed with the highest raw return".into(),
             defended,
+            expected_vulnerable: false,
             detail: format!(
                 "lucky raw={:.4} eligible={}, skilled ranks #1={}",
                 lucky_s.raw_mean_return, lucky_s.rank_eligible, defended
@@ -151,6 +164,7 @@ pub fn run_self_audit() -> SelfAuditReport {
             name: "risk-gate-bypass".into(),
             attack: "place an order that skipped the pre-trade risk gate".into(),
             defended: !s.rank_eligible && !s.process_ok,
+            expected_vulnerable: false,
             detail: format!("process_ok={}, eligible={}", s.process_ok, s.rank_eligible),
         });
     }
@@ -164,6 +178,7 @@ pub fn run_self_audit() -> SelfAuditReport {
             name: "sim-exploitation".into(),
             attack: "submit a manipulative / absurd-size order to exploit the sim".into(),
             defended: !s.rank_eligible && !s.process_ok,
+            expected_vulnerable: false,
             detail: format!("process_ok={}, eligible={}", s.process_ok, s.rank_eligible),
         });
     }
@@ -187,6 +202,7 @@ pub fn run_self_audit() -> SelfAuditReport {
             name: "mandate-breach".into(),
             attack: "exceed the drawdown mandate to reach for return".into(),
             defended: !s.rank_eligible && !s.mandate_ok,
+            expected_vulnerable: false,
             detail: format!(
                 "mdd={:.3} mandate_ok={}, eligible={}",
                 s.max_drawdown, s.mandate_ok, s.rank_eligible
@@ -213,6 +229,7 @@ pub fn run_self_audit() -> SelfAuditReport {
             name: "raw-return-cannot-buy-rank".into(),
             attack: "post the biggest raw return but only on some runs".into(),
             defended: !s.rank_eligible && !s.passed_k,
+            expected_vulnerable: false,
             detail: format!(
                 "raw={:.4} passed_k={}, eligible={}",
                 s.raw_mean_return, s.passed_k, s.rank_eligible
@@ -261,6 +278,7 @@ pub fn run_self_audit() -> SelfAuditReport {
                 "top the field on raw return by bypassing the risk gate and inflating confidence"
                     .into(),
             defended,
+            expected_vulnerable: false,
             detail: format!(
                 "cheat raw={:.4} eligible={} process_ok={}; honest ranks #1={}",
                 cheat_s.raw_mean_return, cheat_s.rank_eligible, cheat_s.process_ok, defended
@@ -320,6 +338,7 @@ pub fn run_self_audit() -> SelfAuditReport {
             attack: "post the smoothest, highest linear returns by selling tail risk (naked short gamma)"
                 .into(),
             defended,
+            expected_vulnerable: false,
             detail: format!(
                 "vol-seller raw={:.4} eligible={} short_gamma={}; honest ranks #1={}",
                 vs.raw_mean_return, vs.rank_eligible, risk.naked_short_gamma, defended
@@ -393,6 +412,7 @@ pub fn run_self_audit() -> SelfAuditReport {
                 "look excellent in-sample with an accurate forecast head, then collapse under a small in-range input perturbation"
                     .into(),
             defended,
+            expected_vulnerable: false,
             detail: format!(
                 "adversarial raw={:.4} eligible={} passed_k={} process_ok={} brier={:.3} novelty={:.2}; honest ranks #1={}",
                 ai.raw_mean_return, ai.rank_eligible, ai.passed_k, ai.process_ok, brier, novelty, defended
@@ -400,10 +420,133 @@ pub fn run_self_audit() -> SelfAuditReport {
         });
     }
 
-    let all_defended = cases.iter().all(|c| c.defended);
+    // 9) Sock-puppet Sybil field (KNOWN GAP, expected-vulnerable). The attack
+    //    targets gate *configuration*, not any per-submission gate: on the
+    //    measured-deflation path [`rank`] estimates `trials_sr_std` as the
+    //    sample standard deviation of pooled per-period Sharpes across the
+    //    field. A submitter who floods the field with near-duplicate,
+    //    low-dispersion sock-puppet agents shrinks that estimate, which lowers
+    //    the expected-maximum-Sharpe bar every agent is deflated against -
+    //    including the submitter's real agent. No per-submission audit can see
+    //    it, because every individual puppet is a perfectly honest, unremarkable
+    //    submission.
+    //
+    //    The kernel has NO wired defense on this path: nothing in [`rank`]
+    //    deduplicates or down-weights near-identical return streams before
+    //    measuring the dispersion. The mitigation *direction* exists as a
+    //    module, [`crate::rediscovery::classify_rediscovery`] flags the
+    //    puppets as near-duplicates of each other at cosine >= 0.97, but it
+    //    screens against a library of known prior strategies at the operator
+    //    layer and is not applied to the measured-dispersion field. So this
+    //    case demonstrates the exposure end to end and is marked
+    //    `expected_vulnerable` rather than pretending a defense exists. If a
+    //    dedup guard is ever wired into the measured path, the demonstration
+    //    below stops reproducing and the audit test flags this marking as
+    //    stale.
+    {
+        use crate::rediscovery::{classify_rediscovery, DEFAULT_REDISCOVERY_THRESHOLD};
+
+        let n = 120usize;
+        let stream = |drift: f64, vol: f64, phase: f64| -> Vec<f64> {
+            (0..n)
+                .map(|i| drift + vol * (i as f64 * 0.9 + phase).sin())
+                .collect()
+        };
+        // The submitter's real agent: a borderline track (per-period Sharpe
+        // ~0.3) that an honestly-dispersed field refuses.
+        let real = agent(
+            "real",
+            vec![run_with(stream(0.0015, 0.007, 0.3), Trace::default())],
+        );
+        // Six honest, genuinely distinct competitors whose Sharpes spread from
+        // about -0.4 to +0.55, a realistic dispersion for the field to measure.
+        let honest_field: Vec<AgentSubmission> = [-0.002, -0.001, 0.0, 0.00075, 0.00175, 0.00275]
+            .iter()
+            .enumerate()
+            .map(|(i, &drift)| {
+                agent(
+                    &format!("honest-{i}"),
+                    vec![run_with(
+                        stream(drift, 0.007, 1.7 * i as f64),
+                        Trace::default(),
+                    )],
+                )
+            })
+            .collect();
+        // 200 sock puppets: near-duplicates of one low-Sharpe stream, each with
+        // a drift jitter far below the field's honest dispersion.
+        let puppet_stream = |k: usize| stream(0.0004 + 1e-7 * k as f64, 0.007, 0.0);
+        let puppets: Vec<AgentSubmission> = (0..200)
+            .map(|k| {
+                agent(
+                    &format!("puppet-{k:03}"),
+                    vec![run_with(puppet_stream(k), Trace::default())],
+                )
+            })
+            .collect();
+
+        // The bootstrap legs are orthogonal to the deflation vector under
+        // attack; a smaller n_boot keeps the 200-agent field cheap to score
+        // without touching the measured-dispersion path being demonstrated.
+        let cfg9 = ScoreConfig {
+            n_boot: 200,
+            ..cfg.clone()
+        };
+
+        let mut field_honest = vec![real.clone()];
+        field_honest.extend(honest_field.iter().cloned());
+        let board_honest = rank(&field_honest, &cfg9);
+        let r_h = board_honest.iter().find(|s| s.agent_id == "real").unwrap();
+
+        let mut field_sybil = field_honest.clone();
+        field_sybil.extend(puppets.iter().cloned());
+        let board_sybil = rank(&field_sybil, &cfg9);
+        let r_s = board_sybil.iter().find(|s| s.agent_id == "real").unwrap();
+
+        // The mitigation direction the kernel already has, unwired: the
+        // rediscovery screen sees the puppets as clones of each other.
+        let first = puppet_stream(0);
+        let flagged = (1..200)
+            .filter(|&k| {
+                classify_rediscovery(
+                    &puppet_stream(k),
+                    std::slice::from_ref(&first),
+                    DEFAULT_REDISCOVERY_THRESHOLD,
+                    false,
+                )
+                .is_rediscovery
+            })
+            .count();
+
+        // The attack works when the puppets shrink the measured dispersion and
+        // the real agent's deflation bar drops with it.
+        let attack_succeeded =
+            r_s.trials_sr_std < r_h.trials_sr_std && r_s.deflated_sharpe > r_h.deflated_sharpe;
+        cases.push(AuditCase {
+            name: "sybil-sock-puppets".into(),
+            attack:
+                "flood the field with near-duplicate low-dispersion agents to shrink measured trials_sr_std and lower the deflation bar for the submitter's real agent"
+                    .into(),
+            defended: !attack_succeeded,
+            expected_vulnerable: true,
+            detail: format!(
+                "measured sr_std {:.4} -> {:.4}, real-agent DSR {:.4} -> {:.4}, eligible {} -> {}; rediscovery screen flags {flagged}/199 puppets but rank() does not apply it, KNOWN GAP",
+                r_h.trials_sr_std,
+                r_s.trials_sr_std,
+                r_h.deflated_sharpe,
+                r_s.deflated_sharpe,
+                r_h.rank_eligible,
+                r_s.rank_eligible,
+            ),
+        });
+    }
+
+    let all_defended = cases.iter().all(|c| c.defended || c.expected_vulnerable);
+    let known_gaps = cases.iter().filter(|c| c.expected_vulnerable).count();
     SelfAuditReport {
         cases,
         all_defended,
+        known_gaps,
     }
 }
 
@@ -414,9 +557,45 @@ mod tests {
     #[test]
     fn benchmark_resists_every_known_attack() {
         let report = run_self_audit();
-        for c in &report.cases {
+        for c in report.cases.iter().filter(|c| !c.expected_vulnerable) {
             assert!(c.defended, "undefended attack: {} — {}", c.name, c.detail);
         }
+        assert!(report.all_defended);
+        assert_eq!(report.known_gaps, 1, "exactly one documented gap: sybil");
+    }
+
+    /// The Sybil case is a documented exposure, not a defense: the attack must
+    /// actually work (measured dispersion shrinks, the real agent's DSR rises),
+    /// and it must be marked expected-vulnerable. If this test ever fails
+    /// because `defended` became true, the kernel has gained a dedup guard on
+    /// the measured path, flip the marking and turn this into a defense case.
+    #[test]
+    fn sybil_case_demonstrates_the_known_gap_honestly() {
+        let report = run_self_audit();
+        let c = report
+            .cases
+            .iter()
+            .find(|c| c.name == "sybil-sock-puppets")
+            .expect("the sybil attack must be in the battery");
+        assert!(c.expected_vulnerable, "must be marked as a known gap");
+        assert!(
+            !c.defended,
+            "the demonstration must reproduce (or the marking is stale): {}",
+            c.detail
+        );
+        assert!(
+            c.detail.contains("KNOWN GAP"),
+            "the exposure must be named in the record: {}",
+            c.detail
+        );
+        // The demonstration is not marginal: the puppets flip the real agent
+        // from refused to admitted at the default 0.95 bar.
+        assert!(
+            c.detail.contains("eligible false -> true"),
+            "the sybil field must flip eligibility: {}",
+            c.detail
+        );
+        // A documented gap must not fail the audit run.
         assert!(report.all_defended);
     }
 

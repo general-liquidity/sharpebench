@@ -33,3 +33,12 @@ paper/*.fdb_latexmk
 paper/*.bbl
 paper/*.blg
 paper/build.log
+
+# LLM-field runs are paid, resumable experiments. Caches, subprocess counters,
+# logs, and partial score files stay local; only a complete assembled
+# `llm-field.jsonl` may become evidence after the assembler's completeness gate.
+paper/evidence/final/llm-cache-*.jsonl
+paper/evidence/final/llm-stats/
+paper/evidence/final/llm-field-run.log
+paper/evidence/final/llm-field-records-*.jsonl
+paper/evidence/final/*.partial
