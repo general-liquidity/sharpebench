@@ -29,9 +29,9 @@ fn main() -> ExitCode {
     match subcommand {
         Some("run") => run_demo(&args, json),
         Some("score") => match args.get(2) {
-            Some(path) => run_score(path, json),
+            Some(path) => run_score(path, &args, json),
             None => {
-                eprintln!("usage: sharpebench score <submissions.json> [--json]");
+                eprintln!("usage: sharpebench score <submissions.json> [--pass-mode <mode>] [--benchmark-agent <id>] [--json]");
                 ExitCode::from(2)
             }
         },
@@ -501,6 +501,38 @@ fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
         .map(String::as_str)
 }
 
+/// Apply the reliability-verdict flags to a config. `--pass-mode` is `all` (the
+/// default), `any`, `at-least:N`, or `relative-to-benchmark`, under which each
+/// run is tested on its excess return over `--benchmark-agent <id>` (default
+/// `buy-and-hold`, the reference agent every `run` field carries) in the same
+/// window and seed. Absent flags leave the config untouched, so the default
+/// verdict is byte-identical to before the flags existed.
+fn apply_pass_mode_flags(args: &[String], cfg: &mut ScoreConfig) -> Result<(), String> {
+    use sharpebench_core::PassMode;
+    if let Some(raw) = flag_value(args, "--pass-mode") {
+        cfg.pass_mode = match raw {
+            "all" => PassMode::All,
+            "any" => PassMode::Any,
+            "relative-to-benchmark" => PassMode::RelativeToBenchmark,
+            other => match other
+                .strip_prefix("at-least:")
+                .and_then(|n| n.parse::<usize>().ok())
+            {
+                Some(n) => PassMode::AtLeast(n),
+                None => {
+                    return Err(format!(
+                        "--pass-mode must be all | any | at-least:N | relative-to-benchmark, got `{raw}`"
+                    ))
+                }
+            },
+        };
+    }
+    if let Some(id) = flag_value(args, "--benchmark-agent") {
+        cfg.benchmark_agent_id = id.to_string();
+    }
+    Ok(())
+}
+
 /// Resolve a signing-key argument. To keep secrets out of process listings and
 /// shell history, `env:NAME` reads the key from an environment variable and
 /// `file:PATH` reads it from a file (trailing newline trimmed); anything else is
@@ -529,9 +561,12 @@ fn help() {
     println!("                       --data: a frozen CSV (else synthetic) · --http/--cmd: add YOUR agent");
     println!("                       --checkpoint <path>: resumable external-agent sweep (crash-tolerant)");
     println!("                       --periods-per-year N: bars per year of the dataset (default 252; 1h crypto 8760, 4h 2190, 1d crypto 365, 1w 52)");
+    println!("                       --pass-mode all|any|at-least:N|relative-to-benchmark: reliability verdict (default all)");
+    println!("                       --benchmark-agent <id>: benchmark for relative-to-benchmark (default buy-and-hold)");
     println!(
         "  sharpebench score <submissions.json>  rank a JSON field of pre-computed submissions"
     );
+    println!("                       --pass-mode / --benchmark-agent: as for run");
     println!(
         "  sharpebench commit <agent> <window> <digest> <salt>  forward-attestation pre-registration"
     );
@@ -1094,7 +1129,11 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
         },
         None => ScoreConfig::default().periods_per_year,
     };
-    let cfg = ScoreConfig::for_periods_per_year(periods_per_year);
+    let mut cfg = ScoreConfig::for_periods_per_year(periods_per_year);
+    if let Err(e) = apply_pass_mode_flags(args, &mut cfg) {
+        eprintln!("error: {e}");
+        return ExitCode::from(2);
+    }
 
     let seeds: Vec<u64> = (0..8).collect();
     let costs = CostModel::default();
@@ -1228,6 +1267,12 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
             windows.len(),
             seeds.len()
         );
+        if cfg.pass_mode == sharpebench_core::PassMode::RelativeToBenchmark {
+            println!(
+                "reliability verdict: relative to `{}` (each run tested on its excess over the benchmark's run in the same window and seed)\n",
+                cfg.benchmark_agent_id
+            );
+        }
     }
     emit_board(&rank(&field, &cfg), json);
     ExitCode::SUCCESS
@@ -1387,7 +1432,7 @@ fn run_verify_trajectory(args: &[String], json: bool) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn run_score(path: &str, json: bool) -> ExitCode {
+fn run_score(path: &str, args: &[String], json: bool) -> ExitCode {
     let data = match std::fs::read_to_string(path) {
         Ok(d) => d,
         Err(e) => {
@@ -1402,7 +1447,12 @@ fn run_score(path: &str, json: bool) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    emit_board(&rank(&subs, &ScoreConfig::default()), json);
+    let mut cfg = ScoreConfig::default();
+    if let Err(e) = apply_pass_mode_flags(args, &mut cfg) {
+        eprintln!("error: {e}");
+        return ExitCode::from(2);
+    }
+    emit_board(&rank(&subs, &cfg), json);
     ExitCode::SUCCESS
 }
 

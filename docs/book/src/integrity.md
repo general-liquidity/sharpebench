@@ -8,12 +8,31 @@ claim.
 
 ## The self-audit
 
-The live battery has nine cases. Eight are claimed defenses and must be demoted
-on every commit. The ninth is deliberately marked `expected_vulnerable`: a
-near-clone Sybil field can shrink measured trial dispersion and lower the
-deflation bar. It reproduces the known gap instead of counting it as a pass;
-when ranking gains a field-level defense, the stale expected-vulnerable marking
-must be removed.
+The live battery has nine cases, and all nine are claimed defenses that must be
+demoted on every commit. The ninth, the sock-puppet Sybil field, was for a time
+marked `expected_vulnerable`: on the measured-deflation path `rank` estimates
+`trials_sr_std` from the field, and 200 near-duplicate low-dispersion puppets
+shrank that estimate enough to lower the deflation bar and admit a borderline
+agent. `rank` now collapses near-clone streams before it measures: pooled streams
+whose `|cosine|` reaches `CLONE_COLLAPSE_COSINE` (0.995) are joined into
+clusters, and each cluster votes once with its median Sharpe, both in the
+dispersion estimate and in the field count the measurement floor is checked
+against. Clones are still scored and still appear on the board; they just do not
+vote on the bar. The constant is deliberately not the rediscovery screen's 0.97:
+rediscovery flags a *similar strategy* for review, the collapse removes
+*duplicate votes* and must never silence an honest agent that is merely
+collinear with another. Honest agents are collinear: on the benchmark's own
+evidence fields a long-only luck-floor agent sits at cosine 0.971 to 0.990
+against buy-and-hold (largest honest pair 0.990 on weekly US indices), which
+0.97 would have merged. The audit's 200 puppets sit at 0.99999 or above against
+each other, the borderline agent at 0.934 against them. A harness test rebuilds
+every committed evidence field and asserts zero merges at 0.995, so the
+collapse is the identity on the shipped evidence. The case proves both halves:
+with `dedup_clones_for_measured_sr_std: false` the exposure reproduces (the 200
+puppets shrink the measured dispersion from 0.326 to 0.056 and lift the agent's
+DSR from 0.000 to 0.976, admitting it), and with the default on the same field
+measures 0.302, exactly what a field with one puppet measures, and the agent
+stays refused.
 
 `sharpebench audit` fires a battery of known attacks at the live scorer and checks
 each is demoted:
@@ -27,6 +46,7 @@ each is demoted:
 [DEFENDED] cheat-reward-hacker        top raw return by bypassing the gate + padding confidence
 [DEFENDED] tail-seller                smooth linear returns earned by selling tail risk (naked short gamma)
 [DEFENDED] adversarial-input          look excellent in-sample with an accurate forecast head, then collapse under a small in-range input perturbation
+[DEFENDED] sybil-sock-puppets         flood the field with near-duplicate agents to shrink measured trials_sr_std and lower the bar
 ```
 
 The command exits non-zero if **any** attack is not demoted. That makes the audit

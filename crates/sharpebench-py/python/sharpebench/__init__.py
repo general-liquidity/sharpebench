@@ -19,7 +19,8 @@ The leaderboard surface is here too: ``rank_board`` / ``score_one`` take the sam
 JSON wire format ``sharpebench score`` reads (a serde array of agent submissions)
 and return the full composite scores as JSON, so a board ranked from Python is
 the board the CLI prints. ``default_score_config`` and
-``never_catastrophic_config`` serialize the config presets so no field name has
+``never_catastrophic_config`` (and ``relative_to_benchmark_config``, the
+mandate-relative verdict) serialize the config presets so no field name has
 to be guessed, and ``rank_returns`` builds a board straight from a mapping of
 agent id to per-run return arrays.
 
@@ -48,6 +49,7 @@ from .sharpebench_py import (
     pass_k,
     probability_of_backtest_overfitting,
     probabilistic_sharpe_ratio,
+    relative_to_benchmark_config,
     rank_board,
     rank_returns,
     reality_check_pvalue,
@@ -80,6 +82,7 @@ __all__ = [
     "probabilistic_sharpe_ratio",
     "probability_of_backtest_overfitting",
     "rank_board",
+    "relative_to_benchmark_config",
     "rank_returns",
     "reality_check_pvalue",
     "runs_for_power",

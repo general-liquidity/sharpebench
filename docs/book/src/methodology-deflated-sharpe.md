@@ -51,7 +51,13 @@ When `rank` has a field of at least `min_field_for_measured_sr_std` agents it
 *measures* the dispersion of per-period Sharpes across the field instead of using
 the prior. That measurement is already per-period and is used as-is:
 `trials_sr_std_source` reads `measured` and `trials_sr_std_annualized` is `null`,
-because no annualized prior was involved.
+because no annualized prior was involved. Before measuring, near-clone streams
+(pooled returns whose `|cosine|` reaches `CLONE_COLLAPSE_COSINE`, 0.995, a
+stricter constant than the rediscovery screen's 0.97 so that honest collinear
+agents keep their vote) are collapsed to one vote per cluster, for the estimate
+and for the field count the floor is checked against, so a flood of
+near-duplicate submissions cannot shrink the dispersion and lower the bar
+(`dedup_clones_for_measured_sr_std`, default on; see the integrity chapter).
 
 ### Why this matters: the bar before 0.3.0
 

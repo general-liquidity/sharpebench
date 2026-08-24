@@ -437,19 +437,23 @@ fn runs_for_power(effect: f64, alpha: f64, power: f64) -> usize {
 }
 
 /// pass^k reliability over a per-run pass/fail vector. `mode` is `"all"` (the
-/// safety-grade default: every run must pass), `"any"`, or `"at_least"` with `n`.
+/// safety-grade default: every run must pass), `"any"`, `"at_least"` with `n`,
+/// or `"relative_to_benchmark"` (aggregates as `"all"`; the per-run vector is
+/// expected to have been computed on excess returns, see
+/// `relative_to_benchmark_config`).
 #[pyfunction]
 #[pyo3(signature = (passed_per_run, mode = "all", n = None))]
 fn pass_k(passed_per_run: Vec<bool>, mode: &str, n: Option<usize>) -> PyResult<bool> {
     let m = match mode {
         "all" => PassMode::All,
         "any" => PassMode::Any,
+        "relative_to_benchmark" => PassMode::RelativeToBenchmark,
         "at_least" => PassMode::AtLeast(n.ok_or_else(|| {
             PyValueError::new_err("mode='at_least' requires n=<number of runs that must pass>")
         })?),
         other => {
             return Err(PyValueError::new_err(format!(
-                "unknown mode {other:?} (expected all | any | at_least)"
+                "unknown mode {other:?} (expected all | any | at_least | relative_to_benchmark)"
             )))
         }
     };
@@ -621,6 +625,20 @@ fn never_catastrophic_config(max_run_dd: f64) -> PyResult<String> {
     to_json(&ScoreConfig::reliability_never_catastrophic(max_run_dd))
 }
 
+/// The mandate-relative preset (`ScoreConfig::relative_to_benchmark`),
+/// serialized to JSON. Relative to the default config it changes exactly two
+/// fields: `pass_mode` becomes `"relative_to_benchmark"` and
+/// `benchmark_agent_id` becomes `benchmark_agent_id`. Each run is then tested
+/// on its excess return over the named agent's run in the same window and seed
+/// (the agent must be in the ranked field), so "reliable" reads "beats owning
+/// the universe in every window". The benchmark itself, whose excess is zero,
+/// fails by rule. Opt-in; the default is unchanged.
+#[pyfunction]
+#[pyo3(signature = (benchmark_agent_id = "buy-and-hold"))]
+fn relative_to_benchmark_config(benchmark_agent_id: &str) -> PyResult<String> {
+    to_json(&ScoreConfig::relative_to_benchmark(benchmark_agent_id))
+}
+
 /// Rank a board straight from arrays: `returns` maps `agent_id` to a list of
 /// per-run return series (window-major, the same cell order for every agent).
 /// Returns the ranked `CompositeScore` array as JSON, like [`rank_board`].
@@ -692,6 +710,7 @@ fn sharpebench_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(score_one, m)?)?;
     m.add_function(wrap_pyfunction!(default_score_config, m)?)?;
     m.add_function(wrap_pyfunction!(never_catastrophic_config, m)?)?;
+    m.add_function(wrap_pyfunction!(relative_to_benchmark_config, m)?)?;
     m.add_function(wrap_pyfunction!(rank_returns, m)?)?;
     m.add("METHODOLOGY_VERSION", METHODOLOGY_VERSION)?;
     m.add(

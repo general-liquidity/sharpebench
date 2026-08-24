@@ -66,8 +66,8 @@ pub use comparison_sets::{
     TaggedSubmission,
 };
 pub use composite::{
-    per_period_sr_std, per_run_psr_benchmark, rank, score_agent, AgentSubmission, CompositeScore,
-    Mandate, Run, ScoreConfig, TrialsSrStdSource,
+    per_period_sr_std, per_run_passes, per_run_psr_benchmark, rank, score_agent, AgentSubmission,
+    CompositeScore, Mandate, Run, ScoreConfig, TrialsSrStdSource,
 };
 pub use correlation::{crowdedness, Crowdedness};
 pub use disqualification::{classify_disqualification, rollup, DisqualThresholds, FailReason};
@@ -83,7 +83,8 @@ pub use pass_k::{pass_k, PassMode};
 pub use percentile::{percentile_of, BaselineBand, HumanBaseline};
 pub use process::{ProcessEvent, ProcessScore, Trace};
 pub use rediscovery::{
-    classify_rediscovery, cosine_similarity, RediscoveryVerdict, DEFAULT_REDISCOVERY_THRESHOLD,
+    classify_rediscovery, clone_clusters, cosine_similarity, RediscoveryVerdict,
+    CLONE_COLLAPSE_COSINE, DEFAULT_REDISCOVERY_THRESHOLD,
 };
 pub use regime_compare::{
     compare_by_regime, RegimeCompareOpts, RegimeComparison, RegimeDistributionReport, ZagaSplit,

@@ -21,6 +21,14 @@ pub enum PassMode {
     Any,
     /// At least `n` runs pass.
     AtLeast(usize),
+    /// Every run must pass, and each run is tested on its **excess** return over
+    /// the benchmark agent's run in the same (window, seed) cell rather than on
+    /// its raw return (see `ScoreConfig::benchmark_agent_id`). "Reliable" then
+    /// means "beats owning the universe in every window", a mandate-relative
+    /// verdict, instead of "profitable in every window", the all-weather
+    /// absolute-return verdict of [`PassMode::All`]. Aggregation is identical to
+    /// `All`; only the series under test changes. Opt-in.
+    RelativeToBenchmark,
 }
 
 /// Evaluate pass^k given a per-run pass/fail vector.
@@ -30,7 +38,7 @@ pub fn pass_k(passed_per_run: &[bool], mode: PassMode) -> bool {
     }
     let n_pass = passed_per_run.iter().filter(|&&b| b).count();
     match mode {
-        PassMode::All => n_pass == passed_per_run.len(),
+        PassMode::All | PassMode::RelativeToBenchmark => n_pass == passed_per_run.len(),
         PassMode::Any => n_pass > 0,
         PassMode::AtLeast(k) => n_pass >= k,
     }
@@ -49,6 +57,11 @@ mod tests {
         assert!(!pass_k(&runs, PassMode::AtLeast(4)));
         assert!(pass_k(&[true, true, true], PassMode::All));
         assert!(!pass_k(&[], PassMode::Any));
+        // Relative aggregation is `All`: the series under test changes upstream,
+        // the "every run" requirement does not.
+        assert!(!pass_k(&runs, PassMode::RelativeToBenchmark));
+        assert!(pass_k(&[true, true, true], PassMode::RelativeToBenchmark));
+        assert!(!pass_k(&[], PassMode::RelativeToBenchmark));
     }
 
     #[test]
@@ -57,6 +70,7 @@ mod tests {
             (PassMode::All, "\"all\""),
             (PassMode::Any, "\"any\""),
             (PassMode::AtLeast(3), "{\"at_least\":3}"),
+            (PassMode::RelativeToBenchmark, "\"relative_to_benchmark\""),
         ] {
             assert_eq!(serde_json::to_string(&mode).unwrap(), json);
             assert_eq!(serde_json::from_str::<PassMode>(json).unwrap(), mode);

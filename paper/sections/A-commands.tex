@@ -2,7 +2,7 @@
 
 All commands run from the repository root at the tagged version. The kernel is deterministic, so each command produces the same bytes on the three CI targets (Linux, macOS, Windows).
 
-\paragraph{Version.} Findings 1 and 2 were first observed at v0.2.1, and \cref{tab:units} was computed against v0.2.1 deliberately, since it documents that kernel's error. The units fix shipped in v0.3.0. Every other table and figure in this revision was regenerated on the v0.6.0 source tree; the original nine-dataset sweep remains byte-identical except for the documented single-symbol luck-floor correction, while the Sybil audit and thousand-agent file are new at v0.6.0.
+\paragraph{Version.} Findings 1 and 2 were first observed at v0.2.1, and \cref{tab:units} was computed against v0.2.1 deliberately, since it documents that kernel's error. The units fix shipped in v0.3.0. Every other table and figure in this revision was regenerated on the v0.6.0 source tree; the original nine-dataset sweep remains byte-identical except for the documented single-symbol luck-floor correction, while the Sybil audit and thousand-agent file are new at v0.6.0. The clone-collapse defense (\cref{sec:sybil}) and the relative-mandate evidence (\cref{sec:relative}) were built on the source tree after v0.6.0 from which this revision was compiled; the audit numbers quoted in \cref{sec:sybil} are the ones that tree prints.
 
 \paragraph{The shipped demonstration (\cref{fig:demotion}).}
 \begin{verbatim}
@@ -19,7 +19,7 @@ The script reimplements the kernel's PSR, expected-maximum-Sharpe and normal-qua
 \begin{verbatim}
 sharpebench audit
 \end{verbatim}
-The command reports eight defended cases and one expected-vulnerable Sybil case. A claimed defense that regresses or a known-gap marking that stops reproducing fails its commit-time tests.
+The command reports nine defended cases and no known gaps. A claimed defense that regresses fails its commit-time tests; the Sybil case also fails if the attack stops reproducing with \texttt{dedup\_clones\_for\_measured\_sr\_std} switched off.
 
 \paragraph{Data realism (\cref{tab:data}).}
 \begin{verbatim}
@@ -57,11 +57,13 @@ cargo run --release -p sharpebench-harness \
 \end{verbatim}
 Sweeps a family of injected-edge agents (known per-period Sharpe by construction) beside a five-agent zero-edge field through the shipped default configuration on two window geometries, and writes one record per (shape, edge, agent).
 
-\paragraph{The evidence figures (\cref{fig:drawdowns}, \cref{fig:luckdeflation}).}
+\paragraph{The evidence figures (\cref{fig:drawdowns}, \cref{fig:luckdeflation}, \cref{fig:witness}, \cref{fig:luck1000}).}
 \begin{verbatim}
 python paper/src/make-evidence-figures.py
+python paper/src/make-evidence-figures.py pass-witness
+python paper/src/make-evidence-figures.py luck-floor-1000
 \end{verbatim}
-Every bar and point is a reduction over the committed records; no number is typed into the script.
+The first command writes all four figures; the two selectors regenerate the pass-witness boundary and the thousand-agent floor figures alone. Every bar, point and marked threshold is a reduction over the committed records; no number is typed into the script.
 
 \paragraph{The thousand-agent luck floor (\cref{sec:luck1000}).}
 \begin{verbatim}
@@ -70,6 +72,14 @@ cargo run --release -p sharpebench-harness \
   paper/evidence/final/luck-floor-1000.jsonl
 \end{verbatim}
 The file contains one row per agent and one explicit summary row for each of the two daily datasets; the first five agents reproduce the shipped floor inside the same run.
+
+\paragraph{The relative-mandate verdict (\cref{tab:relative}).}
+\begin{verbatim}
+cargo run --release -p sharpebench-harness \
+  --example relative_mandate_eval -- \
+  paper/evidence/final/relative-mandate.jsonl
+\end{verbatim}
+Scores the risk-managed field on all nine datasets under the default verdict and under \texttt{PassMode::RelativeToBenchmark} with \texttt{buy-and-hold} as the benchmark: 81 records, one per (dataset, agent), each carrying the per-window pass vectors under both verdicts, the windows gained and lost, and the cell counts. The same verdict is selected on any field with \texttt{sharpebench run --pass-mode relative-to-benchmark [--benchmark-agent <id>]} or the same flags on \texttt{sharpebench score}.
 
 \paragraph{The forward arena (\cref{sec:attest}).}
 \begin{verbatim}

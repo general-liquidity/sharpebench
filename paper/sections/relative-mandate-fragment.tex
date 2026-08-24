@@ -1,0 +1,83 @@
+% Fragment: mandate-relative reliability verdict. \input from 05-experiments.tex after sec:riskmanaged.
+% Evidence: paper/evidence/final/relative-mandate.jsonl (81 records, one per
+% dataset x agent, produced by the command recorded on every record).
+
+\subsection{A mandate-relative reliability verdict}\label{sec:relative}
+
+The default reliability gate tests each run's Probabilistic Sharpe against zero: $\text{PSR}(r, 0) \ge 0.90$ in every window and under every execution seed. That is an all-weather absolute-return mandate, and \cref{sec:passk} showed its consequence on these histories: the index cannot pass on any range containing 2020 or 2022, and neither can anything that holds the index. The never-catastrophic verdict of \cref{sec:ablation} relaxes the \emph{aggregation} (one run is enough) and adds a drawdown bound. This section adds a third verdict that keeps the aggregation strict and changes the \emph{series under test}: each run is judged relative to owning the universe in that same window, which is the question most real mandates ask.
+
+\paragraph{Definition.} Let $r_t(a, w, s)$ be agent $a$'s per-bar return in window $w$ under execution seed $s$, and let $b$ be the benchmark agent, buy-and-hold of the same universe. Under \texttt{PassMode::RelativeToBenchmark}, run $(w, s)$ of agent $a$ passes if and only if, for the excess series $e_t = r_t(a, w, s) - r_t(b, w, s)$,
+\begin{equation}
+\operatorname{std}(e) > 0 \quad\text{and}\quad \text{PSR}\big(e,\; \text{SR}^{\ast}_{\text{run}}\big) \ge 0.90,
+\label{eq:relative}
+\end{equation}
+where $\text{SR}^{\ast}_{\text{run}}$ is the per-period benchmark the annualized \texttt{per\_run\_min\_annual\_sharpe} converts to, zero by default. The agent passes $\text{pass}^{k}$ if and only if every run passes, exactly as under the default. Every other gate (pooled deflated Sharpe, block bootstrap, process audit, drawdown mandate) is computed on the agent's own raw returns and is byte-identical under both verdicts; the relative verdict is a different reliability question, not a weaker set of gates.
+
+Three properties of \cref{eq:relative} matter. First, the benchmark series is not an input: it is the run of the agent named \texttt{benchmark\_agent\_id} (default \texttt{buy-and-hold}) in the \emph{same field being ranked}, at the same position in the window-major layout, so it was produced from the same frozen bars, the same window, the same execution seed and the same cost model as the run it is subtracted from. Nothing is fetched from outside the field; a field without the named agent, or a misaligned cell, fails the run rather than falling back to the absolute test. Second, the benchmark cannot certify itself. Its own excess series is identically zero, and a zero-dispersion series is no evidence of outperformance: the kernel defines its Sharpe as $0$, so PSR returns $\Phi(0) = 0.5$ and the run fails any bar above one half; the explicit $\operatorname{std}(e) > 0$ clause makes the refusal unconditional, so an operator who lowered the bar to $0.5$ would still not admit buy-and-hold, and a clone of the benchmark under another name fails for the same reason. A run indistinguishable from the benchmark has no excess edge, and the verdict is a claim about excess edge in every window. Third, the verdict is opt-in. \texttt{pass\_mode} deserializes to \texttt{all} from every existing config, the benchmark id is never read under the default, and the golden fixtures are byte-identical. It is selected with \texttt{sharpebench run --pass-mode relative-to-benchmark [--benchmark-agent <id>]}, the same flags on \texttt{sharpebench score}, \texttt{ScoreConfig::relative\_to\_benchmark(id)} in Rust, or \texttt{relative\_to\_benchmark\_config(id)} in Python. \texttt{sharpebench\_core::per\_run\_passes} exposes the kernel's per-run vector so a report can say which windows passed, which is what the table below uses.
+
+\paragraph{Evidence.} The same field as \cref{sec:riskmanaged} (buy-and-hold, momentum, hold, the risk-managed agent, and five luck-floor agents), the same window rule, the same eight execution seeds and the same cost model, on all nine frozen datasets, scored under the default verdict and under \cref{eq:relative} with buy-and-hold as the benchmark. Six windows times eight seeds is 48 cells per agent per dataset. \Cref{tab:relative} lists every named agent on every dataset; the 45 luck-floor records are summarized in the text because none of them changes.
+
+\begin{table}[t]
+\centering
+\footnotesize
+\caption{Per-window reliability under the default verdict (profitable in the window with 90 percent confidence) and the relative verdict of \cref{eq:relative} (beats buy-and-hold in the window with 90 percent confidence), all nine datasets, kernel v0.6.0 with the relative mode. Regimes are the six out-of-sample windows in order: U bull, D bear, C chop. A window is marked P when all eight seeds pass and a period otherwise. Cells is the number of the 48 (window, seed) cells that pass. Gained lists windows that pass relative and failed default; Lost the reverse. Every other gate statistic is identical under both verdicts. No agent is rank-eligible under either verdict on any dataset.}
+\label{tab:relative}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{llllrrllcc}
+\toprule
+Dataset & Agent & Regimes & Default / Relative & \multicolumn{2}{c}{Cells} & Gained & Lost & \multicolumn{2}{c}{Eligible} \\
+ & & & (windows 0 to 5) & {def.} & {rel.} & & & def. & rel. \\
+\midrule
+US indices 1d & buy-and-hold & UUUDUU & \texttt{P...P.} / \texttt{......} & 16 & 0 & none & 0, 4 & no & no \\
+US indices 1d & momentum & UUUDUU & \texttt{......} / \texttt{......} & 0 & 0 & none & none & no & no \\
+US indices 1d & hold & UUUDUU & \texttt{......} / \texttt{......} & 0 & 0 & none & none & no & no \\
+US indices 1d & risk-managed & UUUDUU & \texttt{......} / \texttt{......} & 0 & 0 & none & none & no & no \\
+US indices 1w & buy-and-hold & UUUDUU & \texttt{..P.P.} / \texttt{......} & 16 & 0 & none & 2, 4 & no & no \\
+US indices 1w & momentum & UUUDUU & \texttt{..P.P.} / \texttt{......} & 16 & 0 & none & 2, 4 & no & no \\
+US indices 1w & hold & UUUDUU & \texttt{......} / \texttt{......} & 0 & 0 & none & none & no & no \\
+US indices 1w & risk-managed & UUUDUU & \texttt{......} / \texttt{......} & 0 & 0 & none & none & no & no \\
+Crypto 1h & buy-and-hold & UDUUDD & \texttt{P.P...} / \texttt{......} & 16 & 0 & none & 0, 2 & no & no \\
+Crypto 1h & momentum & UDUUDD & \texttt{......} / \texttt{......} & 0 & 0 & none & none & no & no \\
+Crypto 1h & hold & UDUUDD & \texttt{......} / \texttt{.....P} & 0 & 8 & 5 & none & no & no \\
+Crypto 1h & risk-managed & UDUUDD & \texttt{......} / \texttt{......} & 0 & 0 & none & none & no & no \\
+Crypto 4h & buy-and-hold & UDUUDD & \texttt{P.P...} / \texttt{......} & 16 & 0 & none & 0, 2 & no & no \\
+Crypto 4h & momentum & UDUUDD & \texttt{......} / \texttt{......} & 0 & 0 & none & none & no & no \\
+Crypto 4h & hold & UDUUDD & \texttt{......} / \texttt{.....P} & 0 & 8 & 5 & none & no & no \\
+Crypto 4h & risk-managed & UDUUDD & \texttt{......} / \texttt{......} & 0 & 0 & none & none & no & no \\
+Crypto 1d & buy-and-hold & UCUUDD & \texttt{P..P..} / \texttt{......} & 16 & 0 & none & 0, 3 & no & no \\
+Crypto 1d & momentum & UCUUDD & \texttt{......} / \texttt{......} & 0 & 0 & none & none & no & no \\
+Crypto 1d & hold & UCUUDD & \texttt{......} / \texttt{.....P} & 0 & 8 & 5 & none & no & no \\
+Crypto 1d & risk-managed & UCUUDD & \texttt{P..P..} / \texttt{.....P} & 16 & 8 & 5 & 0, 3 & no & no \\
+Crypto 1w & buy-and-hold & UDUUUD & \texttt{..PPP.} / \texttt{......} & 24 & 0 & none & 2, 3, 4 & no & no \\
+Crypto 1w & momentum & UDUUUD & \texttt{P..P..} / \texttt{P....P} & 16 & 16 & 5 & 3 & no & no \\
+Crypto 1w & hold & UDUUUD & \texttt{......} / \texttt{.....P} & 0 & 8 & 5 & none & no & no \\
+Crypto 1w & risk-managed & UDUUUD & \texttt{......} / \texttt{.....P} & 0 & 8 & 5 & none & no & no \\
+FX 1d & buy-and-hold & UDCUDU & \texttt{......} / \texttt{......} & 0 & 0 & none & none & no & no \\
+FX 1d & momentum & UDCUDU & \texttt{......} / \texttt{......} & 0 & 0 & none & none & no & no \\
+FX 1d & hold & UDCUDU & \texttt{......} / \texttt{.P....} & 0 & 8 & 1 & none & no & no \\
+FX 1d & risk-managed & UDCUDU & \texttt{......} / \texttt{......} & 0 & 0 & none & none & no & no \\
+Commodities 1d & buy-and-hold & UDUDUC & \texttt{..PP..} / \texttt{......} & 16 & 0 & none & 2, 3 & no & no \\
+Commodities 1d & momentum & UDUDUC & \texttt{......} / \texttt{......} & 0 & 0 & none & none & no & no \\
+Commodities 1d & hold & UDUDUC & \texttt{......} / \texttt{.P....} & 0 & 8 & 1 & none & no & no \\
+Commodities 1d & risk-managed & UDUDUC & \texttt{......} / \texttt{.P....} & 0 & 8 & 1 & none & no & no \\
+Rates 1d & buy-and-hold & DUUDUU & \texttt{....P.} / \texttt{......} & 8 & 0 & none & 4 & no & no \\
+Rates 1d & momentum & DUUDUU & \texttt{......} / \texttt{......} & 0 & 0 & none & none & no & no \\
+Rates 1d & hold & DUUDUU & \texttt{......} / \texttt{......} & 0 & 0 & none & none & no & no \\
+Rates 1d & risk-managed & DUUDUU & \texttt{......} / \texttt{......} & 0 & 0 & none & none & no & no \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Result.} No agent becomes eligible under the relative verdict on any dataset, and no agent passes $\text{pass}^{k}$ under it: the best any agent manages is two of six windows (momentum on weekly crypto, 16 of 48 cells), and every other named agent passes at most one window. The 45 luck-floor records are unchanged in kind: at most 12 of 48 cells pass under the default and at most 3 under the relative verdict, no window passes on all eight seeds under either, and none is eligible. The paper's ``nothing passes'' statement therefore survives the reviewer's objection with a precise qualification: it is not an artifact of the all-weather mandate, because the mandate-relative verdict, which asks only for outperformance of the universe, refuses every entrant too.
+
+What the relative verdict changes is \emph{which} windows pass, and the pattern is exactly the one the objection predicts. Buy-and-hold loses every window it passed under the default (16 windows across the nine datasets) because it is now measured against itself, and gains none, by the zero-excess rule. Every window gained by any agent is a bear window: window 5 on the four crypto datasets (a bear window on each), window 1 on FX and commodities (bear on both). They are gained by the agents that were out of the market when the universe fell: \texttt{hold}, which holds cash and therefore has excess return equal to minus the index in every bar; the risk-managed agent, whose drawdown halt and trend filter took it flat; and momentum on weekly crypto, which closes to cash on a negative lookback and was flat for the closing bear. The default verdict cannot see this, because an agent that is flat in a bear window has zero raw return there and $\text{PSR}(0, 0) = 0.5$; the relative verdict sees it and credits it. Symmetrically, windows lost are bull windows in which the agent was profitable but did not beat the index: momentum's window 3 on weekly crypto, both of the risk-managed agent's windows on daily crypto, and all of momentum's windows on weekly US indices, where it tracks the index closely enough that its excess carries no 90 percent confidence in either direction.
+
+The two verdicts fail the same agents for complementary reasons, and neither reason is a benchmark defect. Under the default a long-only agent fails on the bear windows; under the relative verdict it fails on the bull windows, because it does not beat the beta it is carrying. An agent that passes both would have to be both profitable and index-beating in every one of six regimes on eight seeds, which on these histories no reference agent is. The one structural caveat is stated rather than hidden: a cash agent has a positive excess series on every bear window, so on a range consisting only of bear windows the relative verdict would pass \texttt{hold} on $\text{pass}^{k}$. It would still not be eligible, because the pooled deflated Sharpe and the bootstrap are computed on its raw returns, which are zero, and that is the reason the relative mode changes the per-run series only and leaves the edge gates absolute. Being flat when the universe falls is reliability; it is not an edge.
+
+\paragraph{Command.}
+\begin{verbatim}
+cargo run --release -p sharpebench-harness \
+  --example relative_mandate_eval -- \
+  paper/evidence/final/relative-mandate.jsonl
+\end{verbatim}
+One record per (dataset, agent), 81 in total, each carrying the command, the benchmark id, the per-window pass vectors under both verdicts, the windows gained and lost, the cell counts, and the gate statistics. The per-window vectors are produced by the kernel's own \texttt{per\_run\_passes}, not by a reimplementation.

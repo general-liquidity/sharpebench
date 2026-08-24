@@ -102,6 +102,73 @@ pub fn classify_rediscovery(
     }
 }
 
+/// Clone-collapse threshold on `|cosine|`: the similarity at which two
+/// submitted streams are one *vote* on the field-measured `trials_sr_std` (see
+/// [`crate::composite::rank`]). Deliberately distinct from
+/// [`DEFAULT_REDISCOVERY_THRESHOLD`], because the two serve different purposes:
+/// rediscovery flags a *similar strategy* for review, and 0.97 (about 14
+/// degrees) is the right net for that; the collapse removes *duplicate votes*
+/// and must never silence an honest, merely collinear agent. Honest agents are
+/// collinear: on the benchmark's own evidence fields a long-only random-exposure
+/// luck-floor agent on a one- to five-symbol universe sits at cosine 0.971 to
+/// 0.990 against buy-and-hold, and two such agents at 0.975 against each other,
+/// and none of those is a duplicate vote. Sock puppets, by contrast, are copies:
+/// the self-audit's 200 puppets sit at 0.99999 or above against each other.
+/// 0.995 (about 5.7 degrees) is above the honest maximum with margin and well
+/// below any copy that differs by less than about ten percent independent noise.
+/// The harness pins the zero-merge property on every committed evidence field.
+pub const CLONE_COLLAPSE_COSINE: f64 = 0.995;
+
+/// Partition `streams` into near-clone clusters: two streams are joined when
+/// their `|cosine|` (see [`cosine_similarity`], with `center` forwarded) meets or
+/// exceeds `threshold`, and clusters are the connected components of that
+/// relation (single linkage). A stream with an undefined similarity to every
+/// other, a zero-norm one for instance, is its own singleton.
+///
+/// The partition is a property of the pairwise similarities alone, so it does
+/// not depend on submission order: every component is listed by ascending
+/// member index and the components are ordered by their smallest member. That
+/// is what lets [`crate::composite::rank`] collapse a sock-puppet field to one
+/// vote per cluster (at [`CLONE_COLLAPSE_COSINE`]) before measuring the field's
+/// Sharpe dispersion, with a result that reshuffling the field cannot move.
+pub fn clone_clusters(streams: &[Vec<f64>], threshold: f64, center: bool) -> Vec<Vec<usize>> {
+    let n = streams.len();
+    let mut parent: Vec<usize> = (0..n).collect();
+    fn find(parent: &mut [usize], mut i: usize) -> usize {
+        while parent[i] != i {
+            parent[i] = parent[parent[i]];
+            i = parent[i];
+        }
+        i
+    }
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let joined = cosine_similarity(&streams[i], &streams[j], center)
+                .is_some_and(|c| c.abs() >= threshold);
+            if joined {
+                let (ri, rj) = (find(&mut parent, i), find(&mut parent, j));
+                if ri != rj {
+                    // Root at the smaller index so the walk below is canonical.
+                    parent[ri.max(rj)] = ri.min(rj);
+                }
+            }
+        }
+    }
+    let mut clusters: Vec<Vec<usize>> = Vec::new();
+    let mut slot: Vec<Option<usize>> = vec![None; n];
+    for i in 0..n {
+        let r = find(&mut parent, i);
+        match slot[r] {
+            Some(k) => clusters[k].push(i),
+            None => {
+                slot[r] = Some(clusters.len());
+                clusters.push(vec![i]);
+            }
+        }
+    }
+    clusters
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -207,5 +274,52 @@ mod tests {
             "should match the target, not decoy"
         );
         assert!(v.is_rediscovery);
+    }
+
+    #[test]
+    fn clusters_collapse_clones_and_keep_distinct_streams_apart() {
+        let a = stream(1.0, 60);
+        let a2: Vec<f64> = a.iter().map(|x| x * 2.0).collect();
+        let a_inv: Vec<f64> = a.iter().map(|x| -x).collect();
+        let b: Vec<f64> = (0..60)
+            .map(|i| (i as f64 * 0.91 + 13.0).cos() * 0.008 - 0.0004)
+            .collect();
+        let flat = vec![0.0; 60];
+        let streams = vec![b.clone(), a.clone(), flat, a2, a_inv];
+        let clusters = clone_clusters(&streams, DEFAULT_REDISCOVERY_THRESHOLD, false);
+        assert_eq!(clusters, vec![vec![0], vec![1, 3, 4], vec![2]]);
+    }
+
+    #[test]
+    fn clusters_are_order_independent() {
+        let a = stream(2.0, 50);
+        let a2: Vec<f64> = a.iter().map(|x| x * 3.0).collect();
+        let b = stream(20.0, 50);
+        let forward = vec![a.clone(), a2.clone(), b.clone()];
+        let backward = vec![b, a2, a];
+        let f = clone_clusters(&forward, DEFAULT_REDISCOVERY_THRESHOLD, false);
+        let r = clone_clusters(&backward, DEFAULT_REDISCOVERY_THRESHOLD, false);
+        // Same partition once member indices are mapped back to the streams.
+        let name = |v: &[Vec<f64>], c: &[usize]| -> Vec<Vec<f64>> {
+            let mut m: Vec<Vec<f64>> = c.iter().map(|&i| v[i].clone()).collect();
+            m.sort_by(|x, y| x[0].partial_cmp(&y[0]).unwrap());
+            m
+        };
+        let mut pf: Vec<Vec<Vec<f64>>> = f.iter().map(|c| name(&forward, c)).collect();
+        let mut pr: Vec<Vec<Vec<f64>>> = r.iter().map(|c| name(&backward, c)).collect();
+        pf.sort_by(|x, y| x[0][0].partial_cmp(&y[0][0]).unwrap());
+        pr.sort_by(|x, y| x[0][0].partial_cmp(&y[0][0]).unwrap());
+        assert_eq!(pf, pr);
+        assert_eq!(pf.len(), 2);
+    }
+
+    #[test]
+    fn empty_and_singleton_fields_cluster_trivially() {
+        assert!(clone_clusters(&[], DEFAULT_REDISCOVERY_THRESHOLD, false).is_empty());
+        let one = vec![stream(1.0, 30)];
+        assert_eq!(
+            clone_clusters(&one, DEFAULT_REDISCOVERY_THRESHOLD, false),
+            vec![vec![0]]
+        );
     }
 }

@@ -108,4 +108,62 @@ a money agent, and the default has not changed: `pass_mode` deserializes to
 `All` and `max_run_drawdown` to `1.0` from any config written before the fields
 existed, and the golden fixtures are byte-identical on every existing value.
 
-In JSON, `pass_mode` is `"all"`, `"any"` or `{"at_least": 3}`.
+In JSON, `pass_mode` is `"all"`, `"any"`, `{"at_least": 3}` or
+`"relative_to_benchmark"`.
+
+## A third verdict: beats the benchmark in every regime
+
+Both verdicts above are absolute: the per-run test compares each run's Sharpe
+to a fixed bar, zero by default. That encodes an all-weather absolute-return
+mandate, and it is why the index itself cannot pass on any range containing
+2020 or 2022. Real mandates are mostly relative: an allocator asks whether the
+manager beat owning the universe, not whether every quarter was positive.
+
+`PassMode::RelativeToBenchmark` is that verdict, opt-in. It aggregates exactly
+as `All` (every window, every seed), but each run is tested on its **excess**
+return over the benchmark agent's run in the same (window, seed) cell:
+
+```text
+e_t   = r_t(agent, window w, seed s) - r_t(benchmark, window w, seed s)
+pass  iff  std(e) > 0  and  PSR(e, per_run_min_annual_sharpe / sqrt(periods_per_year)) >= per_run_psr_bar
+```
+
+The benchmark is `ScoreConfig::benchmark_agent_id` (default `"buy-and-hold"`),
+looked up **by id in the field being ranked**. Its run at position `i` is the
+same cell as every other agent's run `i`, produced from the same frozen bars
+with the same window, execution seed and cost model, so nothing is fetched from
+outside the field and there is no leakage. A field without the named agent, or
+a misaligned cell, fails the run; it never falls back to the absolute test.
+`score_agent` has no field and therefore fails every run under this mode.
+
+Two rules make the verdict non-trivial:
+
+- **A zero-excess run fails.** The benchmark's own excess series is identically
+  zero, and a zero-dispersion series is no evidence of outperformance:
+  `sharpe_ratio` defines it as 0 and PSR then returns `norm_cdf(0) = 0.5`, so it
+  already fails any bar above one half. The `std(e) > 0` clause makes the
+  refusal unconditional, so lowering `per_run_psr_bar` to 0.5 does not admit
+  the benchmark, and a clone of the benchmark under another id fails for the
+  same reason. The verdict is a claim about excess edge in every window; a run
+  indistinguishable from the benchmark has none.
+- **Only pass^k changes.** The pooled Deflated Sharpe, the bootstrap, the
+  process audit and the drawdown mandate are all still computed on the agent's
+  own raw returns. Beating the index in every window with no absolute edge is
+  refused on deflation, as before. This is a different reliability question,
+  not a weaker set of gates.
+
+| | default | `ScoreConfig::relative_to_benchmark(id)` |
+|---|---|---|
+| `pass_mode` | `All` | `RelativeToBenchmark` |
+| `benchmark_agent_id` | `"buy-and-hold"` (unused) | `id` |
+| per-run series | raw returns | excess over `id`'s run in the same cell |
+| certifies | profitable in every regime with 90% confidence | beats `id` in every regime with 90% confidence |
+| every other gate | unchanged | unchanged |
+
+`sharpebench_core::per_run_passes` exposes the kernel's per-run vector so a
+report can say which windows passed, not only whether all did. On the CLI,
+`sharpebench run --pass-mode relative-to-benchmark [--benchmark-agent <id>]`
+and the same flags on `sharpebench score` select it; in Python,
+`relative_to_benchmark_config(id)` serializes the preset. The default is
+unchanged: with the flags absent, `pass_mode` deserializes to `All` and the
+benchmark id is never read, and the golden fixtures are byte-identical.

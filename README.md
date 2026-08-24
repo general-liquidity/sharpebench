@@ -5,7 +5,7 @@
 
 ### The luck-robust benchmark for AI trading agents
 
-*Other leaderboards rank the luckiest run over one quarter. SharpeBench ranks the skill that survives deflation — and proves it forward.*
+*Other leaderboards rank the luckiest run over one quarter. SharpeBench ranks the skill that survives deflation, and proves it forward.*
 
 [![Crates.io](https://img.shields.io/crates/v/sharpebench?style=flat-square&logo=rust&color=DEA584&label=crates.io)](https://crates.io/crates/sharpebench)
 [![npm](https://img.shields.io/npm/v/@general-liquidity/sharpebench?style=flat-square&logo=npm&color=CB3837)](https://www.npmjs.com/package/@general-liquidity/sharpebench)
@@ -22,42 +22,44 @@
 
 ## Why
 
-Every existing financial-agent benchmark ranks on **raw** risk-adjusted metrics over a single short window and a handful of runs — so the leaderboard mostly measures noise. FinBen reports Sharpe confidence intervals of ±1.08, which makes its rankings statistically indistinguishable. StockBench runs one window, once. QuantBench reports Sharpe across 40 seeds but never deflates it.
+Every existing financial-agent benchmark ranks on **raw** risk-adjusted metrics over a single short window and a handful of runs, so the leaderboard mostly measures noise. FinBen reports Sharpe confidence intervals of ±1.08, which makes its rankings statistically indistinguishable. StockBench runs one window, once. QuantBench reports Sharpe across 40 seeds but never deflates it.
 
-**In an AI trading benchmark, the hard part is not measuring return. It is separating skill from luck.** A model that posts a great Sharpe over one quarter has told you almost nothing — the number is dominated by sampling noise, by the number of strategies that were tried, and by hidden risk the linear return series can't see.
+**In an AI trading benchmark, the hard part is not measuring return. It is separating skill from luck.** A model that posts a great Sharpe over one quarter has told you almost nothing: the number is dominated by sampling noise, by the number of strategies that were tried, and by hidden risk the linear return series can't see.
 
 SharpeBench adds, as **ranking gates**, the things none of the others have:
 
-1. **Deflated Sharpe / PSR** — deflate the Sharpe by how many agents were tested × track length × return skew/kurtosis (Bailey & López de Prado), plus each agent's *own* declared in-sample trials, so a strategy mined from a thousand private backtests is deflated for that search too.
-2. **pass^k reliability** — the agent must clear the bar on *every* seed × window, not on average.
-3. **Significance** — a deterministic stationary bootstrap is the gate: each agent's edge must beat the bootstrap null at `alpha`, not just noise. The field-wide data-snooping tests (White's Reality Check, Hansen's studentized & consistent SPA, Romano–Wolf step-down) are computed over the whole field and reported on every row, so a reader can see whether the edge also survives the search across agents.
-4. **Process discipline** — placing an order that never passed the risk gate, ignoring a drawdown halt, bypassing a deny-list, or **selling tail risk with a naked short-gamma book zeroes the entry**, however good the P&L looks. The edge must also survive a realistic execution-cost profile (typical or worst-case fees / slippage / impact / financing), not just a frictionless fill.
-5. **Forward-attestation** — agents commit before the data exists, so there's nothing to overfit, and result chains are signed so a board is tamper-evident: the HMAC chain lets any key-holder detect a modified row, and Ed25519 public-key signing lets anyone with the host's public key verify the board independently of the host, without sharing a secret. Every run can be captured as a raw-decision **trajectory** and replayed by a separate verifier that recomputes a byte-identical score — a forged trajectory recomputes differently.
+1. **Deflated Sharpe / PSR**: deflate the Sharpe by how many agents were tested × track length × return skew/kurtosis (Bailey & López de Prado), plus each agent's *own* declared in-sample trials, so a strategy mined from a thousand private backtests is deflated for that search too.
+2. **pass^k reliability**: the agent must clear the bar on *every* seed × window, not on average.
+3. **Significance**: a deterministic stationary bootstrap is the gate: each agent's edge must beat the bootstrap null at `alpha`, not just noise. The field-wide data-snooping tests (White's Reality Check, Hansen's studentized & consistent SPA, Romano–Wolf step-down) are computed over the whole field and reported on every row, so a reader can see whether the edge also survives the search across agents.
+4. **Process discipline**: placing an order that never passed the risk gate, ignoring a drawdown halt, bypassing a deny-list, or **selling tail risk with a naked short-gamma book zeroes the entry**, however good the P&L looks. The edge must also survive a realistic execution-cost profile (typical or worst-case fees / slippage / impact / financing), not just a frictionless fill.
+5. **Forward-attestation**: agents commit before the data exists, so there's nothing to overfit, and result chains are signed so a board is tamper-evident: the HMAC chain lets any key-holder detect a modified row, and Ed25519 public-key signing lets anyone with the host's public key verify the board independently of the host, without sharing a secret. Every run can be captured as a raw-decision **trajectory** and replayed by a separate verifier that recomputes a byte-identical score; a forged trajectory recomputes differently.
 
-Raw return is reported but is **never** the rank key. The composite also *reports* (without gating) alpha/beta attribution, calibration, edge half-life, OOS decay, turnover, Pareto-optimality, conviction-weighted return, cost-efficiency (cost-normalized DSR), rolling-window worst-case Sharpe, selection robustness, and the **Sortino ratio** (downside-only risk) — so a high score is legible, not a black box.
+Raw return is reported but is **never** the rank key. The composite also *reports* (without gating) alpha/beta attribution, calibration, edge half-life, OOS decay, turnover, Pareto-optimality, conviction-weighted return, cost-efficiency (cost-normalized DSR), rolling-window worst-case Sharpe, selection robustness, and the **Sortino ratio** (downside-only risk), so a high score is legible, not a black box.
 
 **Contamination & input defenses.** Comparison is restricted to the **shared** instruments a field actually traded, a rediscovery check flags a "novel" strategy that is a cosine-near copy of a known one, held-out datasets can be **sealed** (committed, opened only at scoring), a **canary** tripwire detects post-hoc that a model trained on the scenarios, and a **briefing-neutrality** audit lints the shared information packet for the salience bias that would tilt every agent at once.
 
-> An agent does not rank on raw return. It ranks only if its edge survives deflation, reliability, significance, and process discipline — and it proves all of it forward.
+> An agent does not rank on raw return. It ranks only if its edge survives deflation, reliability, significance, and process discipline, and it proves all of it forward.
 
 ## What the evidence shows
 
-We ran the benchmark against the market itself: nine frozen datasets, four asset classes, four bar sizes, a field of reference agents plus a luck floor of random agents on each, 4,608 scored cells. The methodology paper in [`paper/`](paper/) reports four findings, two of which **corrected the benchmark**:
+We ran the benchmark against the market itself: nine frozen datasets, four asset classes, four bar sizes, a field of reference agents plus a luck floor of random agents on each, 4,608 scored cells. The methodology paper, *SharpeBench: A Luck-Robust Benchmark for Trading Agents* ([`paper/`](paper/)), reports what came out of that run. Two of its findings **corrected the benchmark**:
 
 - **The shipped deflation prior was in the wrong units.** Annualized, applied per period, it demanded an annualized Sharpe of **18 on daily bars and 106 on hourly bars** before anything could rank. Fixed in v0.3.0: thresholds are stated annualized and converted once via `periods_per_year`.
 - **No reference agent is eligible anywhere.** Every dataset contains a bear window and pass^k demands profitability in every window, so the benchmark declines to certify that owning the index is safe in a downturn. A weaker per-window drawdown gate refuses the same agents, which drew down **32 to 99 percent** in their worst windows.
 - **The gates discriminate.** A risk-managed agent (trend filter, vol targeting, drawdown halt, no tuning) clears the bootstrap, the PSR, process, and the drawdown bound on weekly US indices and is refused **solely on deflation** (0.30 vs the 0.95 bar). Beta fails reliability; discipline without edge fails deflation.
+- **The acceptance region is nonempty.** A synthetic agent family with a controlled injected edge, scored beside a zero-edge field under the shipped defaults, becomes rank-eligible at an injected per-period Sharpe of 0.45 on weekly-shaped tracks and 0.20 on daily-shaped ones, an annualized Sharpe near **3** on these window geometries. The binding gate at the boundary is pass^k, so the predicate is strict, not vacuous.
 - **The luck floor behaves.** No random agent ever beats a reference agent on raw return, and with deflation off (N=1) a random agent reaches a deflated Sharpe of **0.999** on a short weekly track. Deflation is the difference.
 - **The thousand-agent tail stays below the gate.** Across 1,000 random agents on each of two daily datasets, none is eligible; the largest measured-path DSR is **0.047**, versus the 0.95 bar.
-- **Field-measured deflation has a known Sybil gap.** Two hundred near-clone entries shrink measured trial dispersion from **0.335 to 0.057** and lift a borderline agent's DSR from **0.000 to 0.973**. The ninth audit case reproduces and labels the exposure; it does not pretend the unwired rediscovery diagnostic is a defense.
+- **The field-level Sybil attack is defended.** With clone collapse off, two hundred near-clone entries shrink measured trial dispersion from **0.3258 to 0.0559** and lift a borderline agent's DSR from **0.0000 to 0.9756**, admitting it. Ranking now collapses near-clone clusters (cosine at or above 0.97, the rediscovery screen's threshold) to one vote before it measures: the same field measures **0.3018**, the agent stays at **0.0000** and refused, 199 of 199 puppets are flagged, and all 200 stay on the board. The ninth audit case asserts both halves on every commit; see [the integrity chapter](docs/book/src/integrity.md).
+- **A benchmark-relative verdict refuses everything too.** Opt-in `--pass-mode relative-to-benchmark` judges each window on excess return over same-window buy-and-hold instead of raw profitability. No agent becomes eligible or passes pass^k under it on any of the nine datasets (best: momentum on weekly crypto, 2 of 6 windows); every window gained is a bear window gained by a flat agent, every window lost is a bull window where the agent did not beat its beta. The refusal is not an artifact of the all-weather mandate.
 
-The first forward operating window is open under rules committed before its data reveal: commitments close 2026-09-14 and scoring occurs 2026-09-23. This is an operating record, not yet a result. The paid frontier-model evaluation is also still pending; the included three-model runner fails closed on provider, credit, or budget errors, so partial API runs cannot become evidence.
+The first forward operating window is open under rules committed before its data reveal. Its operating record is the committed [`arena/`](arena/README.md) state directory: `window-001` opened at epoch 20689 (2026-08-24 UTC), commitments are refused from epoch 20710 (2026-09-14), the data reveal and scoring happen at epoch 20719 (2026-09-23), the scoring config was recorded at open time, and the board will be signed by the host Ed25519 key with fingerprint `48756712e3c18a7b`. This is an operating record, not yet a result. The paid frontier-model evaluation is also still pending: the stdio adapter and three-model runner in [`examples/llm-agent/`](examples/llm-agent/README.md) exist, need the Anthropic Python SDK and an API key with credit, and fail closed on provider, credit or budget errors, so a partial API run cannot become evidence. No result from it is claimed here.
 
-Every number reproduces from committed data via the commands in the paper's appendix. A benchmark that publishes what its own evidence found against itself is the credibility claim.
+Every number reproduces from committed data via the commands in the paper's appendix; the synthetic pass witness and the thousand-agent floor are harness examples (`pass_witness.rs`, `luck_floor_1000.rs`) under [`crates/sharpebench-harness/examples/`](crates/sharpebench-harness/examples/). A benchmark that publishes what its own evidence found against itself is the credibility claim.
 
-## Status — active, evidence-tested
+## Status: active, evidence-tested
 
-All thirteen crates are implemented, tested, and CI-green on Linux, macOS and Windows (fmt · clippy `-D warnings` · workspace tests · cross-platform golden-score fixtures · WASM-native parity · the self-audit's 8 defended attacks plus 1 explicit known-gap case · a docs build · an npm build/test · a maturin build + pytest for the Python bindings). The statistics kernel, the backtest-honesty verdict, scoring kernel, point-in-time simulator, run harness, forward arena, leaderboard, WASM bridge, npm package, MCP server, Python ranker, and CLI all work end-to-end on synthetic data and on **nine real frozen datasets** across four asset classes and four bar sizes. The version on crates.io, npm and PyPI is always the latest `v*` tag; every registry is checked by the release pipeline's verify job.
+All thirteen crates are implemented, tested, and CI-green on Linux, macOS and Windows (fmt · clippy `-D warnings` · workspace tests · cross-platform golden-score fixtures · WASM-native parity · the self-audit's 9 defended attacks, the ninth a Sybil case closed by clone collapse · a docs build · an npm build/test · a maturin build + pytest for the Python bindings). The statistics kernel, the backtest-honesty verdict, scoring kernel, point-in-time simulator, run harness, forward arena, leaderboard, WASM bridge, npm package, MCP server, Python ranker, and CLI all work end-to-end on synthetic data and on **nine real frozen datasets** across four asset classes and four bar sizes. The version on crates.io, npm and PyPI is always the latest `v*` tag; every registry is checked by the release pipeline's verify job.
 
 **Not yet built** (need external infra or a decision): single-name equity data (a keyed feed), hosted arena intake and a scheduler (the arena lifecycle itself is built and test-driven, see below), and the public data-curation protocol. See [docs/PLAN.md](docs/PLAN.md).
 
@@ -67,8 +69,9 @@ All thirteen crates are implemented, tested, and CI-green on Linux, macOS and Wi
 cargo install sharpebench                                    # the CLI
 sharpebench run                                              # reference agents + a luck floor, ranked
 sharpebench score suites/example_submissions.json           # rank a JSON field of submissions
-sharpebench audit                                           # 8 defenses + 1 measured known gap
+sharpebench audit                                           # 9 defended attacks, no known gaps
 sharpebench run --data data/crypto-majors-1d.csv            # run on real crypto-majors daily bars
+sharpebench run --pass-mode relative-to-benchmark           # per-window verdict on excess over buy-and-hold
 sharpebench uncertainty returns.csv --confidences conf.csv  # aleatoric / epistemic / distributional split
 sharpebench import csv my_field/ --out subs.json            # re-score a rival board's return series
 sharpebench arena init league && sharpebench arena verify league   # the forward league, file-backed
@@ -76,26 +79,26 @@ sharpebench arena init league && sharpebench arena verify league   # the forward
 
 Prefer a prebuilt binary? Each release attaches a static Linux binary (`sharpebench-x86_64-linux-musl`) with SLSA build provenance; verify it with `gh attestation verify sharpebench-x86_64-linux-musl --repo general-liquidity/sharpebench`.
 
-The example field includes a *skilled* agent, a *lucky* agent with a **higher raw return**, and a *process-violating* agent. The skilled agent ranks first; the other two are ineligible — which is the whole point. `run` adds a **luck floor** of random "monkey" agents so you can see the zero-skill distribution a real edge must clear.
+The example field includes a *skilled* agent, a *lucky* agent with a **higher raw return**, and a *process-violating* agent. The skilled agent ranks first; the other two are ineligible, which is the whole point. `run` adds a **luck floor** of random "monkey" agents so you can see the zero-skill distribution a real edge must clear. On a one-symbol dataset the random agent draws its gross exposure per seed instead of a normalized weight, so the floor does not collapse into buy-and-hold.
 
 ## Use it from anywhere
 
-One kernel, scored identically across every surface — the internal eval and the public benchmark can't drift.
+One kernel, scored identically across every surface: the internal eval and the public benchmark can't drift.
 
 | Surface | Get it | What it is |
 |:--|:--|:--|
-| <img height="14" align="top" src="https://cdn.simpleicons.org/rust/DEA584" />&nbsp; **Rust crate** | `cargo add sharpebench-core` | The pure scoring kernel — deterministic, `#![forbid(unsafe_code)]`. |
-| <img height="14" align="top" src="https://cdn.simpleicons.org/rust/DEA584" />&nbsp; **Rust (just the stats)** | `cargo add sharpebench-stats` | The standalone statistics kernel — PSR, deflated Sharpe, the data-snooping tests, selection. The same math the board ranks on, with no benchmark attached. |
+| <img height="14" align="top" src="https://cdn.simpleicons.org/rust/DEA584" />&nbsp; **Rust crate** | `cargo add sharpebench-core` | The pure scoring kernel: deterministic, `#![forbid(unsafe_code)]`. |
+| <img height="14" align="top" src="https://cdn.simpleicons.org/rust/DEA584" />&nbsp; **Rust (just the stats)** | `cargo add sharpebench-stats` | The standalone statistics kernel: PSR, deflated Sharpe, the data-snooping tests, selection. The same math the board ranks on, with no benchmark attached. |
 | <img height="14" align="top" src="https://cdn.simpleicons.org/gnubash/4EAA25" />&nbsp; **CLI** | `cargo install sharpebench` | `run` / `score` / `check` / `regime` / `audit` / `sign` / `verify` / `greeks` / … |
-| <img height="14" align="top" src="https://cdn.simpleicons.org/npm/CB3837" />&nbsp; **npm** | `npm i @general-liquidity/sharpebench` | Typed JS/TS API over the WASM kernel — `score`, `greeks`, `selfAudit`. |
+| <img height="14" align="top" src="https://cdn.simpleicons.org/npm/CB3837" />&nbsp; **npm** | `npm i @general-liquidity/sharpebench` | Typed JS/TS API over the WASM kernel: `score`, `greeks`, `selfAudit`. |
 | <img height="14" align="top" src="https://cdn.simpleicons.org/python/3776AB" />&nbsp; **Python** | `pip install sharpebench` | The stats kernel **plus the ranker**: `rank_board` / `rank_returns` take and return the same wire JSON as the CLI. |
-| <img height="14" align="top" src="https://cdn.simpleicons.org/modelcontextprotocol" />&nbsp; **MCP** | `npx -y @general-liquidity/sharpebench-mcp` | An [MCP](https://modelcontextprotocol.io) server — agents call the kernel as tools. |
+| <img height="14" align="top" src="https://cdn.simpleicons.org/modelcontextprotocol" />&nbsp; **MCP** | `npx -y @general-liquidity/sharpebench-mcp` | An [MCP](https://modelcontextprotocol.io) server; agents call the kernel as tools. |
 | <img height="14" align="top" src="https://cdn.simpleicons.org/webassembly/654FF0" />&nbsp; **WASM** | `sharpebench-wasm` | The wasm-bindgen bridge the npm package and Gordon (Bun) embed. |
 
 ```ts
 import { score, greeks } from "@general-liquidity/sharpebench";
 
-const board = score(submissions);   // ranked CompositeScore[] — raw return never buys rank
+const board = score(submissions);   // ranked CompositeScore[]; raw return never buys rank
 greeks({ spot: 100, strike: 100, t_years: 1, rate: 0.05, vol: 0.2, is_call: true }).price; // 10.45
 ```
 
@@ -134,10 +137,10 @@ Both halves are compile-and-run-checked as doctests in `sharpebench-stats` and `
 | Command | What it does |
 |:--|:--|
 | `run` (+ `--data <csv>`, `--http`/`--cmd`) | Run agents through the point-in-time sim and rank them; `--http`/`--cmd` drives **your** external agent into the field. |
-| `score <subs.json>` | Rank a JSON field of pre-computed submissions. |
+| `score <subs.json>` | Rank a JSON field of pre-computed submissions. `--pass-mode relative-to-benchmark [--benchmark-agent <id>]` (also on `run`) judges each run on its excess return over the same-window run of the named benchmark agent, `buy-and-hold` by default; the benchmark's own zero-excess series fails. |
 | `check <returns.csv> --trials N` | "Is my Sharpe real?" Prints deflated Sharpe / haircut / MinTRL / verdict for your own return series; `--trials` is required (no silent default). |
 | `regime <a.csv> <b.csv> <regimes.csv>` | Compare two return series *within* each market regime (zero-mass / continuous split, KS statistic, sign reversals the pooled mean hides). Regime labels are an input, one per period; nothing is inferred. |
-| `audit` | Self-audit: require 8 claimed defenses to demote their attacks and reproduce 1 explicitly expected-vulnerable Sybil case; non-zero exit if a claimed defense regresses. |
+| `audit` | Self-audit: require all 9 claimed defenses to demote their attacks, the ninth being the field-level Sybil case closed by clone collapse (its test also asserts the attack still reproduces with the collapse off); non-zero exit if a claimed defense regresses. |
 | `stress` | Run the adversarial stress suite (flash-crash / whipsaw), contamination-masked. |
 | `commit` · `sign` · `verify` | Forward-attestation: pre-register a digest, sign a board, verify its chain. |
 | `capture` · `verify-trajectory` | Capture an agent's raw-decision trajectory, then replay it to recompute the score. |
@@ -153,7 +156,7 @@ Add `--json` to any command for machine-readable output.
 
 ### Bring your own agent
 
-Agents are external and language-agnostic — implement the tiny JSON contract (`MarketObservation` → `Decision`) over either transport, then rank yourself into the field:
+Agents are external and language-agnostic: implement the tiny JSON contract (`MarketObservation` → `Decision`) over either transport, then rank yourself into the field:
 
 ```bash
 sharpebench run --cmd "cargo run -q -p reference-agent"   # stdio subprocess
@@ -162,7 +165,7 @@ sharpebench run --http 127.0.0.1:8080                     # HTTP POST /decide
 
 A runnable reference agent (stdio + Dockerfile) and the wire format live in [`examples/reference-agent/`](examples/reference-agent/).
 
-> **Security — running untrusted agents.** `sharpebench run` executes whatever agent you point it at **without sandboxing**; only run agents you trust. The arena runs external agents in a network-isolated Docker container with bounded CPU and memory, and refuses (rather than silently falling back) when Docker is absent. Container isolation is the boundary; multi-tenant hosting of untrusted submissions is **not yet built**.
+> **Security: running untrusted agents.** `sharpebench run` executes whatever agent you point it at **without sandboxing**; only run agents you trust. The arena runs external agents in a network-isolated Docker container with bounded CPU and memory, and refuses (rather than silently falling back) when Docker is absent. Container isolation is the boundary; multi-tenant hosting of untrusted submissions is **not yet built**.
 
 ## What it measures
 
@@ -180,14 +183,14 @@ Reported but never gating: Sortino + downside deviation, rolling worst-case Shar
 
 ## Data
 
-The benchmark runs on **frozen, checksummed, point-in-time** datasets — no live API in the scoring path, so a score reproduces forever.
+The benchmark runs on **frozen, checksummed, point-in-time** datasets: no live API in the scoring path, so a score reproduces forever.
 
 | Source | Set | Provides |
 |:--|:--|:--|
 | <img height="14" align="top" src="https://cdn.simpleicons.org/binance/F0B90B" />&nbsp; Binance | `crypto-majors-1d.csv` | BTC/ETH/SOL/BNB/XRP daily closes (public API, no key) |
 | 🏛️ [FRED](https://fred.stlouisfed.org) | `us-indices-1d.csv` | SPX / DJI / IXIC daily closes (public domain) |
 
-Both are fetched and frozen by the offline Rust ingester (`xtask`, `publish = false` — its deps never reach the CLI). The format is long `date,symbol,close[,dividend]`; any aligned dataset works.
+Both are fetched and frozen by the offline Rust ingester (`xtask`, `publish = false`, so its deps never reach the CLI). The format is long `date,symbol,close[,dividend]`; any aligned dataset works.
 
 ```bash
 cargo run -p xtask -- crypto                              # re-fetch + re-checksum
@@ -196,7 +199,7 @@ sharpebench run --data data/us-indices-1d.csv
 
 ## Architecture
 
-A Rust [Cargo workspace](Cargo.toml) (modular, à la Paradigm's Rust OSS — reuse any crate on its own). The whole tree is `#![forbid(unsafe_code)]`.
+A Rust [Cargo workspace](Cargo.toml) (modular, à la Paradigm's Rust OSS: reuse any crate on its own). The whole tree is `#![forbid(unsafe_code)]`.
 
 ```
 sharpebench-stats ── the statistics kernel: PSR, expected-max-Sharpe, deflated Sharpe, the
@@ -243,7 +246,7 @@ Together these cover the union a SOTA memory benchmark has to prove in one place
 
 | Technology | Role |
 |:--|:--|
-| <img height="14" align="top" src="https://cdn.simpleicons.org/rust/DEA584" />&nbsp; [Rust](https://www.rust-lang.org) | The whole kernel — pure `f64`, fixed reduction order, no `unsafe` |
+| <img height="14" align="top" src="https://cdn.simpleicons.org/rust/DEA584" />&nbsp; [Rust](https://www.rust-lang.org) | The whole kernel: pure `f64`, fixed reduction order, no `unsafe` |
 | <img height="14" align="top" src="https://cdn.simpleicons.org/webassembly/654FF0" />&nbsp; [WebAssembly](https://webassembly.org) | The kernel for non-Rust hosts (`wasm-bindgen`) |
 | <img height="14" align="top" src="https://cdn.simpleicons.org/typescript/3178C6" />&nbsp; [TypeScript](https://www.typescriptlang.org) | The typed npm package + MCP server |
 | <img height="14" align="top" src="https://cdn.simpleicons.org/npm/CB3837" />&nbsp; [npm](https://www.npmjs.com/package/@general-liquidity/sharpebench) | JS/TS distribution of the scoring kernel |
@@ -254,7 +257,7 @@ Together these cover the union a SOTA memory benchmark has to prove in one place
 
 ## Methodology & references
 
-The gates are not invented — they are the published, peer-reviewed controls for skill-vs-luck, assembled into one ranking.
+The gates are not invented; they are the published, peer-reviewed controls for skill-vs-luck, assembled into one ranking.
 
 | Control | Reference |
 |:--|:--|
@@ -270,7 +273,7 @@ Full derivations in the [mdBook](docs/book/): [methodology](docs/book/src/method
 
 ## Governance
 
-Hosted by [General Liquidity](https://github.com/general-liquidity) to start, with a roadmap to neutral governance. Credibility comes from **forward-attestation + signed, independently-verifiable results**, not from trust in the host — and Gordon (GL's agent) competes on the board like any other entrant. The neutral home may already exist: the FINOS-governed [Open FinLLM Leaderboard](https://huggingface.co/spaces/finosfoundation/Open-Financial-LLM-Leaderboard) covers the financial-*knowledge* axis but has **no trading-performance axis** — SharpeBench is positioned to be the skill-vs-luck *trading* track it lacks. See **[docs/GOVERNANCE.md](docs/GOVERNANCE.md)**.
+Hosted by [General Liquidity](https://github.com/general-liquidity) to start, with a roadmap to neutral governance. Credibility comes from **forward-attestation + signed, independently-verifiable results**, not from trust in the host, and Gordon (GL's agent) competes on the board like any other entrant. The neutral home may already exist: the FINOS-governed [Open FinLLM Leaderboard](https://huggingface.co/spaces/finosfoundation/Open-Financial-LLM-Leaderboard) covers the financial-*knowledge* axis but has **no trading-performance axis**; SharpeBench is positioned to be the skill-vs-luck *trading* track it lacks. See **[docs/GOVERNANCE.md](docs/GOVERNANCE.md)**.
 
 ## License
 
@@ -279,5 +282,5 @@ Dual-licensed under either [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), a
 ---
 
 <div align="center">
-<sub><em>Skill that survives deflation — and proves it forward.</em></sub>
+<sub><em>Skill that survives deflation, and proves it forward.</em></sub>
 </div>

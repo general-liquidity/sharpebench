@@ -420,31 +420,34 @@ pub fn run_self_audit() -> SelfAuditReport {
         });
     }
 
-    // 9) Sock-puppet Sybil field (KNOWN GAP, expected-vulnerable). The attack
-    //    targets gate *configuration*, not any per-submission gate: on the
-    //    measured-deflation path [`rank`] estimates `trials_sr_std` as the
-    //    sample standard deviation of pooled per-period Sharpes across the
-    //    field. A submitter who floods the field with near-duplicate,
-    //    low-dispersion sock-puppet agents shrinks that estimate, which lowers
-    //    the expected-maximum-Sharpe bar every agent is deflated against -
-    //    including the submitter's real agent. No per-submission audit can see
-    //    it, because every individual puppet is a perfectly honest, unremarkable
-    //    submission.
+    // 9) Sock-puppet Sybil field. The attack targets gate *configuration*, not
+    //    any per-submission gate: on the measured-deflation path [`rank`]
+    //    estimates `trials_sr_std` as the sample standard deviation of pooled
+    //    per-period Sharpes across the field. A submitter who floods the field
+    //    with near-duplicate, low-dispersion sock-puppet agents shrinks that
+    //    estimate, which lowers the expected-maximum-Sharpe bar every agent is
+    //    deflated against - including the submitter's real agent. No
+    //    per-submission audit can see it, because every individual puppet is a
+    //    perfectly honest, unremarkable submission.
     //
-    //    The kernel has NO wired defense on this path: nothing in [`rank`]
-    //    deduplicates or down-weights near-identical return streams before
-    //    measuring the dispersion. The mitigation *direction* exists as a
-    //    module, [`crate::rediscovery::classify_rediscovery`] flags the
-    //    puppets as near-duplicates of each other at cosine >= 0.97, but it
-    //    screens against a library of known prior strategies at the operator
-    //    layer and is not applied to the measured-dispersion field. So this
-    //    case demonstrates the exposure end to end and is marked
-    //    `expected_vulnerable` rather than pretending a defense exists. If a
-    //    dedup guard is ever wired into the measured path, the demonstration
-    //    below stops reproducing and the audit test flags this marking as
-    //    stale.
+    //    The defense is field-level, in [`rank`]: before the dispersion is
+    //    measured, near-clone streams ([`crate::rediscovery::clone_clusters`] at
+    //    [`crate::rediscovery::CLONE_COLLAPSE_COSINE`]) are collapsed to one
+    //    vote per cluster, so 200 puppets count as the one strategy they are.
+    //    The puppets sit at cosine 0.99999 or above against each other; the
+    //    real agent sits at 0.934 against them and the honest field at 0.884
+    //    or below pairwise, so nothing honest is collapsed.
+    //    The puppets are still scored and still appear on the board; they just
+    //    do not vote on the bar. The case scores the same Sybil field with the
+    //    collapse off (`dedup_clones_for_measured_sr_std: false`) to show the
+    //    exposure is real and with the default on to show it is closed:
+    //    defended when the collapsed field measures exactly what a field with a
+    //    single puppet measures and the real agent stays refused.
     {
-        use crate::rediscovery::{classify_rediscovery, DEFAULT_REDISCOVERY_THRESHOLD};
+        use crate::rediscovery::{
+            classify_rediscovery, cosine_similarity, CLONE_COLLAPSE_COSINE,
+            DEFAULT_REDISCOVERY_THRESHOLD,
+        };
 
         let n = 120usize;
         let stream = |drift: f64, vol: f64, phase: f64| -> Vec<f64> {
@@ -460,6 +463,10 @@ pub fn run_self_audit() -> SelfAuditReport {
         );
         // Six honest, genuinely distinct competitors whose Sharpes spread from
         // about -0.4 to +0.55, a realistic dispersion for the field to measure.
+        // Phases are spread so that no honest pair, and no honest agent and the
+        // real one, sits within the clone threshold of each other: the honest
+        // field must be one vote per agent, or the case would be measuring the
+        // collapse of its own fixture.
         let honest_field: Vec<AgentSubmission> = [-0.002, -0.001, 0.0, 0.00075, 0.00175, 0.00275]
             .iter()
             .enumerate()
@@ -467,7 +474,7 @@ pub fn run_self_audit() -> SelfAuditReport {
                 agent(
                     &format!("honest-{i}"),
                     vec![run_with(
-                        stream(drift, 0.007, 1.7 * i as f64),
+                        stream(drift, 0.007, 1.0 + 0.5 * i as f64),
                         Trace::default(),
                     )],
                 )
@@ -492,6 +499,10 @@ pub fn run_self_audit() -> SelfAuditReport {
             n_boot: 200,
             ..cfg.clone()
         };
+        let cfg9_exposed = ScoreConfig {
+            dedup_clones_for_measured_sr_std: false,
+            ..cfg9.clone()
+        };
 
         let mut field_honest = vec![real.clone()];
         field_honest.extend(honest_field.iter().cloned());
@@ -500,12 +511,36 @@ pub fn run_self_audit() -> SelfAuditReport {
 
         let mut field_sybil = field_honest.clone();
         field_sybil.extend(puppets.iter().cloned());
+        // The exposure, reproduced with the collapse switched off.
+        let board_exposed = rank(&field_sybil, &cfg9_exposed);
+        let r_x = board_exposed.iter().find(|s| s.agent_id == "real").unwrap();
+        // The defense: the same field under the default config.
         let board_sybil = rank(&field_sybil, &cfg9);
         let r_s = board_sybil.iter().find(|s| s.agent_id == "real").unwrap();
 
-        // The mitigation direction the kernel already has, unwired: the
-        // rediscovery screen sees the puppets as clones of each other.
+        // What 200 puppets are worth once collapsed: one vote, cast by the
+        // cluster's median member. The measured dispersion must be that
+        // field's, bit for bit.
+        let mut field_one = field_honest.clone();
+        field_one.push(puppets[(puppets.len() - 1) / 2].clone());
+        let board_one = rank(&field_one, &cfg9);
+        let r_1 = board_one.iter().find(|s| s.agent_id == "real").unwrap();
+
+        // The rediscovery screen sees the puppets as clones of each other, and
+        // the collapse's own stricter threshold does too: the smallest
+        // puppet-to-puppet cosine is what the collapse has to clear, and the
+        // largest honest-to-puppet cosine is what it must not.
         let first = puppet_stream(0);
+        let puppet_cos_min = (0..200)
+            .flat_map(|a| (a + 1..200).map(move |b| (a, b)))
+            .filter_map(|(a, b)| cosine_similarity(&puppet_stream(a), &puppet_stream(b), false))
+            .map(f64::abs)
+            .fold(1.0_f64, f64::min);
+        let honest_cos_max = field_honest
+            .iter()
+            .filter_map(|s| cosine_similarity(&s.runs[0].returns, &first, false))
+            .map(f64::abs)
+            .fold(0.0_f64, f64::max);
         let flagged = (1..200)
             .filter(|&k| {
                 classify_rediscovery(
@@ -517,25 +552,42 @@ pub fn run_self_audit() -> SelfAuditReport {
                 .is_rediscovery
             })
             .count();
+        // Every puppet is still scored and still on the board.
+        let puppets_on_board = board_sybil
+            .iter()
+            .filter(|s| s.agent_id.starts_with("puppet-"))
+            .count();
 
-        // The attack works when the puppets shrink the measured dispersion and
-        // the real agent's deflation bar drops with it.
-        let attack_succeeded =
-            r_s.trials_sr_std < r_h.trials_sr_std && r_s.deflated_sharpe > r_h.deflated_sharpe;
+        let exposure_reproduces = r_x.trials_sr_std < r_h.trials_sr_std
+            && r_x.deflated_sharpe > r_h.deflated_sharpe
+            && r_x.rank_eligible;
+        let defended = exposure_reproduces
+            && r_s.trials_sr_std.to_bits() == r_1.trials_sr_std.to_bits()
+            && r_s.deflated_sharpe.to_bits() == r_1.deflated_sharpe.to_bits()
+            && !r_s.rank_eligible
+            && r_s.deflated_sharpe < cfg9.dsr_bar
+            && puppets_on_board == 200
+            && flagged == 199
+            && puppet_cos_min >= CLONE_COLLAPSE_COSINE
+            && honest_cos_max < CLONE_COLLAPSE_COSINE;
         cases.push(AuditCase {
             name: "sybil-sock-puppets".into(),
             attack:
                 "flood the field with near-duplicate low-dispersion agents to shrink measured trials_sr_std and lower the deflation bar for the submitter's real agent"
                     .into(),
-            defended: !attack_succeeded,
-            expected_vulnerable: true,
+            defended,
+            expected_vulnerable: false,
             detail: format!(
-                "measured sr_std {:.4} -> {:.4}, real-agent DSR {:.4} -> {:.4}, eligible {} -> {}; rediscovery screen flags {flagged}/199 puppets but rank() does not apply it, KNOWN GAP",
+                "measured sr_std honest {:.4}, sybil undefended {:.4}, sybil defended {:.4} (one-puppet field {:.4}); real-agent DSR {:.4} -> undefended {:.4} -> defended {:.4}, eligible {} -> {} -> {}; {flagged}/199 puppets flagged as clones, {puppets_on_board}/200 still on the board; puppet cosine >= {puppet_cos_min:.5}, honest-to-puppet cosine <= {honest_cos_max:.3}, collapse at {CLONE_COLLAPSE_COSINE}",
                 r_h.trials_sr_std,
+                r_x.trials_sr_std,
                 r_s.trials_sr_std,
+                r_1.trials_sr_std,
                 r_h.deflated_sharpe,
+                r_x.deflated_sharpe,
                 r_s.deflated_sharpe,
                 r_h.rank_eligible,
+                r_x.rank_eligible,
                 r_s.rank_eligible,
             ),
         });
@@ -557,46 +609,111 @@ mod tests {
     #[test]
     fn benchmark_resists_every_known_attack() {
         let report = run_self_audit();
-        for c in report.cases.iter().filter(|c| !c.expected_vulnerable) {
+        for c in &report.cases {
             assert!(c.defended, "undefended attack: {} — {}", c.name, c.detail);
         }
         assert!(report.all_defended);
-        assert_eq!(report.known_gaps, 1, "exactly one documented gap: sybil");
+        assert_eq!(report.known_gaps, 0, "no documented gaps remain");
+        assert_eq!(report.cases.len(), 9);
     }
 
-    /// The Sybil case is a documented exposure, not a defense: the attack must
-    /// actually work (measured dispersion shrinks, the real agent's DSR rises),
-    /// and it must be marked expected-vulnerable. If this test ever fails
-    /// because `defended` became true, the kernel has gained a dedup guard on
-    /// the measured path, flip the marking and turn this into a defense case.
+    /// The Sybil case is a defense, and it has to prove both halves: with the
+    /// clone collapse off the exposure still reproduces (the puppets shrink the
+    /// measured dispersion and admit the real agent), and with the default on
+    /// the 200 puppets are worth exactly one vote and the real agent stays
+    /// refused. A case that only showed the second half could be passing
+    /// because the attack stopped working for some other reason.
     #[test]
-    fn sybil_case_demonstrates_the_known_gap_honestly() {
+    fn sybil_case_proves_the_exposure_and_the_defense() {
         let report = run_self_audit();
         let c = report
             .cases
             .iter()
             .find(|c| c.name == "sybil-sock-puppets")
             .expect("the sybil attack must be in the battery");
-        assert!(c.expected_vulnerable, "must be marked as a known gap");
+        assert!(!c.expected_vulnerable, "no longer a known gap");
+        assert!(c.defended, "the defense must hold: {}", c.detail);
+        // The exposure is still real with the collapse off, and the field
+        // flips the real agent from refused to admitted there.
         assert!(
-            !c.defended,
-            "the demonstration must reproduce (or the marking is stale): {}",
+            c.detail.contains("eligible false -> true -> false"),
+            "undefended must admit, defended must refuse: {}",
             c.detail
         );
         assert!(
-            c.detail.contains("KNOWN GAP"),
-            "the exposure must be named in the record: {}",
+            c.detail
+                .contains("199/199 puppets flagged as clones, 200/200 still on the board"),
+            "clones vote once but are still scored: {}",
             c.detail
         );
-        // The demonstration is not marginal: the puppets flip the real agent
-        // from refused to admitted at the default 0.95 bar.
+        assert_eq!(report.known_gaps, 0);
+    }
+
+    /// Removing the collapse re-exposes the gap: the same Sybil field scored
+    /// with `dedup_clones_for_measured_sr_std: false` measures a smaller
+    /// dispersion than the honest field and admits the borderline agent. This
+    /// is the regression the default exists to prevent, checked directly.
+    #[test]
+    fn disabling_the_clone_collapse_re_exposes_the_sybil_gap() {
+        let n = 120usize;
+        let stream = |drift: f64, phase: f64| -> Vec<f64> {
+            (0..n)
+                .map(|i| drift + 0.007 * (i as f64 * 0.9 + phase).sin())
+                .collect()
+        };
+        let mut field = vec![agent(
+            "real",
+            vec![run_with(stream(0.0015, 0.3), Trace::default())],
+        )];
+        for (i, &drift) in [-0.002, -0.001, 0.0, 0.00075, 0.00175, 0.00275]
+            .iter()
+            .enumerate()
+        {
+            field.push(agent(
+                &format!("honest-{i}"),
+                vec![run_with(
+                    stream(drift, 1.0 + 0.5 * i as f64),
+                    Trace::default(),
+                )],
+            ));
+        }
+        let cfg = ScoreConfig {
+            n_boot: 200,
+            ..ScoreConfig::default()
+        };
+        let honest = rank(&field, &cfg);
+        let r_h = honest.iter().find(|s| s.agent_id == "real").unwrap();
+        assert!(!r_h.rank_eligible);
+
+        for k in 0..200 {
+            field.push(agent(
+                &format!("puppet-{k:03}"),
+                vec![run_with(
+                    stream(0.0004 + 1e-7 * k as f64, 0.0),
+                    Trace::default(),
+                )],
+            ));
+        }
+        let exposed = rank(
+            &field,
+            &ScoreConfig {
+                dedup_clones_for_measured_sr_std: false,
+                ..cfg.clone()
+            },
+        );
+        let r_x = exposed.iter().find(|s| s.agent_id == "real").unwrap();
+        assert!(r_x.trials_sr_std < r_h.trials_sr_std);
         assert!(
-            c.detail.contains("eligible false -> true"),
-            "the sybil field must flip eligibility: {}",
-            c.detail
+            r_x.rank_eligible,
+            "with the collapse off the puppets admit the real agent"
         );
-        // A documented gap must not fail the audit run.
-        assert!(report.all_defended);
+
+        let defended = rank(&field, &cfg);
+        let r_d = defended.iter().find(|s| s.agent_id == "real").unwrap();
+        assert!(!r_d.rank_eligible, "with the default on it stays refused");
+        assert!(r_d.trials_sr_std > r_x.trials_sr_std);
+        // Every puppet is still scored.
+        assert_eq!(defended.len(), 207);
     }
 
     #[test]

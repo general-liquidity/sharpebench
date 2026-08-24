@@ -21,6 +21,7 @@ use crate::econrationality::{elicit_revealed_selection, rationality_score};
 use crate::pass_k::{pass_k, PassMode};
 use crate::percentile::percentile_of;
 use crate::process::{process_score, ProcessEvent, ProcessScore, Trace};
+use crate::rediscovery::{clone_clusters, CLONE_COLLAPSE_COSINE};
 use crate::roles::{attribute_behavior_roles, RoleContribution};
 use crate::rolling::rolling_sharpe;
 use crate::selection::{selection_robustness, SelectionRobustness};
@@ -210,6 +211,17 @@ pub struct ScoreConfig {
     /// side by side; it is not a knob to turn quietly.
     #[serde(default)]
     pub pass_mode: PassMode,
+    /// The agent whose runs are the benchmark under
+    /// [`PassMode::RelativeToBenchmark`]; ignored under every other mode. Default
+    /// `"buy-and-hold"`, the reference agent every harness field carries. The
+    /// benchmark is looked up **in the field being ranked**, by id, so its run at
+    /// position `i` is the same (window, seed) cell as every other agent's run
+    /// `i`: same frozen bars, same window, same execution seed, same cost model.
+    /// Nothing is fetched from outside the field, which is what rules out
+    /// leakage. [`score_agent`] has no field and therefore no benchmark; under
+    /// the relative mode it fails every run (see [`per_run_passes`]).
+    #[serde(default = "default_benchmark_agent_id")]
+    pub benchmark_agent_id: String,
     /// How many return periods make a year on the dataset being scored: the unit
     /// conversion between the annualized thresholds above and the per-period
     /// statistics the kernel computes. Daily equities 252, daily crypto 365,
@@ -268,6 +280,21 @@ pub struct ScoreConfig {
     /// estimate is noisier than the prior it would replace, so five is the floor.
     #[serde(default = "default_min_field_for_measured_sr_std")]
     pub min_field_for_measured_sr_std: usize,
+    /// Collapse near-clone submissions to one vote each before [`rank`] measures
+    /// `trials_sr_std` (default: on). Two pooled streams are clones when their
+    /// `|cosine|` meets [`crate::rediscovery::CLONE_COLLAPSE_COSINE`] (0.995, a
+    /// constant of its own: the rediscovery screen's 0.97 flags similar
+    /// strategies for review and would silence honest collinear agents, which
+    /// the benchmark's own luck floor is against buy-and-hold); clusters are the
+    /// connected components of that relation and each contributes its median
+    /// Sharpe once, both to the dispersion estimate and to the field count the
+    /// measurement floor is checked against. Clones are still scored and still
+    /// appear on the board; they just do not vote on the bar. A field with no
+    /// clones measures exactly as before. Off only reproduces the sock-puppet
+    /// exposure the self-audit documents, where 200 near-duplicate agents shrink
+    /// the measured dispersion and lower the deflation bar for everyone.
+    #[serde(default = "default_dedup_clones_for_measured_sr_std")]
+    pub dedup_clones_for_measured_sr_std: bool,
 }
 
 /// Default rolling-Sharpe window length (21 periods ≈ one trading month).
@@ -291,11 +318,84 @@ fn default_min_field_for_measured_sr_std() -> usize {
     5
 }
 
+/// Clone collapse before the measurement is on by default: a field-level control
+/// against a field-level attack is not an opt-in.
+fn default_dedup_clones_for_measured_sr_std() -> bool {
+    true
+}
+
 /// Default periods per year: daily equity bars, the benchmark's historical
 /// assumption. Configs serialized before the field existed deserialize to this,
 /// so their meaning is unchanged.
 fn default_periods_per_year() -> f64 {
     252.0
+}
+
+/// Default benchmark agent for the relative verdict: the buy-and-hold reference
+/// agent, under the id the harness and the CLI give it.
+fn default_benchmark_agent_id() -> String {
+    "buy-and-hold".to_string()
+}
+
+/// The per-run pass vector pass^k aggregates: one bool per run, in submission
+/// order. This is the kernel's own test, exposed so a report can say *which*
+/// runs passed rather than only whether all did.
+///
+/// Under [`PassMode::All`], [`PassMode::Any`] and [`PassMode::AtLeast`] run `i`
+/// passes iff `PSR(returns_i, per_run_psr_benchmark(cfg)) >= cfg.per_run_psr_bar`;
+/// `benchmark` is ignored.
+///
+/// Under [`PassMode::RelativeToBenchmark`] run `i` passes iff all of:
+/// 1. `benchmark` is present and has a run at position `i` of the same length
+///    (the same (window, seed) cell; a missing or misaligned cell is a failure,
+///    never a silent fallback to the absolute test);
+/// 2. the excess series `e_t = returns_i[t] - benchmark_i[t]` has strictly
+///    positive standard deviation;
+/// 3. `PSR(e, per_run_psr_benchmark(cfg)) >= cfg.per_run_psr_bar`.
+///
+/// Rule 2 is what stops the benchmark from certifying itself. Its own excess
+/// series is identically zero, and a zero-dispersion series carries no evidence
+/// of outperformance at all: `sharpe_ratio` defines it as 0 and PSR then returns
+/// `norm_cdf(0) = 0.5`, so it already fails any bar above one half, but an
+/// operator who lowered `per_run_psr_bar` to 0.5 would admit it. The rule makes
+/// the refusal unconditional: a run indistinguishable from the benchmark is a
+/// run with no excess edge, and the relative verdict is a claim about excess
+/// edge in every window. It also refuses a clone of the benchmark under another
+/// id, for the same reason.
+pub fn per_run_passes(
+    sub: &AgentSubmission,
+    benchmark: Option<&AgentSubmission>,
+    cfg: &ScoreConfig,
+) -> Vec<bool> {
+    let bar = per_run_psr_benchmark(cfg);
+    match cfg.pass_mode {
+        PassMode::All | PassMode::Any | PassMode::AtLeast(_) => sub
+            .runs
+            .iter()
+            .map(|r| probabilistic_sharpe_ratio(&r.returns, bar) >= cfg.per_run_psr_bar)
+            .collect(),
+        PassMode::RelativeToBenchmark => sub
+            .runs
+            .iter()
+            .enumerate()
+            .map(|(i, r)| {
+                benchmark
+                    .and_then(|b| b.runs.get(i))
+                    .and_then(|b| excess_returns(&r.returns, &b.returns))
+                    .is_some_and(|e| {
+                        std_dev(&e) > 0.0
+                            && probabilistic_sharpe_ratio(&e, bar) >= cfg.per_run_psr_bar
+                    })
+            })
+            .collect(),
+    }
+}
+
+/// Period-by-period excess of `returns` over `benchmark`, or `None` when the two
+/// series are not the same length (not the same cell).
+fn excess_returns(returns: &[f64], benchmark: &[f64]) -> Option<Vec<f64>> {
+    (returns.len() == benchmark.len())
+        .then(|| returns.iter().zip(benchmark).map(|(a, b)| a - b).collect())
 }
 
 /// The per-period cross-trial Sharpe dispersion the kernel deflates with on the
@@ -343,6 +443,7 @@ impl Default for ScoreConfig {
             per_run_psr_bar: 0.90,
             per_run_min_annual_sharpe: 0.0,
             pass_mode: PassMode::default(),
+            benchmark_agent_id: default_benchmark_agent_id(),
             periods_per_year: default_periods_per_year(),
             alpha: 0.05,
             bootstrap_seed: 0x5BA7_2026,
@@ -355,6 +456,7 @@ impl Default for ScoreConfig {
             dsr_ci_level: default_dsr_ci_level(),
             shared_run_set: default_shared_run_set(),
             min_field_for_measured_sr_std: default_min_field_for_measured_sr_std(),
+            dedup_clones_for_measured_sr_std: default_dedup_clones_for_measured_sr_std(),
         }
     }
 }
@@ -405,6 +507,29 @@ impl ScoreConfig {
                 max_run_drawdown: max_run_dd,
                 ..Mandate::default()
             },
+            ..Self::default()
+        }
+    }
+
+    /// The mandate-relative reliability verdict, as one named preset.
+    ///
+    /// The default certifies *profitable in every regime*: an all-weather
+    /// absolute-return mandate, which is why the index itself cannot pass on any
+    /// range containing a bear window. This preset certifies *beats owning the
+    /// universe in every regime*: it sets `pass_mode` to
+    /// [`PassMode::RelativeToBenchmark`] and names `benchmark_agent_id`, so each
+    /// run's PSR is tested on its excess return over the benchmark's run in the
+    /// same (window, seed) cell (see [`per_run_passes`] for the exact rule and
+    /// for why the benchmark itself, whose excess is identically zero, fails).
+    /// Every other gate is the default's: the pooled Deflated Sharpe, the
+    /// bootstrap, the process audit and the drawdown mandate are all still
+    /// computed on the agent's own raw returns, so this is a different
+    /// reliability question, not a weaker set of gates. It is opt-in and changes
+    /// nothing about the default.
+    pub fn relative_to_benchmark(benchmark_agent_id: &str) -> Self {
+        Self {
+            pass_mode: PassMode::RelativeToBenchmark,
+            benchmark_agent_id: benchmark_agent_id.to_string(),
             ..Self::default()
         }
     }
@@ -653,10 +778,15 @@ impl Deflation {
 /// cross-trial dispersion on, the configured annualized prior applies, converted
 /// to per period once.
 pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
-    score_agent_with(sub, cfg, Deflation::configured(cfg))
+    score_agent_with(sub, cfg, Deflation::configured(cfg), None)
 }
 
-fn score_agent_with(sub: &AgentSubmission, cfg: &ScoreConfig, defl: Deflation) -> CompositeScore {
+fn score_agent_with(
+    sub: &AgentSubmission,
+    cfg: &ScoreConfig,
+    defl: Deflation,
+    benchmark: Option<&AgentSubmission>,
+) -> CompositeScore {
     let pooled: Vec<f64> = sub
         .runs
         .iter()
@@ -670,14 +800,11 @@ fn score_agent_with(sub: &AgentSubmission, cfg: &ScoreConfig, defl: Deflation) -
     let effective_n_trials = cfg.n_trials.saturating_add(sub.in_sample_trials);
     let dsr = deflated_sharpe_ratio(&pooled, effective_n_trials, defl.sr_std);
 
-    // pass^k: every run must individually clear the per-run PSR bar against the
-    // per-period benchmark the annualized minimum converts to (0 by default).
-    let per_run_benchmark = per_run_psr_benchmark(cfg);
-    let per_run: Vec<bool> = sub
-        .runs
-        .iter()
-        .map(|r| probabilistic_sharpe_ratio(&r.returns, per_run_benchmark) >= cfg.per_run_psr_bar)
-        .collect();
+    // pass^k: each run individually clears the per-run PSR bar against the
+    // per-period benchmark the annualized minimum converts to (0 by default), on
+    // its raw returns or, under the relative mode, on its excess over the
+    // benchmark agent's run in the same cell.
+    let per_run = per_run_passes(sub, benchmark, cfg);
     let passed_k = pass_k(&per_run, cfg.pass_mode);
 
     // process: a single block-severity violation in any run is disqualifying.
@@ -960,13 +1087,38 @@ fn restrict_to_shared_positions(subs: &[AgentSubmission]) -> Vec<AgentSubmission
 /// per-period Sharpe ratios across agents with a finite Sharpe, or `None` when
 /// fewer than `min_field` agents qualify. Sharpes are sorted before summing so
 /// the submission order of the field cannot move the deflation bar by an ULP.
-fn measured_trials_sr_std(pooled: &[Vec<f64>], min_field: usize) -> Option<f64> {
-    let mut sharpes: Vec<f64> = pooled
+///
+/// With `dedup_clones` the qualifying streams are first partitioned by
+/// [`clone_clusters`] at [`CLONE_COLLAPSE_COSINE`], and each cluster votes once
+/// with its median Sharpe (the lower middle of the sorted cluster), so a
+/// sock-puppet flood of near-duplicate streams counts as the one strategy it
+/// is. The partition and the median are functions of the streams alone, so the
+/// result is order-independent; a field with no clones is all singletons and
+/// measures byte for byte as it would without the collapse.
+fn measured_trials_sr_std(
+    pooled: &[Vec<f64>],
+    min_field: usize,
+    dedup_clones: bool,
+) -> Option<f64> {
+    let qualifying: Vec<(&[f64], f64)> = pooled
         .iter()
         .filter(|p| p.len() >= 2)
-        .map(|p| sharpe_ratio(p))
-        .filter(|sr| sr.is_finite())
+        .map(|p| (p.as_slice(), sharpe_ratio(p)))
+        .filter(|(_, sr)| sr.is_finite())
         .collect();
+    let mut sharpes: Vec<f64> = if dedup_clones {
+        let streams: Vec<Vec<f64>> = qualifying.iter().map(|(p, _)| p.to_vec()).collect();
+        clone_clusters(&streams, CLONE_COLLAPSE_COSINE, false)
+            .iter()
+            .map(|members| {
+                let mut cluster: Vec<f64> = members.iter().map(|&i| qualifying[i].1).collect();
+                cluster.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                cluster[(cluster.len() - 1) / 2]
+            })
+            .collect()
+    } else {
+        qualifying.iter().map(|(_, sr)| *sr).collect()
+    };
     if sharpes.len() < min_field.max(2) {
         return None;
     }
@@ -986,6 +1138,10 @@ fn measured_trials_sr_std(pooled: &[Vec<f64>], min_field: usize) -> Option<f64> 
 ///   agents, `trials_sr_std` is the measured Sharpe dispersion of the field rather
 ///   than the configured prior. Smaller fields use the configured value, byte for
 ///   byte as before. Which applied is stamped on every score.
+/// - **Clone collapse** (`cfg.dedup_clones_for_measured_sr_std`, default on):
+///   near-duplicate streams (`|cosine| >= CLONE_COLLAPSE_COSINE`) vote once
+///   on that measurement, so a sock-puppet flood cannot shrink the dispersion and
+///   lower the bar. Clones are still scored and still appear on the board.
 ///
 /// ```
 /// use sharpebench_core::{rank, AgentSubmission, Run, ScoreConfig, Trace};
@@ -1049,14 +1205,28 @@ pub fn rank(subs: &[AgentSubmission], cfg: &ScoreConfig) -> Vec<CompositeScore> 
     // per-period Sharpes, so it goes in as-is; only the configured prior is
     // annualized and needs converting. A small field scores exactly as
     // `score_agent` would, so the configured path stays byte-identical.
-    let defl = measured_trials_sr_std(&pooled, cfg.min_field_for_measured_sr_std)
-        .map_or_else(|| Deflation::configured(cfg), Deflation::measured);
+    let defl = measured_trials_sr_std(
+        &pooled,
+        cfg.min_field_for_measured_sr_std,
+        cfg.dedup_clones_for_measured_sr_std,
+    )
+    .map_or_else(|| Deflation::configured(cfg), Deflation::measured);
+
+    // The relative verdict's benchmark is a member of this same (restricted)
+    // field, so its run `i` is every other agent's cell `i`. Looked up only
+    // under that mode: the default path never touches it.
+    let benchmark = match cfg.pass_mode {
+        PassMode::RelativeToBenchmark => {
+            field.iter().find(|s| s.agent_id == cfg.benchmark_agent_id)
+        }
+        PassMode::All | PassMode::Any | PassMode::AtLeast(_) => None,
+    };
 
     let mut scores: Vec<CompositeScore> = field
         .iter()
         .enumerate()
         .map(|(idx, s)| {
-            let mut cs = score_agent_with(s, cfg, defl);
+            let mut cs = score_agent_with(s, cfg, defl, benchmark);
             cs.runs_submitted = subs[idx].runs.len();
             if min_len >= 2 {
                 let (alpha, beta) = crate::attribution::alpha_beta(&pooled[idx], &market);
@@ -1674,9 +1844,20 @@ mod tests {
         let field: Vec<AgentSubmission> = (0..5)
             .map(|i| {
                 let m = 0.0002 + 0.0003 * i as f64;
+                // Each agent gets its own phase: five drifts on one shared
+                // wiggle would be a single clone cluster under the collapse.
+                let phase = 0.6 * i as f64;
                 agent(
                     &format!("a{i}"),
-                    (0..5).map(|_| run(m, 0.003, 60)).collect(),
+                    (0..5)
+                        .map(|_| {
+                            let mut r = run(m, 0.003, 60);
+                            r.returns = (0..60)
+                                .map(|t| m + 0.003 * (t as f64 * 0.7 + phase).sin())
+                                .collect();
+                            r
+                        })
+                        .collect(),
                 )
             })
             .collect();
@@ -1776,6 +1957,76 @@ mod tests {
         assert_ne!(s.deflated_sharpe.to_bits(), twice.to_bits());
     }
 
+    /// Near-clone streams vote once on the measured dispersion: a field of five
+    /// distinct agents plus twenty leveraged copies of one of them measures
+    /// exactly what the five distinct agents measure, the copies are still on
+    /// the board, and submission order cannot move the result. A field with no
+    /// clones measures byte for byte as it does with the collapse off.
+    #[test]
+    fn clone_clusters_vote_once_on_the_measured_sr_std() {
+        let cfg = ScoreConfig::default();
+        let distinct: Vec<AgentSubmission> = (0..5)
+            .map(|i| {
+                agent(
+                    &format!("a{i}"),
+                    vec![Run {
+                        returns: gaussian_like(120, 0.0002 + 0.0003 * i as f64, 0.003, 11 + i),
+                        trace: Trace::default(),
+                        confidences: vec![],
+                        outcomes: vec![],
+                        cost: 0.0,
+                    }],
+                )
+            })
+            .collect();
+        let base = rank(&distinct, &cfg);
+        assert_eq!(base[0].trials_sr_std_source, TrialsSrStdSource::Measured);
+        let off = rank(
+            &distinct,
+            &ScoreConfig {
+                dedup_clones_for_measured_sr_std: false,
+                ..cfg.clone()
+            },
+        );
+        assert_eq!(base, off, "no clones: the collapse is the identity");
+
+        let mut flooded = distinct.clone();
+        for k in 0..20 {
+            let mut copy = distinct[2].clone();
+            copy.agent_id = format!("copy{k:02}");
+            let lever = 1.0 + 0.05 * k as f64;
+            copy.runs[0].returns.iter_mut().for_each(|r| *r *= lever);
+            flooded.push(copy);
+        }
+        let board = rank(&flooded, &cfg);
+        assert_eq!(board.len(), 25, "clones are still scored");
+        assert_eq!(
+            board[0].trials_sr_std.to_bits(),
+            base[0].trials_sr_std.to_bits(),
+            "twenty copies of one stream are one vote"
+        );
+        let mut shuffled = flooded.clone();
+        shuffled.rotate_left(7);
+        shuffled.swap(0, 12);
+        let again = rank(&shuffled, &cfg);
+        assert_eq!(
+            again[0].trials_sr_std.to_bits(),
+            base[0].trials_sr_std.to_bits()
+        );
+
+        let exposed = rank(
+            &flooded,
+            &ScoreConfig {
+                dedup_clones_for_measured_sr_std: false,
+                ..cfg.clone()
+            },
+        );
+        assert!(
+            exposed[0].trials_sr_std < base[0].trials_sr_std,
+            "without the collapse the copies shrink the dispersion"
+        );
+    }
+
     /// The measured path measures a dispersion of per-period Sharpes, so it is
     /// reported and used as-is: `periods_per_year` must not touch it.
     #[test]
@@ -1783,9 +2034,20 @@ mod tests {
         let field: Vec<AgentSubmission> = (0..5)
             .map(|i| {
                 let m = 0.0002 + 0.0003 * i as f64;
+                // Each agent gets its own phase: five drifts on one shared
+                // wiggle would be a single clone cluster under the collapse.
+                let phase = 0.6 * i as f64;
                 agent(
                     &format!("a{i}"),
-                    (0..5).map(|_| run(m, 0.003, 60)).collect(),
+                    (0..5)
+                        .map(|_| {
+                            let mut r = run(m, 0.003, 60);
+                            r.returns = (0..60)
+                                .map(|t| m + 0.003 * (t as f64 * 0.7 + phase).sin())
+                                .collect();
+                            r
+                        })
+                        .collect(),
                 )
             })
             .collect();
@@ -2072,6 +2334,170 @@ mod tests {
             p.contains(&"lucky".to_string()) && !d.contains(&"lucky".to_string()),
             "{preset:?}"
         );
+    }
+
+    /// A field for the relative verdict: a benchmark that is profitable in five
+    /// windows and loses in a sixth (a bear window), and agents defined by how
+    /// they sit against it cell by cell. Six runs each, so the shared-cell
+    /// restriction is the identity; five agents, so deflation stays configured.
+    fn relative_field() -> Vec<AgentSubmission> {
+        let bench: Vec<Run> = (0..5)
+            .map(|_| run(0.002, 0.0005, 60))
+            .chain(std::iter::once(run(-0.003, 0.0005, 60)))
+            .collect();
+        // Beats the benchmark by a steady margin in every cell, including the
+        // bear window, where it still loses money.
+        let beats: Vec<Run> = bench
+            .iter()
+            .map(|b| {
+                let mut r = b.clone();
+                for (i, x) in r.returns.iter_mut().enumerate() {
+                    *x += 0.001 + 0.0002 * (i as f64 * 0.7).sin();
+                }
+                r
+            })
+            .collect();
+        // Beats it in five cells and trails it in the bear window.
+        let mut five_of_six = beats.clone();
+        for (i, x) in five_of_six[5].returns.iter_mut().enumerate() {
+            *x = bench[5].returns[i] - 0.001;
+        }
+        // Profitable in every cell yet below the benchmark in every cell.
+        let trails: Vec<Run> = bench
+            .iter()
+            .map(|b| {
+                let mut r = b.clone();
+                for x in r.returns.iter_mut() {
+                    *x = x.abs() * 0.5 + 0.0005;
+                }
+                r
+            })
+            .collect();
+        vec![
+            agent("buy-and-hold", bench.clone()),
+            agent("beats", beats),
+            agent("five-of-six", five_of_six),
+            agent("trails", trails),
+            agent("clone", bench),
+        ]
+    }
+
+    /// The default verdict never reads the benchmark id: a config that differs
+    /// from the default only in `benchmark_agent_id` ranks byte-identically.
+    #[test]
+    fn default_verdict_ignores_the_benchmark_id() {
+        let field = relative_field();
+        let default = rank(&field, &ScoreConfig::default());
+        let renamed = rank(
+            &field,
+            &ScoreConfig {
+                benchmark_agent_id: "no-such-agent".to_string(),
+                ..ScoreConfig::default()
+            },
+        );
+        assert_eq!(default, renamed);
+        assert_eq!(
+            serde_json::from_str::<ScoreConfig>("{\"n_trials\":1,\"trials_sr_std\":0.5,\"dsr_bar\":0.9,\"per_run_psr_bar\":0.9,\"alpha\":0.05,\"bootstrap_seed\":1,\"n_boot\":10,\"block_prob\":0.1}")
+                .unwrap()
+                .benchmark_agent_id,
+            "buy-and-hold"
+        );
+    }
+
+    /// The relative verdict asks a different question of each cell, and the two
+    /// verdicts disagree in both directions: an agent that beats the benchmark
+    /// in every window while losing money in the bear one fails the default and
+    /// passes relative; an agent profitable everywhere but below the benchmark
+    /// everywhere passes the default and fails relative. The benchmark itself
+    /// and a clone of it fail relative on the zero-excess rule, and one trailing
+    /// cell is enough to fail.
+    #[test]
+    fn relative_verdict_tests_excess_over_the_same_cell() {
+        let field = relative_field();
+        let cfg = ScoreConfig::relative_to_benchmark("buy-and-hold");
+        let default = rank(&field, &ScoreConfig::default());
+        let relative = rank(&field, &cfg);
+        let passed = |board: &[CompositeScore], id: &str| {
+            board.iter().find(|s| s.agent_id == id).unwrap().passed_k
+        };
+        assert!(!passed(&default, "beats") && passed(&relative, "beats"));
+        assert!(passed(&default, "trails") && !passed(&relative, "trails"));
+        // The benchmark has a bear window, so it fails the default too; under
+        // relative it and its clone fail for a different reason, zero excess.
+        assert!(!passed(&default, "buy-and-hold") && !passed(&relative, "buy-and-hold"));
+        assert!(!passed(&relative, "clone"));
+        assert!(!passed(&relative, "five-of-six"));
+
+        // The per-cell vector says which cells, not only whether all.
+        let bench = &field[0];
+        let five = per_run_passes(&field[2], Some(bench), &cfg);
+        assert_eq!(five, vec![true, true, true, true, true, false]);
+        let zero = per_run_passes(bench, Some(bench), &cfg);
+        assert_eq!(zero, vec![false; 6]);
+        // The zero-excess refusal is unconditional: even a bar of 0.5, which
+        // `norm_cdf(0)` would reach, does not admit the benchmark.
+        let lax = ScoreConfig {
+            per_run_psr_bar: 0.5,
+            ..cfg.clone()
+        };
+        assert_eq!(per_run_passes(bench, Some(bench), &lax), vec![false; 6]);
+
+        // Only pass^k moves: every other statistic of every agent is the
+        // default's, because it is computed on the agent's own raw returns.
+        for d in &default {
+            let r = relative.iter().find(|s| s.agent_id == d.agent_id).unwrap();
+            assert_eq!(d.deflated_sharpe.to_bits(), r.deflated_sharpe.to_bits());
+            assert_eq!(d.psr.to_bits(), r.psr.to_bits());
+            assert_eq!(d.bootstrap_p.to_bits(), r.bootstrap_p.to_bits());
+            assert_eq!(
+                d.worst_run_drawdown.to_bits(),
+                r.worst_run_drawdown.to_bits()
+            );
+            assert_eq!(d.process_ok, r.process_ok);
+        }
+    }
+
+    /// No benchmark, no relative verdict: a field without the named agent, a
+    /// single-agent `score_agent`, and a misaligned benchmark all fail every
+    /// run rather than falling back to the absolute test.
+    #[test]
+    fn relative_verdict_without_a_benchmark_fails_every_run() {
+        let field = relative_field();
+        let cfg = ScoreConfig::relative_to_benchmark("absent");
+        assert!(rank(&field, &cfg).iter().all(|s| !s.passed_k));
+        let alone = score_agent(
+            &field[1],
+            &ScoreConfig::relative_to_benchmark("buy-and-hold"),
+        );
+        assert!(!alone.passed_k);
+        let mut short = field[0].clone();
+        short.runs[2].returns.pop();
+        let v = per_run_passes(
+            &field[1],
+            Some(&short),
+            &ScoreConfig::relative_to_benchmark("buy-and-hold"),
+        );
+        assert_eq!(v, vec![true, true, false, true, true, true]);
+        let mut fewer = field[0].clone();
+        fewer.runs.truncate(4);
+        let v = per_run_passes(
+            &field[1],
+            Some(&fewer),
+            &ScoreConfig::relative_to_benchmark("buy-and-hold"),
+        );
+        assert_eq!(v, vec![true, true, true, true, false, false]);
+    }
+
+    /// The preset changes exactly two fields of the default.
+    #[test]
+    fn relative_preset_differs_only_in_mode_and_benchmark_id() {
+        let mut preset = serde_json::to_value(ScoreConfig::relative_to_benchmark("index")).unwrap();
+        let default = serde_json::to_value(ScoreConfig::default()).unwrap();
+        assert_eq!(preset["pass_mode"], "relative_to_benchmark");
+        assert_eq!(preset["benchmark_agent_id"], "index");
+        preset["pass_mode"] = default["pass_mode"].clone();
+        preset["benchmark_agent_id"] = default["benchmark_agent_id"].clone();
+        assert_eq!(preset, default);
     }
 
     /// Warn-severity events lower the reported graded process score and count,

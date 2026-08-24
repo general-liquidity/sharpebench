@@ -6,12 +6,14 @@ A benchmark that scores capital allocation is a target. This section lists the w
 
 \paragraph{Determinism.} The kernel performs no input or output, reads no clock, draws no ambient randomness, and sums in a fixed order; every bootstrap takes an explicit seed and every map is an ordered tree. Golden fixtures commit the full ranked output of two fields at full floating-point precision, a one-unit change in the last place of any statistic fails the test, and regeneration is a deliberate local command that refuses to run under continuous integration. The fixtures are checked on Linux, macOS and Windows on every commit, and a parity test asserts that the WebAssembly build and the native kernel produce byte-identical scores. Before this paper the cross-platform claim was architectural and the continuous-integration check compared a run to itself on one machine; both are now checks.
 
-\paragraph{Self-audit.}\label{sec:selfaudit} Surveys of benchmark integrity \citep{betterbench2024,kapoor2024agents} find that benchmarks with a model judge or a single tunable target get gamed. This benchmark has no judge and is deterministic, so its resistance is something to run. \texttt{sharpebench audit} constructs nine attacks against the live kernel. Eight are claimed defenses and must be demoted or the command exits non-zero; the ninth is an expected-vulnerable field-level Sybil case and must continue to reproduce until a defense is actually wired. That distinction prevents a known exposure from being counted as a pass. \Cref{tab:attacks} lists the battery. The eighth is adapted from \citet{deza2021interpretability}: it posts excellent returns on the presented series and collapses under a small in-range perturbation while its forecast head keeps working. The ninth floods the measured-dispersion field with 200 near-clone entries. It shrinks $\sigma_{\text{trials}}$ from $0.335$ to $0.057$, raises the target agent's DSR from $0.000$ to $0.973$, and flips eligibility; the rediscovery diagnostic catches 199 of 199 clones, but ranking does not apply it. The audit reports \texttt{defended: false} and \texttt{expected\_vulnerable: true}, while a regression test ensures that a future defense makes this marking fail as stale. Two limits remain. First, the battery tests gate evasion, not calibration: the eight defended attacks stayed demoted while the deflation prior was off by up to $\sqrt{8760}$ (\cref{sec:units}). Second, a fragility no submitted run exercises is invisible to a kernel with no model; \cref{sec:perturb} narrows that blind spot.
+\paragraph{Self-audit.}\label{sec:selfaudit} Surveys of benchmark integrity \citep{betterbench2024,kapoor2024agents} find that benchmarks with a model judge or a single tunable target get gamed. This benchmark has no judge and is deterministic, so its resistance is something to run. \texttt{sharpebench audit} constructs nine attacks against the live kernel, and every one is a claimed defense that must be demoted or the command exits non-zero. The ninth, a field-level Sybil case, was until this revision marked expected-vulnerable and required to keep reproducing, a marking that prevented a known exposure from being counted as a pass; ranking now defends it, and the next paragraph gives the numbers on both sides of the switch. \Cref{tab:attacks} lists the battery. The eighth is adapted from \citet{deza2021interpretability}: it posts excellent returns on the presented series and collapses under a small in-range perturbation while its forecast head keeps working. The ninth floods the measured-dispersion field with 200 near-clone entries. Two limits remain. First, the battery tests gate evasion, not calibration: the eight defended attacks stayed demoted while the deflation prior was off by up to $\sqrt{8760}$ (\cref{sec:units}). Second, a fragility no submitted run exercises is invisible to a kernel with no model; \cref{sec:perturb} narrows that blind spot.
+
+\input{sections/sybil-defense-fragment}
 
 \begin{table}[t]
 \centering
 \small
-\caption{The self-audit battery. The first eight attacks are demoted on every commit. The ninth is a measured known gap: the test requires the exploit to reproduce until ranking gains a field-level defense.}
+\caption{The self-audit battery. All nine attacks are demoted on every commit. The ninth was recorded as a measured known gap until ranking gained the clone collapse of \cref{sec:sybil}; its test now asserts that the exploit reproduces with the collapse off and fails with it on.}
 \label{tab:attacks}
 \begin{tabular}{lll}
 \toprule
@@ -25,7 +27,7 @@ raw-return-cannot-buy-rank & top raw return on some runs only & $\text{pass}^{k}
 cheat-reward-hacker & gate bypass plus padded confidence & process \\
 tail-seller & smooth returns from selling tail risk & process \\
 adversarial-input & accurate forecasts, collapse under perturbation & $\text{pass}^{k}$ \\
-sybil-sock-puppets & near-clones shrink field dispersion & known gap (not demoted) \\
+sybil-sock-puppets & near-clones shrink field dispersion & clone collapse \\
 \bottomrule
 \end{tabular}
 \end{table}
