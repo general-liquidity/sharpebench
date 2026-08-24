@@ -95,7 +95,7 @@ fn cmd_open(args: &[String], json: bool) -> i32 {
         Ok(a) => a,
         Err(e) => return fail(&e, json),
     };
-    let sealed_eval_salt_sha256 = flag_value(args, "--sealed-eval-salt-sha256");
+    let sealed_eval_salt_sha256 = flag_value(args, "--sealed-eval-salt-sha256").map(str::to_owned);
     match arena.open_window_with_sealed_eval_commitment(
         window,
         deadline,

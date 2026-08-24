@@ -2128,7 +2128,13 @@ mod tests {
         let raw_measured = std_dev(&sharpes);
 
         for ppy in [1.0, 252.0, 8760.0] {
-            let cfg = ScoreConfig::for_periods_per_year(ppy);
+            // This test isolates unit conversion of a measured value. Disable
+            // the separate field-integrity floor, which is covered by its own
+            // regression test above.
+            let cfg = ScoreConfig {
+                min_measured_trials_sr_std: 0.0,
+                ..ScoreConfig::for_periods_per_year(ppy)
+            };
             let board = rank(&field, &cfg);
             for s in &board {
                 assert_eq!(s.trials_sr_std_source, TrialsSrStdSource::Measured);
