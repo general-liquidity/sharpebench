@@ -2,7 +2,14 @@
 
 All commands run from the repository root at the tagged version. The kernel is deterministic, so each command produces the same bytes on the three CI targets (Linux, macOS, Windows).
 
-\paragraph{Version.} Findings 1 and 2 were first observed at v0.2.1, and \cref{tab:units} was computed against v0.2.1 deliberately, since it documents that kernel's error. The units fix shipped in v0.3.0. Every other table and figure in this revision was regenerated on the v0.6.0 source tree; the original nine-dataset sweep remains byte-identical except for the documented single-symbol luck-floor correction, while the Sybil audit and thousand-agent file are new at v0.6.0. The clone-collapse defense (\cref{sec:sybil}) and the relative-mandate evidence (\cref{sec:relative}) were built on the source tree after v0.6.0 from which this revision was compiled; the audit numbers quoted in \cref{sec:sybil} are the ones that tree prints.
+\paragraph{Version.} Findings 1 and 2 were first observed at v0.2.1, and \cref{tab:units} was computed against v0.2.1 deliberately because it documents that kernel's unit error. The units fix shipped in v0.3.0. Current-result artifacts were regenerated from the source snapshot containing the observed-field trial floor, the measured-dispersion floor, clone collapse and the strict forward-window schema. Historical package labels are not substituted for that exact content snapshot.
+
+\paragraph{Content provenance.}
+\begin{verbatim}
+python paper/src/make-provenance.py
+  -> paper/evidence/provenance.json
+\end{verbatim}
+The manifest records the Git parent, a content hash over the Rust, Python, manifest, producer and frozen-data snapshot, and the SHA-256 digest of every result JSONL and figure. Incomplete paid-LLM artifacts are excluded because they contain no model decisions and support no result in this paper.
 
 \paragraph{The shipped demonstration (\cref{fig:demotion}).}
 \begin{verbatim}
@@ -38,7 +45,7 @@ python scripts/data/derive_weekly.py --check
 cargo run --release -p sharpebench-harness \
   --example evidence_sweep -- out.jsonl [dataset] [dsr_bar]
 \end{verbatim}
-One JSON record per (dataset, configuration, agent), 512 per dataset. The grid, seeds, window rule, cost profile and both reliability configurations are constants in the source and are emitted on every record. The optional arguments restrict a run to one dataset or one deflation bar so the grid can be split across processes; because every seed is pinned, the concatenation of parts is identical to a serial run. The analysis that turns the records into the tables is a short script committed beside them under \texttt{paper/evidence/}.
+One JSON record per (dataset, configuration, agent), 512 per dataset. The grid, seeds, window rule, cost profile, effective trial count, dispersion-floor settings, both SPA values and both reliability configurations are emitted on every record. The optional arguments restrict a run to one dataset or one deflation bar so the grid can be split across processes; because every seed is pinned, concatenating the four bar shards in the documented order is identical to a serial run. \texttt{paper/evidence/assemble\_sweep.py} validates that assembly, and \texttt{analyze.py} reduces the records into the tables.
 
 \paragraph{The risk-managed agent (\cref{sec:riskmanaged}), its deflation N-sensitivity, and the perturbation report (\cref{sec:perturb}).}
 \begin{verbatim}
@@ -55,7 +62,7 @@ cargo test -p sharpebench-harness perturb
 cargo run --release -p sharpebench-harness \
   --example pass_witness -- pass-witness.jsonl
 \end{verbatim}
-Sweeps a family of injected-edge agents (known per-period Sharpe by construction) beside a five-agent zero-edge field through the shipped default configuration on two window geometries, and writes one record per (shape, edge, agent).
+Sweeps a family of injected-edge agents (known per-period Sharpe by construction) beside a five-agent zero-edge field through the shipped default configuration on two window geometries, and writes one record per (shape, edge, agent). The witness uses common random numbers across the edge grid and the producer aborts if DSR decreases or eligibility closes after opening, so ``boundary'' means the first point of a monotone sampled acceptance set rather than a local crossing between unrelated draws.
 
 \paragraph{The evidence figures (\cref{fig:drawdowns}, \cref{fig:luckdeflation}, \cref{fig:witness}, \cref{fig:luck1000}).}
 \begin{verbatim}
@@ -63,7 +70,7 @@ python paper/src/make-evidence-figures.py
 python paper/src/make-evidence-figures.py pass-witness
 python paper/src/make-evidence-figures.py luck-floor-1000
 \end{verbatim}
-The first command writes all four figures; the two selectors regenerate the pass-witness boundary and the thousand-agent floor figures alone. Every bar, point and marked threshold is a reduction over the committed records; no number is typed into the script.
+The first command writes all four figures; the two selectors regenerate the pass-witness boundary and the thousand-agent floor figures alone. Every plotted result and data-dependent crossing is a reduction over the committed records. The horizontal $0.95$ line is the protocol's declared eligibility bar rather than an estimated result.
 
 \paragraph{The thousand-agent luck floor (\cref{sec:luck1000}).}
 \begin{verbatim}
@@ -71,7 +78,7 @@ cargo run --release -p sharpebench-harness \
   --example luck_floor_1000 -- \
   paper/evidence/final/luck-floor-1000.jsonl
 \end{verbatim}
-The file contains one row per agent and one explicit summary row for each of the two daily datasets; the first five agents reproduce the shipped floor inside the same run.
+The file contains one row per agent and one explicit summary row for each of the two daily datasets. The first five return streams reproduce the shipped floor inside the same run; all 1{,}000 streams are scored with the observable trial count fixed at 1{,}000. Every row distinguishes the configured-prior score, the raw measured-dispersion diagnostic with the floor intentionally disabled, and the operational measured path after the annualized floor is applied.
 
 \paragraph{The relative-mandate verdict (\cref{tab:relative}).}
 \begin{verbatim}
@@ -84,7 +91,8 @@ Scores the risk-managed field on all nine datasets under the default verdict and
 \paragraph{The forward arena (\cref{sec:attest}).}
 \begin{verbatim}
 sharpebench arena init <dir>
-sharpebench arena open <dir> <window> <deadline> <reveal> [--config c.json]
+sharpebench arena open <dir> <window> <deadline> <reveal> \
+  [--config c.json] [--sealed-eval-salt-sha256 <hex>]
 sharpebench arena commit <dir> <window> <agent> <digest> <salt>
 sharpebench arena advance <dir> <epoch>
 sharpebench arena score <dir> <window> <data.csv> <reveals.json>

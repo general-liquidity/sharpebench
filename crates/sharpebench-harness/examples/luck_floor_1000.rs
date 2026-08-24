@@ -6,19 +6,23 @@
 //! introduction invokes: N = 1000 distinctly-seeded [`RandomAgent`]s
 //! (`sharpebench_harness::luck_floor`, whose N has always been a parameter)
 //! across the same walk-forward windows x seeds the evidence sweep uses, on
-//! us-indices-1d and crypto-majors-1d. The first five agents of this field are
-//! byte-identical to the shipped five-agent floor, so the old and new floors
-//! are directly comparable inside one run.
+//! us-indices-1d and crypto-majors-1d. The first five return streams are
+//! byte-identical to the shipped five-agent floor; their scores differ because
+//! the observable trial count and measured dispersion belong to this larger
+//! field.
 //!
-//! Each agent is scored two ways:
-//! - `dsr_configured`: `score_agent` under the default config for the dataset's
-//!   periods-per-year (the annualized 0.5 prior, n_trials = 50), the
-//!   configured deflation path.
+//! Each agent is scored three ways:
+//! - `dsr_configured`: the configured annualized 0.5 prior with the observed
+//!   1,000-entry field count used as the trial footprint.
 //! - `dsr_field`: the same score with the deflation dispersion *measured from
 //!   the 1000-monkey field itself* (the sample standard deviation of pooled
 //!   per-period Sharpes, which is what `rank`'s measured path computes). The
 //!   measured per-period value is injected through the config by multiplying it
-//!   back to annualized units, so `per_period_sr_std` recovers it exactly.
+//!   back to annualized units, so `per_period_sr_std` recovers it exactly. The
+//!   1,000-entry trial footprint still applies; only the dispersion floor is off.
+//! - `dsr_shipped_floor`: the field-measured value after applying the shipped
+//!   annualized lower bound. This is the value the current ranking path uses;
+//!   the raw measured value is retained as a diagnostic of the empirical tail.
 //!
 //! Scoring is parallelized across all available cores with std::thread (rayon
 //! is not a workspace dependency); results are deterministic regardless of
@@ -31,7 +35,7 @@
 //!
 //! Output: one `record: "agent"` JSON line per (dataset, agent) plus one
 //! `record: "summary"` line per dataset with the max/quantile DSRs, the
-//! shipped five-agent floor's max under identical scoring, and the raw-return
+//! first-five-stream max in the same 1,000-entry context, and the raw-return
 //! comparison against the reference agents.
 
 use std::env;
@@ -150,11 +154,13 @@ struct AgentRecord<'a> {
     sharpe_per_period: f64,
     dsr_configured: f64,
     dsr_field: f64,
+    dsr_shipped_floor: f64,
     psr: f64,
     raw_mean_return: f64,
     passed_k: bool,
     rank_eligible_configured: bool,
     rank_eligible_field: bool,
+    rank_eligible_shipped_floor: bool,
     max_drawdown: f64,
 }
 
@@ -167,8 +173,9 @@ struct DsrSummary {
     p50: f64,
     mean: f64,
     n_rank_eligible: usize,
-    /// Max among the first five agents, the shipped floor, scored identically.
-    max_shipped_5: f64,
+    /// Max among the first five return streams, scored in this 1,000-entry
+    /// context rather than as a standalone five-entry field.
+    max_first_5: f64,
 }
 
 #[derive(Serialize)]
@@ -180,13 +187,17 @@ struct Summary<'a> {
     n_windows: usize,
     window_len: usize,
     n_seeds: usize,
-    n_trials: u32,
+    host_n_trials: u32,
+    operational_n_trials: u32,
     dsr_bar: f64,
     /// Field-measured per-period Sharpe dispersion across the 1000 monkeys.
     measured_sr_std_per_period: f64,
     measured_sr_std_annualized: f64,
     configured: DsrSummary,
+    /// Raw measured path with the safety floor deliberately disabled.
     field_measured: DsrSummary,
+    /// Field-measured path after the shipped annualized floor is applied.
+    shipped_floor: DsrSummary,
     argmax_agent_configured: String,
     argmax_agent_field: String,
     floor_max_raw_return: f64,
@@ -207,9 +218,14 @@ fn summarize(scores: &[CompositeScore], key: impl Fn(&CompositeScore) -> f64) ->
         p50: quantile(&xs, 0.50),
         mean: mean(&xs),
         n_rank_eligible: 0,
-        max_shipped_5: scores
+        max_first_5: scores
             .iter()
-            .take(SHIPPED_FLOOR)
+            .filter(|s| {
+                s.agent_id
+                    .strip_prefix("luck-floor-")
+                    .and_then(|suffix| suffix.parse::<usize>().ok())
+                    .is_some_and(|index| index < SHIPPED_FLOOR)
+            })
             .map(&key)
             .fold(f64::MIN, f64::max),
     }
@@ -234,24 +250,34 @@ fn main() {
         let monkeys = luck_floor(&data, &windows, &EXEC_SEEDS, CostModel::default(), N_AGENTS);
 
         let cfg = ScoreConfig::for_periods_per_year(*ppy);
-        // Field-measured deflation: the sample std of pooled per-period Sharpes
-        // across the monkey field (what rank()'s measured path computes),
-        // injected via the annualized config field so per_period_sr_std
-        // recovers the measured per-period value exactly.
-        let mut sharpes: Vec<f64> = monkeys
+        let monkey_sharpes: Vec<f64> = monkeys
             .iter()
             .map(pooled_sharpe)
-            .filter(|s| s.is_finite())
+            .filter(|sr| sr.is_finite())
             .collect();
-        sharpes.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        let measured_pp = std_dev(&sharpes);
-        let mut cfg_field = cfg.clone();
-        cfg_field.trials_sr_std = measured_pp * ppy.sqrt();
+        let measured_pp = std_dev(&monkey_sharpes);
+        let measured_annualized = measured_pp * ppy.sqrt();
+
+        // `score_agent` has no field context, so spell out the three inputs the
+        // ranking path would resolve before scoring. This keeps the expensive
+        // 1,000-agent bootstrap parallel while preserving the exact DSR inputs:
+        // an observable trial footprint of 1,000, the raw field dispersion, and
+        // that dispersion floored by the shipped annualized lower bound. Clone
+        // collapse is immaterial here because the 1,000 independently seeded
+        // random streams are not near-duplicate submissions.
+        let mut cfg_configured = cfg.clone();
+        cfg_configured.n_trials = N_AGENTS as u32;
+        let mut cfg_field = cfg_configured.clone();
+        cfg_field.trials_sr_std = measured_annualized;
+        let mut cfg_shipped_floor = cfg_configured.clone();
+        cfg_shipped_floor.trials_sr_std = measured_annualized.max(cfg.min_measured_trials_sr_std);
 
         eprintln!("{name}: scoring (configured prior)...");
-        let scored_cfg = score_all(&monkeys, &cfg);
+        let scored_cfg = score_all(&monkeys, &cfg_configured);
         eprintln!("{name}: scoring (field-measured dispersion)...");
         let scored_field = score_all(&monkeys, &cfg_field);
+        eprintln!("{name}: scoring (field-measured with shipped floor)...");
+        let scored_shipped_floor = score_all(&monkeys, &cfg_shipped_floor);
 
         let references: Vec<AgentSubmission> = ["buy-and-hold", "momentum"]
             .iter()
@@ -259,9 +285,11 @@ fn main() {
             .collect();
         let ref_scores = score_all(&references, &cfg);
 
-        for (m, (sc, sf)) in monkeys
+        for (((m, sc), sf), shipped) in monkeys
             .iter()
-            .zip(scored_cfg.iter().zip(scored_field.iter()))
+            .zip(&scored_cfg)
+            .zip(&scored_field)
+            .zip(&scored_shipped_floor)
         {
             let rec = AgentRecord {
                 record: "agent",
@@ -270,11 +298,13 @@ fn main() {
                 sharpe_per_period: pooled_sharpe(m),
                 dsr_configured: sc.deflated_sharpe,
                 dsr_field: sf.deflated_sharpe,
+                dsr_shipped_floor: shipped.deflated_sharpe,
                 psr: sc.psr,
                 raw_mean_return: sc.raw_mean_return,
                 passed_k: sc.passed_k,
                 rank_eligible_configured: sc.rank_eligible,
                 rank_eligible_field: sf.rank_eligible,
+                rank_eligible_shipped_floor: shipped.rank_eligible,
                 max_drawdown: sc.max_drawdown,
             };
             serde_json::to_writer(&mut w, &rec).expect("write record");
@@ -285,6 +315,11 @@ fn main() {
         configured.n_rank_eligible = scored_cfg.iter().filter(|s| s.rank_eligible).count();
         let mut field_measured = summarize(&scored_field, |s| s.deflated_sharpe);
         field_measured.n_rank_eligible = scored_field.iter().filter(|s| s.rank_eligible).count();
+        let mut shipped_floor = summarize(&scored_shipped_floor, |s| s.deflated_sharpe);
+        shipped_floor.n_rank_eligible = scored_shipped_floor
+            .iter()
+            .filter(|s| s.rank_eligible)
+            .count();
 
         let argmax = |scores: &[CompositeScore]| -> String {
             scores
@@ -319,12 +354,14 @@ fn main() {
             n_windows: windows.len(),
             window_len,
             n_seeds: EXEC_SEEDS.len(),
-            n_trials: cfg.n_trials,
+            host_n_trials: cfg.n_trials,
+            operational_n_trials: cfg_shipped_floor.n_trials,
             dsr_bar: cfg.dsr_bar,
             measured_sr_std_per_period: measured_pp,
             measured_sr_std_annualized: measured_pp * ppy.sqrt(),
             configured,
             field_measured,
+            shipped_floor,
             argmax_agent_configured: argmax(&scored_cfg),
             argmax_agent_field: argmax(&scored_field),
             floor_max_raw_return: floor_max_raw,
@@ -335,8 +372,11 @@ fn main() {
         w.write_all(b"\n").expect("newline");
         w.flush().expect("flush");
         eprintln!(
-            "{name}: max DSR (configured) = {:.4}, max DSR (field-measured) = {:.4}, shipped-5 max = {:.4}",
-            summary.configured.max, summary.field_measured.max, summary.configured.max_shipped_5
+            "{name}: max DSR configured={:.4}, raw-measured={:.4}, shipped-floor={:.4}, first-5={:.4}",
+            summary.configured.max,
+            summary.field_measured.max,
+            summary.shipped_floor.max,
+            summary.configured.max_first_5
         );
     }
     eprintln!("wrote {out}");

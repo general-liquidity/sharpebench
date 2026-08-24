@@ -55,6 +55,14 @@ pub const BOARD_MD_FILE: &str = "board.md";
 pub const GENESIS_ANCHOR: &str = "genesis";
 /// `kind` tag on a [`WindowHeader`] payload.
 pub const WINDOW_HEADER_KIND: &str = "sharpebench-arena-window";
+/// Canonical on-disk schema for a forward window. A version bump is required
+/// when the meaning or required fields of the frozen scoring record change.
+pub const WINDOW_SCHEMA_VERSION: u32 = 1;
+
+fn score_config_digest(config: &ScoreConfig) -> Result<String, String> {
+    let bytes = serde_json::to_vec(config).map_err(|e| format!("serialize score config: {e}"))?;
+    Ok(content_digest(&bytes))
+}
 
 /// Lifecycle status of one evaluation window.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -82,6 +90,9 @@ pub struct Refusal {
 /// Persistent state of one evaluation window (`windows/<id>/window.json`).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WindowState {
+    /// Required schema discriminator. Opened windows never inherit a newer
+    /// scorer's implicit serde defaults silently.
+    pub schema_version: u32,
     pub id: String,
     /// Epoch at (and after) which new commitments are refused.
     pub commit_deadline: u64,
@@ -90,6 +101,10 @@ pub struct WindowState {
     pub status: WindowStatus,
     /// The scoring rules, fixed at `open_window` time, before any entry exists.
     pub score_config: ScoreConfig,
+    /// SHA-256 of serde's canonical compact serialization of `score_config`.
+    /// Loading rejects a mismatch, including one caused by a newly introduced
+    /// config field being filled from a default rather than frozen at open.
+    pub score_config_sha256: String,
     /// Optional SHA-256 commitment to the secret salt used to derive a
     /// SharpeArena sealed-evaluation seed set. The salt itself never enters the
     /// arena state; after scoring it can be revealed and independently checked
@@ -127,7 +142,9 @@ pub struct WindowHeader {
     pub commit_deadline: u64,
     pub data_reveal_epoch: u64,
     pub dataset_hash: String,
+    pub schema_version: u32,
     pub score_config: ScoreConfig,
+    pub score_config_sha256: String,
     /// The pre-entry sealed-evaluation salt commitment, when this window uses
     /// SharpeArena's commit-reveal seed protocol.
     #[serde(default)]
@@ -183,6 +200,40 @@ fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, String> {
     let text = std::fs::read_to_string(path)
         .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
     serde_json::from_str(&text).map_err(|e| format!("invalid JSON in {}: {e}", path.display()))
+}
+
+/// Read a frozen window without allowing serde defaults to complete a scoring
+/// configuration that was never committed. `ScoreConfig` remains permissive
+/// for ordinary API/backward-compatibility use; the forward record is stricter
+/// because every scoring field must have been explicit when the window opened.
+fn read_window_state(path: &Path) -> Result<WindowState, String> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    let value: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| format!("invalid JSON in {}: {e}", path.display()))?;
+    let actual = value
+        .get("score_config")
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| format!("{} has no score_config object", path.display()))?;
+    let expected_value = serde_json::to_value(ScoreConfig::default())
+        .map_err(|e| format!("serialize default score config: {e}"))?;
+    let expected = expected_value
+        .as_object()
+        .ok_or_else(|| "serialized ScoreConfig is not an object".to_string())?;
+    let actual_keys: std::collections::BTreeSet<_> = actual.keys().collect();
+    let expected_keys: std::collections::BTreeSet<_> = expected.keys().collect();
+    if actual_keys != expected_keys {
+        let missing: Vec<_> = expected_keys.difference(&actual_keys).copied().collect();
+        let extra: Vec<_> = actual_keys.difference(&expected_keys).copied().collect();
+        return Err(format!(
+            "{} score_config is not explicit for schema {} (missing: {:?}; extra: {:?})",
+            path.display(),
+            WINDOW_SCHEMA_VERSION,
+            missing,
+            extra
+        ));
+    }
+    serde_json::from_value(value).map_err(|e| format!("invalid JSON in {}: {e}", path.display()))
 }
 
 fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
@@ -244,7 +295,20 @@ impl Arena {
         let state: StateFile = read_json(&dir.join(STATE_FILE))?;
         let mut windows = BTreeMap::new();
         for id in &state.window_order {
-            let w: WindowState = read_json(&dir.join(WINDOWS_DIR).join(id).join(WINDOW_FILE))?;
+            let w = read_window_state(&dir.join(WINDOWS_DIR).join(id).join(WINDOW_FILE))?;
+            if w.schema_version != WINDOW_SCHEMA_VERSION {
+                return Err(format!(
+                    "window `{id}` uses schema {}, expected {}",
+                    w.schema_version, WINDOW_SCHEMA_VERSION
+                ));
+            }
+            let actual = score_config_digest(&w.score_config)?;
+            if actual != w.score_config_sha256 {
+                return Err(format!(
+                    "window `{id}` score config digest mismatch: recorded {}, recomputed {actual}",
+                    w.score_config_sha256
+                ));
+            }
             windows.insert(id.clone(), w);
         }
         Ok(Self {
@@ -349,14 +413,17 @@ impl Arena {
                 );
             }
         }
+        let score_config_sha256 = score_config_digest(&config)?;
         self.windows.insert(
             id.to_string(),
             WindowState {
+                schema_version: WINDOW_SCHEMA_VERSION,
                 id: id.to_string(),
                 commit_deadline,
                 data_reveal_epoch,
                 status: WindowStatus::Open,
                 score_config: config,
+                score_config_sha256,
                 sealed_eval_salt_sha256,
                 commitments: Vec::new(),
                 refusals: Vec::new(),
@@ -513,7 +580,9 @@ impl Arena {
             commit_deadline: w.commit_deadline,
             data_reveal_epoch: w.data_reveal_epoch,
             dataset_hash: w.dataset_hash.clone().unwrap_or_default(),
+            schema_version: w.schema_version,
             score_config: w.score_config.clone(),
+            score_config_sha256: w.score_config_sha256.clone(),
             sealed_eval_salt_sha256: w.sealed_eval_salt_sha256.clone(),
             refusals: w.refusals.clone(),
             prev_final_signature,

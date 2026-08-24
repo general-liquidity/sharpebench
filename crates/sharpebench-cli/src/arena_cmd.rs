@@ -1,9 +1,8 @@
 //! `sharpebench arena` - forward-league driver subcommands.
 //!
-//! Standalone module, deliberately not wired into `main.rs` here: dispatch is
-//! added at integration as `Some("arena") => ExitCode::from(arena_cmd::run(&args, json) as u8)`
-//! (plus a `mod arena_cmd;` declaration and a `sharpebench-arena` dependency in
-//! this crate's Cargo.toml).
+//! The production CLI dispatches here from its `arena` command arm. Keeping the
+//! lifecycle implementation in one module lets the CLI and the arena crate's
+//! integration test exercise the same code.
 //!
 //! Contract for [`run`]: `args` is the process argv with any `--json` flags
 //! already stripped (the same slice `main` dispatches on, so `args[1] == "arena"`

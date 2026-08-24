@@ -442,7 +442,9 @@ pub fn run_self_audit() -> SelfAuditReport {
     //    collapse off (`dedup_clones_for_measured_sr_std: false`) to show the
     //    exposure is real and with the default on to show it is closed:
     //    defended when the collapsed field measures exactly what a field with a
-    //    single puppet measures and the real agent stays refused.
+    //    single puppet measures and the real agent stays refused. The observed
+    //    trial-count floor still counts every visible submission, so the full
+    //    defended field is at least as strict as the one-puppet comparison.
     {
         use crate::rediscovery::{
             classify_rediscovery, cosine_similarity, CLONE_COLLAPSE_COSINE,
@@ -563,7 +565,9 @@ pub fn run_self_audit() -> SelfAuditReport {
             && r_x.rank_eligible;
         let defended = exposure_reproduces
             && r_s.trials_sr_std.to_bits() == r_1.trials_sr_std.to_bits()
-            && r_s.deflated_sharpe.to_bits() == r_1.deflated_sharpe.to_bits()
+            && r_s.deflated_sharpe <= r_1.deflated_sharpe
+            && r_s.effective_n_trials == field_sybil.len() as u32
+            && r_1.effective_n_trials == cfg9.n_trials.max(field_one.len() as u32)
             && !r_s.rank_eligible
             && r_s.deflated_sharpe < cfg9.dsr_bar
             && puppets_on_board == 200
@@ -578,7 +582,7 @@ pub fn run_self_audit() -> SelfAuditReport {
             defended,
             expected_vulnerable: false,
             detail: format!(
-                "measured sr_std honest {:.4}, sybil undefended {:.4}, sybil defended {:.4} (one-puppet field {:.4}); real-agent DSR {:.4} -> undefended {:.4} -> defended {:.4}, eligible {} -> {} -> {}; {flagged}/199 puppets flagged as clones, {puppets_on_board}/200 still on the board; puppet cosine >= {puppet_cos_min:.5}, honest-to-puppet cosine <= {honest_cos_max:.3}, collapse at {CLONE_COLLAPSE_COSINE}",
+                "measured sr_std honest {:.4}, sybil undefended {:.4}, sybil defended {:.4} (one-puppet field {:.4}); real-agent DSR {:.4} -> undefended {:.4} -> defended {:.4}, eligible {} -> {} -> {}; effective N defended {} vs one-puppet {}; {flagged}/199 puppets flagged as clones, {puppets_on_board}/200 still on the board; puppet cosine >= {puppet_cos_min:.5}, honest-to-puppet cosine <= {honest_cos_max:.3}, collapse at {CLONE_COLLAPSE_COSINE}",
                 r_h.trials_sr_std,
                 r_x.trials_sr_std,
                 r_s.trials_sr_std,
@@ -589,6 +593,8 @@ pub fn run_self_audit() -> SelfAuditReport {
                 r_h.rank_eligible,
                 r_x.rank_eligible,
                 r_s.rank_eligible,
+                r_s.effective_n_trials,
+                r_1.effective_n_trials,
             ),
         });
     }
@@ -620,8 +626,9 @@ mod tests {
     /// The Sybil case is a defense, and it has to prove both halves: with the
     /// clone collapse off the exposure still reproduces (the puppets shrink the
     /// measured dispersion and admit the real agent), and with the default on
-    /// the 200 puppets are worth exactly one vote and the real agent stays
-    /// refused. A case that only showed the second half could be passing
+    /// the 200 puppets are worth exactly one dispersion vote, the visible field
+    /// still raises the observed trial count, and the real agent stays refused.
+    /// A case that only showed the second half could be passing
     /// because the attack stopped working for some other reason.
     #[test]
     fn sybil_case_proves_the_exposure_and_the_defense() {

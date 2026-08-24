@@ -1,5 +1,10 @@
 # SharpeBench final-integrity audit — 2026-08-24
 
+> **Superseded historical artifact.** This report predates the strict
+> forward-window schema, the measured-dispersion floor's evidence regeneration,
+> the observable field-size trial floor and full SPA serialization. See the
+> current integrity report for the submission candidate.
+
 **Stage:** 4.5 final integrity, fresh working-tree audit before release commit.
 **Inputs:** `paper/main.tex` SHA-256 `24132e379ef8f6d9476d5ae9c9a49c27ba37f52b5b8ea930947c4bb7d3ede19a`; `paper/refs.bib` SHA-256 `75bdebe43d280bc75d809fcce9a328e9f9263b4947ec598840f6a8616a252ac2`; base commit `95a80e2831289b346afb687462fb0c473b1f711f`.
 **Scope:** no paid-model/API call was made. The incomplete LLM run was inspected only to verify that it is excluded.

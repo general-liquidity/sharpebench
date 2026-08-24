@@ -63,6 +63,9 @@ struct GateRecord<'a> {
     n_bars: usize,
     n_windows: usize,
     agent_id: String,
+    effective_n_trials: u32,
+    trials_sr_std_used: f64,
+    trials_sr_std_source: String,
     deflated_sharpe: f64,
     psr: f64,
     passed_k: bool,
@@ -78,7 +81,10 @@ struct GateRecord<'a> {
 struct NSensitivityRecord<'a> {
     kind: &'static str,
     dataset: &'a str,
+    /// Host floor requested for this sensitivity cell.
     n_trials: u32,
+    /// Actual count after the observable field-size floor.
+    effective_n_trials: u32,
     agent_id: String,
     deflated_sharpe: f64,
     rank_eligible: bool,
@@ -188,6 +194,9 @@ fn main() {
                 n_bars: n,
                 n_windows: windows.len(),
                 agent_id: s.agent_id.clone(),
+                effective_n_trials: s.effective_n_trials,
+                trials_sr_std_used: s.trials_sr_std,
+                trials_sr_std_source: format!("{:?}", s.trials_sr_std_source),
                 deflated_sharpe: s.deflated_sharpe,
                 psr: s.psr,
                 passed_k: s.passed_k,
@@ -228,6 +237,7 @@ fn main() {
                         kind: "n_sensitivity",
                         dataset: name,
                         n_trials,
+                        effective_n_trials: s.effective_n_trials,
                         agent_id: s.agent_id.clone(),
                         deflated_sharpe: s.deflated_sharpe,
                         rank_eligible: s.rank_eligible,

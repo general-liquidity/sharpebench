@@ -1,12 +1,13 @@
 # Per-cell provenance for the comparison tables (tab:related, tab:related-inverse)
 
 Protocol: a mark means the cited paper (or its public board) states the property
-of itself; an empty cell means the paper does not claim it. This file records
-the source for every mark and for the deliberate blanks that were explicitly
-checked. "abs" = the paper's arXiv abstract page; "body" = full text searched;
-"unchecked" = the blank follows from no claim being found at the abstract level
-and the body was not exhaustively searched. Checked 2026-08-23; rows added in
-revision checked 2026-08-24.
+of itself. A blank means only that this audit found no positive documentation;
+it is not evidence that the system lacks the property. This file records the
+source for every mark and distinguishes exhaustively searched blanks from
+abstract-only checks. "abs" = the paper's arXiv abstract page; "body" = full
+text searched; "unchecked" = no claim was found at abstract level and the body
+was not exhaustively searched. Checked 2026-08-23; rows added in revision
+checked 2026-08-24.
 
 ## tab:related (gate axes)
 

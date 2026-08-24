@@ -1,5 +1,10 @@
 # Response to Reviewers
 
+> **Historical response.** This letter records the Round 1 revision. Later
+> scoring controls and regenerated evidence supersede its version and
+> pre-floor numeric assertions; the current manuscript, provenance manifest and
+> integrity report are authoritative.
+
 Manuscript: SharpeBench: A Luck-Robust Benchmark for Trading Agents (retitled; formerly "SharpeBench: The Luck-Robust Benchmark for AI Trading Agents")
 
 Decision responded to: Major Revision, five-seat panel, 2026-08-24.

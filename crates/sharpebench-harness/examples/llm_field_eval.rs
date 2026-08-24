@@ -6,8 +6,9 @@
 //! walk-forward windows,
 //! seeds, reference field, luck floor, and scoring kernel as the paper's
 //! evidence sweep, on two datasets only (cost scoping): us-indices-1d and
-//! crypto-majors-1d. One scoring config (dsr_bar 0.80, n_trials 1, measured
-//! trials_sr_std), matching the headline rows of the existing evidence.
+//! crypto-majors-1d. One scoring config uses a host floor of one and a DSR bar
+//! of 0.80; ranking still deflates for at least the observed field size under
+//! the same measured-dispersion safeguards as every other ranked field.
 //!
 //! Run from the repo root with ANTHROPIC_API_KEY (and optionally LLM_CACHE_DIR /
 //! LLM_STATS_DIR / LLM_STRIDE / LLM_MAX_CALLS) exported. The run fails closed:

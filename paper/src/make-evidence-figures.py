@@ -2,10 +2,12 @@
 """Figures computed from the committed evidence records.
 
 Reads paper/evidence/final/*.jsonl and writes vector PDFs into paper/figures/.
-No number is typed in: every bar, point and marked threshold is a reduction over
-the records the sweep, the risk-managed evaluation, the pass witness and the
-thousand-agent floor wrote (the 0.95 bar and the default N=50 are the shipped
-defaults the records were scored at). Run from the paper/ directory:
+Every plotted result and data-dependent crossing is reduced from records written
+by the sweep, risk-managed evaluation, pass witness, or thousand-agent floor.
+The horizontal 0.95 line is the protocol's declared eligibility bar, not an
+estimated result; the records span a configuration grid, and the thousand-agent
+diagnostic is scored at its observable field size of 1,000. Run from the paper/
+directory:
 
     python src/make-evidence-figures.py                 # all four figures
     python src/make-evidence-figures.py pass-witness    # one figure
@@ -129,17 +131,18 @@ def fig_luck_deflation():
         ("us-indices-1w", "US eq 1w", GRAY),
     ]:
         recs = [r for r in load(ds) if r["sr_std_pinned"] is None and r["dsr_bar"] == DSR_BAR]
-        ns = sorted({r["n_trials"] for r in recs})
+        ns = sorted({r.get("effective_n_trials", r["n_trials"]) for r in recs})
         ys = [max(r["deflated_sharpe"] for r in recs
-                  if r["n_trials"] == n and r["agent_id"].startswith("luck")) for n in ns]
+                  if r.get("effective_n_trials", r["n_trials"]) == n
+                  and r["agent_id"].startswith("luck")) for n in ns]
         ax.plot(ns, ys, color=color, linewidth=2.2, marker="o", markersize=4.5,
                 label=f"best random agent, {short}", zorder=3)
     ax.axhline(DSR_BAR, color=INK, linewidth=1.1, linestyle=DASH)
     ax.text(200, 0.905, "eligibility bar", ha="right", va="top", fontsize=9.5, color=INK)
     ax.set_xscale("log")
-    ax.set_xticks([1, 10, 50, 200])
-    ax.set_xticklabels(["1", "10", "50", "200"], fontsize=10)
-    ax.set_xlabel("trials deflated for (N)", fontsize=11, color=INK)
+    ax.set_xticks([8, 10, 50, 200])
+    ax.set_xticklabels(["8", "10", "50", "200"], fontsize=10)
+    ax.set_xlabel("effective trials deflated for", fontsize=11, color=INK)
     ax.set_ylabel("deflated Sharpe of the best zero-skill agent", fontsize=10.5, color=INK)
     ax.set_ylim(-0.03, 1.05)
     ax.legend(frameon=False, fontsize=9.5, loc="upper right")
@@ -151,8 +154,8 @@ def fig_luck_deflation():
 # ---- Figure C: the pass-witness boundary --------------------------------------
 # Top panel: the witness's deflated Sharpe against the injected per-period edge,
 # one curve per window geometry. Bottom panel: the two gate outcomes per edge,
-# filled where the gate passes. The gap between "DSR clears the bar" and
-# "pass^k passes" is the point of the figure: pass^k binds at the boundary.
+# filled where the gate passes. The daily geometry separates the two crossings;
+# on the sampled weekly grid they coincide.
 def fig_pass_witness():
     recs = [r for r in load("pass-witness") if r["agent_id"] == "witness"]
     shapes = [("weekly-shaped", "weekly-shaped (six 77-bar windows)", BLUE),
@@ -217,35 +220,36 @@ def fig_pass_witness():
 
 
 # ---- Figure D: the thousand-agent luck floor ---------------------------------
-# ECDF of the deflated Sharpe over 1,000 random agents per dataset, both the
-# configured-prior and the field-measured dispersion path. Left: the full [0, 1]
-# axis with the bar; right: the same curves on the range the floor occupies.
+# ECDF of the deflated Sharpe over 1,000 random agents per dataset. The raw
+# measured path is a deliberately unfloored diagnostic; the shipped path applies
+# the precommitted annualized lower bound. Left: the full [0, 1] axis with the
+# bar; right: the same curves on the range the floor occupies.
 def fig_luck_floor_1000():
     recs = load("luck-floor-1000")
     agents = [r for r in recs if r["record"] == "agent"]
     summaries = {r["dataset"]: r for r in recs if r["record"] == "summary"}
     series = [
-        ("us-indices-1d", "dsr_configured", "US eq 1d, configured prior", GRAY, "-"),
-        ("us-indices-1d", "dsr_field", "US eq 1d, measured dispersion", GRAY, DASH),
-        ("crypto-majors-1d", "dsr_configured", "crypto 1d, configured prior", RED, "-"),
-        ("crypto-majors-1d", "dsr_field", "crypto 1d, measured dispersion", RED, DASH),
+        ("us-indices-1d", "dsr_shipped_floor", "US eq 1d, shipped path", GRAY, "-"),
+        ("us-indices-1d", "dsr_field", "US eq 1d, unfloored diagnostic", GRAY, DASH),
+        ("crypto-majors-1d", "dsr_shipped_floor", "crypto 1d, shipped path", RED, "-"),
+        ("crypto-majors-1d", "dsr_field", "crypto 1d, unfloored diagnostic", RED, DASH),
     ]
     fig, (ax, ax2) = plt.subplots(1, 2, figsize=(7.8, 3.6),
                                   gridspec_kw={"width_ratios": [1.0, 1.3], "wspace": 0.28})
     for ds, field, label, color, ls in series:
         vals = sorted(r[field] for r in agents if r["dataset"] == ds)
         ecdf = [(i + 1) / len(vals) for i in range(len(vals))]
-        # The three all-zero paths are vertical at 0; the crypto configured line
-        # is drawn thinner so the US curves beneath it stay visible.
-        lw = 1.4 if (ds, field) == ("crypto-majors-1d", "dsr_configured") else 2.4
+        # Coincident near-zero paths are drawn at different widths so the lines
+        # beneath remain visible.
+        lw = 1.4 if (ds, field) == ("crypto-majors-1d", "dsr_shipped_floor") else 2.4
         for a in (ax, ax2):
             a.step([0.0] + vals, [0.0] + ecdf, where="post", color=color, linestyle=ls,
                    linewidth=lw, label=label, zorder=3)
 
     crypto = summaries["crypto-majors-1d"]["field_measured"]
-    five = crypto["max_shipped_5"]
+    five = crypto["max_first_5"]
     top = crypto["max"]
-    eligible = sum(s["configured"]["n_rank_eligible"] + s["field_measured"]["n_rank_eligible"]
+    eligible = sum(s["shipped_floor"]["n_rank_eligible"] + s["field_measured"]["n_rank_eligible"]
                    for s in summaries.values())
 
     ax.axvline(DSR_BAR, color=INK, linewidth=1.1, linestyle=DASH)
@@ -261,9 +265,9 @@ def fig_luck_floor_1000():
     style(ax)
 
     ax2.axvline(five, color=RED, linewidth=1.0, linestyle=(0, (2, 3)))
-    ax2.text(five + 0.0008, 0.06, f"five-agent floor\nmaximum ({five:.3f})", ha="left",
+    ax2.text(five + 0.0008, 0.06, f"first-five streams\nmaximum ({five:.3f})", ha="left",
              va="bottom", fontsize=8.5, color=RED)
-    ax2.annotate("US eq 1d, both paths, and\ncrypto configured prior:\nall 1,000 agents at 0.000",
+    ax2.annotate("Operational paths remain\nat or near zero",
                  (0.0, 0.55), xytext=(58, 0), textcoords="offset points", ha="left",
                  va="center", fontsize=8.5, color=INK,
                  arrowprops={"arrowstyle": "-", "color": INK, "linewidth": 0.8})

@@ -1,7 +1,6 @@
-//! Compile + drive the CLI's standalone `arena_cmd` module against a real temp
-//! arena. `main.rs` is not wired to it yet (dispatch lands at integration), so
-//! this path-include is what keeps the module compiling, clippy-clean, and
-//! behaviorally tested in the meantime.
+//! Compile + drive the CLI's `arena_cmd` module against a real temporary arena.
+//! The production CLI dispatches to this module; the path include lets the arena
+//! crate exercise the same implementation through a full lifecycle test.
 
 #[path = "../../sharpebench-cli/src/arena_cmd.rs"]
 mod arena_cmd;

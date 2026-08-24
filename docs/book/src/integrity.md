@@ -30,9 +30,11 @@ every committed evidence field and asserts zero merges at 0.995, so the
 collapse is the identity on the shipped evidence. The case proves both halves:
 with `dedup_clones_for_measured_sr_std: false` the exposure reproduces (the 200
 puppets shrink the measured dispersion from 0.326 to 0.056 and lift the agent's
-DSR from 0.000 to 0.976, admitting it), and with the default on the same field
+DSR from 0.000 to 0.952, admitting it), and with the default on the same field
 measures 0.302, exactly what a field with one puppet measures, and the agent
-stays refused.
+stays refused. The cluster casts one dispersion vote, but all 207 visible
+submissions still count toward the observable trial floor and remain on the
+board.
 
 `sharpebench audit` fires a battery of known attacks at the live scorer and checks
 each is demoted:

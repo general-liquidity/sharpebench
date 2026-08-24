@@ -122,7 +122,9 @@ fn main() {
             "{:>6} {:>8} {:>8} {:>7} {:>9} {:>9}",
             "s", "s_ann", "dsr", "pass^k", "worst_dd", "eligible"
         );
-        for (i, &s) in EDGES.iter().enumerate() {
+        let mut last_witness_dsr = f64::NEG_INFINITY;
+        let mut eligibility_open = false;
+        for &s in EDGES {
             // Five zero-edge agents + one witness: the measured-dispersion path
             // is active at field size six, as on every real dataset.
             let mut subs: Vec<AgentSubmission> = (0..N_ZERO_EDGE)
@@ -137,7 +139,10 @@ fn main() {
                 .collect();
             subs.push(submission(
                 "witness",
-                0x00BB_0000 + i as u64,
+                // Common random numbers across the edge sweep: only the
+                // injected mean changes. Without this, a reported first pass
+                // could be a local crossing caused by a different noise draw.
+                0x00BB_0000,
                 s,
                 *window_len,
             ));
@@ -145,6 +150,16 @@ fn main() {
             let scored = rank(&subs, &cfg);
             for sc in &scored {
                 if sc.agent_id == "witness" {
+                    assert!(
+                        sc.deflated_sharpe + 1e-12 >= last_witness_dsr,
+                        "witness DSR must be monotone under common random numbers"
+                    );
+                    assert!(
+                        !eligibility_open || sc.rank_eligible,
+                        "witness eligibility closed after opening"
+                    );
+                    last_witness_dsr = sc.deflated_sharpe;
+                    eligibility_open |= sc.rank_eligible;
                     println!(
                         "{:>6.2} {:>8.2} {:>8.4} {:>7} {:>9.4} {:>9}",
                         s,

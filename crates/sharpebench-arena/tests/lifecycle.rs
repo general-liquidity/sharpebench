@@ -486,6 +486,32 @@ fn sealed_eval_salt_commitment_is_persisted_and_shape_checked() {
 }
 
 #[test]
+fn opened_window_rejects_a_config_completed_by_later_serde_defaults() {
+    let dir = temp_arena_dir("frozen-score-config-digest");
+    let mut arena = Arena::init(&dir).unwrap();
+    arena
+        .open_window("w", 10, 20, ScoreConfig::default())
+        .unwrap();
+    drop(arena);
+
+    let path = dir.join(WINDOWS_DIR).join("w").join("window.json");
+    let mut value: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    value["score_config"]
+        .as_object_mut()
+        .unwrap()
+        .remove("min_measured_trials_sr_std");
+    std::fs::write(&path, serde_json::to_string_pretty(&value).unwrap()).unwrap();
+
+    let err = match Arena::load(&dir) {
+        Ok(_) => panic!("tampered config unexpectedly loaded"),
+        Err(err) => err,
+    };
+    assert!(err.contains("score_config is not explicit"), "{err}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn arena_layout_is_state_json_plus_windows_dir() {
     let dir = temp_arena_dir("layout");
     let mut arena = Arena::init(&dir).unwrap();

@@ -21,12 +21,15 @@ Epochs are monotonic; the kernel never reads a wall clock.
 | Commit deadline | epoch 20710 (2026-09-14 UTC), commitments at or after this epoch are refused |
 | Data reveal / resolution | epoch 20719 (2026-09-23 UTC), scoring runs on data revealed here |
 | Scoring rules | recorded in `windows/window-001/window.json` at open time, before any entry or any forward data exists |
-| Scoring config SHA-256 | `c2e74f85670b22136e590840849856642ff1c6980c61f0c11bf58f335f4fc481` (over the canonical JSON of `score_config`: sorted keys, no whitespace) |
+| Scoring config SHA-256 | `5050b3aa20298bd188a9418e5e76c0ff4de2027732920d8617d5e176448b8bcf` (over the compact serialization of the typed `score_config`, in schema field order) |
 
 The recorded config is the shipped default for daily bars: `n_trials = 50`,
 annualized `trials_sr_std` prior 0.5 with the measured path enabled at a
-minimum field of 5, `dsr_bar = 0.95`, per-run PSR bar 0.90 in pass-all mode,
-`periods_per_year = 252`.
+minimum field of 5 and bounded below by annualized dispersion 0.5,
+`dsr_bar = 0.95`, per-run PSR bar 0.90 in pass-all mode, and
+`periods_per_year = 252`. The v1 loader requires the complete score-config key
+set and rejects missing or extra fields before deserialization, so later serde
+defaults cannot silently change this opened window.
 
 ## Host verifying key
 

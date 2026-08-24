@@ -152,6 +152,11 @@ fn max_drawdown(returns: &[f64]) -> f64 {
 /// Nothing else in the kernel knows what a period is.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ScoreConfig {
+    /// Host-side lower bound on the number of trials. [`score_agent`] uses this
+    /// value directly because it has no field context. [`rank`] first replaces
+    /// it with `max(n_trials, submitted_field_size)`, then each submission's
+    /// declared private trials are added. A ranked host therefore cannot erase
+    /// strategies it can observe by configuring `n_trials = 1`.
     pub n_trials: u32,
     /// **Annualized** cross-trial dispersion of Sharpe ratios: the `sqrt(V[SR])`
     /// term in Bailey & López de Prado's expected-maximum Sharpe, which sets how
@@ -302,10 +307,11 @@ pub struct ScoreConfig {
     /// low-dispersion streams. The bound is converted to per-period units once,
     /// alongside [`trials_sr_std`](Self::trials_sr_std).
     ///
-    /// The default equals the configured prior. That makes a measured field a
-    /// one-way safety update: measurement can tighten a bar, never relax it. An
-    /// operator who has precommitted a justified lower floor may set this field
-    /// explicitly, and every resulting score records that the floor bound.
+    /// This field and `trials_sr_std` both default to 0.5. They are independently
+    /// configurable, so an operator changing the prior must also choose the
+    /// measured-field floor explicitly. With the shipped pair of defaults,
+    /// measurement is a one-way safety update: it can tighten the bar but cannot
+    /// relax it. Every resulting score records when this floor binds.
     #[serde(default = "default_min_measured_trials_sr_std")]
     pub min_measured_trials_sr_std: f64,
 }
@@ -1212,6 +1218,16 @@ pub fn rank(subs: &[AgentSubmission], cfg: &ScoreConfig) -> Vec<CompositeScore> 
         subs
     };
 
+    // A ranked field exposes at least one tried strategy per distinct entry.
+    // Refuse a host configuration that understates that observable search
+    // footprint. `score_agent` has no field context and therefore retains the
+    // configured value; ranking uses max(configured N, field size), then adds
+    // each entrant's own declared private trials in `score_agent_with`.
+    let mut rank_cfg = cfg.clone();
+    rank_cfg.n_trials = cfg
+        .n_trials
+        .max(u32::try_from(field.len()).unwrap_or(u32::MAX));
+
     // Pooled returns per agent + an equal-weight market proxy (the field average),
     // used for performance attribution: alpha (skill) vs beta (market exposure).
     let pooled: Vec<Vec<f64>> = field
@@ -1258,7 +1274,7 @@ pub fn rank(subs: &[AgentSubmission], cfg: &ScoreConfig) -> Vec<CompositeScore> 
         .iter()
         .enumerate()
         .map(|(idx, s)| {
-            let mut cs = score_agent_with(s, cfg, defl, benchmark);
+            let mut cs = score_agent_with(s, &rank_cfg, defl, benchmark);
             cs.runs_submitted = subs[idx].runs.len();
             if min_len >= 2 {
                 let (alpha, beta) = crate::attribution::alpha_beta(&pooled[idx], &market);
@@ -1597,6 +1613,28 @@ mod tests {
             s.deflated_sharpe,
             base.deflated_sharpe
         );
+    }
+
+    #[test]
+    fn ranked_field_size_is_an_observable_trial_floor() {
+        let field: Vec<_> = (0..8)
+            .map(|i| {
+                agent(
+                    &format!("agent-{i}"),
+                    vec![run(0.002 + f64::from(i) * 0.00001, 0.0005, 60)],
+                )
+            })
+            .collect();
+        let cfg = ScoreConfig {
+            n_trials: 1,
+            min_field_for_measured_sr_std: usize::MAX,
+            ..ScoreConfig::default()
+        };
+        let board = rank(&field, &cfg);
+        assert!(board.iter().all(|score| score.effective_n_trials == 8));
+
+        let standalone = score_agent(&field[0], &cfg);
+        assert_eq!(standalone.effective_n_trials, 1);
     }
 
     #[test]
