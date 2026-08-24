@@ -295,6 +295,19 @@ pub struct ScoreConfig {
     /// the measured dispersion and lower the deflation bar for everyone.
     #[serde(default = "default_dedup_clones_for_measured_sr_std")]
     pub dedup_clones_for_measured_sr_std: bool,
+    /// Annualized lower bound for a field-measured cross-trial Sharpe
+    /// dispersion. A field is allowed to demonstrate that strategies are *more*
+    /// heterogeneous than the precommitted prior, but it cannot lower the
+    /// deflation bar merely by recruiting a broad set of genuinely dissimilar,
+    /// low-dispersion streams. The bound is converted to per-period units once,
+    /// alongside [`trials_sr_std`](Self::trials_sr_std).
+    ///
+    /// The default equals the configured prior. That makes a measured field a
+    /// one-way safety update: measurement can tighten a bar, never relax it. An
+    /// operator who has precommitted a justified lower floor may set this field
+    /// explicitly, and every resulting score records that the floor bound.
+    #[serde(default = "default_min_measured_trials_sr_std")]
+    pub min_measured_trials_sr_std: f64,
 }
 
 /// Default rolling-Sharpe window length (21 periods ≈ one trading month).
@@ -322,6 +335,12 @@ fn default_min_field_for_measured_sr_std() -> usize {
 /// against a field-level attack is not an opt-in.
 fn default_dedup_clones_for_measured_sr_std() -> bool {
     true
+}
+
+/// Do not let the submitted field reduce the precommitted deflation prior by
+/// default. See [`ScoreConfig::min_measured_trials_sr_std`].
+fn default_min_measured_trials_sr_std() -> f64 {
+    0.5
 }
 
 /// Default periods per year: daily equity bars, the benchmark's historical
@@ -432,6 +451,9 @@ pub enum TrialsSrStdSource {
     /// The sample standard deviation of pooled per-period Sharpe ratios across the
     /// ranked field — what the deflation formula actually asks for.
     Measured,
+    /// The field was measured, but its value was below the operator's
+    /// precommitted floor and the floor was applied instead.
+    MeasuredFloored,
 }
 
 impl Default for ScoreConfig {
@@ -457,6 +479,7 @@ impl Default for ScoreConfig {
             shared_run_set: default_shared_run_set(),
             min_field_for_measured_sr_std: default_min_field_for_measured_sr_std(),
             dedup_clones_for_measured_sr_std: default_dedup_clones_for_measured_sr_std(),
+            min_measured_trials_sr_std: default_min_measured_trials_sr_std(),
         }
     }
 }
@@ -765,11 +788,17 @@ impl Deflation {
 
     /// `sr_std` is the field's measured dispersion of per-period Sharpes: already
     /// in the kernel's units, so it must not pass through the conversion.
-    fn measured(sr_std: f64) -> Self {
+    fn measured(sr_std: f64, cfg: &ScoreConfig) -> Self {
+        let floor = cfg.min_measured_trials_sr_std / cfg.periods_per_year.sqrt();
+        let floored = sr_std < floor;
         Self {
-            sr_std,
+            sr_std: sr_std.max(floor),
             annualized: None,
-            source: TrialsSrStdSource::Measured,
+            source: if floored {
+                TrialsSrStdSource::MeasuredFloored
+            } else {
+                TrialsSrStdSource::Measured
+            },
         }
     }
 }
@@ -1210,7 +1239,10 @@ pub fn rank(subs: &[AgentSubmission], cfg: &ScoreConfig) -> Vec<CompositeScore> 
         cfg.min_field_for_measured_sr_std,
         cfg.dedup_clones_for_measured_sr_std,
     )
-    .map_or_else(|| Deflation::configured(cfg), Deflation::measured);
+    .map_or_else(
+        || Deflation::configured(cfg),
+        |sr_std| Deflation::measured(sr_std, cfg),
+    );
 
     // The relative verdict's benchmark is a member of this same (restricted)
     // field, so its run `i` is every other agent's cell `i`. Looked up only
@@ -1899,6 +1931,46 @@ mod tests {
         reversed.reverse();
         let again = rank(&reversed, &cfg);
         assert_eq!(again[0].trials_sr_std.to_bits(), expected.to_bits());
+    }
+
+    /// A Sybil need not submit literal clones to compress a field measurement:
+    /// many genuinely distinct streams can be engineered to have almost the
+    /// same Sharpe. The precommitted floor makes that construction unable to
+    /// relax deflation, while preserving the measured path when it is stricter.
+    #[test]
+    fn measured_dispersion_cannot_fall_below_the_precommitted_floor() {
+        let cfg = ScoreConfig {
+            // Disable clone collapse: this is deliberately a *dissimilar*
+            // stream construction, not the near-copy attack covered elsewhere.
+            dedup_clones_for_measured_sr_std: false,
+            min_measured_trials_sr_std: 0.5,
+            ..ScoreConfig::default()
+        };
+        let field: Vec<AgentSubmission> = (0..5)
+            .map(|i| {
+                // Cyclic shifts have exactly the same mean and variance, but
+                // point in different directions and are not clone-connected.
+                let phase = i as f64 * 36.0;
+                let returns = (0..180)
+                    .map(|t| {
+                        0.001 + 0.0004 * (std::f64::consts::TAU * (t as f64 + phase) / 180.0).sin()
+                    })
+                    .collect();
+                agent(
+                    &format!("low-dispersion-{i}"),
+                    vec![Run {
+                        returns,
+                        ..Run::default()
+                    }],
+                )
+            })
+            .collect();
+        let board = rank(&field, &cfg);
+        let floor = per_period_sr_std(&cfg);
+        assert!(board.iter().all(|s| {
+            s.trials_sr_std_source == TrialsSrStdSource::MeasuredFloored
+                && s.trials_sr_std.to_bits() == floor.to_bits()
+        }));
     }
 
     /// A deterministic, roughly Gaussian return series with *exactly* the

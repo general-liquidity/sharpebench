@@ -439,6 +439,53 @@ fn state_survives_reload_at_every_stage() {
 }
 
 #[test]
+fn sealed_eval_salt_commitment_is_persisted_and_shape_checked() {
+    let dir = temp_arena_dir("sealed-eval-commitment");
+    let mut arena = Arena::init(&dir).unwrap();
+    let hash = "ab".repeat(32);
+    arena
+        .open_window_with_sealed_eval_commitment(
+            "sealed",
+            10,
+            20,
+            ScoreConfig::default(),
+            Some(hash.clone()),
+        )
+        .unwrap();
+    assert_eq!(
+        arena
+            .window("sealed")
+            .unwrap()
+            .sealed_eval_salt_sha256
+            .as_deref(),
+        Some(hash.as_str())
+    );
+    drop(arena);
+    assert_eq!(
+        Arena::load(&dir)
+            .unwrap()
+            .window("sealed")
+            .unwrap()
+            .sealed_eval_salt_sha256
+            .as_deref(),
+        Some(hash.as_str())
+    );
+
+    let mut invalid = Arena::init(&temp_arena_dir("sealed-eval-invalid")).unwrap();
+    let err = invalid
+        .open_window_with_sealed_eval_commitment(
+            "bad",
+            10,
+            20,
+            ScoreConfig::default(),
+            Some("not-a-sha256".to_string()),
+        )
+        .unwrap_err();
+    assert!(err.contains("64-character lowercase"), "{err}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn arena_layout_is_state_json_plus_windows_dir() {
     let dir = temp_arena_dir("layout");
     let mut arena = Arena::init(&dir).unwrap();

@@ -38,7 +38,7 @@ pub fn run(args: &[String], json: bool) -> i32 {
 fn usage() {
     eprintln!("usage: sharpebench arena <subcommand> [--json]");
     eprintln!("  arena init <dir>                                       create an arena directory");
-    eprintln!("  arena open <dir> <window> <commit_deadline> <reveal_epoch> [--config <score_config.json>]");
+    eprintln!("  arena open <dir> <window> <commit_deadline> <reveal_epoch> [--config <score_config.json>] [--sealed-eval-salt-sha256 <hex>]");
     eprintln!("                                                         open a window; the scoring rules are fixed now");
     eprintln!("  arena commit <dir> <window> <commitment.json>          register a pre-deadline commitment (from `sharpebench commit`)");
     eprintln!("  arena advance <dir> <epoch>                            advance the epoch (operator/cron/CI supplies \"now\")");
@@ -71,7 +71,7 @@ fn cmd_open(args: &[String], json: bool) -> i32 {
         (args.get(3), args.get(4), args.get(5), args.get(6))
     else {
         eprintln!(
-            "usage: sharpebench arena open <dir> <window> <commit_deadline> <reveal_epoch> [--config <score_config.json>]"
+            "usage: sharpebench arena open <dir> <window> <commit_deadline> <reveal_epoch> [--config <score_config.json>] [--sealed-eval-salt-sha256 <hex>]"
         );
         return 2;
     };
@@ -95,7 +95,14 @@ fn cmd_open(args: &[String], json: bool) -> i32 {
         Ok(a) => a,
         Err(e) => return fail(&e, json),
     };
-    match arena.open_window(window, deadline, reveal, config) {
+    let sealed_eval_salt_sha256 = flag_value(args, "--sealed-eval-salt-sha256");
+    match arena.open_window_with_sealed_eval_commitment(
+        window,
+        deadline,
+        reveal,
+        config,
+        sealed_eval_salt_sha256,
+    ) {
         Ok(()) => {
             if json {
                 emit_json(&serde_json::json!({
@@ -103,6 +110,7 @@ fn cmd_open(args: &[String], json: bool) -> i32 {
                     "window": window,
                     "commit_deadline": deadline,
                     "data_reveal_epoch": reveal,
+                    "sealed_eval_salt_sha256": arena.window(window).and_then(|w| w.sealed_eval_salt_sha256.as_deref()),
                 }));
             } else {
                 println!(

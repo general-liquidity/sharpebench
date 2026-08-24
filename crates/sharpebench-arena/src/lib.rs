@@ -90,6 +90,12 @@ pub struct WindowState {
     pub status: WindowStatus,
     /// The scoring rules, fixed at `open_window` time, before any entry exists.
     pub score_config: ScoreConfig,
+    /// Optional SHA-256 commitment to the secret salt used to derive a
+    /// SharpeArena sealed-evaluation seed set. The salt itself never enters the
+    /// arena state; after scoring it can be revealed and independently checked
+    /// against this pre-entry commitment.
+    #[serde(default)]
+    pub sealed_eval_salt_sha256: Option<String>,
     pub commitments: Vec<Commitment>,
     #[serde(default)]
     pub refusals: Vec<Refusal>,
@@ -122,6 +128,10 @@ pub struct WindowHeader {
     pub data_reveal_epoch: u64,
     pub dataset_hash: String,
     pub score_config: ScoreConfig,
+    /// The pre-entry sealed-evaluation salt commitment, when this window uses
+    /// SharpeArena's commit-reveal seed protocol.
+    #[serde(default)]
+    pub sealed_eval_salt_sha256: Option<String>,
     pub refusals: Vec<Refusal>,
     /// Final signature of the previously published window's board, or
     /// [`GENESIS_ANCHOR`] for the arena's first published window.
@@ -290,6 +300,28 @@ impl Arena {
         data_reveal_epoch: u64,
         config: ScoreConfig,
     ) -> Result<(), String> {
+        self.open_window_with_sealed_eval_commitment(
+            id,
+            commit_deadline,
+            data_reveal_epoch,
+            config,
+            None,
+        )
+    }
+
+    /// Open a window with an optional SHA-256 commitment to a SharpeArena
+    /// sealed-evaluation salt. The commitment is public and checked here for
+    /// shape only; the secret salt remains outside this repository until the
+    /// post-score reveal. It is part of the signed window header, so an operator
+    /// cannot replace it after entries have committed.
+    pub fn open_window_with_sealed_eval_commitment(
+        &mut self,
+        id: &str,
+        commit_deadline: u64,
+        data_reveal_epoch: u64,
+        config: ScoreConfig,
+        sealed_eval_salt_sha256: Option<String>,
+    ) -> Result<(), String> {
         validate_window_id(id)?;
         if self.windows.contains_key(id) {
             return Err(format!("window `{id}` already exists"));
@@ -305,6 +337,18 @@ impl Arena {
                 "data-reveal epoch {data_reveal_epoch} is before the commit deadline {commit_deadline}"
             ));
         }
+        if let Some(commitment) = &sealed_eval_salt_sha256 {
+            let valid = commitment.len() == 64
+                && commitment
+                    .bytes()
+                    .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase());
+            if !valid {
+                return Err(
+                    "sealed evaluation commitment must be a 64-character lowercase SHA-256 hex digest"
+                        .to_string(),
+                );
+            }
+        }
         self.windows.insert(
             id.to_string(),
             WindowState {
@@ -313,6 +357,7 @@ impl Arena {
                 data_reveal_epoch,
                 status: WindowStatus::Open,
                 score_config: config,
+                sealed_eval_salt_sha256,
                 commitments: Vec::new(),
                 refusals: Vec::new(),
                 dataset_hash: None,
@@ -469,6 +514,7 @@ impl Arena {
             data_reveal_epoch: w.data_reveal_epoch,
             dataset_hash: w.dataset_hash.clone().unwrap_or_default(),
             score_config: w.score_config.clone(),
+            sealed_eval_salt_sha256: w.sealed_eval_salt_sha256.clone(),
             refusals: w.refusals.clone(),
             prev_final_signature,
         };

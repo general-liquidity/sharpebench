@@ -246,6 +246,7 @@ fn main() {
                             trials_sr_std_used: s.trials_sr_std,
                             trials_sr_std_source: match s.trials_sr_std_source {
                                 TrialsSrStdSource::Measured => "measured".into(),
+                                TrialsSrStdSource::MeasuredFloored => "measured_floored".into(),
                                 TrialsSrStdSource::Configured => "configured".into(),
                             },
                         };
