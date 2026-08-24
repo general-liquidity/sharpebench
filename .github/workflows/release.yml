@@ -15,6 +15,11 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing vX.Y.Z tag to recover or verify"
+        required: true
+        type: string
 
 permissions:
   contents: write # attach the static binary to the GitHub Release
@@ -32,6 +37,8 @@ jobs:
       attestations: write # store the attestation on the repo
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - name: Install Rust + musl target
         # Pin to the rust-toolchain.toml channel (1.96.0) so the musl target lands
@@ -72,6 +79,7 @@ jobs:
       - name: Attach to the release
         uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
           files: |
             target/x86_64-unknown-linux-musl/release/sharpebench-x86_64-linux-musl
             target/x86_64-unknown-linux-musl/release/sharpebench-x86_64-linux-musl.sha256
@@ -88,9 +96,17 @@ jobs:
     environment: crates
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.96.0"
+      - name: Assert the workspace manifest matches the release tag
+        run: |
+          TAG="${{ inputs.release_tag || github.ref_name }}"
+          TAG="${TAG#v}"
+          V="$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
+          test "$V" = "$TAG" || { echo "::error::workspace version $V does not match tag $TAG"; exit 1; }
       # Exchanges the GitHub OIDC identity for a short-lived crates.io token.
       - uses: rust-lang/crates-io-auth-action@v1
         id: auth
@@ -130,6 +146,8 @@ jobs:
     environment: npm
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       # The npm package ships the compiled WASM kernel (npm/pkg), so build it first.
       - name: Install Rust (pinned) + wasm target
@@ -156,7 +174,8 @@ jobs:
       - name: Assert npm manifests match the release tag
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          TAG="${GITHUB_REF_NAME#v}"
+          TAG="${{ inputs.release_tag || github.ref_name }}"
+          TAG="${TAG#v}"
           fail=0
           for f in package.json mcp/package.json; do
             V=$(node -p "require('./$f').version")
@@ -210,6 +229,8 @@ jobs:
     environment: pypi
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       # cargo-release rewrites crates/sharpebench-py/{Cargo.toml,pyproject.toml} from the
       # workspace version. If they are stale the wheel below builds the OLD version, PyPI
@@ -219,7 +240,8 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         working-directory: crates/sharpebench-py
         run: |
-          TAG="${GITHUB_REF_NAME#v}"
+          TAG="${{ inputs.release_tag || github.ref_name }}"
+          TAG="${TAG#v}"
           fail=0
           for f in Cargo.toml pyproject.toml; do
             V=$(grep -m1 '^version = ' "$f" | sed 's/.*"\(.*\)".*/\1/')
@@ -265,7 +287,8 @@ jobs:
           node-version: 24
       - name: Assert crates.io, npm and PyPI all serve the tag version
         run: |
-          TAG="${GITHUB_REF_NAME#v}"
+          TAG="${{ inputs.release_tag || github.ref_name }}"
+          TAG="${TAG#v}"
           UA="sharpebench-release (general-liquidity)" # crates.io rejects requests without a User-Agent
           fail=0
 
