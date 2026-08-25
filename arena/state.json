@@ -1,6 +1,8 @@
 {
   "current_epoch": 20689,
-  "window_order": [],
+  "window_order": [
+    "window-003"
+  ],
   "published_order": [],
   "superseded": [
     {

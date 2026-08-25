@@ -12,11 +12,27 @@ Epochs are integer **days since the Unix epoch, UTC**: `epoch = floor(unix_time 
 The operator (or CI) advances the clock with `sharpebench arena advance arena <epoch>`.
 Epochs are monotonic; the kernel never reads a wall clock.
 
-## Superseded pre-entry records (no window is currently open)
+## Window 003 (open)
 
-Two windows were opened and withdrawn before any commitment, refusal or score
-existed. Both records remain in `windows/` and `state.json` as history; neither
-is live, and the next window is not open yet.
+| Field | Value |
+|---|---|
+| Window id | `window-003` |
+| Opened at epoch | 20690 (2026-08-25 UTC) |
+| Commit deadline | epoch 20711 (2026-09-15 UTC), commitments at or after this epoch are refused |
+| Data reveal / resolution | epoch 20720 (2026-09-24 UTC), scoring runs on data revealed here |
+| Scorer artifact SHA-256 | `263fadcd4376ca2d1c63435b885f9809fea3748a9091e30c9d72a577463c2fa1` (`sharpebench-x86_64-linux-musl` attached to the v0.9.0 GitHub release, SLSA provenance verifiable with `gh attestation verify`) |
+| Scoring config SHA-256 | `8c59e511ea2a9e572d8fb7901fd2951da1221ca9323bfe8e2fdbfa9395a89f07` (schema v2; the complete typed `score_config` is inside `windows/window-003/window.json`) |
+
+The scorer that will grade the reveal is the published, attested v0.9.0 release
+binary; any entrant can retrieve it byte for byte before committing. The config
+is the shipped default for daily bars under the v0.9.0 kernel (seed-averaged
+pooling, effective-N floor, measured-dispersion floor 0.5 annualized).
+
+## Superseded pre-entry records
+
+Two earlier windows were opened and withdrawn before any commitment, refusal
+or score existed. Both records remain in `windows/` and `state.json` as
+history; `window-003` above is the live window.
 
 | Window id | Opened at epoch | Superseded at epoch | Reason |
 |---|---|---|---|
