@@ -173,9 +173,13 @@ fn main() {
             .find(|s| s.agent_id == BENCHMARK)
             .expect("benchmark in field");
 
-        let cfg = ScoreConfig::for_periods_per_year(*ppy);
+        let cfg = ScoreConfig {
+            execution_seeds_per_window: EXEC_SEEDS.len(),
+            ..ScoreConfig::for_periods_per_year(*ppy)
+        };
         let mut cfg_rel = ScoreConfig::relative_to_benchmark(BENCHMARK);
         cfg_rel.periods_per_year = *ppy;
+        cfg_rel.execution_seeds_per_window = EXEC_SEEDS.len();
         let scored = rank(&subs, &cfg);
         let scored_rel = rank(&subs, &cfg_rel);
 

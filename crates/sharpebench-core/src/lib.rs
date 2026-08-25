@@ -14,7 +14,7 @@
 //! The headline idea: an agent does **not** rank on raw return. It ranks only if
 //! its edge survives (a) deflation for the number of agents tested
 //! ([`deflated_sharpe`]), (b) reliability across every seed×window
-//! ([`pass_k`]), and (c) decision-process discipline ([`process`]). Raw return is
+//! ([`mod@pass_k`]), and (c) decision-process discipline ([`process`]). Raw return is
 //! reported but never the rank key — see [`composite`].
 #![forbid(unsafe_code)]
 
@@ -66,8 +66,10 @@ pub use comparison_sets::{
     TaggedSubmission,
 };
 pub use composite::{
-    per_period_sr_std, per_run_passes, per_run_psr_benchmark, rank, score_agent, AgentSubmission,
-    CompositeScore, Mandate, Run, ScoreConfig, TrialsSrStdSource,
+    per_period_sr_std, per_run_passes, per_run_psr_benchmark, rank, rank_declared, score_agent,
+    score_agent_declared, split_declarations, AgentSubmission, CompositeScore, DeclaredMandate,
+    DeclaredSubmission, Mandate, MandateDeclarations, MandateVerdict, Run, ScoreConfig,
+    TrialsSrStdSource,
 };
 pub use correlation::{crowdedness, Crowdedness};
 pub use disqualification::{classify_disqualification, rollup, DisqualThresholds, FailReason};

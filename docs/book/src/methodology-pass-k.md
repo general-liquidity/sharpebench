@@ -167,3 +167,60 @@ and the same flags on `sharpebench score` select it; in Python,
 `relative_to_benchmark_config(id)` serializes the preset. The default is
 unchanged: with the flags absent, `pass_mode` deserializes to `All` and the
 benchmark id is never read, and the golden fixtures are byte-identical.
+
+## Declaring a mandate at submission
+
+The three verdicts above are selected by the host. A submitter can also declare
+one, on the submission itself: `DeclaredMandate` (in `sharpebench-protocol`,
+carried on `AgentTrajectory` and accepted as a `declared_mandate` key on a JSON
+submission object) names the reliability verdict the agent asks to be judged
+under.
+
+| declaration (JSON `kind`) | resolves to | certifies |
+|---|---|---|
+| `absolute_return` | pass^k `All` on raw returns | profitable in every regime (the default verdict, restated) |
+| `relative_to` + `benchmark_id` | pass^k `RelativeToBenchmark` against that id | beats the named agent in every regime |
+| `outperform_buy_and_hold` | `relative_to` buy-and-hold | beats buy-and-hold in every regime |
+| `drawdown_capped` + `max_per_run_drawdown` | pass^k `Any` plus the declared per-run bound | has an edge and never draws down past the bound in any single run |
+
+The rule, and it is the whole design: **a declaration selects which reliability
+question pass^k asks and, for `drawdown_capped`, adds a per-run bound; it never
+relaxes a gate.** The deflated-Sharpe bar, the block bootstrap, the process
+audit and the host's drawdown mandate are computed on the agent's raw returns
+under every declaration. A misdeclared benchmark (an id the field does not
+contain, or a misaligned cell) fails the declared verdict closed, exactly as
+the host-side relative verdict does, and a declared bound outside `(0, 1]` is a
+misdeclaration and fails. Buy-and-hold declaring `outperform_buy_and_hold` is
+judged against itself and fails on the zero-excess rule. The former
+`long_only_beta` spelling remains a read-only compatibility alias for old
+artifacts; it did not describe the excess-return test correctly.
+
+Eligibility is reported per verdict, and the two verdicts never mix:
+
+- `rank_eligible`, the sort key and `rank_ordinal` are the host verdict's,
+  byte-identical with or without declarations.
+- The declared verdict is an additional labeled column on the same score:
+  `declared_mandate` (what was asked), `verdict_applied` (what was tested),
+  `declared_passed_k`, and `declared_mandate_eligible` (the host predicate with
+  only the pass^k question exchanged, plus the declared bound where one
+  exists).
+- `declared_mandate_ordinal` orders declared-eligible agents by deflated
+  Sharpe within their **mandate class** only (one resolved verdict; the same
+  benchmark id, the same bound). Agents under different mandates answer
+  different questions and are never ordered against each other, or against the
+  host board.
+
+The board row prints both clauses, so a reader sees, for example, `fails
+ineligible under declared verdict (relative to buy-and-hold); host-board ineligible` on buy-and-hold's
+row instead of a bare refusal. In Rust the entry points are
+`rank_declared(subs, &declarations, &cfg)` and
+`score_agent_declared(sub, declared, &cfg)`; `rank` is the empty-declaration
+special case and the golden fixtures are byte-identical. On the CLI,
+`sharpebench score` accepts the `declared_mandate` key on each submission
+object; the trajectory verifier carries the artifact's declaration through
+`verify_trajectory`. Evidence for the reference agents under matching
+declarations is committed at `paper/evidence/final/mandate-declaration.jsonl`:
+no reference agent meets its declared mandate. The nearest miss, the
+risk-managed agent's `drawdown_capped` 0.20 declaration on daily crypto, is
+the only declared reliability pass; it is still refused by both deflation
+(DSR 0.2118) and the stationary bootstrap (p 0.1949).

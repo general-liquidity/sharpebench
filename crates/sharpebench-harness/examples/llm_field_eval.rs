@@ -202,6 +202,7 @@ fn main() {
         let cfg = ScoreConfig {
             dsr_bar: DSR_BAR,
             n_trials: N_TRIALS,
+            execution_seeds_per_window: EXEC_SEEDS.len(),
             ..ScoreConfig::for_periods_per_year(*ppy)
         };
         let mut cfg_nc = cfg.clone();

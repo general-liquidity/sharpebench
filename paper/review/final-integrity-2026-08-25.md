@@ -1,5 +1,10 @@
 # Stage 4.5 Final Integrity Report — 2026-08-25
 
+> **Superseded for all statistical and numerical claims by
+> `final-integrity-2026-08-25-post-repair.md`.** This file remains the audit
+> record for the earlier candidate; its pooled-seed, measured-dispersion and
+> risk-control values are not current evidence.
+
 ## Verdict
 
 **PASS for the current, explicitly bounded claims.** This supersedes the

@@ -9,7 +9,7 @@
 //! The RNG is a seeded SplitMix64 so a given (data, seed) always yields the same
 //! p-value — a benchmark result must be reproducible.
 
-use crate::deflated_sharpe::deflated_sharpe_ratio;
+use crate::deflated_sharpe::deflated_sharpe_ratio_against_null;
 use crate::stats::{mean, norm_ppf};
 
 /// Minimal deterministic PRNG (SplitMix64). Not cryptographic — used only for a
@@ -80,7 +80,8 @@ pub fn bootstrap_pvalue(excess: &[f64], seed: u64, n_boot: usize, block_prob: f6
 /// noise are not hard-ranked as if the difference were real.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DsrConfidence {
-    /// Point-estimate DSR on the observed track (equals [`deflated_sharpe_ratio`]).
+    /// Point-estimate DSR on the observed track (equals
+    /// [`crate::deflated_sharpe_ratio`]).
     pub point: f64,
     /// Bootstrap standard error: the standard deviation of the resampled DSRs.
     pub se: f64,
@@ -106,8 +107,35 @@ pub fn bootstrap_dsr_ci(
     block_prob: f64,
     ci: f64,
 ) -> DsrConfidence {
+    bootstrap_dsr_ci_against_null(
+        returns,
+        n_trials,
+        0.0,
+        trials_sr_std,
+        seed,
+        n_boot,
+        block_prob,
+        ci,
+    )
+}
+
+/// As [`bootstrap_dsr_ci`], but with the explicit null-population mean used in
+/// the DSR threshold. This keeps the confidence interval on the same statistic
+/// as a score configured with a non-zero benchmark/null population.
+#[allow(clippy::too_many_arguments)]
+pub fn bootstrap_dsr_ci_against_null(
+    returns: &[f64],
+    n_trials: u32,
+    null_mean_sharpe: f64,
+    trials_sr_std: f64,
+    seed: u64,
+    n_boot: usize,
+    block_prob: f64,
+    ci: f64,
+) -> DsrConfidence {
     let n = returns.len();
-    let point = deflated_sharpe_ratio(returns, n_trials, trials_sr_std);
+    let point =
+        deflated_sharpe_ratio_against_null(returns, n_trials, null_mean_sharpe, trials_sr_std);
     if n < 2 || n_boot == 0 {
         return DsrConfidence {
             point,
@@ -131,7 +159,12 @@ pub fn bootstrap_dsr_ci(
                 idx = (idx + 1) % n;
             }
         }
-        boots.push(deflated_sharpe_ratio(&resample, n_trials, trials_sr_std));
+        boots.push(deflated_sharpe_ratio_against_null(
+            &resample,
+            n_trials,
+            null_mean_sharpe,
+            trials_sr_std,
+        ));
     }
     let m = mean(&boots);
     let var = boots.iter().map(|b| (b - m) * (b - m)).sum::<f64>() / boots.len() as f64;

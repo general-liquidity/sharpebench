@@ -57,11 +57,25 @@ pub const GENESIS_ANCHOR: &str = "genesis";
 pub const WINDOW_HEADER_KIND: &str = "sharpebench-arena-window";
 /// Canonical on-disk schema for a forward window. A version bump is required
 /// when the meaning or required fields of the frozen scoring record change.
-pub const WINDOW_SCHEMA_VERSION: u32 = 1;
+pub const WINDOW_SCHEMA_VERSION: u32 = 2;
 
 fn score_config_digest(config: &ScoreConfig) -> Result<String, String> {
     let bytes = serde_json::to_vec(config).map_err(|e| format!("serialize score config: {e}"))?;
     Ok(content_digest(&bytes))
+}
+
+fn validate_sha256(label: &str, digest: &str) -> Result<(), String> {
+    if digest.len() == 64
+        && digest
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    {
+        Ok(())
+    } else {
+        Err(format!(
+            "{label} digest must be a 64-character lowercase SHA-256 hex digest"
+        ))
+    }
 }
 
 /// Lifecycle status of one evaluation window.
@@ -105,6 +119,10 @@ pub struct WindowState {
     /// Loading rejects a mismatch, including one caused by a newly introduced
     /// config field being filled from a default rather than frozen at open.
     pub score_config_sha256: String,
+    /// SHA-256 of the exact scorer artifact selected before commitments open.
+    /// A source revision alone is not enough: a forward result must identify the
+    /// executable or container image that interpreted this frozen config.
+    pub scorer_artifact_sha256: String,
     /// Optional SHA-256 commitment to the secret salt used to derive a
     /// SharpeArena sealed-evaluation seed set. The salt itself never enters the
     /// arena state; after scoring it can be revealed and independently checked
@@ -145,6 +163,7 @@ pub struct WindowHeader {
     pub schema_version: u32,
     pub score_config: ScoreConfig,
     pub score_config_sha256: String,
+    pub scorer_artifact_sha256: String,
     /// The pre-entry sealed-evaluation salt commitment, when this window uses
     /// SharpeArena's commit-reveal seed protocol.
     #[serde(default)]
@@ -163,6 +182,28 @@ struct StateFile {
     window_order: Vec<String>,
     /// Windows in publish order - the order the cross-window chain runs in.
     published_order: Vec<String>,
+    /// Empty windows superseded before any commitment. The old `window.json`
+    /// remains in place; this ledger points to its immutable bytes and explains
+    /// why it is deliberately excluded from the active lifecycle.
+    #[serde(default)]
+    superseded: Vec<WindowSupersession>,
+}
+
+/// Auditable replacement of an empty pre-entry window. This is intentionally a
+/// separate record rather than a mutation of the original frozen window.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WindowSupersession {
+    pub window_id: String,
+    pub superseded_at_epoch: u64,
+    pub historical_window_sha256: String,
+    pub reason: String,
+    /// Filled after the replacement window is opened. Keeping this in the
+    /// historical ledger makes the old/new frozen config digests auditable
+    /// without pretending that the old window used the new rules.
+    #[serde(default)]
+    pub replacement_window_id: Option<String>,
+    #[serde(default)]
+    pub replacement_score_config_sha256: Option<String>,
 }
 
 /// Verification result for one published board.
@@ -293,6 +334,44 @@ impl Arena {
     /// Load an existing arena directory.
     pub fn load(dir: &Path) -> Result<Self, String> {
         let state: StateFile = read_json(&dir.join(STATE_FILE))?;
+        for historical in &state.superseded {
+            if state
+                .window_order
+                .iter()
+                .any(|id| id == &historical.window_id)
+            {
+                return Err(format!(
+                    "superseded window `{}` is still active",
+                    historical.window_id
+                ));
+            }
+            let path = dir
+                .join(WINDOWS_DIR)
+                .join(&historical.window_id)
+                .join(WINDOW_FILE);
+            let bytes = std::fs::read(&path)
+                .map_err(|e| format!("cannot read superseded {}: {e}", path.display()))?;
+            let actual = content_digest(&bytes);
+            if actual != historical.historical_window_sha256 {
+                return Err(format!(
+                    "superseded window `{}` historical digest mismatch: recorded {}, recomputed {actual}",
+                    historical.window_id, historical.historical_window_sha256
+                ));
+            }
+            if let (Some(replacement), Some(config_digest)) = (
+                historical.replacement_window_id.as_ref(),
+                historical.replacement_score_config_sha256.as_ref(),
+            ) {
+                let replacement_path = dir.join(WINDOWS_DIR).join(replacement).join(WINDOW_FILE);
+                let replacement: WindowState = read_window_state(&replacement_path)?;
+                if &replacement.score_config_sha256 != config_digest {
+                    return Err(format!(
+                        "supersession `{}` replacement `{}` config digest mismatch",
+                        historical.window_id, replacement.id
+                    ));
+                }
+            }
+        }
         let mut windows = BTreeMap::new();
         for id in &state.window_order {
             let w = read_window_state(&dir.join(WINDOWS_DIR).join(id).join(WINDOW_FILE))?;
@@ -309,6 +388,7 @@ impl Arena {
                     w.score_config_sha256
                 ));
             }
+            validate_sha256("scorer artifact", &w.scorer_artifact_sha256)?;
             windows.insert(id.clone(), w);
         }
         Ok(Self {
@@ -364,12 +444,15 @@ impl Arena {
         data_reveal_epoch: u64,
         config: ScoreConfig,
     ) -> Result<(), String> {
-        self.open_window_with_sealed_eval_commitment(
+        // Kept for in-process test fixtures. Production callers must use
+        // `open_window_with_provenance`, which requires the real artifact hash.
+        self.open_window_with_provenance(
             id,
             commit_deadline,
             data_reveal_epoch,
             config,
             None,
+            content_digest(b"sharpebench-arena-in-process-test-artifact"),
         )
     }
 
@@ -385,6 +468,31 @@ impl Arena {
         data_reveal_epoch: u64,
         config: ScoreConfig,
         sealed_eval_salt_sha256: Option<String>,
+    ) -> Result<(), String> {
+        // Compatibility helper for tests and embedding code predating artifact
+        // provenance. The CLI never calls this path; its explicitly named
+        // provenance variant is required for a real forward window.
+        self.open_window_with_provenance(
+            id,
+            commit_deadline,
+            data_reveal_epoch,
+            config,
+            sealed_eval_salt_sha256,
+            content_digest(b"sharpebench-arena-legacy-embedded-artifact"),
+        )
+    }
+
+    /// Open a window with all score-affecting provenance frozen before entries
+    /// can commit. `scorer_artifact_sha256` is normally the digest of the
+    /// release binary or immutable container image that will run the scorer.
+    pub fn open_window_with_provenance(
+        &mut self,
+        id: &str,
+        commit_deadline: u64,
+        data_reveal_epoch: u64,
+        config: ScoreConfig,
+        sealed_eval_salt_sha256: Option<String>,
+        scorer_artifact_sha256: String,
     ) -> Result<(), String> {
         validate_window_id(id)?;
         if self.windows.contains_key(id) {
@@ -413,6 +521,7 @@ impl Arena {
                 );
             }
         }
+        validate_sha256("scorer artifact", &scorer_artifact_sha256)?;
         let score_config_sha256 = score_config_digest(&config)?;
         self.windows.insert(
             id.to_string(),
@@ -424,6 +533,7 @@ impl Arena {
                 status: WindowStatus::Open,
                 score_config: config,
                 score_config_sha256,
+                scorer_artifact_sha256,
                 sealed_eval_salt_sha256,
                 commitments: Vec::new(),
                 refusals: Vec::new(),
@@ -433,6 +543,96 @@ impl Arena {
         );
         self.state.window_order.push(id.to_string());
         self.save()
+    }
+
+    /// Supersede an empty pre-entry window without rewriting its frozen bytes.
+    /// This is the only migration path for a live schema/config correction: a
+    /// window with even one commitment, refusal, score, or a non-open status is
+    /// immutable and must not be silently reinterpreted.
+    pub fn supersede_empty_window(
+        dir: &Path,
+        window_id: &str,
+        reason: &str,
+    ) -> Result<WindowSupersession, String> {
+        if reason.trim().is_empty() {
+            return Err("supersession reason must be non-empty".to_string());
+        }
+        let mut state: StateFile = read_json(&dir.join(STATE_FILE))?;
+        if state.published_order.iter().any(|id| id == window_id) {
+            return Err(format!("window `{window_id}` is published and immutable"));
+        }
+        let position = state
+            .window_order
+            .iter()
+            .position(|id| id == window_id)
+            .ok_or_else(|| format!("no active window `{window_id}`"))?;
+        let path = dir.join(WINDOWS_DIR).join(window_id).join(WINDOW_FILE);
+        let bytes =
+            std::fs::read(&path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+        let value: serde_json::Value = serde_json::from_slice(&bytes)
+            .map_err(|e| format!("invalid JSON in {}: {e}", path.display()))?;
+        let empty = value.get("status").and_then(serde_json::Value::as_str) == Some("open")
+            && value
+                .get("commitments")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(Vec::is_empty)
+            && value
+                .get("refusals")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(Vec::is_empty)
+            && value
+                .get("scores")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(Vec::is_empty)
+            && value
+                .get("dataset_hash")
+                .is_some_and(serde_json::Value::is_null);
+        if !empty {
+            return Err(format!(
+                "window `{window_id}` is not an empty open record; supersession is forbidden"
+            ));
+        }
+        let record = WindowSupersession {
+            window_id: window_id.to_string(),
+            superseded_at_epoch: state.current_epoch,
+            historical_window_sha256: content_digest(&bytes),
+            reason: reason.to_string(),
+            replacement_window_id: None,
+            replacement_score_config_sha256: None,
+        };
+        state.window_order.remove(position);
+        state.superseded.push(record.clone());
+        write_json(&dir.join(STATE_FILE), &state)?;
+        Ok(record)
+    }
+
+    /// Link a preserved supersession to a replacement whose config has already
+    /// been opened and frozen. The link is explicit, checked, and persisted;
+    /// callers never hand-edit the historical ledger.
+    pub fn link_supersession_replacement(
+        dir: &Path,
+        superseded_window_id: &str,
+        replacement_window_id: &str,
+    ) -> Result<(), String> {
+        let mut state: StateFile = read_json(&dir.join(STATE_FILE))?;
+        let replacement_path = dir
+            .join(WINDOWS_DIR)
+            .join(replacement_window_id)
+            .join(WINDOW_FILE);
+        let replacement: WindowState = read_window_state(&replacement_path)?;
+        let record = state
+            .superseded
+            .iter_mut()
+            .find(|r| r.window_id == superseded_window_id)
+            .ok_or_else(|| format!("no supersession for `{superseded_window_id}`"))?;
+        if record.replacement_window_id.is_some() {
+            return Err(format!(
+                "supersession `{superseded_window_id}` already has a replacement"
+            ));
+        }
+        record.replacement_window_id = Some(replacement_window_id.to_string());
+        record.replacement_score_config_sha256 = Some(replacement.score_config_sha256);
+        write_json(&dir.join(STATE_FILE), &state)
     }
 
     /// Rebuild an attest [`Registry`] holding this window's commitments, each
@@ -583,6 +783,7 @@ impl Arena {
             schema_version: w.schema_version,
             score_config: w.score_config.clone(),
             score_config_sha256: w.score_config_sha256.clone(),
+            scorer_artifact_sha256: w.scorer_artifact_sha256.clone(),
             sealed_eval_salt_sha256: w.sealed_eval_salt_sha256.clone(),
             refusals: w.refusals.clone(),
             prev_final_signature,
@@ -616,8 +817,8 @@ fn render_markdown(header: &WindowHeader, scores: &[CompositeScore]) -> String {
     let mut out = String::new();
     out.push_str(&format!("# Arena window `{}`\n\n", header.window_id));
     out.push_str(&format!(
-        "- commit deadline: epoch {}\n- data reveal: epoch {}\n- dataset SHA-256: `{}`\n- previous board signature: `{}`\n\n",
-        header.commit_deadline, header.data_reveal_epoch, header.dataset_hash, header.prev_final_signature
+        "- commit deadline: epoch {}\n- data reveal: epoch {}\n- dataset SHA-256: `{}`\n- scorer artifact SHA-256: `{}`\n- previous board signature: `{}`\n\n",
+        header.commit_deadline, header.data_reveal_epoch, header.dataset_hash, header.scorer_artifact_sha256, header.prev_final_signature
     ));
     out.push_str("```\n");
     out.push_str(&sharpebench_leaderboard::render(scores));

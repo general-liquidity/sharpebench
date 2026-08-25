@@ -162,6 +162,43 @@ pub struct RunTrajectory {
     pub steps: Vec<DecisionStep>,
 }
 
+/// The mandate an agent declares at submission: which **reliability verdict** it
+/// asks to be judged under. Opt-in and additive: a submission with no
+/// declaration is scored exactly as before.
+///
+/// A declaration selects the per-run series and aggregation of the pass^k gate
+/// and, for [`DeclaredMandate::DrawdownCapped`], adds a per-run drawdown bound.
+/// It never relaxes anything: the deflated-Sharpe bar, the block bootstrap, the
+/// process audit and the host's drawdown mandate are computed on the agent's raw
+/// returns under every declaration, and the host board's own verdict is still
+/// applied and still decides rank. The declared verdict is reported beside it,
+/// labeled, so a reader sees both "meets its declared mandate" and "is not
+/// all-weather" on one row. Serialized internally tagged in snake case, e.g.
+/// `{"kind":"relative_to","benchmark_id":"buy-and-hold"}`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DeclaredMandate {
+    /// Profitable in every regime: per-run PSR on raw returns, every run must
+    /// pass. The verdict the benchmark applies when nothing is declared.
+    AbsoluteReturn,
+    /// Beats the named benchmark agent in every regime: per-run PSR on the
+    /// excess return over `benchmark_id`'s run in the same (window, seed) cell,
+    /// every run must pass. The benchmark must be in the field being ranked; a
+    /// missing or misaligned benchmark fails every run rather than falling
+    /// back to the absolute test.
+    RelativeTo { benchmark_id: String },
+    /// Never catastrophic in any regime: at least one run clears the per-run
+    /// PSR bar, and no single run draws down more than `max_per_run_drawdown`
+    /// (in `(0, 1]`; a bound outside that range is a misdeclaration and fails).
+    DrawdownCapped { max_per_run_drawdown: f64 },
+    /// Beats the field's same-cell buy-and-hold reference in every regime.
+    /// This is an excess-return mandate, not a statement that the agent itself
+    /// is long-only or beta-tracking. The former `long_only_beta` wire spelling
+    /// remains accepted only for backward-compatible reads.
+    #[serde(rename = "outperform_buy_and_hold", alias = "long_only_beta")]
+    OutperformBuyAndHold,
+}
+
 /// An agent's full captured trajectory: every (window × seed) run's raw decisions.
 /// Serde-(de)serializable to JSON; this is the on-disk artifact a separate verifier
 /// ingests to recompute the score from raw decisions alone.
@@ -172,6 +209,11 @@ pub struct AgentTrajectory {
     /// recomputed submission carries the same deflation footprint.
     #[serde(default)]
     pub in_sample_trials: u32,
+    /// The mandate the agent declared at submission (see [`DeclaredMandate`]).
+    /// `None` = undeclared, the default; the artifact's bytes are unchanged for
+    /// every existing trajectory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub declared_mandate: Option<DeclaredMandate>,
     /// One captured run per (window, seed), in the same order the harness produced
     /// them (window-major: all seeds of window 0, then window 1, …).
     pub runs: Vec<RunTrajectory>,
@@ -263,6 +305,7 @@ mod tests {
         let traj = AgentTrajectory {
             agent_id: "a".to_string(),
             in_sample_trials: 7,
+            declared_mandate: None,
             runs: vec![RunTrajectory {
                 window_start: 20,
                 window_end: 30,
@@ -291,5 +334,62 @@ mod tests {
         assert_eq!(back.runs[0].seed, 3);
         assert_eq!(back.runs[0].steps[0].observation_id, "2025-001");
         assert_eq!(back.runs[0].steps[0].decision.orders[0].target_weight, 0.25);
+        // An undeclared mandate is absent from the bytes, not serialized as null.
+        assert!(!serde_json::to_string(&traj)
+            .unwrap()
+            .contains("declared_mandate"));
+        assert!(back.declared_mandate.is_none());
+    }
+
+    #[test]
+    fn declared_mandate_is_additive_and_round_trips() {
+        // Every trajectory written before the field existed still parses.
+        let legacy = r#"{"agent_id":"a","runs":[]}"#;
+        let t: AgentTrajectory = serde_json::from_str(legacy).unwrap();
+        assert!(t.declared_mandate.is_none());
+
+        for (m, json) in [
+            (
+                DeclaredMandate::AbsoluteReturn,
+                r#"{"kind":"absolute_return"}"#,
+            ),
+            (
+                DeclaredMandate::RelativeTo {
+                    benchmark_id: "buy-and-hold".to_string(),
+                },
+                r#"{"kind":"relative_to","benchmark_id":"buy-and-hold"}"#,
+            ),
+            (
+                DeclaredMandate::DrawdownCapped {
+                    max_per_run_drawdown: 0.2,
+                },
+                r#"{"kind":"drawdown_capped","max_per_run_drawdown":0.2}"#,
+            ),
+            (
+                DeclaredMandate::OutperformBuyAndHold,
+                r#"{"kind":"outperform_buy_and_hold"}"#,
+            ),
+        ] {
+            assert_eq!(serde_json::to_string(&m).unwrap(), json);
+            assert_eq!(serde_json::from_str::<DeclaredMandate>(json).unwrap(), m);
+        }
+
+        let declared = AgentTrajectory {
+            agent_id: "a".to_string(),
+            in_sample_trials: 0,
+            declared_mandate: Some(DeclaredMandate::OutperformBuyAndHold),
+            runs: Vec::new(),
+        };
+        let back: AgentTrajectory =
+            serde_json::from_str(&serde_json::to_string(&declared).unwrap()).unwrap();
+        assert_eq!(
+            back.declared_mandate,
+            Some(DeclaredMandate::OutperformBuyAndHold)
+        );
+        assert_eq!(
+            serde_json::from_str::<DeclaredMandate>(r#"{"kind":"long_only_beta"}"#).unwrap(),
+            DeclaredMandate::OutperformBuyAndHold,
+            "old artifacts remain readable but are re-emitted under the honest name"
+        );
     }
 }

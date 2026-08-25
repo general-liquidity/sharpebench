@@ -240,7 +240,7 @@ jobs:
       # already serves it, skip-existing swallows it, and the run goes green having shipped
       # nothing. Exactly the npm-stall failure, so assert the same way npm does.
       - name: Assert the Python manifests match the release tag
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
         working-directory: crates/sharpebench-py
         run: |
           TAG="${{ inputs.release_tag || github.ref_name }}"

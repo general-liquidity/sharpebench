@@ -22,6 +22,8 @@ pub fn run(args: &[String], json: bool) -> i32 {
     match args.get(2).map(String::as_str) {
         Some("init") => cmd_init(args, json),
         Some("open") => cmd_open(args, json),
+        Some("supersede-empty") => cmd_supersede_empty(args, json),
+        Some("link-supersession") => cmd_link_supersession(args, json),
         Some("commit") => cmd_commit(args, json),
         Some("advance") => cmd_advance(args, json),
         Some("score") => cmd_score(args, json),
@@ -37,8 +39,10 @@ pub fn run(args: &[String], json: bool) -> i32 {
 fn usage() {
     eprintln!("usage: sharpebench arena <subcommand> [--json]");
     eprintln!("  arena init <dir>                                       create an arena directory");
-    eprintln!("  arena open <dir> <window> <commit_deadline> <reveal_epoch> [--config <score_config.json>] [--sealed-eval-salt-sha256 <hex>]");
-    eprintln!("                                                         open a window; the scoring rules are fixed now");
+    eprintln!("  arena open <dir> <window> <commit_deadline> <reveal_epoch> --scorer-artifact-sha256 <hex> [--config <score_config.json>] [--sealed-eval-salt-sha256 <hex>]");
+    eprintln!("                                                         open a window; scorer/config provenance is fixed now");
+    eprintln!("  arena supersede-empty <dir> <window> <reason>          archive an empty obsolete window before reopening");
+    eprintln!("  arena link-supersession <dir> <old> <new>               record the audited replacement config link");
     eprintln!("  arena commit <dir> <window> <commitment.json>          register a pre-deadline commitment (from `sharpebench commit`)");
     eprintln!("  arena advance <dir> <epoch>                            advance the epoch (operator/cron/CI supplies \"now\")");
     eprintln!("  arena score <dir> <window> <dataset> <entries.json>    verify reveals, refuse mismatches, rank the rest");
@@ -70,7 +74,7 @@ fn cmd_open(args: &[String], json: bool) -> i32 {
         (args.get(3), args.get(4), args.get(5), args.get(6))
     else {
         eprintln!(
-            "usage: sharpebench arena open <dir> <window> <commit_deadline> <reveal_epoch> [--config <score_config.json>] [--sealed-eval-salt-sha256 <hex>]"
+            "usage: sharpebench arena open <dir> <window> <commit_deadline> <reveal_epoch> --scorer-artifact-sha256 <hex> [--config <score_config.json>] [--sealed-eval-salt-sha256 <hex>]"
         );
         return 2;
     };
@@ -95,12 +99,16 @@ fn cmd_open(args: &[String], json: bool) -> i32 {
         Err(e) => return fail(&e, json),
     };
     let sealed_eval_salt_sha256 = flag_value(args, "--sealed-eval-salt-sha256").map(str::to_owned);
-    match arena.open_window_with_sealed_eval_commitment(
+    let Some(scorer_artifact_sha256) = flag_value(args, "--scorer-artifact-sha256") else {
+        return fail("--scorer-artifact-sha256 is required: freeze the exact release binary or immutable image before entries commit", json);
+    };
+    match arena.open_window_with_provenance(
         window,
         deadline,
         reveal,
         config,
         sealed_eval_salt_sha256,
+        scorer_artifact_sha256.to_string(),
     ) {
         Ok(()) => {
             if json {
@@ -110,11 +118,53 @@ fn cmd_open(args: &[String], json: bool) -> i32 {
                     "commit_deadline": deadline,
                     "data_reveal_epoch": reveal,
                     "sealed_eval_salt_sha256": arena.window(window).and_then(|w| w.sealed_eval_salt_sha256.as_deref()),
+                    "scorer_artifact_sha256": arena.window(window).map(|w| w.scorer_artifact_sha256.as_str()),
                 }));
             } else {
                 println!(
                     "opened window `{window}` (commit deadline: epoch {deadline}, data reveal: epoch {reveal}); scoring rules recorded"
                 );
+            }
+            0
+        }
+        Err(e) => fail(&e, json),
+    }
+}
+
+fn cmd_supersede_empty(args: &[String], json: bool) -> i32 {
+    let (Some(dir), Some(window), Some(reason)) = (args.get(3), args.get(4), args.get(5)) else {
+        eprintln!("usage: sharpebench arena supersede-empty <dir> <window> <reason>");
+        return 2;
+    };
+    match Arena::supersede_empty_window(Path::new(dir), window, reason) {
+        Ok(record) => {
+            if json {
+                emit_json(&serde_json::json!({ "ok": true, "supersession": record }));
+            } else {
+                println!(
+                    "superseded empty window `{}` at epoch {}; preserved historical SHA-256 {}",
+                    record.window_id, record.superseded_at_epoch, record.historical_window_sha256
+                );
+            }
+            0
+        }
+        Err(e) => fail(&e, json),
+    }
+}
+
+fn cmd_link_supersession(args: &[String], json: bool) -> i32 {
+    let (Some(dir), Some(old), Some(new)) = (args.get(3), args.get(4), args.get(5)) else {
+        eprintln!("usage: sharpebench arena link-supersession <dir> <old> <new>");
+        return 2;
+    };
+    match Arena::link_supersession_replacement(Path::new(dir), old, new) {
+        Ok(()) => {
+            if json {
+                emit_json(
+                    &serde_json::json!({ "ok": true, "superseded": old, "replacement": new }),
+                );
+            } else {
+                println!("linked supersession `{old}` to replacement `{new}`");
             }
             0
         }

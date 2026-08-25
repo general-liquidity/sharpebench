@@ -1,0 +1,42 @@
+{
+  "schema_version": 2,
+  "id": "window-002",
+  "commit_deadline": 20710,
+  "data_reveal_epoch": 20719,
+  "status": "open",
+  "score_config": {
+    "n_trials": 50,
+    "trials_sr_std": 0.5,
+    "deflation_null_mean_per_period": 0.0,
+    "dsr_bar": 0.95,
+    "per_run_psr_bar": 0.9,
+    "per_run_min_annual_sharpe": 0.0,
+    "pass_mode": "all",
+    "benchmark_agent_id": "buy-and-hold",
+    "periods_per_year": 252.0,
+    "alpha": 0.05,
+    "bootstrap_seed": 1537679398,
+    "n_boot": 2000,
+    "block_prob": 0.1,
+    "mandate": {
+      "max_drawdown": 1.0,
+      "max_run_drawdown": 1.0
+    },
+    "rank_key": "deflated_sharpe",
+    "reference_dsr_population": [],
+    "rolling_window": 21,
+    "dsr_ci_level": 0.9,
+    "shared_run_set": true,
+    "min_field_for_measured_sr_std": 5,
+    "dedup_clones_for_measured_sr_std": true,
+    "min_measured_trials_sr_std": 0.5,
+    "execution_seeds_per_window": 1
+  },
+  "score_config_sha256": "8c59e511ea2a9e572d8fb7901fd2951da1221ca9323bfe8e2fdbfa9395a89f07",
+  "scorer_artifact_sha256": "6f267c9f09f8d2b09294bf3396f6557a569ab684b385e27f4c79a50b23d80f0e",
+  "sealed_eval_salt_sha256": null,
+  "commitments": [],
+  "refusals": [],
+  "dataset_hash": null,
+  "scores": []
+}

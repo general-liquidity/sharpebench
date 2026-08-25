@@ -78,7 +78,7 @@ impl HumanBaseline {
 
     /// Classify a Deflated Sharpe against the band: `Below` the floor, `Within`
     /// the skilled-human range, or `Above` the ceiling. Uses the same normal-track
-    /// mapping as [`reference_dsr_population`].
+    /// mapping as the `reference_dsr_population` score field.
     pub fn classify_dsr(
         &self,
         dsr: f64,

@@ -16,10 +16,16 @@ agent must beat `alpha` (default `0.05`) to be eligible.
 ## 2. White's Reality Check (field-wide)
 
 `reality_check_pvalue` is a data-snooping test: the probability that the **best**
-agent's outperformance over the field benchmark arose by chance, *given how many
-agents were tried*. A shared bootstrap index path across all agents preserves
-cross-agent correlation. Low p ⇒ the field leader's edge is real, not the luckiest
-draw. This value is reported on every row of the board.
+agent's outperformance over a fixed aligned named benchmark arose by chance,
+*given how many agents were tried*. The benchmark is buy-and-hold when that
+agent is present and zero-return cash otherwise; the candidate field's average
+is attribution only. A shared bootstrap index path across all agents preserves
+cross-agent correlation. Low p means the field leader's excess return is not
+explained by the sampled null. This value is reported on every row of the board.
+
+The scorer also reports Hansen's superior-predictive-ability p-value (including
+its consistent-bootstrap variant) against the same fixed benchmark. Neither the
+Reality Check nor SPA gates rank.
 
 ## 3. Romano–Wolf step-down (per-agent, family-wise)
 
@@ -30,6 +36,6 @@ against the maximum statistic over the *remaining* agents only. The result is a
 boolean per agent — "this agent's outperformance survives correction for every
 agent tested" — reported as `step_down_significant`.
 
-Together: the bootstrap gate stops a single noisy agent ranking; the Reality Check
-stops the field leader being luck; step-down hands every contestant an honest,
-multiplicity-corrected significance verdict.
+Together: the bootstrap is the per-agent rank gate; the Reality Check, SPA, and
+step-down procedures are field-wide reported diagnostics. They answer related
+multiple-comparison questions but do not silently add conjuncts to eligibility.

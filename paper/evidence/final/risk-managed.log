@@ -2,8 +2,8 @@ us-indices-1d: 2513 bars, 6 windows
 
 == us-indices-1d (1d, ppy 252) ==
 agent                 dsr      psr  pass^k  process   boot_p  worst_dd  eligible      nc
-buy-and-hold       0.0000   1.0000   false     true   0.0005    0.3361     false   false
-risk-managed       0.0000   0.1111   false     true   1.0000    0.2383     false   false
+buy-and-hold       0.1558   0.9935   false     true   0.0020    0.3361     false   false
+risk-managed       0.0000   0.3331   false     true   1.0000    0.2383     false   false
 luck-floor-00      0.0000   0.0000   false     true   1.0000    0.6445     false   false
 luck-floor-02      0.0000   0.0000   false     true   1.0000    0.6494     false   false
 luck-floor-03      0.0000   0.0000   false     true   1.0000    0.6601     false   false
@@ -13,25 +13,25 @@ us-indices-1w: 522 bars, 6 windows
 
 == us-indices-1w (1w, ppy 52) ==
 agent                 dsr      psr  pass^k  process   boot_p  worst_dd  eligible      nc
-buy-and-hold       0.0046   1.0000   false     true   0.0005    0.3198     false   false
-luck-floor-02      0.0000   0.9838   false     true   0.0035    0.3416     false   false
-luck-floor-00      0.0000   0.9837   false     true   0.0035    0.3390     false   false
-luck-floor-03      0.0000   0.9819   false     true   0.0040    0.3539     false   false
-luck-floor-01      0.0000   0.9562   false     true   0.0155    0.3460     false   false
-luck-floor-04      0.0000   0.9444   false     true   0.0210    0.3509     false   false
-risk-managed       0.0000   0.9998   false     true   0.0005    0.1132     false   false
+buy-and-hold       0.1781   0.9908   false     true   0.0015    0.3198     false   false
+luck-floor-02      0.0044   0.7763   false     true   0.1824    0.3416     false   false
+luck-floor-00      0.0044   0.7758   false     true   0.1799    0.3390     false   false
+luck-floor-03      0.0042   0.7716   false     true   0.1904    0.3539     false   false
+luck-floor-01      0.0028   0.7279   false     true   0.2344    0.3460     false   false
+luck-floor-04      0.0024   0.7142   false     true   0.2469    0.3509     false   false
+risk-managed       0.0262   0.8958   false     true   0.0715    0.1132     false   false
 
 == us-indices-1w: deflation N-sensitivity ==
-N=7    dsr  0.0255 eligible false never-catastrophic false
-N=10   dsr  0.0035 eligible false never-catastrophic false
-N=25   dsr  0.0000 eligible false never-catastrophic false
-N=50   dsr  0.0000 eligible false never-catastrophic false
-N=100  dsr  0.0000 eligible false never-catastrophic false
+N=7    dsr  0.2449 eligible false never-catastrophic false
+N=10   dsr  0.1699 eligible false never-catastrophic false
+N=25   dsr  0.0608 eligible false never-catastrophic false
+N=50   dsr  0.0262 eligible false never-catastrophic false
+N=100  dsr  0.0108 eligible false never-catastrophic false
 crypto-majors-1h: 24000 bars, 6 windows
 
 == crypto-majors-1h (1h, ppy 8760) ==
 agent                 dsr      psr  pass^k  process   boot_p  worst_dd  eligible      nc
-buy-and-hold       0.0000   1.0000   false     true   0.0005    0.4896     false   false
+buy-and-hold       0.0000   0.9214   false     true   0.0685    0.4896     false   false
 risk-managed       0.0000   0.0000   false     true   1.0000    0.8736     false   false
 luck-floor-02      0.0000   0.0000   false     true   1.0000    0.9996     false   false
 luck-floor-00      0.0000   0.0000   false     true   1.0000    0.9996     false   false
@@ -42,8 +42,8 @@ crypto-majors-4h: 6000 bars, 6 windows
 
 == crypto-majors-4h (4h, ppy 2190) ==
 agent                 dsr      psr  pass^k  process   boot_p  worst_dd  eligible      nc
-buy-and-hold       0.0000   1.0000   false     true   0.0005    0.4787     false   false
-risk-managed       0.0000   0.0000   false     true   1.0000    0.4460     false   false
+buy-and-hold       0.3230   0.9203   false     true   0.0735    0.4787     false   false
+risk-managed       0.0005   0.0778   false     true   1.0000    0.4460     false   false
 luck-floor-00      0.0000   0.0000   false     true   1.0000    0.9102     false   false
 luck-floor-02      0.0000   0.0000   false     true   1.0000    0.9087     false   false
 luck-floor-04      0.0000   0.0000   false     true   1.0000    0.9108     false   false
@@ -53,29 +53,29 @@ crypto-majors-1d: 1000 bars, 6 windows
 
 == crypto-majors-1d (1d, ppy 365) ==
 agent                 dsr      psr  pass^k  process   boot_p  worst_dd  eligible      nc
-buy-and-hold       0.0090   0.9994   false     true   0.0015    0.4760     false   false
-risk-managed       0.0032   0.9980   false     true   0.0045    0.1697     false   false
-luck-floor-01      0.0000   0.0390   false     true   1.0000    0.6028     false   false
-luck-floor-03      0.0000   0.0254   false     true   1.0000    0.6088     false   false
-luck-floor-00      0.0000   0.0238   false     true   1.0000    0.6167     false   false
-luck-floor-04      0.0000   0.0213   false     true   1.0000    0.6144     false   false
-luck-floor-02      0.0000   0.0147   false     true   1.0000    0.6154     false   false
+buy-and-hold       0.2505   0.8741   false     true   0.1219    0.4760     false   false
+risk-managed       0.2118   0.8450   false     true   0.1949    0.1697     false   false
+luck-floor-01      0.0071   0.2636   false     true   1.0000    0.6028     false   false
+luck-floor-03      0.0058   0.2417   false     true   1.0000    0.6088     false   false
+luck-floor-00      0.0056   0.2386   false     true   1.0000    0.6167     false   false
+luck-floor-04      0.0054   0.2334   false     true   1.0000    0.6144     false   false
+luck-floor-02      0.0046   0.2170   false     true   1.0000    0.6154     false   false
 crypto-majors-1w: 307 bars, 6 windows
 
 == crypto-majors-1w (1w, ppy 52) ==
 agent                 dsr      psr  pass^k  process   boot_p  worst_dd  eligible      nc
-buy-and-hold       0.0006   1.0000   false     true   0.0005    0.6714     false   false
-luck-floor-02      0.0000   0.9995   false     true   0.0010    0.7375     false   false
-luck-floor-04      0.0000   0.9992   false     true   0.0010    0.7462     false   false
-luck-floor-03      0.0000   0.9988   false     true   0.0015    0.7290     false   false
-luck-floor-01      0.0000   0.9985   false     true   0.0015    0.7602     false   false
-luck-floor-00      0.0000   0.9985   false     true   0.0030    0.7394     false   false
-risk-managed       0.0000   0.5945   false     true   0.4233    0.0889     false   false
+buy-and-hold       0.1244   0.9262   false     true   0.0795    0.6714     false   false
+luck-floor-02      0.0762   0.8804   false     true   0.1369    0.7375     false   false
+luck-floor-04      0.0718   0.8717   false     true   0.1404    0.7462     false   false
+luck-floor-03      0.0629   0.8611   false     true   0.1534    0.7290     false   false
+luck-floor-01      0.0634   0.8574   false     true   0.1584    0.7602     false   false
+luck-floor-00      0.0624   0.8569   false     true   0.1574    0.7394     false   false
+risk-managed       0.0057   0.5336   false     true   0.4608    0.0889     false   false
 fx-majors-1d: 4157 bars, 6 windows
 
 == fx-majors-1d (1d, ppy 252) ==
 agent                 dsr      psr  pass^k  process   boot_p  worst_dd  eligible      nc
-buy-and-hold       0.0000   0.1618   false     true   1.0000    0.1988     false   false
+buy-and-hold       0.0000   0.3636   false     true   1.0000    0.1988     false   false
 risk-managed       0.0000   0.0000   false     true   1.0000    0.3251     false   false
 luck-floor-02      0.0000   0.0000   false     true   1.0000    0.7723     false   false
 luck-floor-00      0.0000   0.0000   false     true   1.0000    0.7754     false   false
@@ -86,19 +86,19 @@ commodities-1d: 4126 bars, 6 windows
 
 == commodities-1d (1d, ppy 252) ==
 agent                 dsr      psr  pass^k  process   boot_p  worst_dd  eligible      nc
-buy-and-hold       0.0000   1.0000   false     true   0.0030    0.9571     false   false
-luck-floor-04      0.0000   0.7292   false     true   0.2649    0.9977     false   false
-risk-managed       0.0000   0.0002   false     true   1.0000    0.3476     false   false
-luck-floor-03      0.0000   0.3325   false     true   1.0000    1.0744     false   false
+buy-and-hold       0.0000   0.9905   false     true   0.1244    0.9571     false   false
+luck-floor-04      0.0000   0.6453   false     true   0.2804    0.9977     false   false
+risk-managed       0.0000   0.1011   false     true   1.0000    0.3476     false   false
+luck-floor-03      0.0000   0.0046   false     true   1.0000    1.0744     false   false
 luck-floor-02      0.0000   0.0000   false     true   1.0000    1.0524     false   false
 luck-floor-01      0.0000   0.0000   false     true   1.0000    1.0210     false   false
-luck-floor-00      0.0000   0.0149   false     true   1.0000    1.0922     false   false
+luck-floor-00      0.0000   0.0117   false     true   1.0000    1.0922     false   false
 rates-1d: 4157 bars, 6 windows
 
 == rates-1d (1d, ppy 252) ==
 agent                 dsr      psr  pass^k  process   boot_p  worst_dd  eligible      nc
-buy-and-hold       0.0000   0.9931   false     true   0.0035    0.8395     false   false
-risk-managed       0.0000   0.0000   false     true   1.0000    0.4585     false   false
+buy-and-hold       0.0000   0.8079   false     true   0.1754    0.8395     false   false
+risk-managed       0.0000   0.0014   false     true   1.0000    0.4585     false   false
 luck-floor-03      0.0000   0.0000   false     true   1.0000    0.8328     false   false
 luck-floor-02      0.0000   0.0000   false     true   1.0000    0.7943     false   false
 luck-floor-00      0.0000   0.0000   false     true   1.0000    0.8709     false   false
@@ -108,6 +108,6 @@ luck-floor-01      0.0000   0.0000   false     true   1.0000    0.8223     false
 
 wrote == perturbation report: us-indices-1w (5 variants, seed 7) ==
 agent              orig_psr       best      worst     spread
-risk-managed         0.9998     1.0000     0.9995     0.0005
-buy-and-hold         1.0000     1.0000     1.0000     0.0000
-paper/evidence/candidate-final/risk-managed.jsonl
+risk-managed         0.8958     0.9695     0.8767     0.0928
+buy-and-hold         0.9908     0.9972     0.9438     0.0534
+paper/evidence/final/risk-managed.jsonl

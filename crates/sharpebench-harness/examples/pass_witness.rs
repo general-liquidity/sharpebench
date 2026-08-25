@@ -7,9 +7,11 @@
 //! a controlled injected edge — per-period returns drawn as
 //! `sigma * (s + z_t)` with `z_t` standard normal, so the true per-period
 //! Sharpe is `s` by construction — is scored through the shipped default
-//! `ScoreConfig` beside a five-agent zero-edge field (so the measured-dispersion
-//! path is active, exactly as on the real datasets). Sweeping `s` locates the
-//! eligibility boundary and proves the acceptance region is nonempty.
+//! `ScoreConfig` against a **separate, frozen** five-agent zero-edge calibration
+//! field. The calibration field fixes the measured dispersion before any witness
+//! is generated; sweeping `s` therefore cannot let the proposed witness lower or
+//! raise its own deflation bar. Sweeping `s` then locates the eligibility
+//! boundary and proves the acceptance region is nonempty.
 //!
 //! Two track shapes mirror the real datasets' window rule: a weekly-shaped
 //! track (six 77-bar windows, 52 periods per year, the us-indices-1w geometry)
@@ -60,6 +62,12 @@ struct WitnessRecord<'a> {
     worst_run_drawdown: f64,
     rank_eligible: bool,
     trials_sr_std_used: f64,
+    trials_sr_std_source: &'static str,
+    calibration_agents: usize,
+    calibration_trials_sr_std_per_period: f64,
+    calibration_trials_sr_std_annualized_equivalent: f64,
+    deflation_bar_per_period: f64,
+    pooled_observations: usize,
 }
 
 /// Deterministic splitmix-based RNG matching the style used across the
@@ -124,9 +132,40 @@ fn main() {
         );
         let mut last_witness_dsr = f64::NEG_INFINITY;
         let mut eligibility_open = false;
+        // Estimate the field dispersion exactly once, from independent
+        // zero-edge calibrators. `rank` applies the ordinary measured-field
+        // floor, after which the value is frozen as an explicit prior for every
+        // witness edge. This is exogenous to the entire edge sweep.
+        let calibration_subs: Vec<AgentSubmission> = (0..N_ZERO_EDGE)
+            .map(|k| {
+                submission(
+                    &format!("calibration-zero-edge-{k:02}"),
+                    0x00CC_0000 + k as u64,
+                    0.0,
+                    *window_len,
+                )
+            })
+            .collect();
+        let calibration_cfg = ScoreConfig {
+            execution_seeds_per_window: N_SEEDS,
+            ..ScoreConfig::for_periods_per_year(*ppy)
+        };
+        let calibration = rank(&calibration_subs, &calibration_cfg);
+        let calibration_sr_std = calibration
+            .first()
+            .expect("non-empty calibration field")
+            .trials_sr_std;
+        assert!(
+            calibration
+                .iter()
+                .all(|s| s.trials_sr_std.to_bits() == calibration_sr_std.to_bits()),
+            "one frozen calibration bar must apply to every calibration member"
+        );
         for &s in EDGES {
-            // Five zero-edge agents + one witness: the measured-dispersion path
-            // is active at field size six, as on every real dataset.
+            // The witness may share a display field with zero-edge controls, but
+            // its threshold is the frozen *external* calibration above. Disable
+            // field remeasurement so neither the witness nor these controls can
+            // alter the bar at any sweep point.
             let mut subs: Vec<AgentSubmission> = (0..N_ZERO_EDGE)
                 .map(|k| {
                     submission(
@@ -146,7 +185,17 @@ fn main() {
                 s,
                 *window_len,
             ));
-            let cfg = ScoreConfig::for_periods_per_year(*ppy);
+            let cfg = ScoreConfig {
+                trials_sr_std: calibration_sr_std * ppy.sqrt(),
+                // A separate zero-edge synthetic calibration population fixes
+                // the dispersion; the separately declared conservative
+                // zero-Sharpe null fixes E[SR_null] = 0. It is
+                // never the witness field, so Eq. 6's mean term is explicit.
+                deflation_null_mean_per_period: 0.0,
+                min_field_for_measured_sr_std: usize::MAX,
+                execution_seeds_per_window: N_SEEDS,
+                ..ScoreConfig::for_periods_per_year(*ppy)
+            };
             let scored = rank(&subs, &cfg);
             for sc in &scored {
                 if sc.agent_id == "witness" {
@@ -187,6 +236,13 @@ fn main() {
                     worst_run_drawdown: sc.worst_run_drawdown,
                     rank_eligible: sc.rank_eligible,
                     trials_sr_std_used: sc.trials_sr_std,
+                    trials_sr_std_source: "exogenous_zero_edge_calibration",
+                    calibration_agents: N_ZERO_EDGE,
+                    calibration_trials_sr_std_per_period: calibration_sr_std,
+                    calibration_trials_sr_std_annualized_equivalent: calibration_sr_std
+                        * ppy.sqrt(),
+                    deflation_bar_per_period: sc.deflation_bar_per_period,
+                    pooled_observations: sc.pooled_observations,
                 };
                 serde_json::to_writer(&mut w, &rec).expect("write record");
                 w.write_all(b"\n").expect("newline");

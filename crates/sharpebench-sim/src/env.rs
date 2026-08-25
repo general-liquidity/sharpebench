@@ -1,7 +1,7 @@
 //! The Gym-style open-loop environment: the caller drives `reset()` / `step()`.
 //!
 //! [`TradingEnv`] is the open-loop face of the same engine [`crate::run_backtest`]
-//! runs closed — both call the one shared [`crate::engine::step_once`] body, so a
+//! runs closed — both call the one shared `crate::engine::step_once` body, so a
 //! trajectory the env produces is byte-identical to the equivalent `run_backtest`
 //! (proven by `env_step_matches_run_backtest`). Look-ahead is impossible: the env
 //! owns the time cursor and only ever builds a point-in-time observation.
@@ -52,6 +52,9 @@ impl TradingEnv {
     /// Build an environment that steps `window` over `data` with seeded execution
     /// noise and the given cost model.
     pub fn new(data: Dataset, window: Window, costs: CostModel, seed: u64) -> Self {
+        costs
+            .validate()
+            .expect("invalid CostModel: execution noise must be finite and in-domain");
         let symbols = data.symbols();
         let end = window.end.min(data.len());
         let book = Book::new(&symbols, seed);
@@ -86,6 +89,7 @@ impl TradingEnv {
             &self.symbols,
             &mut self.book,
             &self.costs,
+            self.seed,
             t,
             &decision,
         );
@@ -142,7 +146,7 @@ impl TradingEnv {
 }
 
 /// An O(1), serializable snapshot of a [`TradingEnv`]'s mutable state — the time
-/// cursor plus the full [`Book`] (holdings, cash, RNG cursor, decision trace, prior
+/// cursor plus the full `Book` (holdings, cash, RNG cursor, decision trace, prior
 /// NAV). Everything an env needs to resume an exact trajectory; the immutable
 /// config (frozen data, window, costs, seed) lives in the env and is not copied.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -162,7 +166,7 @@ pub struct Scenario {
 }
 
 impl Scenario {
-    /// A single full window over `data` (after a [`WARMUP`]-bar burn-in) under `costs`.
+    /// A single full window over `data` (after a `WARMUP`-bar burn-in) under `costs`.
     pub fn full(name: impl Into<String>, data: Dataset, costs: CostModel) -> Self {
         let end = data.len();
         let start = WARMUP.min(end.saturating_sub(1));

@@ -31,6 +31,12 @@ sharpebench score submissions.json
 One `run` per seed × window — that is what makes pass^k and multi-window OOS
 meaningful.
 
+A submission object may also carry an optional `declared_mandate`, e.g.
+`{"kind": "drawdown_capped", "max_per_run_drawdown": 0.2}` or
+`{"kind": "outperform_buy_and_hold"}`: the reliability verdict the agent asks to be
+judged under, scored and reported beside the board verdict without moving rank.
+See [Declaring a mandate at submission](methodology-pass-k.md#declaring-a-mandate-at-submission).
+
 ## 2. A live agent over the simulator
 
 Implement the `Agent` trait (in-process) or speak the newline-delimited JSON

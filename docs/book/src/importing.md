@@ -58,7 +58,7 @@ Deliberately not a parser; see the StockBench section below.
 ## What the re-score can and cannot claim
 
 An imported submission carries returns and nothing else, so two of
-SharpeBench's four gates degenerate:
+SharpeBench's five eligibility conjuncts are only partially observable:
 
 - **Process gate: trivially passes.** There is no audit trace, so the process
   checks have nothing to inspect and every agent scores clean. A pass here
@@ -69,6 +69,8 @@ SharpeBench's four gates degenerate:
 The comparison that remains is real but narrower: deflation (deflated Sharpe
 and PSR against the declared search footprint), per-run reliability
 (`pass^k` across the imported runs) and the bootstrap significance test. The
+configured mandate remains a scoreable return-path constraint, but an import
+cannot establish the foreign process that produced a trace-free record. The
 import command prints this notice loudly on every run, and embeds the same
 text in each submission under an `_import_note` field. The scorer's
 deserialization ignores unknown fields, so the caveat travels inside the file

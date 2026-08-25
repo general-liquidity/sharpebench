@@ -43,15 +43,25 @@ per-period trials_sr_std = annualized trials_sr_std / sqrt(periods_per_year)
 
 The conversion lives in one function, `sharpebench_core::per_period_sr_std`, and
 every deflation call site reads from it, so the prior can neither be converted
-twice nor reach a per-period statistic unconverted. Every `CompositeScore` reports
-the per-period value it was actually deflated with as `trials_sr_std`, and the
-annualized prior it came from as `trials_sr_std_annualized`.
+twice nor reach a per-period statistic unconverted. Every `CompositeScore`
+reports the per-period value it was actually deflated with, its annualized
+equivalent, the configured/measured/measured-floored source, and the resulting
+deflation bar in both units.
+
+Execution seeds are Monte-Carlo replicates conditional on one market path, not
+additional history. Before PSR, DSR, and the stationary bootstrap are computed,
+the scorer averages aligned seed returns within each window and concatenates
+the windows. Eight executions of a 409-bar window therefore contribute 409
+temporally distinct observations, not 3,272 pseudo-independent ones. Incomplete
+or unequal seed blocks are rejected rather than truncated.
 
 When `rank` has a field of at least `min_field_for_measured_sr_std` agents it
 *measures* the dispersion of per-period Sharpes across the field instead of using
-the prior. That measurement is already per-period and is used as-is:
-`trials_sr_std_source` reads `measured` and `trials_sr_std_annualized` is `null`,
-because no annualized prior was involved. Before measuring, near-clone streams
+the prior. That measurement is already per-period and is used as-is;
+`trials_sr_std_source` reads `measured`, while
+`trials_sr_std_annualized_equivalent` reports the same quantity multiplied by
+the square root of periods per year for interpretation. Before measuring,
+near-clone streams
 (pooled returns whose `|cosine|` reaches `CLONE_COLLAPSE_COSINE`, 0.995, a
 stricter constant than the rediscovery screen's 0.97 so that honest collinear
 agents keep their vote) are collapsed to one vote per cluster, for the estimate

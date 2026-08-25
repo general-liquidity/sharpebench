@@ -204,6 +204,46 @@ fn full_lifecycle_is_deterministic_and_verifies() {
 }
 
 #[test]
+fn empty_window_is_superseded_without_rewriting_its_frozen_record() {
+    let dir = temp_arena_dir("supersession");
+    let mut arena = Arena::init(&dir).unwrap();
+    arena
+        .open_window("old", 10, 20, ScoreConfig::default())
+        .unwrap();
+    let old_path = dir.join(WINDOWS_DIR).join("old").join("window.json");
+    let before = std::fs::read(&old_path).unwrap();
+    let record = Arena::supersede_empty_window(
+        &dir,
+        "old",
+        "schema-v1 omitted explicit execution-seed topology and null population",
+    )
+    .unwrap();
+    assert_eq!(record.historical_window_sha256, content_digest(&before));
+    assert_eq!(std::fs::read(&old_path).unwrap(), before);
+
+    let mut reopened = Arena::load(&dir).unwrap();
+    assert!(reopened.window("old").is_none());
+    reopened
+        .open_window_with_provenance(
+            "new",
+            10,
+            20,
+            ScoreConfig::default(),
+            None,
+            content_digest(b"new-frozen-scorer"),
+        )
+        .unwrap();
+    assert_eq!(
+        reopened.window("new").unwrap().scorer_artifact_sha256,
+        content_digest(b"new-frozen-scorer")
+    );
+    let state: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("state.json")).unwrap()).unwrap();
+    assert_eq!(state["superseded"][0]["window_id"], "old");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn late_commitment_is_refused() {
     let dir = temp_arena_dir("late-commit");
     let mut arena = Arena::init(&dir).unwrap();

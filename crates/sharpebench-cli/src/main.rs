@@ -1016,7 +1016,13 @@ fn run_stress(json: bool) -> ExitCode {
             sharpebench_harness::run_agent("momentum", &masked, &windows, &seeds, costs, || {
                 Box::new(Momentum::default()) as Box<dyn Agent>
             });
-        let board = rank(&[bh, mo], &ScoreConfig::default());
+        let board = rank(
+            &[bh, mo],
+            &ScoreConfig {
+                execution_seeds_per_window: seeds.len(),
+                ..ScoreConfig::default()
+            },
+        );
         if json {
             scenarios.push(serde_json::json!({ "scenario": name, "board": board }));
         } else {
@@ -1137,6 +1143,7 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
 
     let seeds: Vec<u64> = (0..8).collect();
     let costs = CostModel::default();
+    cfg.execution_seeds_per_window = seeds.len();
 
     let bh = sharpebench_harness::run_agent("buy-and-hold", &data, &windows, &seeds, costs, || {
         Box::new(BuyAndHold) as Box<dyn Agent>
@@ -1427,6 +1434,12 @@ fn run_verify_trajectory(args: &[String], json: bool) -> ExitCode {
         println!("  deflated Sharpe : {:.4}", result.score.deflated_sharpe);
         println!("  raw mean return : {:.5}", result.score.raw_mean_return);
         println!("  rank-eligible   : {}", yn(result.score.rank_eligible));
+        match &result.declared_verdict {
+            sharpebench_harness::DeclaredVerdictVerification::FieldRequired { benchmark_id } => {
+                println!("  declared mandate: requires aligned field benchmark `{benchmark_id}`; not verified from one artifact")
+            }
+            other => println!("  declared mandate: {other:?}"),
+        }
         println!("\n{}", result.verification_explanation);
     }
     ExitCode::SUCCESS
@@ -1440,19 +1453,25 @@ fn run_score(path: &str, args: &[String], json: bool) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let subs: Vec<AgentSubmission> = match serde_json::from_str(&data) {
+    // Each object is a submission plus an optional `declared_mandate`; the
+    // declaration is scored as a labeled second verdict and never moves rank.
+    let field: Vec<sharpebench_core::DeclaredSubmission> = match serde_json::from_str(&data) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("error: invalid submissions JSON: {e}");
             return ExitCode::FAILURE;
         }
     };
+    let (subs, declarations) = sharpebench_core::split_declarations(field);
     let mut cfg = ScoreConfig::default();
     if let Err(e) = apply_pass_mode_flags(args, &mut cfg) {
         eprintln!("error: {e}");
         return ExitCode::from(2);
     }
-    emit_board(&rank(&subs, &cfg), json);
+    emit_board(
+        &sharpebench_core::rank_declared(&subs, &declarations, &cfg),
+        json,
+    );
     ExitCode::SUCCESS
 }
 
@@ -1466,8 +1485,12 @@ fn emit_board(board: &[CompositeScore], json: bool) {
 }
 
 fn print_board(board: &[CompositeScore]) {
+    // The mandate column appears only when some row declared one, so a board
+    // with no declarations prints exactly as before.
+    let declared = board.iter().any(|s| s.verdict_applied.is_some());
+    let mandate_header = if declared { " mandate" } else { "" };
     println!(
-        "{:<4} {:<18} {:>9} {:>8} {:>7} {:>6} {:>9} {:>10}",
+        "{:<4} {:<18} {:>9} {:>8} {:>7} {:>6} {:>9} {:>10}{mandate_header}",
         "#", "agent", "DSR", "PSR", "pass^k", "proc", "boot_p", "raw_ret"
     );
     println!("{}", "-".repeat(80));
@@ -1477,8 +1500,17 @@ fn print_board(board: &[CompositeScore]) {
         } else {
             "—".to_string()
         };
+        let mandate = if declared {
+            format!(
+                " {}",
+                s.mandate_verdict_label()
+                    .unwrap_or_else(|| "undeclared".to_string())
+            )
+        } else {
+            String::new()
+        };
         println!(
-            "{:<4} {:<18} {:>9.4} {:>8.4} {:>7} {:>6} {:>9.4} {:>10.5}",
+            "{:<4} {:<18} {:>9.4} {:>8.4} {:>7} {:>6} {:>9.4} {:>10.5}{mandate}",
             pos,
             truncate(&s.agent_id, 18),
             s.deflated_sharpe,
@@ -1494,6 +1526,13 @@ fn print_board(board: &[CompositeScore]) {
         board.iter().filter(|s| s.rank_eligible).count(),
         board.len()
     );
+    if declared {
+        println!(
+            "Declared mandates are reported beside the board verdict, never ranked against it: \
+             \"meets\" is eligibility under the verdict the submitter declared, \"all-weather\" \
+             is eligibility under this board's verdict, and # counts the latter only."
+        );
+    }
 }
 
 fn yn(b: bool) -> &'static str {

@@ -36,8 +36,20 @@ fn cli_drives_the_full_lifecycle_and_verify_walks_the_chain() {
     let dir = arena_dir.to_str().unwrap();
 
     assert_eq!(arena_cmd::run(&argv(&["init", dir]), true), 0);
+    let scorer = content_digest(b"cli-scorer-artifact");
     assert_eq!(
-        arena_cmd::run(&argv(&["open", dir, "w1", "10", "20"]), true),
+        arena_cmd::run(
+            &argv(&[
+                "open",
+                dir,
+                "w1",
+                "10",
+                "20",
+                "--scorer-artifact-sha256",
+                &scorer,
+            ]),
+            true,
+        ),
         0
     );
 

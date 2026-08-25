@@ -39,6 +39,11 @@ jobs:
       - name: Clippy (deny warnings)
         run: cargo clippy --all-targets --all-features -- -D warnings
 
+      - name: Rustdoc (deny warnings)
+        env:
+          RUSTDOCFLAGS: -Dwarnings
+        run: cargo doc --workspace --no-deps
+
   test:
     name: build · test (${{ matrix.os }})
     # The kernel's claim is "byte-identical output on any platform". The golden-score
@@ -181,6 +186,18 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check
+      # sharpebench-py is excluded from the Rust-only workspace, so the action
+      # above cannot see its pyo3 dependency tree. Run the pinned binary from
+      # that crate against the same root policy.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96.0"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.19.9
+      - name: cargo-deny (crates/sharpebench-py, excluded from the workspace)
+        working-directory: crates/sharpebench-py
+        run: cargo deny check --config ../../deny.toml
 
   docs:
     name: docs build

@@ -88,7 +88,7 @@ fn behavior_role(run: &Run) -> &'static str {
 /// member runs, truncated to the shortest run so every stream aligns with the
 /// team stream period by period. Empty when there are no runs or the shortest
 /// run has fewer than 2 periods (no regression is estimable). Deterministic:
-/// classes appear in the fixed [`BEHAVIOR_ROLES`] order, and averaging follows
+/// classes appear in the fixed `BEHAVIOR_ROLES` order, and averaging follows
 /// run submission order.
 pub fn elicit_behavior_roles(runs: &[Run]) -> Vec<(String, Vec<f64>)> {
     let Some(min_len) = runs.iter().map(|r| r.returns.len()).min() else {

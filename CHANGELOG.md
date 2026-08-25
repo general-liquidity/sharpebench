@@ -9,7 +9,12 @@ section is one `v*` tag and links the commits it was built from.
 
 ## [Unreleased]
 
+### Added
+- core/protocol: `DeclaredMandate`, an opt-in mandate declared on the submission (`absolute_return`, `relative_to`, `drawdown_capped`, `outperform_buy_and_hold`; the prior `long_only_beta` wire spelling remains a compatibility alias), scored by `rank_declared` / `score_agent_declared` as a labeled second verdict (`declared_mandate`, `verdict_applied`, `declared_passed_k`, `declared_mandate_eligible`, `declared_mandate_ordinal`). A declaration selects which reliability question pass^k asks and never relaxes the DSR, bootstrap, process or host-mandate gates; the board ranks under the host verdict and orders declared eligibility within its mandate class only. Evidence: `paper/evidence/final/mandate-declaration.jsonl` records 36 declared agent--dataset cases and 45 undeclared luck-floor records; none is declared-eligible, and the one declared reliability pass still fails deflation and bootstrap (this commit).
+
 ### Fixed
+- statistics: pooled PSR, DSR and bootstrap inputs now average aligned execution-seed returns within a window before concatenating market time; malformed or unequal seed blocks fail closed. Scores stamp execution-seed topology, pooled observations, the fixed null and configured-versus-measured dispersion source.
+- paper/docs: regenerated final evidence replaces pre-repair values. The default grid has no eligible agent in 4,608 cells; the risk-managed control is not a deflation-only refusal; the thousand-agent daily-crypto diagnostic peaks at DSR 0.2500 while the operational path peaks at 0.0012; two empty forward-window records are superseded and no window is open.
 - release: recovery runs dispatched with `release_tag` now run the npm and Python manifest guards and the registry verify job instead of skipping them, so a recovery cannot report success without proving every registry serves the tag; a failed crate publish prints the exact trusted-publisher configuration to add on crates.io (this commit).
 
 ## [0.8.0] - 2026-08-24
@@ -71,7 +76,7 @@ section is one `v*` tag and links the commits it was built from.
 - py: `rank_board`, `score_one`, `rank_returns`, `default_score_config`, `never_catastrophic_config` take and return the CLI's wire JSON ([6ef1a54](https://github.com/general-liquidity/sharpebench/commit/6ef1a54)).
 - cli, wasm, npm, mcp: `select`, `disqualify`, `rediscover`, `uncertainty` and `decay-prior` subcommands, with WASM, npm and MCP surfaces for the four that make sense in a browser ([f6ad5e3](https://github.com/general-liquidity/sharpebench/commit/f6ad5e3), [5abbf14](https://github.com/general-liquidity/sharpebench/commit/5abbf14)).
 - release: SLSA build provenance on the musl release binary, verifiable with `gh attestation verify` ([d203825](https://github.com/general-liquidity/sharpebench/commit/d203825)).
-- paper: methodology paper draft with committed evidence records, the full nine-dataset grid (4,608 cells), the fourth finding (risk-managed agent refused solely on deflation), evidence figures and the inverse comparison table ([d48295b](https://github.com/general-liquidity/sharpebench/commit/d48295b), [8cb43db](https://github.com/general-liquidity/sharpebench/commit/8cb43db), [442cd3d](https://github.com/general-liquidity/sharpebench/commit/442cd3d), [73a054f](https://github.com/general-liquidity/sharpebench/commit/73a054f), [25431ee](https://github.com/general-liquidity/sharpebench/commit/25431ee)).
+- paper: methodology paper draft with committed evidence records, the full nine-dataset grid (4,608 cells), evidence figures and the inverse comparison table. Later regenerated evidence supersedes the early risk-managed ``deflation only'' description ([d48295b](https://github.com/general-liquidity/sharpebench/commit/d48295b), [8cb43db](https://github.com/general-liquidity/sharpebench/commit/8cb43db), [442cd3d](https://github.com/general-liquidity/sharpebench/commit/442cd3d), [73a054f](https://github.com/general-liquidity/sharpebench/commit/73a054f), [25431ee](https://github.com/general-liquidity/sharpebench/commit/25431ee)).
 
 ### Changed
 - paper: title aligned with the product tagline ([930e41d](https://github.com/general-liquidity/sharpebench/commit/930e41d), [a459f78](https://github.com/general-liquidity/sharpebench/commit/a459f78)).

@@ -51,9 +51,13 @@ pub struct RunSpec {
 /// alongside the point estimate.
 pub fn render(board: &[CompositeScore]) -> String {
     let mut out = String::new();
+    // Rows that declared a mandate get a trailing column stating the verdict
+    // applied and how it went; a board with no declarations is unchanged.
+    let declared = board.iter().any(|s| s.verdict_applied.is_some());
+    let mandate_header = if declared { " mandate" } else { "" };
     let _ = writeln!(
         out,
-        "{:<4} {:<18} {:>9} {:>19} {:>4} {:>7} {:>9}",
+        "{:<4} {:<18} {:>9} {:>19} {:>4} {:>7} {:>9}{mandate_header}",
         "#", "agent", "DSR", "DSR CI", "tie", "elig", "raw_ret"
     );
     for s in board.iter() {
@@ -68,9 +72,18 @@ pub fn render(board: &[CompositeScore]) -> String {
         } else {
             ""
         };
+        let mandate = if declared {
+            format!(
+                " {}",
+                s.mandate_verdict_label()
+                    .unwrap_or_else(|| "undeclared".to_string())
+            )
+        } else {
+            String::new()
+        };
         let _ = writeln!(
             out,
-            "{:<4} {:<18} {:>9.4} {:>19} {:>4} {:>7} {:>9.5}",
+            "{:<4} {:<18} {:>9.4} {:>19} {:>4} {:>7} {:>9.5}{mandate}",
             pos, s.agent_id, s.deflated_sharpe, ci, tie, s.rank_eligible, s.raw_mean_return
         );
     }
@@ -128,7 +141,7 @@ fn spec_payload(spec: &RunSpec) -> String {
     serde_json::to_string(spec).unwrap_or_default()
 }
 
-/// Build a self-describing signed board: chain = [spec] ++ [scores…], each link
+/// Build a self-describing signed board: chain = `spec` followed by `scores`, each link
 /// signed against the previous so the spec and the ranking are bound together.
 pub fn publish_self_describing(
     spec: RunSpec,

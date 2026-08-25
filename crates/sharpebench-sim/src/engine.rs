@@ -7,7 +7,7 @@ use sharpebench_core::{ProcessEvent, Run, Trace};
 use sharpebench_protocol::{Decision, MarketObservation, PositionState, SymbolSnapshot};
 
 use crate::agent::Agent;
-use crate::costs::{liquidity_capped_delta, market_impact_frac, CostModel, Rng};
+use crate::costs::{liquidity_capped_delta, market_impact_frac, CostModel, ExecutionNoise, Rng};
 use crate::data::Dataset;
 
 const LOOKBACK: usize = 20;
@@ -56,6 +56,17 @@ pub(crate) struct Book {
     pub(crate) rng: Rng,
     pub(crate) trace: Trace,
     pub(crate) prev_nav: f64,
+    /// Orders carried to the next bar by the opt-in execution noise (a delayed
+    /// order or the unfilled remainder of a partial fill). Empty, and absent from
+    /// the serialized snapshot, under the default cost model.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(crate) pending: BTreeMap<String, PendingOrder>,
+}
+
+/// An order carried from a previous bar: the target weight still to be reached.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct PendingOrder {
+    pub(crate) target_weight: f64,
 }
 
 impl Book {
@@ -66,6 +77,7 @@ impl Book {
             rng: Rng::new(seed),
             trace: Trace::default(),
             prev_nav: 1.0_f64,
+            pending: BTreeMap::new(),
         }
     }
 }
@@ -111,6 +123,113 @@ pub(crate) struct StepOutcome {
     pub(crate) outcome: bool,
 }
 
+/// Whether attempting a fresh/carry order changed the execution state. The
+/// caller needs this distinction to preserve legacy fill-only traces when
+/// execution noise is off, while still recording a delayed noisy decision once.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OrderOutcome {
+    Noop,
+    Deferred,
+    Filled,
+}
+
+/// Fill one order (fresh or carried) toward `target_weight` on `symbol` at step
+/// `t`: liquidity cap, base seeded slippage, own-order impact, fees, and, when
+/// the cost model carries [`ExecutionNoise`], the seed-driven delay / partial
+/// fill / queue slippage. With `costs.noise == None` the arithmetic is exactly
+/// the historical fill path, in the same order.
+#[allow(clippy::too_many_arguments)]
+fn apply_order(
+    data: &Dataset,
+    symbols: &[String],
+    book: &mut Book,
+    costs: &CostModel,
+    seed: u64,
+    t: usize,
+    cur_nav: f64,
+    symbol: &str,
+    target_weight: f64,
+    carried: bool,
+) -> OrderOutcome {
+    let p = price(data, symbol, t);
+    if p <= 0.0 {
+        return OrderOutcome::Noop;
+    }
+    let target_value = target_weight.max(0.0) * cur_nav;
+    let cur_value = book.shares[symbol] * p;
+    // Liquidity cap: a trade larger than the per-step participation limit
+    // only partially fills; the rest is left for later steps.
+    let mut delta_value =
+        liquidity_capped_delta(target_value - cur_value, costs.max_participation, cur_nav);
+    if delta_value.abs() < 1e-9 {
+        return OrderOutcome::Noop;
+    }
+    let mut queue_slip = 0.0;
+    if let Some(noise) = costs.noise {
+        let sym_idx = symbols.iter().position(|s| s == symbol).unwrap_or(0);
+        let mut nr = ExecutionNoise::stream(seed, t, sym_idx);
+        let u_d = nr.unit();
+        let u_f = nr.unit();
+        let u_q = nr.unit();
+        // (a) fill delay: a fresh order may not reach the book this bar. It is
+        // carried and fills at the next bar's price; a carried order never waits
+        // a second time.
+        if !carried && u_d < noise.delay_prob {
+            book.pending
+                .insert(symbol.to_string(), PendingOrder { target_weight });
+            return OrderOutcome::Deferred;
+        }
+        // (b) partial fill: only a fraction of the target change fills now; the
+        // remainder is carried as an order for the same target weight, unless
+        // it is below the carry floor, in which case the order fills in full.
+        let phi = noise.min_fill_frac + (1.0 - noise.min_fill_frac) * u_f;
+        let remainder = (1.0 - phi) * delta_value.abs();
+        if remainder > noise.carry_floor * cur_nav.max(0.0) {
+            delta_value *= phi;
+            book.pending
+                .insert(symbol.to_string(), PendingOrder { target_weight });
+        }
+        // (c) queue-position slippage: an adverse move inside the bar's range,
+        // proxied by the close-to-close absolute move since the dataset carries
+        // closes only, scaled by participation up to the reference level.
+        let prev = if t > 0 {
+            data.close_at(symbol, t - 1).unwrap_or(0.0)
+        } else {
+            0.0
+        };
+        let range = if prev > 0.0 {
+            (p / prev - 1.0).abs()
+        } else {
+            0.0
+        };
+        let participation = delta_value.abs() / cur_nav.max(1e-9);
+        let scale = if noise.queue_participation_ref > 0.0 {
+            (participation / noise.queue_participation_ref).min(1.0)
+        } else {
+            1.0
+        };
+        queue_slip = u_q * range * scale;
+    }
+    // Base seeded slippage plus own-order market impact: the bigger the
+    // trade relative to NAV, the more the fill moves against the agent.
+    let participation = delta_value.abs() / cur_nav.max(1e-9);
+    let slip = (costs.slippage_bps + book.rng.signed_unit().abs() * costs.slippage_bps) / 10_000.0
+        + market_impact_frac(costs.impact_bps, participation)
+        + queue_slip;
+    let exec_p = if delta_value > 0.0 {
+        p * (1.0 + slip)
+    } else {
+        p * (1.0 - slip)
+    };
+    let dshares = delta_value / exec_p;
+    let fee = delta_value.abs() * (costs.fee_bps / 10_000.0);
+    if let Some(sh) = book.shares.get_mut(symbol) {
+        *sh += dshares;
+    }
+    book.cash -= dshares * exec_p + fee;
+    OrderOutcome::Filled
+}
+
 /// Apply `decision` at step `t` and advance one bar: rebalance toward target
 /// weights with cost + seeded slippage + own-order market impact + partial fills,
 /// credit dividends, charge financing on leverage, then book the post-trade return
@@ -122,13 +241,46 @@ pub(crate) fn step_once(
     symbols: &[String],
     book: &mut Book,
     costs: &CostModel,
+    seed: u64,
     t: usize,
     decision: &Decision,
 ) -> StepOutcome {
     let cur_nav = nav(data, symbols, &book.shares, book.cash, t);
 
+    // Orders carried from the previous bar by the execution-noise model fill
+    // first, at this bar's price, unless the agent re-issues an order on the
+    // same symbol this bar (cancel/replace supersedes the carried order).
+    if !book.pending.is_empty() {
+        let carried = std::mem::take(&mut book.pending);
+        for (symbol, pend) in carried {
+            if decision.orders.iter().any(|o| o.symbol == symbol) {
+                continue;
+            }
+            let _ = apply_order(
+                data,
+                symbols,
+                book,
+                costs,
+                seed,
+                t,
+                cur_nav,
+                &symbol,
+                pend.target_weight,
+                true,
+            );
+        }
+    }
+
+    // Noise is keyed by (seed, step, symbol), so duplicate symbol targets would
+    // otherwise reuse one draw. Accept the first target and flag every duplicate
+    // instead of making correlated same-bar execution look independent.
+    let mut seen_symbols = std::collections::BTreeSet::new();
     // rebalance toward target weights with cost + seeded slippage.
     for ord in &decision.orders {
+        if !seen_symbols.insert(&ord.symbol) {
+            book.trace.events.push(ProcessEvent::ManipulativeOrder);
+            continue;
+        }
         let p = price(data, &ord.symbol, t);
         if p <= 0.0 {
             continue;
@@ -141,43 +293,34 @@ pub(crate) fn step_once(
         if ord.target_weight.abs() > CONCENTRATION_CAP {
             book.trace.events.push(ProcessEvent::ConcentrationBreach);
         }
-        let target_value = ord.target_weight.max(0.0) * cur_nav;
-        let cur_value = book.shares[&ord.symbol] * p;
-        // Liquidity cap: a trade larger than the per-step participation limit
-        // only partially fills; the rest is left for later steps.
-        let delta_value =
-            liquidity_capped_delta(target_value - cur_value, costs.max_participation, cur_nav);
-        if delta_value.abs() < 1e-9 {
-            continue;
-        }
-        // Base seeded slippage plus own-order market impact: the bigger the
-        // trade relative to NAV, the more the fill moves against the agent.
-        let participation = delta_value.abs() / cur_nav.max(1e-9);
-        let slip = (costs.slippage_bps + book.rng.signed_unit().abs() * costs.slippage_bps)
-            / 10_000.0
-            + market_impact_frac(costs.impact_bps, participation);
-        let exec_p = if delta_value > 0.0 {
-            p * (1.0 + slip)
-        } else {
-            p * (1.0 - slip)
-        };
-        let dshares = delta_value / exec_p;
-        let fee = delta_value.abs() * (costs.fee_bps / 10_000.0);
-        if let Some(sh) = book.shares.get_mut(&ord.symbol) {
-            *sh += dshares;
-        }
-        book.cash -= dshares * exec_p + fee;
-        // Capture the order's stated rationale into the audit trail (score-neutral),
-        // so the frozen trace explains *why* each fill happened. Empty = omitted.
-        if !ord.rationale.is_empty() {
-            book.trace.events.push(ProcessEvent::DecisionRationale {
-                symbol: ord.symbol.clone(),
-                rationale: ord.rationale.clone(),
+        let outcome = apply_order(
+            data,
+            symbols,
+            book,
+            costs,
+            seed,
+            t,
+            cur_nav,
+            &ord.symbol,
+            ord.target_weight,
+            false,
+        );
+        // With legacy noise-off costs, retain the historic trace contract: an
+        // order/rationale event denotes an actual fill and no event is emitted
+        // for a no-op target. With execution noise, an accepted delayed or
+        // partially filled decision is recorded here once; carried fills never
+        // duplicate it on later bars.
+        if outcome != OrderOutcome::Noop {
+            if !ord.rationale.is_empty() {
+                book.trace.events.push(ProcessEvent::DecisionRationale {
+                    symbol: ord.symbol.clone(),
+                    rationale: ord.rationale.clone(),
+                });
+            }
+            book.trace.events.push(ProcessEvent::OrderPlaced {
+                risk_gate_passed: true,
             });
         }
-        book.trace.events.push(ProcessEvent::OrderPlaced {
-            risk_gate_passed: true,
-        });
     }
 
     // corporate actions: credit cash dividends on post-trade holdings.
@@ -225,7 +368,7 @@ pub(crate) fn step_once(
 /// Run a single backtest of `agent` over `window` with seeded execution noise,
 /// returning an [`sharpebench_core::Run`] (per-period returns + decision trace).
 /// The closed-loop driver: it owns the `decide → step` loop, calling the same
-/// [`step_once`] body the open-loop [`crate::env::TradingEnv`] uses.
+/// `step_once` body the open-loop [`crate::env::TradingEnv`] uses.
 pub fn run_backtest(
     data: &Dataset,
     agent: &mut dyn Agent,
@@ -233,6 +376,9 @@ pub fn run_backtest(
     seed: u64,
     costs: CostModel,
 ) -> Run {
+    costs
+        .validate()
+        .expect("invalid CostModel: execution noise must be finite and in-domain");
     let symbols = data.symbols();
     let end = window.end.min(data.len());
     let mut book = Book::new(&symbols, seed);
@@ -250,7 +396,7 @@ pub fn run_backtest(
         if let Some(c) = &decision.cost {
             compute_cost += c.billable_units();
         }
-        let out = step_once(data, &symbols, &mut book, &costs, t, &decision);
+        let out = step_once(data, &symbols, &mut book, &costs, seed, t, &decision);
         returns.push(out.ret);
         confidences.push(out.confidence);
         outcomes.push(out.outcome);
@@ -268,7 +414,8 @@ pub fn run_backtest(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::{Agent, BuyAndHold};
+    use crate::agent::{Agent, BuyAndHold, Momentum};
+    use crate::costs::CostProfile;
     use sharpebench_protocol::{Action, Decision, MarketObservation, Order};
 
     /// Test-only agent: levers 2× into the first symbol (gross exposure 2× NAV).
@@ -391,6 +538,60 @@ mod tests {
     }
 
     #[test]
+    fn delayed_fill_records_one_decision_and_keeps_its_rationale() {
+        let data = Dataset::synthetic(2, 30, 9);
+        let symbols = data.symbols();
+        let mut book = Book::new(&symbols, 3);
+        let costs = CostModel {
+            noise: Some(ExecutionNoise {
+                delay_prob: 1.0,
+                min_fill_frac: 1.0,
+                carry_floor: 0.0,
+                queue_participation_ref: 1.0,
+            }),
+            ..CostModel::default()
+        };
+        let decision = Decision {
+            orders: vec![Order {
+                symbol: symbols[0].clone(),
+                action: Action::Buy,
+                target_weight: 0.2,
+                confidence: 0.7,
+                rationale: "delayed rationale".to_string(),
+            }],
+            reasoning: String::new(),
+            cost: None,
+        };
+        // First bar records the decision but delays its fill. The next bar has
+        // no new decision; it executes the carry without duplicating audit rows.
+        step_once(&data, &symbols, &mut book, &costs, 3, 10, &decision);
+        let no_decision = Decision {
+            orders: Vec::new(),
+            reasoning: String::new(),
+            cost: None,
+        };
+        step_once(&data, &symbols, &mut book, &costs, 3, 11, &no_decision);
+        assert_eq!(
+            book.trace
+                .events
+                .iter()
+                .filter(|e| matches!(e, ProcessEvent::OrderPlaced { .. }))
+                .count(),
+            1,
+            "one decision, not one event per carried fill"
+        );
+        assert_eq!(
+            book.trace
+                .events
+                .iter()
+                .filter(|e| matches!(e, ProcessEvent::DecisionRationale { rationale, .. } if rationale == "delayed rationale"))
+                .count(),
+            1,
+            "the rationale belongs to the submitted decision even when delayed"
+        );
+    }
+
+    #[test]
     fn backtest_produces_returns_and_trace() {
         let data = Dataset::synthetic(4, 120, 11);
         let mut agent = BuyAndHold;
@@ -436,6 +637,7 @@ mod tests {
             financing_bps: 0.0,
             max_participation: f64::INFINITY,
             trf_cost: None,
+            noise: None,
         };
         let plain = run_backtest(&base, &mut BuyAndHold, w, 0, no_costs);
         let div = run_backtest(&paying, &mut BuyAndHold, w, 0, no_costs);
@@ -467,6 +669,198 @@ mod tests {
         assert!(
             b.returns.iter().sum::<f64>() < a.returns.iter().sum::<f64>(),
             "financing should drag a leveraged book's return"
+        );
+    }
+
+    /// Test-only agent that issues one order on the first bar and then holds,
+    /// so a carried (delayed or partially filled) order is the only way the
+    /// remainder ever reaches the book.
+    struct OneShot {
+        fired: bool,
+    }
+    impl Agent for OneShot {
+        fn decide(&mut self, obs: &MarketObservation) -> Decision {
+            if self.fired {
+                return Decision {
+                    orders: Vec::new(),
+                    reasoning: "hold".to_string(),
+                    cost: None,
+                };
+            }
+            self.fired = true;
+            Decision {
+                orders: vec![Order {
+                    symbol: obs.symbols[0].symbol.clone(),
+                    action: Action::Buy,
+                    target_weight: 0.4,
+                    confidence: 0.5,
+                    rationale: String::new(),
+                }],
+                reasoning: "one shot".to_string(),
+                cost: None,
+            }
+        }
+    }
+
+    fn realistic() -> CostModel {
+        CostProfile::Realistic.resolve().costs
+    }
+
+    #[test]
+    fn default_profile_ignores_the_noise_machinery() {
+        // `noise: None` spelled explicitly and the default model must be the
+        // same fills bit for bit, and neither leaves anything pending.
+        let data = Dataset::synthetic(4, 120, 11);
+        let w = Window {
+            start: 20,
+            end: 120,
+        };
+        let explicit = CostModel {
+            noise: None,
+            ..CostModel::default()
+        };
+        let a = run_backtest(&data, &mut Momentum::default(), w, 3, CostModel::default());
+        let b = run_backtest(&data, &mut Momentum::default(), w, 3, explicit);
+        assert_eq!(a.returns, b.returns);
+        assert_eq!(a.trace, b.trace);
+        let mut book = Book::new(&data.symbols(), 3);
+        let obs = build_observation(&data, &data.symbols(), &book, 20);
+        let d = Momentum::default().decide(&obs);
+        step_once(
+            &data,
+            &data.symbols(),
+            &mut book,
+            &CostModel::default(),
+            3,
+            20,
+            &d,
+        );
+        assert!(book.pending.is_empty());
+    }
+
+    #[test]
+    fn realistic_profile_changes_fills() {
+        let data = Dataset::synthetic(4, 120, 11);
+        let w = Window {
+            start: 20,
+            end: 120,
+        };
+        let a = run_backtest(&data, &mut BuyAndHold, w, 1, CostModel::default());
+        let b = run_backtest(&data, &mut BuyAndHold, w, 1, realistic());
+        assert_ne!(
+            a.returns, b.returns,
+            "the realistic profile must move fills"
+        );
+        assert_eq!(a.returns.len(), b.returns.len());
+    }
+
+    #[test]
+    fn realistic_profile_is_deterministic_per_seed() {
+        let data = Dataset::synthetic(4, 120, 11);
+        let w = Window {
+            start: 20,
+            end: 120,
+        };
+        for seed in [1u64, 2, 9] {
+            let a = run_backtest(&data, &mut Momentum::default(), w, seed, realistic());
+            let b = run_backtest(&data, &mut Momentum::default(), w, seed, realistic());
+            assert_eq!(a.returns, b.returns, "seed {seed} must replay bit for bit");
+            assert_eq!(a.trace, b.trace);
+        }
+    }
+
+    #[test]
+    fn realistic_seeds_are_distinct_but_bounded() {
+        let data = Dataset::synthetic(4, 160, 11);
+        let w = Window {
+            start: 20,
+            end: 160,
+        };
+        let runs: Vec<Vec<f64>> = (1..=8)
+            .map(|s| run_backtest(&data, &mut Momentum::default(), w, s, realistic()).returns)
+            .collect();
+        for i in 0..runs.len() {
+            for j in (i + 1)..runs.len() {
+                assert_ne!(runs[i], runs[j], "seeds {i} and {j} coincide");
+            }
+        }
+        // Bounded: execution noise perturbs the run, it does not replace the
+        // market. The across-seed dispersion of the run's mean return must sit
+        // below the within-run dispersion of returns, and every return finite.
+        let means: Vec<f64> = runs
+            .iter()
+            .map(|r| r.iter().sum::<f64>() / r.len() as f64)
+            .collect();
+        let m = means.iter().sum::<f64>() / means.len() as f64;
+        let across =
+            (means.iter().map(|x| (x - m).powi(2)).sum::<f64>() / (means.len() - 1) as f64).sqrt();
+        let within = {
+            let r = &runs[0];
+            let mu = means[0];
+            (r.iter().map(|x| (x - mu).powi(2)).sum::<f64>() / (r.len() - 1) as f64).sqrt()
+        };
+        assert!(runs.iter().flatten().all(|x| x.is_finite()));
+        assert!(
+            across < within,
+            "across-seed std of mean return {across} should be below within-run std {within}"
+        );
+    }
+
+    #[test]
+    fn carried_order_fills_next_bar_for_a_non_reissuing_agent() {
+        // Under the realistic profile a one-shot order is either delayed or
+        // partially filled at bar 20 with probability one minus a measure-zero
+        // event, so the position must keep building on later bars from the
+        // carried remainder alone, and the carry must drain (min fill 0.5 per bar).
+        let data = Dataset::synthetic(3, 80, 5);
+        let symbols = data.symbols();
+        let mut book = Book::new(&symbols, 4);
+        let mut agent = OneShot { fired: false };
+        let costs = realistic();
+        let mut held = Vec::new();
+        for t in 20..30 {
+            let obs = build_observation(&data, &symbols, &book, t);
+            let d = agent.decide(&obs);
+            step_once(&data, &symbols, &mut book, &costs, 4, t, &d);
+            held.push(book.shares[&symbols[0]]);
+        }
+        assert!(held[0] >= 0.0);
+        assert!(
+            held.windows(2).any(|p| p[1] > p[0] + 1e-12),
+            "a carried order must add to the position on a later bar: {held:?}"
+        );
+        assert!(
+            book.pending.is_empty(),
+            "the carry must drain within ten bars: {:?}",
+            book.pending
+        );
+    }
+
+    #[test]
+    fn fresh_order_supersedes_a_carried_one() {
+        let data = Dataset::synthetic(3, 80, 5);
+        let symbols = data.symbols();
+        let mut book = Book::new(&symbols, 4);
+        book.pending
+            .insert(symbols[0].clone(), PendingOrder { target_weight: 0.9 });
+        // The agent re-issues a small target on the same symbol: the 0.9 carry
+        // must not fill, so the holding stays at or below the fresh target.
+        let d = Decision {
+            orders: vec![Order {
+                symbol: symbols[0].clone(),
+                action: Action::Buy,
+                target_weight: 0.1,
+                confidence: 0.5,
+                rationale: String::new(),
+            }],
+            reasoning: String::new(),
+            cost: None,
+        };
+        step_once(&data, &symbols, &mut book, &realistic(), 4, 20, &d);
+        let value = book.shares[&symbols[0]] * data.close_at(&symbols[0], 20).unwrap();
+        assert!(
+            value <= 0.1 + 1e-9,
+            "carried 0.9 target must be superseded: {value}"
         );
     }
 

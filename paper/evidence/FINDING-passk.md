@@ -1,4 +1,10 @@
-# Finding: pass^k in All-mode is a test of every-regime profitability, not of edge
+# Superseded historical note: pass^k in All-mode is a test of every-regime profitability, not of edge
+
+> **Status, 2026-08-25:** This note predates seed-block pooling, the fixed
+> deflation null and the final regenerated evidence. It remains a record of the
+> design interpretation, not a source for current DSR, bootstrap, eligibility or
+> deflation values. Use the nine final sweep files (512 records each) and
+> `paper/review/audit-math-2026-08-25.md` for the current record.
 
 Date: 2026-08-23. Source: `paper/evidence/after-v0.3.0/`, seven complete
 datasets, 4,072 records, kernel at v0.3.0 (units fix applied).

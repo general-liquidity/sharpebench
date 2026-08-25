@@ -58,7 +58,20 @@ pub fn expected_max_sharpe(trials_sr_std: f64, n_trials: u32) -> f64 {
 /// `trials_sr_std` is the dispersion of Sharpe ratios across the trials/agents
 /// that were tested (the multiple-testing footprint). Larger ⇒ harder to clear.
 pub fn deflated_sharpe_ratio(returns: &[f64], n_trials: u32, trials_sr_std: f64) -> f64 {
-    let sr_star = expected_max_sharpe(trials_sr_std, n_trials);
+    deflated_sharpe_ratio_against_null(returns, n_trials, 0.0, trials_sr_std)
+}
+
+/// Deflated Sharpe Ratio against an explicit per-period null population. Bailey
+/// & López de Prado's expected maximum is `E[SR_null] + sigma_SR * k(N)`;
+/// `null_mean_sharpe` is the first term and `expected_max_sharpe` supplies the
+/// second. The zero-mean convenience wrapper above preserves the historic API.
+pub fn deflated_sharpe_ratio_against_null(
+    returns: &[f64],
+    n_trials: u32,
+    null_mean_sharpe: f64,
+    trials_sr_std: f64,
+) -> f64 {
+    let sr_star = null_mean_sharpe + expected_max_sharpe(trials_sr_std, n_trials);
     probabilistic_sharpe_ratio(returns, sr_star)
 }
 

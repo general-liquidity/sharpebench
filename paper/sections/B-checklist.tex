@@ -3,7 +3,7 @@
 \citet{constructvalidity2025} review 445 benchmarks and recommend that a benchmark paper answer an operational checklist. The answers below point to the section that supports each one, and say plainly where the answer is no.
 
 \begin{description}[leftmargin=*,itemsep=3pt]
-\item[Define the phenomenon.] Yes. The phenomenon is skill that survives four corrections: deflation for the number of trials, reliability across seeds and windows, process discipline, and a bootstrap null. \Cref{sec:principles} states it and \cref{eq:eligible} operationalizes it exactly.
+\item[Define the phenomenon.] Yes. The phenomenon is skill that survives five eligibility conjuncts: deflation for the number of trials, $\text{pass}^{k}$ across seeds and windows, process discipline, a bootstrap null and the configured mandate. \Cref{sec:principles} states it and \cref{eq:eligible} operationalizes it exactly.
 \item[Measure only the phenomenon.] Partly. The eligibility predicate measures the phenomenon and nothing else. The scorer also reports fourteen statistics that do not gate, and \cref{sec:predicate} separates the two so a reader can tell which number moved the rank.
 \item[Construct representative datasets.] Partly. Nine datasets across four asset classes and four bar sizes, each scored for realism before use (\cref{sec:data}). Single-name equities are absent, two datasets fail the realism battery and ship with the verdict recorded, and the observation is twenty trailing closes (\cref{sec:limitations}).
 \item[Acknowledge limitations of reused datasets.] Yes. Every dataset's source, license, caveats and failing stylized facts are in \cref{tab:data} and the data scripts. The commodities file keeps a negative oil close as published and documents the opt-out.

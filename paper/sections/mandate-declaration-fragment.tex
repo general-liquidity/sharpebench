@@ -1,0 +1,79 @@
+% Fragment: the declared mandate at submission, included from 05-experiments.tex.
+% Evidence: paper/evidence/final/mandate-declaration.jsonl (81 records, one per
+% dataset x agent, produced by the command recorded on every record).
+
+\subsection{A mandate declared at submission}\label{sec:mandate}
+
+The design direction that \cref{sec:predicate} and the limitations state, a mandate declared at submission and certified against rather than selected by the host, is now built, and this section reports what it does to the reference field. A submission may carry a typed declaration, \texttt{DeclaredMandate}, with four variants: \texttt{AbsoluteReturn} (the shipped default verdict, restated); \texttt{RelativeTo\{benchmark\_id\}} (the benchmark-relative verdict of \cref{sec:relative} against a named agent); \texttt{DrawdownCapped\{max\_per\_run\_drawdown\}} (the never-catastrophic verdict of \cref{sec:ablation}, with the per-run bound declared by the submitter); and \texttt{OutperformBuyAndHold}, an explicitly excess-return mandate resolving to \texttt{RelativeTo} buy-and-hold. The former wire spelling \texttt{long\_only\_beta} remains readable for old artifacts but is not used for new declarations: outperformance is not a claim that an agent is beta-tracking or long-only. This release therefore implements declared \emph{verdict selection}, not certification that a portfolio fulfils a beta-tracking or other portfolio-purpose mandate; a defensible tracking predicate needs an independently specified benchmark, horizon and tolerance. The declaration is optional and defaults to absent.
+
+\paragraph{Mechanism.} A declaration selects which reliability question $\text{pass}^{k}$ asks; it never relaxes a gate. Let $m_a$ be agent $a$'s declaration and $v(m_a)$ the verdict it resolves to. The agent's declared-mandate eligibility is the predicate of \cref{eq:eligible} with only the reliability conjunct exchanged:
+\begin{equation}\label{eq:declared}
+\text{eligible}_{v}(a) \;=\; \text{DSR} \ge \beta \;\wedge\; \text{pass}^{k}_{v} \;\wedge\; \text{process} \;\wedge\; p_{\text{boot}} < \alpha \;\wedge\; \text{mandate} \;\wedge\; \text{dd}_{v},
+\end{equation}
+where $\text{pass}^{k}_{v}$ uses the verdict's per-run series and aggregation (raw returns under every-run aggregation for \texttt{AbsoluteReturn}; excess over the named agent's same-cell run, every run, for the relative verdicts, with the zero-excess and missing-benchmark refusals of \cref{eq:relative} unchanged; raw returns under at-least-one aggregation for \texttt{DrawdownCapped}) and $\text{dd}_{v}$ is the declared per-run drawdown bound, vacuously true except under \texttt{DrawdownCapped}, where a bound outside $(0, 1]$ is a misdeclaration and fails. The deflated Sharpe, the bootstrap, the process audit and the host's drawdown mandate in \cref{eq:declared} are the same tests on the same raw returns as in \cref{eq:eligible}; a declaration cannot flip any of them, and a unit test asserts that raising the deflation bar refuses every declaration. Both verdicts are recorded on the score (\texttt{declared\_mandate}, \texttt{verdict\_applied}, \texttt{declared\_passed\_k}, \texttt{declared\_mandate\_eligible}), and the board row prints both clauses, so buy-and-hold's row reads ``ineligible under declared verdict (relative to buy-and-hold); host-board ineligible'' rather than a bare refusal.
+
+\paragraph{Ranking.} Eligibility is reported per verdict and the verdicts never mix. The board sorts on \cref{eq:eligible} under the host's configuration, byte-identically with or without declarations, and the ordinal rank counts host-eligible agents only. Declared eligibility is an additional labeled column; among agents that are declared-eligible under the \emph{same} resolved verdict (the agent's mandate class: same variant, same benchmark id, same bound), a within-class ordinal orders them by deflated Sharpe. Agents under different mandates have answered different questions and are never ordered against each other, or against the all-weather board.
+
+\paragraph{Evidence.} The field of \cref{sec:riskmanaged}, with buy-and-hold carrying the explicit \texttt{OutperformBuyAndHold} comparison, hold and momentum declaring \texttt{AbsoluteReturn}, and the risk-managed agent declaring \texttt{DrawdownCapped} at $0.20$. The five luck-floor agents are undeclared, and their 45 records are identical to the undeclared board. \Cref{tab:mandate} lists every declared agent on every dataset.
+
+\begin{table}[t]
+\centering
+\footnotesize
+\caption{Declared-mandate verdicts for every declared reference agent on all nine frozen datasets. OBH is \texttt{OutperformBuyAndHold} (relative to buy-and-hold), ABS is \texttt{AbsoluteReturn}, and DD .20 is \texttt{DrawdownCapped} at a per-run drawdown of $0.20$. DSR and $p_{\text{boot}}$ are pooled gates; pass$^k_v$ is the declared reliability leg; Meets is \cref{eq:declared}. None of the 36 declared agent--dataset cases meets its declared eligibility predicate.}
+\label{tab:mandate}
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lllrrcc}
+\toprule
+Dataset & Agent & Declared & DSR & $p_{\text{boot}}$ & pass$^k_v$ & Meets \\
+\midrule
+US indices 1d & buy-and-hold & OBH & 0.0000 & 0.0020 & no & no \\
+US indices 1d & momentum & ABS & 0.0000 & 1.0000 & no & no \\
+US indices 1d & hold & ABS & 0.0000 & 1.0000 & no & no \\
+US indices 1d & risk-managed & DD .20 & 0.0000 & 1.0000 & no & no \\
+US indices 1w & buy-and-hold & OBH & 0.1781 & 0.0015 & no & no \\
+US indices 1w & momentum & ABS & 0.0264 & 0.0775 & no & no \\
+US indices 1w & hold & ABS & 0.0003 & 1.0000 & no & no \\
+US indices 1w & risk-managed & DD .20 & 0.0262 & 0.0715 & no & no \\
+Crypto 1h & buy-and-hold & OBH & 0.0000 & 0.0685 & no & no \\
+Crypto 1h & momentum & ABS & 0.0000 & 1.0000 & no & no \\
+Crypto 1h & hold & ABS & 0.0000 & 1.0000 & no & no \\
+Crypto 1h & risk-managed & DD .20 & 0.0000 & 1.0000 & no & no \\
+Crypto 4h & buy-and-hold & OBH & 0.0000 & 0.0735 & no & no \\
+Crypto 4h & momentum & ABS & 0.0000 & 1.0000 & no & no \\
+Crypto 4h & hold & ABS & 0.0000 & 1.0000 & no & no \\
+Crypto 4h & risk-managed & DD .20 & 0.0000 & 1.0000 & no & no \\
+Crypto 1d & buy-and-hold & OBH & 0.2505 & 0.1219 & no & no \\
+Crypto 1d & momentum & ABS & 0.0051 & 1.0000 & no & no \\
+Crypto 1d & hold & ABS & 0.0343 & 1.0000 & no & no \\
+Crypto 1d & risk-managed & DD .20 & 0.2118 & 0.1949 & yes & no \\
+Crypto 1w & buy-and-hold & OBH & 0.1244 & 0.0795 & no & no \\
+Crypto 1w & momentum & ABS & 0.2406 & 0.0435 & no & no \\
+Crypto 1w & hold & ABS & 0.0044 & 1.0000 & no & no \\
+Crypto 1w & risk-managed & DD .20 & 0.0057 & 0.4608 & no & no \\
+FX 1d & buy-and-hold & OBH & 0.0000 & 1.0000 & no & no \\
+FX 1d & momentum & ABS & 0.0000 & 1.0000 & no & no \\
+FX 1d & hold & ABS & 0.0000 & 1.0000 & no & no \\
+FX 1d & risk-managed & DD .20 & 0.0000 & 1.0000 & no & no \\
+Commodities 1d & buy-and-hold & OBH & 0.0000 & 0.1244 & no & no \\
+Commodities 1d & momentum & ABS & 0.0000 & 1.0000 & no & no \\
+Commodities 1d & hold & ABS & 0.0000 & 1.0000 & no & no \\
+Commodities 1d & risk-managed & DD .20 & 0.0000 & 1.0000 & no & no \\
+Rates 1d & buy-and-hold & OBH & 0.0000 & 0.1754 & no & no \\
+Rates 1d & momentum & ABS & 0.0000 & 1.0000 & no & no \\
+Rates 1d & hold & ABS & 0.0000 & 1.0000 & no & no \\
+Rates 1d & risk-managed & DD .20 & 0.0000 & 1.0000 & no & no \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Result.} No declared agent meets its declared eligibility predicate in any of the 36 declared agent--dataset cases. There is exactly one declared reliability pass: daily-crypto risk-managed. Its score is nevertheless refused by deflation ($\text{DSR}=0.2118$ against $\beta=0.95$) and the block bootstrap ($p_{\text{boot}}=0.1949$); its declared drawdown is within the $0.20$ bound (worst $0.170$). This is a more informative refusal than the host verdict because \cref{eq:declared} records which reliability question was asked without pretending that a declaration can waive an edge gate.
+
+Buy-and-hold's \texttt{OutperformBuyAndHold} declaration is deliberately self-defeating: it resolves to ``beats buy-and-hold in every window'', while buy-and-hold \emph{is} that reference. Its excess series is identically zero, the zero-excess rule of \cref{eq:relative} refuses it in all $48$ cells on every dataset, and the same holds for any clone. The name now says exactly what the test asks; it does not misdescribe an excess-return test as a beta mandate. The mechanism still delivers legibility, ``ineligible under declared verdict (relative to buy-and-hold); host-board ineligible'' in place of a blanket refusal, but the reading is that declaration changes what the refusal \emph{says}, not whether it happens: on these histories and gates, stating the mandate admits nobody. Hold and momentum, whose declaration restates the default verdict, fail exactly as the default fails them, including hold's instructive case: a cash agent breaches nothing, and a zero series is evidence of no edge, not of safety worth certifying.
+
+\paragraph{Command.}
+\begin{verbatim}
+cargo run --release -p sharpebench-harness \
+  --example mandate_eval -- \
+  paper/evidence/final/mandate-declaration.jsonl
+\end{verbatim}
+One record per (dataset, agent), 81 in total: 36 declared cases and 45 undeclared luck-floor records. Each carries the command, declaration, applied verdict and both eligibility columns. The declared columns are produced by the kernel's own \texttt{rank\_declared}, not by a reimplementation, and the host-verdict columns are byte-identical to the undeclared board.

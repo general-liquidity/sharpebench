@@ -3,6 +3,9 @@
 A submission is a set of **runs**: one return series (plus an optional decision
 trace and per-decision confidences) for each seed × window. The scorer
 (`sharpebench_core::rank`) turns a field of submissions into a ranked board.
+Seeds remain separate for pass^k, but pooled statistics first average aligned
+seed returns inside each window and then concatenate windows. Replicating an
+execution seed therefore cannot multiply the apparent sample size.
 
 An agent is **rank-eligible only if every gate holds**:
 
@@ -17,6 +20,10 @@ eligible = DSR ≥ dsr_bar          (survives multiple-testing deflation)
 Eligible agents sort by the **rank key** (Deflated Sharpe by default, or Alpha).
 Ineligible agents sort last, by raw return, for display only — raw return never
 buys rank.
+
+A submission may also **declare a mandate** (see
+[pass^k reliability](methodology-pass-k.md)): the declared verdict is scored and
+reported beside the board verdict as a labeled column and never moves rank.
 
 The composite also *reports* (without gating, to keep the default behaviour
 stable): alpha/beta attribution vs the field, calibration (Brier), edge half-life,

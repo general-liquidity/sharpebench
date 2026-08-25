@@ -2,9 +2,10 @@
 """Turn the evidence sweep records into the tables in the paper.
 
 Reads every JSONL file under paper/evidence/final/ and prints, for each
-dataset, the default-configuration row of the eligibility table plus the
-grid-wide eligibility and luck-floor checks. Every number in Section 5 of
-the paper comes from this script and nowhere else. No plotting, no model,
+dataset, default-configuration reference rows plus grid-wide eligibility and
+luck-floor checks. It displays both the dispersion source and the annualized
+dispersion/deflation bar serialized by the scorer, so dimensional provenance
+is visible rather than inferred from a configuration. No plotting, no model,
 no randomness: it is a reduction over committed records.
 
 Usage:  python paper/evidence/analyze.py [paper/evidence/final]
@@ -44,7 +45,7 @@ def is_default(r):
 
 def main():
     total = 0
-    print("dataset            agent           ppy    DSR    pass^k  worstDD  every  never   boot_p   sr_std(src)")
+    print("dataset            agent           ppy    DSR    pass^k  worstDD  every  never   boot_p   sigma_ann(src)  bar_ann  pooled_n")
     luck_violations = 0
     for d in ORDER:
         recs = load(d)
@@ -59,7 +60,8 @@ def main():
             print(f"{d:18s} {r['agent_id']:14s} {r['periods_per_year']:5.0f}  {r['deflated_sharpe']:.3f}  "
                   f"{str(r['passed_k']):5s}   {r['worst_run_drawdown']:.3f}   {str(r['rank_eligible']):5s}  "
                   f"{str(r['eligible_never_catastrophic']):5s}  {r['bootstrap_p']:.4f}   "
-                  f"{r['trials_sr_std_used']:.3f}({r['trials_sr_std_source'][:4]})")
+                  f"{r['trials_sr_std_annualized_equivalent']:.3f}({r['trials_sr_std_source']})  "
+                  f"{r['deflation_bar_annualized_equivalent']:.3f}  {r['pooled_observations']:8d}")
         best_ref = max(r["raw_mean_return"] for r in cell if r["agent_id"] in ("buy-and-hold", "momentum"))
         best_luck = max(r["raw_mean_return"] for r in cell if r["agent_id"].startswith("luck"))
         best_luck_dsr = max(r["deflated_sharpe"] for r in recs if r["agent_id"].startswith("luck"))

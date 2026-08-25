@@ -6,8 +6,10 @@ it is not evidence that the system lacks the property. This file records the
 source for every mark and distinguishes exhaustively searched blanks from
 abstract-only checks. "abs" = the paper's arXiv abstract page; "body" = full
 text searched; "unchecked" = no claim was found at abstract level and the body
-was not exhaustively searched. Checked 2026-08-23; rows added in revision
-checked 2026-08-24.
+was not exhaustively searched. Checked 2026-08-23; amended 2026-08-24. This
+sheet is bibliographic provenance for the related-work tables only; it is not
+a source for numerical experiment values, which are frozen under
+`paper/evidence/final/`.
 
 ## tab:related (gate axes)
 

@@ -158,9 +158,11 @@ fn main() {
             LUCK_FLOOR_AGENTS,
         ));
 
-        let cfg = ScoreConfig::for_periods_per_year(*ppy);
+        let mut cfg = ScoreConfig::for_periods_per_year(*ppy);
+        cfg.execution_seeds_per_window = EXEC_SEEDS.len();
         let mut cfg_nc = ScoreConfig::reliability_never_catastrophic(NEVER_CATASTROPHIC_RUN_DD);
         cfg_nc.periods_per_year = *ppy;
+        cfg_nc.execution_seeds_per_window = EXEC_SEEDS.len();
         let scored = rank(&subs, &cfg);
         let scored_nc = rank(&subs, &cfg_nc);
 
@@ -270,7 +272,10 @@ fn main() {
                 &agents,
                 N_PERTURBATIONS,
                 PERTURB_SEED,
-                &ScoreConfig::for_periods_per_year(PERTURB_PPY),
+                &ScoreConfig {
+                    execution_seeds_per_window: EXEC_SEEDS.len(),
+                    ..ScoreConfig::for_periods_per_year(PERTURB_PPY)
+                },
             );
             println!(
                 "\n== perturbation report: {PERTURB_DATASET} ({N_PERTURBATIONS} variants, seed {PERTURB_SEED}) =="

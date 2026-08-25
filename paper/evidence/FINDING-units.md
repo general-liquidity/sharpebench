@@ -1,4 +1,15 @@
-# Finding: the deflation thresholds are in annualized units, the statistic is per-period
+# Superseded historical note: the deflation thresholds are in annualized units, the statistic is per-period
+
+> **Status, 2026-08-25:** This note documents the pre-repair experiment only.
+> It is not a source for current manuscript numbers. The current, pooled-seed
+> evidence is the nine 512-record files in `paper/evidence/final/`; each record
+> serializes `trials_sr_std_source`, per-period and annualized dispersion, the
+> fixed zero-Sharpe null, and per-period and annualized deflation bars. Current
+> analysis must use those artifacts and `paper/review/audit-math-2026-08-25.md`.
+> In particular, the weekly-versus-daily 0.984/0.000 contrast below came from
+> the small field-measured path, which the configured-prior unit fix did not
+> change. It diagnosed instability in the unfloored field estimate and must not
+> be attributed to the configured-prior unit bug.
 
 Date: 2026-08-23. Source: `paper/evidence/sweep.jsonl`, datasets `us-indices-1d`
 and `us-indices-1w`, 1,024 records, kernel at commit d0ae4f2 (v0.2.1).
@@ -11,8 +22,10 @@ zero agents are rank-eligible on either dataset. That includes buy-and-hold
 on the US indices, which posts PSR = 1.0000 and bootstrap_p = 0.0005 and still
 scores DSR = 0.0000 and fails pass^k.
 
-PSR = 1.0 and DSR = 0.0 on the same series cannot both be verdicts about the
-data. They are a verdict about the benchmark's threshold.
+PSR = 1.0 and DSR = 0.0 are mathematically compatible because PSR compares the
+series with zero while DSR compares it with a search-adjusted threshold. Their
+coexistence localized the refusal to that threshold rather than the return
+estimate and motivated the unit audit below.
 
 ## Cause
 

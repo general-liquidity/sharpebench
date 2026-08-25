@@ -23,6 +23,10 @@ version = 2
 allow = [
     "MIT",
     "Apache-2.0",
+    # target-lexicon, through pyo3-build-config in the excluded Python crate.
+    # The LLVM exception relaxes Apache's binary-attribution condition; it does
+    # not add a copyleft obligation.
+    "Apache-2.0 WITH LLVM-exception",
     "BSD-3-Clause",
     "Unicode-3.0",
     "Unlicense",

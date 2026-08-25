@@ -30,6 +30,9 @@ source_scope = (
     "crates/**/*.rs",
     "paper/src/*.py",
     "paper/evidence/*.py",
+    "paper/main.tex",
+    "paper/sections/*.tex",
+    "paper/refs.bib",
     "data/*.csv",
     "arena/**/*.json",
     "arena/**/*.toml",
@@ -58,8 +61,12 @@ head = subprocess.check_output(
     ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
 ).strip()
 manifest = {
-    "schema_version": 1,
-    "repository_head": head,
+    "schema_version": 2,
+    # A manifest cannot contain the hash of the commit that will contain the
+    # manifest without becoming self-referential.  Record the checked-out base
+    # commit honestly; source_snapshot_sha256 binds the candidate's actual
+    # (possibly not-yet-committed) source bytes.
+    "repository_base_head": head,
     "source_snapshot_sha256": snapshot,
     "source_snapshot_scope": list(source_scope),
     "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",

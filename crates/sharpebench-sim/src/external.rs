@@ -10,7 +10,7 @@
 //! The HTTP transport retries a transient blip a bounded number of times; both
 //! transports drive a per-endpoint [`CircuitBreaker`] and record every fault into a
 //! [`TransportHealth`] the harness inspects to surface the failure as a typed
-//! [`sharpebench_harness`] `FailureKind` rather than a masked hold. When a decision
+//! `sharpebench_harness::FailureKind` rather than a masked hold. When a decision
 //! still cannot be produced the call returns an empty-orders hold (the trait cannot
 //! signal an error), but that hold is now *flagged* in the health - the harness no
 //! longer mistakes it for a deliberate one.

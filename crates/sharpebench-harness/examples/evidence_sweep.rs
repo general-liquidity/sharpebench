@@ -80,6 +80,7 @@ struct Record<'a> {
     min_field_for_measured_sr_std: usize,
     dedup_clones_for_measured_sr_std: bool,
     min_measured_trials_sr_std_annualized: f64,
+    deflation_null_mean_per_period: f64,
     agent_id: String,
     deflated_sharpe: f64,
     psr: f64,
@@ -98,7 +99,11 @@ struct Record<'a> {
     field_spa_consistent_p: f64,
     step_down_significant: bool,
     trials_sr_std_used: f64,
+    trials_sr_std_annualized_equivalent: f64,
     trials_sr_std_source: String,
+    deflation_bar_per_period: f64,
+    deflation_bar_annualized_equivalent: f64,
+    pooled_observations: usize,
 }
 
 type AgentFactory = Box<dyn Fn() -> Box<dyn Agent>>;
@@ -207,6 +212,7 @@ fn main() {
                     let mut cfg = ScoreConfig {
                         dsr_bar,
                         n_trials,
+                        execution_seeds_per_window: EXEC_SEEDS.len(),
                         ..ScoreConfig::for_periods_per_year(*ppy)
                     };
                     if let Some(x) = pinned {
@@ -241,6 +247,7 @@ fn main() {
                             min_field_for_measured_sr_std: cfg.min_field_for_measured_sr_std,
                             dedup_clones_for_measured_sr_std: cfg.dedup_clones_for_measured_sr_std,
                             min_measured_trials_sr_std_annualized: cfg.min_measured_trials_sr_std,
+                            deflation_null_mean_per_period: cfg.deflation_null_mean_per_period,
                             agent_id: s.agent_id.clone(),
                             deflated_sharpe: s.deflated_sharpe,
                             psr: s.psr,
@@ -256,11 +263,17 @@ fn main() {
                             field_spa_consistent_p: s.field_spa_consistent_p,
                             step_down_significant: s.step_down_significant,
                             trials_sr_std_used: s.trials_sr_std,
+                            trials_sr_std_annualized_equivalent: s
+                                .trials_sr_std_annualized_equivalent,
                             trials_sr_std_source: match s.trials_sr_std_source {
                                 TrialsSrStdSource::Measured => "measured".into(),
                                 TrialsSrStdSource::MeasuredFloored => "measured_floored".into(),
                                 TrialsSrStdSource::Configured => "configured".into(),
                             },
+                            deflation_bar_per_period: s.deflation_bar_per_period,
+                            deflation_bar_annualized_equivalent: s
+                                .deflation_bar_annualized_equivalent,
+                            pooled_observations: s.pooled_observations,
                         };
                         serde_json::to_writer(&mut w, &rec).expect("write record");
                         w.write_all(b"\n").expect("newline");

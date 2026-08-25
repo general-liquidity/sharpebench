@@ -2,7 +2,7 @@
 
 All commands run from the repository root at the tagged version. The kernel is deterministic, so each command produces the same bytes on the three CI targets (Linux, macOS, Windows).
 
-\paragraph{Version.} Findings 1 and 2 were first observed at v0.2.1, and \cref{tab:units} was computed against v0.2.1 deliberately because it documents that kernel's unit error. The units fix shipped in v0.3.0. Current-result artifacts were regenerated from the source snapshot containing the observed-field trial floor, the measured-dispersion floor, clone collapse and the strict forward-window schema. Historical package labels are not substituted for that exact content snapshot.
+\paragraph{Version.} Findings 1 and 2 were first observed at v0.2.1, and \cref{tab:units} was computed against v0.2.1 deliberately because it documents that kernel's unit error. The units fix shipped in v0.3.0. Current-result artifacts are the v0.9.0 release candidate and were regenerated from the content-hashed source snapshot containing corrected execution-seed pooling, the observed-field trial floor, the measured-dispersion floor, clone collapse and the strict forward-window schema. Historical package labels are not substituted for that exact content snapshot.
 
 \paragraph{Content provenance.}
 \begin{verbatim}
@@ -62,7 +62,7 @@ cargo test -p sharpebench-harness perturb
 cargo run --release -p sharpebench-harness \
   --example pass_witness -- pass-witness.jsonl
 \end{verbatim}
-Sweeps a family of injected-edge agents (known per-period Sharpe by construction) beside a five-agent zero-edge field through the shipped default configuration on two window geometries, and writes one record per (shape, edge, agent). The witness uses common random numbers across the edge grid and the producer aborts if DSR decreases or eligibility closes after opening, so ``boundary'' means the first point of a monotone sampled acceptance set rather than a local crossing between unrelated draws.
+Sweeps a family of injected-edge agents (known per-period Sharpe by construction) on two window geometries, and writes one record per (shape, edge, agent). A separate five-agent zero-edge calibration field is run first; its floored per-period dispersion is frozen as the exogenous DSR bar for the complete witness sweep, so the candidate and display-control records cannot move their own threshold. The witness uses common random numbers across the edge grid and the producer aborts if DSR decreases or eligibility closes after opening, so ``boundary'' means the first point of a monotone sampled acceptance set rather than a local crossing between unrelated draws.
 
 \paragraph{The evidence figures (\cref{fig:drawdowns}, \cref{fig:luckdeflation}, \cref{fig:witness}, \cref{fig:luck1000}).}
 \begin{verbatim}

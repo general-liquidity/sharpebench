@@ -11,12 +11,18 @@
 //! point of SharpeBench. Run the included synthetic agents (see tests) to watch a
 //! lucky agent with a higher raw return get demoted below a skilled one.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
+pub use sharpebench_protocol::DeclaredMandate;
 
 use crate::calibration::brier_score;
 use crate::comparison_sets::{comparison_set, restrict_to_shared, TaggedRun, TaggedSubmission};
 use crate::decay::edge_half_life;
-use crate::deflated_sharpe::{deflated_sharpe_ratio, probabilistic_sharpe_ratio, sharpe_ratio};
+use crate::deflated_sharpe::{
+    deflated_sharpe_ratio_against_null, expected_max_sharpe, probabilistic_sharpe_ratio,
+    sharpe_ratio,
+};
 use crate::econrationality::{elicit_revealed_selection, rationality_score};
 use crate::pass_k::{pass_k, PassMode};
 use crate::percentile::percentile_of;
@@ -65,6 +71,147 @@ pub struct AgentSubmission {
     /// median candidate). Empty = not reported.
     #[serde(default)]
     pub candidates: Vec<Vec<f64>>,
+}
+
+/// Mandate declarations for a field, keyed by agent id: the input
+/// [`rank_declared`] scores beside the host verdict. An agent absent from the
+/// map is undeclared and scored exactly as [`rank`] scores it.
+pub type MandateDeclarations = BTreeMap<String, DeclaredMandate>;
+
+/// One submission object as it arrives on the wire: every [`AgentSubmission`]
+/// key plus an optional `declared_mandate` (see [`DeclaredMandate`]). The
+/// declaration is part of the submitted object, not of the host's config, so a
+/// submitter states the mandate and the host cannot restate it. Parse a field
+/// as `Vec<DeclaredSubmission>` and hand it to [`split_declarations`].
+#[derive(Clone, Debug, Deserialize)]
+pub struct DeclaredSubmission {
+    #[serde(flatten)]
+    pub submission: AgentSubmission,
+    #[serde(default)]
+    pub declared_mandate: Option<DeclaredMandate>,
+}
+
+/// Separate a parsed field into the submissions and their declarations, the two
+/// arguments of [`rank_declared`]. Undeclared submissions leave no entry.
+pub fn split_declarations(
+    field: Vec<DeclaredSubmission>,
+) -> (Vec<AgentSubmission>, MandateDeclarations) {
+    let mut declarations = MandateDeclarations::new();
+    let subs = field
+        .into_iter()
+        .map(|d| {
+            if let Some(m) = d.declared_mandate {
+                declarations.insert(d.submission.agent_id.clone(), m);
+            }
+            d.submission
+        })
+        .collect();
+    (subs, declarations)
+}
+
+/// The reliability verdict a [`DeclaredMandate`] resolves to: the question the
+/// kernel actually tests for it. [`DeclaredMandate::OutperformBuyAndHold`] resolves to
+/// [`MandateVerdict::RelativeTo`] buy-and-hold, so two declarations that ask the
+/// same question share one verdict, and one **mandate class**: agents are
+/// compared on their declared column only against agents whose resolved
+/// verdict is equal to theirs (same variant, same benchmark id, same bound).
+/// Serialized like the declaration, e.g. `{"kind":"relative_to","benchmark_id":
+/// "buy-and-hold"}`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MandateVerdict {
+    /// pass^k in [`PassMode::All`] on raw returns: the shipped default.
+    AbsoluteReturn,
+    /// pass^k in [`PassMode::RelativeToBenchmark`] against `benchmark_id`'s run
+    /// in the same cell (see [`per_run_passes`]).
+    RelativeTo { benchmark_id: String },
+    /// pass^k in [`PassMode::Any`] on raw returns plus a per-run drawdown bound:
+    /// the never-catastrophic verdict of
+    /// [`ScoreConfig::reliability_never_catastrophic`], with the bound declared
+    /// by the submitter rather than configured by the host.
+    DrawdownCapped { max_per_run_drawdown: f64 },
+}
+
+impl MandateVerdict {
+    /// Resolve a declaration to the verdict the kernel tests.
+    pub fn of(declared: &DeclaredMandate) -> Self {
+        match declared {
+            DeclaredMandate::AbsoluteReturn => Self::AbsoluteReturn,
+            DeclaredMandate::RelativeTo { benchmark_id } => Self::RelativeTo {
+                benchmark_id: benchmark_id.clone(),
+            },
+            DeclaredMandate::DrawdownCapped {
+                max_per_run_drawdown,
+            } => Self::DrawdownCapped {
+                max_per_run_drawdown: *max_per_run_drawdown,
+            },
+            DeclaredMandate::OutperformBuyAndHold => Self::RelativeTo {
+                benchmark_id: default_benchmark_agent_id(),
+            },
+        }
+    }
+
+    fn pass_mode(&self) -> PassMode {
+        match self {
+            Self::AbsoluteReturn => PassMode::All,
+            Self::RelativeTo { .. } => PassMode::RelativeToBenchmark,
+            Self::DrawdownCapped { .. } => PassMode::Any,
+        }
+    }
+
+    /// The agent id whose same-cell runs this verdict tests excess over, if any.
+    pub fn benchmark_id(&self) -> Option<&str> {
+        match self {
+            Self::RelativeTo { benchmark_id } => Some(benchmark_id),
+            Self::AbsoluteReturn | Self::DrawdownCapped { .. } => None,
+        }
+    }
+
+    /// Whether the agent's worst single-run drawdown satisfies the verdict's own
+    /// bound. `true` for verdicts without one. A declared bound outside `(0, 1]`
+    /// (including NaN) is a misdeclaration and fails closed.
+    fn drawdown_bound_holds(&self, worst_run_drawdown: f64) -> bool {
+        match self {
+            Self::DrawdownCapped {
+                max_per_run_drawdown: x,
+            } => *x > 0.0 && *x <= 1.0 && worst_run_drawdown <= *x,
+            Self::AbsoluteReturn | Self::RelativeTo { .. } => true,
+        }
+    }
+
+    /// The verdict in words, for a board row: `absolute return`,
+    /// `relative to buy-and-hold`, `drawdown capped at 0.20 per run`.
+    pub fn describe(&self) -> String {
+        match self {
+            Self::AbsoluteReturn => "absolute return".to_string(),
+            Self::RelativeTo { benchmark_id } => format!("relative to {benchmark_id}"),
+            Self::DrawdownCapped {
+                max_per_run_drawdown,
+            } => format!("drawdown capped at {max_per_run_drawdown:.2} per run"),
+        }
+    }
+}
+
+/// A total order over mandate classes for grouping: variant, then benchmark
+/// id, then the exact bits of the declared bound (so two bounds that print
+/// alike are still two classes).
+fn class_key(v: &MandateVerdict) -> (u8, &str, u64) {
+    match v {
+        MandateVerdict::AbsoluteReturn => (0, "", 0),
+        MandateVerdict::RelativeTo { benchmark_id } => (1, benchmark_id, 0),
+        MandateVerdict::DrawdownCapped {
+            max_per_run_drawdown,
+        } => (2, "", max_per_run_drawdown.to_bits()),
+    }
+}
+
+/// A declaration resolved against the field: the mandate plus the benchmark
+/// submission its verdict names, looked up by the caller in the field being
+/// ranked (`None` when the verdict names no benchmark, when the field lacks it,
+/// or when there is no field, all of which fail the relative test closed).
+struct ResolvedDeclaration<'a> {
+    mandate: &'a DeclaredMandate,
+    benchmark: Option<&'a AgentSubmission>,
 }
 
 /// What to rank eligible agents by.
@@ -184,6 +331,14 @@ pub struct ScoreConfig {
     /// is stamped on every [`CompositeScore`] as `trials_sr_std` (per period, as
     /// used), `trials_sr_std_annualized` and `trials_sr_std_source`.
     pub trials_sr_std: f64,
+    /// Explicit per-period mean Sharpe of the fixed null/trial population. The
+    /// DSR threshold is `null_mean + expected_max_sharpe(sigma, N)`, not merely
+    /// its dispersion term. The shipped default is the explicit conservative
+    /// zero-Sharpe null (0.0), not a claim about a turnover-matched cost model.
+    /// Any non-zero benchmark must be recorded here rather than smuggled in by
+    /// centering returns or by relabeling a candidate field's mean as a null.
+    #[serde(default)]
+    pub deflation_null_mean_per_period: f64,
     /// Deflated-Sharpe bar an agent must clear to be rank-eligible (e.g. 0.95).
     pub dsr_bar: f64,
     /// Per-run PSR bar each individual run must clear for pass^k: the confidence
@@ -217,8 +372,12 @@ pub struct ScoreConfig {
     #[serde(default)]
     pub pass_mode: PassMode,
     /// The agent whose runs are the benchmark under
-    /// [`PassMode::RelativeToBenchmark`]; ignored under every other mode. Default
-    /// `"buy-and-hold"`, the reference agent every harness field carries. The
+    /// [`PassMode::RelativeToBenchmark`]. Under every mode it also names the
+    /// fixed, aligned series used by the field-level RC/SPA/Romano--Wolf
+    /// diagnostics; if it is absent the scorer records the explicit
+    /// `zero-return-cash` fallback instead of substituting the candidate-field
+    /// mean. Default `"buy-and-hold"`, the reference agent every harness field
+    /// carries. The
     /// benchmark is looked up **in the field being ranked**, by id, so its run at
     /// position `i` is the same (window, seed) cell as every other agent's run
     /// `i`: same frozen bars, same window, same execution seed, same cost model.
@@ -314,6 +473,18 @@ pub struct ScoreConfig {
     /// relax it. Every resulting score records when this floor binds.
     #[serde(default = "default_min_measured_trials_sr_std")]
     pub min_measured_trials_sr_std: f64,
+    /// Number of execution-seed replicates in each window-major run block.
+    ///
+    /// A run is one stochastic execution of the *same* frozen market window.
+    /// Replicates therefore estimate the conditional return of that window; they
+    /// are not additional independent market-time observations.  When this is
+    /// greater than one, scoring first averages aligned returns within each
+    /// window's replicate block and only then computes PSR, DSR, bootstrap and
+    /// every pooled-track diagnostic. `pass^k` deliberately remains per run:
+    /// it asks whether every execution was safe. The default one preserves the
+    /// public API for callers with one execution per window.
+    #[serde(default = "default_execution_seeds_per_window")]
+    pub execution_seeds_per_window: usize,
 }
 
 /// Default rolling-Sharpe window length (21 periods ≈ one trading month).
@@ -347,6 +518,10 @@ fn default_dedup_clones_for_measured_sr_std() -> bool {
 /// default. See [`ScoreConfig::min_measured_trials_sr_std`].
 fn default_min_measured_trials_sr_std() -> f64 {
     0.5
+}
+
+fn default_execution_seeds_per_window() -> usize {
+    1
 }
 
 /// Default periods per year: daily equity bars, the benchmark's historical
@@ -467,6 +642,7 @@ impl Default for ScoreConfig {
         Self {
             n_trials: 50,
             trials_sr_std: 0.5,
+            deflation_null_mean_per_period: 0.0,
             dsr_bar: 0.95,
             per_run_psr_bar: 0.90,
             per_run_min_annual_sharpe: 0.0,
@@ -486,6 +662,7 @@ impl Default for ScoreConfig {
             min_field_for_measured_sr_std: default_min_field_for_measured_sr_std(),
             dedup_clones_for_measured_sr_std: default_dedup_clones_for_measured_sr_std(),
             min_measured_trials_sr_std: default_min_measured_trials_sr_std(),
+            execution_seeds_per_window: default_execution_seeds_per_window(),
         }
     }
 }
@@ -626,6 +803,12 @@ pub struct CompositeScore {
     /// data-snooping tests (drops clearly-bad models from the null). Same value
     /// across the field; filled by [`rank`]. 1.0 from `score_agent` alone.
     pub field_spa_consistent_p: f64,
+    /// Fixed benchmark used by the field-wide White/SPA tests. This is distinct
+    /// from the equal-weight field proxy used only for alpha/beta attribution.
+    /// When the named benchmark is absent, the tests use the explicit zero
+    /// return (cash) benchmark and stamp `"zero-return-cash"` here.
+    #[serde(default)]
+    pub field_significance_benchmark: String,
     /// Crowdedness: the agent's mean Pearson correlation with the rest of the
     /// field's return streams, in [-1, 1]. High = riding the same factor as
     /// everyone else (a common beta that decays for the whole board at once);
@@ -704,6 +887,29 @@ pub struct CompositeScore {
     /// without any reader having to redo the conversion.
     #[serde(default)]
     pub trials_sr_std_annualized: Option<f64>,
+    /// Annualized equivalent of the exact per-period dispersion that deflated
+    /// this score. Unlike `trials_sr_std_annualized`, this is present for both
+    /// configured and measured paths, making a field measurement's units
+    /// explicit without ever feeding an annualized value back into DSR.
+    #[serde(default)]
+    pub trials_sr_std_annualized_equivalent: f64,
+    /// Expected maximum per-period Sharpe under the effective trial footprint
+    /// and the exact dispersion used by DSR: the deflation bar, in the same
+    /// units as the pooled per-period Sharpe.
+    #[serde(default)]
+    pub deflation_bar_per_period: f64,
+    /// `deflation_bar_per_period * sqrt(periods_per_year)`, reported solely for
+    /// legibility across dataset frequencies.
+    #[serde(default)]
+    pub deflation_bar_annualized_equivalent: f64,
+    /// The fixed null-population mean included in the deflation bar, per period.
+    #[serde(default)]
+    pub deflation_null_mean_per_period: f64,
+    /// Number of temporally distinct pooled observations used by PSR, DSR,
+    /// bootstrap and pooled diagnostics. With execution replicates this is not
+    /// multiplied by the replicate count.
+    #[serde(default)]
+    pub pooled_observations: usize,
     /// Whether `trials_sr_std` was measured from the field or taken from the
     /// configured prior. Always `Configured` from `score_agent` alone.
     #[serde(default)]
@@ -751,6 +957,67 @@ pub struct CompositeScore {
     /// estimable. Reported, never gating.
     #[serde(default)]
     pub role_contributions: Vec<RoleContribution>,
+    /// The mandate the submitter declared (see [`DeclaredMandate`]), echoed so
+    /// the record says what was asked. `None` = undeclared; the five declared
+    /// fields are then absent from the serialized score, so an undeclared
+    /// field's bytes are unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub declared_mandate: Option<DeclaredMandate>,
+    /// The verdict the declaration resolved to and was tested under
+    /// ([`MandateVerdict::of`]). `None` when undeclared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verdict_applied: Option<MandateVerdict>,
+    /// pass^k under `verdict_applied`: the declared verdict's own per-run series
+    /// and aggregation. `passed_k` stays the host verdict's. `None` when
+    /// undeclared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub declared_passed_k: Option<bool>,
+    /// Eligibility under the declared verdict: the host predicate with
+    /// `passed_k` replaced by `declared_passed_k` and, for a drawdown-capped
+    /// verdict, the declared per-run bound added. Every other gate (deflated
+    /// Sharpe, bootstrap, process, the host's drawdown mandate) is the same
+    /// test on the same raw returns, so a declaration can only select the
+    /// reliability question, never relax a gate. **Reported, never rank**: the
+    /// board sorts on `rank_eligible` under the host verdict, this column is
+    /// labeled beside it, and `rank_ordinal` counts host-eligible agents only.
+    /// `None` when undeclared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub declared_mandate_eligible: Option<bool>,
+    /// 1-based position by deflated Sharpe among the agents that are eligible
+    /// under the **same** resolved verdict (the agent's mandate class), filled
+    /// by [`rank_declared`]. Agents in different classes are never ordered
+    /// against each other on this column, and no class is mixed with the host
+    /// board's ordinal. `None` when undeclared or not declared-eligible.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub declared_mandate_ordinal: Option<usize>,
+}
+
+impl CompositeScore {
+    /// The board-row wording of eligibility under the declared verdict, e.g.
+    /// `eligible under declared verdict (relative to buy-and-hold); host-board
+    /// ineligible`. This deliberately does not say that the mandate condition
+    /// itself failed: `declared_mandate_eligible` is the full eligibility
+    /// conjunction with the declared reliability verdict substituted, so DSR,
+    /// bootstrap, process, or the host drawdown gate may be the refusing term.
+    /// The second clause is `rank_eligible` under the host verdict. `None` when
+    /// undeclared.
+    pub fn mandate_verdict_label(&self) -> Option<String> {
+        let verdict = self.verdict_applied.as_ref()?;
+        let eligibility = if self.declared_mandate_eligible == Some(true) {
+            "eligible"
+        } else {
+            "ineligible"
+        };
+        let host = if self.rank_eligible {
+            "host-board eligible"
+        } else {
+            "host-board ineligible"
+        };
+        Some(format!(
+            "{eligibility} under declared verdict ({}); {host}",
+            verdict.describe()
+        ))
+    }
 }
 
 /// Scores archived before `process_score` existed carry no graded scalar; they
@@ -781,6 +1048,7 @@ struct Deflation {
     /// The annualized prior `sr_std` came from; `None` when it was measured.
     annualized: Option<f64>,
     source: TrialsSrStdSource,
+    null_mean_per_period: f64,
 }
 
 impl Deflation {
@@ -789,6 +1057,7 @@ impl Deflation {
             sr_std: per_period_sr_std(cfg),
             annualized: Some(cfg.trials_sr_std),
             source: TrialsSrStdSource::Configured,
+            null_mean_per_period: cfg.deflation_null_mean_per_period,
         }
     }
 
@@ -805,6 +1074,7 @@ impl Deflation {
             } else {
                 TrialsSrStdSource::Measured
             },
+            null_mean_per_period: cfg.deflation_null_mean_per_period,
         }
     }
 }
@@ -813,7 +1083,36 @@ impl Deflation {
 /// cross-trial dispersion on, the configured annualized prior applies, converted
 /// to per period once.
 pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
-    score_agent_with(sub, cfg, Deflation::configured(cfg), None)
+    score_agent_with(sub, cfg, Deflation::configured(cfg), None, None)
+}
+
+/// [`score_agent`] with the agent's declared mandate. With no field there is no
+/// benchmark, so a declaration that names one ([`DeclaredMandate::RelativeTo`],
+/// [`DeclaredMandate::OutperformBuyAndHold`]) is not decidable without its
+/// aligned field benchmark. This single-submission API therefore records the
+/// declaration and resolved verdict but leaves the declared pass and eligibility
+/// fields unavailable (`None`); it never encodes missing field context as a
+/// failed mandate. Use [`rank_declared`] to test a relative declaration against
+/// its field. `None` scores exactly as [`score_agent`].
+pub fn score_agent_declared(
+    sub: &AgentSubmission,
+    declared: Option<&DeclaredMandate>,
+    cfg: &ScoreConfig,
+) -> CompositeScore {
+    if let Some(mandate) = declared {
+        let verdict = MandateVerdict::of(mandate);
+        if verdict.benchmark_id().is_some() {
+            let mut score = score_agent(sub, cfg);
+            score.declared_mandate = Some(mandate.clone());
+            score.verdict_applied = Some(verdict);
+            return score;
+        }
+    }
+    let resolved = declared.map(|mandate| ResolvedDeclaration {
+        mandate,
+        benchmark: None,
+    });
+    score_agent_with(sub, cfg, Deflation::configured(cfg), None, resolved)
 }
 
 fn score_agent_with(
@@ -821,19 +1120,23 @@ fn score_agent_with(
     cfg: &ScoreConfig,
     defl: Deflation,
     benchmark: Option<&AgentSubmission>,
+    declared: Option<ResolvedDeclaration<'_>>,
 ) -> CompositeScore {
-    let pooled: Vec<f64> = sub
-        .runs
-        .iter()
-        .flat_map(|r| r.returns.iter().copied())
-        .collect();
+    let pooled = pooled_returns(sub, cfg.execution_seeds_per_window);
 
     let psr = probabilistic_sharpe_ratio(&pooled, 0.0);
     // Fold the agent's declared in-sample search budget into the deflation trial
     // footprint: an agent that tried 5000 configs to find this strategy faces a
     // higher bar than one that tried none (front-end data-snooping control).
     let effective_n_trials = cfg.n_trials.saturating_add(sub.in_sample_trials);
-    let dsr = deflated_sharpe_ratio(&pooled, effective_n_trials, defl.sr_std);
+    let dsr = deflated_sharpe_ratio_against_null(
+        &pooled,
+        effective_n_trials,
+        defl.null_mean_per_period,
+        defl.sr_std,
+    );
+    let deflation_bar_per_period =
+        defl.null_mean_per_period + expected_max_sharpe(defl.sr_std, effective_n_trials);
 
     // pass^k: each run individually clears the per-run PSR bar against the
     // per-period benchmark the annualized minimum converts to (0 by default), on
@@ -984,9 +1287,10 @@ fn score_agent_with(
     // Sampling uncertainty of the DSR point estimate: a bootstrapped CI + SE, so
     // the leaderboard can flag noise-separated entries as tied rather than impose a
     // false hard ordering. Reuses the stationary-bootstrap resampler.
-    let dsr_ci = crate::significance::bootstrap_dsr_ci(
+    let dsr_ci = crate::significance::bootstrap_dsr_ci_against_null(
         &pooled,
         effective_n_trials,
+        defl.null_mean_per_period,
         defl.sr_std,
         cfg.bootstrap_seed,
         cfg.n_boot,
@@ -1017,6 +1321,36 @@ fn score_agent_with(
         dsr >= cfg.dsr_bar && passed_k && process_ok && bootstrap_p < cfg.alpha && mandate_ok;
     let composite = if rank_eligible { dsr } else { 0.0 };
 
+    // The declared verdict, if any: the same predicate as `rank_eligible` with
+    // only the pass^k question exchanged (series and aggregation from the
+    // resolved verdict) and, for a drawdown-capped verdict, the declared per-run
+    // bound added. `dsr`, `bootstrap_p`, `process_ok` and `mandate_ok` are the
+    // values computed above, on raw returns, so a declaration cannot move them.
+    let declared = declared.map(|d| {
+        let verdict = MandateVerdict::of(d.mandate);
+        let verdict_cfg = ScoreConfig {
+            pass_mode: verdict.pass_mode(),
+            benchmark_agent_id: verdict
+                .benchmark_id()
+                .map_or_else(|| cfg.benchmark_agent_id.clone(), str::to_string),
+            ..cfg.clone()
+        };
+        let per_run = per_run_passes(sub, d.benchmark, &verdict_cfg);
+        let declared_passed_k = pass_k(&per_run, verdict_cfg.pass_mode);
+        let eligible = dsr >= cfg.dsr_bar
+            && declared_passed_k
+            && process_ok
+            && bootstrap_p < cfg.alpha
+            && mandate_ok
+            && verdict.drawdown_bound_holds(worst_run_drawdown);
+        (d.mandate.clone(), verdict, declared_passed_k, eligible)
+    });
+    let (declared_mandate, verdict_applied, declared_passed_k, declared_mandate_eligible) =
+        match declared {
+            Some((m, v, p, e)) => (Some(m), Some(v), Some(p), Some(e)),
+            None => (None, None, None, None),
+        };
+
     CompositeScore {
         agent_id: sub.agent_id.clone(),
         deflated_sharpe: dsr,
@@ -1043,6 +1377,7 @@ fn score_agent_with(
         return_per_cost,
         field_spa_p: 1.0,
         field_spa_consistent_p: 1.0,
+        field_significance_benchmark: "unscored".to_string(),
         field_crowdedness: None,
         in_sample_trials: sub.in_sample_trials,
         effective_n_trials,
@@ -1064,6 +1399,11 @@ fn score_agent_with(
         dsr_tied: false,
         trials_sr_std: defl.sr_std,
         trials_sr_std_annualized: defl.annualized,
+        trials_sr_std_annualized_equivalent: defl.sr_std * cfg.periods_per_year.sqrt(),
+        deflation_bar_per_period,
+        deflation_bar_annualized_equivalent: deflation_bar_per_period * cfg.periods_per_year.sqrt(),
+        deflation_null_mean_per_period: defl.null_mean_per_period,
+        pooled_observations: pooled.len(),
         trials_sr_std_source: defl.source,
         runs_submitted: sub.runs.len(),
         runs_scored: sub.runs.len(),
@@ -1072,7 +1412,49 @@ fn score_agent_with(
         econ_rationality_score,
         econ_dominance_violations,
         role_contributions,
+        declared_mandate,
+        verdict_applied,
+        declared_passed_k,
+        declared_mandate_eligible,
+        declared_mandate_ordinal: None,
     }
+}
+
+/// Returns the temporally ordered pooled track used by PSR, DSR, bootstrap and
+/// all pooled diagnostics. Runs are window-major. With `seeds_per_window > 1`,
+/// aligned seed executions are Monte-Carlo replicates of one window and are
+/// averaged per bar before concatenation. Thus eight executions of a 409-bar
+/// window contribute 409 market observations, not 3,272 pseudo-independent
+/// ones. A malformed final block or unequal return lengths is rejected loudly:
+/// silently truncating it would conceal a misaligned market-time axis.
+pub fn pooled_returns(sub: &AgentSubmission, seeds_per_window: usize) -> Vec<f64> {
+    let width = seeds_per_window.max(1);
+    if width == 1 {
+        return sub
+            .runs
+            .iter()
+            .flat_map(|r| r.returns.iter().copied())
+            .collect();
+    }
+    assert!(
+        sub.runs.len().is_multiple_of(width),
+        "{} runs cannot form complete {}-execution window blocks",
+        sub.runs.len(),
+        width
+    );
+    sub.runs
+        .chunks_exact(width)
+        .flat_map(|replicates| {
+            let len = replicates.first().map_or(0, |r| r.returns.len());
+            assert!(
+                replicates.iter().all(|r| r.returns.len() == len),
+                "execution replicates in one window must have equal return lengths"
+            );
+            (0..len).map(move |t| {
+                replicates.iter().map(|r| r.returns[t]).sum::<f64>() / replicates.len() as f64
+            })
+        })
+        .collect()
 }
 
 /// Restrict a field to the run positions every non-empty submission completed —
@@ -1207,6 +1589,38 @@ fn measured_trials_sr_std(
 /// assert_eq!(board.len(), 2);
 /// ```
 pub fn rank(subs: &[AgentSubmission], cfg: &ScoreConfig) -> Vec<CompositeScore> {
+    rank_declared(subs, &MandateDeclarations::new(), cfg)
+}
+
+/// [`rank`] with each agent's declared mandate (see [`DeclaredMandate`]).
+///
+/// The board is the one [`rank`] produces, byte for byte: every agent is scored
+/// under the host verdict (`cfg.pass_mode`), `rank_eligible` decides the sort
+/// and `rank_ordinal` counts host-eligible agents only. A declaration adds a
+/// second, labeled verdict to the agent's row (`verdict_applied`,
+/// `declared_passed_k`, `declared_mandate_eligible`) and never touches the
+/// first. The rule is:
+///
+/// > A declaration selects which reliability question pass^k asks of the agent
+/// > and, for a drawdown-capped mandate, adds a per-run bound; every other gate
+/// > is the same test on the same raw returns. Eligibility is reported per
+/// > verdict; the board ranks under the host verdict; declared eligibility is
+/// > an additional column, ordered only within the agent's mandate class.
+///
+/// The mandate class of an agent is its resolved [`MandateVerdict`]
+/// (`OutperformBuyAndHold` and `RelativeTo { "buy-and-hold" }` share one). Within a
+/// class, declared-eligible agents are ordered by deflated Sharpe, then agent
+/// id, and get a 1-based `declared_mandate_ordinal`; across classes, and
+/// against the host board, nothing is compared, because the columns answer
+/// different questions. A relative verdict's benchmark is looked up by id in
+/// the field being ranked, in the same window-major cells; a field without it
+/// fails that agent's declared verdict closed. With an empty map this is
+/// [`rank`].
+pub fn rank_declared(
+    subs: &[AgentSubmission],
+    declarations: &MandateDeclarations,
+    cfg: &ScoreConfig,
+) -> Vec<CompositeScore> {
     // Shared-cell restriction first: everything below — attribution, the
     // data-snooping family, crowdedness and the scores themselves — must see the
     // same field, or the fairness control would apply to the rank key only.
@@ -1232,18 +1646,29 @@ pub fn rank(subs: &[AgentSubmission], cfg: &ScoreConfig) -> Vec<CompositeScore> 
     // used for performance attribution: alpha (skill) vs beta (market exposure).
     let pooled: Vec<Vec<f64>> = field
         .iter()
-        .map(|s| {
-            s.runs
-                .iter()
-                .flat_map(|r| r.returns.iter().copied())
-                .collect()
-        })
+        .map(|s| pooled_returns(s, rank_cfg.execution_seeds_per_window))
         .collect();
     let min_len = pooled.iter().map(Vec::len).min().unwrap_or(0);
     let n_agents = pooled.len().max(1) as f64;
     let market: Vec<f64> = (0..min_len)
         .map(|i| pooled.iter().map(|p| p[i]).sum::<f64>() / n_agents)
         .collect();
+
+    // The RC/SPA null is predictive superiority against one fixed benchmark,
+    // not superiority against the candidates' equal-weight average (which is an
+    // attribution device only). Prefer the explicitly named benchmark's aligned
+    // stream; with no such entrant, cash (zero return) is the declared null.
+    let (significance_benchmark, significance_benchmark_label): (Vec<f64>, String) = field
+        .iter()
+        .position(|s| s.agent_id == rank_cfg.benchmark_agent_id)
+        .filter(|&idx| pooled[idx].len() >= min_len)
+        .map(|idx| {
+            (
+                pooled[idx][..min_len].to_vec(),
+                rank_cfg.benchmark_agent_id.clone(),
+            )
+        })
+        .unwrap_or_else(|| (vec![0.0; min_len], "zero-return-cash".to_string()));
 
     // Measured deflation: with enough agents the field's own Sharpe dispersion
     // replaces the configured prior. The measured value is a dispersion of
@@ -1274,8 +1699,19 @@ pub fn rank(subs: &[AgentSubmission], cfg: &ScoreConfig) -> Vec<CompositeScore> 
         .iter()
         .enumerate()
         .map(|(idx, s)| {
-            let mut cs = score_agent_with(s, &rank_cfg, defl, benchmark);
+            // The declared verdict's benchmark is resolved in the same
+            // restricted field, so its cells line up like the host verdict's.
+            let declared = declarations
+                .get(&s.agent_id)
+                .map(|mandate| ResolvedDeclaration {
+                    mandate,
+                    benchmark: MandateVerdict::of(mandate)
+                        .benchmark_id()
+                        .and_then(|id| field.iter().find(|b| b.agent_id == id)),
+                });
+            let mut cs = score_agent_with(s, &rank_cfg, defl, benchmark, declared);
             cs.runs_submitted = subs[idx].runs.len();
+            cs.field_significance_benchmark = significance_benchmark_label.clone();
             if min_len >= 2 {
                 let (alpha, beta) = crate::attribution::alpha_beta(&pooled[idx], &market);
                 cs.alpha = alpha;
@@ -1293,8 +1729,8 @@ pub fn rank(subs: &[AgentSubmission], cfg: &ScoreConfig) -> Vec<CompositeScore> 
             .map(|p| {
                 p.iter()
                     .take(min_len)
-                    .zip(market.iter())
-                    .map(|(a, m)| a - m)
+                    .zip(significance_benchmark.iter())
+                    .map(|(a, b)| a - b)
                     .collect()
             })
             .collect();
@@ -1453,6 +1889,41 @@ pub fn rank(subs: &[AgentSubmission], cfg: &ScoreConfig) -> Vec<CompositeScore> 
             cs.dsr_tied = band_counts[cs.tie_group] > 1;
         }
     }
+
+    // Declared-mandate ordinal: within each mandate class (one resolved
+    // verdict), the declared-eligible agents ordered by deflated Sharpe, then
+    // id. The board order above is untouched.
+    let mut classes: Vec<(&MandateVerdict, usize)> = scores
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.declared_mandate_eligible == Some(true))
+        .filter_map(|(i, s)| s.verdict_applied.as_ref().map(|v| (v, i)))
+        .collect();
+    classes.sort_by(|(va, ia), (vb, ib)| {
+        let (a, b) = (&scores[*ia], &scores[*ib]);
+        class_key(va)
+            .cmp(&class_key(vb))
+            .then(
+                b.deflated_sharpe
+                    .partial_cmp(&a.deflated_sharpe)
+                    .unwrap_or(std::cmp::Ordering::Equal),
+            )
+            .then(a.agent_id.cmp(&b.agent_id))
+    });
+    let mut ordinals: Vec<(usize, usize)> = Vec::with_capacity(classes.len());
+    let mut prev: Option<&MandateVerdict> = None;
+    let mut ord = 0usize;
+    for (v, i) in classes {
+        if prev != Some(v) {
+            ord = 0;
+        }
+        ord += 1;
+        ordinals.push((i, ord));
+        prev = Some(v);
+    }
+    for (i, ord) in ordinals {
+        scores[i].declared_mandate_ordinal = Some(ord);
+    }
     scores
 }
 
@@ -1466,7 +1937,7 @@ fn ci_overlap(a: &CompositeScore, b: &CompositeScore) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::deflated_sharpe::expected_max_sharpe;
+    use crate::deflated_sharpe::{deflated_sharpe_ratio, expected_max_sharpe};
     use crate::process::ProcessEvent;
 
     /// Deterministic run: mean drift + a sinusoidal wiggle (no RNG → reproducible).
@@ -2037,6 +2508,67 @@ mod tests {
             .collect()
     }
 
+    #[test]
+    fn execution_replicates_are_averaged_not_counted_as_extra_market_time() {
+        // Two 3-bar windows, each run twice under stochastic execution. The
+        // pooled inference track must retain six market bars rather than twelve
+        // pseudo-independent seed outcomes.
+        let sub = agent(
+            "replicated",
+            vec![
+                run(0.01, 0.0, 3),
+                run(0.03, 0.0, 3),
+                run(-0.02, 0.0, 3),
+                run(0.00, 0.0, 3),
+            ],
+        );
+        let cfg = ScoreConfig {
+            execution_seeds_per_window: 2,
+            ..ScoreConfig::default()
+        };
+        let pooled = pooled_returns(&sub, cfg.execution_seeds_per_window);
+        assert_eq!(pooled.len(), 6);
+        assert_eq!(pooled, vec![0.02, 0.02, 0.02, -0.01, -0.01, -0.01]);
+        let score = score_agent(&sub, &cfg);
+        assert_eq!(score.pooled_observations, 6);
+        assert_eq!(
+            score.psr.to_bits(),
+            probabilistic_sharpe_ratio(&pooled, 0.0).to_bits(),
+            "PSR must see the de-duplicated time axis"
+        );
+    }
+
+    #[test]
+    fn one_execution_per_window_preserves_legacy_pooling() {
+        let sub = agent("single", vec![run(0.01, 0.002, 4), run(-0.01, 0.001, 5)]);
+        assert_eq!(
+            pooled_returns(&sub, 1),
+            pooled_of(&sub),
+            "the default is byte-compatible for one execution per window"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot form complete")]
+    fn incomplete_execution_replicate_block_is_rejected() {
+        let sub = agent(
+            "bad",
+            vec![
+                run(0.01, 0.001, 3),
+                run(0.01, 0.001, 3),
+                run(0.01, 0.001, 3),
+            ],
+        );
+        let _ = pooled_returns(&sub, 2);
+    }
+
+    #[test]
+    #[should_panic(expected = "equal return lengths")]
+    fn unequal_execution_replicate_lengths_are_rejected() {
+        let sub = agent("bad", vec![run(0.01, 0.001, 3), run(0.01, 0.001, 4)]);
+        let _ = pooled_returns(&sub, 2);
+    }
+
     /// The configured prior is annualized; the value the deflation actually sees
     /// is that prior divided by `sqrt(periods_per_year)`, exactly once.
     #[test]
@@ -2498,10 +3030,11 @@ mod tests {
         ]
     }
 
-    /// The default verdict never reads the benchmark id: a config that differs
-    /// from the default only in `benchmark_agent_id` ranks byte-identically.
+    /// The default pass^k verdict does not read the benchmark id, but the
+    /// field-wide RC/SPA tests do: they require a named fixed null rather than
+    /// silently comparing agents to their own field average.
     #[test]
-    fn default_verdict_ignores_the_benchmark_id() {
+    fn fixed_significance_benchmark_is_separate_from_default_pass_verdict() {
         let field = relative_field();
         let default = rank(&field, &ScoreConfig::default());
         let renamed = rank(
@@ -2511,7 +3044,17 @@ mod tests {
                 ..ScoreConfig::default()
             },
         );
-        assert_eq!(default, renamed);
+        assert_eq!(
+            default.iter().map(|s| s.rank_eligible).collect::<Vec<_>>(),
+            renamed.iter().map(|s| s.rank_eligible).collect::<Vec<_>>(),
+            "changing the significance null must not change default pass^k eligibility"
+        );
+        assert!(default
+            .iter()
+            .all(|s| s.field_significance_benchmark == "buy-and-hold"));
+        assert!(renamed
+            .iter()
+            .all(|s| s.field_significance_benchmark == "zero-return-cash"));
         assert_eq!(
             serde_json::from_str::<ScoreConfig>("{\"n_trials\":1,\"trials_sr_std\":0.5,\"dsr_bar\":0.9,\"per_run_psr_bar\":0.9,\"alpha\":0.05,\"bootstrap_seed\":1,\"n_boot\":10,\"block_prob\":0.1}")
                 .unwrap()
@@ -2858,5 +3401,353 @@ mod tests {
 
         let empty = score_agent(&agent("none", Vec::new()), &ScoreConfig::default());
         assert_eq!(empty.worst_run_drawdown, 0.0);
+    }
+
+    // ---- declared mandates -------------------------------------------------
+
+    fn declare(pairs: &[(&str, DeclaredMandate)]) -> MandateDeclarations {
+        pairs
+            .iter()
+            .map(|(id, m)| (id.to_string(), m.clone()))
+            .collect()
+    }
+
+    /// Everything on a score except the five declared fields, for asserting the
+    /// host-verdict columns are untouched by a declaration.
+    fn without_declared(mut s: CompositeScore) -> CompositeScore {
+        s.declared_mandate = None;
+        s.verdict_applied = None;
+        s.declared_passed_k = None;
+        s.declared_mandate_eligible = None;
+        s.declared_mandate_ordinal = None;
+        s
+    }
+
+    /// A declaration is recorded on the score with the verdict it resolved to,
+    /// an undeclared agent carries none of the five fields (absent from its
+    /// JSON, not null), and the empty map reproduces `rank` exactly.
+    #[test]
+    fn declaration_is_recorded_and_absent_by_default() {
+        let field = relative_field();
+        let cfg = ScoreConfig::default();
+        assert_eq!(
+            rank(&field, &cfg),
+            rank_declared(&field, &declare(&[]), &cfg)
+        );
+
+        let board = rank_declared(
+            &field,
+            &declare(&[
+                ("beats", DeclaredMandate::OutperformBuyAndHold),
+                (
+                    "trails",
+                    DeclaredMandate::DrawdownCapped {
+                        max_per_run_drawdown: 0.2,
+                    },
+                ),
+            ]),
+            &cfg,
+        );
+        let get = |id: &str| board.iter().find(|s| s.agent_id == id).unwrap();
+        assert_eq!(
+            get("beats").declared_mandate,
+            Some(DeclaredMandate::OutperformBuyAndHold)
+        );
+        assert_eq!(
+            get("beats").verdict_applied,
+            Some(MandateVerdict::RelativeTo {
+                benchmark_id: "buy-and-hold".to_string()
+            })
+        );
+        assert_eq!(
+            get("trails").verdict_applied,
+            Some(MandateVerdict::DrawdownCapped {
+                max_per_run_drawdown: 0.2
+            })
+        );
+        let json = serde_json::to_string(get("beats")).unwrap();
+        assert!(json.contains("\"declared_mandate\":{\"kind\":\"outperform_buy_and_hold\"}"));
+        assert!(json.contains(
+            "\"verdict_applied\":{\"kind\":\"relative_to\",\"benchmark_id\":\"buy-and-hold\"}"
+        ));
+        for id in ["buy-and-hold", "five-of-six", "clone"] {
+            let s = get(id);
+            assert!(s.declared_mandate.is_none() && s.verdict_applied.is_none());
+            assert!(s.declared_passed_k.is_none() && s.declared_mandate_eligible.is_none());
+            let json = serde_json::to_string(s).unwrap();
+            assert!(!json.contains("declared_") && !json.contains("verdict_applied"));
+        }
+        // The board row says which verdict was applied and how it went.
+        assert_eq!(
+            get("beats").mandate_verdict_label().as_deref(),
+            Some(if get("beats").declared_mandate_eligible == Some(true) {
+                "eligible under declared verdict (relative to buy-and-hold); host-board ineligible"
+            } else {
+                "ineligible under declared verdict (relative to buy-and-hold); host-board ineligible"
+            })
+        );
+        assert!(get("clone").mandate_verdict_label().is_none());
+
+        // The wire shape: the same object as a submission plus `declared_mandate`.
+        let wire = r#"[{"agent_id":"a","runs":[{"returns":[0.01,0.02]}],
+            "declared_mandate":{"kind":"drawdown_capped","max_per_run_drawdown":0.2}},
+            {"agent_id":"b","runs":[{"returns":[0.01,0.02]}]}]"#;
+        let parsed: Vec<DeclaredSubmission> = serde_json::from_str(wire).unwrap();
+        let (subs, decls) = split_declarations(parsed);
+        assert_eq!(subs.len(), 2);
+        assert_eq!(subs[0].runs[0].returns, vec![0.01, 0.02]);
+        assert_eq!(decls.len(), 1);
+        assert_eq!(
+            decls["a"],
+            DeclaredMandate::DrawdownCapped {
+                max_per_run_drawdown: 0.2
+            }
+        );
+    }
+
+    /// An OutperformBuyAndHold declaration is judged relative to itself: the
+    /// verdict applied is the relative one, its excess series is identically
+    /// zero, and it fails on the zero-excess rule. A clone under another id
+    /// fails the same way; an agent that beats it in every cell passes the
+    /// declared pass^k.
+    #[test]
+    fn buy_and_hold_under_long_only_beta_gets_the_relative_verdict_and_fails_it() {
+        let field = relative_field();
+        let board = rank_declared(
+            &field,
+            &declare(&[
+                ("buy-and-hold", DeclaredMandate::OutperformBuyAndHold),
+                ("clone", DeclaredMandate::OutperformBuyAndHold),
+                ("beats", DeclaredMandate::OutperformBuyAndHold),
+            ]),
+            &ScoreConfig::default(),
+        );
+        let get = |id: &str| board.iter().find(|s| s.agent_id == id).unwrap();
+        let relative = Some(MandateVerdict::RelativeTo {
+            benchmark_id: "buy-and-hold".to_string(),
+        });
+        assert_eq!(get("buy-and-hold").verdict_applied, relative);
+        assert_eq!(get("buy-and-hold").declared_passed_k, Some(false));
+        assert_eq!(get("buy-and-hold").declared_mandate_eligible, Some(false));
+        assert_eq!(
+            get("buy-and-hold").mandate_verdict_label().as_deref(),
+            Some(
+                "ineligible under declared verdict (relative to buy-and-hold); host-board ineligible"
+            )
+        );
+        assert_eq!(get("clone").declared_passed_k, Some(false));
+        assert_eq!(get("beats").declared_passed_k, Some(true));
+        // The host verdict on the same rows is what `rank` says.
+        let plain = rank(&field, &ScoreConfig::default());
+        for s in &board {
+            let p = plain.iter().find(|x| x.agent_id == s.agent_id).unwrap();
+            assert_eq!(&without_declared(s.clone()), p, "{}", s.agent_id);
+        }
+    }
+
+    /// A declaration selects the reliability question and nothing else: under
+    /// every declaration kind, every host-verdict column is byte-identical to
+    /// `rank`, declared eligibility implies the DSR, bootstrap, process and
+    /// host-mandate gates, and raising the DSR bar refuses every declaration.
+    #[test]
+    fn a_declaration_cannot_flip_dsr_eligibility_or_move_the_host_columns() {
+        let field = field_with_one_single_run_failure();
+        let kinds = [
+            DeclaredMandate::AbsoluteReturn,
+            DeclaredMandate::OutperformBuyAndHold,
+            DeclaredMandate::RelativeTo {
+                benchmark_id: "a".to_string(),
+            },
+            DeclaredMandate::DrawdownCapped {
+                max_per_run_drawdown: 0.5,
+            },
+        ];
+        let cfg = ScoreConfig::default();
+        let plain = rank(&field, &cfg);
+        for kind in &kinds {
+            let decls: MandateDeclarations = field
+                .iter()
+                .map(|s| (s.agent_id.clone(), kind.clone()))
+                .collect();
+            let board = rank_declared(&field, &decls, &cfg);
+            for s in &board {
+                let p = plain.iter().find(|x| x.agent_id == s.agent_id).unwrap();
+                assert_eq!(&without_declared(s.clone()), p, "{kind:?} {}", s.agent_id);
+                if s.declared_mandate_eligible == Some(true) {
+                    assert!(s.deflated_sharpe >= cfg.dsr_bar);
+                    assert!(s.bootstrap_p < cfg.alpha);
+                    assert!(s.process_ok && s.mandate_ok);
+                }
+            }
+            // Under `AbsoluteReturn` the declared verdict is the host's default
+            // verdict, so the two columns agree on every row.
+            if *kind == DeclaredMandate::AbsoluteReturn {
+                for s in &board {
+                    assert_eq!(s.declared_mandate_eligible, Some(s.rank_eligible));
+                    assert_eq!(s.declared_passed_k, Some(s.passed_k));
+                }
+            }
+            // No declaration survives a DSR bar nobody clears.
+            let strict = ScoreConfig {
+                dsr_bar: 10.0,
+                ..ScoreConfig::default()
+            };
+            for s in rank_declared(&field, &decls, &strict) {
+                assert_eq!(s.declared_mandate_eligible, Some(false), "{kind:?}");
+                assert!(!s.rank_eligible);
+            }
+        }
+        // The one-bad-run agent is refused by the default (one losing window)
+        // and passes its drawdown-capped declaration: one run clears the bar
+        // and no run draws down past the declared bound. That is the case a
+        // declaration exists for, and it is reported, not ranked.
+        let capped = rank_declared(
+            &field,
+            &declare(&[(
+                "one_bad_run",
+                DeclaredMandate::DrawdownCapped {
+                    max_per_run_drawdown: 0.5,
+                },
+            )]),
+            &cfg,
+        );
+        let bad = capped.iter().find(|s| s.agent_id == "one_bad_run").unwrap();
+        assert!(!bad.rank_eligible && !bad.passed_k);
+        assert_eq!(bad.declared_passed_k, Some(true));
+        assert_eq!(bad.declared_mandate_eligible, Some(true), "{bad:?}");
+        assert_eq!(
+            bad.mandate_verdict_label().as_deref(),
+            Some(
+                "eligible under declared verdict (drawdown capped at 0.50 per run); host-board ineligible"
+            )
+        );
+    }
+
+    /// A benchmark the field does not contain, a relative declaration scored
+    /// without a field, and a drawdown bound outside (0, 1] all fail the
+    /// declared verdict closed; none falls back to the absolute test.
+    #[test]
+    fn misdeclared_mandates_fail_closed() {
+        let field = relative_field();
+        let cfg = ScoreConfig::default();
+        let board = rank_declared(
+            &field,
+            &declare(&[(
+                "beats",
+                DeclaredMandate::RelativeTo {
+                    benchmark_id: "absent".to_string(),
+                },
+            )]),
+            &cfg,
+        );
+        let beats = board.iter().find(|s| s.agent_id == "beats").unwrap();
+        assert_eq!(beats.declared_passed_k, Some(false));
+        assert_eq!(beats.declared_mandate_eligible, Some(false));
+        // The same agent beats buy-and-hold in every cell when the benchmark is
+        // named correctly, so the refusal above is the misdeclaration's.
+        let ok = rank_declared(
+            &field,
+            &declare(&[("beats", DeclaredMandate::OutperformBuyAndHold)]),
+            &cfg,
+        );
+        assert_eq!(
+            ok.iter()
+                .find(|s| s.agent_id == "beats")
+                .unwrap()
+                .declared_passed_k,
+            Some(true)
+        );
+
+        // No field, no benchmark.
+        let alone = score_agent_declared(
+            &field[1],
+            Some(&DeclaredMandate::OutperformBuyAndHold),
+            &cfg,
+        );
+        assert_eq!(alone.declared_passed_k, None);
+        assert_eq!(alone.declared_mandate_eligible, None);
+        assert_eq!(
+            score_agent_declared(&field[1], None, &cfg),
+            score_agent(&field[1], &cfg)
+        );
+
+        // A clean agent passes a well-formed drawdown declaration and fails
+        // every malformed one, on the bound alone.
+        let clean = field_with_one_single_run_failure();
+        let capped = |x: f64| {
+            let board = rank_declared(
+                &clean,
+                &declare(&[(
+                    "a",
+                    DeclaredMandate::DrawdownCapped {
+                        max_per_run_drawdown: x,
+                    },
+                )]),
+                &cfg,
+            );
+            let a = board.iter().find(|s| s.agent_id == "a").unwrap().clone();
+            (a.declared_passed_k, a.declared_mandate_eligible)
+        };
+        assert_eq!(capped(0.5), (Some(true), Some(true)));
+        for bad in [0.0, -0.2, 1.5, f64::NAN, f64::INFINITY] {
+            assert_eq!(capped(bad), (Some(true), Some(false)), "bound {bad}");
+        }
+    }
+
+    /// Declared eligibility never moves the board. An agent that is
+    /// host-ineligible and declared-eligible keeps ordinal 0 and its position;
+    /// its declared ordinal counts only agents in its own mandate class, so two
+    /// agents under different verdicts are each first in their class and never
+    /// ordered against each other or against the host ordinal.
+    #[test]
+    fn declared_eligibility_is_ranked_within_its_mandate_class_only() {
+        let field = field_with_one_single_run_failure();
+        let cfg = ScoreConfig::default();
+        let plain = rank(&field, &cfg);
+        let board = rank_declared(
+            &field,
+            &declare(&[
+                (
+                    "one_bad_run",
+                    DeclaredMandate::DrawdownCapped {
+                        max_per_run_drawdown: 0.5,
+                    },
+                ),
+                ("a", DeclaredMandate::AbsoluteReturn),
+                ("b", DeclaredMandate::AbsoluteReturn),
+            ]),
+            &cfg,
+        );
+        let order = |b: &[CompositeScore]| b.iter().map(|s| s.agent_id.clone()).collect::<Vec<_>>();
+        assert_eq!(order(&board), order(&plain));
+        let get = |id: &str| board.iter().find(|s| s.agent_id == id).unwrap();
+        let bad = get("one_bad_run");
+        assert!(!bad.rank_eligible && bad.rank_ordinal == 0);
+        assert_eq!(bad.declared_mandate_eligible, Some(true));
+        assert_eq!(bad.declared_mandate_ordinal, Some(1));
+        // The absolute-return class holds the two host-eligible agents, ordered
+        // by DSR then id, and is a separate class from the drawdown-capped one.
+        let (a, b) = (get("a"), get("b"));
+        assert!(a.rank_eligible && b.rank_eligible);
+        let ords: Vec<Option<usize>> = [a, b].iter().map(|s| s.declared_mandate_ordinal).collect();
+        assert!(
+            ords.contains(&Some(1)) && ords.contains(&Some(2)),
+            "{ords:?}"
+        );
+        let (first, second) = if a.declared_mandate_ordinal == Some(1) {
+            (a, b)
+        } else {
+            (b, a)
+        };
+        assert!(
+            first.deflated_sharpe > second.deflated_sharpe
+                || (first.deflated_sharpe == second.deflated_sharpe
+                    && first.agent_id < second.agent_id)
+        );
+        // Host ordinals are unchanged by the declarations.
+        for s in &board {
+            let p = plain.iter().find(|x| x.agent_id == s.agent_id).unwrap();
+            assert_eq!(s.rank_ordinal, p.rank_ordinal);
+        }
     }
 }

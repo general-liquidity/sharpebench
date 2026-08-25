@@ -43,7 +43,7 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 
 use serde::Serialize;
-use sharpebench_core::composite::{score_agent, ScoreConfig};
+use sharpebench_core::composite::{pooled_returns, score_agent, ScoreConfig};
 use sharpebench_core::{AgentSubmission, CompositeScore};
 use sharpebench_harness::luck_floor;
 use sharpebench_sim::{
@@ -80,11 +80,7 @@ fn std_dev(xs: &[f64]) -> f64 {
 }
 
 fn pooled_sharpe(sub: &AgentSubmission) -> f64 {
-    let pooled: Vec<f64> = sub
-        .runs
-        .iter()
-        .flat_map(|r| r.returns.iter().copied())
-        .collect();
+    let pooled = pooled_returns(sub, EXEC_SEEDS.len());
     let sd = std_dev(&pooled);
     if sd == 0.0 {
         f64::NAN
@@ -249,7 +245,10 @@ fn main() {
 
         let monkeys = luck_floor(&data, &windows, &EXEC_SEEDS, CostModel::default(), N_AGENTS);
 
-        let cfg = ScoreConfig::for_periods_per_year(*ppy);
+        let cfg = ScoreConfig {
+            execution_seeds_per_window: EXEC_SEEDS.len(),
+            ..ScoreConfig::for_periods_per_year(*ppy)
+        };
         let monkey_sharpes: Vec<f64> = monkeys
             .iter()
             .map(pooled_sharpe)

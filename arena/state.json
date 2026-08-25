@@ -1,7 +1,23 @@
 {
   "current_epoch": 20689,
-  "window_order": [
-    "window-001"
-  ],
-  "published_order": []
+  "window_order": [],
+  "published_order": [],
+  "superseded": [
+    {
+      "window_id": "window-001",
+      "superseded_at_epoch": 20689,
+      "historical_window_sha256": "3db666716cb192642bd97a047b460a9b148bb2bbc4cab1604fd7a58ace2308a8",
+      "reason": "schema-v1 omitted execution_seeds_per_window, fixed deflation null mean, and scorer artifact provenance; no commitments, refusals, or scores existed",
+      "replacement_window_id": "window-002",
+      "replacement_score_config_sha256": "8c59e511ea2a9e572d8fb7901fd2951da1221ca9323bfe8e2fdbfa9395a89f07"
+    },
+    {
+      "window_id": "window-002",
+      "superseded_at_epoch": 20689,
+      "historical_window_sha256": "9d9cfc310a1f2b305f3c296f605c31bbbb070744cf50ce804e6a154945c2e7ff",
+      "reason": "withdrawn before commitments: the recorded digest identified a local debug executable, not a publicly retrievable immutable scorer artifact; reopen only with a published release or immutable image digest",
+      "replacement_window_id": null,
+      "replacement_score_config_sha256": null
+    }
+  ]
 }

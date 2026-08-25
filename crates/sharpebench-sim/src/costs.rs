@@ -30,6 +30,11 @@ pub struct CostModel {
     /// callers that want the closed-form remainder rather than per-order fills.
     #[serde(default)]
     pub trf_cost: Option<f64>,
+    /// Opt-in seed-driven execution noise (fill delay, partial fills,
+    /// queue-position slippage). `None` (the default) leaves every fill
+    /// byte-identical to the fee/slippage/impact model; see [`ExecutionNoise`].
+    #[serde(default)]
+    pub noise: Option<ExecutionNoise>,
 }
 
 impl Default for CostModel {
@@ -41,7 +46,98 @@ impl Default for CostModel {
             financing_bps: 5.0,
             max_participation: f64::INFINITY,
             trf_cost: None,
+            noise: None,
         }
+    }
+}
+
+/// Seed-driven execution noise beyond the base slippage draw. Every quantity is
+/// a pure function of `(seed, step, symbol)`, drawn from a stream derived for
+/// that triple rather than from the book's sequential RNG, so an order's noise
+/// does not depend on how many orders preceded it and the base slippage draw is
+/// untouched.
+///
+/// Per order on symbol `i` at step `t`, three uniforms `u_d, u_f, u_q` are drawn:
+///
+/// * **Fill delay.** With probability `delay_prob` (`u_d < delay_prob`) a fresh
+///   order does not fill this bar; it is carried and fills at the next bar's
+///   price, unless the agent re-issues an order on that symbol, which supersedes
+///   it (cancel/replace). A carried order is never delayed a second time.
+/// * **Partial fill.** The filled fraction of the target change is
+///   `phi = min_fill_frac + (1 - min_fill_frac) * u_f`; the remainder is carried
+///   to the next bar as an order for the same target weight. A remainder worth
+///   less than `carry_floor` of NAV fills in full instead, so a carry drains in
+///   finitely many bars rather than shrinking geometrically forever.
+/// * **Queue-position slippage.** An additional adverse price move of
+///   `u_q * range_t * min(1, participation / queue_participation_ref)`, where
+///   `range_t = |c_t / c_{t-1} - 1|` is the bar's close-to-close absolute move
+///   (the dataset carries closes only, so this is the range proxy) and
+///   `participation` is the filled trade value over NAV.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ExecutionNoise {
+    /// Probability a fresh order is deferred to the next bar.
+    pub delay_prob: f64,
+    /// Floor on the fraction of the target change filled in one bar.
+    pub min_fill_frac: f64,
+    /// Unfilled remainder, as a fraction of NAV, below which an order fills in
+    /// full rather than carrying the residual.
+    pub carry_floor: f64,
+    /// Participation (trade value over NAV) at which queue slippage reaches the
+    /// full bar range; below it the range is scaled down linearly.
+    pub queue_participation_ref: f64,
+}
+
+impl Default for ExecutionNoise {
+    fn default() -> Self {
+        Self {
+            delay_prob: 0.25,
+            min_fill_frac: 0.5,
+            carry_floor: 0.001,
+            queue_participation_ref: 0.10,
+        }
+    }
+}
+
+impl ExecutionNoise {
+    /// Validate every public execution-noise parameter before it reaches the
+    /// simulator. Invalid noise is a configuration error, never a silently
+    /// clamped market model: negative fill fractions can reverse an order and a
+    /// negative carry floor can leave an order pending indefinitely.
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.delay_prob.is_finite() || !(0.0..=1.0).contains(&self.delay_prob) {
+            return Err("execution noise delay_prob must be finite and in [0, 1]".to_string());
+        }
+        if !self.min_fill_frac.is_finite() || !(0.0..=1.0).contains(&self.min_fill_frac) {
+            return Err("execution noise min_fill_frac must be finite and in [0, 1]".to_string());
+        }
+        if !self.carry_floor.is_finite() || self.carry_floor < 0.0 {
+            return Err("execution noise carry_floor must be finite and >= 0".to_string());
+        }
+        if !self.queue_participation_ref.is_finite() || self.queue_participation_ref <= 0.0 {
+            return Err(
+                "execution noise queue_participation_ref must be finite and > 0".to_string(),
+            );
+        }
+        Ok(())
+    }
+
+    /// The derived noise stream for one `(seed, step, symbol index)` triple.
+    pub fn stream(seed: u64, step: usize, symbol_index: usize) -> Rng {
+        Rng::new(
+            seed ^ (step as u64).wrapping_mul(0xD6E8_FEB8_6659_FD93)
+                ^ (symbol_index as u64 + 1).wrapping_mul(0x2545_F491_4F6C_DD1D),
+        )
+    }
+}
+
+impl CostModel {
+    /// Reject malformed optional execution noise at the public simulation
+    /// boundary. A config without noise remains backwards compatible.
+    pub fn validate(&self) -> Result<(), String> {
+        if let Some(noise) = self.noise {
+            noise.validate()?;
+        }
+        Ok(())
     }
 }
 
@@ -91,6 +187,10 @@ pub enum CostProfile {
     Typical,
     /// Stressed execution: wide fees + slippage + impact and a multi-bar fill delay.
     WorstCase,
+    /// Typical costs plus seed-driven fill delay, partial fills and
+    /// queue-position slippage ([`ExecutionNoise::default`]), so the seed leg of
+    /// pass^k resamples execution rather than a few basis points of slippage.
+    Realistic,
 }
 
 /// A cost profile resolved to a concrete [`CostModel`] and a decision-to-fill
@@ -114,6 +214,7 @@ impl CostProfile {
                     financing_bps: 0.0,
                     max_participation: f64::INFINITY,
                     trf_cost: None,
+                    noise: None,
                 },
                 decision_delay_bars: 0,
             },
@@ -129,8 +230,16 @@ impl CostProfile {
                     financing_bps: 20.0,
                     max_participation: 0.1,
                     trf_cost: None,
+                    noise: None,
                 },
                 decision_delay_bars: 2,
+            },
+            CostProfile::Realistic => ExecutionProfile {
+                costs: CostModel {
+                    noise: Some(ExecutionNoise::default()),
+                    ..CostModel::default()
+                },
+                decision_delay_bars: 0,
             },
         }
     }
@@ -189,6 +298,27 @@ impl Rng {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn execution_noise_validation_rejects_unsafe_public_values() {
+        let mut noise = ExecutionNoise::default();
+        for value in [-0.1, 1.1, f64::NAN, f64::INFINITY] {
+            noise.delay_prob = value;
+            assert!(noise.validate().is_err());
+        }
+        noise = ExecutionNoise::default();
+        for value in [-0.1, 1.1, f64::NAN, f64::NEG_INFINITY] {
+            noise.min_fill_frac = value;
+            assert!(noise.validate().is_err());
+        }
+        noise = ExecutionNoise::default();
+        noise.carry_floor = -0.001;
+        assert!(noise.validate().is_err());
+        noise = ExecutionNoise::default();
+        noise.queue_participation_ref = 0.0;
+        assert!(noise.validate().is_err());
+        assert!(ExecutionNoise::default().validate().is_ok());
+    }
 
     #[test]
     fn impact_grows_with_participation() {
@@ -285,6 +415,41 @@ mod tests {
         let residual = (1.0 - c * w0 - coef * sell) / (1.0 - c * w0) - mu;
         assert!(residual.abs() < 1e-10, "μ is not a fixed point: {residual}");
         assert!(mu > 0.0 && mu <= 1.0, "μ out of range: {mu}");
+    }
+
+    #[test]
+    fn realistic_profile_is_typical_costs_plus_noise() {
+        let p = CostProfile::Realistic.resolve();
+        let d = CostModel::default();
+        assert_eq!(p.costs.fee_bps, d.fee_bps);
+        assert_eq!(p.costs.slippage_bps, d.slippage_bps);
+        assert_eq!(p.costs.impact_bps, d.impact_bps);
+        assert_eq!(p.costs.financing_bps, d.financing_bps);
+        assert_eq!(p.decision_delay_bars, 0);
+        assert_eq!(p.costs.noise, Some(ExecutionNoise::default()));
+        assert_eq!(d.noise, None);
+    }
+
+    #[test]
+    fn noise_field_is_serde_default_so_old_configs_still_parse() {
+        let old = r#"{"fee_bps":2.0,"slippage_bps":3.0,"impact_bps":50.0,"financing_bps":5.0,"max_participation":0.5}"#;
+        let m: CostModel = serde_json::from_str(old).expect("pre-noise config parses");
+        assert_eq!(m.noise, None);
+        assert_eq!(m.trf_cost, None);
+    }
+
+    #[test]
+    fn noise_stream_is_a_pure_function_of_seed_step_symbol() {
+        let mut a = ExecutionNoise::stream(7, 3, 1);
+        let mut b = ExecutionNoise::stream(7, 3, 1);
+        assert_eq!(a.unit(), b.unit());
+        let mut c = ExecutionNoise::stream(8, 3, 1);
+        let mut d = ExecutionNoise::stream(7, 4, 1);
+        let mut e = ExecutionNoise::stream(7, 3, 2);
+        let base = ExecutionNoise::stream(7, 3, 1).unit();
+        assert_ne!(base, c.unit());
+        assert_ne!(base, d.unit());
+        assert_ne!(base, e.unit());
     }
 
     #[test]
