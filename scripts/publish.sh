@@ -11,7 +11,7 @@ set -euo pipefail
 
 # Dependency-topological order: a crate must be live before its dependents resolve.
 # Mirror of the release.yml publish loop — keep the two lists in sync.
-ORDER=(sharpebench-stats sharpebench-edge sharpebench-core sharpebench-protocol sharpebench-attest sharpebench-sim sharpebench-leaderboard sharpebench-wasm sharpebench-harness sharpebench-arena sharpebench)
+ORDER=(sharpebench-stats sharpebench-edge sharpebench-protocol sharpebench-core sharpebench-attest sharpebench-sim sharpebench-leaderboard sharpebench-wasm sharpebench-harness sharpebench-arena sharpebench)
 
 # The leaf crates (no internal deps) can be package-verified standalone.
 LEAVES=(sharpebench-stats sharpebench-protocol sharpebench-attest)

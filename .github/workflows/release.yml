@@ -122,12 +122,13 @@ jobs:
         run: |
           UA="sharpebench-release (general-liquidity)" # crates.io rejects requests without a User-Agent
           V="$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
-          # leaves first → CLI last (sim/leaderboard/wasm depend on core/protocol/attest;
+          # leaves first → CLI last. protocol has no internal deps and core depends on it
+          # (DeclaredMandate), so protocol precedes core; sim/leaderboard/wasm depend on core/protocol/attest;
           # harness on sim; sharpebench on all). edge depends on stats and is itself a dep of
           # wasm + the CLI, so it MUST come before wasm. arena depends on core/attest/
           # leaderboard/sim and is a dep of the CLI, so it comes after those and before
           # sharpebench. publish=false members are omitted.
-          for c in sharpebench-stats sharpebench-edge sharpebench-core sharpebench-protocol \
+          for c in sharpebench-stats sharpebench-edge sharpebench-protocol sharpebench-core \
                    sharpebench-attest sharpebench-sim sharpebench-leaderboard sharpebench-wasm \
                    sharpebench-harness sharpebench-arena sharpebench; do
             if curl -s -A "$UA" "https://crates.io/api/v1/crates/$c/$V" | grep -q "\"num\":\"$V\""; then
@@ -298,7 +299,7 @@ jobs:
           fail=0
 
           if [ "${{ vars.PUBLISH_CRATES }}" = "true" ]; then
-            for c in sharpebench-stats sharpebench-edge sharpebench-core sharpebench-protocol \
+            for c in sharpebench-stats sharpebench-edge sharpebench-protocol sharpebench-core \
                      sharpebench-attest sharpebench-sim sharpebench-leaderboard sharpebench-wasm \
                      sharpebench-harness sharpebench-arena sharpebench; do
               if curl -s -A "$UA" "https://crates.io/api/v1/crates/$c/$TAG" | grep -q "\"num\":\"$TAG\""; then
