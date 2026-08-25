@@ -5,12 +5,34 @@ All notable changes to SharpeBench are recorded here. The format follows
 version covers every crate, the npm packages and the PyPI package; each
 section is one `v*` tag and links the commits it was built from.
 
-[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.10.0...HEAD
 
 ## [Unreleased]
 
 ### Added
-- core/protocol: `DeclaredMandate`, an opt-in mandate declared on the submission (`absolute_return`, `relative_to`, `drawdown_capped`, `outperform_buy_and_hold`; the prior `long_only_beta` wire spelling remains a compatibility alias), scored by `rank_declared` / `score_agent_declared` as a labeled second verdict (`declared_mandate`, `verdict_applied`, `declared_passed_k`, `declared_mandate_eligible`, `declared_mandate_ordinal`). A declaration selects which reliability question pass^k asks and never relaxes the DSR, bootstrap, process or host-mandate gates; the board ranks under the host verdict and orders declared eligibility within its mandate class only. Evidence: `paper/evidence/final/mandate-declaration.jsonl` records 36 declared agent--dataset cases and 45 undeclared luck-floor records; none is declared-eligible, and the one declared reliability pass still fails deflation and bootstrap (this commit).
+- harness: `local_open_weight_field_eval`, a local frontier-model compatibility field that drives exact Ollama tags through SharpeArena's canonical fail-closed stdio shim, records model/server identity plus cadence/thinking configuration, and withholds the final artifact if any infrastructure cell fails. The path is built and tested; no model performance result is admitted yet.
+- docs: the directed SharpeArena-to-SharpeBench artifact boundary is documented. SharpeArena owns the environment and sandbox, while SharpeBench remains the independent field evaluator; there is no reverse dependency on the full SharpeArena package.
+
+### Fixed
+- protocol/sim: the closed `Decision` contract rejects unknown fields, duplicate or unobserved symbols, non-finite or out-of-range targets, confidence, and spend at every transport boundary. Signed target weights now open real short positions, and financing uses gross exposure after a deliberate short target without moving the frozen long-only golden path.
+- arena: the local OCI sandbox is digest-pinned and fail-closed, runs as a non-root user with no capabilities or network, a read-only root, bounded `noexec` temporary filesystems, explicit startup/execution timeouts, and live hostile readiness probes. A missing image is refused rather than pulled implicitly.
+- examples: the legacy LLM adapter emits the canonical `Decision` wire shape and treats generation or parsing faults as faults instead of silent holds.
+- paper: Figures 1 and 4 use the full text width; the 48-page PDF passed a complete 180-DPI rendered inspection with no clipped panels or dropped floats.
+
+## [0.10.0] - 2026-08-25
+
+### Changed
+- paper: the verification re-review reports the seed-averaging interaction with clone collapse, corrects the pass-witness binding gate, thousand-agent corners, perturbation spread and drawdown range, and groups the findings without renumbering them ([ed14597](https://github.com/general-liquidity/sharpebench/commit/ed14597)).
+- arena: window 003 is opened against the attested v0.9.0 scorer after the two pre-entry windows were superseded ([9e0b016](https://github.com/general-liquidity/sharpebench/commit/9e0b016)).
+
+### Fixed
+- release: publish `sharpebench-protocol` before `sharpebench-core`, which depends on it ([06cb970](https://github.com/general-liquidity/sharpebench/commit/06cb970)).
+
+## [0.9.0] - 2026-08-25
+
+### Added
+- core/protocol: `DeclaredMandate`, an opt-in mandate declared on the submission (`absolute_return`, `relative_to`, `drawdown_capped`, `outperform_buy_and_hold`; the prior `long_only_beta` wire spelling remains a compatibility alias), scored by `rank_declared` / `score_agent_declared` as a labeled second verdict. A declaration selects which reliability question pass^k asks and never relaxes the DSR, bootstrap, process or host-mandate gates; none of the 36 declared evidence rows is eligible ([f49d93c](https://github.com/general-liquidity/sharpebench/commit/f49d93c)).
+- sim/harness: a disclosed execution-noise profile and seed-leg evaluation make execution-seed variability material while preserving the deterministic default ([f49d93c](https://github.com/general-liquidity/sharpebench/commit/f49d93c)).
 
 ### Fixed
 - statistics: pooled PSR, DSR and bootstrap inputs now average aligned execution-seed returns within a window before concatenating market time; malformed or unequal seed blocks fail closed. Scores stamp execution-seed topology, pooled observations, the fixed null and configured-versus-measured dispersion source.
@@ -250,6 +272,10 @@ First published release.
 ### Fixed
 - Constant-time HMAC verification and bounded, timed agent HTTP reads ([6c3d174](https://github.com/general-liquidity/sharpebench/commit/6c3d174)).
 
+[0.10.0]: https://github.com/general-liquidity/sharpebench/compare/v0.9.0...v0.10.0
+[0.9.0]: https://github.com/general-liquidity/sharpebench/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/general-liquidity/sharpebench/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/general-liquidity/sharpebench/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/general-liquidity/sharpebench/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/general-liquidity/sharpebench/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/general-liquidity/sharpebench/compare/v0.3.0...v0.4.0

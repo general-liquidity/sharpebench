@@ -61,6 +61,16 @@ pub(crate) struct Book {
     /// the serialized snapshot, under the default cost model.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub(crate) pending: BTreeMap<String, PendingOrder>,
+    /// Whether this run has deliberately requested a negative target.  Kept
+    /// separately from tiny execution-price overshoots around a zero target so
+    /// the signed-short financing path can use gross exposure without changing
+    /// the committed long-only engine bytes.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub(crate) has_short_target: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// An order carried from a previous bar: the target weight still to be reached.
@@ -78,6 +88,7 @@ impl Book {
             trace: Trace::default(),
             prev_nav: 1.0_f64,
             pending: BTreeMap::new(),
+            has_short_target: false,
         }
     }
 }
@@ -155,7 +166,11 @@ fn apply_order(
     if p <= 0.0 {
         return OrderOutcome::Noop;
     }
-    let target_value = target_weight.max(0.0) * cur_nav;
+    // The public protocol defines a signed target-weight vector.  Keep the
+    // desired value signed so a negative target opens or maintains a short;
+    // clamping here used to make every advertised short-capable environment
+    // silently behave as long-only.
+    let target_value = target_weight * cur_nav;
     let cur_value = book.shares[symbol] * p;
     // Liquidity cap: a trade larger than the per-step participation limit
     // only partially fills; the rest is left for later steps.
@@ -293,6 +308,9 @@ pub(crate) fn step_once(
         if ord.target_weight.abs() > CONCENTRATION_CAP {
             book.trace.events.push(ProcessEvent::ConcentrationBreach);
         }
+        if ord.target_weight < 0.0 {
+            book.has_short_target = true;
+        }
         let outcome = apply_order(
             data,
             symbols,
@@ -338,7 +356,22 @@ pub(crate) fn step_once(
         .sum();
     let nav_now = book.cash + positions_value;
     if nav_now > 1e-12 {
-        let gross = positions_value / nav_now;
+        // Financing is a function of gross, not net, exposure.  Netting a long
+        // against a short must not let a leveraged dollar-neutral book avoid the
+        // carry charged to an equally levered long-only book.
+        let gross = if book.has_short_target {
+            symbols
+                .iter()
+                .map(|s| (book.shares[s] * price(data, s, t)).abs())
+                .sum::<f64>()
+                / nav_now
+        } else {
+            // Preserve the historical long-only arithmetic exactly.  Small
+            // execution-price overshoots around a zero target existed in the
+            // frozen engine before signed shorts were supported; treating those
+            // as intentional shorts would move every committed golden.
+            positions_value / nav_now
+        };
         book.cash -= crate::costs::financing_cost_frac(costs.financing_bps, gross) * nav_now;
     }
 
@@ -881,6 +914,54 @@ mod tests {
         assert_ne!(
             a.returns, b.returns,
             "a tight liquidity cap must change fills"
+        );
+    }
+
+    #[test]
+    fn signed_targets_open_shorts_and_financing_uses_gross_exposure() {
+        let data = Dataset::synthetic(2, 80, 17);
+        let symbols = data.symbols();
+        let mut book = Book::new(&symbols, 3);
+        let costs = CostModel {
+            fee_bps: 0.0,
+            slippage_bps: 0.0,
+            impact_bps: 0.0,
+            financing_bps: 100.0,
+            max_participation: f64::INFINITY,
+            trf_cost: None,
+            noise: None,
+        };
+        let decision = Decision {
+            orders: vec![
+                Order {
+                    symbol: symbols[0].clone(),
+                    action: Action::Buy,
+                    target_weight: 1.0,
+                    confidence: 0.5,
+                    rationale: String::new(),
+                },
+                Order {
+                    symbol: symbols[1].clone(),
+                    action: Action::Sell,
+                    target_weight: -1.0,
+                    confidence: 0.5,
+                    rationale: String::new(),
+                },
+            ],
+            reasoning: "dollar-neutral long/short fixture".to_string(),
+            cost: None,
+        };
+
+        let outcome = step_once(&data, &symbols, &mut book, &costs, 3, 20, &decision);
+        assert!(book.shares[&symbols[0]] > 0.0, "the long leg must open");
+        assert!(
+            book.shares[&symbols[1]] < 0.0,
+            "a negative target must open a short rather than being clamped flat"
+        );
+        assert!(
+            (outcome.ret + 0.01).abs() < 1e-12,
+            "2x gross / 0x net exposure must pay one 100bp leveraged carry charge: {}",
+            outcome.ret
         );
     }
 }

@@ -114,6 +114,15 @@ sharpebench arena publish <dir> <window> <key>
 sharpebench arena verify <dir> [--pubkey <hex>]
 \end{verbatim}
 
+\paragraph{The local open-weight compatibility path (unrun).}
+\begin{verbatim}
+SHARPEBENCH_LOCAL_MODELS=<exact-ollama-tags> \
+cargo run --release -p sharpebench-harness \
+  --example local_open_weight_field_eval -- \
+  local-open-weight.jsonl [dataset]
+\end{verbatim}
+The example drives each exact local tag through SharpeArena's canonical stdio shim and the same reference-field and ranking path as the historical evaluator. It records model/server identity, cadence, thinking settings and agent protocol failures; an infrastructure failure aborts publication. This command is listed to make the built boundary inspectable. It has not produced an evidence file admitted by this manuscript and supports no result above.
+
 \paragraph{Importing a rival field.}
 \begin{verbatim}
 sharpebench import csv <dir-or-file> --out subs.json [--trials N]

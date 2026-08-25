@@ -1,15 +1,16 @@
 //! Sandboxed execution of untrusted external agents.
 //!
 //! An arena entrant is untrusted code. This module runs it inside a Docker
-//! container (`docker run --rm --network none --memory 1g --cpus 1 -i <image>`)
-//! speaking the exact stdin/stdout observation/decision protocol that
+//! container with no network, a read-only root, bounded tmpfs scratch space,
+//! non-root identity, no Linux capabilities, no-new-privileges, and CPU/RAM/PID
+//! limits. Images are digest-pinned by default while speaking the exact
+//! stdin/stdout observation/decision protocol that
 //! `sharpebench_sim::ExternalAgent` already implements. The container command is
 //! the transport process: `ExternalAgent` is wrapped, the protocol is not
 //! reimplemented.
 //!
-//! **Container isolation is the boundary.** `--network none` cuts the agent off
-//! from the network, and the memory/cpu caps bound resource abuse; nothing here
-//! attempts syscall filtering or further hardening on top of Docker. Host
+//! **Container isolation is the boundary.** Docker's default seccomp profile is
+//! retained and the launch removes ambient privilege and writable host state. Host
 //! execution of untrusted code remains unsupported: when Docker is absent this
 //! module returns a clear error, never a silent unsandboxed fallback. The
 //! `allow_unsandboxed` opt-in exists for local development against your OWN
@@ -19,7 +20,11 @@
 //! Docker is invoked as the `docker` binary via `std::process` - no Docker
 //! client crate, keeping the workspace's audited dependency tree unchanged.
 
-use std::process::Command;
+use std::process::{Command, Output, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use serde::Serialize;
 
 use sharpebench_sim::ExternalAgent;
 
@@ -33,6 +38,10 @@ pub struct SandboxOptions {
     /// The host command (program + args) to run when `allow_unsandboxed` is
     /// set and Docker is absent. Local development only.
     pub unsandboxed_command: Option<Vec<String>>,
+    /// Development-only escape hatch for mutable image tags. Field runs require
+    /// `<repository>@sha256:<64 lowercase hex>` by default so the artifact that
+    /// executed is the artifact that was committed.
+    pub allow_unpinned_image: bool,
 }
 
 /// Why a sandboxed run could not start.
@@ -43,6 +52,10 @@ pub enum SandboxError {
     DockerUnavailable(String),
     /// The agent process failed to spawn.
     Spawn(String),
+    /// The container artifact or launch option is unsafe/ambiguous.
+    InvalidConfig(String),
+    /// Docker ran, but the hardened boundary failed a readiness probe.
+    Readiness(String),
 }
 
 impl std::fmt::Display for SandboxError {
@@ -50,6 +63,8 @@ impl std::fmt::Display for SandboxError {
         match self {
             SandboxError::DockerUnavailable(msg) => write!(f, "docker unavailable: {msg}"),
             SandboxError::Spawn(msg) => write!(f, "cannot spawn agent: {msg}"),
+            SandboxError::InvalidConfig(msg) => write!(f, "invalid sandbox config: {msg}"),
+            SandboxError::Readiness(msg) => write!(f, "sandbox is not field-ready: {msg}"),
         }
     }
 }
@@ -60,10 +75,23 @@ impl std::error::Error for SandboxError {}
 /// deterministic and testable without Docker installed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Launch {
-    /// `docker run --rm --network none --memory 1g --cpus 1 -i <image>`.
+    /// A hardened `docker run` invocation ending in the pinned image.
     Docker { program: String, args: Vec<String> },
     /// The opted-in local-dev host command. NOT a sandbox.
     Unsandboxed { program: String, args: Vec<String> },
+}
+
+/// Successful, live verification of the field sandbox boundary.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct SandboxReadiness {
+    /// Digest-pinned image reference used for the hostile probe.
+    pub image: String,
+    /// Docker's immutable image ID for the locally present artifact.
+    pub image_id: String,
+    /// Docker daemon version that enforced the boundary.
+    pub docker_server_version: String,
+    /// Hostile checks that the container passed.
+    pub passed_checks: Vec<String>,
 }
 
 /// Is the Docker CLI present and answering? Checked by running `docker version`.
@@ -85,23 +113,10 @@ pub fn resolve_launch(
     opts: &SandboxOptions,
 ) -> Result<Launch, SandboxError> {
     if docker_present {
+        validate_image(image, opts.allow_unpinned_image)?;
         return Ok(Launch::Docker {
             program: "docker".to_string(),
-            args: [
-                "run",
-                "--rm",
-                "--network",
-                "none",
-                "--memory",
-                "1g",
-                "--cpus",
-                "1",
-                "-i",
-                image,
-            ]
-            .iter()
-            .map(|s| s.to_string())
-            .collect(),
+            args: hardened_docker_args(image),
         });
     }
     if !opts.allow_unsandboxed {
@@ -123,6 +138,213 @@ pub fn resolve_launch(
                 .to_string(),
         )),
     }
+}
+
+fn hardened_docker_args(image: &str) -> Vec<String> {
+    [
+        "run",
+        "--rm",
+        "--init",
+        "--pull",
+        "never",
+        "--network",
+        "none",
+        "--ipc",
+        "none",
+        "--read-only",
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges=true",
+        "--user",
+        "65532:65532",
+        "--memory",
+        "1g",
+        "--memory-swap",
+        "1g",
+        "--cpus",
+        "1",
+        "--pids-limit",
+        "128",
+        "--ulimit",
+        "nofile=256:256",
+        "--tmpfs",
+        "/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777",
+        "--tmpfs",
+        "/run:rw,noexec,nosuid,nodev,size=16m,mode=1777",
+        "--log-driver",
+        "none",
+        "-i",
+        image,
+    ]
+    .iter()
+    .map(|value| (*value).to_string())
+    .collect()
+}
+
+const READINESS_TIMEOUT: Duration = Duration::from_secs(30);
+
+const HOSTILE_PROBE: &str = r#"
+set -eu
+[ "$(id -u)" = "65532" ]
+[ "$(awk '/^CapEff:/ {print $2}' /proc/self/status)" = "0000000000000000" ]
+[ "$(awk '/^NoNewPrivs:/ {print $2}' /proc/self/status)" = "1" ]
+[ "$(ls -1 /sys/class/net)" = "lo" ]
+awk '$5 == "/" { if ($6 !~ /(^|,)ro(,|$)/) exit 1; found=1 } END { if (!found) exit 1 }' /proc/self/mountinfo
+if touch /etc/sharpebench-root-write 2>/dev/null; then exit 41; fi
+touch /tmp/sharpebench-write-ok
+printf '#!/bin/sh\nexit 0\n' > /tmp/sharpebench-exec-denied
+chmod +x /tmp/sharpebench-exec-denied
+if /tmp/sharpebench-exec-denied 2>/dev/null; then exit 42; fi
+touch /run/sharpebench-write-ok
+"#;
+
+fn command_output_with_timeout(
+    program: &str,
+    args: &[String],
+    timeout: Duration,
+) -> Result<Output, String> {
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("cannot start {program}: {error}"))?;
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                return child
+                    .wait_with_output()
+                    .map_err(|error| format!("cannot collect {program} output: {error}"));
+            }
+            Ok(None) if Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(25));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!(
+                    "{program} exceeded the {}s readiness timeout",
+                    timeout.as_secs()
+                ));
+            }
+            Err(error) => return Err(format!("cannot poll {program}: {error}")),
+        }
+    }
+}
+
+fn docker_output(args: &[&str]) -> Result<Output, SandboxError> {
+    let owned: Vec<String> = args.iter().map(|value| (*value).to_string()).collect();
+    command_output_with_timeout("docker", &owned, READINESS_TIMEOUT)
+        .map_err(SandboxError::DockerUnavailable)
+}
+
+/// Prove that the live Docker boundary is ready for a field run.
+///
+/// Unlike the ordinary Docker smoke test, this check never skips. It requires a
+/// locally present, digest-pinned POSIX fixture image with `/bin/sh`, `id`,
+/// `awk`, `ls`, `touch`, and `chmod`, then runs hostile attempts against every
+/// boundary field execution relies on. No image is pulled (`--pull never`).
+pub fn check_sandbox_readiness(image: &str) -> Result<SandboxReadiness, SandboxError> {
+    validate_image(image, false)?;
+
+    let version = docker_output(&["version", "--format", "{{.Server.Version}}"])?;
+    if !version.status.success() {
+        return Err(SandboxError::DockerUnavailable(
+            String::from_utf8_lossy(&version.stderr).trim().to_string(),
+        ));
+    }
+    let docker_server_version = String::from_utf8_lossy(&version.stdout).trim().to_string();
+    if docker_server_version.is_empty() {
+        return Err(SandboxError::DockerUnavailable(
+            "Docker returned no server version".to_string(),
+        ));
+    }
+
+    let inspected = docker_output(&["image", "inspect", "--format", "{{.Id}}", image])?;
+    if !inspected.status.success() {
+        return Err(SandboxError::Readiness(format!(
+            "the pinned fixture image is not present locally: {}",
+            String::from_utf8_lossy(&inspected.stderr).trim()
+        )));
+    }
+    let image_id = String::from_utf8_lossy(&inspected.stdout)
+        .trim()
+        .to_string();
+    if !image_id.starts_with("sha256:") {
+        return Err(SandboxError::Readiness(
+            "Docker returned an invalid image ID".to_string(),
+        ));
+    }
+
+    let mut args = hardened_docker_args(image);
+    args.extend([
+        "/bin/sh".to_string(),
+        "-ceu".to_string(),
+        HOSTILE_PROBE.to_string(),
+    ]);
+    let probe = command_output_with_timeout("docker", &args, READINESS_TIMEOUT)
+        .map_err(SandboxError::Readiness)?;
+    if !probe.status.success() {
+        let stderr = String::from_utf8_lossy(&probe.stderr);
+        return Err(SandboxError::Readiness(format!(
+            "hostile fixture exited with {}: {}",
+            probe.status,
+            stderr.trim()
+        )));
+    }
+
+    Ok(SandboxReadiness {
+        image: image.to_string(),
+        image_id,
+        docker_server_version,
+        passed_checks: [
+            "non-root uid",
+            "zero Linux capabilities",
+            "no-new-privileges",
+            "network namespace exposes loopback only",
+            "root filesystem is read-only",
+            "bounded tmpfs is writable",
+            "tmpfs is noexec",
+        ]
+        .iter()
+        .map(|value| (*value).to_string())
+        .collect(),
+    })
+}
+
+fn validate_image(image: &str, allow_unpinned: bool) -> Result<(), SandboxError> {
+    if image.is_empty()
+        || image.starts_with('-')
+        || image.chars().any(|character| character.is_whitespace())
+    {
+        return Err(SandboxError::InvalidConfig(
+            "image must be one non-option Docker image reference".to_string(),
+        ));
+    }
+    if allow_unpinned {
+        return Ok(());
+    }
+    let Some((repository, digest)) = image.rsplit_once("@sha256:") else {
+        return Err(SandboxError::InvalidConfig(
+            "field images must be pinned as <repository>@sha256:<64 lowercase hex>; set \
+             allow_unpinned_image only for a local development smoke test"
+                .to_string(),
+        ));
+    };
+    if repository.is_empty()
+        || digest.len() != 64
+        || !digest
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return Err(SandboxError::InvalidConfig(
+            "image digest must be 64 lowercase hexadecimal characters".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 /// Run an external agent sandboxed in Docker, returning the live
@@ -160,6 +382,7 @@ mod tests {
         let opts = SandboxOptions {
             allow_unsandboxed: true,
             unsandboxed_command: None,
+            allow_unpinned_image: false,
         };
         assert!(matches!(
             resolve_launch(false, "some/image", &opts),
@@ -172,6 +395,7 @@ mod tests {
         let opts = SandboxOptions {
             allow_unsandboxed: true,
             unsandboxed_command: Some(vec!["python".to_string(), "agent.py".to_string()]),
+            allow_unpinned_image: false,
         };
         assert_eq!(
             resolve_launch(false, "some/image", &opts).unwrap(),
@@ -188,10 +412,11 @@ mod tests {
         let opts = SandboxOptions {
             allow_unsandboxed: true,
             unsandboxed_command: Some(vec!["python".to_string()]),
+            allow_unpinned_image: false,
         };
-        let Launch::Docker { program, args } =
-            resolve_launch(true, "sharpebench/agent:1", &opts).unwrap()
-        else {
+        let digest = "0".repeat(64);
+        let image = format!("sharpebench/agent@sha256:{digest}");
+        let Launch::Docker { program, args } = resolve_launch(true, &image, &opts).unwrap() else {
             panic!("expected the Docker launch");
         };
         assert_eq!(program, "docker");
@@ -200,16 +425,89 @@ mod tests {
             vec![
                 "run",
                 "--rm",
+                "--init",
+                "--pull",
+                "never",
                 "--network",
                 "none",
+                "--ipc",
+                "none",
+                "--read-only",
+                "--cap-drop",
+                "ALL",
+                "--security-opt",
+                "no-new-privileges=true",
+                "--user",
+                "65532:65532",
                 "--memory",
+                "1g",
+                "--memory-swap",
                 "1g",
                 "--cpus",
                 "1",
+                "--pids-limit",
+                "128",
+                "--ulimit",
+                "nofile=256:256",
+                "--tmpfs",
+                "/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777",
+                "--tmpfs",
+                "/run:rw,noexec,nosuid,nodev,size=16m,mode=1777",
+                "--log-driver",
+                "none",
                 "-i",
-                "sharpebench/agent:1"
+                image.as_str()
             ]
         );
+    }
+
+    #[test]
+    fn docker_refuses_mutable_or_option_like_images_by_default() {
+        assert!(matches!(
+            resolve_launch(true, "agent:latest", &SandboxOptions::default()),
+            Err(SandboxError::InvalidConfig(_))
+        ));
+        assert!(matches!(
+            resolve_launch(true, "--privileged", &SandboxOptions::default()),
+            Err(SandboxError::InvalidConfig(_))
+        ));
+        let opts = SandboxOptions {
+            allow_unpinned_image: true,
+            ..SandboxOptions::default()
+        };
+        assert!(matches!(
+            resolve_launch(true, "agent:dev", &opts),
+            Ok(Launch::Docker { .. })
+        ));
+    }
+
+    #[test]
+    fn field_readiness_requires_a_pinned_fixture_before_contacting_docker() {
+        assert!(matches!(
+            check_sandbox_readiness("alpine:latest"),
+            Err(SandboxError::InvalidConfig(_))
+        ));
+    }
+
+    #[test]
+    fn hostile_probe_runs_inside_the_same_hardened_boundary() {
+        let image = format!("fixture@sha256:{}", "a".repeat(64));
+        let mut args = hardened_docker_args(&image);
+        args.extend([
+            "/bin/sh".to_string(),
+            "-ceu".to_string(),
+            HOSTILE_PROBE.to_string(),
+        ]);
+        assert!(args.windows(2).any(|pair| pair == ["--network", "none"]));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--read-only", "--cap-drop"]));
+        assert!(args.iter().any(|arg| arg == "no-new-privileges=true"));
+        assert!(args.iter().any(|arg| arg.contains("noexec")));
+        assert!(args
+            .last()
+            .unwrap()
+            .contains("touch /etc/sharpebench-root-write"));
     }
 
     /// Live Docker smoke test: spawns a real container and drives one decision
@@ -222,7 +520,11 @@ mod tests {
             return;
         }
         use sharpebench_sim::Agent;
-        let mut agent = run_external_sandboxed("alpine", &SandboxOptions::default())
+        let opts = SandboxOptions {
+            allow_unpinned_image: true,
+            ..SandboxOptions::default()
+        };
+        let mut agent = run_external_sandboxed("alpine", &opts)
             .expect("docker is available, so the sandboxed spawn must work");
         let obs = sharpebench_protocol_obs();
         // alpine's default entrypoint does not speak the protocol; the transport

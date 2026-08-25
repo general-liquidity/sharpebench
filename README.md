@@ -169,6 +169,31 @@ A runnable reference agent (stdio + Dockerfile) and the wire format live in [`ex
 
 > **Security: running untrusted agents.** `sharpebench run` executes whatever agent you point it at **without sandboxing**; only run agents you trust. The arena runs external agents in a network-isolated Docker container with bounded CPU and memory, and refuses (rather than silently falling back) when Docker is absent. Container isolation is the boundary; multi-tenant hosting of untrusted submissions is **not yet built**.
 
+### SharpeArena composition and local open-weight fields
+
+[SharpeArena](https://github.com/general-liquidity/sharpearena) is the environment and sandbox; SharpeBench is the evaluator. The composition is directed, not a mutual package dependency:
+
+```text
+SharpeArena observation/decision loop + execution sandbox
+                         ↓
+        validated, append-only field artifact
+                         ↓
+           SharpeBench score / audit / board
+```
+
+SharpeArena depends on the small published SharpeBench protocol, simulator and kernel crates so both sides use one wire contract and execution model. SharpeBench does not import the full SharpeArena package. `sharpearena-compile-bench` closes the boundary by refusing incomplete grids, failed cells, coordinate collisions, conflicting completions and invalid return hashes before emitting one ordinary SharpeBench submissions file per dataset.
+
+The compatibility example below can also drive exact locally installed Ollama tags through SharpeArena's fail-closed stdio shim and this repository's frozen historical panels. It records exact model/server identity, cadence and thinking settings. A protocol-invalid model decision is an agent fault; an infrastructure failure aborts the field and leaves only the partial artifact. This path is built and tested, but no open-weight model result is part of the current paper.
+
+```bash
+export SHARPEBENCH_LOCAL_MODELS='qwen3.8:27b'
+cargo run --release -p sharpebench-harness \
+  --example local_open_weight_field_eval -- \
+  local-open-weight.jsonl us-indices-1d
+```
+
+For the canonical batched/sharded field, the strategy-generation trial ledger and the paper-only forward arm, use SharpeArena's [`LOCAL_AGENT_ARCHITECTURE.md`](https://github.com/general-liquidity/sharpearena/blob/main/docs/LOCAL_AGENT_ARCHITECTURE.md). Historical model scores remain advisory for pretrained policies because public-market contamination cannot be excluded; certification still requires a committed forward window.
+
 ## What it measures
 
 An agent is **rank-eligible only if every gate holds**; eligible agents then sort by the rank key (Deflated Sharpe).

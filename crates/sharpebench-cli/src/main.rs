@@ -31,7 +31,7 @@ fn main() -> ExitCode {
         Some("score") => match args.get(2) {
             Some(path) => run_score(path, &args, json),
             None => {
-                eprintln!("usage: sharpebench score <submissions.json> [--pass-mode <mode>] [--benchmark-agent <id>] [--json]");
+                eprintln!("usage: sharpebench score <submissions.json> [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode <mode>] [--benchmark-agent <id>] [--json]");
                 ExitCode::from(2)
             }
         },
@@ -45,6 +45,7 @@ fn main() -> ExitCode {
         Some("verify-trajectory") => run_verify_trajectory(&args, json),
         Some("audit-briefing") => run_audit_briefing(&args, json),
         Some("canary") => run_canary(&args, json),
+        Some("sandbox-check") => run_sandbox_check(&args, json),
         Some("score-allocation") => run_score_allocation(&args, json),
         Some("greeks") => run_greeks(&args, json),
         Some("check") => run_check(&args, json),
@@ -138,6 +139,40 @@ fn run_canary(args: &[String], json: bool) -> ExitCode {
         println!("\nEmbed the marker in the scenario artifact; if a model ever emits the token, the held-out set leaked into its training corpus.");
     }
     ExitCode::SUCCESS
+}
+
+fn run_sandbox_check(args: &[String], json: bool) -> ExitCode {
+    let Some(image) = args.get(2).filter(|value| !value.starts_with('-')) else {
+        eprintln!("usage: sharpebench sandbox-check <fixture@sha256:digest> [--json]");
+        return ExitCode::from(2);
+    };
+    match sharpebench_arena::check_sandbox_readiness(image) {
+        Ok(report) => {
+            if json {
+                emit_json(&report);
+            } else {
+                println!("FIELD-READY — live hostile sandbox checks passed");
+                println!("image:  {}", report.image);
+                println!("id:     {}", report.image_id);
+                println!("docker: {}", report.docker_server_version);
+                for check in report.passed_checks {
+                    println!("  ok  {check}");
+                }
+            }
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            if json {
+                emit_json(&serde_json::json!({
+                    "field_ready": false,
+                    "error": error.to_string(),
+                }));
+            } else {
+                eprintln!("NOT FIELD-READY — {error}");
+            }
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn run_score_allocation(args: &[String], json: bool) -> ExitCode {
@@ -588,6 +623,7 @@ fn help() {
     );
     println!("  sharpebench audit-briefing <briefing.json>  audit a shared briefing for input-side salience bias");
     println!("  sharpebench canary <seed>             derive a do-not-train contamination tripwire token");
+    println!("  sharpebench sandbox-check <image@sha256:digest>  run live hostile field-readiness checks (never skips)");
     println!(
         "  sharpebench score-allocation <alloc.json>  score a weight-vector trajectory (validity + turnover)"
     );
@@ -1463,7 +1499,23 @@ fn run_score(path: &str, args: &[String], json: bool) -> ExitCode {
         }
     };
     let (subs, declarations) = sharpebench_core::split_declarations(field);
-    let mut cfg = ScoreConfig::default();
+    let periods_per_year = match positive_f64_flag(args, "--periods-per-year") {
+        Ok(Some(value)) => value,
+        Ok(None) => ScoreConfig::default().periods_per_year,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let mut cfg = ScoreConfig::for_periods_per_year(periods_per_year);
+    match positive_usize_flag(args, "--execution-seeds-per-window") {
+        Ok(Some(value)) => cfg.execution_seeds_per_window = value,
+        Ok(None) => {}
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::from(2);
+        }
+    }
     if let Err(e) = apply_pass_mode_flags(args, &mut cfg) {
         eprintln!("error: {e}");
         return ExitCode::from(2);
@@ -1473,6 +1525,28 @@ fn run_score(path: &str, args: &[String], json: bool) -> ExitCode {
         json,
     );
     ExitCode::SUCCESS
+}
+
+fn positive_f64_flag(args: &[String], flag: &str) -> Result<Option<f64>, String> {
+    let Some(raw) = flag_value(args, flag) else {
+        return Ok(None);
+    };
+    match raw.parse::<f64>() {
+        Ok(value) if value.is_finite() && value > 0.0 => Ok(Some(value)),
+        _ => Err(format!(
+            "{flag} must be a positive finite number, got `{raw}`"
+        )),
+    }
+}
+
+fn positive_usize_flag(args: &[String], flag: &str) -> Result<Option<usize>, String> {
+    let Some(raw) = flag_value(args, flag) else {
+        return Ok(None);
+    };
+    match raw.parse::<usize>() {
+        Ok(value) if value > 0 => Ok(Some(value)),
+        _ => Err(format!("{flag} must be a positive integer, got `{raw}`")),
+    }
 }
 
 /// Render a board as a human table, or as JSON when `json` is set.
@@ -1548,5 +1622,55 @@ fn truncate(s: &str, n: usize) -> String {
         s.to_string()
     } else {
         format!("{}…", &s[..n - 1])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| (*value).to_string()).collect()
+    }
+
+    #[test]
+    fn score_frequency_and_replicate_flags_are_positive() {
+        let values = args(&[
+            "sharpebench",
+            "score",
+            "field.json",
+            "--periods-per-year",
+            "8760",
+            "--execution-seeds-per-window",
+            "4",
+        ]);
+        assert_eq!(
+            positive_f64_flag(&values, "--periods-per-year"),
+            Ok(Some(8760.0))
+        );
+        assert_eq!(
+            positive_usize_flag(&values, "--execution-seeds-per-window"),
+            Ok(Some(4))
+        );
+    }
+
+    #[test]
+    fn score_frequency_and_replicate_flags_reject_invalid_values() {
+        let frequency = args(&[
+            "sharpebench",
+            "score",
+            "field.json",
+            "--periods-per-year",
+            "NaN",
+        ]);
+        assert!(positive_f64_flag(&frequency, "--periods-per-year").is_err());
+        let replicates = args(&[
+            "sharpebench",
+            "score",
+            "field.json",
+            "--execution-seeds-per-window",
+            "0",
+        ]);
+        assert!(positive_usize_flag(&replicates, "--execution-seeds-per-window").is_err());
     }
 }

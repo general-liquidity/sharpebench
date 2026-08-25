@@ -29,7 +29,8 @@
 pub mod sandbox;
 
 pub use sandbox::{
-    docker_available, resolve_launch, run_external_sandboxed, Launch, SandboxError, SandboxOptions,
+    check_sandbox_readiness, docker_available, resolve_launch, run_external_sandboxed, Launch,
+    SandboxError, SandboxOptions, SandboxReadiness,
 };
 // Re-exported so a driver (the CLI) can sign and pin without a direct attest dep.
 pub use sharpebench_attest::{SigningKey, VerifyingKey};

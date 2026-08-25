@@ -76,6 +76,9 @@ struct Record<'a> {
     /// the luck floor.
     #[serde(skip_serializing_if = "Option::is_none")]
     model: Option<String>,
+    /// Model-output protocol failures are agent evidence and become sentinel
+    /// runs. Host/provider/runtime failures still abort the whole field.
+    agent_protocol_failures: usize,
     deflated_sharpe: f64,
     psr: f64,
     passed_k: bool,
@@ -169,7 +172,7 @@ fn main() {
         );
 
         let mut subs = reference_field(&data, &windows);
-        let mut model_by_agent: Vec<(String, String)> = Vec::new();
+        let mut model_by_agent: Vec<(String, String, usize)> = Vec::new();
 
         for model in LLM_MODELS {
             let agent_id = format!("llm-{model}");
@@ -187,7 +190,7 @@ fn main() {
                         .map(|a| a.with_decide_timeout(LLM_DECIDE_TIMEOUT))
                 },
             );
-            if !res.failures.is_empty() {
+            if res.failures.runtime_failures() > 0 {
                 panic!(
                     "{name}: incomplete field: {} transport failure(s) for {agent_id} ({} runtime, {} agent-fault); refusing to publish partial evidence",
                     res.failures.records.len(),
@@ -195,7 +198,7 @@ fn main() {
                     res.failures.agent_faults(),
                 );
             }
-            model_by_agent.push((agent_id, model.to_string()));
+            model_by_agent.push((agent_id, model.to_string(), res.failures.agent_faults()));
             subs.insert(0, res.submission);
         }
 
@@ -231,8 +234,12 @@ fn main() {
                 agent_id: s.agent_id.clone(),
                 model: model_by_agent
                     .iter()
-                    .find(|(a, _)| *a == s.agent_id)
-                    .map(|(_, m)| m.clone()),
+                    .find(|(a, _, _)| *a == s.agent_id)
+                    .map(|(_, m, _)| m.clone()),
+                agent_protocol_failures: model_by_agent
+                    .iter()
+                    .find(|(a, _, _)| *a == s.agent_id)
+                    .map_or(0, |(_, _, failures)| *failures),
                 deflated_sharpe: s.deflated_sharpe,
                 psr: s.psr,
                 passed_k: s.passed_k,

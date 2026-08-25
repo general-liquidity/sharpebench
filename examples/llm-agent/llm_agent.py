@@ -27,10 +27,11 @@ Determinism and cost controls:
     the book is left untouched in between (empty orders = hold).
   - A hard per-model cap on fresh API calls (default 800), measured by cache
     size so it holds across the many subprocesses the harness spawns.
-  - Malformed model output and explicit model refusals are scored as agent
-    behavior and therefore become holds. Infrastructure failures (missing
-    credit, authentication, rate limits, network faults, or an exhausted call
-    budget) fail the subprocess instead of silently becoming trading holds.
+  - Malformed model output is emitted as an invalid wire decision so the Rust
+    transport classifies the affected run as an agent-protocol failure. It is
+    never flattened into a hold. Explicit refusals remain deliberate holds.
+    Infrastructure failures (missing credit, authentication, rate limits,
+    network faults, or an exhausted call budget) fail the subprocess.
 
 Environment:
   ANTHROPIC_API_KEY   required (the SDK reads it)
@@ -43,6 +44,7 @@ Environment:
 
 import hashlib
 import json
+import math
 import os
 import sys
 import time
@@ -214,12 +216,12 @@ def parse_decision(text, valid_symbols):
             return None
         if sym not in valid_symbols or action not in ("buy", "sell", "hold"):
             return None
-        w = min(max(w, 0.0), 1.0)
+        if not math.isfinite(w) or not 0.0 <= w <= 1.0:
+            return None
         total += w
         orders.append({"symbol": sym, "action": action, "target_weight": w})
-    if total > 1.0:  # normalize an over-allocated book instead of rejecting it
-        for o in orders:
-            o["target_weight"] = round(o["target_weight"] / total, 4)
+    if total > 1.0 + 1e-12:
+        return None
     return orders
 
 
@@ -262,10 +264,22 @@ def main():
             key = hashlib.sha256((MODEL + "\x00" + prompt).encode()).hexdigest()
             if key in cache:
                 STATS["cache_hits"] += 1
-                decision = {
-                    "orders": cache[key]["orders"],
-                    "reasoning": "cached decision",
-                }
+                if cache[key].get("malformed"):
+                    # Deliberately violate the wire schema: ExternalAgent records
+                    # an agent protocol fault and the resilient harness inserts a
+                    # failing sentinel run. Replaying a cached malformed response
+                    # must not resurrect the old masked-hold behavior.
+                    decision = {"protocol_error": "cached malformed model output"}
+                else:
+                    decision = {
+                        "orders": cache[key]["orders"],
+                        "reasoning": "cached decision",
+                    }
+                    if cache[key].get("cost"):
+                        # The cache makes reruns free to the operator, but the
+                        # benchmark's efficiency column describes the model call
+                        # that produced this frozen decision, not the replay cost.
+                        decision["cost"] = cache[key]["cost"]
             elif len(cache) >= MAX_CALLS:
                 # An incomplete model run is not evidence. Failing the
                 # subprocess makes the harness record a transport failure and
@@ -300,16 +314,14 @@ def main():
                         decision = hold("model refusal -> hold", cost)
                         append_cache(
                             {"key": key, "orders": [], "refusal": True,
-                             "tokens_in": tin, "tokens_out": tout}
+                             "tokens_in": tin, "tokens_out": tout, "cost": cost}
                         )
-                        cache[key] = {"orders": [], "refusal": True}
+                        cache[key] = {"orders": [], "refusal": True, "cost": cost}
                     else:
                         orders = parse_decision(text, valid)
                         if orders is None:
                             STATS["malformed"] += 1
-                            decision = hold(
-                                "malformed model output -> hold", cost
-                            )
+                            decision = {"protocol_error": "malformed model output"}
                             append_cache(
                                 {"key": key, "orders": [], "malformed": True,
                                  "tokens_in": tin, "tokens_out": tout}
@@ -323,9 +335,9 @@ def main():
                             }
                             append_cache(
                                 {"key": key, "orders": orders,
-                                 "tokens_in": tin, "tokens_out": tout}
+                                 "tokens_in": tin, "tokens_out": tout, "cost": cost}
                             )
-                            cache[key] = {"orders": orders}
+                            cache[key] = {"orders": orders, "cost": cost}
                 except anthropic.APIError as e:
                     STATS["api_errors"] += 1
                     write_stats()

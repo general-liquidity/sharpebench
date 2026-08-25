@@ -64,6 +64,17 @@ fn classify_io(err: &std::io::Error) -> DecideError {
     }
 }
 
+fn parse_decision(
+    response: &str,
+    observation: &MarketObservation,
+) -> Result<Decision, DecideError> {
+    let decision: Decision = serde_json::from_str(response).map_err(|_| DecideError::Protocol)?;
+    decision
+        .validate_for(observation)
+        .map_err(|_| DecideError::Protocol)?;
+    Ok(decision)
+}
+
 /// Drives an external agent subprocess over newline-delimited JSON.
 ///
 /// stdout is drained by a dedicated reader thread and consumed through a
@@ -140,7 +151,7 @@ impl ExternalAgent {
         writeln!(self.stdin, "{line}").map_err(|e| classify_io(&e))?;
         self.stdin.flush().map_err(|e| classify_io(&e))?;
         match self.lines.recv_timeout(self.timeout) {
-            Ok(Ok(resp)) => serde_json::from_str(&resp).map_err(|_| DecideError::Protocol),
+            Ok(Ok(resp)) => parse_decision(&resp, obs),
             Ok(Err(_)) => Err(DecideError::Transport),
             Err(RecvTimeoutError::Timeout) => Err(DecideError::Timeout),
             Err(RecvTimeoutError::Disconnected) => Err(DecideError::Transport),
@@ -264,7 +275,7 @@ impl HttpAgent {
             .split_once("\r\n\r\n")
             .map(|(_, b)| b)
             .ok_or(DecideError::Transport)?;
-        serde_json::from_str(json).map_err(|_| DecideError::Protocol)
+        parse_decision(json, obs)
     }
 }
 
@@ -297,6 +308,41 @@ impl TransportDiagnostics for HttpAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn one_symbol_observation() -> MarketObservation {
+        MarketObservation {
+            date: "2026-01-01".to_string(),
+            cash: 1000.0,
+            symbols: vec![sharpebench_protocol::SymbolSnapshot {
+                symbol: "A".to_string(),
+                close_history: vec![100.0],
+                fundamentals: Default::default(),
+                news: Vec::new(),
+            }],
+            portfolio: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn external_wire_parser_fails_closed_on_semantic_faults() {
+        let obs = one_symbol_observation();
+        assert!(parse_decision(
+            r#"{"orders":[{"symbol":"A","action":"sell","target_weight":-0.5}]}"#,
+            &obs
+        )
+        .is_ok());
+        for invalid in [
+            r#"{"orders":[{"symbol":"UNKNOWN","action":"buy","target_weight":0.1}]}"#,
+            r#"{"orders":[{"symbol":"A","action":"buy","target_weight":0.1},{"symbol":"A","action":"buy","target_weight":0.2}]}"#,
+            r#"{"orders":[{"symbol":"A","action":"buy","target_weight":2.0}]}"#,
+            r#"{"orders":[],"unknown":true}"#,
+        ] {
+            assert!(matches!(
+                parse_decision(invalid, &obs),
+                Err(DecideError::Protocol)
+            ));
+        }
+    }
 
     /// Spawn a subprocess that consumes its stdin but never writes a line to
     /// stdout - the shape of a wedged agent (or a shell entrypoint that talks

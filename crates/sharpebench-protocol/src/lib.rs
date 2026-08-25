@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 
 /// What the agent sees at one decision point.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MarketObservation {
     /// ISO-8601 date of the decision point.
     pub date: String,
@@ -25,6 +26,7 @@ pub struct MarketObservation {
 
 /// Point-in-time data for one instrument.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SymbolSnapshot {
     pub symbol: String,
     /// Trailing closes up to and including `date` (oldest first).
@@ -39,6 +41,7 @@ pub struct SymbolSnapshot {
 
 /// The agent's current holding in one instrument.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PositionState {
     pub symbol: String,
     pub shares: f64,
@@ -47,6 +50,7 @@ pub struct PositionState {
 
 /// What the agent returns.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Decision {
     pub orders: Vec<Order>,
     /// Free-text rationale, captured into the trajectory for auditability.
@@ -65,6 +69,7 @@ pub struct Decision {
 /// zero so a partial report (e.g. tokens only, no dollar figure) still deserializes.
 /// The engine reduces this to a single scalar via [`DecisionCost::billable_units`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DecisionCost {
     /// Dollar cost of the compute/tokens spent on this decision. The preferred
     /// unit for skill-per-dollar reporting.
@@ -100,10 +105,11 @@ impl DecisionCost {
 
 /// A single per-instrument instruction.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Order {
     pub symbol: String,
     pub action: Action,
-    /// Target portfolio weight for this symbol in [0, 1] (signed for shorts).
+    /// Target portfolio weight for this symbol in [-1, 1]; negative values are shorts.
     pub target_weight: f64,
     /// Stated conviction in [0, 1]; scored for calibration.
     #[serde(default = "default_confidence")]
@@ -126,6 +132,53 @@ pub enum Action {
 
 fn default_confidence() -> f64 {
     0.5
+}
+
+impl Decision {
+    /// Validate the semantic part of the closed wire contract against the
+    /// observation this decision answers.  Deserialization enforces the object
+    /// shape; this method closes the gaps JSON Schema cannot express cheaply at
+    /// the transport boundary: point-in-time symbol membership, one target per
+    /// symbol, finite bounded weights/confidence, and nonnegative finite spend.
+    ///
+    /// `action` is deliberately not inferred from the target sign.  It is an
+    /// audit label: selling a long can leave a positive target, and buying to
+    /// cover can leave a negative one.  The signed target remains authoritative.
+    pub fn validate_for(&self, observation: &MarketObservation) -> Result<(), String> {
+        let offered = observation
+            .symbols
+            .iter()
+            .map(|snapshot| snapshot.symbol.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        let mut seen = std::collections::BTreeSet::new();
+        for (index, order) in self.orders.iter().enumerate() {
+            if !offered.contains(order.symbol.as_str()) {
+                return Err(format!(
+                    "orders[{index}].symbol {:?} was not observed",
+                    order.symbol
+                ));
+            }
+            if !seen.insert(order.symbol.as_str()) {
+                return Err(format!("duplicate order for symbol {:?}", order.symbol));
+            }
+            if !order.target_weight.is_finite() || order.target_weight.abs() > 1.0 {
+                return Err(format!(
+                    "orders[{index}].target_weight must be finite and in [-1, 1]"
+                ));
+            }
+            if !order.confidence.is_finite() || !(0.0..=1.0).contains(&order.confidence) {
+                return Err(format!(
+                    "orders[{index}].confidence must be finite and in [0, 1]"
+                ));
+            }
+        }
+        if let Some(cost) = self.cost {
+            if !cost.cost_usd.is_finite() || cost.cost_usd < 0.0 {
+                return Err("cost.cost_usd must be finite and nonnegative".to_string());
+            }
+        }
+        Ok(())
+    }
 }
 
 /// One captured decision step of a single backtest run: the agent's *raw* output
@@ -298,6 +351,56 @@ mod tests {
         };
         let back: Decision = serde_json::from_str(&serde_json::to_string(&d2).unwrap()).unwrap();
         assert_eq!(back.cost, Some(tokens_only));
+    }
+
+    #[test]
+    fn closed_decision_contract_rejects_drift_and_semantic_faults() {
+        let obs = MarketObservation {
+            date: "2026-01-01".to_string(),
+            cash: 1.0,
+            symbols: vec![SymbolSnapshot {
+                symbol: "A".to_string(),
+                close_history: vec![1.0],
+                fundamentals: Default::default(),
+                news: Vec::new(),
+            }],
+            portfolio: Vec::new(),
+        };
+        assert!(serde_json::from_str::<Decision>(r#"{"orders":[],"typo":true}"#).is_err());
+
+        let order = |symbol: &str, weight: f64| Order {
+            symbol: symbol.to_string(),
+            action: Action::Sell,
+            target_weight: weight,
+            confidence: 0.5,
+            rationale: String::new(),
+        };
+        let valid = Decision {
+            orders: vec![order("A", -0.5)],
+            reasoning: String::new(),
+            cost: None,
+        };
+        assert!(valid.validate_for(&obs).is_ok());
+
+        for invalid in [
+            Decision {
+                orders: vec![order("UNKNOWN", 0.0)],
+                reasoning: String::new(),
+                cost: None,
+            },
+            Decision {
+                orders: vec![order("A", 0.1), order("A", 0.2)],
+                reasoning: String::new(),
+                cost: None,
+            },
+            Decision {
+                orders: vec![order("A", 1.01)],
+                reasoning: String::new(),
+                cost: None,
+            },
+        ] {
+            assert!(invalid.validate_for(&obs).is_err());
+        }
     }
 
     #[test]
