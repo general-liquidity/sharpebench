@@ -292,6 +292,118 @@ fn seed_averaged_streams_match_committed_dispersion_source() {
     }
 }
 
+// --- the mandate field: one more agent, a different dispersion source --------
+
+/// Periods per year for each frozen dataset, as `examples/mandate_eval.rs` and
+/// `examples/evidence_sweep.rs` configure them.
+const PERIODS_PER_YEAR: &[(&str, f64)] = &[
+    ("us-indices-1d", 252.0),
+    ("us-indices-1w", 52.0),
+    ("crypto-majors-1h", 8760.0),
+    ("crypto-majors-4h", 2190.0),
+    ("crypto-majors-1d", 365.0),
+    ("crypto-majors-1w", 52.0),
+    ("fx-majors-1d", 252.0),
+    ("commodities-1d", 252.0),
+    ("rates-1d", 252.0),
+];
+
+/// `tab:eligibility` and `tab:mandate` print different deflated Sharpes for
+/// buy-and-hold on us-indices-1d and crypto-majors-4h. The cause is field
+/// composition, not a scoring inconsistency: `tab:eligibility` scores the
+/// eight-agent evidence-sweep field and `tab:mandate` the nine-agent field that
+/// adds the risk-managed agent. Three panels sit one vote short of the five-vote
+/// measurement minimum after clone collapse, so the eight-agent field falls back
+/// to the configured prior there; the ninth agent supplies the missing vote and
+/// the measurement runs. On us-indices-1d and crypto-majors-4h the measured
+/// dispersion is above the annualized floor, so the bar rises and the leader's
+/// DSR falls to zero. On crypto-majors-1w it is below the floor, so the floor
+/// applies, the bar is the same 1.1382 the configured prior gives, and both
+/// tables print the same DSR. Everywhere else the two fields agree outright.
+#[test]
+fn mandate_field_changes_dispersion_source_on_three_panels() {
+    use sharpebench_core::{rank, ScoreConfig, TrialsSrStdSource};
+
+    /// The panels where the ninth vote lifts the bar: measured above the floor.
+    const RAISES_BAR: &[&str] = &["us-indices-1d", "crypto-majors-4h"];
+    /// The panel where the ninth vote enables a measurement the floor then
+    /// overrides, leaving the bar and the printed DSR unchanged.
+    const FLOORED: &[&str] = &["crypto-majors-1w"];
+
+    for (name, ppy) in PERIODS_PER_YEAR {
+        let data = load(name);
+        let windows = windows_for(data.len());
+        let floor = luck_floor(
+            &data,
+            &windows,
+            &EXEC_SEEDS,
+            CostModel::default(),
+            LUCK_FLOOR_AGENTS,
+        );
+        let reference = || {
+            vec![
+                run_agent("buy-and-hold", &data, &windows, || Box::new(BuyAndHold)),
+                run_agent(
+                    "momentum",
+                    &data,
+                    &windows,
+                    || Box::new(Momentum::default()),
+                ),
+                run_agent("hold", &data, &windows, || Box::new(HoldAgent)),
+            ]
+        };
+
+        let mut sweep = reference();
+        sweep.extend(floor.iter().cloned());
+
+        let mut mandate = reference();
+        mandate.push(run_agent("risk-managed", &data, &windows, || {
+            Box::new(RiskManaged::new())
+        }));
+        mandate.extend(floor);
+
+        let cfg = ScoreConfig {
+            execution_seeds_per_window: EXEC_SEEDS.len(),
+            ..ScoreConfig::for_periods_per_year(*ppy)
+        };
+        let source_of = |subs: &[AgentSubmission]| {
+            let scored = rank(subs, &cfg);
+            let s = scored.first().expect("a ranked field is never empty");
+            (s.trials_sr_std_source, s.trials_sr_std_annualized_equivalent)
+        };
+        let (sweep_source, sweep_sigma) = source_of(&sweep);
+        let (mandate_source, mandate_sigma) = source_of(&mandate);
+        eprintln!(
+            "{name}: eight-agent {sweep_source:?} (sigma_ann {sweep_sigma:.4}), \
+             nine-agent {mandate_source:?} (sigma_ann {mandate_sigma:.4})"
+        );
+
+        if RAISES_BAR.contains(name) {
+            assert_eq!(sweep_source, TrialsSrStdSource::Configured, "{name}");
+            assert_eq!(mandate_source, TrialsSrStdSource::Measured, "{name}");
+            assert!(
+                mandate_sigma > sweep_sigma,
+                "{name}: the measured dispersion must exceed the configured prior, \
+                 which is what raises the bar and zeroes the leader's DSR"
+            );
+        } else if FLOORED.contains(name) {
+            assert_eq!(sweep_source, TrialsSrStdSource::Configured, "{name}");
+            assert_eq!(mandate_source, TrialsSrStdSource::MeasuredFloored, "{name}");
+            assert!(
+                (mandate_sigma - sweep_sigma).abs() < 1e-12,
+                "{name}: the floor must leave the bar exactly where the configured \
+                 prior put it, which is why both tables print the same DSR"
+            );
+        } else {
+            assert_eq!(
+                sweep_source, mandate_source,
+                "{name}: the ninth agent changed the dispersion source on a panel \
+                 the manuscript does not name"
+            );
+        }
+    }
+}
+
 // --- pass witness: the synthetic field of `examples/pass_witness.rs` ---------
 
 const SHAPES: &[(&str, usize)] = &[("weekly-shaped", 77), ("daily-shaped", 409)];
