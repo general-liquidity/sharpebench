@@ -1,0 +1,64 @@
+\section{Datasheet for the SharpeBench datasets}\label{app:datasheet}
+
+Organized under the seven headings of \citet{gebru2021datasheets}. \Cref{tab:data} gives the shape of each dataset and its realism verdict; \cref{app:simdata} gives the two data caveats and the contamination defenses. This appendix gives provenance, licensing, collection and maintenance, and it is the authoritative record for all four.
+
+\subsection{Motivation}
+
+The datasets exist to score trading agents under a deflation gate whose behavior depends on track length, bar size and return moments. Three requirements followed from that and each excluded otherwise attractive sources. First, no API key may be needed, so that any reader can regenerate every byte and no result depends on a subscription. Second, the file must be redistributable, so the frozen artifact can ship inside the repository and a score can be reproduced from the paper alone. Third, the same underlying price history must be available at several bar sizes, because the deflation benchmark is a function of periods per year and the first finding of this paper is a units error in exactly that conversion (\cref{sec:units}). No funding was received for the collection. The collection was performed by the author.
+
+\subsection{Composition}
+
+Nine files, one per (asset class, bar size), covering four asset classes and four bar sizes. Each instance is one bar: a date, a symbol and a close, in a long format sorted by date then symbol. There is no label, no split into training and test, and no personal data of any kind; every value is a published market price or an official rate. Counts, in bytes and data rows excluding the header:
+
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\caption{Provenance of the nine frozen datasets. Rows exclude the header. Every file carries a \texttt{.sha256} sidecar and a fetch script whose check mode reproduces the committed bytes. The two files marked 2026-06-22 were frozen before the others and \texttt{crypto-majors-1d} contains one partial final bar, recorded in \cref{app:simdata}.}
+\label{tab:datasheet}
+\begin{tabular}{llrrl}
+\toprule
+Dataset & Upstream source & Bytes & Rows & Frozen \\
+\midrule
+us-indices-1d & FRED \texttt{SP500}, \texttt{DJIA}, \texttt{NASDAQCOM} & 195022 & 7539 & 2026-06-22 \\
+us-indices-1w & derived from \texttt{us-indices-1d.csv} & 40524 & 1566 & 2026-08-23 \\
+crypto-majors-1h & Binance \texttt{/api/v3/klines} & 4103983 & 120000 & 2026-08-23 \\
+crypto-majors-4h & Binance \texttt{/api/v3/klines} & 1026006 & 30000 & 2026-08-23 \\
+crypto-majors-1d & Binance \texttt{/api/v3/klines} & 141017 & 5000 & 2026-06-22 \\
+crypto-majors-1w & Binance \texttt{/api/v3/klines} & 43091 & 1535 & 2026-08-23 \\
+fx-majors-1d & FRED \texttt{DEXUSEU}, \texttt{DEXUSUK}, \texttt{DEXUSAL}, \texttt{DEXJPUS}, \texttt{DEXSZUS} & 602783 & 20785 & 2026-08-23 \\
+commodities-1d & FRED \texttt{DCOILWTICO}, \texttt{DCOILBRENTEU} & 199499 & 8252 & 2026-08-23 \\
+rates-1d & FRED \texttt{DGS10} & 103943 & 4157 & 2026-08-23 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The nine files total 6{,}455{,}868 bytes and 198{,}834 data rows. They are not nine independent samples: the four crypto files resample one price history, the two US index files resample another, and WTI co-moves with Brent, so counting claims in \cref{sec:experiments} are phrased over roughly five independent market panels. Each file is complete in the sense that its date axis is the intersection of the dates on which every one of its symbols traded; instances dropped by that intersection are documented per file, and for commodities they are the 42 WTI and 79 Brent observations outside the common axis. Nothing is redacted and nothing is confidential. The rates file's \texttt{close} column is a yield in percent and not a tradable price, which is the single most consequential composition caveat and is stated wherever that row is used (\cref{app:simdata,sec:limitations}). Errors and noise inherited from upstream are kept as published, including the WTI close of $-36.98$ on 20 April 2020.
+
+\subsection{Collection process}
+
+Every file was fetched over public HTTP with no authentication, by a committed script that pins its own date window. The FRED files come from the \texttt{fredgraph.csv} endpoint; the crypto files come from the Binance klines endpoint, paginated at 1{,}000 klines per request, with the kline close stamped at the kline open time in UTC. The weekly US index file is derived offline as a pure function of the daily file's bytes, taking the last close of each ISO week, and touches no network. FX quotes are the New York noon buying rates from the Federal Reserve H.10 release, with JPY and CHF inverted so that every close is the USD price of one unit of the base currency; nothing else is transformed. The FRED windows are capped at 2010-01-01 for comparability across the FRED files and at 2026-08-14, the last date published for all five FX series at freeze time.
+
+The sampling is not random. The crypto universe is the five majors by capitalization at collection time and the index universe is three headline US indices, both selected with hindsight from instruments that survived into the collection period, so the fixed universes do not close survivorship bias (\cref{sec:limitations}). Two intended sources were dropped and neither was substituted: single-name equities, because no keyless daily source exists for them and FRED carries indices only, and gold, because FRED withdrew the daily LBMA series and no keyless redistributable replacement was found. Neither was replaced from a licensed feed. No human subjects were involved, no crowdworkers were used and no ethical review process applies.
+
+\subsection{Preprocessing, cleaning and labeling}
+
+Preprocessing is limited to the date intersection, the JPY and CHF inversion, the weekly derivation, and fixed-decimal formatting with rows sorted by date then symbol and no timestamps written, which is what makes a re-run byte-reproducible. No outlier is removed, no value is interpolated and no return is winsorized. The raw upstream responses are not archived in the repository, because every script reproduces the frozen bytes from the same public endpoints and the \texttt{.sha256} sidecar is what proves the reproduction.
+
+Before any agent is scored on a dataset, the dataset is scored: the stylized-facts battery after \citet{cont2001empirical} tests excess kurtosis, volatility clustering, gain-loss asymmetry, aggregational Gaussianity and time-reversal asymmetry, and issues a verdict that ships with the file. Seven of the nine pass. Weekly US indices fail aggregational Gaussianity because 522 bars is too short for the test, and FX majors fail time-reversal asymmetry. Both ship with the failing verdict recorded in \cref{tab:data}, and \cref{sec:claims} reports that the eligibility conclusions are unchanged when the two are excluded.
+
+\subsection{Uses}
+
+The datasets have been used only to score the agents reported in this paper. They are intended for evaluating trading agents under the protocol of \cref{sec:benchmark}, and for studying how the deflation gate behaves as a function of track length and bar size. Three uses they should not be put to. They are not a source of economic conclusions about any instrument: the universes are narrow, the observation is twenty trailing closes, and the execution model is stylized. They are not a bond dataset, for the reason above. And they are not a substitute for a survivorship-free universe in any study whose conclusion depends on delisted instruments. A user who reports commodities statistics without stating the retained negative WTI close will report moments dominated by one bar; the documented opt-out is a 2020-05-01 start date.
+
+\subsection{Distribution}
+
+The nine files are distributed inside the benchmark's public repository under the same MIT and Apache-2.0 dual license as the code, with a \texttt{.sha256} sidecar each. The FRED series are public domain works of the United States government. The Binance klines are public market data retrieved from the public endpoint under its terms and redistributed as derived closes. No file carries a fee, an export restriction or a use restriction beyond those licenses, and no third party holds intellectual property in the price series that would restrict redistribution. The repository is mirrored to crates.io, npm and PyPI at each tagged version, and the datasets are part of the source distribution.
+
+\subsection{Maintenance}
+
+The author maintains the datasets, and the contact address is the one on the title page. The datasets are versioned with the benchmark: one workspace version covers every crate and every registry package, a tag on the main branch publishes to all of them, and a verification job confirms each registry serves the tag.
+
+A frozen file is never edited in place. Adding a dataset means adding four things together: a hash-pinned file, a fetch script with a check mode, a realism verdict, and a periods-per-year value; a dataset with fewer than four is not admissible. Retiring one means marking it retired in the registry and leaving the bytes and the sidecar in place, so a published board that scored on it stays verifiable. Upstream withdrawal is the expected retirement trigger and it has already happened once: the daily LBMA gold series was withdrawn from FRED before collection, which is why gold is absent rather than stale. If a stylized-fact verdict changes, because the battery is corrected rather than because the data moves, the new verdict is recorded beside the old one and the boards scored under the old verdict are not rescored; the same supersession discipline applies as for a scoring defect (\cref{sec:governance}). Users who want to extend a dataset add a fetcher rather than appending to a frozen file, because appending changes the hash and therefore invalidates every board scored on it.
+
+Defect reports and dataset proposals go through the repository's public issue tracker, which is the feedback channel. There is no mailing list and no separate support address. Older versions remain retrievable through the registries and through the repository's tags for as long as those services host them, which is a dependency on third parties that we do not control and do not guarantee.

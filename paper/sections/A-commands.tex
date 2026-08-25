@@ -9,7 +9,7 @@ All commands run from the repository root at the tagged version. The kernel is d
 python paper/src/make-provenance.py
   -> paper/evidence/provenance.json
 \end{verbatim}
-The manifest records the Git parent, a content hash over the Rust, Python, manifest, producer and frozen-data snapshot, and the SHA-256 digest of every result JSONL and figure. For the artifacts in this paper that content hash is \texttt{8fc377d4c11802cabea8d3f8215fceedde018d831c69a0c36e049aea02ca44f3} over the Git parent \texttt{f62f4f89df20487c79849dd0d59f36325b2cc8e7}. Incomplete paid-LLM artifacts are excluded because they contain no model decisions and support no result in this paper.
+The manifest records the Git parent, a content hash over the Rust, Python, manifest, producer and frozen-data snapshot, and the SHA-256 digest of every result JSONL and figure. For the artifacts in this paper that content hash is \texttt{8fc377d4c11802cabea8d3f8215fceedde018d831c69a0c36e049aea02ca44f3} over the Git parent \texttt{f62f4f89df20487c79849dd0d59f36325b2cc8e7}. Incomplete paid-LLM artifacts are excluded because they contain no model decisions and support no result in this paper. The manifest file itself hashes to \texttt{72fd7ca1f4f1d3d6db62e0b9bbdcad42cc266550ccb7f8a61f022f701a4241f0}, and it covers the artifacts of that snapshot. The externally specified rule field of \cref{sec:external} was produced after it and is not covered by it; that file, \texttt{paper/evidence/final/external-rules.jsonl}, hashes to \texttt{14fd1306755457d3e16162ec983eca53e7b69f6ed000fc6e9a49875589c2a9af}.
 
 \paragraph{The shipped demonstration (\cref{fig:demotion}).}
 \begin{verbatim}
@@ -27,6 +27,12 @@ The script reimplements the kernel's PSR, expected-maximum-Sharpe and normal-qua
 sharpebench audit
 \end{verbatim}
 The command reports nine defended cases and no known gaps. A claimed defense that regresses fails its commit-time tests; the Sybil case also fails if the attack stops reproducing with \texttt{dedup\_clones\_for\_measured\_sr\_std} switched off.
+
+\paragraph{The realized index Sharpe ratios quoted in \cref{sec:units}.}
+\begin{verbatim}
+python paper/evidence/index_sharpe.py
+\end{verbatim}
+Prints the symbol, the number of per-period returns and the annualized Sharpe ratio of each of the three series in \texttt{data/us-indices-1d.csv}, using the kernel's convention: mean over sample standard deviation with one degree of freedom on simple per-period returns, a zero risk-free rate, scaled by $\sqrt{252}$.
 
 \paragraph{Data realism (\cref{tab:data}).}
 \begin{verbatim}
@@ -56,6 +62,14 @@ Runs the risk-managed agent beside buy-and-hold and the luck floor on all nine d
 \begin{verbatim}
 cargo test -p sharpebench-harness perturb
 \end{verbatim}
+
+\paragraph{The externally specified rules and the cost sweep (\cref{tab:external}, \cref{tab:costsens}).}
+\begin{verbatim}
+cargo run --release -p sharpebench-harness \
+  --example external_rules_eval -- \
+  paper/evidence/final/external-rules.jsonl [dataset]
+\end{verbatim}
+Scores a thirteen-agent field (buy-and-hold, momentum, hold, the risk-managed agent, the four published rules, and five luck-floor agents) on all nine datasets under \texttt{CostProfile::None}, \texttt{CostProfile::Typical} and \texttt{CostProfile::WorstCase}, at the default \texttt{ScoreConfig} for each dataset's periods per year: 351 records, one per (dataset, cost profile, agent). Each record carries the command, the rule's published source, the closes the rule requires, the blind-bar count implied by the window rule, the dispersion source, the annualized deflation bar and the full gate vector. The four rules are implemented inside the example from their published statements; no parameter is fitted to any dataset here. The optional argument restricts the run to one dataset.
 
 \paragraph{The synthetic pass witness (\cref{sec:witness}).}
 \begin{verbatim}
