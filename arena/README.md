@@ -12,24 +12,22 @@ Epochs are integer **days since the Unix epoch, UTC**: `epoch = floor(unix_time 
 The operator (or CI) advances the clock with `sharpebench arena advance arena <epoch>`.
 Epochs are monotonic; the kernel never reads a wall clock.
 
-## Window 001 (open)
+## Superseded pre-entry records (no window is currently open)
 
-| Field | Value |
-|---|---|
-| Window id | `window-001` |
-| Opened at epoch | 20689 (2026-08-24 UTC) |
-| Commit deadline | epoch 20710 (2026-09-14 UTC), commitments at or after this epoch are refused |
-| Data reveal / resolution | epoch 20719 (2026-09-23 UTC), scoring runs on data revealed here |
-| Scoring rules | recorded in `windows/window-001/window.json` at open time, before any entry or any forward data exists |
-| Scoring config SHA-256 | `5050b3aa20298bd188a9418e5e76c0ff4de2027732920d8617d5e176448b8bcf` (over the compact serialization of the typed `score_config`, in schema field order) |
+Two windows were opened and withdrawn before any commitment, refusal or score
+existed. Both records remain in `windows/` and `state.json` as history; neither
+is live, and the next window is not open yet.
 
-The recorded config is the shipped default for daily bars: `n_trials = 50`,
-annualized `trials_sr_std` prior 0.5 with the measured path enabled at a
-minimum field of 5 and bounded below by annualized dispersion 0.5,
-`dsr_bar = 0.95`, per-run PSR bar 0.90 in pass-all mode, and
-`periods_per_year = 252`. The v1 loader requires the complete score-config key
-set and rejects missing or extra fields before deserialization, so later serde
-defaults cannot silently change this opened window.
+| Window id | Opened at epoch | Superseded at epoch | Reason |
+|---|---|---|---|
+| `window-001` | 20689 (2026-08-24 UTC) | 20689 | schema v1 omitted `execution_seeds_per_window`, the fixed deflation null mean, and scorer artifact provenance; replaced by `window-002` |
+| `window-002` | 20689 (2026-08-24 UTC) | 20689 | withdrawn before commitments: its recorded scorer digest identified a local debug executable, not a publicly retrievable immutable artifact |
+
+The next window opens only against a published release of the scorer (a
+crates.io version or an immutable image digest) recorded in the window before
+commitments open, so an entrant can retrieve byte-for-byte the kernel that will
+score the reveal. `state.json` carries both supersession records with the
+SHA-256 of each historical window file.
 
 ## Host verifying key
 
