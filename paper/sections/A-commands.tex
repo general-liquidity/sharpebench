@@ -2,14 +2,14 @@
 
 All commands run from the repository root at the tagged version. The kernel is deterministic, so each command produces the same bytes on the three CI targets (Linux, macOS, Windows).
 
-\paragraph{Version.} Findings 1 and 2 were first observed at v0.2.1, and \cref{tab:units} was computed against v0.2.1 deliberately because it documents that kernel's unit error. The units fix shipped in v0.3.0. Current-result artifacts are the v0.9.0 release candidate and were regenerated from the content-hashed source snapshot containing corrected execution-seed pooling, the observed-field trial floor, the measured-dispersion floor, clone collapse and the strict forward-window schema. Historical package labels are not substituted for that exact content snapshot.
+\paragraph{Version.} Findings 1 and 2 were first observed at v0.2.1, and \cref{tab:units} was computed against v0.2.1 deliberately because it documents that kernel's unit error. The units fix shipped in v0.3.0. Current-result artifacts are v0.9.0, a cut and published tag, and were regenerated from the content-hashed source snapshot containing corrected execution-seed pooling, the observed-field trial floor, the measured-dispersion floor, clone collapse and the strict forward-window schema. Historical package labels are not substituted for that exact content snapshot.
 
 \paragraph{Content provenance.}
 \begin{verbatim}
 python paper/src/make-provenance.py
   -> paper/evidence/provenance.json
 \end{verbatim}
-The manifest records the Git parent, a content hash over the Rust, Python, manifest, producer and frozen-data snapshot, and the SHA-256 digest of every result JSONL and figure. Incomplete paid-LLM artifacts are excluded because they contain no model decisions and support no result in this paper.
+The manifest records the Git parent, a content hash over the Rust, Python, manifest, producer and frozen-data snapshot, and the SHA-256 digest of every result JSONL and figure. For the artifacts in this paper that content hash is \texttt{8fc377d4c11802cabea8d3f8215fceedde018d831c69a0c36e049aea02ca44f3} over the Git parent \texttt{f62f4f89df20487c79849dd0d59f36325b2cc8e7}. Incomplete paid-LLM artifacts are excluded because they contain no model decisions and support no result in this paper.
 
 \paragraph{The shipped demonstration (\cref{fig:demotion}).}
 \begin{verbatim}
@@ -105,6 +105,14 @@ sharpebench arena verify <dir> [--pubkey <hex>]
 sharpebench import csv <dir-or-file> --out subs.json [--trials N]
 sharpebench score subs.json
 \end{verbatim}
+
+\paragraph{The pre-floor experiment quoted in \cref{sec:units}.} The DSR $0.984$ weekly and $0.000$ daily pair predates the dispersion floor and is read from the retained artifacts in \texttt{paper/evidence/after-v0.3.0/}, which are kept as the record of that intermediate kernel and are not used for any current result.
+
+\paragraph{The clone-collapse regression tests (\cref{sec:sybil}).}
+\begin{verbatim}
+cargo test -p sharpebench-harness --test evidence_fields_no_clone_merges
+\end{verbatim}
+Rebuilds every committed evidence field twice: once over the streams as submitted, asserting zero merges at the collapse threshold, and once over the seed-averaged pooled streams that ranking actually clusters, asserting the surviving vote count implies the \texttt{trials\_sr\_std\_source} stamped on each committed default cell.
 
 \paragraph{Golden fixtures and the parity test.}
 \begin{verbatim}

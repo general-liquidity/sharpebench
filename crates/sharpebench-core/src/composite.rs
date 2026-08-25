@@ -345,8 +345,11 @@ pub struct ScoreConfig {
     /// with which the run's true Sharpe must exceed `per_run_min_annual_sharpe`.
     ///
     /// PSR scales with `sqrt(n - 1)` of the run's length, so on short windows this
-    /// gate is necessarily weak for any bar: a 78-bar window needs an annualized
-    /// Sharpe of about 2.3 to reach 0.90 against zero, a 250-bar window about 1.3.
+    /// gate is necessarily weak for any bar: reaching 0.90 against zero needs a
+    /// per-period Sharpe of `Z(0.90) / sqrt(n - 1)` under normal moments, which is
+    /// 0.146 on a 78-bar window and 0.081 on a 250-bar one. Annualized those are
+    /// about 1.05 and 1.29 on weekly and daily bars respectively; the per-period
+    /// number is what the kernel compares against.
     /// That is a property of the statistic (short tracks carry little evidence),
     /// not a unit error, and it is why pass^k fails whenever any out-of-sample
     /// window is short. Either score longer windows or lower this bar knowingly.

@@ -422,7 +422,10 @@ pub fn spa_consistent_pvalue(field: &[Vec<f64>], seed: u64, n_boot: usize, block
 /// Romano–Wolf step-down multiple testing: per-agent significance that controls
 /// the family-wise error rate across the whole field, but is more powerful than
 /// the single-step Reality Check (it re-tests the survivors after removing
-/// confirmed winners). `field` rows are each agent's excess returns vs the
+/// confirmed winners). This is the basic, non-studentized variant: the
+/// bootstrap maxima are taken over raw mean excess returns, not over
+/// studentized statistics, so it does not carry the studentized version's
+/// improved finite-sample behavior under heteroskedastic fields. `field` rows are each agent's excess returns vs the
 /// benchmark. Returns, per agent, whether its outperformance is significant at
 /// `alpha` after accounting for every agent tested. Deterministic given `seed`.
 pub fn step_down_significant(

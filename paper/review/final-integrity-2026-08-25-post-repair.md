@@ -81,3 +81,21 @@ the earlier report only as an audit-history record.
   unrun and excluded.
 - No forward window is currently open, and identity governance remains outside
   the implemented statistical defenses.
+
+## Correction appended 2026-08-25 (post re-review)
+
+The "Witness circularity" row above states that "DSR and pass^k co-bind at the
+sampled weekly onset; pass^k binds daily." That is wrong, and the history is
+left unedited so the error is visible. Re-reduced from
+`paper/evidence/final/pass-witness.jsonl`, the witness's DSR clears the 0.95 bar
+at the first nonzero sampled edge on both geometries (s = 0.05 gives 0.9972
+daily and 0.9543 weekly, and 1.0000 from s = 0.10 upward on both), so pass^k
+alone is the binding gate on both geometries. The onsets themselves, 0.35 weekly
+and 0.20 daily, are unchanged and correct. The manuscript text and the
+fig:witness caption have been corrected to match the records.
+
+Two further statements above are superseded by the same pass. The forward arena
+now has one open window, `window-003`, bound to the attested v0.9.0 release
+binary, so "no forward window is currently open" holds only for the state at the
+time this addendum was written. And "the v0.9.0 release candidate" is stale
+wording: v0.9.0 is a cut and published tag.

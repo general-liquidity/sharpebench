@@ -188,6 +188,110 @@ fn committed_evidence_fields_have_no_clone_merges() {
     assert!(honest_max < CLONE_COLLAPSE_COSINE);
 }
 
+// --- seed-averaged streams: the streams `rank` actually measures -------------
+
+/// The raw-concatenation tests above pin the collapse on the streams as
+/// submitted. The live measured path is different: `rank` clusters the
+/// seed-AVERAGED pooled streams of `pooled_returns` (aligned execution
+/// replicates averaged per bar) before it measures `trials_sr_std`. Averaging
+/// eight independent per-seed draws shrinks seed-specific noise by roughly
+/// `sqrt(8)`, so streams that are honestly dissimilar raw can merge once
+/// averaged: the five luck-floor agents converge toward the same
+/// market-average exposure. This test reproduces the live clustering, counts
+/// post-collapse dispersion votes the way `measured_trials_sr_std` does
+/// (finite-Sharpe qualifiers, clusters vote once, `min_field` five), and
+/// asserts the vote count implies exactly the `trials_sr_std_source` stamped
+/// on the committed default cells: `configured` (fewer than five votes) on
+/// us-indices-1w, crypto-majors-1w, crypto-majors-1d, us-indices-1d and
+/// crypto-majors-4h; measured (five or more) on crypto-majors-1h, fx-majors-1d,
+/// commodities-1d and rates-1d.
+#[test]
+fn seed_averaged_streams_match_committed_dispersion_source() {
+    use sharpebench_core::composite::pooled_returns;
+    use sharpebench_core::deflated_sharpe::sharpe_ratio;
+
+    /// Datasets whose committed default cells stamp `trials_sr_std_source:
+    /// "configured"` (paper/evidence/final/<dataset>.jsonl at dsr_bar 0.95,
+    /// host N 50, unpinned dispersion).
+    const CONFIGURED_FALLBACK: &[&str] = &[
+        "us-indices-1w",
+        "crypto-majors-1w",
+        "crypto-majors-1d",
+        "us-indices-1d",
+        "crypto-majors-4h",
+    ];
+    const MIN_FIELD: usize = 5;
+
+    for name in DATASETS {
+        let data = load(name);
+        let windows = windows_for(data.len());
+        let mut sweep = vec![
+            run_agent("buy-and-hold", &data, &windows, || Box::new(BuyAndHold)),
+            run_agent(
+                "momentum",
+                &data,
+                &windows,
+                || Box::new(Momentum::default()),
+            ),
+            run_agent("hold", &data, &windows, || Box::new(HoldAgent)),
+        ];
+        sweep.extend(luck_floor(
+            &data,
+            &windows,
+            &EXEC_SEEDS,
+            CostModel::default(),
+            LUCK_FLOOR_AGENTS,
+        ));
+
+        // Mirror `measured_trials_sr_std`: seed-averaged streams, finite-Sharpe
+        // qualifiers, one vote per clone cluster at the collapse threshold.
+        let averaged: Vec<(String, Vec<f64>)> = sweep
+            .iter()
+            .map(|s| (s.agent_id.clone(), pooled_returns(s, EXEC_SEEDS.len())))
+            .filter(|(_, p)| p.len() >= 2 && sharpe_ratio(p).is_finite())
+            .collect();
+        let streams: Vec<Vec<f64>> = averaged.iter().map(|(_, p)| p.clone()).collect();
+        let clusters = clone_clusters(&streams, CLONE_COLLAPSE_COSINE, false);
+        let votes = clusters.len();
+        let merges: usize = clusters.iter().map(|c| c.len() - 1).sum();
+
+        let mut max = (0.0_f64, String::new(), String::new());
+        for i in 0..streams.len() {
+            for j in (i + 1)..streams.len() {
+                if let Some(c) = cosine_similarity(&streams[i], &streams[j], false) {
+                    if c.abs() > max.0 {
+                        max = (c.abs(), averaged[i].0.clone(), averaged[j].0.clone());
+                    }
+                }
+            }
+        }
+        for cluster in clusters.iter().filter(|c| c.len() > 1) {
+            let ids: Vec<&str> = cluster.iter().map(|&i| averaged[i].0.as_str()).collect();
+            eprintln!("{name} seed-averaged merge cluster: {ids:?}");
+        }
+        eprintln!(
+            "{name} seed-averaged: {} qualifiers, {votes} votes, {merges} merges, max |cos| {:.4} ({} vs {})",
+            averaged.len(),
+            max.0,
+            max.1,
+            max.2
+        );
+
+        let expect_configured = CONFIGURED_FALLBACK.contains(name);
+        assert_eq!(
+            votes < MIN_FIELD,
+            expect_configured,
+            "{name}: {votes} post-collapse votes contradicts the committed \
+             trials_sr_std_source (expected {})",
+            if expect_configured {
+                "configured fallback (< 5 votes)"
+            } else {
+                "measured (>= 5 votes)"
+            }
+        );
+    }
+}
+
 // --- pass witness: the synthetic field of `examples/pass_witness.rs` ---------
 
 const SHAPES: &[(&str, usize)] = &[("weekly-shaped", 77), ("daily-shaped", 409)];

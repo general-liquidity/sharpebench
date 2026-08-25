@@ -222,8 +222,9 @@ def fig_pass_witness():
 # ---- Figure D: the thousand-agent luck floor ---------------------------------
 # ECDF of the deflated Sharpe over 1,000 random agents per dataset. The raw
 # measured path is a deliberately unfloored diagnostic; the shipped path applies
-# the precommitted annualized lower bound. Left: the full [0, 1] axis with the
-# bar; right: the same curves on the range the floor occupies.
+# the precommitted annualized lower bound. Two stacked rows at column width:
+# the full [0, 1] axis with the bar on top, and beneath it the same curves on
+# the range the diagnostic occupies, so the two marked maxima are in frame.
 def fig_luck_floor_1000():
     recs = load("luck-floor-1000")
     agents = [r for r in recs if r["record"] == "agent"]
@@ -234,8 +235,8 @@ def fig_luck_floor_1000():
         ("crypto-majors-1d", "dsr_shipped_floor", "crypto 1d, shipped path", RED, "-"),
         ("crypto-majors-1d", "dsr_field", "crypto 1d, unfloored diagnostic", RED, DASH),
     ]
-    fig, (ax, ax2) = plt.subplots(1, 2, figsize=(7.8, 3.6),
-                                  gridspec_kw={"width_ratios": [1.0, 1.3], "wspace": 0.28})
+    fig, (ax, ax2) = plt.subplots(2, 1, figsize=(5.5, 6.4),
+                                  gridspec_kw={"hspace": 0.34})
     for ds, field, label, color, ls in series:
         vals = sorted(r[field] for r in agents if r["dataset"] == ds)
         ecdf = [(i + 1) / len(vals) for i in range(len(vals))]
@@ -253,31 +254,36 @@ def fig_luck_floor_1000():
                    for s in summaries.values())
 
     ax.axvline(DSR_BAR, color=INK, linewidth=1.1, linestyle=DASH)
-    ax.text(DSR_BAR - 0.03, 1.0, "eligibility\nbar (0.95)", ha="right", va="top",
+    ax.text(DSR_BAR - 0.02, 1.0, "eligibility\nbar (0.95)", ha="right", va="top",
             fontsize=9, color=INK)
     ax.set_xlim(-0.02, 1.02)
     ax.set_ylim(0, 1.04)
-    ax.set_xlabel("deflated Sharpe, full axis", fontsize=10.5, color=INK)
-    ax.set_ylabel("fraction of the 1,000 random agents", fontsize=10.5, color=INK)
-    ax.text(0.5, 0.06, f"{eligible} of {len(agents):,} agent-dataset cells\n"
+    ax.set_xlabel("deflated Sharpe, full axis", fontsize=10, color=INK)
+    ax.set_ylabel("fraction of the 1,000 random agents", fontsize=10, color=INK)
+    ax.text(0.62, 0.06, f"{eligible} of {len(agents):,} agent-dataset cells\n"
             "eligible on either path", ha="center", va="bottom", fontsize=9, color=INK)
-    ax.legend(frameon=False, fontsize=8.5, loc="center", bbox_to_anchor=(0.47, 0.6))
+    ax.legend(frameon=False, fontsize=9, loc="center", bbox_to_anchor=(0.62, 0.55))
+    ax.tick_params(labelsize=9)
     style(ax)
 
+    zoom_hi = max(five, top) * 1.06
     ax2.axvline(five, color=RED, linewidth=1.0, linestyle=(0, (2, 3)))
-    ax2.text(five + 0.0008, 0.06, f"first-five streams\nmaximum ({five:.3f})", ha="left",
-             va="bottom", fontsize=8.5, color=RED)
+    ax2.text(five + 0.003, 0.04, f"first-five streams\nmaximum ({five:.3f})", ha="left",
+             va="bottom", fontsize=9, color=RED)
     ax2.annotate("Operational paths remain\nat or near zero",
-                 (0.0, 0.55), xytext=(58, 0), textcoords="offset points", ha="left",
-                 va="center", fontsize=8.5, color=INK,
+                 (0.0, 0.55), xytext=(40, 0), textcoords="offset points", ha="left",
+                 va="center", fontsize=9, color=INK,
                  arrowprops={"arrowstyle": "-", "color": INK, "linewidth": 0.8})
-    ax2.annotate(f"1,000-agent maximum ({top:.3f})", (top, 1.0), xytext=(-6, -52),
-                 textcoords="offset points", ha="right", va="top", fontsize=8.5,
+    ax2.annotate(f"1,000-agent maximum ({top:.3f})", (top, 1.0), xytext=(-88, -14),
+                 textcoords="offset points", ha="right", va="top", fontsize=9,
                  color=RED, arrowprops={"arrowstyle": "-", "color": RED, "linewidth": 0.8})
-    ax2.set_xlim(-0.001, 0.05)
+    ax2.set_xlim(-0.004, zoom_hi)
     ax2.set_ylim(0, 1.04)
-    ax2.set_xlabel("deflated Sharpe, floor range", fontsize=10.5, color=INK)
+    ax2.set_xlabel("deflated Sharpe, diagnostic range", fontsize=10, color=INK)
+    ax2.set_ylabel("fraction of the 1,000 random agents", fontsize=10, color=INK)
+    ax2.tick_params(labelsize=9)
     style(ax2)
+    fig.subplots_adjust(top=0.96, bottom=0.08, left=0.13, right=0.97)
     save(fig, "evidence-luck-floor-1000.pdf")
 
 

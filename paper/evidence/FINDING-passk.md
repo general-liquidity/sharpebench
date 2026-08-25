@@ -1,10 +1,20 @@
 # Superseded historical note: pass^k in All-mode is a test of every-regime profitability, not of edge
 
 > **Status, 2026-08-25:** This note predates seed-block pooling, the fixed
-> deflation null and the final regenerated evidence. It remains a record of the
-> design interpretation, not a source for current DSR, bootstrap, eligibility or
-> deflation values. Use the nine final sweep files (512 records each) and
-> `paper/review/audit-math-2026-08-25.md` for the current record.
+> deflation null, clone collapse and the final regenerated evidence. It remains
+> a record of the design interpretation, not a source for current DSR,
+> bootstrap, eligibility or deflation values. Use the nine final sweep files
+> (512 records each) and `paper/review/audit-math-2026-08-25.md` for the
+> current record.
+>
+> Two statements below are now false and are retained only as history. The
+> claim that "every real field has eight agents, so `rank` takes the measured
+> path" no longer holds: ranking clusters the seed-averaged pooled streams
+> before measuring, and on five of the nine panels fewer than five votes
+> survive, so those cells fall back to the configured prior. The DSR values
+> quoted here (us-indices-1w 0.984, crypto-majors-1w 0.745/0.978,
+> crypto-majors-1d 0.144) are pre-floor, pre-pooling values; the current ones
+> are 0.178, 0.241 and 0.251.
 
 Date: 2026-08-23. Source: `paper/evidence/after-v0.3.0/`, seven complete
 datasets, 4,072 records, kernel at v0.3.0 (units fix applied).
