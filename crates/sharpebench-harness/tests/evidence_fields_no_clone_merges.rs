@@ -369,7 +369,10 @@ fn mandate_field_changes_dispersion_source_on_three_panels() {
         let source_of = |subs: &[AgentSubmission]| {
             let scored = rank(subs, &cfg);
             let s = scored.first().expect("a ranked field is never empty");
-            (s.trials_sr_std_source, s.trials_sr_std_annualized_equivalent)
+            (
+                s.trials_sr_std_source,
+                s.trials_sr_std_annualized_equivalent,
+            )
         };
         let (sweep_source, sweep_sigma) = source_of(&sweep);
         let (mandate_source, mandate_sigma) = source_of(&mandate);

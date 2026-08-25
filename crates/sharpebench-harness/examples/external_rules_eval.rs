@@ -331,7 +331,15 @@ struct Record<'a> {
 type AgentFactory = Box<dyn Fn() -> Box<dyn Agent>>;
 
 /// `(id, origin, published source, required closes, factory)`.
-fn entrants(faber_bars: usize) -> Vec<(&'static str, &'static str, &'static str, usize, AgentFactory)> {
+fn entrants(
+    faber_bars: usize,
+) -> Vec<(
+    &'static str,
+    &'static str,
+    &'static str,
+    usize,
+    AgentFactory,
+)> {
     vec![
         (
             "buy-and-hold",
@@ -373,14 +381,18 @@ fn entrants(faber_bars: usize) -> Vec<(&'static str, &'static str, &'static str,
             "external",
             "Brock, Lakonishok and LeBaron (1992), variable moving average (1, 50)",
             50,
-            Box::new(|| Box::new(SmaFilter::new(50, "bll vma(1,50) trend filter")) as Box<dyn Agent>),
+            Box::new(|| {
+                Box::new(SmaFilter::new(50, "bll vma(1,50) trend filter")) as Box<dyn Agent>
+            }),
         ),
         (
             "faber-10m",
             "external",
             "Faber (2007), ten-month simple moving average timing rule",
             faber_bars,
-            Box::new(move || Box::new(SmaFilter::new(faber_bars, "faber 10-month sma filter")) as Box<dyn Agent>),
+            Box::new(move || {
+                Box::new(SmaFilter::new(faber_bars, "faber 10-month sma filter")) as Box<dyn Agent>
+            }),
         ),
         (
             "rsi-14-wilder",
@@ -432,7 +444,11 @@ fn main() {
             windows.len()
         );
 
-        for profile in [CostProfile::None, CostProfile::Typical, CostProfile::WorstCase] {
+        for profile in [
+            CostProfile::None,
+            CostProfile::Typical,
+            CostProfile::WorstCase,
+        ] {
             let profile_name = match profile {
                 CostProfile::None => "frictionless",
                 CostProfile::Typical => "typical",
@@ -446,7 +462,9 @@ fn main() {
             let mut subs: Vec<AgentSubmission> = Vec::new();
             for (id, origin, source, need, make) in specs {
                 meta.insert(id.to_string(), (origin, source, need));
-                subs.push(run_agent(id, &data, &windows, &EXEC_SEEDS, costs, || make()));
+                subs.push(run_agent(id, &data, &windows, &EXEC_SEEDS, costs, || {
+                    make()
+                }));
             }
             subs.extend(luck_floor(
                 &data,
@@ -462,13 +480,14 @@ fn main() {
                 ..ScoreConfig::for_periods_per_year(*ppy)
             };
             for s in rank(&subs, &cfg) {
-                let (origin, source, need) = meta
-                    .get(&s.agent_id)
-                    .copied()
-                    .unwrap_or(("luck-floor", "this repository", 1));
+                let (origin, source, need) =
+                    meta.get(&s.agent_id)
+                        .copied()
+                        .unwrap_or(("luck-floor", "this repository", 1));
                 let blind = need.saturating_sub(OBSERVATION_LOOKBACK).min(window_len);
                 let rec = Record {
-                    command: "cargo run --release -p sharpebench-harness --example external_rules_eval",
+                    command:
+                        "cargo run --release -p sharpebench-harness --example external_rules_eval",
                     dataset: name,
                     timeframe: tf,
                     periods_per_year: *ppy,
