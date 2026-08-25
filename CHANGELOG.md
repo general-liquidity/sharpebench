@@ -5,9 +5,11 @@ All notable changes to SharpeBench are recorded here. The format follows
 version covers every crate, the npm packages and the PyPI package; each
 section is one `v*` tag and links the commits it was built from.
 
-[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.11.0...HEAD
 
 ## [Unreleased]
+
+## [0.11.0] - 2026-08-26
 
 ### Added
 - harness: `local_open_weight_field_eval`, a local frontier-model compatibility field that drives exact Ollama tags through SharpeArena's canonical fail-closed stdio shim, records model/server identity plus cadence/thinking configuration, and withholds the final artifact if any infrastructure cell fails. The path is built and tested; no model performance result is admitted yet.
@@ -272,6 +274,7 @@ First published release.
 ### Fixed
 - Constant-time HMAC verification and bounded, timed agent HTTP reads ([6c3d174](https://github.com/general-liquidity/sharpebench/commit/6c3d174)).
 
+[0.11.0]: https://github.com/general-liquidity/sharpebench/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/general-liquidity/sharpebench/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/general-liquidity/sharpebench/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/general-liquidity/sharpebench/compare/v0.7.0...v0.8.0
