@@ -90,7 +90,7 @@
     }
   ],
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
-  "repository_base_head": "46e5a0d60cf1e876bcc3584d9503097dd98b63b9",
+  "repository_base_head": "b73c8e69366d4e92ef7e56c1b6eec0994edb0908",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
   "schema_version": 2,
   "source_files": [
@@ -628,7 +628,7 @@
     },
     {
       "path": "paper/refs.bib",
-      "sha256": "cac58ae5fa43af01e7cd83c142197a40cdac3bb641e41bcfa764cb9dd3b620a5"
+      "sha256": "accf0281138071aae45a95198b5e14d1d6770fbaf3d7e55e6c3e4dd802286c2c"
     },
     {
       "path": "paper/sections/00-abstract.tex",
@@ -644,11 +644,11 @@
     },
     {
       "path": "paper/sections/03-benchmark.tex",
-      "sha256": "1ed681d571247d5f07bcf9fb7caf1ac28fd61c1483e1298daaf128d19908f782"
+      "sha256": "98b1ce68b52e6c4f188e113e4b1c7c7abfcdae58cd0ffa4a3af7a7b00d31e6cd"
     },
     {
       "path": "paper/sections/04-integrity.tex",
-      "sha256": "9d0d8fc65d44907bc4fb8c455ab14a6150649a10240a7b70f0b321e0d2c836c4"
+      "sha256": "c58cdc8f15c07393da14d7c5be59101aa7b28774fdfa5a58dc9e41284ae3c71d"
     },
     {
       "path": "paper/sections/05-experiments.tex",
@@ -660,11 +660,11 @@
     },
     {
       "path": "paper/sections/07-limitations.tex",
-      "sha256": "b87571a16d6c552aa1ff64f6f6399d7a7b89b4571cdbc2caf0a7cb8e43463cb0"
+      "sha256": "82b617a2ca92b8a83f1222fb2d5fccac492c60c0a8ca1cebd13b6fbb352222b1"
     },
     {
       "path": "paper/sections/08-reproducibility.tex",
-      "sha256": "43241172149bc138745cd20860c180194805dab20b282eb73603e3a9fd798797"
+      "sha256": "02f2ce910b9ea29059819dd4d29bdd08cbdbbb4227f4d554689f73088ea9e205"
     },
     {
       "path": "paper/sections/09-ethics.tex",
@@ -672,7 +672,7 @@
     },
     {
       "path": "paper/sections/A-commands.tex",
-      "sha256": "e66f00b80e57a2b66269868c5a54e206efb2f127bbd161adbfd56845794a1dc2"
+      "sha256": "e286d29b17dcb14a6818ab20af38ae65fc618163927d90d2d22a0ae8cb5a0dcb"
     },
     {
       "path": "paper/sections/B-checklist.tex",
@@ -738,5 +738,5 @@
     "arena/**/*.json",
     "arena/**/*.toml"
   ],
-  "source_snapshot_sha256": "acee70d2fe4c539660c99bbf021c4f45fb9a6644298cd3ec3e4b57da0544b1fe"
+  "source_snapshot_sha256": "6d231747d2924930c6dba959e19f5940a3415ed61e25b289db3f92069c2e2370"
 }
