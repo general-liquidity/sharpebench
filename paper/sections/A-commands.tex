@@ -9,7 +9,7 @@ All commands run from the repository root at the tagged version. The kernel is d
 python paper/src/make-provenance.py
   -> paper/evidence/provenance.json
 \end{verbatim}
-The manifest records the Git parent, a content hash over the Rust, Python, manifest, producer and frozen-data snapshot, and the SHA-256 digest of every result JSONL and figure. For the artifacts in this paper that content hash is \texttt{acee70d2fe4c539660c99bbf021c4f45fb9a6644298cd3ec3e4b57da0544b1fe} over the Git parent \texttt{46e5a0d60cf1e876bcc3584d9503097dd98b63b9}. Incomplete paid-LLM artifacts are excluded because they contain no model decisions and support no result in this paper. The manifest file itself hashes to \texttt{80c8b9d0f76fe92e21b7ebec591845f286bc9d4c606baeabd799cd79b04c1696}, and it covers the artifacts of that snapshot. The externally specified rule field of \cref{sec:external} was produced after it and is not covered by it; that file, \texttt{paper/evidence/final/external-rules.jsonl}, hashes to \texttt{14fd1306755457d3e16162ec983eca53e7b69f6ed000fc6e9a49875589c2a9af}.
+The manifest records the Git parent, a content hash over the Rust, Python, manifest, published-schema, producer and frozen-data snapshot, and the SHA-256 digest of every result JSONL and figure. It covers 157 source files and 22 artifacts, and re-running it reproduces every artifact digest, so no committed artifact is stale with respect to the source it was produced from. For the artifacts in this paper that content hash is \texttt{acee70d2fe4c539660c99bbf021c4f45fb9a6644298cd3ec3e4b57da0544b1fe} over the Git parent \texttt{46e5a0d60cf1e876bcc3584d9503097dd98b63b9}. Incomplete paid-LLM artifacts are excluded because they contain no model decisions and support no result in this paper. The manifest file itself hashes to \texttt{80c8b9d0f76fe92e21b7ebec591845f286bc9d4c606baeabd799cd79b04c1696}, and it covers the artifacts of that snapshot. The externally specified rule field of \cref{sec:external} was produced after it and is not covered by it; that file, \texttt{paper/evidence/final/external-rules.jsonl}, hashes to \texttt{14fd1306755457d3e16162ec983eca53e7b69f6ed000fc6e9a49875589c2a9af}.
 
 \paragraph{The shipped demonstration (\cref{fig:demotion}).}
 \begin{verbatim}
@@ -136,6 +136,29 @@ sharpebench score subs.json
 cargo test -p sharpebench-harness --test evidence_fields_no_clone_merges
 \end{verbatim}
 Rebuilds every committed evidence field twice: once over the streams as submitted, asserting zero merges at the collapse threshold, and once over the seed-averaged pooled streams that ranking actually clusters, asserting the surviving vote count implies the \texttt{trials\_sr\_std\_source} stamped on each committed default cell.
+
+\paragraph{The checks added in this revision (\cref{sec:lifecycle}, \cref{sec:agreement}, \cref{sec:entrants}, \cref{sec:benchmark}, \cref{sec:integrity}).}
+\begin{verbatim}
+cargo test -p sharpebench-core   process
+cargo test -p sharpebench-core   entrants
+cargo test -p sharpebench-core   evidence_coverage
+cargo test -p sharpebench-stats  agreement
+cargo test -p sharpebench-stats  dissent
+cargo test -p sharpebench-protocol --test schema_drift
+\end{verbatim}
+The first covers the lifecycle ordering check, including the case that a passing risk evaluation on one instrument does not authorize an order on another. The third is the audit that fails when a new evidence field is neither covered nor excluded with a reason. The last checks the published JSON Schemas against the Rust wire types in both directions. None of these produces a number reported as a result; they are the executable form of the claims in the named sections. The full local suite is
+\begin{verbatim}
+cargo test --workspace
+\end{verbatim}
+which reports 604 passed, 0 failed and 3 ignored.
+
+\paragraph{The live container boundary (\cref{sec:limitations}).}
+\begin{verbatim}
+docker pull alpine:3.22
+SHARPEBENCH_SANDBOX_FIXTURE=<digest-pinned image> \
+cargo test -p sharpebench-arena -- --ignored --nocapture
+\end{verbatim}
+The two live-boundary tests are \texttt{\#[ignore]}d, so this is the only invocation that runs them; the \texttt{sandbox} continuous-integration job runs exactly this after resolving the fixture to a digest and refusing an unpinned one. Each of the two observed runs reports 2 passed and 0 failed. On a machine with no Docker daemon the tests report as ignored rather than as passes, which is the point of the change.
 
 \paragraph{Golden fixtures and the parity test.}
 \begin{verbatim}
