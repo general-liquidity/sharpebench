@@ -97,8 +97,8 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "7591f70313a7c7004e2957a027ececd691a79b20",
-  "generated_at_head_dirty": false,
+  "generated_at_head": "ac85b3eed4926cd166b53021a855e1895b4ee11d",
+  "generated_at_head_dirty": true,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
   "schema_version": 3,
@@ -229,7 +229,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/composite.rs",
-      "sha256": "88cb8d59a60f5e3f5925135e7889d38135988ca59dcde6e44a686cd9bf1548a7"
+      "sha256": "cbb16ee41d58e0cc68c11fbcb54f18b3f77814ee561a29f2c4405e0bf952537b"
     },
     {
       "path": "crates/sharpebench-core/src/correlation.rs",
@@ -261,7 +261,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/lib.rs",
-      "sha256": "ee5cce92900a4e3f1d8c001b21bfae9a2db2a5f28cf2eaa63aaf543021ffd632"
+      "sha256": "684d08427c6431fed63d601df3d8b5d0629cb2dd51347ffd2bbc47ff352c46d8"
     },
     {
       "path": "crates/sharpebench-core/src/oos.rs",
@@ -533,7 +533,7 @@
     },
     {
       "path": "crates/sharpebench-stats/src/significance.rs",
-      "sha256": "c85d9dc5a3b983329f62cc23433801a7d83e91fc9b83c917c2741fcf8188c779"
+      "sha256": "9ed0c27329eb19e704fc2fa7ca1cb70a2d480ab163c05bec28cd1737ba8f818b"
     },
     {
       "path": "crates/sharpebench-stats/src/stats.rs",
@@ -609,7 +609,7 @@
     },
     {
       "path": "paper/main.tex",
-      "sha256": "3e9807c95db9710d1d7ac2c30b8ad99bef96d780d240a243a7a6d6cbe9a7b505"
+      "sha256": "e96cc2a584fa62ff5592be1f7d1e37d0792bc8053bdf402cae59aa94660902a0"
     },
     {
       "path": "paper/refs.bib",
@@ -657,7 +657,7 @@
     },
     {
       "path": "paper/sections/A-commands.tex",
-      "sha256": "27859f33f7cc3639aef1327be484d565152e5b47e57b0844508e7476ba7d2ef2"
+      "sha256": "4f206744bae7d762e5aaad86b199d108e6be1777a994bc5ec19ff904bc1df2ad"
     },
     {
       "path": "paper/sections/B-checklist.tex",
@@ -693,7 +693,7 @@
     },
     {
       "path": "paper/src/check-provenance.py",
-      "sha256": "051d788a7950efb1a4e0b512e6f359b8362b9ec758f4aabc4714b0c62d2b265d"
+      "sha256": "22b8cfbacc8cf2ee104b8d3c1e54fd8fb93ccf7d6d5bf9ab5dc34ad84e8f70a1"
     },
     {
       "path": "paper/src/make-evidence-figures.py",
@@ -705,7 +705,7 @@
     },
     {
       "path": "paper/src/make-provenance.py",
-      "sha256": "91130a498848b0d49432fb5f92ef0eecc23863d9dddf6057351a2cd95b59cb21"
+      "sha256": "c55491dcfd61174c3e0e93409b144dde0adcb762c9bc8aadb43b79cec6aac7c4"
     },
     {
       "path": "paper/src/original-essay-figures.py",
@@ -734,5 +734,5 @@
     "arena/**/*.json",
     "arena/**/*.toml"
   ],
-  "source_snapshot_sha256": "1e049d050929c611ee5c625f4270e20f29be29194961f7991768c84c320038b6"
+  "source_snapshot_sha256": "618eb545df056df23d692b73500a01f29bfc5edfceb29c9271b7c62ee8880da4"
 }
