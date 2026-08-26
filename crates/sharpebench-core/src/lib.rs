@@ -42,6 +42,8 @@ pub mod correlation;
 pub mod decay;
 pub mod disqualification;
 pub mod econrationality;
+pub mod entrants;
+pub mod evidence_coverage;
 pub mod greeks;
 pub mod oos;
 pub mod pass_k;
@@ -76,6 +78,18 @@ pub use disqualification::{classify_disqualification, rollup, DisqualThresholds,
 pub use econrationality::{
     assess_rationality, elicit_revealed_selection, DominanceChoice, EconRationalityReport,
 };
+pub use entrants::{
+    atr_breakout, bounce_counter, distribution_days, follow_through_day, max_exposure_timeout,
+    regime_rsi, signal_gate, AtrBreakoutParams, AtrBreakoutSignal, AtrBreakoutVerdict,
+    BounceParams, BounceState, DistributionCount, DistributionParams, DistributionSeverity,
+    ExposureDecision, ExposureState, FollowThroughParams, FollowThroughPhase, FollowThroughSignal,
+    GateDecision, GateState, GateStatus, IndexBar, RegimeRsiParams, RegimeRsiSignal, RsiBands,
+    Side, TrendRegime,
+};
+pub use evidence_coverage::{
+    Coverage, DigestId, EvidenceInventory, InventoryAudit, PreimageError, RunProvenance,
+    COMPOSITE_SCORE_INVENTORY, REDACTED, RUN_PROVENANCE_INVENTORY,
+};
 pub use greeks::{
     bs_greeks, bs_price, classify_greeks_risk, portfolio_greeks, Greeks, GreeksPolicy, GreeksRisk,
     Leg,
@@ -83,7 +97,10 @@ pub use greeks::{
 pub use oos::{oos_decay, OosDecayReport};
 pub use pass_k::{pass_k, PassMode};
 pub use percentile::{percentile_of, BaselineBand, HumanBaseline};
-pub use process::{ProcessEvent, ProcessScore, Trace};
+pub use process::{
+    check_lifecycle, process_score_with_ordering, LifecycleReport, LifecycleStep, OrderId,
+    OrderingViolation, Phase, PhaseKind, ProcessEvent, ProcessScore, Subject, Trace,
+};
 pub use rediscovery::{
     classify_rediscovery, clone_clusters, cosine_similarity, RediscoveryVerdict,
     CLONE_COLLAPSE_COSINE, DEFAULT_REDISCOVERY_THRESHOLD,
