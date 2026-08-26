@@ -206,9 +206,13 @@ jobs:
       - name: Publish @general-liquidity/sharpebench-mcp (skip if version exists)
         working-directory: npm/mcp
         run: |
-          # mcp depends on @general-liquidity/sharpebench@^0.0.x. When this run just
+          # mcp depends on @general-liquidity/sharpebench at this release. When this run just
           # published that dep, the registry read-path lags a few seconds, so `npm install`
           # here can fail ETARGET ("No matching version") before it propagates. Wait for it.
+          # Do not consult the committed lock for this one install: before a version is
+          # published, that lock cannot carry the registry's final tarball integrity for the
+          # same version. npm otherwise accepts the fresh metadata but rejects the tarball
+          # against the pre-release integrity, preventing the MCP package from publishing.
           DEPV="$(node -p "require('../package.json').version")"
           for i in $(seq 1 30); do
             if npm view "@general-liquidity/sharpebench@$DEPV" version >/dev/null 2>&1; then
@@ -216,7 +220,7 @@ jobs:
             fi
             echo "waiting for @general-liquidity/sharpebench@$DEPV to propagate ($i)…"; sleep 5
           done
-          npm install
+          npm install --package-lock=false
           npm run build
           V=$(node -p "require('./package.json').version")
           if npm view "@general-liquidity/sharpebench-mcp@$V" version >/dev/null 2>&1; then
