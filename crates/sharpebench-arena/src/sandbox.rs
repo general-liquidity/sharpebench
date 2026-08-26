@@ -510,27 +510,101 @@ mod tests {
             .contains("touch /etc/sharpebench-root-write"));
     }
 
-    /// Live Docker smoke test: spawns a real container and drives one decision
-    /// through the wrapped `ExternalAgent` transport. Skipped (with a message)
-    /// when Docker is absent, so CI without Docker stays green and honest.
+    /// The digest-pinned POSIX fixture image the live tests below run against,
+    /// supplied by the Docker-enabled CI job. Requiring it (rather than
+    /// defaulting to a mutable tag) keeps the live boundary tests honest about
+    /// which artifact actually executed.
+    fn live_fixture_image() -> String {
+        std::env::var("SHARPEBENCH_SANDBOX_FIXTURE").expect(
+            "the live sandbox tests need SHARPEBENCH_SANDBOX_FIXTURE set to a digest-pinned \
+             POSIX fixture image that is already present locally (--pull never)",
+        )
+    }
+
+    /// The hostile probe, executed for real.
+    ///
+    /// `#[ignore]` rather than a runtime skip: a skip that returns green is
+    /// indistinguishable from a pass in the `cargo test` summary, which is what
+    /// let the container boundary go unverified while the suite reported
+    /// "0 ignored". Ignored tests are counted and named, so an operator can see
+    /// that the boundary was not exercised. CI runs them with
+    /// `cargo test -p sharpebench-arena -- --ignored` on a Docker-enabled runner.
     #[test]
-    fn docker_spawn_smoke() {
-        if !docker_available() {
-            eprintln!("SKIP docker_spawn_smoke: docker is not available on this machine");
-            return;
+    #[ignore = "needs a running Docker daemon and SHARPEBENCH_SANDBOX_FIXTURE"]
+    fn live_hostile_probe_passes_inside_the_hardened_boundary() {
+        assert!(
+            docker_available(),
+            "this test was requested explicitly with --ignored, so an absent Docker daemon is a \
+             failure, not a reason to pass"
+        );
+        let image = live_fixture_image();
+        let readiness = check_sandbox_readiness(&image)
+            .unwrap_or_else(|error| panic!("the hardened boundary is not field-ready: {error}"));
+        assert_eq!(readiness.image, image);
+        assert!(readiness.image_id.starts_with("sha256:"));
+        assert!(!readiness.docker_server_version.is_empty());
+        // Every boundary the probe asserts on must be reported as passed; a
+        // shorter list means a check was quietly dropped.
+        assert_eq!(readiness.passed_checks.len(), 7, "{readiness:?}");
+        for expected in [
+            "non-root uid",
+            "zero Linux capabilities",
+            "no-new-privileges",
+            "network namespace exposes loopback only",
+            "root filesystem is read-only",
+            "bounded tmpfs is writable",
+            "tmpfs is noexec",
+        ] {
+            assert!(
+                readiness
+                    .passed_checks
+                    .iter()
+                    .any(|check| check == expected),
+                "{expected:?} missing from {:?}",
+                readiness.passed_checks
+            );
         }
-        use sharpebench_sim::Agent;
-        let opts = SandboxOptions {
-            allow_unpinned_image: true,
-            ..SandboxOptions::default()
-        };
-        let mut agent = run_external_sandboxed("alpine", &opts)
-            .expect("docker is available, so the sandboxed spawn must work");
+    }
+
+    /// Live Docker smoke test: spawns a real container through the production
+    /// entry point and drives one decision over the wrapped `ExternalAgent`
+    /// transport.
+    ///
+    /// The old assertion was `decision.orders.is_empty()`, which holds for any
+    /// failure mode including a container that never started, because
+    /// `error_hold` also returns no orders. What distinguishes the two is the
+    /// transport health: a container that never started closes stdout at once
+    /// and the reader channel disconnects (`DecideError::Transport`), while a
+    /// container that *ran* and simply does not speak the protocol keeps
+    /// consuming stdin and stays silent (`DecideError::Timeout`). This test
+    /// requires the latter, so it fails if the image did not execute.
+    #[test]
+    #[ignore = "needs a running Docker daemon and SHARPEBENCH_SANDBOX_FIXTURE"]
+    fn docker_spawn_smoke() {
+        assert!(
+            docker_available(),
+            "this test was requested explicitly with --ignored, so an absent Docker daemon is a \
+             failure, not a reason to pass"
+        );
+        use sharpebench_sim::{Agent, DecideError, TransportDiagnostics};
+        let image = live_fixture_image();
+        let mut agent = run_external_sandboxed(&image, &SandboxOptions::default())
+            .expect("docker is available and the image is pinned, so the spawn must work");
+        agent = agent.with_decide_timeout(Duration::from_secs(5));
         let obs = sharpebench_protocol_obs();
-        // alpine's default entrypoint does not speak the protocol; the transport
-        // must surface that as a flagged hold, not a hang or a panic.
         let decision = agent.decide(&obs);
-        assert!(decision.orders.is_empty());
+        assert!(decision.orders.is_empty(), "a faulted decision is a hold");
+        let health = agent.health();
+        assert!(
+            health.degraded(),
+            "the fault must be flagged, not mistaken for a deliberate hold"
+        );
+        assert_eq!(
+            health.last_error,
+            Some(DecideError::Timeout),
+            "the container must be alive and silent (it ran but does not speak the protocol); \
+             a Transport fault here means it never started"
+        );
     }
 
     #[cfg(test)]

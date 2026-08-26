@@ -149,6 +149,48 @@ jobs:
           cargo run -q -p sharpebench -- score suites/example_submissions.json --json > scored.json
           diff scored.json crates/sharpebench-core/golden/example_submissions.scores.json && echo "matches golden ✓"
 
+  sandbox:
+    # The container boundary is the only security claim in this repository that
+    # cannot be proved by a pure function: everything else about the sandbox is
+    # decided by `resolve_launch`, which is testable without Docker. The hostile
+    # probe and the live spawn are `#[ignore]`d so that a machine without a
+    # daemon reports them as ignored rather than counting them as passes, which
+    # means they run nowhere unless a job asks for them. This is that job.
+    name: live container boundary (hostile probe)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96.0"
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Docker daemon is present and answering
+        run: docker version
+
+      # The probe needs a POSIX fixture with /bin/sh, id, awk, ls, touch and
+      # chmod, present locally (the hardened launch passes `--pull never`), and
+      # referenced by digest (the launch refuses a mutable tag by default).
+      # Resolving the digest from the pulled image is what makes the pin exact
+      # rather than aspirational.
+      - name: Pull and digest-pin the fixture image
+        run: |
+          docker pull alpine:3.22
+          digest=$(docker image inspect alpine:3.22 --format '{{index .RepoDigests 0}}')
+          echo "resolved fixture: $digest"
+          case "$digest" in
+            *@sha256:*) ;;
+            *) echo "refusing to run against an unpinned fixture: $digest"; exit 1 ;;
+          esac
+          echo "SHARPEBENCH_SANDBOX_FIXTURE=$digest" >> "$GITHUB_ENV"
+
+      # `--ignored` runs exactly the tests the other jobs skip. `--include-ignored`
+      # is deliberately not used: the non-ignored arena tests already run in the
+      # `test` job on three OSes, and this job should fail for one reason only.
+      - name: Run the ignored live-boundary tests
+        run: cargo test -p sharpebench-arena -- --ignored --nocapture
+
   audit:
     name: benchmark self-audit
     runs-on: ubuntu-latest
