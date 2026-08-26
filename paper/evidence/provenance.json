@@ -97,8 +97,8 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "ac85b3eed4926cd166b53021a855e1895b4ee11d",
-  "generated_at_head_dirty": true,
+  "generated_at_head": "694db6679b2cdc7ca143e1f4ed75a0a3287e8dd0",
+  "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
   "schema_version": 3,
