@@ -33,15 +33,24 @@
 //! ```
 #![forbid(unsafe_code)]
 
+pub mod agreement;
 pub mod deflated_sharpe;
+pub mod dissent;
 pub mod fdr;
 pub mod selection;
 pub mod significance;
 pub mod stats;
 pub mod stylized_facts;
 
+pub use agreement::{
+    binarize, cohens_kappa, cohens_kappa_binary, gate_vs_human, spearman_rho, GateAgreement,
+};
 pub use deflated_sharpe::{
     deflated_sharpe_ratio, expected_max_sharpe, probabilistic_sharpe_ratio, sharpe_ratio,
+};
+pub use dissent::{
+    dissent, dissent_across, kendall_tau_b, DissentReport, DissentThresholds, DissentVerdict,
+    DEFAULT_MAX_LEVEL_DISSENT, DEFAULT_MAX_RANK_DISSENT,
 };
 pub use fdr::{benjamini_hochberg, fdr_verdict, FdrVerdict};
 pub use selection::{
