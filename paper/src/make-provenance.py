@@ -28,6 +28,11 @@ source_scope = (
     "Cargo.lock",
     "crates/**/*.toml",
     "crates/**/*.rs",
+    # The published wire contract. It is load-bearing, not documentation: a
+    # drift guard fails the build when it disagrees with the Rust types, and an
+    # entrant validates against it. An integrity hash that did not cover it
+    # would leave the authoritative half of the contract unbound.
+    "crates/**/schema/*.json",
     "paper/src/*.py",
     "paper/evidence/*.py",
     "paper/main.tex",
