@@ -1,5 +1,22 @@
 //! Local open-weight model field through SharpeArena's canonical Ollama shim.
 //!
+//! # Cross-repository dependency (this example does not run standalone)
+//!
+//! The model interaction itself lives in the sibling
+//! [SharpeArena](https://github.com/general-liquidity/sharpearena) repository,
+//! not here: this example spawns `python -m sharpearena.ollama_shim` and speaks
+//! the wire protocol to it. Prompt construction, the Ollama HTTP call,
+//! thinking-mode handling, sampling and identity capture are all on that side.
+//! Running this example therefore needs, in addition to Ollama itself:
+//!
+//! ```text
+//! pip install sharpearena        # or: pip install -e path/to/sharpearena
+//! ```
+//!
+//! The example preflights that import and exits with an actionable diagnostic
+//! when it is absent, rather than letting the missing module surface later as an
+//! anonymous spawn failure.
+//!
 //! This is the registry-compatible bridge between the two products. It runs a
 //! predeclared set of installed Ollama models through the same walk-forward,
 //! reference-field, luck-floor, and ranking path as `llm_field_eval`, but it
@@ -195,6 +212,33 @@ fn reference_field(data: &Dataset, windows: &[Window]) -> Vec<AgentSubmission> {
     submissions
 }
 
+/// The shim module, owned by the sibling SharpeArena repository.
+const SHIM_MODULE: &str = "sharpearena.ollama_shim";
+
+/// Preflight the cross-repo dependency: can `python` import the shim at all?
+///
+/// Without this, an absent `sharpearena` package surfaces only once the field is
+/// already running, as `ExternalAgent::spawn(...).ok()` returning `None` and
+/// then a `FailureKind::SpawnError` panic that names neither the module nor the
+/// interpreter. The failure is correct (it fails closed) but unactionable.
+fn probe_shim(python: &str) -> Result<(), String> {
+    let import = format!("import {SHIM_MODULE}");
+    let outcome = std::process::Command::new(python)
+        .args(["-c", &import])
+        .output();
+    let detail = match outcome {
+        Err(error) => format!("cannot run the interpreter {python:?}: {error}"),
+        Ok(output) if output.status.success() => return Ok(()),
+        Ok(output) => String::from_utf8_lossy(&output.stderr).trim().to_string(),
+    };
+    Err(format!(
+        "{SHIM_MODULE} is not importable by {python:?}: {detail}\n\
+         This example is a bridge to the sibling SharpeArena repository and cannot run without \
+         it. Install the shim (`pip install sharpearena`, or `pip install -e` against a local \
+         checkout), or point SHARPEARENA_PYTHON at an interpreter that already has it."
+    ))
+}
+
 fn read_identity(path: &Path) -> ModelIdentity {
     let text = std::fs::read_to_string(path)
         .unwrap_or_else(|error| panic!("cannot read model identity {}: {error}", path.display()));
@@ -203,9 +247,11 @@ fn read_identity(path: &Path) -> ModelIdentity {
 }
 
 fn main() {
-    let out = env::args()
-        .nth(1)
-        .unwrap_or_else(|| "local-open-weight-field.jsonl".to_string());
+    // Required positional; see evidence_sweep for why there is no default.
+    let out = env::args().nth(1).unwrap_or_else(|| {
+        eprintln!("usage: local_open_weight_field_eval <out.jsonl> [dataset]");
+        std::process::exit(2);
+    });
     let only = env::args().nth(2);
     let models = model_tags();
     assert!(
@@ -213,6 +259,12 @@ fn main() {
         "SHARPEBENCH_LOCAL_MODELS contains no tags"
     );
     let python = env::var("SHARPEARENA_PYTHON").unwrap_or_else(|_| "python".to_string());
+    // Fail before touching any dataset: the shim is the whole model path, and a
+    // run that cannot reach it has nothing to produce.
+    if let Err(diagnostic) = probe_shim(&python) {
+        eprintln!("{diagnostic}");
+        std::process::exit(2);
+    }
     let cadence: u32 = env_parse("SHARPEBENCH_LOCAL_CADENCE", 5);
     let thinking: bool = env_parse("SHARPEBENCH_LOCAL_THINKING", false);
     let max_tokens: u32 = env_parse("SHARPEBENCH_LOCAL_MAX_TOKENS", 512);
@@ -356,4 +408,53 @@ fn main() {
     drop(writer);
     std::fs::rename(&partial, &out).expect("publish completed field atomically");
     eprintln!("wrote {n_records} complete records to {out}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The cross-repo dependency must announce itself by name. Before this
+    /// preflight existed, an absent `sharpearena` package reached the operator
+    /// as `FailureKind::SpawnError` from inside the field loop, naming neither
+    /// the module nor the interpreter.
+    ///
+    /// Driven with an interpreter that cannot exist, so the assertion holds on a
+    /// machine that does have the shim installed.
+    #[test]
+    fn missing_shim_names_the_module_the_interpreter_and_the_fix() {
+        let diagnostic = probe_shim("sharpebench-no-such-interpreter")
+            .expect_err("a nonexistent interpreter cannot import the shim");
+        assert!(
+            diagnostic.contains(SHIM_MODULE),
+            "the diagnostic must name the missing module, got: {diagnostic}"
+        );
+        assert!(
+            diagnostic.contains("sharpebench-no-such-interpreter"),
+            "the diagnostic must name the interpreter it tried, got: {diagnostic}"
+        );
+        assert!(
+            diagnostic.contains("pip install sharpearena")
+                && diagnostic.contains("SHARPEARENA_PYTHON"),
+            "the diagnostic must state both remedies, got: {diagnostic}"
+        );
+    }
+
+    /// The shim module path is the contract with the sibling repository. If it
+    /// is renamed there, this pins where the corresponding edit belongs.
+    #[test]
+    fn shim_module_path_is_pinned() {
+        assert_eq!(SHIM_MODULE, "sharpearena.ollama_shim");
+    }
+
+    /// A working interpreter that genuinely has the module reports Ok, so the
+    /// preflight cannot be a blanket refusal. Runs only where the sibling
+    /// package is installed; `#[ignore]` keeps the skip visible in the summary
+    /// rather than counting as a pass.
+    #[test]
+    #[ignore = "needs the sibling SharpeArena package installed"]
+    fn present_shim_passes_the_preflight() {
+        let python = env::var("SHARPEARENA_PYTHON").unwrap_or_else(|_| "python".to_string());
+        probe_shim(&python).expect("the shim is installed for this interpreter");
+    }
 }

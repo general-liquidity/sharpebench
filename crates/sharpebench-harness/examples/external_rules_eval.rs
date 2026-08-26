@@ -411,9 +411,11 @@ fn windows_for(n: usize) -> (Vec<Window>, usize) {
 }
 
 fn main() {
-    let out = env::args()
-        .nth(1)
-        .unwrap_or_else(|| "external-rules.jsonl".to_string());
+    // Required positional; see evidence_sweep for why there is no default.
+    let out = env::args().nth(1).unwrap_or_else(|| {
+        eprintln!("usage: external_rules_eval <out.jsonl> [dataset]");
+        std::process::exit(2);
+    });
     let only = env::args().nth(2);
     let mut w = BufWriter::new(File::create(&out).expect("create output"));
     let mut n_records = 0usize;

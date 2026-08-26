@@ -17,5 +17,14 @@ serde = { version = "1", features = ["derive"] }
 # parse the exact inverse of serialize.
 serde_json = { version = "1", features = ["float_roundtrip"] }
 
+# Examples are not test targets by default, so a `#[test]` inside one is compiled
+# and never run. This example is the bridge to the sibling SharpeArena repository
+# and its preflight is the part that has to hold; opting the target into the test
+# harness is the only way to assert on it without moving the logic out of the
+# example it belongs to.
+[[example]]
+name = "local_open_weight_field_eval"
+test = true
+
 [lints]
 workspace = true

@@ -158,9 +158,13 @@ fn field(data: &Dataset, windows: &[Window]) -> Vec<AgentSubmission> {
 }
 
 fn main() {
-    let out = env::args()
-        .nth(1)
-        .unwrap_or_else(|| "evidence.jsonl".to_string());
+    // Required positional. An evidence producer with a bare CWD-relative default
+    // scatters a copy of a paper artifact wherever it happens to be run from,
+    // which is one `git add` away from being committed as the real thing.
+    let out = env::args().nth(1).unwrap_or_else(|| {
+        eprintln!("usage: evidence_sweep <out.jsonl> [dataset] [dsr_bar]");
+        std::process::exit(2);
+    });
     let mut w = BufWriter::new(File::create(&out).expect("create output"));
     let mut n_records = 0usize;
 

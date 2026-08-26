@@ -228,9 +228,13 @@ fn summarize(scores: &[CompositeScore], key: impl Fn(&CompositeScore) -> f64) ->
 }
 
 fn main() {
-    let out = env::args()
-        .nth(1)
-        .unwrap_or_else(|| "paper/evidence/final/luck-floor-1000.jsonl".to_string());
+    // Required positional; see evidence_sweep for why there is no default. This
+    // one defaulted straight into paper/evidence/final/, so a stray run
+    // overwrote a committed artifact in place.
+    let out = env::args().nth(1).unwrap_or_else(|| {
+        eprintln!("usage: luck_floor_1000 <out.jsonl>");
+        std::process::exit(2);
+    });
     let mut w = BufWriter::new(File::create(&out).expect("create output"));
 
     for (name, ppy) in DATASETS {

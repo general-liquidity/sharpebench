@@ -174,9 +174,11 @@ fn sample_std(xs: &[f64]) -> f64 {
 }
 
 fn main() {
-    let out = env::args()
-        .nth(1)
-        .unwrap_or_else(|| "seed-leg.jsonl".to_string());
+    // Required positional; see evidence_sweep for why there is no default.
+    let out = env::args().nth(1).unwrap_or_else(|| {
+        eprintln!("usage: seed_leg_eval <out.jsonl>");
+        std::process::exit(2);
+    });
     let mut w = BufWriter::new(File::create(&out).expect("create output"));
     let mut n_records = 0usize;
 

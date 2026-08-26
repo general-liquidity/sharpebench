@@ -78,6 +78,21 @@ struct Record<'a> {
     model: Option<String>,
     /// Model-output protocol failures are agent evidence and become sentinel
     /// runs. Host/provider/runtime failures still abort the whole field.
+    ///
+    /// Emitted unconditionally, with no `skip_serializing_if`: a zero here is an
+    /// affirmative record that the field saw no protocol faults, which is not
+    /// the same statement as the key being absent.
+    ///
+    /// A local `paper/evidence/final/llm-field-records-*.jsonl` from an earlier
+    /// run will lack the key. That is not a divergence from committed evidence:
+    /// those files are gitignored paid-run scratch (`.gitignore`, "LLM-field
+    /// runs are paid, resumable experiments"), and only a complete assembled
+    /// `llm-field.jsonl` is ever admitted. Adding `skip_serializing_if` to make
+    /// an old scratch file look shape-compatible would be worse than useless:
+    /// such a file also predates `examples/llm-agent/llm_agent.py` no longer
+    /// converting malformed model output into a hold, so its return series
+    /// reflects masked faults that are now scored, and it does not reproduce
+    /// whatever this key does.
     agent_protocol_failures: usize,
     deflated_sharpe: f64,
     psr: f64,
@@ -143,9 +158,11 @@ fn reference_field(data: &Dataset, windows: &[Window]) -> Vec<AgentSubmission> {
 }
 
 fn main() {
-    let out = env::args()
-        .nth(1)
-        .unwrap_or_else(|| "llm-field-records.jsonl".to_string());
+    // Required positional; see evidence_sweep for why there is no default.
+    let out = env::args().nth(1).unwrap_or_else(|| {
+        eprintln!("usage: llm_field_eval <out.jsonl> [dataset]");
+        std::process::exit(2);
+    });
     let only = env::args().nth(2);
     let partial = format!("{out}.partial");
     let mut w = BufWriter::new(File::create(&partial).expect("create partial output"));

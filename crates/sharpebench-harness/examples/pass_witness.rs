@@ -119,9 +119,11 @@ fn submission(id: &str, base_seed: u64, s: f64, window_len: usize) -> AgentSubmi
 }
 
 fn main() {
-    let out = env::args()
-        .nth(1)
-        .unwrap_or_else(|| "pass_witness.jsonl".to_string());
+    // Required positional; see evidence_sweep for why there is no default.
+    let out = env::args().nth(1).unwrap_or_else(|| {
+        eprintln!("usage: pass_witness <out.jsonl>");
+        std::process::exit(2);
+    });
     let mut w = BufWriter::new(File::create(&out).expect("create output"));
 
     for (shape, ppy, window_len) in SHAPES {
