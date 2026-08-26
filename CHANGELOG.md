@@ -5,9 +5,18 @@ All notable changes to SharpeBench are recorded here. The format follows
 version covers every crate, the npm packages and the PyPI package; each
 section is one `v*` tag and links the commits it was built from.
 
-[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.13.0...HEAD
 
 ## [Unreleased]
+
+## [0.13.0] - 2026-08-26
+
+### Added
+- paper/ci: `check-provenance.py` recomputes every source and artifact digest, re-expands both committed scopes to detect additions or removals, and fails CI on any mismatch.
+
+### Fixed
+- paper: the source snapshot excludes build products, virtual environments, bytecode caches and dependency trees. The previous manifest admitted machine-generated Rust files from `crates/sharpebench-py/target/`, so its identity depended on the development machine.
+- paper: the commands appendix no longer quotes a digest over a source set containing the appendix itself. The manifest is the sole machine-readable authority, the externally specified rule field is covered as an ordinary artifact, and generation records whether its source tree was clean.
 
 ## [0.12.0] - 2026-08-26
 
@@ -293,6 +302,7 @@ First published release.
 ### Fixed
 - Constant-time HMAC verification and bounded, timed agent HTTP reads ([6c3d174](https://github.com/general-liquidity/sharpebench/commit/6c3d174)).
 
+[0.13.0]: https://github.com/general-liquidity/sharpebench/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/general-liquidity/sharpebench/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/general-liquidity/sharpebench/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/general-liquidity/sharpebench/compare/v0.9.0...v0.10.0

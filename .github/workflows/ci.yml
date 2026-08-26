@@ -254,3 +254,15 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Build the book
         run: mdbook build docs/book
+
+  paper-provenance:
+    name: paper evidence provenance
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Every recorded source and artifact matches the committed scope
+        run: python paper/src/check-provenance.py

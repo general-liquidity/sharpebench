@@ -6,6 +6,7 @@
 **/*.rs.bk
 
 # Python build/test scratch from the sharpebench-py binding
+/crates/sharpebench-py/.venv
 __pycache__/
 .pytest_cache/
 *.pyd
