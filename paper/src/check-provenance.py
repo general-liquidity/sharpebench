@@ -12,8 +12,11 @@ ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = ROOT / "paper" / "evidence" / "provenance.json"
 
 
-def sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+def sha256(path: Path, *, canonical_text: bool = False) -> str:
+    data = path.read_bytes()
+    if canonical_text:
+        data = data.replace(b"\r\n", b"\n")
+    return hashlib.sha256(data).hexdigest()
 
 
 def expand(patterns: list[str], excludes: frozenset[str]) -> list[str]:
@@ -28,14 +31,16 @@ def expand(patterns: list[str], excludes: frozenset[str]) -> list[str]:
     return sorted(path.relative_to(ROOT).as_posix() for path in found)
 
 
-def check_group(name: str, records: list[dict[str, str]]) -> list[str]:
+def check_group(
+    name: str, records: list[dict[str, str]], *, canonical_text: bool = False
+) -> list[str]:
     problems: list[str] = []
     for record in records:
         path = ROOT / record["path"]
         if not path.is_file():
             problems.append(f"{name}: MISSING {record['path']}")
             continue
-        actual = sha256(path)
+        actual = sha256(path, canonical_text=canonical_text)
         if actual != record["sha256"]:
             problems.append(
                 f"{name}: DIGEST {record['path']}\n"
@@ -54,7 +59,9 @@ def main() -> int:
         print("unsupported provenance schema_version", file=sys.stderr)
         return 2
 
-    problems = check_group("source", manifest["source_files"])
+    problems = check_group(
+        "source", manifest["source_files"], canonical_text=True
+    )
     problems += check_group("artifact", manifest["artifacts"])
     excludes = frozenset(manifest["source_snapshot_excludes"])
 

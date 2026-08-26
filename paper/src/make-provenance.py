@@ -31,8 +31,14 @@ EXCLUDED_DIR_NAMES = ("target", ".venv", "__pycache__", "node_modules", ".git")
 EXCLUDED_ARTIFACT_PREFIXES = ("llm-cache-", "llm-field-")
 
 
-def sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+def sha256(path: Path, *, canonical_text: bool = False) -> str:
+    data = path.read_bytes()
+    if canonical_text:
+        # Git may materialize the same text blob as LF on CI and CRLF on a
+        # Windows worktree.  Source identity follows the repository text, not
+        # the checkout convention; result artifacts remain byte-exact below.
+        data = data.replace(b"\r\n", b"\n")
+    return hashlib.sha256(data).hexdigest()
 
 
 def files(patterns: tuple[str, ...]) -> list[Path]:
@@ -51,7 +57,10 @@ def files(patterns: tuple[str, ...]) -> list[Path]:
 
 source_paths = files(SOURCE_SCOPE)
 source_records = [
-    {"path": path.relative_to(ROOT).as_posix(), "sha256": sha256(path)}
+    {
+        "path": path.relative_to(ROOT).as_posix(),
+        "sha256": sha256(path, canonical_text=True),
+    }
     for path in source_paths
 ]
 snapshot = hashlib.sha256(

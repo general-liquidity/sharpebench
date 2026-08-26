@@ -16,6 +16,7 @@ section is one `v*` tag and links the commits it was built from.
 
 ### Fixed
 - paper: the source snapshot excludes build products, virtual environments, bytecode caches and dependency trees. The previous manifest admitted machine-generated Rust files from `crates/sharpebench-py/target/`, so its identity depended on the development machine.
+- paper: source hashes canonicalize CRLF to LF while result artifacts stay byte-exact. The previous raw-byte source hashes gave four tracked files different identities on the Windows development worktree and the Linux CI checkout.
 - paper: the commands appendix no longer quotes a digest over a source set containing the appendix itself. The manifest is the sole machine-readable authority, the externally specified rule field is covered as an ordinary artifact, and generation records whether its source tree was clean.
 
 ## [0.12.0] - 2026-08-26
