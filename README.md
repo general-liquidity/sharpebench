@@ -167,6 +167,19 @@ sharpebench run --http 127.0.0.1:8080                     # HTTP POST /decide
 
 A runnable reference agent (stdio + Dockerfile) and the wire format live in [`examples/reference-agent/`](examples/reference-agent/).
 
+The contract is published as JSON Schema (draft 2020-12), and it is authoritative:
+
+| Message | Schema |
+|:--|:--|
+| `MarketObservation` (with `SymbolSnapshot`, `PositionState`) | [`crates/sharpebench-protocol/schema/observation.schema.json`](crates/sharpebench-protocol/schema/observation.schema.json) |
+| `Decision` (with `Order`, `DecisionCost`) | [`crates/sharpebench-protocol/schema/decision.schema.json`](crates/sharpebench-protocol/schema/decision.schema.json) |
+
+A bidirectional drift guard (`crates/sharpebench-protocol/tests/schema_drift.rs`) fails the build if a schema and the Rust type it describes disagree in either direction, so the published document cannot rot away from the code that enforces it.
+
+> **Breaking for entrants as of 0.11.0: the wire contract is closed.** Both schemas set `additionalProperties: false`, mirroring `#[serde(deny_unknown_fields)]` on `MarketObservation`, `SymbolSnapshot`, `PositionState`, `Decision`, `Order` and `DecisionCost`. Through 0.10.x an agent could emit extra keys and they were ignored; from 0.11.0 an extra key is rejected at the transport boundary and scored as a **non-retryable agent protocol fault**, which materializes as a failing sentinel run and counts against pass^k. This is deliberate: an attested benchmark cannot let an unread field carry meaning the scorer never saw.
+>
+> **Migration.** Validate one decision against `decision.schema.json` before submitting. If you emitted diagnostics alongside the orders (`latency_ms`, `model`, `notes`, and the like), put free text in `reasoning` and structured spend in `cost` (`cost_usd`, `tokens_in`, `tokens_out`, `reasoning_tokens`); drop the rest. A rejected decision now prints a diagnostic naming the offending field and the accepted set, so a failing run tells you which key to remove rather than reporting an opaque parse failure. Note also that `target_weight` is documented as `[-1, 1]`, negative meaning a short, correcting a contradictory `[0, 1] (signed for shorts)` in earlier docs.
+
 > **Security: running untrusted agents.** `sharpebench run` executes whatever agent you point it at **without sandboxing**; only run agents you trust. The arena runs external agents in a network-isolated Docker container with bounded CPU and memory, and refuses (rather than silently falling back) when Docker is absent. Container isolation is the boundary; multi-tenant hosting of untrusted submissions is **not yet built**.
 
 ### SharpeArena composition and local open-weight fields
@@ -183,14 +196,21 @@ SharpeArena observation/decision loop + execution sandbox
 
 SharpeArena depends on the small published SharpeBench protocol, simulator and kernel crates so both sides use one wire contract and execution model. SharpeBench does not import the full SharpeArena package. `sharpearena-compile-bench` closes the boundary by refusing incomplete grids, failed cells, coordinate collisions, conflicting completions and invalid return hashes before emitting one ordinary SharpeBench submissions file per dataset.
 
-The compatibility example below can also drive exact locally installed Ollama tags through SharpeArena's fail-closed stdio shim and this repository's frozen historical panels. It records exact model/server identity, cadence and thinking settings. A protocol-invalid model decision is an agent fault; an infrastructure failure aborts the field and leaves only the partial artifact. This path is built and tested, but no open-weight model result is part of the current paper.
+The compatibility example below can also drive exact locally installed Ollama tags through SharpeArena's fail-closed stdio shim and this repository's frozen historical panels. It records exact model/server identity, cadence and thinking settings. A protocol-invalid model decision is an agent fault; an infrastructure failure aborts the field and leaves only the partial artifact. No open-weight model result is part of the current paper.
+
+**Prerequisite:** the shim is the sibling repository's code, not this one's. The example spawns `python -m sharpearena.ollama_shim`, so it needs SharpeArena installed in the interpreter it will use (`pip install sharpearena`, or `pip install -e` against a checkout) as well as a running Ollama. It preflights that import and exits with an actionable message if it is missing, so the dependency is announced before any dataset is loaded rather than surfacing as a spawn failure mid-field.
+
+`SHARPEBENCH_LOCAL_MODELS` takes **exact Ollama tags**, verbatim as `ollama list` prints them; the identity recording is only worth anything if the tag is real. Size the choice to your VRAM: a 9B model at 4-bit needs roughly 6 GB and fits comfortably on a 16 GB card alongside the KV cache, while 27B and 35B tags want 24 GB or more and will spill to CPU or fail to load.
 
 ```bash
-export SHARPEBENCH_LOCAL_MODELS='qwen3.8:27b'
+ollama list                                    # copy a tag from this, verbatim
+export SHARPEBENCH_LOCAL_MODELS='ornith:9b'    # ~6 GB at 4-bit; fits 16 GB VRAM
 cargo run --release -p sharpebench-harness \
   --example local_open_weight_field_eval -- \
   local-open-weight.jsonl us-indices-1d
 ```
+
+The output path is a required positional argument for every evidence-producing example, not a default: a producer that is not told where the evidence goes exits 2 instead of writing a copy of a paper artifact into whatever directory it happened to be run from.
 
 For the canonical batched/sharded field, the strategy-generation trial ledger and the paper-only forward arm, use SharpeArena's [`LOCAL_AGENT_ARCHITECTURE.md`](https://github.com/general-liquidity/sharpearena/blob/main/docs/LOCAL_AGENT_ARCHITECTURE.md). Historical model scores remain advisory for pretrained policies because public-market contamination cannot be excluded; certification still requires a committed forward window.
 
