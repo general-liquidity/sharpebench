@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sharpebench.dev/schema/v1/observation.schema.json",
+  "title": "MarketObservation",
+  "description": "What an agent sees at one point-in-time decision step. All data is point-in-time: close_history, fundamentals and news only ever hold information available at or before `date`. This schema is authoritative for the SharpeBench agent wire contract and is closed: the Rust types carry #[serde(deny_unknown_fields)].",
+  "type": "object",
+  "required": ["date", "cash", "symbols", "portfolio"],
+  "additionalProperties": false,
+  "properties": {
+    "date": {
+      "type": "string",
+      "description": "ISO-8601 date of the decision point."
+    },
+    "cash": {
+      "type": "number",
+      "description": "Cash available to the agent."
+    },
+    "symbols": {
+      "type": "array",
+      "description": "Point-in-time snapshot per tradable instrument. The set of symbols here is the universe an order may name.",
+      "items": { "$ref": "#/$defs/SymbolSnapshot" }
+    },
+    "portfolio": {
+      "type": "array",
+      "description": "The agent's current holdings.",
+      "items": { "$ref": "#/$defs/PositionState" }
+    }
+  },
+  "$defs": {
+    "SymbolSnapshot": {
+      "type": "object",
+      "required": ["symbol", "close_history"],
+      "additionalProperties": false,
+      "properties": {
+        "symbol": { "type": "string" },
+        "close_history": {
+          "type": "array",
+          "description": "Trailing closes up to and including `date` (oldest first).",
+          "items": { "type": "number" }
+        },
+        "fundamentals": {
+          "type": "object",
+          "description": "Named fundamental fields (e.g. `pe`, `revenue_yoy`). Optional; defaults to empty.",
+          "additionalProperties": { "type": "number" }
+        },
+        "news": {
+          "type": "array",
+          "description": "Headlines published on or before `date`. Optional; defaults to empty.",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "PositionState": {
+      "type": "object",
+      "required": ["symbol", "shares", "avg_price"],
+      "additionalProperties": false,
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "description": "The held instrument."
+        },
+        "shares": {
+          "type": "number",
+          "description": "Signed share count; negative is a short position."
+        },
+        "avg_price": {
+          "type": "number",
+          "description": "Average entry price for the position."
+        }
+      }
+    }
+  }
+}

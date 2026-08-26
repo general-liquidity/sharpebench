@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sharpebench.dev/schema/v1/decision.schema.json",
+  "title": "Decision",
+  "description": "What an agent returns at one decision step: per-instrument orders, an optional free-text rationale, and an optional self-reported compute spend. This schema is authoritative for the SharpeBench agent wire contract and is closed: the Rust types carry #[serde(deny_unknown_fields)], so an unknown key is rejected at the transport boundary and scored as an agent protocol fault.",
+  "type": "object",
+  "required": ["orders"],
+  "additionalProperties": false,
+  "properties": {
+    "orders": {
+      "type": "array",
+      "description": "Per-instrument instructions. May be empty (a hold). At most one order per symbol, and every symbol must appear in the observation being answered.",
+      "items": { "$ref": "#/$defs/Order" }
+    },
+    "reasoning": {
+      "type": "string",
+      "description": "Free-text rationale captured into the trajectory for auditability. Optional; defaults to empty."
+    },
+    "cost": {
+      "$ref": "#/$defs/DecisionCost",
+      "description": "Self-reported compute spend for producing this decision. Optional; omitted entirely when not reported. The engine accumulates it into the run cost that drives the cost-normalized leaderboard columns."
+    }
+  },
+  "$defs": {
+    "DecisionCost": {
+      "type": "object",
+      "description": "Self-reported spend for one decision. Every field defaults to zero, so a partial report still validates. cost_usd must be finite and nonnegative.",
+      "additionalProperties": false,
+      "properties": {
+        "cost_usd": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Dollar cost of the compute/tokens spent on this decision. The preferred unit for skill-per-dollar reporting."
+        },
+        "tokens_in": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Prompt/input tokens consumed."
+        },
+        "tokens_out": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Completion/output tokens produced."
+        },
+        "reasoning_tokens": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Reasoning/thinking tokens, surfaced separately as a legibility breakdown. Providers typically already bill these inside tokens_out, so they are not re-added to the token total."
+        }
+      }
+    },
+    "Order": {
+      "type": "object",
+      "required": ["symbol", "action", "target_weight"],
+      "additionalProperties": false,
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "description": "The instrument this order targets. Must be one of the symbols the observation offered."
+        },
+        "action": {
+          "description": "Discrete action label (sizing is carried by target_weight). Deliberately not inferred from the target sign: it is an audit label, and the signed target remains authoritative.",
+          "enum": ["buy", "sell", "hold", "close"]
+        },
+        "target_weight": {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1,
+          "description": "Target portfolio weight for this symbol in [-1, 1]; negative values are shorts."
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Stated conviction in [0, 1]; scored for calibration. Optional; defaults to 0.5."
+        },
+        "rationale": {
+          "type": "string",
+          "description": "Optional one-line rationale for this order, captured into the run trace. Defaults to empty."
+        }
+      }
+    }
+  }
+}
