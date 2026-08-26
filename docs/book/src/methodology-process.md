@@ -52,3 +52,36 @@ legitimate). Making them gate eligibility, or move an agent across a
 statistically meaningful DSR separation, would let an uncalibrated 0.1-per-event
 schedule overrule the calibrated statistics. Ordering inside a band spends the
 information exactly where the statistics have nothing left to say.
+
+## Lifecycle ordering, linked by subject
+
+The table above reads events as a *set*. That was a real hole: the gate could
+say an order bypassed the risk gate, but it had no way to say that a risk
+evaluation must **precede** the order it authorizes. A trace containing both a
+risk evaluation and an order scored clean whatever their order.
+
+`check_lifecycle` supplies the missing semantics. It reads a typed lifecycle
+over the phases a trading decision actually passes through:
+
+```text
+observation -> decision -> risk evaluation -> submission
+            -> acknowledgment -> fill -> reconciliation
+```
+
+Every `LifecycleStep` carries the `Subject` it concerns, and an authorization
+satisfies a requirement **only when the subjects match**. This is the part that
+matters. A system with ordering but without subject linkage accepts a risk
+check on one instrument as authorization for an order in another, which is not
+a hypothetical: it is how an ordering-only gate is defeated. Here the two are
+bound, so an out-of-order or mis-subjected step is reported as an
+`OrderingViolation` naming what was missing and which subject it concerned.
+
+The checks are typed over the event representation rather than matched on tool
+names. Tool names are scaffold-specific, and a gate that matched them would
+reward naming conventions instead of behavior: an agent could pass by calling
+its function `risk_gate` and fail by calling it `preflight`.
+
+**This leg is additive.** `process_score` is unchanged and every committed
+board scores byte-identically; the ordering leg is read through
+`process_score_with_ordering`, so adopting it is a decision a host makes rather
+than a silent retroactive re-scoring of published results.

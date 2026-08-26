@@ -80,25 +80,66 @@ quietly rewritten after publication either.
 
 ## Sandboxed entrants
 
-Untrusted agent code runs inside Docker:
+Untrusted agent code is launched under Docker with every hardening flag the
+runtime offers:
 
 ```
-docker run --rm --network none --memory 1g --cpus 1 -i <image>
+docker run --rm --init --pull never \
+  --network none --ipc none --read-only \
+  --cap-drop ALL --security-opt no-new-privileges=true \
+  --user 65532:65532 \
+  --memory 1g --memory-swap 1g --cpus 1 \
+  --pids-limit 128 --ulimit nofile=256:256 \
+  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777 \
+  --tmpfs /run:rw,noexec,nosuid,nodev,size=16m,mode=1777 \
+  --log-driver none -i <image>
 ```
 
-The container speaks the same stdin/stdout observation/decision protocol as
-any external agent (`sharpebench-sim`'s process transport is wrapped, not
-reimplemented), so an arena entrant is just an image whose entrypoint reads
-one observation per line and writes one decision per line.
+`--pull never` means a missing image is a refusal rather than an implicit
+pull, and the image is pinned by digest. Startup and execution carry explicit
+timeouts. The container speaks the same stdin/stdout observation/decision
+protocol as any external agent (`sharpebench-sim`'s process transport is
+wrapped, not reimplemented), so an arena entrant is just an image whose
+entrypoint reads one observation per line and writes one decision per line.
 
 Be clear about the boundary: **container isolation is the security boundary.**
-`--network none` removes network access and the memory/cpu flags bound resource
-abuse; the arena adds no hardening beyond what Docker provides. When Docker is
-absent the sandbox helper returns an explicit error, never a silent
+The flags above remove network and IPC access, drop every capability, refuse
+privilege escalation, run as a non-root user on a read-only root with
+`noexec` scratch space, and bound memory, CPU, processes and file descriptors.
+The arena adds no hardening beyond what the container runtime provides. When
+Docker is absent the sandbox helper returns an explicit error, never a silent
 unsandboxed fallback. An `allow_unsandboxed` opt-in exists for local
 development against your own agent; it defaults to false and additionally
 requires an explicit host command. Host execution of untrusted third-party
 code remains unsupported.
+
+### The boundary has not been observed to hold
+
+This is the part of the chapter that is not yet evidence.
+
+`docker_spawn_smoke` used to return early with an `eprintln` when Docker was
+absent, so it counted as one of the passing tests and cargo swallowed the
+message. Its assertion was `orders.is_empty()`, which holds for every failure
+mode, including a container that never started, so the boundary could not have
+been observed even on a machine where the test did run. That test is now
+`#[ignore]`d, so a skip reads as a skip, and its assertion moved to transport
+health, which distinguishes a container that ran and stayed silent (a timeout)
+from one that never started (a transport error).
+
+A second test, `live_hostile_probe_passes_inside_the_hardened_boundary`, is
+the first in the repository that actually executes the hostile probe. From
+inside the container the probe asserts that the user id is 65532, that the
+effective capability set is empty, that `NoNewPrivs` is set, that the only
+network interface is loopback, that the root mount is read-only and a write
+to `/etc` is refused, and that `/tmp` accepts a write but refuses to execute
+what was written. A CI job pins alpine by RepoDigest and runs the ignored set
+on a Docker-enabled runner.
+
+**Neither test has ever been executed, and the CI job is unvalidated.** Docker
+Desktop is installed on the development machine but its daemon is not running.
+The hardening above is written and reviewable; nothing here should be read as
+a claim that it was observed to contain anything. What changed is that the
+absence of evidence is now visible instead of counted as evidence.
 
 ## What the arena does NOT provide
 

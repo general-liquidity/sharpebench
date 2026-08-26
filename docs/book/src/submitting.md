@@ -28,7 +28,7 @@ sharpebench score submissions.json
 ```
 
 `trace`, `confidences`, `outcomes`, and `cost` are optional (serde-defaulted).
-One `run` per seed × window — that is what makes pass^k and multi-window OOS
+One `run` per seed × window, which is what makes pass^k and multi-window OOS
 meaningful.
 
 A submission object may also carry an optional `declared_mandate`, e.g.
@@ -52,7 +52,60 @@ let board = sharpebench_core::rank(&[sub], &ScoreConfig::default());
 The external protocol is a request/response loop: the harness writes a
 point-in-time `MarketObservation` (only data at or before the decision date) and
 reads back a `Decision` (target weights + confidence). The agent never sees a
-future bar — look-ahead is impossible by construction, not by convention.
+future bar: look-ahead is impossible by construction, not by convention.
+
+## The wire contract is published, and it is closed
+
+The contract is not prose. It ships as draft 2020-12 JSON Schema covering all
+six wire types across two documents:
+
+| Message | Schema |
+|---|---|
+| `MarketObservation`, `SymbolSnapshot`, `PositionState` | `crates/sharpebench-protocol/schema/observation.schema.json` |
+| `Decision`, `Order`, `DecisionCost` | `crates/sharpebench-protocol/schema/decision.schema.json` |
+
+Every object sets `additionalProperties: false`, mirroring
+`#[serde(deny_unknown_fields)]` on the Rust types. Through 0.10.x an agent
+could emit extra keys and they were ignored; from 0.11.0 an extra key is
+rejected at the transport boundary and scored as a non-retryable agent
+protocol fault, which materializes as a failing sentinel run and counts
+against pass^k. An attested benchmark cannot let an unread field carry meaning
+the scorer never saw.
+
+A bidirectional drift guard (`crates/sharpebench-protocol/tests/schema_drift.rs`)
+fails the build if a schema and the Rust type it describes disagree in
+**either** direction, and asserts each direction separately so a failure names
+which side is missing what. Both failure modes are real interoperability
+breaks, not documentation gaps: a field on the Rust type but absent from the
+schema means a conforming non-Rust implementer rejects a SharpeBench-emitted
+message, and a property in the schema but absent from the Rust type means an
+entrant that follows the published contract is rejected at the boundary. The
+guard is verified non-vacuous in both directions.
+
+**Migration.** Validate one decision against `decision.schema.json` before
+submitting. If you emitted diagnostics alongside the orders (`latency_ms`,
+`model`, `notes`, and the like), put free text in `reasoning` and structured
+spend in `cost` (`cost_usd`, `tokens_in`, `tokens_out`, `reasoning_tokens`);
+drop the rest. A rejected decision prints a diagnostic that names the
+offending field, lists the accepted set and appends the schema path, so a
+failing run tells you which key to remove rather than reporting an opaque
+parse failure. Note also that `target_weight` is `[-1, 1]`, negative meaning a
+short.
+
+## Building on the reference entrants
+
+`sharpebench_core::entrants` publishes rules from the literature as specified,
+deterministic, hidden-state-free transforms with caller-supplied thresholds:
+Donchian channel breakout, the Brock-Lakonishok-LeBaron variable moving
+average, Faber's ten-month filter and Wilder's RSI, plus a regime-conditioned
+RSI, a bounce counter, a signal gate, a max-exposure timeout, an ATR
+breakout, a distribution-day count and a follow-through day. Each names its
+source and its parameters in its docstring.
+
+They are **entrants to be scored, not infrastructure to score with**. They are
+unit-tested; no field evaluation has been run on any of them, and no result
+for any of them is claimed anywhere in this repository. Treat them as a
+starting point for your own submission, not as a published baseline.
 
 ## Teams
 
