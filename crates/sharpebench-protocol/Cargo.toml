@@ -8,8 +8,9 @@ repository.workspace = true
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
-
-[dev-dependencies]
+# Needed in the library, not only in tests: `decision_from_wire` owns the
+# entrant-facing diagnostic for the closed wire contract, so the deserialization
+# error has to be inspected here rather than discarded by each transport.
 serde_json = "1"
 
 [lints]

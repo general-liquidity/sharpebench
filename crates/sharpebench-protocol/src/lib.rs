@@ -7,6 +7,26 @@
 //!
 //! All observations are **point-in-time**: `close_history`, `fundamentals` and
 //! `news` only ever contain information available at or before `date`.
+//!
+//! # The wire contract is closed (breaking for entrants as of 0.11.0)
+//!
+//! Every wire type carries `#[serde(deny_unknown_fields)]`. An agent that emits
+//! a key the contract does not define is rejected at the transport boundary and
+//! scored as an agent protocol fault, not silently accepted. This is a
+//! deliberate departure from the additive-only discipline the rest of the
+//! artifact formats follow: an attested benchmark cannot let an unread field
+//! carry meaning the scorer never saw.
+//!
+//! The authoritative machine-readable definition of the closed contract is
+//! published as JSON Schema (draft 2020-12) alongside this crate:
+//! `schema/decision.schema.json` and `schema/observation.schema.json`. Both set
+//! `additionalProperties: false` to mirror `deny_unknown_fields`, and a
+//! bidirectional drift guard (`tests/schema_drift.rs`) fails the build if the
+//! schema and the Rust types disagree in either direction.
+//!
+//! Entrants migrating from 0.10.x: drop any extra keys, or move them under
+//! `reasoning` (free text) or `cost` (structured spend). [`decision_from_wire`]
+//! produces the diagnostic that names the offending field.
 #![forbid(unsafe_code)]
 
 use std::collections::BTreeMap;
@@ -132,6 +152,33 @@ pub enum Action {
 
 fn default_confidence() -> f64 {
     0.5
+}
+
+/// Where an entrant finds the authoritative, machine-readable contract. Quoted
+/// into every wire-shape diagnostic so a failing agent is one link from the fix.
+pub const DECISION_SCHEMA_PATH: &str = "crates/sharpebench-protocol/schema/decision.schema.json";
+
+/// Deserialize a [`Decision`] from the wire, turning a contract violation into a
+/// diagnostic an entrant can act on.
+///
+/// The contract is closed ([`deny_unknown_fields`]), so the most common
+/// migration failure is an extra key. `serde` already knows which key that is
+/// and which keys were expected; the transports used to throw that away and
+/// report only an opaque protocol fault. This function keeps it, and points at
+/// the published schema.
+///
+/// This checks the object *shape* only. Semantic validity against the
+/// observation being answered is [`Decision::validate_for`].
+///
+/// [`deny_unknown_fields`]: https://serde.rs/container-attrs.html#deny_unknown_fields
+pub fn decision_from_wire(json: &str) -> Result<Decision, String> {
+    serde_json::from_str(json).map_err(|error| {
+        format!(
+            "decision rejected by the closed wire contract: {error}. \
+             Unknown fields are rejected rather than ignored; validate against {DECISION_SCHEMA_PATH} \
+             (additionalProperties: false) and move any extra payload into `reasoning` or `cost`."
+        )
+    })
 }
 
 impl Decision {
@@ -401,6 +448,35 @@ mod tests {
         ] {
             assert!(invalid.validate_for(&obs).is_err());
         }
+    }
+
+    #[test]
+    fn unknown_field_diagnostic_names_the_offending_field() {
+        let error = decision_from_wire(r#"{"orders":[],"latency_ms":12}"#)
+            .expect_err("the closed contract rejects an undefined key");
+        assert!(
+            error.contains("latency_ms"),
+            "the diagnostic must name the offending field, got: {error}"
+        );
+        assert!(
+            error.contains("orders") && error.contains("reasoning") && error.contains("cost"),
+            "the diagnostic must list the accepted fields, got: {error}"
+        );
+        assert!(
+            error.contains(DECISION_SCHEMA_PATH),
+            "the diagnostic must point at the published schema, got: {error}"
+        );
+
+        // A shape fault that is not an unknown field still gets a diagnostic
+        // rather than an opaque failure.
+        let malformed = decision_from_wire("not json").expect_err("malformed input is rejected");
+        assert!(malformed.contains("closed wire contract"));
+
+        // The happy path is unchanged: a conforming decision parses.
+        let ok =
+            decision_from_wire(r#"{"orders":[{"symbol":"A","action":"buy","target_weight":0.5}]}"#)
+                .expect("a conforming decision parses");
+        assert_eq!(ok.orders[0].symbol, "A");
     }
 
     #[test]

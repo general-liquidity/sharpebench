@@ -64,14 +64,26 @@ fn classify_io(err: &std::io::Error) -> DecideError {
     }
 }
 
+/// Parse and validate one wire decision.
+///
+/// `DecideError::Protocol` is a unit variant, so the typed value the harness
+/// scores on cannot carry text. The diagnostic is therefore written to stderr at
+/// the moment the fault is detected: an entrant whose agent is being rejected by
+/// the closed contract sees which field did it and where the schema lives,
+/// instead of an opaque protocol fault in the failure tally. The tally itself is
+/// unchanged, so nothing about scoring depends on this being read.
 fn parse_decision(
     response: &str,
     observation: &MarketObservation,
 ) -> Result<Decision, DecideError> {
-    let decision: Decision = serde_json::from_str(response).map_err(|_| DecideError::Protocol)?;
-    decision
-        .validate_for(observation)
-        .map_err(|_| DecideError::Protocol)?;
+    let decision = sharpebench_protocol::decision_from_wire(response).map_err(|diagnostic| {
+        eprintln!("agent protocol fault: {diagnostic}");
+        DecideError::Protocol
+    })?;
+    decision.validate_for(observation).map_err(|diagnostic| {
+        eprintln!("agent protocol fault: decision is not valid for the observation it answers: {diagnostic}");
+        DecideError::Protocol
+    })?;
     Ok(decision)
 }
 
