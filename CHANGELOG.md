@@ -8,9 +8,11 @@ are the twelve listed in [RELEASING.md](RELEASING.md), and `xtask` and
 `examples/reference-agent` are `publish = false`. Each section is one `v*` tag
 and links the commits it was built from.
 
-[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.14.0...HEAD
 
 ## [Unreleased]
+
+## [0.14.0] - 2026-08-27
 
 ### Fixed
 - release: the MCP package installs its just-published dependency without consulting the committed lock ([61c479a](https://github.com/general-liquidity/sharpebench/commit/61c479a)). `@general-liquidity/sharpebench-mcp` publishes in the same run as `@general-liquidity/sharpebench`, and before that version exists on the registry the committed lock cannot hold the integrity hash of the tarball npm will serve for it; npm accepted the fresh metadata, rejected the tarball against the pre-release integrity, and the MCP package never published. `npm install --package-lock=false` in the publish step is the fix, and it now has a regression test (`npm/mcp/test/release-install.test.js`) asserting the flag and the ordering of the propagation wait, which the original change shipped without.
@@ -310,6 +312,7 @@ First published release.
 ### Fixed
 - Constant-time HMAC verification and bounded, timed agent HTTP reads ([6c3d174](https://github.com/general-liquidity/sharpebench/commit/6c3d174)).
 
+[0.14.0]: https://github.com/general-liquidity/sharpebench/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/general-liquidity/sharpebench/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/general-liquidity/sharpebench/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/general-liquidity/sharpebench/compare/v0.10.0...v0.11.0
