@@ -20,6 +20,13 @@
 \usepackage[hidelinks,breaklinks]{hyperref}
 \usepackage[capitalise,noabbrev]{cleveref}
 
+% Long \texttt identifiers (OutperformBuyAndHold, AbsoluteReturn) cannot
+% hyphenate, so a column forced to hold one is set loose and TeX reports an
+% underfull box. emergencystretch gives the line breaker a final pass with
+% extra stretch to distribute, used only on paragraphs it would otherwise set
+% badly. Paragraphs that already set well are untouched.
+\emergencystretch=1em
+
 \sisetup{
   table-format = 1.4,
   round-mode = places,
