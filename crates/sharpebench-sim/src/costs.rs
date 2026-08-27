@@ -181,16 +181,35 @@ pub fn trf_factor(weights_prev: &[f64], weights_new: &[f64], c: f64) -> f64 {
 /// single swappable axis rather than hand-tuned cost fields scattered per test.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CostProfile {
-    /// Frictionless: no fees, no slippage, no impact, no delay. The ceiling case.
+    /// Reported as **frictionless**: no fees, no slippage, no impact, no delay.
+    /// The ceiling case.
     None,
-    /// A realistic retail/institutional blend — the default-ish baseline.
+    /// Reported as **typical**: a realistic retail/institutional blend, the
+    /// default-ish baseline.
     Typical,
-    /// Stressed execution: wide fees + slippage + impact and a multi-bar fill delay.
+    /// Reported as **stressed**: wide fees + slippage + impact and a multi-bar
+    /// fill delay.
     WorstCase,
-    /// Typical costs plus seed-driven fill delay, partial fills and
-    /// queue-position slippage ([`ExecutionNoise::default`]), so the seed leg of
-    /// pass^k resamples execution rather than a few basis points of slippage.
+    /// Reported as **realistic**: typical costs plus seed-driven fill delay,
+    /// partial fills and queue-position slippage ([`ExecutionNoise::default`]),
+    /// so the seed leg of pass^k resamples execution rather than a few basis
+    /// points of slippage.
     Realistic,
+}
+
+impl CostProfile {
+    /// The name this profile is reported under, in evidence records, the paper
+    /// and the documentation. The variant identifiers are the published Rust API
+    /// and do not match these names; [`name`](Self::name) is the single place
+    /// that binds the two, so a rename cannot silently desynchronize them.
+    pub fn name(self) -> &'static str {
+        match self {
+            CostProfile::None => "frictionless",
+            CostProfile::Typical => "typical",
+            CostProfile::WorstCase => "stressed",
+            CostProfile::Realistic => "realistic",
+        }
+    }
 }
 
 /// A cost profile resolved to a concrete [`CostModel`] and a decision-to-fill
@@ -318,6 +337,17 @@ mod tests {
         noise.queue_participation_ref = 0.0;
         assert!(noise.validate().is_err());
         assert!(ExecutionNoise::default().validate().is_ok());
+    }
+
+    #[test]
+    fn reported_profile_names_are_the_names_in_the_evidence_records() {
+        // These exact strings are the `cost_profile` field of every record in
+        // paper/evidence/final/external-rules.jsonl and the profile names the
+        // paper reports under. Renaming one silently invalidates both.
+        assert_eq!(CostProfile::None.name(), "frictionless");
+        assert_eq!(CostProfile::Typical.name(), "typical");
+        assert_eq!(CostProfile::WorstCase.name(), "stressed");
+        assert_eq!(CostProfile::Realistic.name(), "realistic");
     }
 
     #[test]

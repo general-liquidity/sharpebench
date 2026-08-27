@@ -451,12 +451,7 @@ fn main() {
             CostProfile::Typical,
             CostProfile::WorstCase,
         ] {
-            let profile_name = match profile {
-                CostProfile::None => "frictionless",
-                CostProfile::Typical => "typical",
-                CostProfile::WorstCase => "stressed",
-                CostProfile::Realistic => "realistic",
-            };
+            let profile_name = profile.name();
             let costs: CostModel = profile.resolve().costs;
 
             let specs = entrants(*faber_bars);

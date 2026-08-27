@@ -24,8 +24,18 @@ on every fill. An edge has to survive the friction it would actually meet:
   any platform. Turnover cost is what separates an edge that survives rebalancing from
   one that only looks good before trading frictions.
 
-The cost profile is selectable (typical or worst-case fees, slippage, impact, and
-financing), so an edge can be required to clear the bar even under adverse execution.
+The cost profile is selectable, so an edge can be required to clear the bar even under
+adverse execution. Four ship, each named here as it is named in evidence records and in
+the paper; the Rust identifier differs and is given beside it:
+
+| Reported name | `CostProfile` variant | Fee / slippage / impact / financing (bps) |
+|---|---|---|
+| `frictionless` | `CostProfile::None` | 0 / 0 / 0 / 0, no fill delay |
+| `typical` | `CostProfile::Typical` | 2 / 3 / 50 / 5 |
+| `stressed` | `CostProfile::WorstCase` | 10 / 15 / 150 / 20, 10% participation cap, two-bar delay |
+| `realistic` | `CostProfile::Realistic` | typical, plus seeded fill delay, partial fills and queue-position slippage |
+
+`CostProfile::name()` is the one place that maps a variant to its reported name.
 
 ## Synthetic data
 
