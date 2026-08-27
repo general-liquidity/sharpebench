@@ -32,5 +32,7 @@ for path, expected_bar in zip(parts, expected_bars, strict=True):
         raise SystemExit(f"dataset mismatch: {dataset} versus {part_dataset}")
     lines.extend(part_lines)
 
-out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+# Result artifacts are hashed byte-exact, so the writer must not translate newlines.
+with out.open("w", encoding="utf-8", newline="") as handle:
+    handle.write("\n".join(lines) + "\n")
 print(f"wrote {out}: {len(lines)} records for {dataset}")

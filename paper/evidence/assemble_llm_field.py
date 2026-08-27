@@ -132,7 +132,8 @@ meta = {
     "cost_usd_total": round(sum(m["cost_usd"] for m in per_model.values()), 4),
 }
 
-with OUT.open("w", encoding="utf-8") as f:
+# Result artifacts are hashed byte-exact, so the writer must not translate newlines.
+with OUT.open("w", encoding="utf-8", newline="") as f:
     f.write(json.dumps(meta, sort_keys=True) + "\n")
     for r in records:
         f.write(json.dumps(r) + "\n")

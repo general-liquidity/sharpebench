@@ -103,7 +103,11 @@ manifest = {
     "source_files": source_records,
     "artifacts": artifacts,
 }
-OUT.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+# newline="" suppresses the platform translation Path.write_text applies, so the
+# manifest is the same bytes on Windows as on CI and "regenerate and diff" is a
+# byte-wise check everywhere rather than only where the checkout convention is LF.
+with OUT.open("w", encoding="utf-8", newline="") as handle:
+    handle.write(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
 print(
     f"wrote {OUT.relative_to(ROOT)}: {len(source_records)} sources, "
     f"{len(artifacts)} artifacts"
