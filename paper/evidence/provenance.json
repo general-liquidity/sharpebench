@@ -97,7 +97,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "f8735540c28ed049e02012f89d197493ad223e5b",
+  "generated_at_head": "1d7c76878694221b4e1c44a4f8b8d5aba80c3cc2",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -645,11 +645,11 @@
     },
     {
       "path": "paper/sections/07-limitations.tex",
-      "sha256": "fe98dd80fc4b651594a2874f257a22af189d793b86e96e3f9e29e1cb476a2d2f"
+      "sha256": "37e4eff64a2c18a67bffadd46c60db461eb99892343ba993f493a62d330e623d"
     },
     {
       "path": "paper/sections/08-reproducibility.tex",
-      "sha256": "e2603e5c4642c53c869f3e018decd36e45d2050ada32642702bc64f008359098"
+      "sha256": "9cdd6fbc9e71095f1c80abd4208756169c828095b1b84c91c7c0ea57a92aaa50"
     },
     {
       "path": "paper/sections/09-ethics.tex",
@@ -734,5 +734,5 @@
     "arena/**/*.json",
     "arena/**/*.toml"
   ],
-  "source_snapshot_sha256": "078699c2302ed76bf420b661a3033156393c4017acbe18a4aaf1e0254315d4a4"
+  "source_snapshot_sha256": "68e8783ba61a55a2b65d2eb21add996990ca72914b74af950b0a2f9e40ae871c"
 }
