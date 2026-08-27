@@ -97,7 +97,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "694db6679b2cdc7ca143e1f4ed75a0a3287e8dd0",
+  "generated_at_head": "f8735540c28ed049e02012f89d197493ad223e5b",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -337,7 +337,7 @@
     },
     {
       "path": "crates/sharpebench-harness/examples/external_rules_eval.rs",
-      "sha256": "445a8f05d2458bfedcbaadc149aa6b94226f54b5636915003d93e6300cbd7cb4"
+      "sha256": "3f0a581e0cd9c3d41a2ebe5683c5c3fe0f99b46f24f65762028bdf79960ef5b1"
     },
     {
       "path": "crates/sharpebench-harness/examples/llm_field_eval.rs",
@@ -465,7 +465,7 @@
     },
     {
       "path": "crates/sharpebench-sim/src/costs.rs",
-      "sha256": "7021317b9a6b919dcc9f55b60c43a744038ccacf9da3100d3b9d72dce6cb29ab"
+      "sha256": "1206db58687cb996a5fd5f842fd7fba4178c06624581164dd85adb05e30866f2"
     },
     {
       "path": "crates/sharpebench-sim/src/data.rs",
@@ -597,11 +597,11 @@
     },
     {
       "path": "paper/evidence/assemble_llm_field.py",
-      "sha256": "d0638e210ebc96767419d264bad43f9990e50dd08ce596caf135e482d8863019"
+      "sha256": "5464be82e56dcaf85b8cf5a6294db6104dd1a9640a3ce239c4b853c99a23b002"
     },
     {
       "path": "paper/evidence/assemble_sweep.py",
-      "sha256": "ba227a77598f2d7dd3b9a63b171a0dd4fffb1659683ed7db7a23485da9744c19"
+      "sha256": "862b7545ff901fc6db9ab68fb5f25858b0e1647ab55dc72121f8676ad07019dd"
     },
     {
       "path": "paper/evidence/index_sharpe.py",
@@ -645,11 +645,11 @@
     },
     {
       "path": "paper/sections/07-limitations.tex",
-      "sha256": "82b617a2ca92b8a83f1222fb2d5fccac492c60c0a8ca1cebd13b6fbb352222b1"
+      "sha256": "fe98dd80fc4b651594a2874f257a22af189d793b86e96e3f9e29e1cb476a2d2f"
     },
     {
       "path": "paper/sections/08-reproducibility.tex",
-      "sha256": "02f2ce910b9ea29059819dd4d29bdd08cbdbbb4227f4d554689f73088ea9e205"
+      "sha256": "e2603e5c4642c53c869f3e018decd36e45d2050ada32642702bc64f008359098"
     },
     {
       "path": "paper/sections/09-ethics.tex",
@@ -657,7 +657,7 @@
     },
     {
       "path": "paper/sections/A-commands.tex",
-      "sha256": "4f206744bae7d762e5aaad86b199d108e6be1777a994bc5ec19ff904bc1df2ad"
+      "sha256": "eafb47bac265de552844a1c2f09daec713f9c96ec61555047abad0a3b7e38c12"
     },
     {
       "path": "paper/sections/B-checklist.tex",
@@ -665,7 +665,7 @@
     },
     {
       "path": "paper/sections/C-simdata.tex",
-      "sha256": "82a1d3356ccf1291e501af57ac4871be41fc073f4f1600be571934c0f21da58f"
+      "sha256": "c24281d45f4070df8b851c49822b11499470081e78854c764cd0c490d2378195"
     },
     {
       "path": "paper/sections/D-datasheet.tex",
@@ -693,7 +693,7 @@
     },
     {
       "path": "paper/src/check-provenance.py",
-      "sha256": "22b8cfbacc8cf2ee104b8d3c1e54fd8fb93ccf7d6d5bf9ab5dc34ad84e8f70a1"
+      "sha256": "e7c5f1f66cb95c8c9c70a64baee54a968f9808445ad0f1081040621736ccb14c"
     },
     {
       "path": "paper/src/make-evidence-figures.py",
@@ -705,7 +705,7 @@
     },
     {
       "path": "paper/src/make-provenance.py",
-      "sha256": "c55491dcfd61174c3e0e93409b144dde0adcb762c9bc8aadb43b79cec6aac7c4"
+      "sha256": "387ac44f032d092639c90e676244eb9566d703f4ffa6427c2a66a58801c4529e"
     },
     {
       "path": "paper/src/original-essay-figures.py",
@@ -734,5 +734,5 @@
     "arena/**/*.json",
     "arena/**/*.toml"
   ],
-  "source_snapshot_sha256": "618eb545df056df23d692b73500a01f29bfc5edfceb29c9271b7c62ee8880da4"
+  "source_snapshot_sha256": "078699c2302ed76bf420b661a3033156393c4017acbe18a4aaf1e0254315d4a4"
 }
