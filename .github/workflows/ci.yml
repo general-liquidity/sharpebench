@@ -260,7 +260,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # Full history: the manifest records the commit it was generated at, and the
+      # checker requires that commit to be an ancestor of HEAD. A shallow clone does
+      # not contain it, and the checker fails rather than skipping the ancestry leg.
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

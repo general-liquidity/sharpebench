@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -50,6 +52,74 @@ def check_group(
     return problems
 
 
+def git(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args], cwd=ROOT, capture_output=True, text=True, check=False
+    )
+
+
+def check_generation(manifest: dict) -> list[str]:
+    """Validate the two fields that bind the manifest to a commit.
+
+    `generated_at_head_dirty` is a property of the generation, not of the tree
+    the validator is run against, so it is enforced unconditionally: a manifest
+    generated from a dirty worktree describes source bytes that are in no
+    commit, and accepting it would let uncommitted work pass as recorded.
+
+    `generated_at_head` cannot equal the commit that contains the manifest -
+    that would be self-referential - so the strongest available check is
+    ancestry: the recorded commit must be reachable from HEAD. Enforcing that
+    needs the recorded object, which a shallow clone does not have, so the
+    paper-provenance job checks out full history. Outside a Git worktree the
+    ancestry leg is reported as unenforced rather than silently passed.
+    """
+    problems: list[str] = []
+
+    if manifest.get("generated_at_head_dirty") is not False:
+        problems.append(
+            "generation: DIRTY generated_at_head_dirty is "
+            f"{manifest.get('generated_at_head_dirty')!r}, expected false. The "
+            "manifest was generated from a worktree with uncommitted changes, so "
+            "its source digests correspond to no commit. Commit the sources, then "
+            "regenerate with paper/src/make-provenance.py."
+        )
+
+    recorded = manifest.get("generated_at_head")
+    if not isinstance(recorded, str) or not re.fullmatch(r"[0-9a-f]{40}", recorded):
+        problems.append(f"generation: HEAD generated_at_head is not a commit id: {recorded!r}")
+        return problems
+
+    if git("rev-parse", "--git-dir").returncode != 0:
+        print(
+            "generation: not a Git worktree, so generated_at_head ancestry is NOT "
+            f"enforced here (recorded {recorded}); the dirty flag is enforced."
+        )
+        return problems
+
+    if git("cat-file", "-e", f"{recorded}^{{commit}}").returncode != 0:
+        shallow = git("rev-parse", "--is-shallow-repository").stdout.strip() == "true"
+        problems.append(
+            f"generation: HEAD generated_at_head {recorded} is not a commit in this "
+            + (
+                "repository, and the clone is shallow. Fetch full history "
+                "(fetch-depth: 0) before validating."
+                if shallow
+                else "repository."
+            )
+        )
+        return problems
+
+    if git("merge-base", "--is-ancestor", recorded, "HEAD").returncode != 0:
+        head = git("rev-parse", "HEAD").stdout.strip()
+        problems.append(
+            f"generation: HEAD generated_at_head {recorded} is not an ancestor of "
+            f"HEAD {head}. The manifest was generated on a commit this one does not "
+            "build on, so it does not describe this history."
+        )
+
+    return problems
+
+
 def main() -> int:
     if not MANIFEST.is_file():
         print(f"missing manifest: {MANIFEST}", file=sys.stderr)
@@ -59,7 +129,8 @@ def main() -> int:
         print("unsupported provenance schema_version", file=sys.stderr)
         return 2
 
-    problems = check_group(
+    problems = check_generation(manifest)
+    problems += check_group(
         "source", manifest["source_files"], canonical_text=True
     )
     problems += check_group("artifact", manifest["artifacts"])
