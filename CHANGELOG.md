@@ -13,6 +13,7 @@ and links the commits it was built from.
 ## [Unreleased]
 
 ### Fixed
+- release: the MCP package installs its just-published dependency without consulting the committed lock ([61c479a](https://github.com/general-liquidity/sharpebench/commit/61c479a)). `@general-liquidity/sharpebench-mcp` publishes in the same run as `@general-liquidity/sharpebench`, and before that version exists on the registry the committed lock cannot hold the integrity hash of the tarball npm will serve for it; npm accepted the fresh metadata, rejected the tarball against the pre-release integrity, and the MCP package never published. `npm install --package-lock=false` in the publish step is the fix, and it now has a regression test (`npm/mcp/test/release-install.test.js`) asserting the flag and the ordering of the propagation wait, which the original change shipped without.
 - release: `sharpebench-memory` is published. It carried the workspace version, had no `publish = false`, and was on no registry, so the version it advertised existed nowhere; nothing in the workspace depends on it, so nothing caught that. It is a caller-facing library with a documented API and 40 tests, so it is now in the crates.io publish order after `sharpebench-stats`, its only dependency. The name is unclaimed, so the first publish must be by hand before the next tag (RELEASING.md).
 
 ## [0.13.0] - 2026-08-26
