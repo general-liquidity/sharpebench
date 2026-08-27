@@ -13,7 +13,7 @@ GitHub Release. The crates.io and npm jobs only run when you opt them in.
 | Target | Packages | Trigger |
 |---|---|---|
 | **GitHub Release** | `sharpebench-x86_64-linux-musl` static binary + `.sha256` | every `v*` tag (always) |
-| **crates.io** | the **8** `sharpebench-*` crates (see order below) | `v*` tag **and** `PUBLISH_CRATES=true` |
+| **crates.io** | the **12** `sharpebench-*` crates (see order below) | `v*` tag **and** `PUBLISH_CRATES=true` |
 | **npm** | `@general-liquidity/sharpebench` + `@general-liquidity/sharpebench-mcp` | `v*` tag **and** `PUBLISH_NPM=true` |
 | **PyPI** | `sharpebench` (pyo3 wheels, CPython 3.10-3.13, + sdist) | `v*` tag **and** `PUBLISH_PYPI=true` |
 
@@ -27,15 +27,22 @@ waiting for the index before the next), skipping any already live at the release
 version. The **first, name-claiming** publish must follow the same order by hand:
 
 ```
-Tier0  sharpebench-core   sharpebench-protocol   sharpebench-attest   # no intra-deps
-Tier1  sharpebench-sim                                                # → core, protocol
+Tier0  sharpebench-stats   sharpebench-protocol   sharpebench-core   sharpebench-attest
+         core → protocol
+Tier1  sharpebench-memory   sharpebench-edge   sharpebench-sim
+         memory → stats     edge → stats     sim → core, protocol
 Tier2  sharpebench-leaderboard   sharpebench-wasm   sharpebench-harness
          leaderboard → core, attest
-         wasm        → core, attest
+         wasm        → core, attest, edge
          harness     → core, protocol, sim
-Tier3  sharpebench                                                    # the CLI binary
-         → core, protocol, sim, harness, attest, leaderboard
+Tier3  sharpebench-arena                                              # → core, attest, leaderboard, sim
+Tier4  sharpebench                                                    # the CLI binary
+         → core, protocol, sim, harness, attest, leaderboard, edge, arena
 ```
+
+Nothing depends on `sharpebench-memory`: it is a second benchmark that shares only
+`sharpebench-stats`. It is published because it is a caller-facing library with a
+documented API, not because the workspace needs it.
 
 ## One-time setup (per registry, on the registry's own website)
 
@@ -45,7 +52,7 @@ opt-in variable(s) and the environments. The publisher is always: **GitHub** own
 
 | Registry | Where | Notes |
 |---|---|---|
-| **crates.io** | each crate → *Settings → Trusted Publishing* | A crate must **exist** before a trusted publisher can be added. Do **one** initial `cargo publish` with a token to claim each of the 8 names **in the dependency order above**, then add the trusted publisher to each crate and never use a token again. |
+| **crates.io** | each crate → *Settings → Trusted Publishing* | A crate must **exist** before a trusted publisher can be added. Do **one** initial `cargo publish` with a token to claim each of the 12 names **in the dependency order above**, then add the trusted publisher to each crate and never use a token again. `sharpebench-memory` is the one name still unclaimed, so the next tag with `PUBLISH_CRATES=true` fails on it until that first publish is done by hand. |
 | **npm** | each package page → *Settings → Trusted Publisher* | If `…/sharpebench` + `…-mcp` already exist, configure the trusted publisher directly. If not, claim each once (`npm publish --access public`), then add the trusted publisher. Needs npm ≥ 11.5 (the workflow upgrades it). Provenance is automatic. |
 
 ### Claiming the crate names once (token, first time only)
@@ -55,13 +62,17 @@ publish of each name needs a real token. `cargo login <token>` (token scopes:
 publish-new, publish-update), then publish in dependency order:
 
 ```bash
-cargo publish -p sharpebench-core
+cargo publish -p sharpebench-stats
+cargo publish -p sharpebench-memory   # name not yet claimed as of v0.13.0
+cargo publish -p sharpebench-edge
 cargo publish -p sharpebench-protocol
+cargo publish -p sharpebench-core
 cargo publish -p sharpebench-attest
 cargo publish -p sharpebench-sim
 cargo publish -p sharpebench-leaderboard
 cargo publish -p sharpebench-wasm
 cargo publish -p sharpebench-harness
+cargo publish -p sharpebench-arena
 cargo publish -p sharpebench          # the CLI binary crate (package name `sharpebench`)
 ```
 

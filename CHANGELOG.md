@@ -2,12 +2,18 @@
 
 All notable changes to SharpeBench are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). One workspace
-version covers every crate, the npm packages and the PyPI package; each
-section is one `v*` tag and links the commits it was built from.
+version covers every crate, the npm packages and the PyPI package. Sharing a
+version is not the same as being published: the crates that reach crates.io
+are the twelve listed in [RELEASING.md](RELEASING.md), and `xtask` and
+`examples/reference-agent` are `publish = false`. Each section is one `v*` tag
+and links the commits it was built from.
 
 [Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.13.0...HEAD
 
 ## [Unreleased]
+
+### Fixed
+- release: `sharpebench-memory` is published. It carried the workspace version, had no `publish = false`, and was on no registry, so the version it advertised existed nowhere; nothing in the workspace depends on it, so nothing caught that. It is a caller-facing library with a documented API and 40 tests, so it is now in the crates.io publish order after `sharpebench-stats`, its only dependency. The name is unclaimed, so the first publish must be by hand before the next tag (RELEASING.md).
 
 ## [0.13.0] - 2026-08-26
 

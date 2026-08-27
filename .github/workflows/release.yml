@@ -85,14 +85,15 @@ jobs:
             target/x86_64-unknown-linux-musl/release/sharpebench-x86_64-linux-musl.sha256
 
   crates:
-    name: crates.io (11 sharpebench-* crates)
+    name: crates.io (12 sharpebench-* crates)
     if: ${{ vars.PUBLISH_CRATES == 'true' }}
     runs-on: ubuntu-latest
     # A dedicated publishing environment (configure protection rules under
     # Settings → Environments → crates). Must match the crates.io trusted-publisher
-    # config registered for EACH of the 11 crates (sharpebench-arena is new in
-    # v0.5.0: first publish was by hand per PUBLISHING.md, and it needs its own
-    # trusted-publisher config before the next tag).
+    # config registered for EACH of the 12 crates (sharpebench-memory is new to this
+    # list: the name is unclaimed, so its first publish must be by hand per
+    # RELEASING.md, and it needs its own trusted-publisher config before the next
+    # tag; the same applied to sharpebench-arena in v0.5.0).
     environment: crates
     steps:
       - uses: actions/checkout@v6
@@ -122,15 +123,16 @@ jobs:
         run: |
           UA="sharpebench-release (general-liquidity)" # crates.io rejects requests without a User-Agent
           V="$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
-          # leaves first → CLI last. protocol has no internal deps and core depends on it
+          # leaves first → CLI last. memory depends only on stats and nothing depends on
+          # memory, so it follows stats. protocol has no internal deps and core depends on it
           # (DeclaredMandate), so protocol precedes core; sim/leaderboard/wasm depend on core/protocol/attest;
           # harness on sim; sharpebench on all). edge depends on stats and is itself a dep of
           # wasm + the CLI, so it MUST come before wasm. arena depends on core/attest/
           # leaderboard/sim and is a dep of the CLI, so it comes after those and before
           # sharpebench. publish=false members are omitted.
-          for c in sharpebench-stats sharpebench-edge sharpebench-protocol sharpebench-core \
-                   sharpebench-attest sharpebench-sim sharpebench-leaderboard sharpebench-wasm \
-                   sharpebench-harness sharpebench-arena sharpebench; do
+          for c in sharpebench-stats sharpebench-memory sharpebench-edge sharpebench-protocol \
+                   sharpebench-core sharpebench-attest sharpebench-sim sharpebench-leaderboard \
+                   sharpebench-wasm sharpebench-harness sharpebench-arena sharpebench; do
             if curl -s -A "$UA" "https://crates.io/api/v1/crates/$c/$V" | grep -q "\"num\":\"$V\""; then
               echo "✓ $c@$V already on crates.io — skipping"
             else
