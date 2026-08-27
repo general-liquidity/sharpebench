@@ -45,3 +45,16 @@ allow-branch = ["main"]
 # the crates went to 0.0.11. They are rewritten from the workspace version now, but the
 # rules live in crates/sharpebench-cli/release.toml because cargo-release resolves
 # `file` relative to each crate, not to the workspace root.
+
+# The version bump rewrites Cargo.toml, Cargo.lock and the sharpebench-py
+# manifests, and those are inside the provenance source scope. A manifest bound
+# before the release goes stale the instant cargo-release commits, so the
+# tamper-evidence gate fails on the release commit and on every commit after it.
+# The hook runs after the bump and the replacements and before the commit, so
+# the manifest a tag ships describes the tree that tag points at. cargo-release
+# runs hooks from the crate directory, hence the repository-root resolution.
+pre-release-hook = [
+  "bash",
+  "-c",
+  "python \"$(git rev-parse --show-toplevel)/paper/src/make-provenance.py\"",
+]
