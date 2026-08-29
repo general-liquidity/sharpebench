@@ -29,6 +29,16 @@ tag-name = "v{{version}}"
 tag-message = "SharpeBench v{{version}}"
 pre-release-commit-message = "release: v{{version}}"
 
+# cargo-release does NOT create the tag. The version bump rewrites files inside
+# the provenance source scope, so the pre-release hook below has to rebind the
+# manifest, and it necessarily runs while the bump is still uncommitted: the
+# manifest it writes is correct in its digests but records
+# `generated_at_head_dirty: true`. Tagging that commit publishes a release whose
+# own provenance gate fails, which is what v0.14.1 did. Cut the release, then
+# rebind on the committed tree and tag THAT commit, so the tagged manifest can
+# honestly say the generation was clean. See RELEASING.md.
+tag = false
+
 # These crates are set to Trusted-Publishing-only on crates.io, so a token upload from
 # a laptop is refused with 403 and the local machine cannot publish at all. Cutting a
 # release therefore only bumps, rewrites, commits, tags and pushes; the `v*` tag is what

@@ -111,15 +111,26 @@ reviewers, branch restrictions) to the publishing steps. Their names must match 
      [`npm/mcp/package.json`](npm/mcp/package.json) (and the MCP package's
      `@general-liquidity/sharpebench` dependency range if you want it pinned to the
      new kernel).
-2. Update `CHANGELOG.md` if/when one is added (none today).
+2. Promote the `[Unreleased]` section of `CHANGELOG.md` to the new version and
+   add the two compare links.
 3. Run the green checks first (CI does too, but cargo-release won't):
    ```bash
    cargo test --workspace && cargo clippy --workspace --all-targets && cargo deny check
    ```
-4. Commit, then tag and push:
+4. Cut the bump, then rebind provenance and tag the REBIND commit:
    ```bash
-   git tag v0.0.6 && git push origin v0.0.6
+   cargo release patch --execute      # bumps, commits, pushes; creates no tag
+   python paper/src/make-provenance.py
+   git add paper/evidence/provenance.json
+   git commit -m "chore(provenance): rebind after the <version> version bump"
+   python paper/src/check-provenance.py   # must print OK before tagging
+   git tag -a v0.0.6 -m "SharpeBench v0.0.6" && git push origin main v0.0.6
    ```
+   The tag must point at the rebind, not at the version bump. The bump rewrites
+   files inside the provenance source scope, so the manifest written during it
+   records a dirty generation and the tagged tree fails its own provenance gate.
+   That is what happened to v0.14.1, whose tag `d44c15a` is red on the
+   `paper evidence provenance` job for exactly this reason.
    The tag triggers `release.yml`: the binary is built + attached to the Release
    always; the `crates` / `npm` jobs run if their `PUBLISH_*` variable is `true`.
    (Or run the workflow manually from the Actions tab via *workflow_dispatch*.)
