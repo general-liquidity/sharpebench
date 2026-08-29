@@ -8,9 +8,14 @@ are the twelve listed in [RELEASING.md](RELEASING.md), and `xtask` and
 `examples/reference-agent` are `publish = false`. Each section is one `v*` tag
 and links the commits it was built from.
 
-[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.14.1...HEAD
 
 ## [Unreleased]
+
+## [0.14.1] - 2026-08-28
+
+### Fixed
+- paper: the line breaker gets an emergency pass, taking underfull boxes from 14 to 13. Long typewriter identifiers cannot hyphenate, so a column forced to hold one is set loose. Inserting break points inside the identifiers clears two more, but the PDF then copies `OutperformBuyAndHold` as two words, and a paper whose readers copy these strings should not trade a loose line for a broken identifier, so the rest stay loose.
 
 ## [0.14.0] - 2026-08-27
 
@@ -312,6 +317,7 @@ First published release.
 ### Fixed
 - Constant-time HMAC verification and bounded, timed agent HTTP reads ([6c3d174](https://github.com/general-liquidity/sharpebench/commit/6c3d174)).
 
+[0.14.1]: https://github.com/general-liquidity/sharpebench/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/general-liquidity/sharpebench/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/general-liquidity/sharpebench/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/general-liquidity/sharpebench/compare/v0.11.0...v0.12.0
