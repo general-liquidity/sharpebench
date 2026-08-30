@@ -8,9 +8,11 @@ are the twelve listed in [RELEASING.md](RELEASING.md), and `xtask` and
 `examples/reference-agent` are `publish = false`. Each section is one `v*` tag
 and links the commits it was built from.
 
-[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.14.1...HEAD
+[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.15.0...HEAD
 
 ## [Unreleased]
+
+## [0.15.0] - 2026-08-30
 
 ### Added
 - cli: `sharpebench run --image <repository@sha256:...>` runs an external entrant inside the container boundary. The hardened launch in `sharpebench-arena` had no production consumer: its only non-test reference was the crate re-export, while `run --cmd` spawned the agent through a bare `std::process::Command` on the host. Every property the sandbox configures (network and IPC isolation, read-only root, non-root user, dropped capabilities, no-new-privileges, cpu / memory / pid / fd limits, digest-pinned image) was therefore written and unreachable from the CLI. `--image` is the missing consumer, and a refusal on that path (no daemon, a mutable tag, an image absent locally) ends the run rather than degrading to host execution.
@@ -331,6 +333,7 @@ First published release.
 ### Fixed
 - Constant-time HMAC verification and bounded, timed agent HTTP reads ([6c3d174](https://github.com/general-liquidity/sharpebench/commit/6c3d174)).
 
+[0.15.0]: https://github.com/general-liquidity/sharpebench/compare/v0.14.1...v0.15.0
 [0.14.1]: https://github.com/general-liquidity/sharpebench/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/general-liquidity/sharpebench/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/general-liquidity/sharpebench/compare/v0.12.0...v0.13.0
