@@ -138,7 +138,7 @@ Both halves are compile-and-run-checked as doctests in `sharpebench-stats` and `
 
 | Command | What it does |
 |:--|:--|
-| `run` (+ `--data <csv>`, `--http`/`--cmd`) | Run agents through the point-in-time sim and rank them; `--http`/`--cmd` drives **your** external agent into the field. |
+| `run` (+ `--data <csv>`, `--http`/`--image`/`--cmd`) | Run agents through the point-in-time sim and rank them; `--http`/`--image`/`--cmd` drives **your** external agent into the field. `--image <repository@sha256:...>` runs it inside the hardened container boundary; `--cmd` runs it on the host with no sandbox and says so on every run. |
 | `score <subs.json>` | Rank a JSON field of pre-computed submissions. `--pass-mode relative-to-benchmark [--benchmark-agent <id>]` (also on `run`) judges each run on its excess return over the same-window run of the named benchmark agent, `buy-and-hold` by default; the benchmark's own zero-excess series fails. |
 | `check <returns.csv> --trials N` | "Is my Sharpe real?" Prints deflated Sharpe / haircut / MinTRL / verdict for your own return series; `--trials` is required (no silent default). |
 | `regime <a.csv> <b.csv> <regimes.csv>` | Compare two return series *within* each market regime (zero-mass / continuous split, KS statistic, sign reversals the pooled mean hides). Regime labels are an input, one per period; nothing is inferred. |
@@ -161,8 +161,9 @@ Add `--json` to any command for machine-readable output.
 Agents are external and language-agnostic: implement the tiny JSON contract (`MarketObservation` → `Decision`) over either transport, then rank yourself into the field:
 
 ```bash
-sharpebench run --cmd "cargo run -q -p reference-agent"   # stdio subprocess
-sharpebench run --http 127.0.0.1:8080                     # HTTP POST /decide
+sharpebench run --image ghcr.io/you/agent@sha256:<digest>  # sandboxed container (untrusted entrants)
+sharpebench run --cmd "cargo run -q -p reference-agent"    # stdio subprocess, UNSANDBOXED
+sharpebench run --http 127.0.0.1:8080                      # HTTP POST /decide
 ```
 
 A runnable reference agent (stdio + Dockerfile) and the wire format live in [`examples/reference-agent/`](examples/reference-agent/).
@@ -182,9 +183,11 @@ A bidirectional drift guard (`crates/sharpebench-protocol/tests/schema_drift.rs`
 >
 > **Migration.** Validate one decision against `decision.schema.json` before submitting. If you emitted diagnostics alongside the orders (`latency_ms`, `model`, `notes`, and the like), put free text in `reasoning` and structured spend in `cost` (`cost_usd`, `tokens_in`, `tokens_out`, `reasoning_tokens`); drop the rest. A rejected decision now prints a diagnostic naming the offending field and the accepted set, so a failing run tells you which key to remove rather than reporting an opaque parse failure. Note also that `target_weight` is documented as `[-1, 1]`, negative meaning a short, correcting a contradictory `[0, 1] (signed for shorts)` in earlier docs.
 
-> **Security: running untrusted agents.** `sharpebench run` executes whatever agent you point it at **without sandboxing**; only run agents you trust. The arena's containment path (`sharpebench-arena`) launches an external agent under Docker with the network and IPC namespaces removed, all capabilities dropped, `no-new-privileges`, a non-root user, a read-only root, bounded `noexec` temporary filesystems, memory / CPU / PID / file-descriptor limits, an image pinned by digest, and explicit startup and execution timeouts; a missing image or a missing daemon is a refusal, never a silent unsandboxed fallback.
+> **Security: running untrusted agents.** Use `sharpebench run --image <repository@sha256:...>` for an agent whose code you do not control. That path launches the entrant through `sharpebench-arena`'s containment: Docker with the network and IPC namespaces removed, all capabilities dropped, `no-new-privileges`, a non-root user, a read-only root, bounded `noexec` temporary filesystems, memory / CPU / PID / file-descriptor limits, an image pinned by digest, and explicit startup and execution timeouts. A missing daemon, a mutable tag or an absent image is a refusal that ends the run; there is no fall-through to host execution.
 >
-> **That boundary has never been observed to hold.** Its smoke test skipped invisibly for its whole life, returning green when Docker was absent, and its assertion held for every failure mode including a container that never started. Both the smoke test and the new hostile probe are now `#[ignore]`d and wired to a Docker-enabled CI job, and neither has ever been executed, because the development machine's Docker daemon is not running. The hardening is written and reviewable; it is not yet evidence. Multi-tenant hosting of untrusted submissions is **not built**.
+> `--cmd` and `--http` are **not** sandboxed: `--cmd` executes the program on this host and `--http` posts to an endpoint you are responsible for isolating. `--cmd` prints an unsandboxed-execution warning to stderr on every run, in both text and `--json` mode, so the two paths cannot be confused after the fact. Only point them at agents you trust.
+>
+> **What the boundary has and has not been observed to do.** Through 0.14.1 nothing launched an entrant through it: `run_external_sandboxed` had no caller outside its own tests, so `run` had no sandboxed option and every external entrant went to the host. (`sandbox-check` did call the readiness probe, which proves a fixture image clears the boundary; it launches no entrant.) `--image` is the missing caller. The live evidence for the boundary itself is still narrow: the hostile readiness probe and a live spawn run only in a Docker-enabled CI job, against one benign POSIX fixture (`alpine:3.22`), and neither has ever executed on the development machine, whose Docker daemon is not running. That job is green, so the declared properties have been observed to hold for a container that behaves; no hostile entrant has been inside the boundary. Multi-tenant hosting of untrusted submissions is **not built**.
 
 ### SharpeArena composition and local open-weight fields
 

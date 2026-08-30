@@ -12,6 +12,20 @@ and links the commits it was built from.
 
 ## [Unreleased]
 
+### Added
+- cli: `sharpebench run --image <repository@sha256:...>` runs an external entrant inside the container boundary. The hardened launch in `sharpebench-arena` had no production consumer: its only non-test reference was the crate re-export, while `run --cmd` spawned the agent through a bare `std::process::Command` on the host. Every property the sandbox configures (network and IPC isolation, read-only root, non-root user, dropped capabilities, no-new-privileges, cpu / memory / pid / fd limits, digest-pinned image) was therefore written and unreachable from the CLI. `--image` is the missing consumer, and a refusal on that path (no daemon, a mutable tag, an image absent locally) ends the run rather than degrading to host execution.
+- arena: `check_sandbox_readiness` asserts egress by attempting one outbound connect from inside the boundary rather than inferring it from the launch flags, and separates a policy refusal from the three outcomes that resemble one: a connect that hung until its client timeout (which a broken network also produces), a fixture image with no HTTP client installed, and a connect that succeeded. The attempt is timed net of a do-nothing run of the same image, so the budget bounds the connect and not container startup. `sandbox-check` reports it as an eighth passed check. Like every other live leg it runs only in the Docker-enabled CI job.
+- arena: `require_local_image` refuses a digest-pinned reference that Docker cannot resolve to a locally present artifact. `docker run --pull never` spawns successfully whether or not the image exists, so without this an absent image reached the harness as a dead agent mid-sweep instead of as a refusal before anything started.
+
+### Changed
+- cli: `run --cmd` now prints an unsandboxed-execution warning to stderr on every run, in both text and `--json` mode. Its behaviour is otherwise unchanged: it still executes the named program directly on the host, which is what it has always done, and existing invocations keep working. What changed is that the choice is now recorded instead of implicit, so an unsandboxed run cannot be mistaken for a sandboxed one after the fact.
+- sim: the stdio transport caps one decision line at 8 MiB, the same budget the HTTP transport already applied to a response, and reports a line past it as the new non-retryable `DecideError::Oversized`. The reader was doing an unbounded `read_line` on untrusted subprocess output, so an entrant that writes without ever sending a newline grew the buffer until the harness died, losing every other agent's results in the same sweep. An oversized line counts with the protocol faults rather than the transport faults, because it is the entrant's own violation of the one-decision-per-line contract.
+- sim: an external agent is spawned into its own process group on Unix, and teardown signals the group (TERM, a 500 ms grace, then KILL) instead of only the direct child. An entrant wrapped in `sh -c` leaves a grandchild holding the inherited stdout pipe, so the reader thread never saw EOF and every later decision spent its full wall-clock budget waiting on a process whose parent was already dead.
+
+### Fixed
+- paper: `make-provenance.py` refuses a scope pattern that matches no file, and `check-provenance.py` fails a manifest that records one. A dead pattern removes files from both the digest leg and the unrecorded-file leg while the run still reports OK, so one renamed directory could empty a whole scope and the validator would pass on a tree it had checked nothing in. `arena/**/*.toml`, which matches nothing, is dropped from the source scope.
+- paper: `make-provenance.py` writes the manifest atomically (temp file, fsync, rename, directory fsync), so an interrupted or out-of-space run leaves the previous manifest intact instead of a truncated prefix of the new one.
+
 ## [0.14.1] - 2026-08-28
 
 ### Fixed
