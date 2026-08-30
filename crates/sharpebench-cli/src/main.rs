@@ -591,9 +591,11 @@ fn help() {
     println!("sharpebench — luck-robust benchmark for AI trading agents\n");
     println!("USAGE:");
     println!(
-        "  sharpebench run [--data <csv>] [--http <addr>|--cmd \"<prog>\"]  run agents and rank"
+        "  sharpebench run [--data <csv>] [--http <addr>|--image <ref>|--cmd \"<prog>\"]  run agents and rank"
     );
-    println!("                       --data: a frozen CSV (else synthetic) · --http/--cmd: add YOUR agent");
+    println!("                       --data: a frozen CSV (else synthetic) · --http/--image/--cmd: add YOUR agent");
+    println!("                       --image <repository@sha256:...>: run the agent in the hardened container sandbox (no daemon = refusal)");
+    println!("                       --cmd: UNSANDBOXED host execution, for agents you trust; prints a warning on every run");
     println!("                       --checkpoint <path>: resumable external-agent sweep (crash-tolerant)");
     println!("                       --periods-per-year N: bars per year of the dataset (default 252; 1h crypto 8760, 4h 2190, 1d crypto 365, 1w 52)");
     println!("                       --pass-mode all|any|at-least:N|relative-to-benchmark: reliability verdict (default all)");
@@ -1194,9 +1196,17 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
     ));
 
     // Optionally drive a real external agent (yours) through the *same* sim and
-    // rank it into the field. `--http` hits a POST /decide endpoint; `--cmd` spawns
-    // a subprocess speaking newline-delimited JSON over stdio (see examples/reference-agent).
-    // Both go through the transport-honest path: a wire blip is retried and, if it
+    // rank it into the field. `--http` hits a POST /decide endpoint; `--image` runs a
+    // digest-pinned container through `sharpebench_arena`'s hardened boundary; `--cmd`
+    // spawns a host subprocess. All three speak newline-delimited JSON over the same
+    // protocol (see examples/reference-agent).
+    //
+    // `--image` is the path for an entrant whose code you do not control: the sandbox
+    // refuses to launch when Docker is absent or the reference is not digest-pinned,
+    // and never degrades to host execution. `--cmd` is host execution by definition,
+    // so it announces itself on stderr rather than resolving to a quiet default.
+    //
+    // All three go through the transport-honest path: a wire blip is retried and, if it
     // persists, surfaced as an explicit failure instead of a masked degrade-to-hold.
     // `--checkpoint <path>` (external agents only) makes the sweep resumable: a crash
     // mid-run resumes and finishes only the outstanding window × seed tasks.
@@ -1242,6 +1252,61 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
         };
         report_transport_failures(&label, &res.failures, json);
         field.insert(0, res.submission);
+    } else if let Some(image) = flag_value(args, "--image") {
+        let image = image.to_string();
+        let opts = sharpebench_arena::SandboxOptions::default();
+        // Pre-flight: a refusal here (no daemon, unpinned tag, absent image) is the
+        // point of this path. There is no fall-through to host execution.
+        //
+        // The presence check is separate because the launch cannot make it: with
+        // `--pull never`, `docker run` against an image that is not there spawns
+        // anyway and exits on its own, so an absent artifact would otherwise reach
+        // the sweep as an agent that answers nothing rather than as a refusal.
+        if let Err(error) =
+            sharpebench_arena::resolve_launch(sharpebench_arena::docker_available(), &image, &opts)
+                .and_then(|_| sharpebench_arena::require_local_image(&image))
+        {
+            eprintln!("error: cannot start the sandboxed agent `{image}`: {error}");
+            return ExitCode::FAILURE;
+        }
+        let label = format!("sandbox:{image}");
+        let res = if let Some(ckpt) = &checkpoint {
+            match sharpebench_harness::run_resumable_sweep(
+                ckpt,
+                &label,
+                &windows,
+                &seeds,
+                EXTERNAL_MAX_RETRIES,
+                |wi, seed| match sharpebench_arena::run_external_sandboxed(&image, &opts) {
+                    Ok(mut a) => sharpebench_harness::run_external_backtest(
+                        &data,
+                        &mut a,
+                        windows[wi],
+                        seed,
+                        costs,
+                    ),
+                    Err(_) => Err(sharpebench_harness::FailureKind::SpawnError),
+                },
+            ) {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("error: checkpoint sweep failed: {e}");
+                    return ExitCode::FAILURE;
+                }
+            }
+        } else {
+            sharpebench_harness::run_external_agent(
+                &label,
+                &data,
+                &windows,
+                &seeds,
+                costs,
+                EXTERNAL_MAX_RETRIES,
+                || sharpebench_arena::run_external_sandboxed(&image, &opts).ok(),
+            )
+        };
+        report_transport_failures(&label, &res.failures, json);
+        field.insert(0, res.submission);
     } else if let Some(cmd) = flag_value(args, "--cmd") {
         let parts: Vec<String> = cmd.split_whitespace().map(String::from).collect();
         let Some((prog, rest)) = parts.split_first() else {
@@ -1250,6 +1315,15 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
         };
         let prog = prog.clone();
         let rest = rest.to_vec();
+        // Unconditional and on stderr, so it is recorded in both output modes and
+        // an unsandboxed run can never be mistaken for a sandboxed one.
+        eprintln!(
+            "warning: --cmd runs `{prog}` directly on this host with NO sandbox: no container, \
+             no network or IPC isolation, no capability drop, no read-only root, no memory / \
+             CPU / PID limits. Only point it at an agent you trust. To run an untrusted \
+             entrant inside the hardened container boundary, use \
+             `--image <repository@sha256:...>`."
+        );
         // Pre-flight: fail fast with a clear message if the agent won't spawn at all.
         let rest_refs: Vec<&str> = rest.iter().map(String::as_str).collect();
         if ExternalAgent::spawn(&prog, &rest_refs).is_err() {
