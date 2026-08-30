@@ -524,36 +524,66 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn teardown_reaches_a_grandchild_that_holds_the_stdout_pipe() {
-        // The marker makes the grandchild identifiable in `ps` without matching
-        // any other sleeper this suite runs in parallel.
-        let marker = format!("sharpebench-teardown-{}", std::process::id());
-        let script = format!("sh -c 'sleep 30' {marker} & read line; exit 0");
+        // The grandchild reports its own pid instead of being searched for in
+        // `ps`. A marker in the argument list does not survive the exec a shell
+        // performs for the last command of a script, and whether it performs one
+        // differs between the shells `/bin/sh` is on Linux and on macOS, so the
+        // marker version of this fixture failed its own self-check on macOS
+        // while proving nothing about teardown. A pid survives exec.
+        let pidfile =
+            std::env::temp_dir().join(format!("sharpebench-teardown-{}.pid", std::process::id()));
+        let _ = std::fs::remove_file(&pidfile);
+        // `exec` keeps the pid the inner shell just reported, and the sleeper
+        // inherits the stdout pipe, which is the whole point of the fixture.
+        let script = format!(
+            "sh -c 'echo $$ > \"{}\" ; exec sleep 30' & read line; exit 0",
+            pidfile.display()
+        );
 
-        // Counting in-process rather than through `grep` keeps the search pattern
-        // out of the process table it is searching, which is the classic way this
-        // kind of check ends up matching itself and reporting nonsense.
-        let alive = |marker: &str| {
-            let out = Command::new("ps").args(["-eo", "args"]).output();
-            String::from_utf8_lossy(&out.expect("ps must run").stdout)
-                .lines()
-                .filter(|line| line.contains(marker))
-                .count()
+        let alive = |pid: &str| {
+            Command::new("kill")
+                .args(["-0", pid])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .expect("kill must run")
+                .success()
         };
 
         let agent =
             ExternalAgent::spawn("sh", &["-c", &script]).expect("the platform shell must spawn");
-        std::thread::sleep(Duration::from_millis(300));
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let pid = loop {
+            let reported = std::fs::read_to_string(&pidfile).unwrap_or_default();
+            let reported = reported.trim().to_string();
+            if !reported.is_empty() {
+                break reported;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the fixture never reported a grandchild, so it would have proved \
+                 nothing about teardown"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        };
         assert!(
-            alive(&marker) >= 2,
+            alive(&pid),
             "the fixture must actually have a live grandchild, or the assertion \
              below would hold for a test that proved nothing"
         );
 
         drop(agent);
-        std::thread::sleep(Duration::from_millis(300));
-        assert_eq!(
-            alive(&marker),
-            0,
+        // Generous next to the teardown grace: the assertion is that the group
+        // signal reaches the grandchild at all, not how fast the kernel reaps it.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while alive(&pid) && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let outlived = alive(&pid);
+        let _ = std::fs::remove_file(&pidfile);
+        assert!(
+            !outlived,
             "the backgrounded grandchild outlived the teardown, so it is still \
              holding the stdout pipe open"
         );
