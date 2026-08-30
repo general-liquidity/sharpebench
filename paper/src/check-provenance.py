@@ -21,16 +21,38 @@ def sha256(path: Path, *, canonical_text: bool = False) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def match(pattern: str, excludes: frozenset[str]) -> list[Path]:
+    return [
+        path
+        for path in ROOT.glob(pattern)
+        if path.is_file()
+        and not any(part in excludes for part in path.relative_to(ROOT).parts)
+    ]
+
+
 def expand(patterns: list[str], excludes: frozenset[str]) -> list[str]:
     found: set[Path] = set()
     for pattern in patterns:
-        found.update(
-            path
-            for path in ROOT.glob(pattern)
-            if path.is_file()
-            and not any(part in excludes for part in path.relative_to(ROOT).parts)
-        )
+        found.update(match(pattern, excludes))
     return sorted(path.relative_to(ROOT).as_posix() for path in found)
+
+
+def check_scope_is_live(name: str, patterns: list[str], excludes: frozenset[str]) -> list[str]:
+    """A recorded pattern that now matches nothing has stopped guarding anything.
+
+    The digest and unrecorded-file legs below are both driven by these
+    expansions, so a pattern that goes empty removes files from the checked set
+    without removing anything from the manifest, and the run still reports OK.
+    A whole scope could be emptied by one renamed directory and this validator
+    would pass on a tree it had checked nothing in.
+    """
+    return [
+        f"{name}: DEAD PATTERN {pattern} matches no file, so it guards nothing. "
+        "Either the path moved (fix it) or the pattern is dead (drop it and "
+        "regenerate with paper/src/make-provenance.py)."
+        for pattern in patterns
+        if not match(pattern, excludes)
+    ]
 
 
 def check_group(
@@ -135,6 +157,10 @@ def main() -> int:
     )
     problems += check_group("artifact", manifest["artifacts"])
     excludes = frozenset(manifest["source_snapshot_excludes"])
+    problems += check_scope_is_live(
+        "source", manifest["source_snapshot_scope"], excludes
+    )
+    problems += check_scope_is_live("artifact", manifest["artifact_scope"], excludes)
 
     recorded_sources = {item["path"] for item in manifest["source_files"]}
     for path in expand(manifest["source_snapshot_scope"], excludes):
