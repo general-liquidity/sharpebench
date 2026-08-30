@@ -158,7 +158,7 @@ Add `--json` to any command for machine-readable output.
 
 ### Bring your own agent
 
-Agents are external and language-agnostic: implement the tiny JSON contract (`MarketObservation` → `Decision`) over either transport, then rank yourself into the field:
+Agents are external and language-agnostic: implement the tiny JSON contract (`MarketObservation` → `Decision`) over any of the three transports, then rank yourself into the field:
 
 ```bash
 sharpebench run --image ghcr.io/you/agent@sha256:<digest>  # sandboxed container (untrusted entrants)
