@@ -184,6 +184,80 @@ fn hardened_docker_args(image: &str) -> Vec<String> {
 
 const READINESS_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Longest an outbound connect may take and still count as a policy denial.
+///
+/// A refusal with no route out returns in microseconds; a packet that is dropped
+/// somewhere between here and the destination burns the client timeout instead.
+/// The two are the same exit status, so elapsed time is the only thing that
+/// separates "the boundary refused this" from "the network happened to be
+/// broken", and a test that asserted only on the status would pass on the
+/// second. The budget is measured net of container startup (see
+/// [`check_sandbox_readiness`]), which is why it can be this tight.
+const EGRESS_DENIAL_MAX: Duration = Duration::from_millis(1500);
+
+/// Exit status a POSIX shell uses for a command it could not find.
+const EXIT_COMMAND_NOT_FOUND: i32 = 127;
+
+/// Attempt an outbound connection to a routable public address. `wget` is in the
+/// busybox userland every POSIX fixture image ships; its absence exits 127 and is
+/// reported as such rather than being counted as a denial, because a probe that
+/// never ran proves nothing about the boundary. A bare IP is used so the result
+/// does not depend on name resolution.
+const EGRESS_PROBE: &str = r#"
+set -eu
+command -v wget >/dev/null 2>&1 || exit 127
+wget -q -T 5 -O /dev/null http://1.1.1.1/
+"#;
+
+/// Baseline run: the same image and launch, doing nothing. Its wall time is the
+/// container startup cost that [`EGRESS_PROBE`]'s measurement is taken net of.
+const STARTUP_BASELINE: &str = "exit 0\n";
+
+/// How an outbound-connect attempt from inside the sandbox ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EgressVerdict {
+    /// Refused immediately: there is no route out of the namespace.
+    BlockedByPolicy,
+    /// The attempt hung until its own client timeout. Indistinguishable from a
+    /// broken network, so it is not evidence that the boundary held.
+    Timeout,
+    /// No client was present, so nothing was attempted.
+    ProbeUnavailable,
+    /// The connection succeeded. The boundary is open.
+    Connected,
+}
+
+impl std::fmt::Display for EgressVerdict {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let text = match self {
+            EgressVerdict::BlockedByPolicy => {
+                "the connect was refused immediately, as a routeless namespace does"
+            }
+            EgressVerdict::Timeout => {
+                "the connect hung until its client timeout, which a broken network also does; \
+                 this is not evidence the boundary held"
+            }
+            EgressVerdict::ProbeUnavailable => {
+                "the fixture image has no wget, so no connection was attempted; the probe \
+                 proves nothing about this image"
+            }
+            EgressVerdict::Connected => "the connect SUCCEEDED: the sandbox has egress",
+        };
+        f.write_str(text)
+    }
+}
+
+/// Classify one egress attempt from its exit status and the time it took net of
+/// container startup. Pure, so the classification is tested without Docker.
+fn classify_egress(exit_code: Option<i32>, attempt: Duration) -> EgressVerdict {
+    match exit_code {
+        Some(0) => EgressVerdict::Connected,
+        Some(EXIT_COMMAND_NOT_FOUND) => EgressVerdict::ProbeUnavailable,
+        _ if attempt >= EGRESS_DENIAL_MAX => EgressVerdict::Timeout,
+        _ => EgressVerdict::BlockedByPolicy,
+    }
+}
+
 const HOSTILE_PROBE: &str = r#"
 set -eu
 [ "$(id -u)" = "65532" ]
@@ -279,20 +353,32 @@ pub fn check_sandbox_readiness(image: &str) -> Result<SandboxReadiness, SandboxE
         ));
     }
 
-    let mut args = hardened_docker_args(image);
-    args.extend([
-        "/bin/sh".to_string(),
-        "-ceu".to_string(),
-        HOSTILE_PROBE.to_string(),
-    ]);
-    let probe = command_output_with_timeout("docker", &args, READINESS_TIMEOUT)
-        .map_err(SandboxError::Readiness)?;
+    let (probe, _) = run_in_sandbox(image, HOSTILE_PROBE)?;
     if !probe.status.success() {
         let stderr = String::from_utf8_lossy(&probe.stderr);
         return Err(SandboxError::Readiness(format!(
             "hostile fixture exited with {}: {}",
             probe.status,
             stderr.trim()
+        )));
+    }
+
+    // Egress is asserted by attempting one, not by reading the interface list:
+    // `/sys/class/net` says what was configured, an attempted connect says what
+    // the configuration does. The measurement is taken net of a do-nothing run of
+    // the same image so the budget bounds the connect, not container startup.
+    let (baseline, startup) = run_in_sandbox(image, STARTUP_BASELINE)?;
+    if !baseline.status.success() {
+        return Err(SandboxError::Readiness(format!(
+            "the startup baseline run exited with {}, so the egress measurement has no reference",
+            baseline.status
+        )));
+    }
+    let (egress, elapsed) = run_in_sandbox(image, EGRESS_PROBE)?;
+    let verdict = classify_egress(egress.status.code(), elapsed.saturating_sub(startup));
+    if verdict != EgressVerdict::BlockedByPolicy {
+        return Err(SandboxError::Readiness(format!(
+            "outbound connect from inside the sandbox: {verdict}"
         )));
     }
 
@@ -308,11 +394,27 @@ pub fn check_sandbox_readiness(image: &str) -> Result<SandboxReadiness, SandboxE
             "root filesystem is read-only",
             "bounded tmpfs is writable",
             "tmpfs is noexec",
+            "outbound connect refused by policy, not by timeout",
         ]
         .iter()
         .map(|value| (*value).to_string())
         .collect(),
     })
+}
+
+/// Run one `/bin/sh` script inside the hardened boundary against `image`,
+/// returning its output and how long the whole container took.
+fn run_in_sandbox(image: &str, script: &str) -> Result<(Output, Duration), SandboxError> {
+    let mut args = hardened_docker_args(image);
+    args.extend([
+        "/bin/sh".to_string(),
+        "-ceu".to_string(),
+        script.to_string(),
+    ]);
+    let started = Instant::now();
+    let output = command_output_with_timeout("docker", &args, READINESS_TIMEOUT)
+        .map_err(SandboxError::Readiness)?;
+    Ok((output, started.elapsed()))
 }
 
 fn validate_image(image: &str, allow_unpinned: bool) -> Result<(), SandboxError> {
@@ -347,6 +449,25 @@ fn validate_image(image: &str, allow_unpinned: bool) -> Result<(), SandboxError>
     Ok(())
 }
 
+/// Refuse a reference Docker cannot resolve to a locally present image.
+///
+/// [`run_external_sandboxed`] cannot see this and is not the place to: the
+/// launch passes `--pull never`, and `docker run` against an image that is not
+/// there still *spawns*, exits on its own, and reaches the harness as an agent
+/// that answers nothing. A driver that wants an absent artifact to be a refusal
+/// before the sweep starts, rather than a dead agent inside it, asks here first.
+pub fn require_local_image(image: &str) -> Result<(), SandboxError> {
+    validate_image(image, false)?;
+    let inspected = docker_output(&["image", "inspect", "--format", "{{.Id}}", image])?;
+    if !inspected.status.success() {
+        return Err(SandboxError::InvalidConfig(format!(
+            "the pinned image is not present locally and nothing is pulled: {}",
+            String::from_utf8_lossy(&inspected.stderr).trim()
+        )));
+    }
+    Ok(())
+}
+
 /// Run an external agent sandboxed in Docker, returning the live
 /// [`ExternalAgent`] transport (drive it with the harness exactly like any
 /// other external agent). See the module docs for the isolation contract.
@@ -375,6 +496,23 @@ mod tests {
         // No Docker + no opt-in = a hard, explanatory error. Never a fallback.
         let err = resolve_launch(false, "some/image", &opts).unwrap_err();
         assert!(matches!(err, SandboxError::DockerUnavailable(_)));
+    }
+
+    /// The pinning leg is decided before Docker is contacted, so it is the part
+    /// of the presence check that holds on a machine with no daemon. The
+    /// presence leg itself needs one, and runs in the Docker-enabled CI job
+    /// through the CLI's `--image` refusal test.
+    #[test]
+    fn an_unpinned_reference_is_refused_without_contacting_docker() {
+        let error = require_local_image("some/agent:latest")
+            .expect_err("a mutable tag is never a field artifact");
+        // The message is asserted, not just the variant: the presence leg refuses
+        // with the same variant on a machine with no daemon, so a variant-only
+        // assertion would pass here even if the pinning leg were gone.
+        assert!(
+            error.to_string().contains("must be pinned"),
+            "the refusal must be about the missing digest: {error}"
+        );
     }
 
     #[test]
@@ -481,6 +619,58 @@ mod tests {
         ));
     }
 
+    /// Each verdict is asserted against the neighbour it would otherwise be
+    /// confused with: a bare "the connect did not succeed" assertion passes for a
+    /// dropped packet and for a fixture with no client installed, neither of
+    /// which is evidence that the boundary refused anything.
+    #[test]
+    fn an_egress_denial_is_distinguished_from_the_failures_that_look_like_one() {
+        let instant = Duration::from_millis(3);
+        assert_eq!(
+            classify_egress(Some(1), instant),
+            EgressVerdict::BlockedByPolicy
+        );
+        // Same non-zero exit, but it burned the client timeout: a broken network
+        // produces exactly this, so it must not read as a denial.
+        assert_eq!(
+            classify_egress(Some(1), EGRESS_DENIAL_MAX),
+            EgressVerdict::Timeout
+        );
+        assert_eq!(
+            classify_egress(Some(1), Duration::from_secs(5)),
+            EgressVerdict::Timeout
+        );
+        // Killed by a signal (no exit code) is likewise not a denial once it has
+        // spent the budget.
+        assert_eq!(
+            classify_egress(None, instant),
+            EgressVerdict::BlockedByPolicy
+        );
+        assert_eq!(
+            classify_egress(None, Duration::from_secs(5)),
+            EgressVerdict::Timeout
+        );
+        // No client in the image: nothing was attempted, so nothing was shown.
+        assert_eq!(
+            classify_egress(Some(EXIT_COMMAND_NOT_FOUND), instant),
+            EgressVerdict::ProbeUnavailable
+        );
+        // The one outcome that means the sandbox leaks.
+        assert_eq!(classify_egress(Some(0), instant), EgressVerdict::Connected);
+    }
+
+    #[test]
+    fn the_egress_probe_refuses_to_pass_when_its_client_is_missing() {
+        assert!(
+            EGRESS_PROBE.contains(&format!("|| exit {EXIT_COMMAND_NOT_FOUND}")),
+            "an absent client must exit as not-found, not fall through to a denial: {EGRESS_PROBE}"
+        );
+        assert!(
+            EGRESS_PROBE.contains("http://1.1.1.1/"),
+            "the probe must attempt a routable address, not a loopback one: {EGRESS_PROBE}"
+        );
+    }
+
     #[test]
     fn field_readiness_requires_a_pinned_fixture_before_contacting_docker() {
         assert!(matches!(
@@ -545,7 +735,7 @@ mod tests {
         assert!(!readiness.docker_server_version.is_empty());
         // Every boundary the probe asserts on must be reported as passed; a
         // shorter list means a check was quietly dropped.
-        assert_eq!(readiness.passed_checks.len(), 7, "{readiness:?}");
+        assert_eq!(readiness.passed_checks.len(), 8, "{readiness:?}");
         for expected in [
             "non-root uid",
             "zero Linux capabilities",
@@ -554,6 +744,7 @@ mod tests {
             "root filesystem is read-only",
             "bounded tmpfs is writable",
             "tmpfs is noexec",
+            "outbound connect refused by policy, not by timeout",
         ] {
             assert!(
                 readiness
