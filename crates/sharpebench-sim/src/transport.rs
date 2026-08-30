@@ -29,6 +29,12 @@ pub enum DecideError {
     /// The agent answered, but the bytes were not a parseable [`Decision`]. The
     /// agent's own protocol violation - **not** retryable.
     Protocol,
+    /// The agent emitted more bytes for one decision than the transport accepts.
+    /// The contract is one decision per line; an unbounded line is the agent's
+    /// own violation of it, so this is **not** retryable and is counted with the
+    /// protocol faults. It is a distinct variant because "your line was too long"
+    /// and "your JSON did not parse" send an entrant to different places.
+    Oversized,
 }
 
 impl DecideError {
@@ -109,7 +115,7 @@ impl CircuitBreaker {
 pub struct TransportHealth {
     /// Retryable transport / timeout faults that ultimately degraded to a hold.
     pub transport_faults: u32,
-    /// Agent protocol faults (unparseable output) - the agent's own fault.
+    /// Agent protocol faults (unparseable or oversized output) - the agent's own fault.
     pub protocol_faults: u32,
     /// Whether the per-endpoint circuit breaker has tripped.
     pub tripped: bool,
@@ -122,7 +128,7 @@ impl TransportHealth {
     /// circuit breaker tripped on it.
     pub fn record(&mut self, err: DecideError, tripped: bool) {
         match err {
-            DecideError::Protocol => self.protocol_faults += 1,
+            DecideError::Protocol | DecideError::Oversized => self.protocol_faults += 1,
             DecideError::Transport | DecideError::Timeout => self.transport_faults += 1,
         }
         self.last_error = Some(err);
