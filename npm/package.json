@@ -29,6 +29,7 @@
   "scripts": {
     "build": "tsc",
     "test": "node --test \"test/**/*.test.js\"",
+    "smoke-install": "node test/smoke-install.mjs",
     "prepublishOnly": "tsc && node -e \"require('fs').rmSync('pkg/.gitignore',{force:true})\""
   },
   "devDependencies": {

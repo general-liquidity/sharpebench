@@ -35,6 +35,13 @@ jobs:
           npm run build
           npm test
 
+      # Pack-then-offline-install: tests the tarball an installer actually gets
+      # (files list, main/types paths, the wasm reaching the pack), which the
+      # working-tree unit tests above cannot see.
+      - name: Smoke-test the packed tarball (offline install)
+        working-directory: npm
+        run: npm run smoke-install
+
       - name: Build + test the MCP server
         working-directory: npm/mcp
         run: |
