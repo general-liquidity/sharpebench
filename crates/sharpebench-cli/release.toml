@@ -13,6 +13,21 @@ search = '"version": "[0-9]+\.[0-9]+\.[0-9]+"'
 replace = '"version": "{{version}}"'
 exactly = 1
 
+# npm records the package version twice in its lockfile: once at the document
+# root and once for the root package. Keep both identities on the release
+# commit; `npm install` otherwise repairs them only later in a developer tree.
+[[pre-release-replacements]]
+file = "../../npm/package-lock.json"
+search = '"name": "@general-liquidity/sharpebench",\n  "version": "[0-9]+\.[0-9]+\.[0-9]+"'
+replace = '"name": "@general-liquidity/sharpebench",\n  "version": "{{version}}"'
+exactly = 1
+
+[[pre-release-replacements]]
+file = "../../npm/package-lock.json"
+search = '"name": "@general-liquidity/sharpebench",\n      "version": "[0-9]+\.[0-9]+\.[0-9]+"'
+replace = '"name": "@general-liquidity/sharpebench",\n      "version": "{{version}}"'
+exactly = 1
+
 [[pre-release-replacements]]
 file = "../../npm/mcp/package.json"
 search = '"version": "[0-9]+\.[0-9]+\.[0-9]+"'
@@ -69,4 +84,37 @@ exactly = 1
 file = "../sharpebench-py/Cargo.toml"
 search = 'sharpebench-core = \{ path = "\.\./sharpebench-core", version = "[0-9]+\.[0-9]+\.[0-9]+" \}'
 replace = 'sharpebench-core = { path = "../sharpebench-core", version = "{{version}}" }'
+exactly = 1
+
+# The excluded pyo3 crate owns a separate Cargo.lock. Cargo-release updates its
+# manifest and path-dependency requirements but never visits this lockfile, so
+# record each local package identity explicitly in the same version commit.
+[[pre-release-replacements]]
+file = "../sharpebench-py/Cargo.lock"
+search = 'name = "sharpebench-core"\nversion = "[0-9]+\.[0-9]+\.[0-9]+"'
+replace = 'name = "sharpebench-core"\nversion = "{{version}}"'
+exactly = 1
+
+[[pre-release-replacements]]
+file = "../sharpebench-py/Cargo.lock"
+search = 'name = "sharpebench-edge"\nversion = "[0-9]+\.[0-9]+\.[0-9]+"'
+replace = 'name = "sharpebench-edge"\nversion = "{{version}}"'
+exactly = 1
+
+[[pre-release-replacements]]
+file = "../sharpebench-py/Cargo.lock"
+search = 'name = "sharpebench-protocol"\nversion = "[0-9]+\.[0-9]+\.[0-9]+"'
+replace = 'name = "sharpebench-protocol"\nversion = "{{version}}"'
+exactly = 1
+
+[[pre-release-replacements]]
+file = "../sharpebench-py/Cargo.lock"
+search = 'name = "sharpebench-py"\nversion = "[0-9]+\.[0-9]+\.[0-9]+"'
+replace = 'name = "sharpebench-py"\nversion = "{{version}}"'
+exactly = 1
+
+[[pre-release-replacements]]
+file = "../sharpebench-py/Cargo.lock"
+search = 'name = "sharpebench-stats"\nversion = "[0-9]+\.[0-9]+\.[0-9]+"'
+replace = 'name = "sharpebench-stats"\nversion = "{{version}}"'
 exactly = 1
