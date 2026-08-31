@@ -21,12 +21,13 @@
 //! client crate, keeping the workspace's audited dependency tree unchanged.
 
 use std::process::{Command, Output, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
-use sharpebench_sim::ExternalAgent;
+use sharpebench_sim::{Agent, ExternalAgent, TransportDiagnostics, TransportHealth};
 
 /// How a sandboxed agent run is configured.
 #[derive(Clone, Debug, Default)]
@@ -116,7 +117,7 @@ pub fn resolve_launch(
         validate_image(image, opts.allow_unpinned_image)?;
         return Ok(Launch::Docker {
             program: "docker".to_string(),
-            args: hardened_docker_args(image),
+            args: hardened_docker_args(image, &Retention::AutoRemove),
         });
     }
     if !opts.allow_unsandboxed {
@@ -140,46 +141,77 @@ pub fn resolve_launch(
     }
 }
 
-fn hardened_docker_args(image: &str) -> Vec<String> {
-    [
-        "run",
-        "--rm",
-        "--init",
-        "--pull",
-        "never",
-        "--network",
-        "none",
-        "--ipc",
-        "none",
-        "--read-only",
-        "--cap-drop",
-        "ALL",
-        "--security-opt",
-        "no-new-privileges=true",
-        "--user",
-        "65532:65532",
-        "--memory",
-        "1g",
-        "--memory-swap",
-        "1g",
-        "--cpus",
-        "1",
-        "--pids-limit",
-        "128",
-        "--ulimit",
-        "nofile=256:256",
-        "--tmpfs",
-        "/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777",
-        "--tmpfs",
-        "/run:rw,noexec,nosuid,nodev,size=16m,mode=1777",
-        "--log-driver",
-        "none",
-        "-i",
-        image,
-    ]
-    .iter()
-    .map(|value| (*value).to_string())
-    .collect()
+/// How the launched container's lifetime and post-exit state are managed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Retention {
+    /// `--rm`: the daemon removes the container the instant it exits. Used by
+    /// the readiness probes, which need no post-exit state.
+    AutoRemove,
+    /// A named container that is **not** auto-removed, so post-exit state
+    /// (`State.OOMKilled`) is still inspectable after the wait. The caller owns
+    /// explicit removal — [`SandboxedAgent`] does it in `finish` / `Drop`, which
+    /// is what preserves the no-leak property `--rm` provided.
+    Inspectable(String),
+}
+
+/// Monotonic per-process counter, so two agents spawned in the same nanosecond
+/// still get distinct container names.
+static CONTAINER_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// A container name unique across processes (pid) and within one (counter).
+fn fresh_container_name() -> String {
+    format!(
+        "sharpebench-agent-{}-{}",
+        std::process::id(),
+        CONTAINER_SEQ.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+fn hardened_docker_args(image: &str, retention: &Retention) -> Vec<String> {
+    let mut args: Vec<String> = vec!["run".to_string()];
+    match retention {
+        Retention::AutoRemove => args.push("--rm".to_string()),
+        Retention::Inspectable(name) => args.extend(["--name".to_string(), name.clone()]),
+    }
+    args.extend(
+        [
+            "--init",
+            "--pull",
+            "never",
+            "--network",
+            "none",
+            "--ipc",
+            "none",
+            "--read-only",
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges=true",
+            "--user",
+            "65532:65532",
+            "--memory",
+            "1g",
+            "--memory-swap",
+            "1g",
+            "--cpus",
+            "1",
+            "--pids-limit",
+            "128",
+            "--ulimit",
+            "nofile=256:256",
+            "--tmpfs",
+            "/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777",
+            "--tmpfs",
+            "/run:rw,noexec,nosuid,nodev,size=16m,mode=1777",
+            "--log-driver",
+            "none",
+            "-i",
+            image,
+        ]
+        .iter()
+        .map(|value| (*value).to_string()),
+    );
+    args
 }
 
 const READINESS_TIMEOUT: Duration = Duration::from_secs(30);
@@ -405,7 +437,7 @@ pub fn check_sandbox_readiness(image: &str) -> Result<SandboxReadiness, SandboxE
 /// Run one `/bin/sh` script inside the hardened boundary against `image`,
 /// returning its output and how long the whole container took.
 fn run_in_sandbox(image: &str, script: &str) -> Result<(Output, Duration), SandboxError> {
-    let mut args = hardened_docker_args(image);
+    let mut args = hardened_docker_args(image, &Retention::AutoRemove);
     args.extend([
         "/bin/sh".to_string(),
         "-ceu".to_string(),
@@ -468,21 +500,162 @@ pub fn require_local_image(image: &str) -> Result<(), SandboxError> {
     Ok(())
 }
 
+/// Post-exit inspection of a named container, injectable so the classification
+/// path is testable on a machine with no Docker daemon. The live implementation
+/// is [`DockerCli`]; the live leg runs only in the Docker-enabled CI job.
+pub trait ContainerInspector {
+    /// Whether the kernel OOM-killed the named container (`State.OOMKilled`).
+    /// `None` when the state could not be determined.
+    fn oom_killed(&self, name: &str) -> Option<bool>;
+    /// Remove the named container, force-stopping it if still running. Best
+    /// effort: this is the explicit replacement for `--rm`.
+    fn remove(&self, name: &str);
+}
+
+/// The real inspector: shells out to the `docker` binary, like every other
+/// Docker interaction in this module.
+pub struct DockerCli;
+
+impl ContainerInspector for DockerCli {
+    fn oom_killed(&self, name: &str) -> Option<bool> {
+        let output = Command::new("docker")
+            .args(["inspect", "--format", "{{.State.OOMKilled}}", name])
+            .stdin(Stdio::null())
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        match String::from_utf8_lossy(&output.stdout).trim() {
+            "true" => Some(true),
+            "false" => Some(false),
+            _ => None,
+        }
+    }
+
+    fn remove(&self, name: &str) {
+        let _ = Command::new("docker")
+            .args(["rm", "-f", name])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+}
+
+/// A sandboxed external agent plus the handle to its container.
+///
+/// An entrant killed by the sandbox's `--memory` limit exits 137, which the
+/// transport cannot tell apart from any other SIGKILL — so exceeding a
+/// *published* resource budget, a scoring-relevant fact, was invisible to the
+/// failure taxonomy. The container is therefore launched **named and without
+/// `--rm`**, and [`SandboxedAgent::finish`] reads `State.OOMKilled` after the
+/// wait, then removes the container explicitly. Removal uses `docker rm -f`, so
+/// the no-leak property `--rm` provided is preserved on both the `finish` path
+/// and `Drop` (a harness killed with SIGKILL between spawn and drop can still
+/// leave a stopped container behind; the deterministic `sharpebench-agent-*`
+/// name prefix makes such a remnant findable).
+pub struct SandboxedAgent {
+    /// `Some` for the whole life of the value; taken in `finish_with` so the
+    /// docker client is reaped (the container has exited) before inspection.
+    agent: Option<ExternalAgent>,
+    /// The container name, or `None` for an opted-in unsandboxed local run.
+    container: Option<String>,
+}
+
+impl SandboxedAgent {
+    /// Override the per-decision wall-clock budget on the wrapped transport.
+    pub fn with_decide_timeout(mut self, timeout: Duration) -> Self {
+        self.agent = self.agent.take().map(|a| a.with_decide_timeout(timeout));
+        self
+    }
+
+    /// The launched container's name, when there is one.
+    pub fn container_name(&self) -> Option<&str> {
+        self.container.as_deref()
+    }
+
+    /// Tear the agent down, then report whether the kernel OOM-killed its
+    /// container, removing the container afterwards. `Some(true)` means the
+    /// entrant exceeded the published `--memory` budget; the driver folds that
+    /// into the failure taxonomy via `sharpebench_harness::apply_oom_verdict`.
+    /// `None` for an unsandboxed run or when the state was indeterminable.
+    pub fn finish(self) -> Option<bool> {
+        self.finish_with(&DockerCli)
+    }
+
+    /// [`SandboxedAgent::finish`] with an injected inspector, so the
+    /// inspect-then-remove sequence is testable without a Docker daemon.
+    pub fn finish_with(mut self, inspector: &dyn ContainerInspector) -> Option<bool> {
+        // Reap the docker client first: once it is gone the container has
+        // exited (or is orphaned and about to be force-removed), so the state
+        // read below is final rather than mid-run.
+        self.agent = None;
+        let name = self.container.take()?;
+        let verdict = inspector.oom_killed(&name);
+        inspector.remove(&name);
+        verdict
+    }
+}
+
+impl Agent for SandboxedAgent {
+    fn decide(
+        &mut self,
+        obs: &sharpebench_protocol::MarketObservation,
+    ) -> sharpebench_protocol::Decision {
+        self.agent
+            .as_mut()
+            .expect("agent is present until finish consumes the value")
+            .decide(obs)
+    }
+}
+
+impl TransportDiagnostics for SandboxedAgent {
+    fn health(&self) -> &TransportHealth {
+        self.agent
+            .as_ref()
+            .expect("agent is present until finish consumes the value")
+            .health()
+    }
+}
+
+impl Drop for SandboxedAgent {
+    fn drop(&mut self) {
+        // A drop without `finish` (a panic, an early return) must not leak the
+        // non-`--rm` container: reap the client, then force-remove.
+        self.agent = None;
+        if let Some(name) = self.container.take() {
+            DockerCli.remove(&name);
+        }
+    }
+}
+
 /// Run an external agent sandboxed in Docker, returning the live
-/// [`ExternalAgent`] transport (drive it with the harness exactly like any
-/// other external agent). See the module docs for the isolation contract.
+/// [`SandboxedAgent`] transport (drive it with the harness exactly like any
+/// other external agent, then call [`SandboxedAgent::finish`] for the post-run
+/// resource verdict). See the module docs for the isolation contract.
 pub fn run_external_sandboxed(
     image: &str,
     opts: &SandboxOptions,
-) -> Result<ExternalAgent, SandboxError> {
+) -> Result<SandboxedAgent, SandboxError> {
+    // The refusal logic is shared with `resolve_launch`; the sandboxed branch
+    // then swaps `--rm` for a fresh name so post-exit state stays inspectable.
     let launch = resolve_launch(docker_available(), image, opts)?;
-    let (program, args) = match &launch {
-        Launch::Docker { program, args } | Launch::Unsandboxed { program, args } => {
-            (program.as_str(), args)
+    let (program, args, container) = match launch {
+        Launch::Docker { program, .. } => {
+            let name = fresh_container_name();
+            let args = hardened_docker_args(image, &Retention::Inspectable(name.clone()));
+            (program, args, Some(name))
         }
+        Launch::Unsandboxed { program, args } => (program, args, None),
     };
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    ExternalAgent::spawn(program, &arg_refs).map_err(|e| SandboxError::Spawn(e.to_string()))
+    let agent = ExternalAgent::spawn(&program, &arg_refs)
+        .map_err(|e| SandboxError::Spawn(e.to_string()))?;
+    Ok(SandboxedAgent {
+        agent: Some(agent),
+        container,
+    })
 }
 
 #[cfg(test)]
@@ -599,6 +772,99 @@ mod tests {
         );
     }
 
+    /// The agent launch must keep post-exit state: `--rm` would let the daemon
+    /// destroy `State.OOMKilled` before it can be read, making a kill by the
+    /// published `--memory` budget indistinguishable from any other SIGKILL.
+    #[test]
+    fn an_inspectable_launch_is_named_and_not_auto_removed() {
+        let image = format!("fixture@sha256:{}", "a".repeat(64));
+        let retention = Retention::Inspectable("sharpebench-agent-test-0".to_string());
+        let args = hardened_docker_args(&image, &retention);
+        assert!(
+            !args.iter().any(|a| a == "--rm"),
+            "--rm destroys the exited container's state before docker inspect can read it: {args:?}"
+        );
+        let name_at = args
+            .iter()
+            .position(|a| a == "--name")
+            .expect("the container must be named so it can be inspected and removed");
+        assert_eq!(args[name_at + 1], "sharpebench-agent-test-0");
+        assert_eq!(
+            args.last().map(String::as_str),
+            Some(image.as_str()),
+            "the image stays the trailing positional"
+        );
+        // The hardening flags must be identical to the probe launch apart from
+        // the retention choice, so the inspectable path weakens nothing.
+        let mut auto = hardened_docker_args(&image, &Retention::AutoRemove);
+        auto.retain(|a| a != "--rm");
+        let mut named = args;
+        named.retain(|a| a != "--name" && a != "sharpebench-agent-test-0");
+        assert_eq!(auto, named);
+    }
+
+    #[test]
+    fn container_names_are_unique_within_a_process() {
+        assert_ne!(fresh_container_name(), fresh_container_name());
+    }
+
+    /// An inspector whose calls are journaled, so the inspect-then-remove
+    /// sequence is provable without a Docker daemon (the live leg runs only in
+    /// the Docker-enabled CI job).
+    struct FakeInspector {
+        verdict: Option<bool>,
+        calls: std::cell::RefCell<Vec<String>>,
+    }
+
+    impl ContainerInspector for FakeInspector {
+        fn oom_killed(&self, name: &str) -> Option<bool> {
+            self.calls.borrow_mut().push(format!("inspect {name}"));
+            self.verdict
+        }
+        fn remove(&self, name: &str) {
+            self.calls.borrow_mut().push(format!("remove {name}"));
+        }
+    }
+
+    #[test]
+    fn finish_inspects_before_removing_and_reports_the_verdict() {
+        for verdict in [Some(true), Some(false), None] {
+            let inspector = FakeInspector {
+                verdict,
+                calls: std::cell::RefCell::new(Vec::new()),
+            };
+            let agent = SandboxedAgent {
+                agent: None,
+                container: Some("c-1".to_string()),
+            };
+            assert_eq!(agent.finish_with(&inspector), verdict);
+            assert_eq!(
+                *inspector.calls.borrow(),
+                vec!["inspect c-1".to_string(), "remove c-1".to_string()],
+                "the state must be read before the container is destroyed, and \
+                 the container must always be removed (the explicit replacement \
+                 for --rm)"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unsandboxed_run_has_no_container_and_no_verdict() {
+        let inspector = FakeInspector {
+            verdict: Some(true),
+            calls: std::cell::RefCell::new(Vec::new()),
+        };
+        let agent = SandboxedAgent {
+            agent: None,
+            container: None,
+        };
+        assert_eq!(agent.finish_with(&inspector), None);
+        assert!(
+            inspector.calls.borrow().is_empty(),
+            "nothing to inspect or remove without a container"
+        );
+    }
+
     #[test]
     fn docker_refuses_mutable_or_option_like_images_by_default() {
         assert!(matches!(
@@ -682,7 +948,7 @@ mod tests {
     #[test]
     fn hostile_probe_runs_inside_the_same_hardened_boundary() {
         let image = format!("fixture@sha256:{}", "a".repeat(64));
-        let mut args = hardened_docker_args(&image);
+        let mut args = hardened_docker_args(&image, &Retention::AutoRemove);
         args.extend([
             "/bin/sh".to_string(),
             "-ceu".to_string(),
@@ -795,6 +1061,30 @@ mod tests {
             Some(DecideError::Timeout),
             "the container must be alive and silent (it ran but does not speak the protocol); \
              a Transport fault here means it never started"
+        );
+        // The post-run resource verdict: a container that merely idled was not
+        // OOM-killed, and `finish` must both read that state (possible only
+        // because the launch is not `--rm`) and then remove the container so
+        // nothing leaks.
+        let name = agent
+            .container_name()
+            .expect("a Docker launch always names its container")
+            .to_string();
+        assert_eq!(
+            agent.finish(),
+            Some(false),
+            "an idle container must report OOMKilled=false, not an indeterminable state"
+        );
+        let inspect = Command::new("docker")
+            .args(["inspect", &name])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("docker must run");
+        assert!(
+            !inspect.success(),
+            "the container must be removed after finish; a remnant re-creates the leak --rm prevented"
         );
     }
 

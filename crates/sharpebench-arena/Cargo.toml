@@ -14,12 +14,10 @@ sharpebench-leaderboard = { path = "../sharpebench-leaderboard", version = "0.15
 # `sharpebench_sim::ExternalAgent`). sim depends on core + protocol and never on
 # arena, so arena -> sim introduces no cycle.
 sharpebench-sim = { path = "../sharpebench-sim", version = "0.15.0" }
+# Observation/decision types named by the `Agent` impl on `SandboxedAgent`.
+sharpebench-protocol = { path = "../sharpebench-protocol", version = "0.15.0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-
-[dev-dependencies]
-# Observation/decision types for the sandbox transport smoke test.
-sharpebench-protocol = { path = "../sharpebench-protocol", version = "0.15.0" }
 
 [lints]
 workspace = true

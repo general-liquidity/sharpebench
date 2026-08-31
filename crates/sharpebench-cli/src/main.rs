@@ -1270,6 +1270,24 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
             return ExitCode::FAILURE;
         }
         let label = format!("sandbox:{image}");
+        // One attempt = spawn, run, then `finish` for the post-exit resource
+        // verdict: a container the kernel OOM-killed for exceeding the published
+        // `--memory` budget surfaces as `ResourceLimitExceeded` (an agent fault),
+        // not as the retryable transport blip its dead pipe would look like.
+        let sandbox_attempt =
+            |wi: usize, seed: u64| match sharpebench_arena::run_external_sandboxed(&image, &opts) {
+                Ok(mut a) => {
+                    let result = sharpebench_harness::run_external_backtest(
+                        &data,
+                        &mut a,
+                        windows[wi],
+                        seed,
+                        costs,
+                    );
+                    sharpebench_harness::apply_oom_verdict(result, a.finish())
+                }
+                Err(_) => Err(sharpebench_harness::FailureKind::SpawnError),
+            };
         let res = if let Some(ckpt) = &checkpoint {
             match sharpebench_harness::run_resumable_sweep(
                 ckpt,
@@ -1277,16 +1295,7 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                 &windows,
                 &seeds,
                 EXTERNAL_MAX_RETRIES,
-                |wi, seed| match sharpebench_arena::run_external_sandboxed(&image, &opts) {
-                    Ok(mut a) => sharpebench_harness::run_external_backtest(
-                        &data,
-                        &mut a,
-                        windows[wi],
-                        seed,
-                        costs,
-                    ),
-                    Err(_) => Err(sharpebench_harness::FailureKind::SpawnError),
-                },
+                sandbox_attempt,
             ) {
                 Ok(r) => r,
                 Err(e) => {
@@ -1295,14 +1304,16 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                 }
             }
         } else {
-            sharpebench_harness::run_external_agent(
+            sharpebench_harness::run_agent_resilient(
                 &label,
-                &data,
-                &windows,
+                windows.len(),
                 &seeds,
-                costs,
                 EXTERNAL_MAX_RETRIES,
-                || sharpebench_arena::run_external_sandboxed(&image, &opts).ok(),
+                windows
+                    .first()
+                    .map(|w| w.end.saturating_sub(w.start))
+                    .unwrap_or(0),
+                sandbox_attempt,
             )
         };
         report_transport_failures(&label, &res.failures, json);

@@ -12,7 +12,8 @@ pub mod perturb;
 
 pub use checkpoint::{run_resumable_sweep, SweepCheckpoint, TaskRecord, TaskState};
 pub use failure::{
-    failing_sentinel_run, run_with_retries, FailureKind, FailureLog, FailureRecord, RunOutcome,
+    apply_oom_verdict, failing_sentinel_run, run_with_retries, FailureKind, FailureLog,
+    FailureRecord, RunOutcome,
 };
 
 use sharpebench_core::{AgentSubmission, MandateVerdict};

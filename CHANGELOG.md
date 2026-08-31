@@ -12,6 +12,9 @@ and links the commits it was built from.
 
 ## [Unreleased]
 
+### Added
+- harness/arena/cli: a kill by the sandbox's published `--memory` budget is a first-class failure. An OOM-killed entrant exits 137 like any other SIGKILL, so exceeding a published resource budget, a scoring-relevant fact, was invisible to the failure taxonomy: the dead pipe it leaves behind was filed as a retryable transport blip, and the harness respawned an agent guaranteed to blow the same budget again. The sandbox now launches the agent container named and without `--rm` (readiness probes keep `--rm`), reads `State.OOMKilled` via `docker inspect` after the wait, and removes the container explicitly, preserving the no-leak property on both the `finish` path and `Drop`. The verdict folds into the taxonomy as `FailureKind::ResourceLimitExceeded` through `apply_oom_verdict`: an agent fault, never retried, counted against pass^k, and it overrides even a clean run because the budget breach is a fact about the run regardless of what made it onto the wire before the kill. `run_external_sandboxed` now returns a `SandboxedAgent` (transport plus container handle) instead of a bare `ExternalAgent`. The classification is unit-tested through an injected `ContainerInspector`; the live `docker inspect` leg runs only in the Docker-enabled CI job.
+
 ## [0.15.0] - 2026-08-30
 
 ### Added

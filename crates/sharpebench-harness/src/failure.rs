@@ -39,6 +39,14 @@ pub enum FailureKind {
     /// is the *agent's* fault, not the harness's — **not** retried; it is a real
     /// agent failure and is surfaced as such.
     AgentProtocolViolation,
+    /// The agent exceeded a published resource budget: the kernel OOM-killed its
+    /// sandbox container (the `--memory` limit). The exit status alone cannot
+    /// show this — an OOM kill exits 137 like any other SIGKILL — so the sandbox
+    /// reads the container's `State.OOMKilled` after the run and the driver folds
+    /// it in via [`apply_oom_verdict`]. Breaching a published budget is the
+    /// agent's own fault: **not** retried (the same agent against the same budget
+    /// reproduces it) and counted as a genuine failure for pass^k.
+    ResourceLimitExceeded,
 }
 
 impl FailureKind {
@@ -49,6 +57,27 @@ impl FailureKind {
             self,
             FailureKind::SpawnError | FailureKind::TransportError | FailureKind::Timeout
         )
+    }
+}
+
+/// Fold a sandboxed run's post-exit resource verdict into its result.
+///
+/// `oom_killed` is what the sandbox read from the exited container's
+/// `State.OOMKilled` (`None` when there was no container to inspect, e.g. an
+/// unsandboxed local-dev run, or the state could not be determined). A kernel
+/// OOM kill overrides *everything*, the transport-level classification and even
+/// a clean run: exceeding the published budget is a scoring-relevant fact in its
+/// own right, and the dead pipe an OOM-killed agent leaves behind would
+/// otherwise be misfiled as a retryable transport blip — the harness would then
+/// respawn an agent that is guaranteed to blow the same budget again.
+pub fn apply_oom_verdict(
+    result: Result<Run, FailureKind>,
+    oom_killed: Option<bool>,
+) -> Result<Run, FailureKind> {
+    if oom_killed == Some(true) {
+        Err(FailureKind::ResourceLimitExceeded)
+    } else {
+        result
     }
 }
 
@@ -195,6 +224,50 @@ mod tests {
             Err(FailureKind::AgentProtocolViolation)
         });
         assert_eq!(calls, 1, "an agent fault must not be retried");
+        assert!(matches!(outcome, RunOutcome::AgentFault(_)));
+    }
+
+    /// An OOM kill must override every other outcome: a transport-classified
+    /// failure (the dead pipe the kill leaves behind) and even a clean run,
+    /// because the budget breach is scoring-relevant regardless of what made it
+    /// onto the wire before the kill.
+    #[test]
+    fn an_oom_kill_overrides_both_a_transport_failure_and_a_clean_run() {
+        assert_eq!(
+            apply_oom_verdict(Err(FailureKind::TransportError), Some(true)).unwrap_err(),
+            FailureKind::ResourceLimitExceeded,
+        );
+        assert_eq!(
+            apply_oom_verdict(Ok(failing_sentinel_run(5)), Some(true)).unwrap_err(),
+            FailureKind::ResourceLimitExceeded,
+        );
+    }
+
+    /// Without an OOM verdict the result must pass through untouched — both the
+    /// no-container case (`None`) and an inspected container that was not
+    /// OOM-killed (`Some(false)`).
+    #[test]
+    fn no_oom_verdict_leaves_the_result_untouched() {
+        for verdict in [None, Some(false)] {
+            assert!(apply_oom_verdict(Ok(failing_sentinel_run(5)), verdict).is_ok());
+            assert_eq!(
+                apply_oom_verdict(Err(FailureKind::Timeout), verdict).unwrap_err(),
+                FailureKind::Timeout,
+            );
+        }
+    }
+
+    /// Rerunning an agent against the same published budget reproduces the same
+    /// OOM, so a budget breach must be a final agent fault, never retried.
+    #[test]
+    fn a_resource_limit_breach_is_an_agent_fault_and_is_not_retried() {
+        assert!(!FailureKind::ResourceLimitExceeded.is_runtime());
+        let mut calls = 0;
+        let (outcome, _) = run_with_retries(5, || {
+            calls += 1;
+            Err(FailureKind::ResourceLimitExceeded)
+        });
+        assert_eq!(calls, 1, "a budget breach must not be retried");
         assert!(matches!(outcome, RunOutcome::AgentFault(_)));
     }
 
