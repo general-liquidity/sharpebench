@@ -167,51 +167,98 @@ fn fresh_container_name() -> String {
     )
 }
 
-fn hardened_docker_args(image: &str, retention: &Retention) -> Vec<String> {
-    let mut args: Vec<String> = vec!["run".to_string()];
-    match retention {
-        Retention::AutoRemove => args.push("--rm".to_string()),
-        Retention::Inspectable(name) => args.extend(["--name".to_string(), name.clone()]),
+/// A hardened `docker run` invocation with the flags and the trailing image
+/// positional held **separately** until assembly.
+///
+/// The previous shape was one flat argument list ending `"-i", image`, with
+/// callers `extend`ing after it — correct only because the image happened to be
+/// last. Anyone appending a hardening flag to that list would silently turn it
+/// into a *container command* argument (everything after the image positional
+/// belongs to the entrant, not to Docker). Holding the flags and the positional
+/// apart makes the ordering structural: a flag pushed onto `flags` at any point
+/// lands before the image, and a container command can only land after it.
+struct HardenedLaunch {
+    /// Everything before the image: `run`, the retention choice, the hardening
+    /// flags, `-i`. Append further Docker flags here — never a positional.
+    flags: Vec<String>,
+    /// The trailing image positional. Assembly places it last (or ahead of an
+    /// explicit container command), whatever `flags` holds.
+    image: String,
+}
+
+impl HardenedLaunch {
+    fn new(image: &str, retention: &Retention) -> Self {
+        let mut flags: Vec<String> = vec!["run".to_string()];
+        match retention {
+            Retention::AutoRemove => flags.push("--rm".to_string()),
+            Retention::Inspectable(name) => flags.extend(["--name".to_string(), name.clone()]),
+        }
+        flags.extend(
+            [
+                "--init",
+                "--pull",
+                "never",
+                "--network",
+                "none",
+                "--ipc",
+                "none",
+                "--read-only",
+                "--cap-drop",
+                "ALL",
+                "--security-opt",
+                "no-new-privileges=true",
+                "--user",
+                "65532:65532",
+                "--memory",
+                "1g",
+                "--memory-swap",
+                "1g",
+                "--cpus",
+                "1",
+                "--pids-limit",
+                "128",
+                "--ulimit",
+                "nofile=256:256",
+                "--tmpfs",
+                "/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777",
+                "--tmpfs",
+                "/run:rw,noexec,nosuid,nodev,size=16m,mode=1777",
+                "--log-driver",
+                "none",
+                "-i",
+            ]
+            .iter()
+            .map(|value| (*value).to_string()),
+        );
+        Self {
+            flags,
+            image: image.to_string(),
+        }
     }
-    args.extend(
-        [
-            "--init",
-            "--pull",
-            "never",
-            "--network",
-            "none",
-            "--ipc",
-            "none",
-            "--read-only",
-            "--cap-drop",
-            "ALL",
-            "--security-opt",
-            "no-new-privileges=true",
-            "--user",
-            "65532:65532",
-            "--memory",
-            "1g",
-            "--memory-swap",
-            "1g",
-            "--cpus",
-            "1",
-            "--pids-limit",
-            "128",
-            "--ulimit",
-            "nofile=256:256",
-            "--tmpfs",
-            "/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777",
-            "--tmpfs",
-            "/run:rw,noexec,nosuid,nodev,size=16m,mode=1777",
-            "--log-driver",
-            "none",
-            "-i",
-            image,
-        ]
-        .iter()
-        .map(|value| (*value).to_string()),
-    );
-    args
+
+    /// Assemble `docker run <flags> <image>` — the agent launch, where the
+    /// image's own entrypoint is the container command.
+    fn into_args(self) -> Vec<String> {
+        let mut args = self.flags;
+        args.push(self.image);
+        args
+    }
+
+    /// Assemble `docker run <flags> <image> <command...>` — the probe launch,
+    /// where the container command is explicit. The command can only ever land
+    /// after the image positional.
+    fn into_args_with_command<I>(self, command: I) -> Vec<String>
+    where
+        I: IntoIterator<Item = String>,
+    {
+        let mut args = self.into_args();
+        args.extend(command);
+        args
+    }
+}
+
+fn hardened_docker_args(image: &str, retention: &Retention) -> Vec<String> {
+    HardenedLaunch::new(image, retention).into_args()
 }
 
 const READINESS_TIMEOUT: Duration = Duration::from_secs(30);
@@ -437,8 +484,7 @@ pub fn check_sandbox_readiness(image: &str) -> Result<SandboxReadiness, SandboxE
 /// Run one `/bin/sh` script inside the hardened boundary against `image`,
 /// returning its output and how long the whole container took.
 fn run_in_sandbox(image: &str, script: &str) -> Result<(Output, Duration), SandboxError> {
-    let mut args = hardened_docker_args(image, &Retention::AutoRemove);
-    args.extend([
+    let args = HardenedLaunch::new(image, &Retention::AutoRemove).into_args_with_command([
         "/bin/sh".to_string(),
         "-ceu".to_string(),
         script.to_string(),
@@ -956,11 +1002,50 @@ mod tests {
         ));
     }
 
+    /// A flag appended to a launch after construction must land before the
+    /// image positional however the command is assembled — the previous flat
+    /// list made "append a hardening flag" silently mean "hand the entrant a
+    /// container argument".
+    #[test]
+    fn a_flag_appended_late_lands_before_the_image_positional() {
+        let image = format!("fixture@sha256:{}", "a".repeat(64));
+        for with_command in [false, true] {
+            let mut launch = HardenedLaunch::new(&image, &Retention::AutoRemove);
+            launch.flags.push("--appended-hardening-flag".to_string());
+            let args = if with_command {
+                launch.into_args_with_command(["/bin/sh".to_string(), "-c".to_string()])
+            } else {
+                launch.into_args()
+            };
+            let flag_at = args
+                .iter()
+                .position(|a| a == "--appended-hardening-flag")
+                .expect("the appended flag must be in the command");
+            let image_at = args
+                .iter()
+                .position(|a| *a == image)
+                .expect("the image positional must be in the command");
+            assert!(
+                flag_at < image_at,
+                "an appended flag after the image is a container argument, not \
+                 a Docker flag: {args:?}"
+            );
+            if with_command {
+                assert_eq!(
+                    args[image_at + 1],
+                    "/bin/sh",
+                    "the command follows the image"
+                );
+            } else {
+                assert_eq!(args.last(), Some(&image), "the image stays trailing");
+            }
+        }
+    }
+
     #[test]
     fn hostile_probe_runs_inside_the_same_hardened_boundary() {
         let image = format!("fixture@sha256:{}", "a".repeat(64));
-        let mut args = hardened_docker_args(&image, &Retention::AutoRemove);
-        args.extend([
+        let args = HardenedLaunch::new(&image, &Retention::AutoRemove).into_args_with_command([
             "/bin/sh".to_string(),
             "-ceu".to_string(),
             HOSTILE_PROBE.to_string(),
