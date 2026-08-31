@@ -210,9 +210,9 @@ fn agent_environment(extra: &[&str]) -> Vec<(String, String)> {
 
 impl ExternalAgent {
     /// Spawn `program args...` as an agent subprocess with a **cleared**
-    /// environment: the agent receives only [`HERMETIC_ENV_ALLOWLIST`] and the
-    /// names opted in via [`AGENT_ENV_PASSTHROUGH`], never the harness's full
-    /// environment (API keys included). An agent process is no more trusted
+    /// environment: the agent receives only the fixed hermetic allowlist and the
+    /// names opted in via `SHARPEBENCH_AGENT_ENV`, never the
+    /// harness's full environment (API keys included). An agent process is no more trusted
     /// than an HTTP endpoint; see [`ExternalAgent::spawn_with_env`] for a
     /// programmatic per-variable pass-through and
     /// [`ExternalAgent::spawn_inheriting`] for trusted transport tooling.

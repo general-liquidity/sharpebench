@@ -643,7 +643,7 @@ fn measure_startup(image: &str) -> Result<Duration, SandboxError> {
 
 /// Attempt one outbound connection to `target` from inside the hardened boundary
 /// and classify how it ended. Measures its own startup baseline; callers probing
-/// several classes in a row share one via [`probe_egress_after`].
+/// several classes in a row reuse that baseline through an internal helper.
 pub fn probe_egress(image: &str, target: EgressTarget) -> Result<EgressVerdict, SandboxError> {
     let startup = measure_startup(image)?;
     probe_egress_after(image, target, startup)
