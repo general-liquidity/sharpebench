@@ -19,7 +19,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use sharpebench_protocol::{Decision, MarketObservation};
 
@@ -306,28 +306,127 @@ impl ExternalAgent {
         self
     }
 
+    /// Classify a stdin write failure: writing to a child that has already
+    /// exited is the exit, not a generic pipe break, so the fault names the
+    /// exit status instead of burning classification on the symptom. The pipe
+    /// teardown can precede the observable exit by a beat, so the check gets
+    /// the same short grace the other exit paths use.
+    fn stdin_error(&mut self, error: &std::io::Error) -> DecideError {
+        let deadline = Instant::now() + EXIT_DRAIN_GRACE;
+        loop {
+            match self.child.try_wait() {
+                Ok(Some(status)) => return exited_fault(status),
+                Ok(None) if Instant::now() < deadline => std::thread::sleep(DEAD_CHILD_POLL),
+                _ => return classify_io(error),
+            }
+        }
+    }
+
+    /// The child exited with no pending decision. A fast agent may have
+    /// answered and exited in the same instant: its line is either already in
+    /// the channel or still in flight through the reader thread, which reaches
+    /// EOF (and drops the sender) promptly once the pipe drains. Drain within a
+    /// short bounded grace before ruling the exit unanswered — an answered
+    /// exit is a SUCCESS, not a failure.
+    fn drain_after_exit(
+        &mut self,
+        status: std::process::ExitStatus,
+        obs: &MarketObservation,
+    ) -> Result<Decision, DecideError> {
+        let deadline = Instant::now() + EXIT_DRAIN_GRACE;
+        loop {
+            match self.lines.recv_timeout(DEAD_CHILD_POLL) {
+                Ok(Ok(Wire::Line(resp))) => return parse_decision(&resp, obs),
+                Ok(Ok(Wire::Oversized)) => return Err(oversized_fault()),
+                Ok(Err(_)) => return Err(DecideError::Transport),
+                Err(RecvTimeoutError::Disconnected) => break,
+                Err(RecvTimeoutError::Timeout) if Instant::now() >= deadline => break,
+                Err(RecvTimeoutError::Timeout) => {}
+            }
+        }
+        Err(exited_fault(status))
+    }
+
     /// One decision attempt over the stdio pipe, returning a typed [`DecideError`]
     /// rather than degrading to a hold. A closed stdout (EOF) or a broken pipe is a
     /// transport fault; unparseable output is the agent's protocol fault; a
-    /// subprocess that stays silent past [`STDIO_DECIDE_TIMEOUT`] is a timeout.
+    /// subprocess that stays silent past [`STDIO_DECIDE_TIMEOUT`] is a timeout —
+    /// but a subprocess that *exited* with no answer pending is reported as the
+    /// exit it is, immediately, instead of spending the full budget to call a
+    /// startup crash a timeout.
     fn decide_once(&mut self, obs: &MarketObservation) -> Result<Decision, DecideError> {
         let line = serde_json::to_string(obs).map_err(|_| DecideError::Transport)?;
-        writeln!(self.stdin, "{line}").map_err(|e| classify_io(&e))?;
-        self.stdin.flush().map_err(|e| classify_io(&e))?;
-        match self.lines.recv_timeout(self.timeout) {
-            Ok(Ok(Wire::Line(resp))) => parse_decision(&resp, obs),
-            Ok(Ok(Wire::Oversized)) => {
-                eprintln!(
-                    "agent protocol fault: one decision exceeded the {MAX_AGENT_LINE}-byte line \
-                     budget without a newline; the contract is one JSON decision per line"
-                );
-                Err(DecideError::Oversized)
+        if let Err(error) = writeln!(self.stdin, "{line}") {
+            return Err(self.stdin_error(&error));
+        }
+        if let Err(error) = self.stdin.flush() {
+            return Err(self.stdin_error(&error));
+        }
+        let deadline = Instant::now() + self.timeout;
+        loop {
+            let slice = DEAD_CHILD_POLL.min(deadline.saturating_duration_since(Instant::now()));
+            match self.lines.recv_timeout(slice) {
+                Ok(Ok(Wire::Line(resp))) => return parse_decision(&resp, obs),
+                Ok(Ok(Wire::Oversized)) => return Err(oversized_fault()),
+                Ok(Err(_)) => return Err(DecideError::Transport),
+                Err(RecvTimeoutError::Disconnected) => {
+                    // The reader saw EOF and the channel is empty. EOF races the
+                    // process teardown itself — the pipe closes a beat before
+                    // `try_wait` can observe the exit — so give the exit the
+                    // same short grace the drain gets. A child that merely
+                    // closed stdout while still running stays a transport break.
+                    let deadline = Instant::now() + EXIT_DRAIN_GRACE;
+                    loop {
+                        match self.child.try_wait() {
+                            Ok(Some(status)) => return Err(exited_fault(status)),
+                            Ok(None) if Instant::now() < deadline => {
+                                std::thread::sleep(DEAD_CHILD_POLL)
+                            }
+                            _ => return Err(DecideError::Transport),
+                        }
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => {
+                    if let Ok(Some(status)) = self.child.try_wait() {
+                        return self.drain_after_exit(status, obs);
+                    }
+                    if Instant::now() >= deadline {
+                        return Err(DecideError::Timeout);
+                    }
+                }
             }
-            Ok(Err(_)) => Err(DecideError::Transport),
-            Err(RecvTimeoutError::Timeout) => Err(DecideError::Timeout),
-            Err(RecvTimeoutError::Disconnected) => Err(DecideError::Transport),
         }
     }
+}
+
+/// How often the decide wait wakes to check whether the child has died. The
+/// cost of a wake is one `try_wait`, so a tight cadence is cheap next to the
+/// 30s budget it saves on a startup crash.
+const DEAD_CHILD_POLL: Duration = Duration::from_millis(25);
+
+/// How long a just-exited child's final line gets to travel from the pipe
+/// through the reader thread before the exit is ruled unanswered. The reader
+/// hits EOF and drops the sender almost immediately once the child is gone, so
+/// the normal exit path leaves through `Disconnected` well before this cap.
+const EXIT_DRAIN_GRACE: Duration = Duration::from_millis(500);
+
+/// The typed fault for a child that exited without answering, with the exit
+/// status named on stderr at the moment it is detected (the unit-style
+/// [`DecideError`] payload carries only the code).
+fn exited_fault(status: std::process::ExitStatus) -> DecideError {
+    eprintln!(
+        "agent transport fault: the agent process exited ({status}) with no decision pending"
+    );
+    DecideError::Exited(status.code())
+}
+
+/// The oversized-line protocol fault with its entrant-facing diagnostic.
+fn oversized_fault() -> DecideError {
+    eprintln!(
+        "agent protocol fault: one decision exceeded the {MAX_AGENT_LINE}-byte line \
+         budget without a newline; the contract is one JSON decision per line"
+    );
+    DecideError::Oversized
 }
 
 impl Agent for ExternalAgent {
@@ -790,6 +889,140 @@ mod tests {
         #[cfg(not(windows))]
         let agent = ExternalAgent::spawn("sh", &["-c", "read line; sleep 60"]);
         agent.expect("spawning the platform shell must work")
+    }
+
+    /// A child that dies at startup must be reported as its exit, immediately —
+    /// not after burning the full decide budget and masquerading as a timeout.
+    /// The default 30s budget is deliberately left in place: the assertion that
+    /// the decision returns in a fraction of it is the fail-fast property.
+    #[test]
+    fn a_child_dead_at_startup_fails_fast_as_an_exit_not_a_timeout() {
+        #[cfg(windows)]
+        let agent = ExternalAgent::spawn("powershell", &["-NoProfile", "-Command", "exit 3"]);
+        #[cfg(not(windows))]
+        let agent = ExternalAgent::spawn("sh", &["-c", "exit 3"]);
+        let mut agent = agent.expect("spawning the platform shell must work");
+        let start = std::time::Instant::now();
+        let decision = agent.decide(&one_symbol_observation());
+        assert!(
+            start.elapsed() < Duration::from_secs(20),
+            "a dead child must be detected long before the 30s decide budget"
+        );
+        assert!(decision.orders.is_empty(), "a faulted decision is a hold");
+        assert_eq!(
+            agent.health().last_error,
+            Some(DecideError::Exited(Some(3))),
+            "the fault must name the exit, not report a timeout or a bare transport break"
+        );
+    }
+
+    /// The race the exit polling must not lose: an agent that answers and exits
+    /// in the same breath has SUCCEEDED. Its line may still be in flight through
+    /// the reader thread when `try_wait` first sees the exit, so the drain has
+    /// to pick it up rather than ruling the exit unanswered.
+    #[test]
+    fn an_agent_that_answers_then_exits_is_a_success_not_an_exit_fault() {
+        #[cfg(windows)]
+        let agent = ExternalAgent::spawn(
+            "powershell",
+            &[
+                "-NoProfile",
+                "-Command",
+                "$null = [Console]::In.ReadLine(); Write-Output '{\"orders\":[]}'",
+            ],
+        );
+        #[cfg(not(windows))]
+        let agent = ExternalAgent::spawn("sh", &["-c", "read line; echo '{\"orders\":[]}'"]);
+        let mut agent = agent.expect("spawning the platform shell must work");
+        let decision = agent.decide(&one_symbol_observation());
+        assert!(decision.orders.is_empty());
+        assert!(
+            !agent.health().degraded(),
+            "an answered exit is a clean decision, not a fault: {:?}",
+            agent.health()
+        );
+    }
+
+    /// The drain semantics, pinned deterministically (the integration test above
+    /// exercises the race only when the exit poll happens to win it): a line
+    /// still in flight when the exit is observed must be delivered as a
+    /// SUCCESS, and only an exit with truly nothing pending is ruled the typed
+    /// exit fault.
+    #[test]
+    fn the_post_exit_drain_delivers_a_line_in_flight_and_rules_only_on_silence() {
+        use std::process::ExitStatus;
+
+        fn finished_status(code: &str) -> ExitStatus {
+            #[cfg(windows)]
+            let status = Command::new("powershell")
+                .args(["-NoProfile", "-Command", &format!("exit {code}")])
+                .stdin(Stdio::null())
+                .status();
+            #[cfg(not(windows))]
+            let status = Command::new("sh")
+                .args(["-c", &format!("exit {code}")])
+                .stdin(Stdio::null())
+                .status();
+            status.expect("the platform shell must run")
+        }
+
+        // A live-but-silent agent supplies the child/stdin plumbing; its real
+        // channel is swapped for one the test controls.
+        let make_agent = |rx| {
+            let mut agent = spawn_silent_agent();
+            agent.lines = rx;
+            agent
+        };
+        let status = finished_status("7");
+        let obs = one_symbol_observation();
+
+        // A line that arrives during the drain window is the agent's answer.
+        let (tx, rx) = mpsc::channel();
+        let mut agent = make_agent(rx);
+        let sender = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            let _ = tx.send(Ok(Wire::Line(r#"{"orders":[]}"#.to_string())));
+        });
+        let drained = agent.drain_after_exit(status, &obs);
+        sender.join().expect("sender thread must finish");
+        assert!(
+            drained.is_ok(),
+            "a line in flight at exit time is a success, not an exit fault: {drained:?}"
+        );
+
+        // Nothing pending and the sender gone: the exit is ruled as the fault.
+        let (tx, rx) = mpsc::channel::<std::io::Result<Wire>>();
+        drop(tx);
+        let mut agent = make_agent(rx);
+        assert_eq!(
+            agent.drain_after_exit(status, &obs).unwrap_err(),
+            DecideError::Exited(Some(7)),
+            "an exit with nothing pending must carry its status"
+        );
+    }
+
+    /// The EOF shortcut cannot see this one: a backgrounded grandchild inherits
+    /// stdout, so the reader thread never reaches EOF and only the exit poll in
+    /// the decide wait can notice the parent died. Unix-only fixture (the shell
+    /// job-control idiom); the polled code path itself is platform-neutral and
+    /// the ubuntu/macos CI legs run this.
+    #[cfg(unix)]
+    #[test]
+    fn a_dead_child_whose_pipe_is_held_open_is_still_detected() {
+        let mut agent = ExternalAgent::spawn("sh", &["-c", "sleep 60 & exit 3"])
+            .expect("the platform shell must spawn");
+        let start = std::time::Instant::now();
+        let decision = agent.decide(&one_symbol_observation());
+        assert!(
+            start.elapsed() < Duration::from_secs(20),
+            "the exit poll must detect the death long before the 30s budget"
+        );
+        assert!(decision.orders.is_empty(), "a faulted decision is a hold");
+        assert_eq!(
+            agent.health().last_error,
+            Some(DecideError::Exited(Some(3))),
+            "with the pipe held open, only the exit poll can classify this"
+        );
     }
 
     #[test]

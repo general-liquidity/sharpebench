@@ -35,13 +35,26 @@ pub enum DecideError {
     /// protocol faults. It is a distinct variant because "your line was too long"
     /// and "your JSON did not parse" send an entrant to different places.
     Oversized,
+    /// The agent process exited (carrying its exit status, when the platform
+    /// reports one) with no decision pending. Distinct from [`Timeout`]: a
+    /// process that died at startup is a spawn/crash failure and is known the
+    /// moment it exits, so burning the full decide budget and reporting a
+    /// timeout would misclassify it. Retryable like [`Transport`] — the run
+    /// level respawns a fresh process.
+    ///
+    /// [`Timeout`]: DecideError::Timeout
+    /// [`Transport`]: DecideError::Transport
+    Exited(Option<i32>),
 }
 
 impl DecideError {
     /// Whether this is a retryable runtime error (transport / timeout) rather than a
     /// final agent protocol fault.
     pub fn is_retryable(&self) -> bool {
-        matches!(self, DecideError::Transport | DecideError::Timeout)
+        matches!(
+            self,
+            DecideError::Transport | DecideError::Timeout | DecideError::Exited(_)
+        )
     }
 }
 
@@ -129,7 +142,9 @@ impl TransportHealth {
     pub fn record(&mut self, err: DecideError, tripped: bool) {
         match err {
             DecideError::Protocol | DecideError::Oversized => self.protocol_faults += 1,
-            DecideError::Transport | DecideError::Timeout => self.transport_faults += 1,
+            DecideError::Transport | DecideError::Timeout | DecideError::Exited(_) => {
+                self.transport_faults += 1
+            }
         }
         self.last_error = Some(err);
         self.tripped = tripped;
@@ -221,6 +236,20 @@ mod tests {
         cb2.record_success();
         assert!(!cb2.record_fault(), "streak reset by the success");
         assert!(!cb2.is_tripped());
+    }
+
+    /// A child exit is a runtime fault like a broken pipe: retried at the run
+    /// level with a fresh spawn, and counted with the transport faults — never
+    /// with the agent's own protocol faults.
+    #[test]
+    fn an_exit_is_retryable_and_counts_as_a_transport_fault() {
+        assert!(DecideError::Exited(Some(3)).is_retryable());
+        assert!(DecideError::Exited(None).is_retryable());
+        let mut health = TransportHealth::default();
+        health.record(DecideError::Exited(Some(137)), false);
+        assert_eq!(health.transport_faults, 1);
+        assert_eq!(health.protocol_faults, 0);
+        assert_eq!(health.last_error, Some(DecideError::Exited(Some(137))));
     }
 
     #[test]
