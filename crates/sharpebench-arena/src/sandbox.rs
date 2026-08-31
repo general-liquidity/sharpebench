@@ -650,8 +650,19 @@ pub fn run_external_sandboxed(
         Launch::Unsandboxed { program, args } => (program, args, None),
     };
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    let agent = ExternalAgent::spawn(&program, &arg_refs)
-        .map_err(|e| SandboxError::Spawn(e.to_string()))?;
+    // The Docker branch spawns `spawn_inheriting`, deliberately: the child is
+    // the trusted `docker` client, which needs its `DOCKER_HOST` /
+    // `DOCKER_CONFIG` context, while the untrusted entrant inside the container
+    // gets the container's own fresh environment regardless — nothing of the
+    // harness environment crosses the boundary. The opted-in local-dev command
+    // IS the agent process, so it gets the hermetic spawn like every other
+    // host-executed agent (`SHARPEBENCH_AGENT_ENV` passes named variables).
+    let agent = if container.is_some() {
+        ExternalAgent::spawn_inheriting(&program, &arg_refs)
+    } else {
+        ExternalAgent::spawn(&program, &arg_refs)
+    }
+    .map_err(|e| SandboxError::Spawn(e.to_string()))?;
     Ok(SandboxedAgent {
         agent: Some(agent),
         container,

@@ -202,9 +202,15 @@ fn main() {
                 CostModel::default(),
                 EXTERNAL_MAX_RETRIES,
                 || {
-                    ExternalAgent::spawn("python", &[LLM_SCRIPT, model])
-                        .ok()
-                        .map(|a| a.with_decide_timeout(LLM_DECIDE_TIMEOUT))
+                    // Hermetic spawn + exactly the one variable the paid-model
+                    // shim needs; the rest of the harness environment stays out.
+                    ExternalAgent::spawn_with_env(
+                        "python",
+                        &[LLM_SCRIPT, model],
+                        &["ANTHROPIC_API_KEY"],
+                    )
+                    .ok()
+                    .map(|a| a.with_decide_timeout(LLM_DECIDE_TIMEOUT))
                 },
             );
             if res.failures.runtime_failures() > 0 {

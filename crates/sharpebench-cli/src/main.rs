@@ -1331,8 +1331,10 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
         eprintln!(
             "warning: --cmd runs `{prog}` directly on this host with NO sandbox: no container, \
              no network or IPC isolation, no capability drop, no read-only root, no memory / \
-             CPU / PID limits. Only point it at an agent you trust. To run an untrusted \
-             entrant inside the hardened container boundary, use \
+             CPU / PID limits. The agent receives a CLEARED environment (PATH and platform \
+             essentials only, never the harness's API keys); pass named variables through \
+             with SHARPEBENCH_AGENT_ENV=NAME1,NAME2. Only point it at an agent you trust. \
+             To run an untrusted entrant inside the hardened container boundary, use \
              `--image <repository@sha256:...>`."
         );
         // Pre-flight: fail fast with a clear message if the agent won't spawn at all.

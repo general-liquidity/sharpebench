@@ -326,9 +326,16 @@ fn main() {
                 CostModel::default(),
                 EXTERNAL_MAX_RETRIES,
                 || {
-                    ExternalAgent::spawn(&python, &arg_refs).ok().map(|agent| {
-                        agent.with_decide_timeout(Duration::from_secs(timeout_seconds))
-                    })
+                    // Hermetic spawn; the shim resolves as an installed module
+                    // or via PYTHONPATH, and talks to a possibly non-default
+                    // Ollama endpoint — those two names pass through, no more.
+                    ExternalAgent::spawn_with_env(
+                        &python,
+                        &arg_refs,
+                        &["PYTHONPATH", "OLLAMA_HOST"],
+                    )
+                    .ok()
+                    .map(|agent| agent.with_decide_timeout(Duration::from_secs(timeout_seconds)))
                 },
             );
             if result.failures.runtime_failures() > 0 {

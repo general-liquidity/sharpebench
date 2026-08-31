@@ -145,10 +145,105 @@ pub struct ExternalAgent {
     health: TransportHealth,
 }
 
+/// Environment variables a hermetically spawned agent keeps, beyond the
+/// [`AGENT_ENV_PASSTHROUGH`] escape hatch. The set is what a plain subprocess
+/// needs to *run at all*, not what any particular agent might want:
+///
+/// - `PATH`: resolving the program itself and any children it spawns.
+/// - `TEMP` / `TMP` / `TMPDIR`: runtimes create temp files on startup.
+/// - `HOME` / `USERPROFILE`: per-user paths interpreters resolve at startup.
+/// - Windows `SystemRoot` / `windir`: DLL loading and Winsock initialization
+///   fail without them; `ComSpec`, `PATHEXT` and `SystemDrive` are how scripts
+///   and shells resolve; `APPDATA` / `LOCALAPPDATA` are required by common
+///   runtimes (PowerShell module paths, Python user site, npm).
+/// - Unix `LANG` / `LC_ALL` / `TZ`: text encoding and time, when set.
+///
+/// Everything else — API keys first among them — stays in the harness.
+#[cfg(windows)]
+const HERMETIC_ENV_ALLOWLIST: &[&str] = &[
+    "PATH",
+    "PATHEXT",
+    "SYSTEMROOT",
+    "WINDIR",
+    "COMSPEC",
+    "SYSTEMDRIVE",
+    "TEMP",
+    "TMP",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+];
+#[cfg(not(windows))]
+const HERMETIC_ENV_ALLOWLIST: &[&str] = &["PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "TZ"];
+
+/// Escape hatch for a legitimately env-dependent agent on the hermetic spawn
+/// path: a comma-separated list of variable *names* to pass through from the
+/// harness environment (e.g. `SHARPEBENCH_AGENT_ENV=MY_DATA_DIR,MY_TOKEN`).
+/// An explicit, visible opt-in per variable — never the whole environment.
+pub const AGENT_ENV_PASSTHROUGH: &str = "SHARPEBENCH_AGENT_ENV";
+
+/// The environment a hermetic spawn hands the agent: the platform allowlist,
+/// plus `extra` names, plus names listed in [`AGENT_ENV_PASSTHROUGH`] — each
+/// resolved against the harness environment. Windows matches names
+/// case-insensitively, as the platform does.
+fn agent_environment(extra: &[&str]) -> Vec<(String, String)> {
+    let passthrough = std::env::var(AGENT_ENV_PASSTHROUGH).unwrap_or_default();
+    let wanted: Vec<&str> = HERMETIC_ENV_ALLOWLIST
+        .iter()
+        .copied()
+        .chain(extra.iter().copied())
+        .chain(passthrough.split(',').map(str::trim))
+        .filter(|name| !name.is_empty())
+        .collect();
+    std::env::vars()
+        .filter(|(key, _)| {
+            wanted.iter().any(|name| {
+                if cfg!(windows) {
+                    name.eq_ignore_ascii_case(key)
+                } else {
+                    *name == key
+                }
+            })
+        })
+        .collect()
+}
+
 impl ExternalAgent {
-    /// Spawn `program args...` as an agent subprocess.
+    /// Spawn `program args...` as an agent subprocess with a **cleared**
+    /// environment: the agent receives only [`HERMETIC_ENV_ALLOWLIST`] and the
+    /// names opted in via [`AGENT_ENV_PASSTHROUGH`], never the harness's full
+    /// environment (API keys included). An agent process is no more trusted
+    /// than an HTTP endpoint; see [`ExternalAgent::spawn_with_env`] for a
+    /// programmatic per-variable pass-through and
+    /// [`ExternalAgent::spawn_inheriting`] for trusted transport tooling.
     pub fn spawn(program: &str, args: &[&str]) -> std::io::Result<Self> {
+        Self::spawn_with_env(program, args, &[])
+    }
+
+    /// Like [`ExternalAgent::spawn`], but additionally passes the named
+    /// variables through from the harness environment. For a driver that knows
+    /// exactly which variables its agent legitimately needs (e.g. an API key
+    /// for a paid-model shim) — still an explicit list, never the world.
+    pub fn spawn_with_env(
+        program: &str,
+        args: &[&str],
+        extra_vars: &[&str],
+    ) -> std::io::Result<Self> {
         let mut command = Command::new(program);
+        command.env_clear().envs(agent_environment(extra_vars));
+        Self::spawn_command(command, args)
+    }
+
+    /// Spawn with the harness's full environment inherited. **Not** for agent
+    /// code: this exists for trusted transport tooling that wraps the agent —
+    /// the `docker` client needs `DOCKER_HOST` / `DOCKER_CONFIG` and friends,
+    /// while the untrusted code inside the container gets the container's own
+    /// fresh environment regardless of what the client process holds.
+    pub fn spawn_inheriting(program: &str, args: &[&str]) -> std::io::Result<Self> {
+        Self::spawn_command(Command::new(program), args)
+    }
+
+    fn spawn_command(mut command: Command, args: &[&str]) -> std::io::Result<Self> {
         command
             .args(args)
             .stdin(Stdio::piped())
@@ -586,6 +681,96 @@ mod tests {
             !outlived,
             "the backgrounded grandchild outlived the teardown, so it is still \
              holding the stdout pipe open"
+        );
+    }
+
+    /// Spawn an agent that reports, in its decision's `reasoning`, whether the
+    /// named environment variable reached it and whether `PATH` did.
+    fn spawn_env_probe(var: &str) -> ExternalAgent {
+        #[cfg(windows)]
+        let agent = ExternalAgent::spawn(
+            "powershell",
+            &[
+                "-NoProfile",
+                "-Command",
+                &format!(
+                    "$null = [Console]::In.ReadLine(); \
+                     $c = if ([Environment]::GetEnvironmentVariable('{var}')) {{ 1 }} else {{ 0 }}; \
+                     $p = if ($env:PATH) {{ 1 }} else {{ 0 }}; \
+                     Write-Output ('{{\"orders\":[],\"reasoning\":\"var=' + $c + ' path=' + $p + '\"}}')"
+                ),
+            ],
+        );
+        #[cfg(not(windows))]
+        let agent = ExternalAgent::spawn(
+            "sh",
+            &[
+                "-c",
+                &format!(
+                    "read line; c=0; [ -n \"${{{var}}}\" ] && c=1; p=0; [ -n \"$PATH\" ] && p=1; \
+                     printf '{{\"orders\":[],\"reasoning\":\"var=%s path=%s\"}}\\n' \"$c\" \"$p\""
+                ),
+            ],
+        );
+        agent.expect("spawning the platform shell must work")
+    }
+
+    /// The hermetic spawn must clear the harness environment — an API key set in
+    /// the harness must NOT arrive in the agent — while PATH (allowlisted)
+    /// must survive, or nothing with an interpreter could run at all.
+    #[test]
+    fn a_spawned_agent_does_not_inherit_the_harness_environment() {
+        std::env::set_var("SHARPEBENCH_TEST_LEAK", "a-secret-the-agent-must-not-see");
+        let mut agent = spawn_env_probe("SHARPEBENCH_TEST_LEAK");
+        let decision = agent.decide(&one_symbol_observation());
+        assert_eq!(
+            decision.reasoning, "var=0 path=1",
+            "the canary must be cleared and PATH must survive"
+        );
+        assert!(
+            !agent.health().degraded(),
+            "the probe decision itself must be clean"
+        );
+    }
+
+    /// The escape hatch: a variable *named* in SHARPEBENCH_AGENT_ENV passes
+    /// through, so a legitimately env-dependent agent still works without
+    /// reopening the whole environment.
+    #[test]
+    fn a_variable_named_in_the_passthrough_reaches_the_agent() {
+        std::env::set_var("SHARPEBENCH_TEST_EXTRA", "42");
+        // The same value the sibling test sets, so the two cannot race however
+        // the test threads interleave.
+        std::env::set_var(
+            AGENT_ENV_PASSTHROUGH,
+            "SHARPEBENCH_TEST_EXTRA, SHARPEBENCH_TEST_PURE_B ,",
+        );
+        let mut agent = spawn_env_probe("SHARPEBENCH_TEST_EXTRA");
+        let decision = agent.decide(&one_symbol_observation());
+        assert_eq!(decision.reasoning, "var=1 path=1");
+    }
+
+    /// The pure resolution logic, pinned directly: allowlist + programmatic
+    /// extras + the passthrough names, and nothing else.
+    #[test]
+    fn agent_environment_resolves_allowlist_extras_and_passthrough_only() {
+        std::env::set_var("SHARPEBENCH_TEST_PURE_A", "1");
+        std::env::set_var("SHARPEBENCH_TEST_PURE_B", "2");
+        std::env::set_var("SHARPEBENCH_TEST_PURE_C", "3");
+        // The same value the sibling test sets, so the two cannot race however
+        // the test threads interleave.
+        std::env::set_var(
+            AGENT_ENV_PASSTHROUGH,
+            "SHARPEBENCH_TEST_EXTRA, SHARPEBENCH_TEST_PURE_B ,",
+        );
+        let env = agent_environment(&["SHARPEBENCH_TEST_PURE_A"]);
+        let has = |name: &str| env.iter().any(|(k, _)| k == name);
+        assert!(has("PATH"), "PATH is allowlisted");
+        assert!(has("SHARPEBENCH_TEST_PURE_A"), "programmatic extra");
+        assert!(has("SHARPEBENCH_TEST_PURE_B"), "passthrough name (trimmed)");
+        assert!(
+            !has("SHARPEBENCH_TEST_PURE_C"),
+            "a variable nobody named must not leak through"
         );
     }
 
