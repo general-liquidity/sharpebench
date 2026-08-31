@@ -1,16 +1,17 @@
 # SharpeBench release pipeline (cargo-release). See docs/PUBLISHING.md §5.
 #
-# One command cuts a full release: bump the shared workspace version, rewrite the
-# inter-crate `version = "x"` pins and the npm manifests, tag `vX.Y.Z`, and push the
-# commit + tag. Publishing itself happens in .github/workflows/release.yml, which the
-# tag triggers: crates.io over OIDC, npm, and the signed binary.
+# `scripts/release.py` cuts a full release: it creates a disposable worktree from
+# fetched origin/main, delegates the shared version/dependency/manifest rewrites to
+# cargo-release, rebinds provenance on the clean version commit, tags that child, and
+# atomically pushes the commits plus tag. Publishing itself happens in
+# .github/workflows/release.yml: crates.io over OIDC, npm, PyPI, and the signed binary.
 #
 # Always run the green checks first — cargo-release will not:
 #   cargo test --workspace && cargo clippy --workspace --all-targets && cargo deny check
 #
 # Then:
-#   cargo release patch              # DRY RUN — prints exactly what would happen
-#   cargo release patch --execute    # 0.0.1 -> 0.0.2: bump, dep-rewrite, ordered publish, tag, push
+#   python scripts/release.py rehearse patch
+#   python scripts/release.py execute patch
 #
 # Do NOT release until all tier work is in. The version stays 0.0.1 on git until then.
 
@@ -30,21 +31,19 @@ tag-message = "SharpeBench v{{version}}"
 pre-release-commit-message = "release: v{{version}}"
 
 # cargo-release does NOT create the tag. The version bump rewrites files inside
-# the provenance source scope, so the pre-release hook below has to rebind the
-# manifest, and it necessarily runs while the bump is still uncommitted: the
-# manifest it writes is correct in its digests but records
-# `generated_at_head_dirty: true`. Tagging that commit publishes a release whose
-# own provenance gate fails, which is what v0.14.1 did. Cut the release, then
-# rebind on the committed tree and tag THAT commit, so the tagged manifest can
-# honestly say the generation was clean. See RELEASING.md.
+# the provenance source scope, so a pre-commit rebind necessarily records a dirty
+# generation. `scripts/release.py` rebinds after the clean version commit and tags
+# that provenance-only child; v0.14.1 demonstrated why tagging the bump is wrong.
 tag = false
 
 # These crates are set to Trusted-Publishing-only on crates.io, so a token upload from
 # a laptop is refused with 403 and the local machine cannot publish at all. Cutting a
-# release therefore only bumps, rewrites, commits, tags and pushes; the `v*` tag is what
-# makes CI publish over OIDC (see .github/workflows/release.yml).
+# release therefore only bumps, rewrites, and commits locally; the driver's atomic
+# push of the `v*` tag is what makes CI publish over OIDC (see release.yml).
 publish = false
-push = true
+# A direct cargo-release invocation must never push a provenance-stale version
+# commit. The isolated driver owns the single atomic commit+tag push.
+push = false
 
 # Guard rail: only ever release from main.
 allow-branch = ["main"]
@@ -56,15 +55,10 @@ allow-branch = ["main"]
 # rules live in crates/sharpebench-cli/release.toml because cargo-release resolves
 # `file` relative to each crate, not to the workspace root.
 
-# The version bump rewrites Cargo.toml, Cargo.lock and the sharpebench-py
-# manifests, and those are inside the provenance source scope. A manifest bound
-# before the release goes stale the instant cargo-release commits, so the
-# tamper-evidence gate fails on the release commit and on every commit after it.
-# The hook runs after the bump and the replacements and before the commit, so
-# the manifest a tag ships describes the tree that tag points at. cargo-release
-# runs hooks from the crate directory, hence the repository-root resolution.
-pre-release-hook = [
-  "bash",
-  "-c",
-  "python \"$(git rev-parse --show-toplevel)/paper/src/make-provenance.py\"",
-]
+# The version bump rewrites files inside the provenance source scope. Rebinding
+# in cargo-release's pre-commit hook cannot solve that: generation necessarily
+# sees a dirty tree and records `generated_at_head_dirty: true`. It also routed
+# through `bash`, mixing WSL and Windows Git paths when invoked outside Git Bash.
+# `scripts/release.py` therefore owns the rebind after cargo-release has made a
+# clean version commit, commits only the manifest, checks it, and tags that
+# provenance-only child. There is deliberately no pre-release hook here.

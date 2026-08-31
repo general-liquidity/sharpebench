@@ -63,13 +63,15 @@ impl FailureKind {
 /// Fold a sandboxed run's post-exit resource verdict into its result.
 ///
 /// `oom_killed` is what the sandbox read from the exited container's
-/// `State.OOMKilled` (`None` when there was no container to inspect, e.g. an
-/// unsandboxed local-dev run, or the state could not be determined). A kernel
-/// OOM kill overrides *everything*, the transport-level classification and even
-/// a clean run: exceeding the published budget is a scoring-relevant fact in its
-/// own right, and the dead pipe an OOM-killed agent leaves behind would
-/// otherwise be misfiled as a retryable transport blip — the harness would then
-/// respawn an agent that is guaranteed to blow the same budget again.
+/// `State.OOMKilled` (`None` only when there was no container to inspect, e.g.
+/// an explicitly opted-in unsandboxed local-dev run). The sandbox finalizer
+/// returns an error rather than `None` when a container verdict is
+/// indeterminate. A kernel OOM kill overrides *everything*, the transport-level
+/// classification and even a clean run: exceeding the published budget is a
+/// scoring-relevant fact in its own right, and the dead pipe an OOM-killed agent
+/// leaves behind would otherwise be misfiled as a retryable transport blip — the
+/// harness would then respawn an agent that is guaranteed to blow the same
+/// budget again.
 pub fn apply_oom_verdict(
     result: Result<Run, FailureKind>,
     oom_killed: Option<bool>,

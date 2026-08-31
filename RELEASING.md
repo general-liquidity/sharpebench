@@ -103,7 +103,7 @@ reviewers, branch restrictions) to the publishing steps. Their names must match 
 
 ## Cutting a release
 
-1. Bump the version everywhere it's pinned:
+1. Confirm the version surfaces the driver will bump together:
    - `[workspace.package] version` in the root [`Cargo.toml`](Cargo.toml) (all 8
      crates inherit via `version.workspace = true`; cargo-release rewrites the
      inter-crate `version = "x"` pins — see [`release.toml`](release.toml)).
@@ -111,21 +111,26 @@ reviewers, branch restrictions) to the publishing steps. Their names must match 
      [`npm/mcp/package.json`](npm/mcp/package.json) (and the MCP package's
      `@general-liquidity/sharpebench` dependency range if you want it pinned to the
      new kernel).
-2. Promote the `[Unreleased]` section of `CHANGELOG.md` to the new version and
-   add the two compare links.
+2. Finish and push the `[Unreleased]` section of `CHANGELOG.md`. The driver
+   promotes it and adds both compare links inside the isolated release tree; it
+   refuses notes that exist only in the operator's checkout.
 3. Run the green checks first (CI does too, but cargo-release won't):
    ```bash
    cargo test --workspace && cargo clippy --workspace --all-targets && cargo deny check
    ```
-4. Cut the bump, then rebind provenance and tag the REBIND commit:
+4. Rehearse, then execute the isolated release driver:
    ```bash
-   cargo release patch --execute      # bumps, commits, pushes; creates no tag
-   python paper/src/make-provenance.py
-   git add paper/evidence/provenance.json
-   git commit -m "chore(provenance): rebind after the <version> version bump"
-   python paper/src/check-provenance.py   # must print OK before tagging
-   git tag -a v0.0.6 -m "SharpeBench v0.0.6" && git push origin main v0.0.6
+   python scripts/release.py rehearse patch
+   python scripts/release.py execute patch
    ```
+   Both commands fetch `origin/main` and cut from a throwaway worktree. The
+   operator's checkout is never the release tree, so local dirt and a stale local
+   branch cannot enter the release. The driver refuses changelog entries that are
+   only local, promotes the pushed notes, runs `cargo release` without publishing
+   or pushing, regenerates provenance on the clean version commit, tags that
+   rebind, and atomically pushes the commits plus tag. `rehearse` executes the same
+   sequence without the tag or push and deletes its temporary branch.
+
    The tag must point at the rebind, not at the version bump. The bump rewrites
    files inside the provenance source scope, so the manifest written during it
    records a dirty generation and the tagged tree fails its own provenance gate.
@@ -135,9 +140,9 @@ reviewers, branch restrictions) to the publishing steps. Their names must match 
    always; the `crates` / `npm` jobs run if their `PUBLISH_*` variable is `true`.
    (Or run the workflow manually from the Actions tab via *workflow_dispatch*.)
 
-`cargo release patch --execute` automates steps 1, 4, and the ordered crates.io
-publish in one command (config in [`release.toml`](release.toml)); the CI path above
-is the tokenless alternative once trusted publishing is wired.
+The driver delegates the workspace bump and replacement rules to `cargo-release`
+(config in [`release.toml`](release.toml)); publishing remains tokenless in CI after
+the tag is pushed.
 
 With OIDC trusted publishing, npm attaches **provenance** automatically, so each
 release carries a signed attestation that it was built from this repo + commit.

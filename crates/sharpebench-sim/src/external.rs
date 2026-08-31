@@ -863,7 +863,15 @@ mod tests {
             "SHARPEBENCH_TEST_EXTRA, SHARPEBENCH_TEST_PURE_B ,",
         );
         let env = agent_environment(&["SHARPEBENCH_TEST_PURE_A"]);
-        let has = |name: &str| env.iter().any(|(k, _)| k == name);
+        let has = |name: &str| {
+            env.iter().any(|(key, _)| {
+                if cfg!(windows) {
+                    key.eq_ignore_ascii_case(name)
+                } else {
+                    key == name
+                }
+            })
+        };
         assert!(has("PATH"), "PATH is allowlisted");
         assert!(has("SHARPEBENCH_TEST_PURE_A"), "programmatic extra");
         assert!(has("SHARPEBENCH_TEST_PURE_B"), "passthrough name (trimmed)");

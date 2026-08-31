@@ -15,6 +15,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  release-rehearsal:
+    name: isolated release rehearsal
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96.0"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-release@1.1.2
+      - name: Test release-driver guards and cleanup ordering
+        run: python -m unittest scripts/test_release.py
+      - name: Rehearse the complete cut, rebind, and cleanup sequence
+        # HEAD is the candidate tree on both pushes and PRs. The real execute
+        # command defaults to freshly fetched origin/main; rehearsing origin/main
+        # here would test the old driver on a PR and reject the PR's own changelog.
+        run: python scripts/release.py rehearse patch --base-ref HEAD --no-fetch
+
   check:
     name: fmt · clippy
     runs-on: ubuntu-latest

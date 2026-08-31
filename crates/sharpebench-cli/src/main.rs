@@ -1284,7 +1284,21 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                         seed,
                         costs,
                     );
-                    sharpebench_harness::apply_oom_verdict(result, a.finish())
+                    match a.finish() {
+                        Ok(oom_killed) => {
+                            sharpebench_harness::apply_oom_verdict(result, oom_killed)
+                        }
+                        Err(error) => {
+                            // Post-exit inspection and named-container cleanup are
+                            // part of the sandbox contract, not optional telemetry.
+                            // If either is indeterminate, do not score or retry the
+                            // entrant as though its resource verdict were known.
+                            eprintln!(
+                                "error: sandboxed agent `{image}` could not be finalized: {error}"
+                            );
+                            Err(sharpebench_harness::FailureKind::TransportError)
+                        }
+                    }
                 }
                 Err(_) => Err(sharpebench_harness::FailureKind::SpawnError),
             };
