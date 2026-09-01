@@ -1729,9 +1729,14 @@ mod tests {
         .into_args_with_command([
             "/bin/sh".to_string(),
             "-ceu".to_string(),
-            // BusyBox awk grows one in-process string until the cgroup kills it.
-            // Streaming /dev/zero would not work: a pipe holds only a bounded buffer.
-            "command -v awk >/dev/null 2>&1 || exit 127; awk 'BEGIN { x=\"0123456789abcdef\"; for (i=0; i<30; i++) x=x x; print length(x) }'"
+            // `/tmp` is a 64 MiB tmpfs and tmpfs pages are charged to the
+            // container's memory cgroup. `exec` makes the allocating writer the
+            // workload process rather than leaving a shell that can survive a
+            // killed child. Writing twice the no-swap 32 MiB budget therefore
+            // crosses the kernel boundary; unlike an exponential awk string it
+            // has no language-level maximum-length path that can exit nonzero
+            // without an OOM event.
+            "command -v dd >/dev/null 2>&1 || exit 127; exec dd if=/dev/zero of=/tmp/sharpebench-oom bs=1M count=64"
                 .to_string(),
         ]);
         let status = Command::new("docker")
