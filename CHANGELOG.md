@@ -28,6 +28,11 @@ and links the commits it was built from.
   shape and every published version surface. Release actions and tool installers
   are immutable or exact-version pinned, and registry verification now includes
   all twelve crates, including `sharpebench-memory`.
+- paper: provenance scope, exclusions, schema fields, and semantic metadata are
+  validator policy shared with the writer rather than instructions trusted from
+  the manifest. The checker rejects extra, missing, duplicate, or escaping
+  records and verifies that a claimed clean generation matches the blobs in the
+  recorded commit, not only the current checkout.
 - packaging: the Nix derivation reads the workspace version from `Cargo.toml`
   instead of labelling every build `0.0.1`; the release configuration no longer
   documents that obsolete pre-release state, and the flake no longer describes

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import itertools
 import json
 import os
@@ -10,46 +9,29 @@ import subprocess
 import sys
 from pathlib import Path
 
+from provenance_common import (
+    ARTIFACT_SCOPE,
+    EXCLUDED_ARTIFACT_PREFIXES,
+    EXCLUDED_DIR_NAMES,
+    NOTE,
+    REPRODUCTION_ENTRYPOINT,
+    SCHEMA_VERSION,
+    SOURCE_SCOPE,
+    digest_bytes,
+    matching_files,
+    snapshot_digest,
+)
+
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "paper" / "evidence" / "provenance.json"
 
-SOURCE_SCOPE = (
-    "Cargo.toml",
-    "Cargo.lock",
-    "crates/**/*.toml",
-    "crates/**/*.rs",
-    "crates/**/schema/*.json",
-    "paper/src/*.py",
-    "paper/evidence/*.py",
-    "paper/main.tex",
-    "paper/sections/*.tex",
-    "paper/refs.bib",
-    "data/*.csv",
-    "arena/**/*.json",
-)
-ARTIFACT_SCOPE = ("paper/evidence/final/*.jsonl", "paper/figures/*.pdf")
-EXCLUDED_DIR_NAMES = ("target", ".venv", "__pycache__", "node_modules", ".git")
-EXCLUDED_ARTIFACT_PREFIXES = ("llm-cache-", "llm-field-")
-
-
 def sha256(path: Path, *, canonical_text: bool = False) -> str:
-    data = path.read_bytes()
-    if canonical_text:
-        # Git may materialize the same text blob as LF on CI and CRLF on a
-        # Windows worktree.  Source identity follows the repository text, not
-        # the checkout convention; result artifacts remain byte-exact below.
-        data = data.replace(b"\r\n", b"\n")
-    return hashlib.sha256(data).hexdigest()
+    return digest_bytes(path.read_bytes(), canonical_text=canonical_text)
 
 
 def match(pattern: str) -> list[Path]:
-    return [
-        path
-        for path in ROOT.glob(pattern)
-        if path.is_file()
-        and not any(part in EXCLUDED_DIR_NAMES for part in path.relative_to(ROOT).parts)
-    ]
+    return matching_files(ROOT, pattern, frozenset(EXCLUDED_DIR_NAMES))
 
 
 def files(patterns: tuple[str, ...]) -> list[Path]:
@@ -86,9 +68,7 @@ source_records = [
     }
     for path in source_paths
 ]
-snapshot = hashlib.sha256(
-    "".join(f"{item['sha256']}  {item['path']}\n" for item in source_records).encode()
-).hexdigest()
+snapshot = snapshot_digest(source_records)
 
 artifact_paths = [
     path
@@ -109,7 +89,7 @@ dirty = bool(
     ).strip()
 )
 manifest = {
-    "schema_version": 3,
+    "schema_version": SCHEMA_VERSION,
     # A manifest cannot contain the hash of the commit that will contain the
     # manifest without becoming self-referential.  Record the checked-out base
     # commit honestly; source_snapshot_sha256 binds the candidate's actual
@@ -121,8 +101,8 @@ manifest = {
     "source_snapshot_excludes": list(EXCLUDED_DIR_NAMES),
     "artifact_scope": list(ARTIFACT_SCOPE),
     "artifact_excluded_prefixes": list(EXCLUDED_ARTIFACT_PREFIXES),
-    "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
-    "note": "Incomplete paid LLM runs are excluded from result provenance.",
+    "reproduction_entrypoint": REPRODUCTION_ENTRYPOINT,
+    "note": NOTE,
     "source_files": source_records,
     "artifacts": artifacts,
 }

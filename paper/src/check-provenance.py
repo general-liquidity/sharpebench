@@ -2,12 +2,22 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 import subprocess
 import sys
 from pathlib import Path
+
+from provenance_common import (
+    ARTIFACT_SCOPE,
+    EXCLUDED_ARTIFACT_PREFIXES,
+    EXCLUDED_DIR_NAMES,
+    SOURCE_SCOPE,
+    digest_bytes,
+    manifest_rule_problems,
+    matching_files,
+    snapshot_digest,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -15,19 +25,11 @@ MANIFEST = ROOT / "paper" / "evidence" / "provenance.json"
 
 
 def sha256(path: Path, *, canonical_text: bool = False) -> str:
-    data = path.read_bytes()
-    if canonical_text:
-        data = data.replace(b"\r\n", b"\n")
-    return hashlib.sha256(data).hexdigest()
+    return digest_bytes(path.read_bytes(), canonical_text=canonical_text)
 
 
 def match(pattern: str, excludes: frozenset[str]) -> list[Path]:
-    return [
-        path
-        for path in ROOT.glob(pattern)
-        if path.is_file()
-        and not any(part in excludes for part in path.relative_to(ROOT).parts)
-    ]
+    return matching_files(ROOT, pattern, excludes)
 
 
 def expand(patterns: list[str], excludes: frozenset[str]) -> list[str]:
@@ -78,6 +80,63 @@ def git(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", *args], cwd=ROOT, capture_output=True, text=True, check=False
     )
+
+
+def git_blobs(commit: str, paths: list[str]) -> dict[str, bytes | None]:
+    if not paths:
+        return {}
+    request = "".join(f"{commit}:{path}\n" for path in paths).encode()
+    completed = subprocess.run(
+        ["git", "cat-file", "--batch"],
+        cwd=ROOT,
+        input=request,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return {path: None for path in paths}
+    result: dict[str, bytes | None] = {}
+    output = completed.stdout
+    offset = 0
+    for path in paths:
+        newline = output.find(b"\n", offset)
+        if newline < 0:
+            result[path] = None
+            continue
+        header = output[offset:newline].split(b" ")
+        if header[-1] in (b"missing", b"ambiguous") or len(header) != 3:
+            result[path] = None
+            offset = newline + 1
+            continue
+        size = int(header[2])
+        result[path] = output[newline + 1 : newline + 1 + size]
+        offset = newline + 1 + size + 1
+    return result
+
+
+def check_committed_group(
+    name: str,
+    records: list[dict[str, str]],
+    commit: str,
+    *,
+    canonical_text: bool = False,
+) -> list[str]:
+    blobs = git_blobs(commit, [record["path"] for record in records])
+    problems: list[str] = []
+    for record in records:
+        path = record["path"]
+        blob = blobs.get(path)
+        if blob is None:
+            problems.append(f"{name}: MISSING {path} from generated_at_head")
+            continue
+        actual = digest_bytes(blob, canonical_text=canonical_text)
+        if actual != record["sha256"]:
+            problems.append(
+                f"{name}: COMMITTED DIGEST {path}\n"
+                f"    recorded {record['sha256']}\n"
+                f"    commit   {actual}"
+            )
+    return problems
 
 
 def check_generation(manifest: dict) -> list[str]:
@@ -147,39 +206,56 @@ def main() -> int:
         print(f"missing manifest: {MANIFEST}", file=sys.stderr)
         return 2
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
-    if manifest.get("schema_version") != 3:
-        print("unsupported provenance schema_version", file=sys.stderr)
-        return 2
+    problems = manifest_rule_problems(manifest)
+    if problems:
+        print("\n".join(problems))
+        print(f"\nFAIL: {len(problems)} provenance problem(s)")
+        return 1
 
     problems = check_generation(manifest)
     problems += check_group(
         "source", manifest["source_files"], canonical_text=True
     )
     problems += check_group("artifact", manifest["artifacts"])
-    excludes = frozenset(manifest["source_snapshot_excludes"])
-    problems += check_scope_is_live(
-        "source", manifest["source_snapshot_scope"], excludes
-    )
-    problems += check_scope_is_live("artifact", manifest["artifact_scope"], excludes)
+    recorded_head = manifest["generated_at_head"]
+    if git("cat-file", "-e", f"{recorded_head}^{{commit}}").returncode == 0:
+        problems += check_committed_group(
+            "source",
+            manifest["source_files"],
+            recorded_head,
+            canonical_text=True,
+        )
+        problems += check_committed_group(
+            "artifact", manifest["artifacts"], recorded_head
+        )
 
-    recorded_sources = {item["path"] for item in manifest["source_files"]}
-    for path in expand(manifest["source_snapshot_scope"], excludes):
-        if path not in recorded_sources:
-            problems.append(f"source: UNRECORDED {path}")
+    excludes = frozenset(EXCLUDED_DIR_NAMES)
+    problems += check_scope_is_live("source", list(SOURCE_SCOPE), excludes)
+    problems += check_scope_is_live("artifact", list(ARTIFACT_SCOPE), excludes)
 
-    prefixes = tuple(manifest["artifact_excluded_prefixes"])
-    recorded_artifacts = {item["path"] for item in manifest["artifacts"]}
-    for path in expand(manifest["artifact_scope"], excludes):
-        if Path(path).name.startswith(prefixes):
-            continue
-        if path not in recorded_artifacts:
-            problems.append(f"artifact: UNRECORDED {path}")
+    recorded_sources = [item["path"] for item in manifest["source_files"]]
+    actual_sources = expand(list(SOURCE_SCOPE), excludes)
+    if recorded_sources != actual_sources:
+        missing = sorted(set(actual_sources) - set(recorded_sources))
+        extra = sorted(set(recorded_sources) - set(actual_sources))
+        problems.append(
+            f"source: scope mismatch; missing={missing}, extra={extra}"
+        )
 
-    snapshot = hashlib.sha256(
-        "".join(
-            f"{item['sha256']}  {item['path']}\n" for item in manifest["source_files"]
-        ).encode()
-    ).hexdigest()
+    recorded_artifacts = [item["path"] for item in manifest["artifacts"]]
+    actual_artifacts = [
+        path
+        for path in expand(list(ARTIFACT_SCOPE), excludes)
+        if not Path(path).name.startswith(EXCLUDED_ARTIFACT_PREFIXES)
+    ]
+    if recorded_artifacts != actual_artifacts:
+        missing = sorted(set(actual_artifacts) - set(recorded_artifacts))
+        extra = sorted(set(recorded_artifacts) - set(actual_artifacts))
+        problems.append(
+            f"artifact: scope mismatch; missing={missing}, extra={extra}"
+        )
+
+    snapshot = snapshot_digest(manifest["source_files"])
     if snapshot != manifest["source_snapshot_sha256"]:
         problems.append(
             "snapshot: DIGEST source_snapshot_sha256\n"
