@@ -202,7 +202,9 @@ data publication, and the public verifying-key channel.
 
 Rows are directly rank-comparable within one signed board. Cross-board claims
 also require the same run specification, entrant field, trial footprint,
-schema, and scorer artifact. The full comparability rule lives in
+schema, and scorer artifact. Matching `RunSpec` alone is not sufficient: field
+composition changes the observed trial floor and can change measured
+dispersion. The full comparability rule lives in
 [Evidence contracts](docs/book/src/evidence-contracts.md) and
 [The arena](docs/book/src/arena.md).
 
