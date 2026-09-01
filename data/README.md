@@ -1,15 +1,24 @@
 # Frozen datasets
 
 SharpeBench runs on **frozen, point-in-time, checksummed** datasets: never a live
-API in the scoring path, so a score reproduces byte-for-byte forever. Fetchers are
-offline (the `xtask` crate and `scripts/data/`); the benchmark only ever loads the
-frozen artifact.
+API in the scoring path. The fetch tools under `xtask` and `scripts/data/` do use
+upstream networks; only scoring is offline.
+
+> [!CAUTION]
+> The code license does not license the data. The current
+> [series-by-series rights audit](RIGHTS.md) found no recorded redistribution
+> grant for S&P 500, DJIA, Nasdaq Composite, or Binance observations, and the
+> current FRED terms restrict this software and archive use. Do not redistribute
+> the CSVs or run the FRED fetchers for this product until the maintainer resolves
+> that blocker. Replacing the series requires new dataset identities and a new
+> empirical run; it cannot be presented as the v0.9.0 evidence.
 
 ## `crypto-majors-1d.csv`
 
 - **Symbols:** BTC, ETH, SOL, BNB, XRP (quoted vs USDT, treated as USD).
 - **Bars:** daily closes, ~1000 days.
-- **Source:** Binance public REST API (`/api/v3/klines`, no key): public market data.
+- **Source:** Binance public REST API (`/api/v3/klines`, no key). Public access
+  does not establish redistribution permission; see [RIGHTS.md](RIGHTS.md).
 - **Format:** long: `date,symbol,close` (ISO `YYYY-MM-DD`; series aligned on the
   date axis common to all symbols).
 - **Integrity:** `crypto-majors-1d.csv.sha256`.
@@ -25,7 +34,9 @@ cargo run -p xtask -- crypto                                   # re-fetch + writ
 
 - **Symbols:** SPX (S&P 500), DJI (Dow Jones Industrial Average), IXIC (Nasdaq Composite).
 - **Bars:** daily closes, ~2500 days (10 years).
-- **Source:** FRED public CSV endpoint (`fredgraph.csv`, no key): **public domain**.
+- **Source:** FRED CSV endpoint (`fredgraph.csv`, no key). SP500, DJIA, and
+  NASDAQCOM are copyrighted; no required pre-approval is recorded here. See
+  [RIGHTS.md](RIGHTS.md).
 - **Format:** long: `date,symbol,close` (aligned on the shared NYSE-calendar axis).
 - **Integrity:** `us-indices-1d.csv.sha256`.
 
@@ -51,7 +62,8 @@ and kurtosis, which change with bar size.
     five pairs (SOL listed on Binance 2020-08-11): the intersection trims the
     older BTC/ETH/BNB/XRP history. The first SOL bar is a partial listing week.
 - **Source:** Binance public REST API (`/api/v3/klines`, no key, paginated 1000
-  klines per request): public market data. Fetched 2026-08-23.
+  klines per request). Public access does not establish redistribution
+  permission. Fetched 2026-08-23; see [RIGHTS.md](RIGHTS.md).
 - **Raw / derived:** raw.
 - **Integrity:** `<file>.sha256`. Regenerate and compare:
 
@@ -73,8 +85,9 @@ left untouched; the 1h/4h/1w files contain only completed bars.
   `us-indices-1d.csv`, stamped with the actual date of that last trading day.
   522 bars / symbol, `2016-06-24` .. `2026-06-17` (1 566 rows). The first and last
   weeks are partial.
-- **Source:** derived offline from the frozen `us-indices-1d.csv` (FRED, public
-  domain): no network. Derived 2026-08-23.
+- **Source:** derived offline from the frozen `us-indices-1d.csv`; no network.
+  Derivation does not remove the three upstream index copyrights. Derived
+  2026-08-23; see [RIGHTS.md](RIGHTS.md).
 - **Raw / derived:** **derived**; a pure function of the daily file's bytes.
 - **Integrity:** `us-indices-1w.csv.sha256`.
 
@@ -96,8 +109,10 @@ python scripts/data/derive_weekly.py          # us-indices-1d.csv -> us-indices-
   (EUR to 1999); the window is **capped at 2010-01-01** for comparability across
   the FRED files, and at 2026-08-14, the last date published for all five at
   freeze time.
-- **Source:** FRED `fredgraph.csv` (no key), Federal Reserve Board H.10 release:
-  **public domain**. Fetched 2026-08-23.
+- **Source:** FRED `fredgraph.csv` (no key), Federal Reserve Board H.10 release.
+  FRED labels these series `Public Domain: Citation Requested`, a category it
+  says may include copyrighted works and that remains subject to its prohibited
+  uses. Fetched 2026-08-23; see [RIGHTS.md](RIGHTS.md).
 - **Raw / derived:** raw (values inverted for JPY/CHF, nothing else).
 - **Integrity:** `fx-majors-1d.csv.sha256`.
 
@@ -122,8 +137,10 @@ python scripts/data/fetch_fred.py fx
   **-37.7** on this file, versus **+6.3** excess kurtosis when the window starts
   2020-05-01. Run `fetch_fred.py commodities --start 2020-05-01` (or any other
   cap) if a study needs a strictly positive price path, and say so.
-- **Source:** FRED `fredgraph.csv` (no key), data from the U.S. Energy Information
-  Administration: **public domain**. Fetched 2026-08-23.
+- **Source:** FRED `fredgraph.csv` (no key), data from the U.S. Energy
+  Information Administration. FRED labels these series `Public Domain: Citation
+  Requested`, subject to its prohibited uses. Fetched 2026-08-23; see
+  [RIGHTS.md](RIGHTS.md).
 - **Raw / derived:** raw.
 - **Integrity:** `commodities-1d.csv.sha256`.
 
@@ -145,8 +162,9 @@ python scripts/data/fetch_fred.py commodities
 - **Bars:** daily, 4 157 bars, `2010-01-04` .. `2026-08-14` (4 157 rows). Single
   symbol: `DGS2` / `DGS30` are a one-line addition in the script if a
   cross-section is wanted.
-- **Source:** FRED `fredgraph.csv` (no key), Federal Reserve Board H.15 release:
-  **public domain**. Fetched 2026-08-23.
+- **Source:** FRED `fredgraph.csv` (no key), Federal Reserve Board H.15 release.
+  FRED labels the series `Public Domain: Citation Requested`, subject to its
+  prohibited uses. Fetched 2026-08-23; see [RIGHTS.md](RIGHTS.md).
 - **Raw / derived:** raw.
 - **Integrity:** `rates-1d.csv.sha256`.
 
@@ -159,17 +177,17 @@ python scripts/data/fetch_fred.py rates
 Rows exclude the header. Fetch date for every file added 2026-08-23 is stated in
 its section above; the two original files were frozen 2026-06-22.
 
-| file | symbols | rows | bars | date range | source | license | raw / derived |
+| file | symbols | rows | bars | date range | source | rights status | raw / derived |
 |---|---|---|---|---|---|---|---|
-| `crypto-majors-1d.csv` | BTC ETH SOL BNB XRP | 5 000 | 1 000 | 2023-09-27 .. 2026-06-22 | Binance `/api/v3/klines` | public market data | raw |
-| `crypto-majors-1h.csv` | BTC ETH SOL BNB XRP | 120 000 | 24 000 | 2023-09-27T00:00 .. 2026-06-22T23:00 | Binance `/api/v3/klines` | public market data | raw |
-| `crypto-majors-4h.csv` | BTC ETH SOL BNB XRP | 30 000 | 6 000 | 2023-09-27T00:00 .. 2026-06-22T20:00 | Binance `/api/v3/klines` | public market data | raw |
-| `crypto-majors-1w.csv` | BTC ETH SOL BNB XRP | 1 535 | 307 | 2020-08-10 .. 2026-06-22 | Binance `/api/v3/klines` | public market data | raw |
-| `us-indices-1d.csv` | SPX DJI IXIC | 7 539 | 2 513 | 2016-06-20 .. 2026-06-17 | FRED `SP500` `DJIA` `NASDAQCOM` | public domain | raw |
-| `us-indices-1w.csv` | SPX DJI IXIC | 1 566 | 522 | 2016-06-24 .. 2026-06-17 | derived from `us-indices-1d.csv` | public domain | **derived** |
-| `fx-majors-1d.csv` | EURUSD GBPUSD AUDUSD JPYUSD CHFUSD | 20 785 | 4 157 | 2010-01-04 .. 2026-08-14 | FRED `DEXUSEU` `DEXUSUK` `DEXUSAL` `DEXJPUS` `DEXSZUS` | public domain | raw (JPY/CHF inverted) |
-| `commodities-1d.csv` | WTI BRENT | 8 252 | 4 126 | 2010-01-04 .. 2026-08-14 | FRED `DCOILWTICO` `DCOILBRENTEU` | public domain | raw |
-| `rates-1d.csv` | UST10Y (yield, %) | 4 157 | 4 157 | 2010-01-04 .. 2026-08-14 | FRED `DGS10` | public domain | raw |
+| `crypto-majors-1d.csv` | BTC ETH SOL BNB XRP | 5 000 | 1 000 | 2023-09-27 .. 2026-06-22 | Binance `/api/v3/klines` | no redistribution grant recorded | raw |
+| `crypto-majors-1h.csv` | BTC ETH SOL BNB XRP | 120 000 | 24 000 | 2023-09-27T00:00 .. 2026-06-22T23:00 | Binance `/api/v3/klines` | no redistribution grant recorded | raw |
+| `crypto-majors-4h.csv` | BTC ETH SOL BNB XRP | 30 000 | 6 000 | 2023-09-27T00:00 .. 2026-06-22T20:00 | Binance `/api/v3/klines` | no redistribution grant recorded | raw |
+| `crypto-majors-1w.csv` | BTC ETH SOL BNB XRP | 1 535 | 307 | 2020-08-10 .. 2026-06-22 | Binance `/api/v3/klines` | no redistribution grant recorded | raw |
+| `us-indices-1d.csv` | SPX DJI IXIC | 7 539 | 2 513 | 2016-06-20 .. 2026-06-17 | FRED `SP500` `DJIA` `NASDAQCOM` | pre-approval required; none recorded | raw |
+| `us-indices-1w.csv` | SPX DJI IXIC | 1 566 | 522 | 2016-06-24 .. 2026-06-17 | derived from `us-indices-1d.csv` | inherits upstream restrictions | **derived** |
+| `fx-majors-1d.csv` | EURUSD GBPUSD AUDUSD JPYUSD CHFUSD | 20 785 | 4 157 | 2010-01-04 .. 2026-08-14 | FRED `DEXUSEU` `DEXUSUK` `DEXUSAL` `DEXJPUS` `DEXSZUS` | FRED terms apply; no consent recorded | raw (JPY/CHF inverted) |
+| `commodities-1d.csv` | WTI BRENT | 8 252 | 4 126 | 2010-01-04 .. 2026-08-14 | FRED `DCOILWTICO` `DCOILBRENTEU` | FRED terms apply; no consent recorded | raw |
+| `rates-1d.csv` | UST10Y (yield, %) | 4 157 | 4 157 | 2010-01-04 .. 2026-08-14 | FRED `DGS10` | FRED terms apply; no consent recorded | raw |
 
 Every file has a `<file>.sha256` sidecar (`sha256sum -c <file>.sha256` inside
 `data/`, or re-run the script with `--check`). The Python scripts under
@@ -186,6 +204,8 @@ oil and the 10-year yield (FRED). Known gaps:
 
 - **Single-name equities**: DJIA / S&P constituents need a keyed source (Tiingo, Nasdaq Data Link) or a JS-capable Stooq fetch; FRED carries indices, not single names. Not attempted.
 - **Gold**: FRED withdrew the daily LBMA series; no keyless, redistributable daily source found.
-- **Fundamentals**: SEC EDGAR financial-statement datasets (public domain) → the `fundamentals` channel.
+- **Fundamentals**: evaluate SEC EDGAR financial-statement data and its current
+  terms before adding a `fundamentals` channel.
 
-Add new fetchers to `scripts/data/` (Python) or the `xtask` crate (offline, `publish = false`) and keep the scoring path pure.
+Add permission-compatible fetchers to `scripts/data/` (Python) or the `xtask`
+crate (`publish = false`) and keep network access outside the scoring path.
