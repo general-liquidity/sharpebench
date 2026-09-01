@@ -39,6 +39,54 @@ class ProvenancePolicyTests(unittest.TestCase):
     def test_current_manifest_uses_the_closed_policy(self) -> None:
         self.assertEqual(common.manifest_rule_problems(self.manifest), [])
 
+    def test_every_manifest_rule_rejects_its_planted_counterexample(self) -> None:
+        """One registry covers every rule family with a named negative control.
+
+        The real manifest above is the valid control. Keeping the mutations in
+        one table means a new validator rule has one obvious place to acquire a
+        non-vacuous fixture, and CI exercises the whole registry whenever this
+        checker changes.
+        """
+
+        def mutate(field, value):
+            def apply(manifest):
+                manifest[field] = value
+
+            return apply
+
+        def mutate_source_record(change):
+            def apply(manifest):
+                change(manifest["source_files"][0])
+
+            return apply
+
+        def duplicate_source(manifest):
+            manifest["source_files"].append(copy.deepcopy(manifest["source_files"][0]))
+
+        cases = (
+            ("canonical policy", mutate("schema_version", -1), "canonical validator rule"),
+            ("closed top level", lambda m: m.update({"unreviewed": True}), "top-level fields differ"),
+            ("commit identity", mutate("generated_at_head", "not-a-commit"), "not a full commit id"),
+            ("dirty flag type", mutate("generated_at_head_dirty", "false"), "must be boolean"),
+            ("snapshot digest", mutate("source_snapshot_sha256", "xyz"), "not a sha256"),
+            ("record schema", mutate_source_record(lambda r: r.update({"size": 1})), "exactly path and sha256"),
+            ("rooted path", mutate_source_record(lambda r: r.update(path="../escape")), "invalid path"),
+            ("record digest", mutate_source_record(lambda r: r.update(sha256="0")), "invalid sha256"),
+            ("unique path", duplicate_source, "repeats path"),
+            ("nonempty sources", mutate("source_files", []), "source_files is empty"),
+            ("nonempty artifacts", mutate("artifacts", []), "artifacts is empty"),
+        )
+        self.assertGreaterEqual(len(cases), 10, "a truncated registry proves too little")
+        for name, apply, diagnostic in cases:
+            with self.subTest(rule=name):
+                planted = copy.deepcopy(self.manifest)
+                apply(planted)
+                problems = common.manifest_rule_problems(planted)
+                self.assertTrue(
+                    any(diagnostic in problem for problem in problems),
+                    f"planted counterexample for {name!r} escaped: {problems}",
+                )
+
     def test_manifest_cannot_remove_scope_or_add_an_exclusion(self) -> None:
         narrowed = copy.deepcopy(self.manifest)
         narrowed["source_snapshot_scope"].pop()
