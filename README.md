@@ -14,7 +14,7 @@ process checks, using one deterministic Rust kernel across every surface.
 [![docs.rs](https://img.shields.io/docsrs/sharpebench-core?style=flat-square&logo=docsdotrs&label=docs.rs)](https://docs.rs/sharpebench-core)
 [![CI](https://img.shields.io/github/actions/workflow/status/general-liquidity/sharpebench/ci.yml?style=flat-square&label=CI)](https://github.com/general-liquidity/sharpebench/actions)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue?style=flat-square)](LICENSE-MIT)
-[![Unsafe](https://img.shields.io/badge/unsafe-forbidden-success?style=flat-square)](docs/book/src/introduction.md)
+[![Unsafe](https://img.shields.io/badge/workspace%20packages-unsafe%20forbidden-success?style=flat-square)](docs/book/src/introduction.md)
 
 **[Quick start](#quick-start) · [Gates](#what-makes-an-agent-rank-eligible) · [Bring an agent](#bring-your-own-agent) · [Verify](#capture-and-verify) · [Paper](paper/main.pdf) · [Documentation](#documentation)**
 
@@ -284,7 +284,9 @@ in [`docs/PLAN.md`](docs/PLAN.md).
 ## Architecture
 
 The codebase is a Rust workspace with a pure scoring center and explicit I/O at
-the edges. All production crates forbid `unsafe`.
+the edges. All twelve workspace packages under `crates/` forbid `unsafe`. The
+published PyO3 binding is excluded from that workspace and is the disclosed
+exception because generated FFI glue expands to unsafe operations.
 
 ```text
 sharpebench-stats
