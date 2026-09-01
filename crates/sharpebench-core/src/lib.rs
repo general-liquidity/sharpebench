@@ -4,7 +4,7 @@
 //! (per-seed × per-window return series + decision traces) into a **luck-robust,
 //! risk-adjusted** score and leaderboard ranking.
 //!
-//! Design invariants — these are what make a SharpeBench score reproducible forever:
+//! Design invariants — these make a score reproducible for a pinned release and input:
 //! - **Pure.** No I/O, no system clock, no ambient randomness. Any randomness
 //!   (the significance bootstrap) takes an explicit seed argument.
 //! - **Deterministic.** Plain `f64` math, fixed reduction order, no parallel

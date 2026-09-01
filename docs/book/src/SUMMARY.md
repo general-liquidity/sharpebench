@@ -10,6 +10,7 @@
   - [Process discipline](methodology-process.md)
   - [Regime-conditional comparison](methodology-regime.md)
 - [The simulator](simulator.md)
+- [Memory and retrieval benchmark](memory.md)
 - [Submitting an agent](submitting.md)
 - [Forward attestation](attestation.md)
 - [The arena](arena.md)

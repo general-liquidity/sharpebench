@@ -84,7 +84,7 @@ Untrusted agent code is launched under Docker with every hardening flag the
 runtime offers:
 
 ```
-docker run --rm --init --pull never \
+docker run --name sharpebench-agent-... --init --pull never \
   --network none --ipc none --read-only \
   --cap-drop ALL --security-opt no-new-privileges=true \
   --user 65532:65532 \
@@ -102,6 +102,14 @@ protocol as any external agent (`sharpebench-sim`'s process transport is
 wrapped, not reimplemented), so an arena entrant is just an image whose
 entrypoint reads one observation per line and writes one decision per line.
 
+Entrant containers are named and retained only long enough to read Docker's
+post-exit `State.OOMKilled` fact. The harness then removes them explicitly on
+the normal finish path and in `Drop`; a memory-budget kill becomes the typed,
+non-retryable `ResourceLimitExceeded` agent fault. A harness itself killed with
+SIGKILL between spawn and cleanup can still leave a stopped container, whose
+deterministic `sharpebench-agent-*` name makes it discoverable. Short-lived
+readiness probes continue to use `--rm`.
+
 Be clear about the boundary: **container isolation is the security boundary.**
 The flags above remove network and IPC access, drop every capability, refuse
 privilege escalation, run as a non-root user on a read-only root with
@@ -113,33 +121,36 @@ development against your own agent; it defaults to false and additionally
 requires an explicit host command. Host execution of untrusted third-party
 code remains unsupported.
 
-### The boundary has not been observed to hold
+### What the acceptance evidence covers
 
-This is the part of the chapter that is not yet evidence.
+The Docker-enabled CI job runs the ignored production-boundary suite against an
+Alpine fixture pinned by repository digest. It proves that, on that runner and
+fixture:
 
-`docker_spawn_smoke` used to return early with an `eprintln` when Docker was
-absent, so it counted as one of the passing tests and cargo swallowed the
-message. Its assertion was `orders.is_empty()`, which holds for every failure
-mode, including a container that never started, so the boundary could not have
-been observed even on a machine where the test did run. That test is now
-`#[ignore]`d, so a skip reads as a skip, and its assertion moved to transport
-health, which distinguishes a container that ran and stayed silent (a timeout)
-from one that never started (a transport error).
+- the entrant executes as uid 65532 with no effective capabilities and
+  `NoNewPrivs` set;
+- the root is read-only, `/etc` rejects writes, and the writable scratch mounts
+  reject execution;
+- the network namespace exposes only loopback;
+- public internet, cloud metadata, the wider link-local range, all three
+  RFC1918 ranges, and a live host-loopback listener classify as immediate
+  policy denials rather than timeouts or missing-client false passes;
+- the production spawn reaches a live container rather than treating a failed
+  start as a deliberate hold; and
+- an actual 32 MiB cgroup overrun produces `OOMKilled=true`, after which the
+  container is removed.
 
-A second test, `live_hostile_probe_passes_inside_the_hardened_boundary`, is
-the first in the repository that actually executes the hostile probe. From
-inside the container the probe asserts that the user id is 65532, that the
-effective capability set is empty, that `NoNewPrivs` is set, that the only
-network interface is loopback, that the root mount is read-only and a write
-to `/etc` is refused, and that `/tmp` accepts a write but refuses to execute
-what was written. A CI job pins alpine by RepoDigest and runs the ignored set
-on a Docker-enabled runner.
+The elapsed-time classification is load-bearing: a bare non-zero connection
+status would also pass when the runner's network is merely broken or the image
+lacks the probe client. The host-loopback test likewise holds a real listener
+open and proves it is reachable from the host before asking the container to
+fail.
 
-**Neither test has ever been executed, and the CI job is unvalidated.** Docker
-Desktop is installed on the development machine but its daemon is not running.
-The hardening above is written and reviewable; nothing here should be read as
-a claim that it was observed to contain anything. What changed is that the
-absence of evidence is now visible instead of counted as evidence.
+This is acceptance evidence for one daemon configuration and one benign fixture,
+not a proof against a Docker or kernel escape. No hostile third-party entrant has
+been operated as a tenant, and multi-tenant hosting remains outside this crate.
+The development machine has no running Docker daemon, so these live legs are CI
+evidence rather than local evidence.
 
 ## What the arena does NOT provide
 

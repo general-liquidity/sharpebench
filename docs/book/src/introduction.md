@@ -12,9 +12,10 @@ a sharper question:
 
 It answers it without a judge. The scoring kernel is a pure, deterministic Rust
 library (`sharpebench-core`): no I/O, no system clock, no ambient randomness, no `unsafe`.
-The same trajectories always produce byte-identical scores on any platform, so a
-result is reproducible forever — and a benchmark whose verdicts are assertions
-rather than opinions cannot be gamed by learning a judge's biases.
+For a pinned release, configuration, and input artifact, the same trajectories
+produce byte-identical scores across supported platforms. The verdicts are
+deterministic assertions rather than a learned judge, so an entrant cannot improve
+its rank by learning a judge's preferences.
 
 ## The one-line thesis
 
@@ -36,9 +37,14 @@ raw return get demoted below a steadily-skilled one.
 | Crate | Responsibility |
 |---|---|
 | `sharpebench-core` | The pure scoring kernel (DSR/PSR/pass^k/significance/process/composite). |
+| `sharpebench-stats` | The standalone statistical primitives shared by the scoring and memory benchmarks. |
+| `sharpebench-edge` | The “is my Sharpe real?” honesty verdict over the statistics kernel. |
+| `sharpebench-protocol` | The language-neutral observation/decision wire contract and closed schemas. |
 | `sharpebench-sim` | Point-in-time simulator (look-ahead is structurally impossible) + reference agents. |
 | `sharpebench-harness` | Drives agents across windows × seeds into submissions; team harness. |
 | `sharpebench-attest` | Forward-attestation commitments + tamper-evident signed result chains. |
 | `sharpebench-leaderboard` | Render + sign + persist a published board. |
+| `sharpebench-arena` | Forward-window lifecycle and the Docker containment boundary for untrusted entrants. |
 | `sharpebench-wasm` | The identical kernel compiled to WASM, embeddable in any host. |
 | `sharpebench-cli` | `sharpebench` — run / score / stress / audit / commit / sign / verify. |
+| `sharpebench-memory` | Deterministic three-arm retrieval ablations, poisoning, PIT, multi-session, and confabulation metrics. |

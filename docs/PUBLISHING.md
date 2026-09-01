@@ -1,85 +1,62 @@
-# Publishing SharpeBench to crates.io
+# Publishing SharpeBench
 
-crates.io is Rust's package registry — the `cargo` equivalent of `npm publish`.
-Publishing is **irreversible**: a version can be *yanked* (blocked from new
-dependents) but never deleted, and a crate **name is claimed forever**. Decide
-names *before* the first publish.
+SharpeBench publishes from the tagged commit through GitHub Actions. The normal
+path uses OIDC trusted publishing; no long-lived crates.io, npm, or PyPI token is
+stored in the repository.
 
-## 0. Published names — `sharpebench-*`
+The operational runbook is [`RELEASING.md`](../RELEASING.md). This page explains
+the registry setup and the exceptional first-publish case.
 
-The crates are named consistently throughout — directory, package, and import all
-match: `crates/sharpebench-core`, package `sharpebench-core`, import
-`sharpebench_core`. The CLI crate's package is `sharpebench` (so `cargo install
-sharpebench` works). Nothing left to decide.
+## Published surfaces
 
-Names on crates.io are permanent (a version can be yanked but never deleted, and a
-name is claimed forever), so confirm availability before the first publish.
+| Registry | Packages |
+|---|---|
+| crates.io | 12 `sharpebench-*` crates, including the `sharpebench` CLI and `sharpebench-memory` |
+| npm | `@general-liquidity/sharpebench` and `@general-liquidity/sharpebench-mcp` |
+| PyPI | `sharpebench` |
+| GitHub Releases | Static musl CLI, checksum, and build provenance |
 
-## 1. Account + token
+`xtask` and `examples/reference-agent` are private workspace members with
+`publish = false`.
 
-1. Log into <https://crates.io> with GitHub.
-2. Account Settings → API Tokens → new token (scopes: publish-new, publish-update).
-3. `cargo login <token>` (or set `CARGO_REGISTRY_TOKEN` in the environment).
+## Trusted-publisher identity
 
-## 2. Pre-publish checklist
+Each registry trusts the GitHub repository `general-liquidity/sharpebench`, the
+workflow file `release.yml`, and its registry-specific GitHub Environment:
+`crates`, `npm`, or `pypi`. GitHub exchanges the workflow's OIDC identity for a
+short-lived publishing credential during the release run.
 
-- [ ] Names decided (§0).
-- [ ] `cargo deny check`, `cargo test --workspace`, `cargo clippy --workspace` all clean.
-- [ ] Every crate has `description` + `license` (✓ inherited: `MIT OR Apache-2.0`).
-- [ ] Path deps carry a `version` (✓ — crates.io requires it; path is ignored on publish).
-- [ ] Mark any internal-only crate `publish = false` (e.g. if `sharpebench-wasm` stays Gordon-internal).
-- [ ] Clean working tree (`cargo publish` refuses a dirty tree).
+All current package names are already claimed. A normal release therefore needs
+no `cargo login`, npm token, PyPI token, or repository secret.
 
-## 3. Publish in dependency order
+## Adding a new Rust crate
 
-A crate must be live on crates.io before its dependents can resolve it:
+crates.io cannot configure a trusted publisher before a crate exists. If the
+workspace gains another public crate:
 
-```
-sharpebench-core   sharpebench-protocol   sharpebench-attest    # no internal deps — first
-sharpebench-sim    sharpebench-leaderboard   sharpebench-wasm   # depend on the row above
-sharpebench-harness                                             # core / protocol / sim
-sharpebench                                                     # the binary; depends on all
-```
+1. Confirm its permanent package name and set `publish = false` until the public
+   API and dependency order are reviewed.
+2. Run the complete local package, test, lint, license, and release rehearsal
+   gates.
+3. Claim the name once with a narrowly scoped crates.io token using
+   `cargo publish -p <new-crate>`.
+4. Configure the same GitHub trusted-publisher identity as the existing crates.
+5. Add it to the dependency-ordered publish loop and registry verification list
+   in `.github/workflows/release.yml`.
+6. Remove the local token and restore the OIDC-only path.
 
-Helper script:
+The first publish is irreversible: a version can be yanked but not deleted, and
+the crate name remains claimed. This one-time step is therefore intentionally
+manual. It is not the release procedure for existing packages.
 
-```bash
-scripts/publish.sh --check      # package-verify the leaf crates locally (no upload)
-scripts/publish.sh --execute    # real, ordered publish to crates.io
-```
+## Recovery after a partial release
 
-> `cargo publish --dry-run` only fully works for the leaf crates (those with no
-> internal deps). Dependents verify against crates.io once their deps are live, so
-> the real publish proceeds one crate at a time, in the order above.
+Publishing is per package. If a registry job stops after some packages are live,
+do not retag or overwrite published versions. Fix the workflow or registry
+configuration, then rerun the same tag: the release jobs skip versions already
+present and continue the dependency-ordered loop.
 
-## 4. After publishing
-
-- `cargo install sharpebench` installs the CLI. The static **musl** binary also
-  ships via GitHub Releases (`.github/workflows/release.yml`, on `git tag v*`) with
-  SLSA build provenance attached via GitHub's native attestation
-  (`actions/attest-build-provenance`: keyless OIDC, no signing keys to manage).
-  Anyone can verify a downloaded binary with one command:
-
-  ```bash
-  gh attestation verify sharpebench-x86_64-linux-musl --repo general-liquidity/sharpebench
-  ```
-- To automate later: add `CARGO_REGISTRY_TOKEN` as a repo secret and extend
-  `release.yml` to run the ordered publish on tag. Do the **first** publish by hand
-  — names are permanent, so verify everything once before automating.
-
-## 5. Cutting a release with cargo-release (preferred)
-
-`cargo-release` automates §3 plus the version bump and the inter-crate `version`
-pin rewrite — the one easy-to-miss step. Config lives in `release.toml`.
-
-```bash
-cargo install cargo-release            # once
-# verify green first — cargo-release does not run tests:
-cargo test --workspace && cargo clippy --workspace --all-targets && cargo deny check
-cargo release patch                    # DRY RUN: prints the bump, dep rewrites, publish order, tag
-cargo release patch --execute          # 0.0.1 -> 0.0.2: bump, rewrite pins, ordered publish, tag v0.0.2, push
-```
-
-`cargo login <token>` once (or set `CARGO_REGISTRY_TOKEN`) before `--execute`. The
-pushed `v0.0.2` tag triggers the attested musl binary build in `release.yml`. The
-manual `scripts/publish.sh` flow in §3 remains as a fallback.
+The release workflow validates the annotated tag and provenance before any
+publish job, checks out the exact validated commit in every job, and verifies all
+registries after publishing. See [`RELEASING.md`](../RELEASING.md) for the cut,
+rehearsal, and tag invariants.

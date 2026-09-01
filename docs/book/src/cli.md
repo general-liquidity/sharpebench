@@ -5,6 +5,8 @@ The `sharpebench` binary (crate `sharpebench-cli`) is the command-line entry poi
 ```text
 sharpebench run                       run reference agents through the sim and rank them
 sharpebench score <submissions.json>  rank a JSON field of pre-computed submissions
+sharpebench check <returns.csv> --trials N             test one return series for backtest honesty
+sharpebench realism [--data <csv>]    run the stylized-facts dataset gate
 sharpebench commit <agent> <window> <digest> <salt>   forward-attestation pre-registration
 sharpebench stress                    run the adversarial stress suite (contamination-masked)
 sharpebench audit                     self-audit: prove the scorer resists gaming
@@ -14,8 +16,10 @@ sharpebench capture <agent> <out.json>                capture an agent's raw-dec
 sharpebench verify-trajectory <traj.json>             replay a trajectory → recompute its score
 sharpebench audit-briefing <briefing.json>            audit a shared briefing for salience bias
 sharpebench canary <seed>                             derive a do-not-train contamination tripwire
+sharpebench sandbox-check <image@sha256:digest>       run the live Docker-boundary acceptance checks
 sharpebench score-allocation <alloc.json>             score a weight-vector trajectory (turnover)
 sharpebench greeks <spot> <strike> <t> <r> <vol> <call|put>   Black-Scholes price + Greeks + tail-risk
+sharpebench self-update                               update an update-enabled binary in place
 ```
 
 Add `--json` to any command for machine-readable output.
@@ -25,6 +29,21 @@ Add `--json` to any command for machine-readable output.
 Runs the reference agents (buy-and-hold, momentum) through the point-in-time
 simulator over multiple windows × seeds with costs on, and prints the ranked
 board. The teaching demo: watch deflation and pass^k in action.
+
+Three external-agent transports are explicit rather than interchangeable:
+
+- `--image <repository@sha256:...>` launches an already-present, digest-pinned
+  image through the fail-closed Docker boundary. No daemon, mutable reference,
+  absent image, failed readiness check, indeterminate OOM verdict, or failed
+  cleanup becomes host execution.
+- `--cmd "<program>"` executes a trusted program on the host and prints an
+  unsandboxed warning on every run. Its environment is cleared to a small
+  platform allowlist; opt named variables in with
+  `SHARPEBENCH_AGENT_ENV=NAME1,NAME2`.
+- `--http <addr>` posts to an endpoint whose isolation the operator owns.
+
+See [The arena](arena.md#sandboxed-entrants) for the boundary and acceptance
+evidence.
 
 ## `score`
 

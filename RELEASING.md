@@ -52,18 +52,20 @@ opt-in variable(s) and the environments. The publisher is always: **GitHub** own
 
 | Registry | Where | Notes |
 |---|---|---|
-| **crates.io** | each crate → *Settings → Trusted Publishing* | A crate must **exist** before a trusted publisher can be added. Do **one** initial `cargo publish` with a token to claim each of the 12 names **in the dependency order above**, then add the trusted publisher to each crate and never use a token again. `sharpebench-memory` is the one name still unclaimed, so the next tag with `PUBLISH_CRATES=true` fails on it until that first publish is done by hand. |
+| **crates.io** | each crate → *Settings → Trusted Publishing* | All 12 names are already published and configured for this workflow. A future new crate must be claimed once with a token before its trusted publisher can be added. |
 | **npm** | each package page → *Settings → Trusted Publisher* | If `…/sharpebench` + `…-mcp` already exist, configure the trusted publisher directly. If not, claim each once (`npm publish --access public`), then add the trusted publisher. Needs npm ≥ 11.5 (the workflow upgrades it). Provenance is automatic. |
 
-### Claiming the crate names once (token, first time only)
+### Claiming a future crate name once
 
-Trusted publishing can't be added to a crate that doesn't exist yet, so the first
-publish of each name needs a real token. `cargo login <token>` (token scopes:
-publish-new, publish-update), then publish in dependency order:
+Trusted publishing cannot be added to a crate that does not exist yet. All current
+SharpeBench packages are already claimed; this procedure applies only if a later
+release adds another public crate. Use a narrowly scoped token for that first
+publish, place the crate in the dependency order below, then add the same trusted
+publisher as the existing packages and remove the token locally.
 
 ```bash
 cargo publish -p sharpebench-stats
-cargo publish -p sharpebench-memory   # name not yet claimed as of v0.13.0
+cargo publish -p sharpebench-memory
 cargo publish -p sharpebench-edge
 cargo publish -p sharpebench-protocol
 cargo publish -p sharpebench-core
@@ -79,9 +81,9 @@ cargo publish -p sharpebench          # the CLI binary crate (package name `shar
 (Avoid `cargo publish --workspace` for this — its publish planner can deadlock
 part-way through with "no packages ready to publish but N packages remain… awaiting
 confirmation", leaving some crates unpublished; publish per-crate as above.) After
-each crate is live, add its trusted publisher on crates.io; thereafter CI publishes
-tokenlessly. See [`docs/PUBLISHING.md`](docs/PUBLISHING.md) for the manual token
-flow / name-availability notes.
+the new crate is live, add its trusted publisher on crates.io; thereafter CI publishes
+it tokenlessly. See [`docs/PUBLISHING.md`](docs/PUBLISHING.md) for registry setup
+and recovery notes.
 
 ### Opt-in repository variables + environments
 
@@ -104,8 +106,9 @@ reviewers, branch restrictions) to the publishing steps. Their names must match 
 ## Cutting a release
 
 1. Confirm the version surfaces the driver will bump together:
-   - `[workspace.package] version` in the root [`Cargo.toml`](Cargo.toml) (all 8
-     crates inherit via `version.workspace = true`; cargo-release rewrites the
+   - `[workspace.package] version` in the root [`Cargo.toml`](Cargo.toml) (all 14
+     Rust workspace members inherit via `version.workspace = true`; two are
+     private, and cargo-release rewrites the
      inter-crate `version = "x"` pins — see [`release.toml`](release.toml)).
    - `version` in [`npm/package.json`](npm/package.json) **and**
      [`npm/mcp/package.json`](npm/mcp/package.json) (and the MCP package's
