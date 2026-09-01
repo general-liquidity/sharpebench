@@ -764,6 +764,10 @@ pub struct CompositeScore {
     /// Calibration of stated confidence (Brier score; lower = better). `None` if
     /// the agent reported no confidences/outcomes.
     pub calibration_brier: Option<f64>,
+    /// Decision-level confidence/outcome pairs behind `calibration_brier`.
+    /// Pairing is performed inside each run, never across a run boundary.
+    #[serde(default)]
+    pub calibration_observations: usize,
     /// Edge durability: half-life (in runs) of the per-run edge. `None` if there
     /// are too few runs or the edge isn't decaying.
     pub edge_half_life: Option<f64>,
@@ -818,6 +822,9 @@ pub struct CompositeScore {
     /// low/negative = diversifying. Reported, not gating; filled by [`rank`].
     /// `None` from `score_agent` alone (no field context) or with < 2 agents.
     pub field_crowdedness: Option<f64>,
+    /// Peers with a defined correlation behind `field_crowdedness`.
+    #[serde(default)]
+    pub field_crowdedness_peers: usize,
     /// In-sample search budget the agent declared (configs tried before submission).
     pub in_sample_trials: u32,
     /// Effective deflation trial footprint = `cfg.n_trials + in_sample_trials`; the
@@ -842,6 +849,9 @@ pub struct CompositeScore {
     /// the edge is everywhere; low = the deflated edge lives in a few lucky
     /// windows. `None` when the track is too short.
     pub rolling_frac_positive: Option<f64>,
+    /// Overlapping windows behind the rolling fraction and minimum Sharpe.
+    #[serde(default)]
+    pub rolling_windows: usize,
     /// Sortino ratio over the pooled track (excess mean return per unit of
     /// *downside* deviation, MAR = 0): rewards an edge that doesn't arrive with
     /// downside churn. Reported, never the rank key. `None` with no downside.
@@ -1170,17 +1180,19 @@ fn score_agent_with(
     let raw_mean_return = mean(&pooled);
 
     // Calibration: does stated conviction predict outcomes? (None if not reported.)
-    let conf: Vec<f64> = sub
+    let calibration_pairs: Vec<(f64, bool)> = sub
         .runs
         .iter()
-        .flat_map(|r| r.confidences.iter().copied())
+        .flat_map(|run| {
+            run.confidences
+                .iter()
+                .copied()
+                .zip(run.outcomes.iter().copied())
+        })
         .collect();
-    let outc: Vec<bool> = sub
-        .runs
-        .iter()
-        .flat_map(|r| r.outcomes.iter().copied())
-        .collect();
-    let calibration_brier = if !conf.is_empty() && !outc.is_empty() {
+    let calibration_observations = calibration_pairs.len();
+    let (conf, outc): (Vec<f64>, Vec<bool>) = calibration_pairs.into_iter().unzip();
+    let calibration_brier = if calibration_observations > 0 {
         Some(brier_score(&conf, &outc))
     } else {
         None
@@ -1267,6 +1279,7 @@ fn score_agent_with(
     let rolling = rolling_sharpe(&pooled, cfg.rolling_window);
     let rolling_min_sharpe = rolling.map(|r| r.min_sharpe);
     let rolling_frac_positive = rolling.map(|r| r.frac_positive);
+    let rolling_windows = rolling.map_or(0, |r| r.n_windows);
 
     // Downside-risk view: the Sortino rewards an edge that doesn't arrive with
     // downside volatility (reported alongside the Sharpe family, never a gate).
@@ -1367,6 +1380,7 @@ fn score_agent_with(
         alpha: 0.0,
         beta: 0.0,
         calibration_brier,
+        calibration_observations,
         edge_half_life: edge_half_life_periods,
         field_reality_check_p: 1.0,
         max_drawdown: mdd,
@@ -1382,6 +1396,7 @@ fn score_agent_with(
         field_spa_consistent_p: 1.0,
         field_significance_benchmark: "unscored".to_string(),
         field_crowdedness: None,
+        field_crowdedness_peers: 0,
         in_sample_trials: sub.in_sample_trials,
         effective_n_trials,
         dsr_percentile,
@@ -1390,6 +1405,7 @@ fn score_agent_with(
         rank_ordinal: 0,
         rolling_min_sharpe,
         rolling_frac_positive,
+        rolling_windows,
         sortino,
         downside_deviation,
         dsr_per_cost,
@@ -1785,7 +1801,9 @@ pub fn rank_declared(
                 .filter(|&(j, _)| j != idx)
                 .map(|(_, &p)| p)
                 .collect();
-            cs.field_crowdedness = crate::correlation::crowdedness(aligned[idx], &peers).mean_corr;
+            let crowdedness = crate::correlation::crowdedness(aligned[idx], &peers);
+            cs.field_crowdedness = crowdedness.mean_corr;
+            cs.field_crowdedness_peers = crowdedness.n_peers;
         }
     }
 
@@ -2059,6 +2077,27 @@ mod tests {
     }
 
     #[test]
+    fn calibration_pairs_stop_at_each_run_boundary_and_report_support() {
+        let mut first = run(0.002, 0.0005, 30);
+        first.confidences = vec![0.0, 1.0];
+        first.outcomes = vec![false];
+        let mut second = run(0.002, 0.0005, 30);
+        second.confidences = vec![1.0];
+        second.outcomes = vec![true, false];
+
+        let score = score_agent(
+            &agent("paired", vec![first, second]),
+            &ScoreConfig::default(),
+        );
+        assert_eq!(score.calibration_observations, 2);
+        assert_eq!(
+            score.calibration_brier,
+            Some(0.0),
+            "unpaired tails must not cross a run boundary and become a false error"
+        );
+    }
+
+    #[test]
     fn cost_efficiency_reported_only_with_cost() {
         let mut r = run(0.002, 0.0005, 30);
         r.cost = 4.0;
@@ -2142,6 +2181,7 @@ mod tests {
             (fp - 1.0).abs() < 1e-12,
             "steady edge → all windows positive"
         );
+        assert_eq!(s.rolling_windows, 280, "300 - 21 + 1 backing windows");
     }
 
     #[test]
@@ -2153,6 +2193,19 @@ mod tests {
         let s = score_agent(&agent("short", vec![run(0.002, 0.0005, 30)]), &cfg);
         assert!(s.rolling_min_sharpe.is_none());
         assert!(s.rolling_frac_positive.is_none());
+        assert_eq!(s.rolling_windows, 0);
+    }
+
+    #[test]
+    fn crowdedness_reports_the_number_of_defined_peers() {
+        let field = [
+            agent("a", vec![run(0.001, 0.003, 60)]),
+            agent("b", vec![run(0.002, 0.004, 60)]),
+            agent("c", vec![run(-0.001, 0.002, 60)]),
+        ];
+        let board = rank(&field, &ScoreConfig::default());
+        assert!(board.iter().all(|score| score.field_crowdedness.is_some()));
+        assert!(board.iter().all(|score| score.field_crowdedness_peers == 2));
     }
 
     #[test]

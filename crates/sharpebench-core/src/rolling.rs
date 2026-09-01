@@ -16,6 +16,8 @@ pub struct RollingSharpe {
     pub min_sharpe: f64,
     /// Fraction of windows whose Sharpe is strictly positive, in [0, 1].
     pub frac_positive: f64,
+    /// Number of overlapping windows behind both reported statistics.
+    pub n_windows: usize,
 }
 
 /// Compute the worst-window Sharpe and fraction-of-positive-windows over
@@ -41,6 +43,7 @@ pub fn rolling_sharpe(returns: &[f64], window: usize) -> Option<RollingSharpe> {
     Some(RollingSharpe {
         min_sharpe,
         frac_positive: positive as f64 / n_windows as f64,
+        n_windows,
     })
 }
 
