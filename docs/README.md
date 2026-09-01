@@ -11,12 +11,14 @@ operations and engineering assessments.
 | Book contents | [mdBook summary](book/src/SUMMARY.md) |
 | CLI and transports | [CLI reference](book/src/cli.md) |
 | Submission format | [Submitting an agent](book/src/submitting.md) |
+| Checkpoint and replay identity | [Evidence contracts](book/src/evidence-contracts.md) |
 | Scoring and statistical gates | [Methodology](book/src/methodology.md) |
 | Process and lifecycle checks | [Process discipline](book/src/methodology-process.md) |
 | Forward attestation | [Attestation](book/src/attestation.md) |
 | Sandboxed entrants and forward league | [The arena](book/src/arena.md) |
 | Integrity, self-audit, and provenance | [Integrity](book/src/integrity.md) |
 | Memory/retrieval benchmark | [Memory benchmark](book/src/memory.md) |
+| Frozen data inventory | [Data README](../data/README.md) |
 
 Build or serve the book from the repository root:
 
@@ -36,6 +38,14 @@ mdbook serve docs/book
 | Release procedure | [`RELEASING.md`](../RELEASING.md) |
 | Registry authentication and recovery | [Publishing model](PUBLISHING.md) |
 | Methodology paper and committed evidence | [`paper/`](../paper/) |
+
+## Engineering records
+
+These are implementation audits and design ledgers, not user instructions.
+
+| Topic | Document |
+|---|---|
+| Cross-benchmark architecture review | [65-benchmark audit](BENCHMARK_ARCHITECTURE_AUDIT.md) |
 
 Package-specific READMEs remain beside the Rust crates, Python distribution,
 npm package, MCP server, and reference agent so registry consumers do not need

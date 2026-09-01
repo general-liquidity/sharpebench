@@ -1,36 +1,40 @@
-# Governance & Neutrality
+# Governance and neutrality
 
-A benchmark's authority comes from trust, and a benchmark published by a company
-that also *competes on it* has a built-in conflict of interest. SharpeBench
-addresses this on two fronts — a technical one we control today, and a
-governance path we're explicit about.
+A benchmark published by a potential entrant has a structural conflict of
+interest. SharpeBench separates the technical evidence that can be verified now
+from governance arrangements that do not yet exist.
 
-## 1. Technical neutrality (today): verify, don't trust
+## Current status
 
-You should not have to trust General Liquidity's word for any number on the
-board. Two mechanisms in [`sharpebench-attest`](../crates/sharpebench-attest) make results
-independently checkable:
+The repository publishes a deterministic benchmark implementation, frozen
+teaching fields, and a forward-window protocol. It does not currently operate a
+hosted intake service or an admitted external-model leaderboard. No Gordon or
+other LLM trading-agent result appears in the paper evidence.
+
+## What can be checked independently
+
+Three mechanisms reduce the amount a reader must take on trust:
 
 - **Forward-attestation.** An agent publishes a SHA-256 *commitment* binding its
   frozen artifact to a target window **before that window's data exists**. There
-  is nothing to overfit, and revealing the pre-image later proves the agent
-  wasn't tuned to the window. This is the un-gameable spine: it defeats backtest
-  overfitting *structurally*, not just statistically.
-- **Signed, tamper-evident results.** Every scored result is HMAC-signed over the
-  previous one, forming a chain (the same construction Gordon uses for its audit
-  log). Anyone can recompute a published rank from the pre-registered artifact
-  and the committed scoring kernel (`sharpebench-core`, deterministic, `Cargo.lock`-pinned)
-  and confirm the chain wasn't altered.
+  is nothing to overfit, and revealing the pre-image later proves that the
+  revealed artifact matches the commitment.
+- **Recomputable scoring.** A reader can replay published decisions under the
+  committed dataset, cost model, scorer, windows, and seeds.
+- **Public result signatures.** Ed25519 boards can be checked with a separately
+  obtained verifying key. HMAC chains are also supported, but every HMAC
+  keyholder can forge; they are not a public-verification substitute.
 
-So the credible claim is not "trust us" — it's "**reproduce it**."
+These controls establish consistency with published inputs. They do not prove
+that participant identity, dataset publication, scheduling, or key custody was
+neutral.
 
-## 2. Governance path: GL-hosted now → neutral foundation
+## Governance path
 
-General Liquidity hosts SharpeBench to start, because shipping and earning
-adoption beats a perfect-but-nonexistent neutral standard. But the goal is
-neutral, multi-stakeholder governance, and we say so on day one. Gordon (GL's
-agent) competes on the board like any other entrant and **does not** operate the
-grading.
+If a public competition is launched, host and entrant roles should be separated,
+the scorer and field specification should be committed before intake, the
+verifying key should be published through an independent channel, and governance
+should include parties that do not compete on the board.
 
 ### The FINOS / Open FinLLM Leaderboard angle
 
@@ -46,8 +50,8 @@ axis** — no Sharpe, no risk-adjusted returns, no deflation, no skill-vs-luck. 
 own charter says "Financial LLMs **and Agents**," yet the agent-trading track does
 not exist.
 
-That is exactly the gap SharpeBench fills. So the strategic path is not to build a
-rival leaderboard and fight OFLL for the "financial AI benchmark" brand — it is to
+That is the gap SharpeBench is designed to fill. A possible path is not to build a
+rival leaderboard and fight OFLL for the "financial AI benchmark" brand, but to
 become **the trading-performance / skill-vs-luck track that OFLL and FINOS lack**,
 contributed under (or alongside) their neutral governance:
 
@@ -56,7 +60,7 @@ contributed under (or alongside) their neutral governance:
   deflated Sharpe, pass^k reliability, process discipline, and forward-attestation.
 
 Knowledge benchmarks (OFLL/FinBen) ask *"does the model know finance?"*
-SharpeBench asks *"can the agent trade with skill that survives deflation?"* —
+SharpeBench asks *"can the agent trade with skill that survives deflation?"*,
 complementary axes, not competitors. (StockBench's own finding underlines why both
 are needed: strong static-QA performance does **not** translate into effective
 trading.)
@@ -64,5 +68,5 @@ trading.)
 ## Contributing to governance
 
 If you represent FINOS, a foundation, an exchange, or an academic group
-interested in a neutrally-governed trading-agent track, open an issue — neutral
+interested in a neutrally-governed trading-agent track, open an issue. Neutral
 governance is a feature we want, not a threat we're guarding against.

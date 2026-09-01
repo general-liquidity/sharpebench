@@ -21,13 +21,16 @@ its rank by learning a judge's preferences.
 
 An agent does **not** rank on raw return. It ranks only if its edge survives:
 
-1. **Deflation** for the number of agents tested (Deflated Sharpe / PSR),
+1. **Deflation** for the number of agents tested (Deflated Sharpe),
 2. **Reliability** across *every* seed × window (pass^k, mode "all"),
-3. **Significance** that beats data-snooping (stationary bootstrap + White's
-   Reality Check + Romano–Wolf step-down),
+3. **Significance** under the stationary-bootstrap null,
 4. **Process discipline** over the decision trace (risk-gate-before-order,
    drawdown halts, no manipulative orders),
 5. **Mandate compliance** with the declared drawdown and risk constraints.
+
+PSR, White's Reality Check, SPA, and Romano-Wolf step-down remain reported
+diagnostics. They do not silently replace the five published eligibility
+predicates.
 
 Raw mean return is recorded and displayed, but it is **never** the rank key. Run
 the reference field with `sharpebench run`. To watch a lucky agent with the

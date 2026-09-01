@@ -22,7 +22,9 @@ sharpebench greeks <spot> <strike> <t> <r> <vol> <call|put>   Black-Scholes pric
 sharpebench self-update                               update an update-enabled binary in place
 ```
 
-Add `--json` to any command for machine-readable output.
+Use `sharpebench --help` for the complete command and flag inventory. Commands
+that render a human report accept the global `--json` flag for structured
+output; file-producing commands already write their documented JSON artifact.
 
 ## `run`
 
@@ -41,6 +43,18 @@ Three external-agent transports are explicit rather than interchangeable:
   platform allowlist; opt named variables in with
   `SHARPEBENCH_AGENT_ENV=NAME1,NAME2`.
 - `--http <addr>` posts to an endpoint whose isolation the operator owns.
+
+Add `--checkpoint <path>` to resume an external sweep. The checkpoint contract
+binds the dataset, costs, score configuration, running CLI binary, entrant,
+ordered windows, ordered seeds, and retry policy. A checkpointed `--cmd` or
+`--http` run also requires `--entrant-sha256 <digest>` because a command line or
+endpoint address does not identify the artifact that served it. A mismatched or
+legacy checkpoint is refused rather than overwritten.
+
+Exhausted runtime failures make the external sweep noncertifying: the CLI emits
+expected, completed, runtime-failed, and agent-failed cell counts, then exits
+without a board. Agent-caused protocol faults remain in the pass^k denominator
+as failing sentinels.
 
 See [The arena](arena.md#sandboxed-entrants) for the boundary and acceptance
 evidence.
@@ -65,13 +79,23 @@ is not demoted.
 ## `commit` / `sign` / `verify`
 
 The [forward-attestation](attestation.md) surface: pre-register a strategy digest,
-sign a published board, and verify a board's tamper-evident chain.
+sign a published board, and verify a board's chain. HMAC verification requires a
+shared secret whose holders can also forge. Public verification uses the
+Ed25519 chain and a verifying key obtained through an independent channel.
 
 ## `capture` / `verify-trajectory`
 
 Capture an agent's raw per-seed×window decision trajectory to JSON, then have a
-separate verifier replay it through the sim and recompute the score from the raw
-decisions — a forged trajectory recomputes to a different number.
+separate verifier replay it through the simulator and recompute the score from
+the raw decisions. New captures bind the data, costs, engine, runner, exact
+ordered windows, and exact ordered seeds. Strict verification requires every
+declared cell and every decision step, validates step and observation identity,
+and derives replicate grouping from the contract. Missing, duplicated,
+reordered, shortened, or cross-environment evidence is refused.
+
+`--allow-unbound-trajectory` is an explicit legacy or cross-version regrade. It
+does not claim that the artifact reproduces its original execution conditions.
+See [Evidence contracts](evidence-contracts.md).
 
 ## `regime`
 

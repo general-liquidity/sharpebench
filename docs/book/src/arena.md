@@ -20,10 +20,13 @@ open -> committed -> scoring -> published
 ```
 
 1. **`arena init <dir>`** creates the arena.
-2. **`arena open <dir> <window> <commit_deadline> <reveal_epoch>`** opens a
+2. **`arena open <dir> <window> <commit_deadline> <reveal_epoch>
+   --scorer-artifact-sha256 <hex>`** opens a
    window. Nothing is sealed yet, but the `ScoreConfig` the window will be
    scored under is recorded now, so the rules are fixed before any entry
-   exists. Pass `--config <score_config.json>` to override the default.
+   exists. The required scorer digest freezes the exact scoring artifact before
+   entrants commit. Pass `--config <score_config.json>` to override the default
+   and `--sealed-eval-salt-sha256 <hex>` when the window uses sealed evaluation.
 3. **`arena commit <dir> <window> <commitment.json>`** registers an entrant's
    commitment (the JSON that `sharpebench commit` prints). Late commitments,
    at or after the deadline epoch, are refused; so are duplicates. These are

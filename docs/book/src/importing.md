@@ -97,11 +97,10 @@ read every imported re-score:
 If the source documents its protocol (for example "3 runs per model"), pass a
 defensible `--trials` and say in your write-up what you assumed.
 
-A second calibration knob: `sharpebench score` uses the default
-`ScoreConfig`, whose annualization assumes daily bars (252 periods per year).
-Imported daily equity series match it; for other bar sizes, score through the
-library with `ScoreConfig::for_periods_per_year` as `sharpebench run
---periods-per-year` does.
+A second calibration knob: the default annualization assumes daily bars (252
+periods per year). Imported daily equity series match it; for other bar sizes,
+pass `--periods-per-year N` to `sharpebench score` or use
+`ScoreConfig::for_periods_per_year` through the library.
 
 ## StockBench: the experiment that needs the authors' artifacts
 

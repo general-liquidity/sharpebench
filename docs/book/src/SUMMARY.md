@@ -12,6 +12,7 @@
 - [The simulator](simulator.md)
 - [Memory and retrieval benchmark](memory.md)
 - [Submitting an agent](submitting.md)
+- [Evidence contracts](evidence-contracts.md)
 - [Forward attestation](attestation.md)
 - [The arena](arena.md)
 - [Importing a rival field](importing.md)
