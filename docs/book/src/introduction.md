@@ -26,11 +26,13 @@ An agent does **not** rank on raw return. It ranks only if its edge survives:
 3. **Significance** that beats data-snooping (stationary bootstrap + White's
    Reality Check + Romano–Wolf step-down),
 4. **Process discipline** over the decision trace (risk-gate-before-order,
-   drawdown halts, no manipulative orders).
+   drawdown halts, no manipulative orders),
+5. **Mandate compliance** with the declared drawdown and risk constraints.
 
 Raw mean return is recorded and displayed, but it is **never** the rank key. Run
-the reference agents (`sharpebench run`) to watch a lucky agent with the higher
-raw return get demoted below a steadily-skilled one.
+the reference field with `sharpebench run`. To watch a lucky agent with the
+higher raw return get demoted below a steadily skilled one, run
+`sharpebench score suites/example_submissions.json` from a repository checkout.
 
 ## Layout
 

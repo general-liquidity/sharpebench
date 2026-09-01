@@ -16,7 +16,7 @@ process checks, using one deterministic Rust kernel across every surface.
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue?style=flat-square)](LICENSE-MIT)
 [![Unsafe](https://img.shields.io/badge/unsafe-forbidden-success?style=flat-square)](docs/book/src/introduction.md)
 
-**[Quick start](#quick-start) · [Surfaces](#choose-a-surface) · [Gates](#what-makes-an-agent-rank-eligible) · [Agent transports](#bring-your-own-agent) · [Documentation](#documentation)**
+**[Quick start](#quick-start) · [Gates](#what-makes-an-agent-rank-eligible) · [Bring an agent](#bring-your-own-agent) · [Verify](#capture-and-verify) · [Paper](paper/main.pdf) · [Documentation](#documentation)**
 
 </div>
 
@@ -33,6 +33,17 @@ point-in-time trajectories using the same protocol and execution model.
 > every hard gate passes; an impressive but unreliable or process-invalid run
 > remains ineligible.
 
+## Benchmark at a glance
+
+| | |
+|:--|:--|
+| Question | Does an agent's apparent edge survive selection, repeated execution, significance, process, and mandate checks? |
+| Judge | One deterministic Rust kernel. No LLM judge. |
+| Inputs | Frozen returns and process traces, or point-in-time decisions from a live agent. |
+| Eligibility | Five conjunctive hard gates. One failed gate makes the submission ineligible. |
+| Data | Nine frozen datasets across four asset classes and four bar sizes. |
+| Outputs | A diagnostic board, replayable trajectories, and optional signed forward records. |
+
 ## Quick start
 
 ```bash
@@ -40,14 +51,38 @@ cargo install sharpebench
 sharpebench run
 ```
 
-The built-in field includes a steady agent, a lucky agent with higher raw
-return, a process violator, and random-agent luck floors. The steady agent ranks;
-the others show why headline return is insufficient.
+`sharpebench run` drives buy-and-hold, momentum, and three zero-skill luck-floor
+agents across two windows and eight execution seeds. To see the headline
+failure directly, score the committed teaching submissions from a repository
+checkout:
+
+```bash
+sharpebench score suites/example_submissions.json
+```
+
+The resulting board makes the rank rule concrete:
+
+| Entrant | Raw mean return | pass^k | Process | Eligible |
+|:--|--:|:--:|:--:|:--:|
+| `skilled-momentum` | 0.2020% | yes | pass | **yes** |
+| `lucky-yolo` | **0.4111%** | no | pass | no |
+| `ungated-bot` | 0.2020% | yes | fail | no |
+
+The lucky entrant earns roughly twice the raw mean return and still cannot
+rank. The process violator reproduces the skilled return but is floored. The
+table is pinned to the
+[committed golden board](crates/sharpebench-core/golden/example_submissions.scores.json).
+
+> [!NOTE]
+> This is a deterministic teaching field, not a model leaderboard, and
+> `sharpebench run` does not reproduce the paper's complete evidence sweep. The
+> current paper evaluates author-written entrants and externally specified rules;
+> no LLM trading agent has competed. See the
+> [paper](paper/main.pdf) and its [exact reproduction commands](paper/sections/A-commands.tex).
 
 Common next steps:
 
 ```bash
-sharpebench score suites/example_submissions.json
 sharpebench check returns.csv --trials 200
 sharpebench run --data data/crypto-majors-1d.csv
 sharpebench audit
@@ -58,21 +93,99 @@ sharpebench arena verify league
 Every command supports `--json` for machine-readable output. The full reference
 is in the [CLI chapter](docs/book/src/cli.md).
 
-## Choose a surface
+## What makes an agent rank-eligible
 
-| Surface | Install | Best for |
+All hard gates are conjunctive:
+
+| Gate | Requirement | What it resists |
 |:--|:--|:--|
-| CLI | `cargo install sharpebench` | Running fields, scoring submissions, checking one return series, stress/audit, attestation, and forward leagues. |
-| Rust kernel | `cargo add sharpebench-core` | Deterministic rank, eligibility, process, attribution, and diagnostic APIs. |
-| Statistics | `cargo add sharpebench-stats` | PSR, Deflated Sharpe, stationary bootstrap, Reality Check, SPA, step-down, and selection primitives without the benchmark. |
-| Python | `pip install sharpebench` | The statistics kernel and JSON-compatible board/return rankers. |
-| npm | `npm i @general-liquidity/sharpebench` | Typed JS/TS calls over the WASM kernel. |
-| MCP | `npx -y @general-liquidity/sharpebench-mcp` | The scoring kernel exposed as agent tools. |
+| Deflated Sharpe / PSR | Edge survives trial count, sample length, skew, and kurtosis. | Lucky search and backtest selection. |
+| pass^k | The bar clears on every required seed and window. | One-lucky-seed winners. |
+| Significance | The stationary-bootstrap null is beaten at the configured alpha. | Data-snooping false positives. |
+| Process | No block-severity lifecycle or trace violation occurs. | Risk-gate bypass and invalid execution behavior. |
+| Mandate | The submitted run respects its drawdown or risk mandate. | Taking uncontrolled risk to buy return. |
 
-The workspace contains 12 published Rust crates, two private Rust helpers
-(`xtask` and the reference agent), and the separate maturin-built Python crate.
-See the [package map](docs/book/src/introduction.md#layout) before choosing a
-lower-level dependency.
+`pass^k` means every required execution seed and evaluation window passes. It
+is intentionally stricter than `pass@k`: one successful attempt demonstrates
+possible capability, not reliable trading edge. Seeds test execution stability;
+windows test robustness across market regimes.
+
+Reality Check, SPA, step-down families, downside metrics, rolling stability,
+calibration, decay, turnover, attribution, and cost-normalized measures remain
+visible diagnostics. They do not silently replace the published rank key.
+
+See [Methodology](docs/book/src/methodology.md) and
+[process discipline](docs/book/src/methodology-process.md) for definitions and
+derivations.
+
+## Bring your own agent
+
+Implement the closed `MarketObservation` → `Decision` JSON contract, then choose
+the trust boundary explicitly:
+
+```bash
+sharpebench run --image ghcr.io/you/agent@sha256:<digest>
+sharpebench run --cmd "./trusted-local-agent"
+sharpebench run --http 127.0.0.1:8080
+```
+
+| Transport | Boundary |
+|:--|:--|
+| `--image` | Fail-closed Docker containment: digest-pinned local image, no network or IPC, non-root, read-only root, dropped capabilities, `no-new-privileges`, bounded memory, CPU, PIDs, and files, plus explicit timeouts. |
+| `--cmd` | Trusted host process. The harness clears its environment and passes only platform essentials plus variables named in `SHARPEBENCH_AGENT_ENV`. |
+| `--http` | Remote or local endpoint; the operator owns its isolation. |
+
+> [!WARNING]
+> `--cmd` and `--http` are not sandboxed. For code you do not control, use the
+> digest-pinned `--image` path. It refuses missing Docker, mutable tags, absent
+> images, readiness failures, and indeterminate cleanup or OOM state; it never
+> falls through to host execution.
+
+The Docker-enabled CI suite verifies user, capability, and no-new-privilege
+state; read-only and `noexec` mounts; seven egress-denial classes with timeout
+discrimination; a real production spawn; a live cgroup OOM classification; and
+cleanup. That is evidence for one runner and one benign fixture, not proof
+against a Docker or kernel escape, and not evidence for a hosted multi-tenant
+service. Details and exact limits are in [The arena](docs/book/src/arena.md).
+
+A runnable stdio agent and Dockerfile live in
+[`examples/reference-agent/`](examples/reference-agent/).
+
+## Capture and verify
+
+For a built-in agent, preserve raw decisions instead of trusting a reported
+score:
+
+```bash
+sharpebench capture momentum trajectory.json
+sharpebench verify-trajectory trajectory.json
+```
+
+The verifier replays the decisions through the same frozen simulator and
+recomputes the score. For external agents, the harness and forward arena retain
+the same decision and process-trace boundary; see
+[Submitting an agent](docs/book/src/submitting.md) and
+[Attestation](docs/book/src/attestation.md).
+
+SharpeBench can also pre-register strategy digests before a forward window,
+commit to held-out data, sign boards with publicly verifiable Ed25519 chains,
+and link consecutive windows so replacing an earlier board breaks a later
+anchor. The forward arena is file-backed and clock-free. The operator owns
+scheduling, participant identity, data publication, and the public verifying-key
+channel.
+
+### Compare scores correctly
+
+Two self-describing boards are directly comparable only when their dataset
+hash, cost profile, score configuration, seed set, and window definitions
+match. Forward-window comparisons must also match the schema version and exact
+scorer-artifact digest. If any field differs, treat the boards as separate
+benchmark conditions. Each can be internally valid without supporting a direct
+cross-board ranking.
+
+See [Integrity](docs/book/src/integrity.md) and
+[The arena](docs/book/src/arena.md) for the signed fields and verification
+model.
 
 ## How the Sharpe suite fits
 
@@ -96,83 +209,27 @@ crates so the two products cannot invent competing execution semantics.
 SharpeBench does not import the full Arena package. The field compiler at their
 boundary refuses incomplete or internally inconsistent artifacts before scoring.
 
-## What makes an agent rank-eligible
+## Choose a surface
 
-All hard gates are conjunctive:
-
-| Gate | Requirement | What it resists |
+| Surface | Install | Best for |
 |:--|:--|:--|
-| Deflated Sharpe / PSR | Edge survives trial count, sample length, skew, and kurtosis. | Lucky search and backtest selection. |
-| pass^k | The bar clears on every required seed and window. | One-lucky-seed winners. |
-| Significance | The stationary-bootstrap null is beaten at the configured alpha. | Data-snooping false positives. |
-| Process | No block-severity lifecycle or trace violation occurs. | Risk-gate bypass and invalid execution behavior. |
-| Mandate | The submitted run respects its drawdown/risk mandate. | Taking uncontrolled risk to buy return. |
+| CLI | `cargo install sharpebench` | Running fields, scoring submissions, checking one return series, stress and audit, attestation, and forward leagues. |
+| Rust kernel | `cargo add sharpebench-core` | Deterministic rank, eligibility, process, attribution, and diagnostic APIs. |
+| Statistics | `cargo add sharpebench-stats` | PSR, Deflated Sharpe, stationary bootstrap, Reality Check, SPA, step-down, and selection primitives without the benchmark. |
+| Python | `pip install sharpebench` | The statistics kernel and JSON-compatible board or return rankers. |
+| npm | `npm i @general-liquidity/sharpebench` | Typed JavaScript and TypeScript calls over the WASM kernel. |
+| MCP | `npx -y @general-liquidity/sharpebench-mcp` | The scoring kernel exposed as agent tools. |
 
-Reality Check, SPA, step-down families, downside metrics, rolling stability,
-calibration, decay, turnover, attribution, and cost-normalized measures remain
-visible diagnostics. They do not silently replace the published rank key.
+See the [package map](docs/book/src/introduction.md#layout) before choosing a
+lower-level dependency.
 
-See [Methodology](docs/book/src/methodology.md) and
-[process discipline](docs/book/src/methodology-process.md) for definitions and
-derivations.
-
-## Bring your own agent
-
-Implement the closed `MarketObservation` → `Decision` JSON contract, then choose
-the trust boundary explicitly:
-
-```bash
-sharpebench run --image ghcr.io/you/agent@sha256:<digest>
-sharpebench run --cmd "./trusted-local-agent"
-sharpebench run --http 127.0.0.1:8080
-```
-
-| Transport | Boundary |
-|:--|:--|
-| `--image` | Fail-closed Docker containment: digest-pinned local image, no network/IPC, non-root, read-only root, dropped capabilities, `no-new-privileges`, bounded memory/CPU/PIDs/files, and explicit timeouts. |
-| `--cmd` | Trusted host process. The harness clears its environment and passes only platform essentials plus variables named in `SHARPEBENCH_AGENT_ENV`. |
-| `--http` | Remote/local endpoint; the operator owns its isolation. |
-
-> [!WARNING]
-> `--cmd` and `--http` are not sandboxed. For code you do not control, use the
-> digest-pinned `--image` path. It refuses missing Docker, mutable tags, absent
-> images, readiness failures, and indeterminate cleanup/OOM state; it never
-> falls through to host execution.
-
-The Docker-enabled CI suite verifies user/capability/no-new-privilege state,
-read-only and `noexec` mounts, seven egress-denial classes with timeout
-discrimination, a real production spawn, a live cgroup OOM classification, and
-cleanup. That is evidence for one runner and one benign fixture, not a proof
-against Docker/kernel escape or a hosted multi-tenant service. Details and exact
-limits are in [The arena](docs/book/src/arena.md).
-
-A runnable stdio agent and Dockerfile live in
-[`examples/reference-agent/`](examples/reference-agent/).
-
-## Forward verification
-
-SharpeBench can preserve more than a score:
-
-- capture raw decisions and replay them through the frozen simulator;
-- pre-register strategy digests before a forward window opens;
-- seal held-out data and publish canary markers;
-- sign boards with publicly verifiable Ed25519 chains;
-- link consecutive windows so replacing an earlier board breaks a later anchor;
-- declare exactly which fields each digest covers and why exclusions exist.
-
-The forward arena is file-backed and clock-free. The operator supplies explicit
-integer epochs and owns scheduling, participant identity, data publication, and
-the public verifying-key channel. See
-[Attestation](docs/book/src/attestation.md), [Integrity](docs/book/src/integrity.md),
-and [The arena](docs/book/src/arena.md).
-
-## Data and reproducibility
+## Data and evidence
 
 Scoring uses frozen, checksummed, point-in-time datasets rather than a live API.
-The repository includes nine curated datasets spanning multiple asset classes
-and bar sizes, plus deterministic synthetic/stress generators. For a pinned
-release, configuration, and input artifact, the same trajectories produce the
-same score across supported platforms.
+The repository includes nine datasets across four asset classes and four bar
+sizes, plus deterministic synthetic and stress generators. For a pinned
+release, run specification, and input artifact, the same trajectories produce
+the same score across supported platforms.
 
 Provenance scopes are code-owned, reject empty matches, and verify source blobs
 and result artifacts. Releases build in an isolated checkout, bind the final
@@ -180,26 +237,11 @@ version tree, tag the provenance commit, publish through OIDC, and verify every
 registry surface. Reproducibility means pinned inputs, not that an unpinned data
 source remains unchanged forever.
 
-## Memory and retrieval
-
-`sharpebench-memory` applies the same discipline to a caller-supplied memory or
-retrieval system. It scores baseline/retrieval/oracle ablations, significance,
-fraction of oracle ceiling, poisoning, cross-session dependency, point-in-time
-correctness, and confabulation. It is a pure 40-test library over outcome
-vectors; it does not run agents or own a store. See
-[Memory and retrieval benchmark](docs/book/src/memory.md).
-
-## Current evidence
-
-The companion paper reports the benchmark calibration, determinism checks,
-adversarial self-audit, frozen datasets, and baseline/reference-agent results.
-No local open-weight model field is part of the admitted evidence. SharpeArena's
-runner can produce that field, but the current paper does not claim model
-performance that has not been measured.
-
-Exact scripts, artifacts, figures, and the provenance manifest live under
-[`paper/`](paper/). The full engineering status and remaining external decisions
-are in [`docs/PLAN.md`](docs/PLAN.md).
+The companion [paper](paper/main.pdf) reports calibration, determinism checks,
+the adversarial self-audit, frozen-data results, and explicit limitations. Its
+scripts, artifacts, figures, and provenance manifest live under
+[`paper/`](paper/). The engineering status and remaining external decisions are
+in [`docs/PLAN.md`](docs/PLAN.md).
 
 ## Architecture
 
@@ -219,15 +261,22 @@ See the [package layout](docs/book/src/introduction.md#layout) and the
 [architecture chapters](docs/book/src/SUMMARY.md) for the detailed dependency
 and methodology map.
 
+### Additional package
+
+`sharpebench-memory` scores caller-supplied memory and retrieval ablations. It
+does not run agents or own a store. See the
+[memory and retrieval benchmark](docs/book/src/memory.md).
+
 ## Documentation
 
-| I want to… | Read |
+| I want to... | Read |
 |:--|:--|
 | Understand the benchmark and packages | [Introduction](docs/book/src/introduction.md) · [Book contents](docs/book/src/SUMMARY.md) |
 | Use the CLI or submit an agent | [CLI reference](docs/book/src/cli.md) · [Submitting](docs/book/src/submitting.md) |
 | Understand scoring | [Methodology](docs/book/src/methodology.md) · [Process discipline](docs/book/src/methodology-process.md) |
 | Operate the forward league or sandbox | [Arena](docs/book/src/arena.md) · [Attestation](docs/book/src/attestation.md) |
 | Audit integrity and provenance | [Integrity](docs/book/src/integrity.md) |
+| Reproduce the paper | [Paper PDF](paper/main.pdf) · [Commands](paper/sections/A-commands.tex) |
 | Publish a release | [`RELEASING.md`](RELEASING.md) · [Publishing model](docs/PUBLISHING.md) |
 | Browse everything | [Documentation map](docs/README.md) |
 

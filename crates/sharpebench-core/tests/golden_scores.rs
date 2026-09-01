@@ -45,6 +45,10 @@ fn suites_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../suites")
 }
 
+fn repo_readme() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../README.md")
+}
+
 fn update_requested() -> bool {
     let requested = std::env::var_os(UPDATE_ENV).is_some_and(|v| !v.is_empty() && v != "0");
     // GitHub Actions (and every other mainstream CI) exports `CI=true`. Rewriting
@@ -162,4 +166,55 @@ fn golden_fixtures_are_valid_composite_scores() {
             serde_json::from_str(&raw).unwrap_or_else(|e| panic!("{name} parses: {e}"));
         assert!(!scores.is_empty(), "{name} must contain at least one score");
     }
+}
+
+#[test]
+fn readme_teaching_board_matches_the_committed_golden() {
+    let scores: Vec<CompositeScore> =
+        serde_json::from_str(&golden("example_submissions.scores.json"))
+            .expect("example-submission golden parses");
+    let highest_raw = scores
+        .iter()
+        .map(|score| score.raw_mean_return)
+        .fold(f64::NEG_INFINITY, f64::max);
+
+    let mut expected = String::from(
+        "| Entrant | Raw mean return | pass^k | Process | Eligible |\n\
+         |:--|--:|:--:|:--:|:--:|\n",
+    );
+    for score in &scores {
+        let mut raw = format!("{:.4}%", score.raw_mean_return * 100.0);
+        if score.raw_mean_return == highest_raw {
+            raw = format!("**{raw}**");
+        }
+        let pass_k = if score.passed_k { "yes" } else { "no" };
+        let process = if score.process_ok { "pass" } else { "fail" };
+        let eligible = if score.rank_eligible { "**yes**" } else { "no" };
+        expected.push_str(&format!(
+            "| `{}` | {raw} | {pass_k} | {process} | {eligible} |\n",
+            score.agent_id
+        ));
+    }
+
+    let path = repo_readme();
+    let readme =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    assert!(
+        readme.contains("### The luck-robust benchmark for trading agents"),
+        "README must retain the paper-aligned product line"
+    );
+    assert!(
+        !readme.contains('\u{2014}'),
+        "README must use punctuation other than em dashes"
+    );
+    assert!(
+        !readme.to_ascii_lowercase().contains("smolvm"),
+        "README must describe SharpeBench on its own terms"
+    );
+    assert!(
+        readme.contains(&expected),
+        "README teaching board drifted from example_submissions.scores.json. \
+         Regenerate the golden only for an intentional scorer change, then update the \
+         README table from that reviewed fixture.\n--- expected table ---\n{expected}"
+    );
 }
