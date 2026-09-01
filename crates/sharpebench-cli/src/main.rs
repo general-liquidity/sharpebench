@@ -5,6 +5,8 @@
 //! - `sharpebench score <submissions.json>` — rank a JSON field of pre-computed
 //!   submissions on the luck-robust composite.
 
+#![forbid(unsafe_code)]
+
 use std::process::ExitCode;
 
 use serde::Serialize;
