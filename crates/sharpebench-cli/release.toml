@@ -19,13 +19,13 @@ exactly = 1
 [[pre-release-replacements]]
 file = "../../npm/package-lock.json"
 search = '"name": "@general-liquidity/sharpebench",\n  "version": "[0-9]+\.[0-9]+\.[0-9]+"'
-replace = '"name": "@general-liquidity/sharpebench",\n  "version": "{{version}}"'
+replace = "\"name\": \"@general-liquidity/sharpebench\",\n  \"version\": \"{{version}}\""
 exactly = 1
 
 [[pre-release-replacements]]
 file = "../../npm/package-lock.json"
 search = '"name": "@general-liquidity/sharpebench",\n      "version": "[0-9]+\.[0-9]+\.[0-9]+"'
-replace = '"name": "@general-liquidity/sharpebench",\n      "version": "{{version}}"'
+replace = "\"name\": \"@general-liquidity/sharpebench\",\n      \"version\": \"{{version}}\""
 exactly = 1
 
 [[pre-release-replacements]]
@@ -92,29 +92,29 @@ exactly = 1
 [[pre-release-replacements]]
 file = "../sharpebench-py/Cargo.lock"
 search = 'name = "sharpebench-core"\nversion = "[0-9]+\.[0-9]+\.[0-9]+"'
-replace = 'name = "sharpebench-core"\nversion = "{{version}}"'
+replace = "name = \"sharpebench-core\"\nversion = \"{{version}}\""
 exactly = 1
 
 [[pre-release-replacements]]
 file = "../sharpebench-py/Cargo.lock"
 search = 'name = "sharpebench-edge"\nversion = "[0-9]+\.[0-9]+\.[0-9]+"'
-replace = 'name = "sharpebench-edge"\nversion = "{{version}}"'
+replace = "name = \"sharpebench-edge\"\nversion = \"{{version}}\""
 exactly = 1
 
 [[pre-release-replacements]]
 file = "../sharpebench-py/Cargo.lock"
 search = 'name = "sharpebench-protocol"\nversion = "[0-9]+\.[0-9]+\.[0-9]+"'
-replace = 'name = "sharpebench-protocol"\nversion = "{{version}}"'
+replace = "name = \"sharpebench-protocol\"\nversion = \"{{version}}\""
 exactly = 1
 
 [[pre-release-replacements]]
 file = "../sharpebench-py/Cargo.lock"
 search = 'name = "sharpebench-py"\nversion = "[0-9]+\.[0-9]+\.[0-9]+"'
-replace = 'name = "sharpebench-py"\nversion = "{{version}}"'
+replace = "name = \"sharpebench-py\"\nversion = \"{{version}}\""
 exactly = 1
 
 [[pre-release-replacements]]
 file = "../sharpebench-py/Cargo.lock"
 search = 'name = "sharpebench-stats"\nversion = "[0-9]+\.[0-9]+\.[0-9]+"'
-replace = 'name = "sharpebench-stats"\nversion = "{{version}}"'
+replace = "name = \"sharpebench-stats\"\nversion = \"{{version}}\""
 exactly = 1

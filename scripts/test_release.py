@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import shutil
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -60,6 +62,42 @@ class ReleaseDriverTests(unittest.TestCase):
         self.assertEqual(release.tag_version("v0.16.0"), "0.16.0")
         with self.assertRaises(release.ReleaseError):
             release.tag_version("release-0.16.0")
+
+    def test_multiline_lock_replacements_preserve_json_and_toml(self) -> None:
+        config = tomllib.loads(
+            (release.ROOT / "crates/sharpebench-cli/release.toml").read_text(
+                encoding="utf-8"
+            )
+        )
+        targets = {
+            "../../npm/package-lock.json": release.ROOT / "npm/package-lock.json",
+            "../sharpebench-py/Cargo.lock": (
+                release.ROOT / "crates/sharpebench-py/Cargo.lock"
+            ),
+        }
+        rewritten: dict[str, str] = {}
+        for configured, path in targets.items():
+            payload = path.read_text(encoding="utf-8")
+            for rule in config["pre-release-replacements"]:
+                if rule["file"] != configured:
+                    continue
+                replacement = rule["replace"].replace("{{version}}", "0.15.1")
+                payload, count = re.subn(rule["search"], replacement, payload)
+                self.assertEqual(count, rule["exactly"])
+            rewritten[configured] = payload
+
+        npm_lock = json.loads(rewritten["../../npm/package-lock.json"])
+        self.assertEqual(npm_lock["version"], "0.15.1")
+        self.assertEqual(npm_lock["packages"][""]["version"], "0.15.1")
+        py_lock = tomllib.loads(rewritten["../sharpebench-py/Cargo.lock"])
+        local_versions = {
+            package["name"]: package["version"]
+            for package in py_lock["package"]
+            if package["name"] == "sharpebench"
+            or package["name"].startswith("sharpebench-")
+        }
+        self.assertTrue(local_versions)
+        self.assertEqual(set(local_versions.values()), {"0.15.1"})
 
     def test_a_subheading_without_entries_is_empty(self) -> None:
         self.assertEqual(
