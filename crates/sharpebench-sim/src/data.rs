@@ -85,7 +85,7 @@ impl Dataset {
     /// header required). The series are aligned on the **intersection** of every
     /// symbol's dates, so `close_at(sym, t)` lines up across symbols; ISO
     /// `YYYY-MM-DD` dates sort chronologically. Pure — no network. The benchmark
-    /// only ever reads *frozen* data (offline fetchers live in the `xtask` crate),
+    /// only ever reads *frozen* data (online fetch tools live outside `sim`),
     /// which is what keeps a score reproducible forever.
     pub fn from_csv(text: &str) -> Result<Dataset, String> {
         let mut per_symbol: BTreeMap<String, BTreeMap<String, f64>> = BTreeMap::new();

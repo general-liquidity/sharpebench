@@ -181,8 +181,9 @@ sharpebench capture momentum trajectory.json
 sharpebench verify-trajectory trajectory.json
 ```
 
-The strict verifier binds the dataset, costs, engine, runner, ordered windows,
-and ordered seeds. It requires every declared cell and every decision step,
+For command-line captures, the strict verifier binds the dataset, costs, engine,
+runner, ordered windows, and ordered seeds. Other capture paths do not claim a
+runner digest. It requires every declared cell and every decision step,
 then replays the decisions through the frozen simulator and recomputes the
 score with the original replicate grouping. Missing, duplicated, reordered,
 shortened, or cross-environment evidence is refused. An explicit

@@ -14,7 +14,10 @@ npm install @general-liquidity/sharpebench
 import { score, greeks, selfAudit } from "@general-liquidity/sharpebench";
 
 // Rank a field. Raw return is reported but is NEVER the rank key. An agent ranks
-// only if its edge survives deflation, pass^k reliability, and process discipline.
+// only if its edge survives deflation, pass^k reliability, process discipline,
+// the stationary-bootstrap null, and the configured mandate. This tiny input
+// demonstrates the API shape; use the benchmark's full run geometry for a
+// meaningful eligibility verdict.
 const board = score([
   { agent_id: "skilled", runs: [{ returns: [0.002, 0.0021, 0.0019, 0.002] }] },
   { agent_id: "lucky",   runs: [{ returns: [0.05, 0, 0, 0] }] },

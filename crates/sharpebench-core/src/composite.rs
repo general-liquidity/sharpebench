@@ -5,7 +5,8 @@
 //! 2. it passes the per-run bar on enough seed×window runs (`pass^k`; every run
 //!    under the default `PassMode::All`),
 //! 3. it has zero block-severity process violations in any run,
-//! 4. its bootstrap p-value beats `alpha` (the edge isn't noise).
+//! 4. its bootstrap p-value beats `alpha` (the edge isn't noise), and
+//! 5. it respects the configured mandate.
 //!
 //! Raw mean return is recorded but is **never** the rank key — that is the whole
 //! point of SharpeBench. Run the included synthetic agents (see tests) to watch a
