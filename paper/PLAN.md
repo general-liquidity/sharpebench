@@ -114,7 +114,7 @@ Grid (to be confirmed against what data is obtainable without a keyed feed):
 
 | Asset class | Source | Timeframes | Notes |
 |---|---|---|---|
-| US equity indices | FRED (have) | 1d; 1w by aggregation | public domain |
+| US equity indices | FRED (historical evidence only) | 1d; 1w by aggregation | copyrighted; pre-approval required, none recorded |
 | Crypto majors | Binance klines (have, no key) | 1h, 4h, 1d, 1w | widest timeframe range available free |
 | FX majors | to find (free daily exists) | 1d | different microstructure, near-zero drift |
 | Commodities / rates | FRED has some | 1d | low-frequency sanity |

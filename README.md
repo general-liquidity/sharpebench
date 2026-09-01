@@ -41,8 +41,15 @@ point-in-time trajectories using the same protocol and execution model.
 | Judge | One deterministic Rust kernel. No LLM judge. |
 | Inputs | Frozen returns and process traces, or point-in-time decisions from a live agent. |
 | Eligibility | Five conjunctive hard gates. One failed gate makes the submission ineligible. |
-| Data | Nine frozen datasets across four asset classes and four bar sizes. |
+| Data | Eight tradable-price datasets across four asset classes, plus one rates-yield stress series, at four bar sizes. |
 | Outputs | A diagnostic board, replayable trajectories, and optional signed forward records. |
+
+> [!CAUTION]
+> The code license does not license the frozen market observations. The
+> [series-by-series rights audit](data/RIGHTS.md) records unresolved
+> redistribution restrictions for the current data bundle. Historical evidence
+> remains bound to the exact committed bytes, but those CSVs must not be treated
+> as MIT- or Apache-licensed data.
 
 ## Quick start
 
