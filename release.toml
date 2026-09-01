@@ -13,7 +13,8 @@
 #   python scripts/release.py rehearse patch
 #   python scripts/release.py execute patch
 #
-# Do NOT release until all tier work is in. The version stays 0.0.1 on git until then.
+# Do not cut a release until its complete change set and release notes are on
+# origin/main; the isolated driver refuses local-only notes and dirty inputs.
 
 # Every sharpebench-* crate moves on a single version (matches `version.workspace = true`).
 shared-version = true

@@ -21,6 +21,7 @@
           cargo = toolchain;
           rustc = toolchain;
         };
+        workspaceManifest = builtins.fromTOML (builtins.readFile ./Cargo.toml);
       in
       {
         # `nix build` — a reproducible, hermetic build of the single `sharpebench`
@@ -28,7 +29,8 @@
         # host toolchain: the same inputs yield the identical binary, forever.
         packages.default = rustPlatform.buildRustPackage {
           pname = "sharpebench";
-          version = "0.0.1";
+          # Cargo.toml is the version source shared by every published surface.
+          version = workspaceManifest.workspace.package.version;
           src = self;
 
           cargoLock.lockFile = ./Cargo.lock;
