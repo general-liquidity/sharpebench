@@ -13,6 +13,18 @@ and links the commits it was built from.
 ## [Unreleased]
 
 ### Added
+- harness/protocol: resumable sweeps and captured trajectories now bind the
+  complete evidence geometry. Contracts include the dataset, costs, scorer,
+  runner, entrant, ordered windows, ordered seeds, and retry policy. Strict
+  replay refuses missing, extra, duplicated, reordered, shortened, or
+  cross-environment cells, while exhausted infrastructure failures suppress the
+  board instead of shrinking its denominator.
+- core: composite scores report the support behind calibration, crowdedness,
+  and rolling-stability diagnostics as `calibration_observations`,
+  `field_crowdedness_peers`, and `rolling_windows`.
+- wasm/npm/mcp: regime-conditional comparison is available through the
+  published WebAssembly kernel, typed npm wrapper, and MCP server rather than
+  being registered as an unavailable tool.
 - arena: the live containment readiness check now probes cloud metadata, the rest of link-local space, host loopback, all three RFC1918 ranges, and the public internet independently. Each probe first verifies that the container has only loopback, uses a numeric destination, distinguishes a fast routeless-policy refusal from a timeout, and refuses to infer anything when the client is absent, the namespace is open, or the probe dies by signal.
 - arena/harness: a real Docker acceptance fixture crosses a 32 MiB cgroup limit and requires `State.OOMKilled=true`, complementing the injected inspector tests. Normal sandbox finalization now fails closed if Docker state cannot be read or the named container cannot be removed; the CLI records that indeterminate run as a retryable transport failure instead of scoring it.
 - release: `scripts/release.py` rehearses and executes the complete version-bump, clean provenance rebind, annotated-tag, and atomic-push sequence from a temporary worktree based on freshly fetched `origin/main`. It refuses empty or local-only changelog notes and preserves worktree registration when cleanup cannot safely finish; CI rehearses the candidate sequence on every change.
@@ -24,6 +36,9 @@ and links the commits it was built from.
 - docs: reorganize the root README into a concise, task-first entry point matching SharpeArena's family structure, while moving detailed capability, containment, methodology, release, and project-status material into maintained subdocuments.
 
 ### Fixed
+- core: confidence and outcome observations are paired within each run before
+  calibration is aggregated. Unequal run lengths can no longer pair a
+  confidence from one run with an outcome from another.
 - release: every publishing job now waits on one provenance-safe annotated-tag
   validator and checks out the validated commit, rather than independently
   trusting any pushed `v*` ref. The validator pins the provenance-only rebind
