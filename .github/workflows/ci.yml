@@ -68,10 +68,10 @@ jobs:
 
   test:
     name: build · test (${{ matrix.os }})
-    # The kernel's claim is "byte-identical output on any platform". The golden-score
-    # tests (crates/sharpebench-core/tests/golden_scores.rs) and the wasm↔native parity
-    # tests (crates/sharpebench-wasm/tests/native_parity.rs) compare against committed
-    # fixtures, so running this job on all three OSes is the cross-platform proof.
+    # The golden-score tests pin two committed fields on Linux, macOS, and Windows.
+    # The wasm/native tests exercise the host-testable facade on the same matrix;
+    # actual wasm-pack/npm parity runs on Ubuntu in npm.yml. These are fixture- and
+    # host-scoped checks, not a claim about every input or platform.
     strategy:
       fail-fast: false
       matrix:

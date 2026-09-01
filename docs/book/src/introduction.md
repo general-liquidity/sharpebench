@@ -12,8 +12,8 @@ a sharper question:
 
 It answers it without a judge. The scoring kernel is a pure, deterministic Rust
 library (`sharpebench-core`): no I/O, no system clock, no ambient randomness, no `unsafe`.
-For a pinned release, configuration, and input artifact, the same trajectories
-produce byte-identical scores across supported platforms. The verdicts are
+For a pinned release and configuration, two committed input fields produce
+byte-identical scores on the Linux, macOS, and Windows CI hosts. The verdicts are
 deterministic assertions rather than a learned judge, so an entrant cannot improve
 its rank by learning a judge's preferences.
 

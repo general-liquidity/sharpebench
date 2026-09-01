@@ -12,8 +12,11 @@ lists and dicts.
     True
 
 The whole surface is a pyo3 binding over the same Rust kernel the SharpeBench CLI
-and the ``@general-liquidity/sharpebench`` npm package use, so a number computed
-here is byte-identical to the one the benchmark reports.
+and the ``@general-liquidity/sharpebench`` npm package use. The Python test suite
+compares the public example board with the committed Rust golden on Ubuntu CI;
+cross-platform CI separately pins two Rust golden fields on Linux, macOS, and
+Windows. This is evidence for those fixtures and hosts, not every possible input
+on every platform.
 
 The leaderboard surface is here too: ``rank_board`` / ``score_one`` take the same
 JSON wire format ``sharpebench score`` reads (a serde array of agent submissions)

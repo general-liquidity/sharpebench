@@ -261,12 +261,13 @@ lower-level dependency.
 ## Data and evidence
 
 Scoring uses frozen, checksummed, point-in-time datasets rather than a live API.
-The repository includes nine datasets across four broad asset classes and four
-bar sizes, plus deterministic synthetic and stress generators. Two bundled
+The historical evidence uses eight tradable-price datasets across four asset
+classes, plus one rates-yield stress series, at four bar sizes. Deterministic
+synthetic and stress generators are separate. Two bundled
 artifacts do not clear the stylized-facts realism gate, and the rates dataset
 contains yields rather than tradable prices; both facts are recorded in the
-data inventory and paper limitations. For pinned inputs, the same trajectories
-produce the same score across supported platforms.
+data inventory and paper limitations. Two committed golden fields reproduce
+byte-for-byte on the Linux, macOS, and Windows CI hosts.
 
 Provenance scopes are code-owned, reject empty matches, and verify source blobs
 and result artifacts. Releases build in an isolated checkout, bind the final

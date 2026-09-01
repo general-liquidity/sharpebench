@@ -65,7 +65,9 @@ Two conventions, deliberately unchanged from the papers they come from:
 
 No I/O, no clock, no ambient randomness. The bootstraps take an explicit `seed`
 (defaulted to a fixed constant, so a result is reproducible unless you ask for
-otherwise). The same input yields byte-identical output on any platform.
+otherwise). The Python suite matches the public example board to the committed
+Rust golden on Ubuntu CI. Rust CI separately checks two committed golden fields
+on Linux, macOS, and Windows; neither check covers every possible input or host.
 
 ## Relationship to `sharpearena`
 

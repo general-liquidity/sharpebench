@@ -47,7 +47,11 @@ console.log(greeks({ spot: 100, strike: 100, t_years: 1, rate: 0.05, vol: 0.2, i
 | `classifyDisqualification(submissions, config?)` | Named hard-gate and advisory reasons |
 | `regimeCompare(a, b, regimes, opts?)` | Regime-conditional distribution comparison and pooled-sign reversal |
 
-All inputs and outputs are fully typed (TypeScript declarations ship with the package). The kernel is deterministic: the same input yields byte-identical scores on any platform.
+All inputs and outputs are fully typed (TypeScript declarations ship with the
+package). The npm tests compare the WASM package with the native kernel and
+committed golden on the Ubuntu CI host. The Rust CI separately pins the two
+committed golden fields on Linux, macOS, and Windows; this is not a claim about
+every possible input or platform.
 
 ## Why luck-robust?
 

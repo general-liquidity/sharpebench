@@ -3,8 +3,11 @@
 A benchmark whose scorer is re-implemented per consumer drifts. SharpeBench avoids
 that by having **one** scoring kernel, `sharpebench-core`, and compiling it to
 WebAssembly (`sharpebench-wasm`) for non-Rust hosts. A TypeScript trading agent, the
-published npm package, and the canonical Rust CLI all score against byte-identical
-math; there is no second implementation to disagree.
+published npm package, and the canonical Rust CLI all call the same kernel; there
+is no second scoring implementation. Ubuntu CI compares the built npm/WASM
+package with the committed golden, while the Rust host facade is checked on the
+three CI operating systems. That evidence is limited to the tested fixtures and
+hosts.
 
 ## The npm package
 

@@ -69,7 +69,7 @@ Wolfram Language checks confirmed how quickly uncertainty changes with support.
 For a Bernoulli rate at 0.5, the standard error is 0.5 at `n=1`, 0.224 at
 `n=5`, 0.158 at `n=10`, 0.100 at `n=25`, and 0.050 at `n=100`. Wolfram|Alpha's
 95 percent Wilson interval for 50 successes in 100 trials is approximately
-0.399 to 0.601. SharpeBench therefore reports denominators rather than imposing
+0.404 to 0.596. SharpeBench therefore reports denominators rather than imposing
 one universal minimum that would have different meanings across diagnostics.
 
 ## Complete 65-repository ledger

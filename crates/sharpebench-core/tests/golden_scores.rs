@@ -7,8 +7,9 @@
 //! exact bytes `sharpebench score <input> --json` prints). serde_json renders
 //! every `f64` with ryu's shortest-round-trip form, which is unique per bit
 //! pattern, so even 1-ULP drift in any statistic changes the bytes and fails the
-//! assert. The same test file runs on every OS in the CI matrix, which is what
-//! turns "byte-identical on any platform" from an architectural claim into a check.
+//! assert. The same test file runs on Linux, macOS, and Windows in CI, so the two
+//! committed fields have a concrete cross-platform check. It is not an
+//! exhaustive claim about other inputs or platforms.
 //!
 //! This file exercises the scoring kernel only. `synthetic_field.input.json` is a
 //! committed trajectory set; the test that proves the simulator still produces

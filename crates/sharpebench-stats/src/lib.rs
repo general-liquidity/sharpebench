@@ -10,7 +10,8 @@
 //! - **Pure.** No I/O, no system clock, no ambient randomness. Any randomness
 //!   (the significance bootstrap) takes an explicit seed argument.
 //! - **Deterministic.** Plain `f64` math, fixed reduction order, no parallel
-//!   float sums. The same input yields byte-identical output on any platform.
+//!   float sums. The enclosing benchmark pins two committed golden fields on
+//!   Linux, macOS, and Windows; that check does not cover every input or host.
 //! - **No `unsafe`.**
 //!
 //! ## Example: is this Sharpe real?
