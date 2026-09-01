@@ -1,8 +1,8 @@
 \section{Commands that produce every number}\label{app:commands}
 
-All commands run from the repository root at the tagged version. The kernel is deterministic, so each command produces the same bytes on the three CI targets (Linux, macOS, Windows).
+All commands run from the repository root. Commands that reproduce empirical numbers use the v0.9.0 evidence snapshot; commands that test the newer contracts use the current engineering tree. The kernel is deterministic, so its golden outputs reproduce on the three CI targets (Linux, macOS, Windows).
 
-\paragraph{Version.} Findings 1 and 2 were first observed at v0.2.1, and \cref{tab:units} was computed against v0.2.1 deliberately because it documents that kernel's unit error. The units fix shipped in v0.3.0. Current-result artifacts are v0.9.0, a cut and published tag, and were regenerated from the content-hashed source snapshot containing corrected execution-seed pooling, the observed-field trial floor, the measured-dispersion floor, clone collapse and the strict forward-window schema. Historical package labels are not substituted for that exact content snapshot.
+\paragraph{Version.} Findings 1 and 2 were first observed at v0.2.1, and \cref{tab:units} was computed against v0.2.1 deliberately because it documents that kernel's unit error. The units fix shipped in v0.3.0. The admitted result artifacts are from v0.9.0, a cut and published tag, and were regenerated from the content-hashed source snapshot containing corrected execution-seed pooling, the observed-field trial floor, the measured-dispersion floor, clone collapse and the strict forward-window schema. Historical package labels are not substituted for that exact content snapshot. The current engineering tree is on the v0.15.0 development line and includes later checkpoint, trajectory, transport and diagnostic-schema corrections. Those later changes are software claims exercised below, not a new empirical validation; the result JSONL, figures and model field were not rerun.
 
 \paragraph{Content provenance.}
 \begin{verbatim}
@@ -106,14 +106,18 @@ Scores the risk-managed field on all nine datasets under the default verdict and
 \paragraph{The forward arena (\cref{sec:attest}).}
 \begin{verbatim}
 sharpebench arena init <dir>
-sharpebench arena open <dir> <window> <deadline> <reveal> \
-  [--config c.json] [--sealed-eval-salt-sha256 <hex>]
-sharpebench arena commit <dir> <window> <agent> <digest> <salt>
+sharpebench arena open <dir> <window> <commit_deadline> <reveal_epoch> \
+  --scorer-artifact-sha256 <hex> \
+  [--config <score_config.json>] [--sealed-eval-salt-sha256 <hex>]
+sharpebench commit <agent_id> <target_window> <artifact_digest> <salt> \
+  > commitment.json
+sharpebench arena commit <dir> <window> <commitment.json>
 sharpebench arena advance <dir> <epoch>
-sharpebench arena score <dir> <window> <data.csv> <reveals.json>
+sharpebench arena score <dir> <window> <dataset> <entries.json>
 sharpebench arena publish <dir> <window> <key>
 sharpebench arena verify <dir> [--pubkey <hex>]
 \end{verbatim}
+The opening command refuses to create a window without the exact scorer artifact digest. The standalone \texttt{commit} command produces the commitment document that \texttt{arena commit} registers; the latter does not accept the agent, artifact and salt as positional fields.
 
 \paragraph{The local open-weight compatibility path (unrun).}
 \begin{verbatim}
@@ -123,6 +127,13 @@ cargo run --release -p sharpebench-harness \
   local-open-weight.jsonl [dataset]
 \end{verbatim}
 The example drives each exact local tag through SharpeArena's canonical stdio shim and the same reference-field and ranking path as the historical evaluator. It records model/server identity, cadence, thinking settings and agent protocol failures; an infrastructure failure aborts publication. This command is listed to make the built boundary inspectable. It has not produced an evidence file admitted by this manuscript and supports no result above.
+
+\paragraph{Capturing and strictly replaying a trajectory.}
+\begin{verbatim}
+sharpebench capture <agent> <trajectory.json> [--data <csv>]
+sharpebench verify-trajectory <trajectory.json> [--data <csv>]
+\end{verbatim}
+The second command is strict by default: it verifies the data, cost, engine, optional runner, ordered-window and ordered-seed contract and requires the complete run matrix before replay. \texttt{--allow-unbound-trajectory} is the explicitly labeled legacy or cross-version regrade, not a fallback used after strict verification fails.
 
 \paragraph{Importing a rival field.}
 \begin{verbatim}
@@ -147,11 +158,11 @@ cargo test -p sharpebench-stats  agreement
 cargo test -p sharpebench-stats  dissent
 cargo test -p sharpebench-protocol --test schema_drift
 \end{verbatim}
-The first covers the lifecycle ordering check, including the case that a passing risk evaluation on one instrument does not authorize an order on another. The third is the audit that fails when a new evidence field is neither covered nor excluded with a reason. The last checks the published JSON Schemas against the Rust wire types in both directions. None of these produces a number reported as a result; they are the executable form of the claims in the named sections. The full local suite is
+The first covers the lifecycle ordering check, including the case that a passing risk evaluation on one instrument does not authorize an order on another. The third is the audit that fails when a new evidence field is neither covered nor excluded with a reason. The last checks the published JSON Schemas against the Rust wire types in both directions. None of these produces a number reported as a result; they are the executable form of the claims in the named sections. The full local suite on the audited engineering tree is
 \begin{verbatim}
 cargo test --workspace
 \end{verbatim}
-which reports 604 passed, 0 failed and 3 ignored.
+which reports 653 passed, 0 failed and 11 ignored.
 
 \paragraph{The live container boundary (\cref{sec:limitations}).}
 \begin{verbatim}
@@ -159,7 +170,7 @@ docker pull alpine:3.22
 SHARPEBENCH_SANDBOX_FIXTURE=<digest-pinned image> \
 cargo test -p sharpebench-arena -- --ignored --nocapture
 \end{verbatim}
-The two live-boundary tests are \texttt{\#[ignore]}d, so this is the only invocation that runs them; the \texttt{sandbox} continuous-integration job runs exactly this after resolving the fixture to a digest and refusing an unpinned one. Each of the two observed runs reports 2 passed and 0 failed. On a machine with no Docker daemon the tests report as ignored rather than as passes, which is the point of the change.
+The ten live-boundary tests are \texttt{\#[ignore]}d, so this is the invocation that runs them; the \texttt{sandbox} continuous-integration job runs exactly this after resolving the fixture to a digest and refusing an unpinned one. They cover the in-container hardening probe, six remote egress classes, host-loopback egress with a live-listener prerequisite, production spawn and a real cgroup OOM verdict. On a machine with no Docker daemon the tests report as ignored rather than as passes, which prevents missing infrastructure from being counted as evidence.
 
 \paragraph{Golden fixtures and the parity test.}
 \begin{verbatim}
@@ -175,4 +186,4 @@ sharpebench sign   subs.json <hmac-key> board.json --ed25519 <secret>
 sharpebench verify board.json --public
 sharpebench verify board.json --pubkey <hex>
 \end{verbatim}
-The second form verifies from the document alone. The third pins the key and rejects a board re-signed under a different one.
+The second form verifies the Ed25519 chain from the document's embedded public key; it establishes internal consistency under that key, not the host's identity. The third pins the expected public key out of band and rejects a board re-signed under a different one. The positional HMAC key is shared: anyone who can verify with it can also forge, so the HMAC chain is suitable only for private integrity among key-holders.
