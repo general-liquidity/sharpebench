@@ -6,7 +6,7 @@
 ### The luck-robust benchmark for trading agents
 
 Rank skill only after it survives deflation, repeated runs, significance, and
-process checks—using one deterministic Rust kernel across every surface.
+process checks, using one deterministic Rust kernel across every surface.
 
 [![Crates.io](https://img.shields.io/crates/v/sharpebench-core?style=flat-square&logo=rust&color=DEA584&label=crates.io)](https://crates.io/crates/sharpebench-core)
 [![npm](https://img.shields.io/npm/v/@general-liquidity/sharpebench?style=flat-square&logo=npm&color=CB3837)](https://www.npmjs.com/package/@general-liquidity/sharpebench)
@@ -142,7 +142,7 @@ sharpebench run --http 127.0.0.1:8080
 The Docker-enabled CI suite verifies user/capability/no-new-privilege state,
 read-only and `noexec` mounts, seven egress-denial classes with timeout
 discrimination, a real production spawn, a live cgroup OOM classification, and
-cleanup. That is evidence for one runner and one benign fixture—not a proof
+cleanup. That is evidence for one runner and one benign fixture, not a proof
 against Docker/kernel escape or a hosted multi-tenant service. Details and exact
 limits are in [The arena](docs/book/src/arena.md).
 
@@ -177,7 +177,7 @@ same score across supported platforms.
 Provenance scopes are code-owned, reject empty matches, and verify source blobs
 and result artifacts. Releases build in an isolated checkout, bind the final
 version tree, tag the provenance commit, publish through OIDC, and verify every
-registry surface. Reproducibility means pinned inputs—not that an unpinned data
+registry surface. Reproducibility means pinned inputs, not that an unpinned data
 source remains unchanged forever.
 
 ## Memory and retrieval
