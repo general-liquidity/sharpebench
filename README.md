@@ -90,8 +90,9 @@ sharpebench arena init league
 sharpebench arena verify league
 ```
 
-Every command supports `--json` for machine-readable output. The full reference
-is in the [CLI chapter](docs/book/src/cli.md).
+Commands that render reports accept `--json` for structured output. Commands
+that create an artifact already write the documented JSON form. The full
+reference is in the [CLI chapter](docs/book/src/cli.md).
 
 ## What makes an agent rank-eligible
 
@@ -99,11 +100,11 @@ All hard gates are conjunctive:
 
 | Gate | Requirement | What it resists |
 |:--|:--|:--|
-| Deflated Sharpe / PSR | Edge survives trial count, sample length, skew, and kurtosis. | Lucky search and backtest selection. |
+| Deflated Sharpe | Edge survives trial count, sample length, skew, and kurtosis. | Lucky search and backtest selection. |
 | pass^k | The bar clears on every required seed and window. | One-lucky-seed winners. |
 | Significance | The stationary-bootstrap null is beaten at the configured alpha. | Data-snooping false positives. |
 | Process | No block-severity lifecycle or trace violation occurs. | Risk-gate bypass and invalid execution behavior. |
-| Mandate | The submitted run respects its drawdown or risk mandate. | Taking uncontrolled risk to buy return. |
+| Host mandate | Every run respects the configured drawdown bound. | Taking uncontrolled drawdown to buy return. |
 
 `pass^k` means every required execution seed and evaluation window passes. It
 is intentionally stricter than `pass@k`: one successful attempt demonstrates
@@ -129,6 +130,14 @@ sharpebench run --cmd "./trusted-local-agent"
 sharpebench run --http 127.0.0.1:8080
 ```
 
+For a resumable command or HTTP sweep, bind the entrant artifact explicitly:
+
+```bash
+sharpebench run --cmd "./trusted-local-agent" \
+  --checkpoint sweep.json \
+  --entrant-sha256 <64-lowercase-hex-digest>
+```
+
 | Transport | Boundary |
 |:--|:--|
 | `--image` | Fail-closed Docker containment: digest-pinned local image, no network or IPC, non-root, read-only root, dropped capabilities, `no-new-privileges`, bounded memory, CPU, PIDs, and files, plus explicit timeouts. |
@@ -151,6 +160,10 @@ service. Details and exact limits are in [The arena](docs/book/src/arena.md).
 A runnable stdio agent and Dockerfile live in
 [`examples/reference-agent/`](examples/reference-agent/).
 
+Entrant faults remain in the pass^k denominator as failing sentinels. Exhausted
+runtime or transport failures make the sweep noncertifying: the CLI reports the
+missing cells, emits no board, and exits unsuccessfully.
+
 ## Capture and verify
 
 For a built-in agent, preserve raw decisions instead of trusting a reported
@@ -161,18 +174,22 @@ sharpebench capture momentum trajectory.json
 sharpebench verify-trajectory trajectory.json
 ```
 
-The verifier replays the decisions through the same frozen simulator and
-recomputes the score. For external agents, the harness and forward arena retain
-the same decision and process-trace boundary; see
-[Submitting an agent](docs/book/src/submitting.md) and
-[Attestation](docs/book/src/attestation.md).
+The strict verifier binds the dataset, costs, engine, runner, ordered windows,
+and ordered seeds. It requires every declared cell and every decision step,
+then replays the decisions through the frozen simulator and recomputes the
+score with the original replicate grouping. Missing, duplicated, reordered,
+shortened, or cross-environment evidence is refused. An explicit
+`--allow-unbound-trajectory` option exists only for a legacy or cross-version
+diagnostic regrade. See [Evidence contracts](docs/book/src/evidence-contracts.md)
+and [Submitting an agent](docs/book/src/submitting.md).
 
 SharpeBench can also pre-register strategy digests before a forward window,
 commit to held-out data, sign boards with publicly verifiable Ed25519 chains,
 and link consecutive windows so replacing an earlier board breaks a later
-anchor. The forward arena is file-backed and clock-free. The operator owns
-scheduling, participant identity, data publication, and the public verifying-key
-channel.
+anchor. HMAC chains are shared-secret checks whose keyholders can also forge;
+they are not a substitute for public verification. The forward arena is
+file-backed and clock-free. The operator owns scheduling, participant identity,
+data publication, and the public verifying-key channel.
 
 ### Evaluation contract
 
@@ -183,14 +200,11 @@ channel.
 | Field context | The submitted field sets an observable trial-count floor and can supply the measured cross-strategy dispersion. |
 | Judge | Every entrant in the field is scored by the same deterministic Rust kernel. |
 
-Rows are directly rank-comparable within the same signed board. Comparing
-across boards requires the same run specification and the same entrant field
-and trial footprint. Matching `RunSpec` alone is not sufficient: field
-composition can change both the deflation trial floor and the measured
-dispersion. Forward-window comparisons must also match the schema version and
-exact scorer-artifact digest. If any condition differs, treat the boards as
-separate experiments. Each can be internally valid without supporting a direct
-cross-board ranking.
+Rows are directly rank-comparable within one signed board. Cross-board claims
+also require the same run specification, entrant field, trial footprint,
+schema, and scorer artifact. The full comparability rule lives in
+[Evidence contracts](docs/book/src/evidence-contracts.md) and
+[The arena](docs/book/src/arena.md).
 
 See [Integrity](docs/book/src/integrity.md) and
 [The arena](docs/book/src/arena.md) for the signed fields and verification
@@ -235,10 +249,12 @@ lower-level dependency.
 ## Data and evidence
 
 Scoring uses frozen, checksummed, point-in-time datasets rather than a live API.
-The repository includes nine datasets across four asset classes and four bar
-sizes, plus deterministic synthetic and stress generators. For a pinned
-release, run specification, and input artifact, the same trajectories produce
-the same score across supported platforms.
+The repository includes nine datasets across four broad asset classes and four
+bar sizes, plus deterministic synthetic and stress generators. Two bundled
+artifacts do not clear the stylized-facts realism gate, and the rates dataset
+contains yields rather than tradable prices; both facts are recorded in the
+data inventory and paper limitations. For pinned inputs, the same trajectories
+produce the same score across supported platforms.
 
 Provenance scopes are code-owned, reject empty matches, and verify source blobs
 and result artifacts. Releases build in an isolated checkout, bind the final
@@ -284,7 +300,7 @@ does not run agents or own a store. See the
 | Use the CLI or submit an agent | [CLI reference](docs/book/src/cli.md) · [Submitting](docs/book/src/submitting.md) |
 | Understand scoring | [Methodology](docs/book/src/methodology.md) · [Process discipline](docs/book/src/methodology-process.md) |
 | Operate the forward league or sandbox | [Arena](docs/book/src/arena.md) · [Attestation](docs/book/src/attestation.md) |
-| Audit integrity and provenance | [Integrity](docs/book/src/integrity.md) |
+| Audit integrity and provenance | [Integrity](docs/book/src/integrity.md) · [Evidence contracts](docs/book/src/evidence-contracts.md) · [65-benchmark architecture audit](docs/BENCHMARK_ARCHITECTURE_AUDIT.md) |
 | Reproduce the paper | [Paper PDF](paper/main.pdf) · [Commands](paper/sections/A-commands.tex) |
 | Contribute or propose a change | [`CONTRIBUTING.md`](CONTRIBUTING.md) · [Governance](docs/GOVERNANCE.md) |
 | Review releases and licensing | [`CHANGELOG.md`](CHANGELOG.md) · [MIT](LICENSE-MIT) · [Apache-2.0](LICENSE-APACHE) |
