@@ -174,13 +174,22 @@ anchor. The forward arena is file-backed and clock-free. The operator owns
 scheduling, participant identity, data publication, and the public verifying-key
 channel.
 
-### Compare scores correctly
+### Evaluation contract
 
-Two self-describing boards are directly comparable only when their dataset
-hash, cost profile, score configuration, seed set, and window definitions
-match. Forward-window comparisons must also match the schema version and exact
-scorer-artifact digest. If any field differs, treat the boards as separate
-benchmark conditions. Each can be internally valid without supporting a direct
+| Part | Contract |
+|:--|:--|
+| Held fixed | Exact dataset bytes and hash, cost profile, score configuration, execution seeds, and evaluation windows. |
+| Entrant varies | Decisions, resulting return streams, declared search history, and process traces. |
+| Field context | The submitted field sets an observable trial-count floor and can supply the measured cross-strategy dispersion. |
+| Judge | Every entrant in the field is scored by the same deterministic Rust kernel. |
+
+Rows are directly rank-comparable within the same signed board. Comparing
+across boards requires the same run specification and the same entrant field
+and trial footprint. Matching `RunSpec` alone is not sufficient: field
+composition can change both the deflation trial floor and the measured
+dispersion. Forward-window comparisons must also match the schema version and
+exact scorer-artifact digest. If any condition differs, treat the boards as
+separate experiments. Each can be internally valid without supporting a direct
 cross-board ranking.
 
 See [Integrity](docs/book/src/integrity.md) and
@@ -277,6 +286,8 @@ does not run agents or own a store. See the
 | Operate the forward league or sandbox | [Arena](docs/book/src/arena.md) · [Attestation](docs/book/src/attestation.md) |
 | Audit integrity and provenance | [Integrity](docs/book/src/integrity.md) |
 | Reproduce the paper | [Paper PDF](paper/main.pdf) · [Commands](paper/sections/A-commands.tex) |
+| Contribute or propose a change | [`CONTRIBUTING.md`](CONTRIBUTING.md) · [Governance](docs/GOVERNANCE.md) |
+| Review releases and licensing | [`CHANGELOG.md`](CHANGELOG.md) · [MIT](LICENSE-MIT) · [Apache-2.0](LICENSE-APACHE) |
 | Publish a release | [`RELEASING.md`](RELEASING.md) · [Publishing model](docs/PUBLISHING.md) |
 | Browse everything | [Documentation map](docs/README.md) |
 

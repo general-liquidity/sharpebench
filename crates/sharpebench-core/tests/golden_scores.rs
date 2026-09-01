@@ -212,6 +212,10 @@ fn readme_teaching_board_matches_the_committed_golden() {
         "README must describe SharpeBench on its own terms"
     );
     assert!(
+        readme.contains("Matching `RunSpec` alone is not sufficient: field"),
+        "README must not imply that matching RunSpec makes differently composed fields rank-comparable"
+    );
+    assert!(
         readme.contains(&expected),
         "README teaching board drifted from example_submissions.scores.json. \
          Regenerate the golden only for an intentional scorer change, then update the \

@@ -30,7 +30,9 @@ mdbook serve docs/book
 | Topic | Document |
 |---|---|
 | Current state and roadmap | [Plan](PLAN.md) |
+| Contributing | [`CONTRIBUTING.md`](../CONTRIBUTING.md) |
 | Governance | [Governance](GOVERNANCE.md) |
+| Release history | [`CHANGELOG.md`](../CHANGELOG.md) |
 | Release procedure | [`RELEASING.md`](../RELEASING.md) |
 | Registry authentication and recovery | [Publishing model](PUBLISHING.md) |
 | smolvm extraction audit | [smolvm assessment](SMOLVM_ASSESSMENT.md) |

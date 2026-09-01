@@ -27,9 +27,14 @@ pub struct CostProfile {
     pub max_participation: Option<f64>,
 }
 
-/// The full, self-describing specification a leaderboard was produced from. Inlined
-/// into the signed blob so any entry is independently re-derivable: same dataset
-/// (by hash), same costs, same scoring config, same seeds and windows.
+/// The benchmark-condition specification a leaderboard was produced from. It is
+/// inlined into the signed blob so a verifier can establish that the dataset hash,
+/// costs, scoring config, seeds, and windows were not changed after publication.
+///
+/// This is not the complete experimental context by itself. Field composition
+/// affects the observable trial floor and can affect measured dispersion, while
+/// raw submissions or trajectories are separate replay artifacts. Cross-board
+/// ranking therefore also requires the same entrant field and trial footprint.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RunSpec {
     /// SHA-256 hex digest of the exact frozen dataset the agents were scored on
@@ -127,8 +132,11 @@ pub fn publish(board: &[CompositeScore], key: &[u8]) -> PublishedBoard {
 /// A *self-describing* published board: the run-spec, the ranked scores, and a
 /// single tamper-evident chain that signs the spec **and** every entry. Because
 /// the spec is the chain's first link, altering the dataset hash, costs, scoring
-/// config, or seeds after the fact breaks the signature — the published number is
-/// inseparable from the inputs that produced it, and re-derivable from them.
+/// config, seeds, or windows after the fact breaks the signature.
+///
+/// Verification proves integrity of the published condition and scores. It does
+/// not independently recompute them because this document does not contain the
+/// raw submissions or trajectories.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SelfDescribingBoard {
     pub spec: RunSpec,

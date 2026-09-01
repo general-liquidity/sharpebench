@@ -24,9 +24,14 @@ cargo test --workspace
 
 ## Scope
 
-See [docs/PLAN.md](docs/PLAN.md) for the phased roadmap. Good first areas:
-significance tests (Hansen SPA), cost/slippage models in `sharpebench-sim`, additional
-process-discipline checks, and reference agents implementing `sharpebench-protocol`.
+See [docs/PLAN.md](docs/PLAN.md) for the current roadmap. Before proposing a
+new kernel primitive, search the workspace and the documentation map: the
+statistics kernel already includes Reality Check, Hansen SPA, step-down tests,
+stationary bootstrap, and cost-aware simulation. Useful contributions include
+adversarial regression fixtures, additional reference entrants implemented
+against `sharpebench-protocol`, clearer diagnostics, and source-backed dataset
+or documentation corrections. Dataset additions also need provenance,
+licensing, and a deprecation policy.
 
 ## License
 
