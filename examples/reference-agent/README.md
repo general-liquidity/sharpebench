@@ -1,6 +1,6 @@
 # Reference agent + the SharpeBench agent contract
 
-SharpeBench agents are **external and language-agnostic** — a container or an
+SharpeBench agents are **external and language-agnostic**: a container or an
 HTTP endpoint, in any language. The harness drives an agent through the same
 two-message loop every decision step:
 
@@ -24,7 +24,7 @@ Driven by `sharpebench_sim::ExternalAgent::spawn(program, args)`.
 ```bash
 cargo run -p reference-agent                  # run it directly
 
-# or containerize it (build from the repo root — it uses the workspace crate):
+# or containerize it (build from the repo root; it uses the workspace crate):
 docker build -f examples/reference-agent/Dockerfile -t sharpebench-reference-agent .
 docker run -i --rm sharpebench-reference-agent
 ```
@@ -42,8 +42,12 @@ Content-Type: application/json
 { ...MarketObservation... }   ->   200 OK   { ...Decision... }
 ```
 
-On any connection or parse error, both transports degrade to a **hold** (empty
-orders) — they never crash the harness.
+The low-level `Agent` trait represents a failed call with an empty decision, but
+transport health records whether that decision came from a fault. Checked field
+paths convert the record into a typed failure: retryable runtime exhaustion
+makes the sweep noncertifying, while an entrant protocol fault remains in the
+pass^k denominator as a failing sentinel. A failed call is never ranked as an
+ordinary hold.
 
 ## Wire format
 
@@ -69,7 +73,7 @@ orders) — they never crash the harness.
 
 - `close_history` is oldest-first and **point-in-time**: it only contains closes
   at or before `date`. `fundamentals` and `news` follow the same rule. Look-ahead
-  is impossible by construction — the harness never sends future rows.
+  is impossible by construction because the harness never sends future rows.
 
 ### `Decision` (agent → harness)
 
@@ -83,9 +87,9 @@ orders) — they never crash the harness.
 ```
 
 - `action` ∈ `"buy" | "sell" | "hold" | "close"` (lower-case).
-- `target_weight` is the desired portfolio weight for the symbol in `[0, 1]`
-  (signed for shorts); sizing is carried here, not by `action`.
-- `confidence` ∈ `[0, 1]` (defaults to `0.5`) is your stated conviction — it is
+- `target_weight` is the signed desired portfolio weight for the symbol in
+  `[-1, 1]`; sizing is carried here, not by `action`.
+- `confidence` ∈ `[0, 1]` (defaults to `0.5`) is your stated conviction. It is
   **scored for calibration** (Brier), so report it honestly: claiming 0.9 on
   coin-flips is penalized.
 - `reasoning` is optional and captured for auditability.
