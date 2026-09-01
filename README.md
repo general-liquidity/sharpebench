@@ -229,7 +229,6 @@ and methodology map.
 | Operate the forward league or sandbox | [Arena](docs/book/src/arena.md) · [Attestation](docs/book/src/attestation.md) |
 | Audit integrity and provenance | [Integrity](docs/book/src/integrity.md) |
 | Publish a release | [`RELEASING.md`](RELEASING.md) · [Publishing model](docs/PUBLISHING.md) |
-| See what was extracted from smolvm | [smolvm assessment](docs/SMOLVM_ASSESSMENT.md) |
 | Browse everything | [Documentation map](docs/README.md) |
 
 ---
