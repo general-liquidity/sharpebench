@@ -510,6 +510,77 @@ fn docker_output(args: &[&str]) -> Result<Output, SandboxError> {
         .map_err(SandboxError::DockerUnavailable)
 }
 
+/// Read the named container's startup state.
+///
+/// `docker run` being alive proves only that the client process spawned. Under
+/// daemon load it can still be waiting to create the container, which made a
+/// silent pre-start client indistinguishable from a live-but-silent entrant.
+/// `None` is the one retryable state: Docker has not registered the name yet.
+fn inspect_container_running(name: &str) -> Result<Option<bool>, String> {
+    let args = [
+        "container".to_string(),
+        "inspect".to_string(),
+        "--format".to_string(),
+        "{{.State.Running}}".to_string(),
+        name.to_string(),
+    ];
+    let output = command_output_with_timeout("docker", &args, READINESS_TIMEOUT)?;
+    if output.status.success() {
+        return match String::from_utf8_lossy(&output.stdout).trim() {
+            "true" => Ok(Some(true)),
+            "false" => Ok(Some(false)),
+            value => Err(format!(
+                "docker inspect for {name} returned an invalid running state {value:?}"
+            )),
+        };
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if stderr.contains("No such object") || stderr.contains("No such container") {
+        Ok(None)
+    } else {
+        Err(format!(
+            "docker inspect for {name} exited {}: {}",
+            output.status,
+            stderr.trim()
+        ))
+    }
+}
+
+/// Wait until Docker, rather than merely its client process, confirms that the
+/// entrant is running. Injectable so the absent → running transition and an
+/// early exit are pinned without requiring a daemon in the ordinary test suite.
+fn wait_for_container_running_with(
+    name: &str,
+    timeout: Duration,
+    mut inspect: impl FnMut(&str) -> Result<Option<bool>, String>,
+) -> Result<(), SandboxError> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        match inspect(name) {
+            Ok(Some(true)) => return Ok(()),
+            Ok(Some(false)) => {
+                return Err(SandboxError::Readiness(format!(
+                    "container {name} exited before it became ready"
+                )))
+            }
+            Ok(None) if Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(25));
+            }
+            Ok(None) => {
+                return Err(SandboxError::Readiness(format!(
+                    "container {name} was not registered within {}s",
+                    timeout.as_secs()
+                )))
+            }
+            Err(error) => return Err(SandboxError::Readiness(error)),
+        }
+    }
+}
+
+fn wait_for_container_running(name: &str) -> Result<(), SandboxError> {
+    wait_for_container_running_with(name, READINESS_TIMEOUT, inspect_container_running)
+}
+
 /// Prove that the live Docker boundary is ready for a field run.
 ///
 /// Unlike the ordinary Docker smoke test, this check never skips. It requires a
@@ -915,10 +986,17 @@ pub fn run_external_sandboxed(
         ExternalAgent::spawn(&program, &arg_refs)
     }
     .map_err(|e| SandboxError::Spawn(e.to_string()))?;
-    Ok(SandboxedAgent {
+    let agent = SandboxedAgent {
         agent: Some(agent),
         container,
-    })
+    };
+    if let Some(name) = agent.container_name() {
+        // Do not hand the transport to a field run until the daemon has
+        // registered the container and says its entrant is running. A live
+        // `docker run` client alone can still be queued before creation.
+        wait_for_container_running(name)?;
+    }
+    Ok(agent)
 }
 
 #[cfg(test)]
@@ -1069,6 +1147,26 @@ mod tests {
     #[test]
     fn container_names_are_unique_within_a_process() {
         assert_ne!(fresh_container_name(), fresh_container_name());
+    }
+
+    #[test]
+    fn container_readiness_retries_absence_but_refuses_an_early_exit() {
+        let mut observations = [Ok(None), Ok(None), Ok(Some(true))].into_iter();
+        assert_eq!(
+            wait_for_container_running_with("c-1", Duration::from_secs(1), |_| observations
+                .next()
+                .expect("the fixture has enough states")),
+            Ok(()),
+            "a queued Docker client may precede registration; readiness waits for the daemon fact"
+        );
+
+        let error = wait_for_container_running_with("c-2", Duration::ZERO, |_| Ok(Some(false)))
+            .expect_err("an entrant that exited before readiness must be refused");
+        assert!(error.to_string().contains("exited before"), "{error}");
+
+        let error = wait_for_container_running_with("c-3", Duration::ZERO, |_| Ok(None))
+            .expect_err("a name that never appears must not become a live agent");
+        assert!(error.to_string().contains("not registered"), "{error}");
     }
 
     /// An inspector whose calls are journaled, so the inspect-then-remove
