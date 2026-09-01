@@ -8,9 +8,11 @@ are the twelve listed in [RELEASING.md](RELEASING.md), and `xtask` and
 `examples/reference-agent` are `publish = false`. Each section is one `v*` tag
 and links the commits it was built from.
 
-[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.16.0...HEAD
 
 ## [Unreleased]
+
+## [0.16.0] - 2026-09-01
 
 ### Added
 - harness/protocol: resumable sweeps and captured trajectories now bind the
@@ -386,6 +388,7 @@ First published release.
 ### Fixed
 - Constant-time HMAC verification and bounded, timed agent HTTP reads ([6c3d174](https://github.com/general-liquidity/sharpebench/commit/6c3d174)).
 
+[0.16.0]: https://github.com/general-liquidity/sharpebench/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/general-liquidity/sharpebench/compare/v0.14.1...v0.15.0
 [0.14.1]: https://github.com/general-liquidity/sharpebench/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/general-liquidity/sharpebench/compare/v0.13.0...v0.14.0
