@@ -19,6 +19,8 @@ export function is_my_sharpe_real_full(field_json: string, winner_idx: number, c
 
 export function percentile_selection(candidates_json: string, params_json: string): string;
 
+export function regime_compare(returns_a_json: string, returns_b_json: string, regimes_json: string, options_json: string): string;
+
 export function score(submissions_json: string, config_json: string): string;
 
 export function score_agent(submission_json: string, config_json: string): string;

@@ -197,6 +197,35 @@ function percentile_selection(candidates_json, params_json) {
 exports.percentile_selection = percentile_selection;
 
 /**
+ * @param {string} returns_a_json
+ * @param {string} returns_b_json
+ * @param {string} regimes_json
+ * @param {string} options_json
+ * @returns {string}
+ */
+function regime_compare(returns_a_json, returns_b_json, regimes_json, options_json) {
+    let deferred5_0;
+    let deferred5_1;
+    try {
+        const ptr0 = passStringToWasm0(returns_a_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(returns_b_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ptr2 = passStringToWasm0(regimes_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len2 = WASM_VECTOR_LEN;
+        const ptr3 = passStringToWasm0(options_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len3 = WASM_VECTOR_LEN;
+        const ret = wasm.regime_compare(ptr0, len0, ptr1, len1, ptr2, len2, ptr3, len3);
+        deferred5_0 = ret[0];
+        deferred5_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred5_0, deferred5_1, 1);
+    }
+}
+exports.regime_compare = regime_compare;
+
+/**
  * @param {string} submissions_json
  * @param {string} config_json
  * @returns {string}

@@ -10,8 +10,9 @@
 #![forbid(unsafe_code)]
 
 use sharpebench_core::{
-    audit_briefing, bs_greeks, bs_price, classify_greeks_risk, rank, score_agent, AgentSubmission,
-    AllocationPolicy, AllocationTrajectory, Briefing, BriefingPolicy, GreeksPolicy, ScoreConfig,
+    audit_briefing, bs_greeks, bs_price, classify_greeks_risk, compare_by_regime, rank,
+    score_agent, AgentSubmission, AllocationPolicy, AllocationTrajectory, Briefing, BriefingPolicy,
+    GreeksPolicy, RegimeCompareOpts, ScoreConfig,
 };
 
 /// Parse an optional config blob: blank → `T::default()`.
@@ -345,6 +346,44 @@ pub fn classify_disqualification_json(
     serde_json::to_string(&out).map_err(|e| e.to_string())
 }
 
+#[derive(Default, serde::Deserialize)]
+struct RegimeCompareOptions {
+    zero_tol: Option<f64>,
+    min_periods: Option<usize>,
+    tie_tol: Option<f64>,
+}
+
+/// Compare two aligned return streams inside caller-supplied regimes. Labels
+/// are inputs; the kernel does not infer market regimes.
+pub fn regime_compare_json(
+    returns_a_json: &str,
+    returns_b_json: &str,
+    regimes_json: &str,
+    options_json: &str,
+) -> Result<String, String> {
+    let returns_a: Vec<f64> = serde_json::from_str(returns_a_json).map_err(|e| e.to_string())?;
+    let returns_b: Vec<f64> = serde_json::from_str(returns_b_json).map_err(|e| e.to_string())?;
+    let regimes: Vec<String> = serde_json::from_str(regimes_json).map_err(|e| e.to_string())?;
+    if returns_a.len() != returns_b.len() || returns_a.len() != regimes.len() {
+        return Err(format!(
+            "regime comparison requires aligned arrays, got a={} b={} regimes={}",
+            returns_a.len(),
+            returns_b.len(),
+            regimes.len()
+        ));
+    }
+    let supplied: RegimeCompareOptions = parse_or_default(options_json)?;
+    let defaults = RegimeCompareOpts::default();
+    let options = RegimeCompareOpts {
+        zero_tol: supplied.zero_tol.unwrap_or(defaults.zero_tol),
+        min_periods: supplied.min_periods.unwrap_or(defaults.min_periods),
+        tie_tol: supplied.tie_tol.unwrap_or(defaults.tie_tol),
+    };
+    let labels: Vec<&str> = regimes.iter().map(String::as_str).collect();
+    serde_json::to_string(&compare_by_regime(&returns_a, &returns_b, &labels, options))
+        .map_err(|e| e.to_string())
+}
+
 /// The wasm-bindgen exports. Each returns the result JSON, or a `{"error":"..."}`
 /// JSON object on failure (never throws across the boundary).
 #[cfg(target_arch = "wasm32")]
@@ -437,6 +476,21 @@ mod wasm {
         wrap(super::classify_disqualification_json(
             submissions_json,
             config_json,
+        ))
+    }
+
+    #[wasm_bindgen]
+    pub fn regime_compare(
+        returns_a_json: &str,
+        returns_b_json: &str,
+        regimes_json: &str,
+        options_json: &str,
+    ) -> String {
+        wrap(super::regime_compare_json(
+            returns_a_json,
+            returns_b_json,
+            regimes_json,
+            options_json,
         ))
     }
 }
@@ -668,5 +722,23 @@ mod tests {
             "{noise_reasons:?}"
         );
         assert!(classify_disqualification_json("not json", "").is_err());
+    }
+
+    #[test]
+    fn regime_compare_json_exposes_the_core_report_and_refuses_misalignment() {
+        let out = regime_compare_json(
+            "[0.02,0.03,-0.01,-0.02]",
+            "[0.0,0.01,0.01,0.02]",
+            r#"["calm","calm","stress","stress"]"#,
+            r#"{"min_periods":2}"#,
+        )
+        .expect("aligned regime comparison");
+        let report: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(report["regimes"].as_array().unwrap().len(), 2);
+        assert_eq!(report["pooled_hides_reversal"], true);
+
+        let error = regime_compare_json("[0.1]", "[0.1,0.2]", r#"["calm"]"#, "")
+            .expect_err("misaligned arrays must not be silently truncated at the wrapper");
+        assert!(error.contains("requires aligned arrays"), "{error}");
     }
 }

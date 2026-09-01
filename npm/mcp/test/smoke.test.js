@@ -23,6 +23,7 @@ test("registers the kernel tools", async () => {
     "greeks",
     "canary",
     "is_my_sharpe_real",
+    "regime_compare",
   ]) {
     assert.ok(names.includes(expected), `missing tool: ${expected}`);
   }
@@ -61,5 +62,23 @@ test("self_audit tool reports all defended", async () => {
   const res = await client.callTool({ name: "self_audit", arguments: {} });
   const parsed = JSON.parse(res.content[0].text);
   assert.equal(parsed.all_defended, true);
+  await client.close();
+});
+
+test("regime_compare tool executes the WASM kernel", async () => {
+  const client = await connectedClient();
+  const res = await client.callTool({
+    name: "regime_compare",
+    arguments: {
+      returns_a: [0.02, 0.03, -0.01, -0.02],
+      returns_b: [0.0, 0.01, 0.01, 0.02],
+      regimes: ["calm", "calm", "stress", "stress"],
+      min_periods: 2,
+    },
+  });
+  assert.notEqual(res.isError, true);
+  const parsed = JSON.parse(res.content[0].text);
+  assert.equal(parsed.pooled_hides_reversal, true);
+  assert.deepEqual(parsed.reversal_regimes, ["calm"]);
   await client.close();
 });

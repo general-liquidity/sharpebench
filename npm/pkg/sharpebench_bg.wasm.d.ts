@@ -10,6 +10,7 @@ export const greeks: (a: number, b: number) => [number, number];
 export const is_my_sharpe_real: (a: number, b: number, c: number, d: number) => [number, number];
 export const is_my_sharpe_real_full: (a: number, b: number, c: number, d: number, e: number) => [number, number];
 export const percentile_selection: (a: number, b: number, c: number, d: number) => [number, number];
+export const regime_compare: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number];
 export const score: (a: number, b: number, c: number, d: number) => [number, number];
 export const score_agent: (a: number, b: number, c: number, d: number) => [number, number];
 export const score_allocation: (a: number, b: number, c: number, d: number) => [number, number];

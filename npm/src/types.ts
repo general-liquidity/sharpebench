@@ -341,3 +341,45 @@ export interface FullVerdict {
   pbo: number;
   [k: string]: unknown;
 }
+
+/** Options for a regime-conditional comparison. Regime labels are caller inputs. */
+export interface RegimeCompareOpts {
+  zeroTol?: number;
+  minPeriods?: number;
+  tieTol?: number;
+}
+
+export interface ZagaSplit {
+  n: number;
+  zero_mass: number;
+  n_nonzero: number;
+  positive_share: number;
+  cont_mean: number;
+  cont_sd: number;
+  cont_median: number;
+  gamma_shape: number;
+  gamma_rate: number;
+  pooled_mean: number;
+}
+
+export interface RegimeComparison {
+  regime: string;
+  n_periods: number;
+  a: ZagaSplit;
+  b: ZagaSplit;
+  zero_mass_gap: number;
+  mean_gap: number;
+  cont_mean_gap: number;
+  ks_statistic: number;
+  edge_sign: -1 | 0 | 1;
+  counted: boolean;
+}
+
+export interface RegimeDistributionReport {
+  regimes: RegimeComparison[];
+  pooled_mean_gap: number;
+  pooled_edge_sign: -1 | 0 | 1;
+  reversal_regimes: string[];
+  pooled_hides_reversal: boolean;
+  edge_dispersion: number;
+}

@@ -34,26 +34,6 @@ const { version: PACKAGE_VERSION } = createRequire(import.meta.url)("../package.
   version: string;
 };
 
-/**
- * Regime-conditional comparison lives in `sharpebench-core::regime_compare`.
- * The WASM bridge does not export it yet, so the tool is resolved against the
- * kernel at call time: once `@general-liquidity/sharpebench` ships
- * `regimeCompare`, the tool works unchanged; until then it returns a typed error
- * instead of silently reimplementing the math in TypeScript (one kernel, one
- * answer).
- */
-type RegimeCompareFn = (a: number[], b: number[], regimes: string[], opts?: unknown) => unknown;
-function kernelRegimeCompare(): RegimeCompareFn {
-  const fn = (sb as unknown as { regimeCompare?: RegimeCompareFn }).regimeCompare;
-  if (typeof fn !== "function") {
-    throw new Error(
-      "regime_compare is not exported by this build of @general-liquidity/sharpebench; " +
-        "use `sharpebench regime <a.csv> <b.csv> <regimes.csv>` from the CLI",
-    );
-  }
-  return fn;
-}
-
 /** Build the SharpeBench MCP server with all kernel tools registered. */
 export function createServer(): McpServer {
   const server = new McpServer({ name: "sharpebench", version: PACKAGE_VERSION });
@@ -149,7 +129,7 @@ export function createServer(): McpServer {
     },
     async ({ returns_a, returns_b, regimes, zero_tol, min_periods, tie_tol }) =>
       run(() =>
-        kernelRegimeCompare()(returns_a, returns_b, regimes, {
+        sb.regimeCompare(returns_a, returns_b, regimes, {
           zeroTol: zero_tol,
           minPeriods: min_periods,
           tieTol: tie_tol,

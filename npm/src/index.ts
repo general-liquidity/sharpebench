@@ -29,6 +29,8 @@ import type {
   HonestyVerdict,
   PercentileSelectionOpts,
   PercentileSelectionResult,
+  RegimeCompareOpts,
+  RegimeDistributionReport,
   ScoreConfig,
   SelfAuditReport,
   UncertaintyInput,
@@ -270,6 +272,31 @@ export function classifyDisqualification(
     kernel.classify_disqualification(
       JSON.stringify(submissions),
       optJson(config),
+    ),
+  );
+}
+
+/**
+ * Compare two aligned return streams inside caller-supplied market regimes.
+ * The report separates zero/no-trade mass from continuous returns and names a
+ * pooled edge whose sign reverses in a sufficiently supported regime.
+ */
+export function regimeCompare(
+  returnsA: number[],
+  returnsB: number[],
+  regimes: string[],
+  opts?: RegimeCompareOpts,
+): RegimeDistributionReport {
+  const options: Record<string, unknown> = {};
+  if (opts?.zeroTol !== undefined) options.zero_tol = opts.zeroTol;
+  if (opts?.minPeriods !== undefined) options.min_periods = opts.minPeriods;
+  if (opts?.tieTol !== undefined) options.tie_tol = opts.tieTol;
+  return parse(
+    kernel.regime_compare(
+      JSON.stringify(returnsA),
+      JSON.stringify(returnsB),
+      JSON.stringify(regimes),
+      optJson(options),
     ),
   );
 }

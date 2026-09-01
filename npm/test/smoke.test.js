@@ -86,3 +86,22 @@ test("isMySharpeRealFull runs the multiple-testing family + PBO", () => {
   assert.ok(v.realityCheckP >= 0 && v.realityCheckP <= 1);
   assert.equal(v.stepDown.length, field.length);
 });
+
+test("regimeCompare reports a pooled sign reversal", () => {
+  const report = sb.regimeCompare(
+    [0.02, 0.03, -0.01, -0.02],
+    [0.0, 0.01, 0.01, 0.02],
+    ["calm", "calm", "stress", "stress"],
+    { minPeriods: 2 },
+  );
+  assert.equal(report.regimes.length, 2);
+  assert.equal(report.pooled_hides_reversal, true);
+  assert.deepEqual(report.reversal_regimes, ["calm"]);
+});
+
+test("regimeCompare refuses misaligned arrays", () => {
+  assert.throws(
+    () => sb.regimeCompare([0.1], [0.1, 0.2], ["calm"]),
+    /requires aligned arrays/,
+  );
+});
