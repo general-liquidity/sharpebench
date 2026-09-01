@@ -195,8 +195,11 @@ commit to held-out data, sign boards with publicly verifiable Ed25519 chains,
 and link consecutive windows so replacing an earlier board breaks a later
 anchor. HMAC chains are shared-secret checks whose keyholders can also forge;
 they are not a substitute for public verification. The forward arena is
-file-backed and clock-free. The operator owns scheduling, participant identity,
-data publication, and the public verifying-key channel.
+file-backed and clock-free. Cryptography binds bytes and history, not chronology:
+the operator owns epoch advancement, participant identity, held-out-data custody,
+reveal timing, the signing key, and the public verifying-key channel. A forward
+interpretation assumes an auditable wall-time mapping and no pre-commitment
+observation of the target data.
 
 ### Evaluation contract
 

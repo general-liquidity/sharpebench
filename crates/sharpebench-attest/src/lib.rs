@@ -2,11 +2,11 @@
 //!
 //! The un-gameable spine of SharpeBench. Two primitives:
 //!
-//! 1. **Commitment** — before an evaluation window's data exists, an agent
-//!    publishes a SHA-256 [`Commitment`] binding (its identity, the target
-//!    window, a digest of its frozen artifact, a salt). There is nothing to
-//!    overfit because the data isn't out yet; revealing the pre-image later
-//!    proves the agent wasn't tuned to the window.
+//! 1. **Commitment** — before the operator-declared commitment deadline, an
+//!    agent publishes a SHA-256 [`Commitment`] binding its identity, target
+//!    window, frozen-artifact digest, and salt. Revealing the pre-image later
+//!    proves only that those bytes match the earlier commitment. This crate
+//!    does not observe wall time, data availability, or what either party saw.
 //! 2. **Signed result chain** — each scored result is signed over the previous
 //!    signature, forming a tamper-evident chain (the same pattern Gordon uses
 //!    for its audit log). Two schemes share one link shape ([`SignedResult`]):
@@ -18,9 +18,10 @@
 //!      document can check it and nobody without the signing key can forge it.
 //!      This is what "verify the board, don't trust the host" actually needs.
 //!
-//! Together these let a *host-operated* benchmark be *independently trusted*:
-//! the numbers are reproducible from a pre-registered artifact and the published
-//! chain is publicly verifiable.
+//! Together these make the committed bytes and published history independently
+//! checkable. A forward interpretation additionally trusts the operator's epoch
+//! advancement, custody of the held-out data and signing key, and claim that
+//! entrants could not observe the target data before committing.
 #![forbid(unsafe_code)]
 
 pub mod canary;
@@ -46,7 +47,10 @@ use sha2::{Digest, Sha256};
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// A pre-registration commitment, published before the target window's data exists.
+/// A commitment intended for publication before the operator-declared deadline.
+///
+/// The value contains no wall-time or data-availability witness. Its forward
+/// meaning therefore depends on an external chronology and custody process.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Commitment {
     pub agent_id: String,

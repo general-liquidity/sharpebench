@@ -1,10 +1,12 @@
-//! Forward-attestation registry with explicit time-lock.
+//! Forward-attestation registry with an explicit operator-driven epoch lock.
 //!
 //! The deterministic core of a forward league: agents register a commitment for
-//! a future window, and the pre-image can only be revealed once the window
-//! *unlocks*. Time is an explicit integer **epoch** (no wall clock → reproducible
-//! in tests and verifiable by anyone). The live data feed and hosting that drive
-//! the epoch forward are out of scope for this crate.
+//! a declared window, and the pre-image can only be revealed once the registry
+//! *unlocks*. Time is an explicit integer **epoch** (no wall clock, so refusals
+//! are reproducible in tests). The operator supplies that epoch. This crate does
+//! not establish its correspondence to wall time, data availability, or prior
+//! non-observation; the live feed, custody, scheduler, and hosting are out of
+//! scope.
 
 use std::collections::HashMap;
 
@@ -18,7 +20,7 @@ pub struct Registration {
     pub revealed: bool,
 }
 
-/// A registry of forward-attestation commitments under a monotonic epoch clock.
+/// A registry of commitments under a monotonic, operator-supplied epoch counter.
 #[derive(Default)]
 pub struct Registry {
     current_epoch: u64,

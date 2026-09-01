@@ -1,11 +1,12 @@
 # The arena (forward league)
 
-SharpeBench's tagline is "proves it forward", and every primitive that claim
-needs already exists in the workspace: pre-registration commitments and the
+SharpeBench supplies the cryptographic primitives for an operator-declared
+forward protocol: pre-registration commitments and the
 epoch-locked registry (`sharpebench-attest`), sealed held-out datasets, HMAC and
 Ed25519 result chains, and signed board publication (`sharpebench-leaderboard`).
 The arena (`sharpebench-arena`) is the driver that walks those primitives
-through an actual forward season.
+through a season. Calling that season forward additionally assumes honest epoch
+advancement, held-out-data custody, and non-observation before commitment.
 
 ## The lifecycle
 
@@ -60,6 +61,12 @@ somebody (you, cron, CI) decides what epoch "now" is and calls
 refused. An hourly cron job that computes `epoch = unix_time / 3600` and calls
 `advance` is a perfectly good scheduler. Nothing inside the crate ever reads a
 clock.
+
+That design makes the state machine deterministic, not self-dating. The
+operator can advance an epoch early or reveal data out of band, and the files
+alone cannot disprove it. A credible deployment therefore needs an external
+wall-time record, controlled custody of the target data, and evidence that
+entrants could not observe it before their commitments were accepted.
 
 ## Cross-window chaining
 

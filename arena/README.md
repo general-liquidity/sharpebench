@@ -39,10 +39,10 @@ history; `window-003` above is the live window.
 | `window-001` | 20689 (2026-08-24 UTC) | 20689 | schema v1 omitted `execution_seeds_per_window`, the fixed deflation null mean, and scorer artifact provenance; replaced by `window-002` |
 | `window-002` | 20689 (2026-08-24 UTC) | 20689 | withdrawn before commitments: its recorded scorer digest identified a local debug executable, not a publicly retrievable immutable artifact |
 
-The next window opens only against a published release of the scorer (a
-crates.io version or an immutable image digest) recorded in the window before
-commitments open, so an entrant can retrieve byte-for-byte the kernel that will
-score the reveal. `state.json` carries both supersession records with the
+The next window opens only against exact publicly retrievable scorer bytes whose
+SHA-256 is recorded in the window before commitments open. A package version by
+itself is not an artifact identity; the recorded digest must verify the bytes an
+entrant can retrieve. `state.json` carries both supersession records with the
 SHA-256 of each historical window file.
 
 ## Host verifying key
@@ -68,6 +68,13 @@ committed here.
 
 Produce a commitment before the deadline with `sharpebench commit` and deliver
 the JSON out of band (a PR against this directory is fine); the operator
-registers it with `sharpebench arena commit arena window-001 <commitment.json>`.
+registers it with `sharpebench arena commit arena window-003 <commitment.json>`.
 At the reveal epoch, reveals that do not match their registered commitment are
 refused and the refusal is part of the permanent signed record.
+
+The dates above are operator declarations derived from the stated epoch scheme.
+The crate does not read wall time or observe when data becomes available. A
+forward interpretation trusts the operator's epoch advancement, custody of the
+held-out data and signing key, and claim that entrants did not see target data
+before commitment. The commitment proves byte binding, not those operational
+facts.

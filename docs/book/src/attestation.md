@@ -1,8 +1,9 @@
 # Forward attestation
 
-The deepest defense against an overfit leaderboard is temporal: make an agent
-**commit to its strategy before the data it will be graded on exists**. SharpeBench
-supports this with `sharpebench-attest`.
+The strongest intended defense against an overfit leaderboard is temporal: make
+an agent commit before it can observe the data it will be graded on.
+`sharpebench-attest` supplies the cryptographic binding for that protocol; it
+does not itself prove the chronology.
 
 ## Pre-registration commitments
 
@@ -13,10 +14,11 @@ its artifact (model hash, config, or strategy digest) plus a salt:
 sharpebench commit my-agent 2026-Q3 <artifact_digest> <salt>
 ```
 
-The commitment reveals nothing about the strategy, but later, once results are
-in, the entrant reveals the artifact and salt, and anyone can `verify_commitment`
-that the revealed artifact matches what was committed. An agent cannot retrofit a
-strategy to data it pre-committed against.
+The commitment reveals nothing about the strategy, but later the entrant reveals
+the artifact and salt, and anyone can use `verify_commitment` to check that the
+revealed bytes match the earlier commitment. This prevents an undetectable
+pre-image substitution after commitment. It does not prove when the commitment
+was made, when the data became available, or what the entrant observed.
 
 ## Shared-key HMAC boards
 
@@ -42,7 +44,10 @@ holder can check the chain but cannot forge a replacement. The forward Arena
 publishes Ed25519 boards and links consecutive windows so replacing an earlier
 board changes the anchor recorded by the next one.
 
-The `Registry` time-lock uses explicit integer epochs rather than a wall clock,
-which keeps every commitment refusal deterministic. Public credibility still
-depends on publishing the verifying key independently and preserving the
-pre-registration and dataset commitments.
+The `Registry` lock uses explicit integer epochs rather than a wall clock, which
+keeps every commitment refusal deterministic. The operator advances those
+epochs and controls intake, held-out-data custody, reveal timing, and the signing
+key. A forward claim therefore assumes an independently auditable mapping from
+epochs to wall time, evidence that target data stayed unavailable to entrants
+before commitment, and preservation of the commitment and custody records.
+Cryptography binds bytes and order; it does not supply those observations.
