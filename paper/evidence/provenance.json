@@ -97,7 +97,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "5736732ff88479a67ef056647858bd4c972cf630",
+  "generated_at_head": "223a7481c2403af3a2917c9d38444a2a63dd0c39",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -177,7 +177,7 @@
     },
     {
       "path": "crates/sharpebench-cli/release.toml",
-      "sha256": "8da6c7e629796a2f7ac350ed4f497dcc9af2a8657b80ce7458a2eaa2ed5a76d9"
+      "sha256": "555a03922bbd7ffe08a5b0ea98858667ef15fef37c92efb86154818feb86214d"
     },
     {
       "path": "crates/sharpebench-cli/src/analysis_cmd.rs",
@@ -697,7 +697,7 @@
     },
     {
       "path": "paper/src/check-provenance.py",
-      "sha256": "2573015d2fdeed9e0d9e9771efd3add5a59a327b29e0511728031cac9b08c216"
+      "sha256": "c10f6f40234e939398fc2251112fb8ad48168035193d8f1479d91a9a2d4b19e4"
     },
     {
       "path": "paper/src/make-evidence-figures.py",
@@ -709,11 +709,19 @@
     },
     {
       "path": "paper/src/make-provenance.py",
-      "sha256": "85eddc687e9128b39f09858f52d59f3d489a4f450044ea5c3e6303361d8f1f9a"
+      "sha256": "24f50596f51805e1dcc88a2931bb8dd5706cf1a57ac5b82a5621c09a672f71f3"
     },
     {
       "path": "paper/src/original-essay-figures.py",
       "sha256": "b32c6a311802f6d565a6f7dc89b28369f692dec3a72d9e1f8892286e5843a2fe"
+    },
+    {
+      "path": "paper/src/provenance_common.py",
+      "sha256": "6a6e2012fc917fb165374f1189c954446140b0419522a30875c72c2a3eddb318"
+    },
+    {
+      "path": "paper/src/test_provenance.py",
+      "sha256": "1f12096d7e80a0414ab7972612392b1c614a3fce8fb6ca9bdf0fe1ca0a22f0de"
     }
   ],
   "source_snapshot_excludes": [
@@ -737,5 +745,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "0b46306cdee029d0900a6fe50607182ebe5f294dc83b849d7e70232f3184fc07"
+  "source_snapshot_sha256": "39a6d720218cd8ab8272cb1d8ee380bd82054fe912313799321892faa4da742a"
 }
