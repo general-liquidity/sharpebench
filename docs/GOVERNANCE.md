@@ -16,9 +16,10 @@ other LLM trading-agent result appears in the paper evidence.
 Three mechanisms reduce the amount a reader must take on trust:
 
 - **Forward-attestation.** An agent publishes a SHA-256 *commitment* binding its
-  frozen artifact to a target window **before that window's data exists**. There
-  is nothing to overfit, and revealing the pre-image later proves that the
-  revealed artifact matches the commitment.
+  frozen artifact bytes to a target window before an operator-declared
+  deadline. Revealing the pre-image later shows that those bytes match the
+  commitment. The commitment does not witness wall time, prove when the data
+  became available, or establish that the entrant had not already observed it.
 - **Recomputable scoring.** A reader can replay published decisions under the
   committed dataset, cost model, scorer, windows, and seeds.
 - **Public result signatures.** Ed25519 boards can be checked with a separately
@@ -26,8 +27,8 @@ Three mechanisms reduce the amount a reader must take on trust:
   keyholder can forge; they are not a public-verification substitute.
 
 These controls establish consistency with published inputs. They do not prove
-that participant identity, dataset publication, scheduling, or key custody was
-neutral.
+chronology, participant identity, prior non-observation, neutral host operation,
+or custody of held-out data and signing keys.
 
 ## Governance path
 

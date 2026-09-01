@@ -3,26 +3,26 @@
 //! The HMAC chain in the crate root ([`crate::sign_result`] / [`crate::verify_chain`])
 //! is *symmetric*: whoever can verify it holds the key that signs it, so it is
 //! tamper-evident only to key-holders, and any key-holder can forge. That is the
-//! right tool for a host checking its own audit log. It is the wrong tool for the
-//! claim SharpeBench actually makes, "verify the board, don't trust the host",
-//! because a third party cannot check an HMAC chain without being handed the
-//! power to rewrite it.
+//! right tool for a host checking its own audit log. It cannot provide public
+//! verification because a third party cannot check an HMAC chain without being
+//! handed the power to rewrite it.
 //!
 //! This module adds an *asymmetric* chain with the same shape: every link is an
 //! Ed25519 signature over `prev_signature | payload`, genesis-anchored, so an
 //! altered payload, a dropped row, or a reordered pair breaks the chain exactly
 //! as it does under HMAC. The difference is who can check it. The host publishes
 //! its [`VerifyingKey`] inside the board ([`PublicChain`]); anyone with the
-//! document can run [`verify_public_chain`] with no secret at all, and nobody
-//! without the [`SigningKey`] can produce a chain that passes.
+//! document can run [`verify_public_chain`] with no secret at all. That check
+//! binds the chain to the embedded key; it does not establish whose key it is,
+//! when the chain was signed, or whether the signer operated neutrally.
 //!
 //! What each scheme guarantees, precisely:
 //!
 //! - **HMAC-SHA256** (crate root): integrity for key-holders. The set of parties
 //!   who can verify equals the set who can forge.
-//! - **Ed25519** (this module): public verifiability. Anyone holding the published
-//!   verifying key can check the chain; only the holder of the signing key can
-//!   forge it.
+//! - **Ed25519** (this module): public verification under a given key. Anyone
+//!   holding the verifying key can check the chain; key identity and custody
+//!   must be established outside the document.
 //!
 //! Ed25519 is chosen over other signature schemes because RFC 8032 signing is
 //! **deterministic**: the nonce is derived from the key and the message, never

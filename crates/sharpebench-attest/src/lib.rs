@@ -14,14 +14,15 @@
 //!      holding the key can verify the chain, and anyone holding the key can
 //!      forge it. Integrity for key-holders; the host's own audit trail.
 //!    - **Ed25519** ([`public`]): asymmetric. The host signs with a private key
-//!      and publishes the verifying key inside the board, so anyone with the
-//!      document can check it and nobody without the signing key can forge it.
-//!      This is what "verify the board, don't trust the host" actually needs.
+//!      and publishes the verifying key inside the board. Anyone with the
+//!      document can check internal consistency under that key; authenticating
+//!      the key as the operator's identity remains an out-of-band task.
 //!
-//! Together these make the committed bytes and published history independently
-//! checkable. A forward interpretation additionally trusts the operator's epoch
-//! advancement, custody of the held-out data and signing key, and claim that
-//! entrants could not observe the target data before committing.
+//! Together these make committed bytes and the signed chain independently
+//! checkable. They do not witness chronology. A forward interpretation trusts
+//! the operator-declared deadline, epoch advancement, custody of held-out data
+//! and signing keys, prior non-observation by entrants, and neutral host
+//! operation.
 #![forbid(unsafe_code)]
 
 pub mod canary;
