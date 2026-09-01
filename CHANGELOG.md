@@ -12,6 +12,10 @@ and links the commits it was built from.
 
 ## [Unreleased]
 
+### Fixed
+- ci/release: ordinary branch CI skips only the prospective patch rehearsal when HEAD already carries an exact `v*` tag. A successful release intentionally empties `[Unreleased]`, so immediately rehearsing the next patch would reject the released main commit even though its separate tag-validation and registry workflow had passed. Release-driver unit tests and every product, packaging, provenance, and platform job still run.
+- release tests: the surface-version fixture derives the current workspace version instead of hardcoding `0.15.0`, so a successful bump cannot make the guard's own clean-tree assertion stale. Its mutation still forces the npm wasm wrapper to `0.0.0` and requires the exact mismatch diagnostic.
+
 ## [0.16.0] - 2026-09-01
 
 ### Added

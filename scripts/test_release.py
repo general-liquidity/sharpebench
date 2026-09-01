@@ -28,6 +28,7 @@ class ReleaseDriverTests(unittest.TestCase):
         self.assertEqual(release.next_version("0.15.0", "2.3.4"), "2.3.4")
 
     def test_release_surface_guard_catches_a_stale_npm_wrapper(self) -> None:
+        current = release.workspace_version((release.ROOT / "Cargo.toml").read_bytes())
         paths = (
             "Cargo.toml",
             "Cargo.lock",
@@ -47,15 +48,15 @@ class ReleaseDriverTests(unittest.TestCase):
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(source, destination)
 
-            self.assertEqual(release.surface_version_problems(root, "0.15.0"), [])
+            self.assertEqual(release.surface_version_problems(root, current), [])
             wrapper = root / "npm/pkg/package.json"
             payload = json.loads(wrapper.read_text(encoding="utf-8"))
-            payload["version"] = "0.14.0"
+            payload["version"] = "0.0.0"
             wrapper.write_text(json.dumps(payload) + "\n", encoding="utf-8")
 
             self.assertIn(
-                "npm/pkg/package.json reports 0.14.0, tag requires 0.15.0",
-                release.surface_version_problems(root, "0.15.0"),
+                f"npm/pkg/package.json reports 0.0.0, tag requires {current}",
+                release.surface_version_problems(root, current),
             )
 
     def test_release_tag_requires_a_semantic_version(self) -> None:
