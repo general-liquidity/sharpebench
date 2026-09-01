@@ -3,7 +3,7 @@
 
 # SharpeBench
 
-### A luck-robust benchmark and forward-attestation stack for trading agents
+### The luck-robust benchmark for trading agents
 
 Rank skill only after it survives deflation, repeated runs, significance, and
 process checks—using one deterministic Rust kernel across every surface.
