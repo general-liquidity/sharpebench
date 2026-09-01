@@ -200,12 +200,24 @@ impl HardenedLaunch {
     fn new_with_memory(image: &str, retention: &Retention, memory: &str) -> Self {
         let mut flags: Vec<String> = vec!["run".to_string()];
         match retention {
-            Retention::AutoRemove => flags.push("--rm".to_string()),
-            Retention::Inspectable(name) => flags.extend(["--name".to_string(), name.clone()]),
+            Retention::AutoRemove => {
+                flags.push("--rm".to_string());
+                flags.push("--init".to_string());
+            }
+            // The entrant must be namespace PID 1 on the inspectable path.
+            // With `--init`, an allocating child can be killed by the memory
+            // cgroup while docker-init survives long enough for Docker to record
+            // `State.OOMKilled=false`. Making the image entrypoint PID 1 turns
+            // the published memory-budget breach into the inspectable container
+            // verdict that the harness classifies. The PID limit bounds zombie
+            // accumulation, and `docker rm -f` still tears down the whole
+            // namespace on every finish/drop path.
+            Retention::Inspectable(name) => {
+                flags.extend(["--name".to_string(), name.clone()]);
+            }
         }
         flags.extend(
             [
-                "--init",
                 "--pull",
                 "never",
                 "--network",
@@ -1131,15 +1143,21 @@ mod tests {
             .position(|a| a == "--name")
             .expect("the container must be named so it can be inspected and removed");
         assert_eq!(args[name_at + 1], "sharpebench-agent-test-0");
+        assert!(
+            !args.iter().any(|a| a == "--init"),
+            "docker-init would remain PID 1 and can hide a child-process cgroup kill from State.OOMKilled: {args:?}"
+        );
         assert_eq!(
             args.last().map(String::as_str),
             Some(image.as_str()),
             "the image stays the trailing positional"
         );
-        // The hardening flags must be identical to the probe launch apart from
-        // the retention choice, so the inspectable path weakens nothing.
+        // The security flags must be identical to the probe launch. `--init` is
+        // intentionally a lifecycle difference: probes need automatic child
+        // reaping but no post-exit OOM verdict, while entrant launches require
+        // their entrypoint to be PID 1 so Docker records a cgroup kill.
         let mut auto = hardened_docker_args(&image, &Retention::AutoRemove);
-        auto.retain(|a| a != "--rm");
+        auto.retain(|a| a != "--rm" && a != "--init");
         let mut named = args;
         named.retain(|a| a != "--name" && a != "sharpebench-agent-test-0");
         assert_eq!(auto, named);
@@ -1731,12 +1749,11 @@ mod tests {
             "/bin/sh".to_string(),
             "-ceu".to_string(),
             // `/tmp` is a 64 MiB tmpfs and tmpfs pages are charged to the
-            // container's memory cgroup. `exec` makes the allocating writer the
-            // workload process rather than leaving a shell that can survive a
-            // killed child. Writing twice the no-swap 32 MiB budget therefore
-            // crosses the kernel boundary; unlike an exponential awk string it
-            // has no language-level maximum-length path that can exit nonzero
-            // without an OOM event.
+            // container's memory cgroup. Inspectable launches omit `--init`, and
+            // `exec` therefore makes this writer namespace PID 1. Writing twice
+            // the no-swap 32 MiB budget crosses the kernel boundary and kills
+            // the container process Docker observes, rather than only a child
+            // whose surviving init could hide the OOM verdict.
             "command -v dd >/dev/null 2>&1 || exit 127; exec dd if=/dev/zero of=/tmp/sharpebench-oom bs=1M count=64"
                 .to_string(),
         ]);

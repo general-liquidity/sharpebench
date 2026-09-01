@@ -94,7 +94,7 @@ Untrusted agent code is launched under Docker with every hardening flag the
 runtime offers:
 
 ```
-docker run --name sharpebench-agent-... --init --pull never \
+docker run --name sharpebench-agent-... --pull never \
   --network none --ipc none --read-only \
   --cap-drop ALL --security-opt no-new-privileges=true \
   --user 65532:65532 \
@@ -118,7 +118,11 @@ the normal finish path and in `Drop`; a memory-budget kill becomes the typed,
 non-retryable `ResourceLimitExceeded` agent fault. A harness itself killed with
 SIGKILL between spawn and cleanup can still leave a stopped container, whose
 deterministic `sharpebench-agent-*` name makes it discoverable. Short-lived
-readiness probes continue to use `--rm`.
+readiness probes continue to use `--rm` and `--init`. Entrant launches omit
+`--init` so the image entrypoint is namespace PID 1: otherwise an allocating
+child can be killed while Docker's init survives and the post-exit
+`State.OOMKilled` fact remains false. The 128-process limit bounds zombie
+accumulation, and forced container removal still tears down the namespace.
 
 Be clear about the boundary: **container isolation is the security boundary.**
 The flags above remove network and IPC access, drop every capability, refuse
