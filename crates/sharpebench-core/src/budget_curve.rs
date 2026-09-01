@@ -44,7 +44,8 @@ use crate::deflated_sharpe::{deflated_sharpe_ratio, sharpe_ratio};
 use crate::significance::bootstrap_pvalue;
 
 /// Tuning for the budget-curve analysis. All fields default to house constants; the
-/// bootstrap seed is fixed so the per-point p-values are reproducible forever.
+/// bootstrap seed is fixed so the pinned implementation reproduces the
+/// per-point p-values from the same inputs.
 #[derive(Clone, Debug, Serialize)]
 pub struct BudgetCurveOpts {
     /// Periods per year, used only to annualize the reported raw Sharpe for

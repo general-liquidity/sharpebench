@@ -7,10 +7,14 @@ verifiability are very welcome.
 ## Ground rules
 
 - **Determinism is sacred.** `sharpebench-core` must stay pure: no I/O, no system clock,
-  no ambient randomness (pass an explicit seed). A given input must produce a
-  byte-identical score on every platform, forever. Changes that alter a published
-  score must be deliberate, documented, and versioned.
-- **`#![forbid(unsafe_code)]`** in `sharpebench-core`, `sharpebench-sim`, and `sharpebench-protocol`.
+  no ambient randomness (pass an explicit seed). Changes that alter a published
+  score must be deliberate, documented, and versioned. Two committed Rust
+  goldens are checked on Linux, macOS, and Windows; do not generalize that
+  evidence to every platform and toolchain.
+- **`#![forbid(unsafe_code)]`** at all twelve workspace package roots under
+  `crates/`. The published PyO3 binding is excluded from the workspace and is
+  the disclosed exception because its generated FFI glue expands to unsafe
+  operations.
 - **Tests with the math.** New scoring logic ships with unit tests, including a
   case that demonstrates it resists gaming (see `composite.rs` for the pattern).
 
