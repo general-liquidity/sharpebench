@@ -1,7 +1,7 @@
 # Embedding the kernel (WASM, npm, MCP)
 
 A benchmark whose scorer is re-implemented per consumer drifts. SharpeBench avoids
-that by having **one** scoring kernel — `sharpebench-core` — and compiling it to
+that by having **one** scoring kernel, `sharpebench-core`, and compiling it to
 WebAssembly (`sharpebench-wasm`) for non-Rust hosts. A TypeScript trading agent, the
 published npm package, and the canonical Rust CLI all score against byte-identical
 math; there is no second implementation to disagree.
@@ -9,7 +9,7 @@ math; there is no second implementation to disagree.
 ## The npm package
 
 [`@general-liquidity/sharpebench`](https://www.npmjs.com/package/@general-liquidity/sharpebench)
-is the kernel as a typed JS/TS package — no Rust toolchain required:
+is the kernel as a typed JS/TS package. No Rust toolchain is required:
 
 ```ts
 import { score, scoreAgent, selfAudit, greeks } from "@general-liquidity/sharpebench";
@@ -19,8 +19,11 @@ selfAudit().all_defended;                   // the anti-gaming proof, in JS
 greeks({ spot: 100, strike: 100, t_years: 1, rate: 0.05, vol: 0.2, is_call: true });
 ```
 
-The full surface: `score`, `scoreAgent`, `selfAudit`, `auditBriefing`,
-`scoreAllocation`, `greeks`, `canary` — all fully typed and deterministic.
+The full surface is `score`, `scoreAgent`, `selfAudit`, `auditBriefing`,
+`scoreAllocation`, `greeks`, `canary`, `isMySharpeReal`,
+`isMySharpeRealFull`, `percentileSelection`, `decomposeUncertainty`,
+`crowdingHalfLife`, `classifyDisqualification`, and `regimeCompare`. All are
+typed and deterministic.
 
 ## The MCP server
 

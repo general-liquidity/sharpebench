@@ -1,6 +1,6 @@
 # @general-liquidity/sharpebench-mcp
 
-An **MCP server** that exposes the [SharpeBench](https://github.com/general-liquidity/sharpebench) luck-robust scoring kernel as agent-callable tools. Point Claude (or any MCP client) at it and it can deflate a Sharpe, check pass^k reliability, audit a briefing for bias, or price an option's tail-risk — all from the deterministic Rust kernel, no network.
+An **MCP server** that exposes the [SharpeBench](https://github.com/general-liquidity/sharpebench) luck-robust scoring kernel as agent-callable tools. Point an MCP client at it to deflate a Sharpe, check pass^k reliability, compare regimes, audit a briefing, or price option tail risk. Every result comes from the deterministic Rust kernel with no network access.
 
 ## Tools
 
@@ -13,8 +13,14 @@ An **MCP server** that exposes the [SharpeBench](https://github.com/general-liqu
 | `score_allocation` | Score a weight-vector trajectory (validity + turnover) |
 | `greeks` | Black-Scholes price + Greeks + tail-selling risk |
 | `canary` | Derive a do-not-train contamination tripwire |
+| `is_my_sharpe_real` | Deflate one return series for its search footprint and render the honesty verdict |
+| `regime_compare` | Compare aligned returns inside caller-supplied regimes |
+| `percentile_selection` | Compare the observed point winner with a bootstrap-percentile winner |
+| `decompose_uncertainty` | Report aleatoric, epistemic, and distributional diagnostic legs |
+| `crowding_half_life` | Evaluate a caller-calibrated crowding-decay prior |
+| `classify_disqualification` | Name every hard-gate and advisory signal that fired |
 
-All tools are read-only and deterministic — safe to expose without sandboxing.
+All tools are read-only and deterministic. They do not execute entrant code or access the network.
 
 ## Use it
 

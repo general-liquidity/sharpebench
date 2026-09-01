@@ -45,6 +45,12 @@ print(ci["lower"], ci["point"], ci["upper"])
 | `selection_robustness(candidates, n_trials, ...)` | best vs median DSR: is the headline a lucky pick? |
 | `runs_for_power(effect, alpha, power)` | how many runs to detect an effect |
 | `pass_k(passed_per_run, mode="all", n=None)` | pass^k reliability: won on **every** run, not on average |
+| `budget_curve(...)` | DSR by search budget, marginal DSR, and overfit-onset diagnostics |
+| `rank_board(submissions, config_json="")` / `score_one(...)` | Full composite scoring over the CLI-compatible JSON contract |
+| `rank_returns(field, config_json="")` | Build and rank a board from agent IDs and per-run return arrays |
+| `default_score_config()` | Serialize the default scoring configuration |
+| `never_catastrophic_config()` | Serialize the preset that asks only whether every run avoids catastrophe |
+| `relative_to_benchmark_config(id)` | Serialize the benchmark-relative pass preset |
 
 ### Matrix orientation
 
@@ -63,8 +69,9 @@ otherwise). The same input yields byte-identical output on any platform.
 
 ## Relationship to `sharpearena`
 
-`sharpearena` is the **environment**: a leak-free, point-in-time arena where a
-trading agent produces a track, scored end-to-end by `score_run`. `sharpebench`
+`sharpearena` is the **environment**: a point-in-time market API where a
+trading agent produces a track, scored end-to-end by its `score_run` helper. It
+does not provide process containment. `sharpebench`
 is the **judge for a track you already have**: your own backtest, live P&L, or a
 field of candidate strategies. They share one Rust statistics kernel, so the
 verdict is identical either way; this package simply does not, and will not,
