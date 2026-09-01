@@ -10,14 +10,17 @@ pub mod checkpoint;
 pub mod failure;
 pub mod perturb;
 
-pub use checkpoint::{run_resumable_sweep, SweepCheckpoint, TaskRecord, TaskState};
+pub use checkpoint::{
+    run_resumable_sweep, run_resumable_sweep_bound, SweepCheckpoint, SweepContract, SweepIdentity,
+    TaskRecord, TaskState,
+};
 pub use failure::{
     apply_oom_verdict, failing_sentinel_run, run_with_retries, FailureKind, FailureLog,
     FailureRecord, RunOutcome,
 };
 
 use sharpebench_core::{AgentSubmission, MandateVerdict};
-use sharpebench_protocol::{AgentTrajectory, RunTrajectory};
+use sharpebench_protocol::{AgentTrajectory, RunTrajectory, TrajectoryContract, TrajectoryWindow};
 use sharpebench_sim::{
     run_backtest, run_backtest_capture, Agent, CostModel, Dataset, RandomAgent, TeamAgent,
     TransportDiagnostics, TransportHealth, Window,
@@ -85,11 +88,75 @@ where
     };
     let trajectory = AgentTrajectory {
         agent_id: agent_id.to_string(),
+        contract: Some(trajectory_contract(data, costs, windows, seeds)),
         in_sample_trials: 0,
         runs: traj_runs,
         declared_mandate: None,
     };
     (submission, trajectory)
+}
+
+fn semantic_digest<T: serde::Serialize>(value: &T) -> String {
+    let bytes = serde_json::to_vec(value).expect("benchmark semantic inputs serialize");
+    sharpebench_attest::content_digest(&bytes)
+}
+
+/// Bit-exact identity of the execution-cost model. JSON represents every
+/// non-finite float as `null`, but `max_participation = +infinity` is the
+/// shipped unlimited-liquidity setting. Hashing the IEEE-754 bits keeps that
+/// setting distinct from NaN and any future non-finite sentinel.
+pub fn cost_model_digest(costs: CostModel) -> String {
+    let noise = costs.noise.map_or_else(
+        || "none".to_string(),
+        |noise| {
+            format!(
+                "some:{:016x}:{:016x}:{:016x}:{:016x}",
+                noise.delay_prob.to_bits(),
+                noise.min_fill_frac.to_bits(),
+                noise.carry_floor.to_bits(),
+                noise.queue_participation_ref.to_bits()
+            )
+        },
+    );
+    let trf = costs.trf_cost.map_or_else(
+        || "none".to_string(),
+        |value| format!("some:{:016x}", value.to_bits()),
+    );
+    let preimage = format!(
+        "sharpebench-cost-model-v1|{:016x}|{:016x}|{:016x}|{:016x}|{:016x}|{trf}|{noise}",
+        costs.fee_bps.to_bits(),
+        costs.slippage_bps.to_bits(),
+        costs.impact_bps.to_bits(),
+        costs.financing_bps.to_bits(),
+        costs.max_participation.to_bits(),
+    );
+    sharpebench_attest::content_digest(preimage.as_bytes())
+}
+
+/// Contract for the semantic inputs a trajectory capture consumes. This is
+/// public so non-CLI callers can validate the same identity without duplicating
+/// canonicalization rules.
+pub fn trajectory_contract(
+    data: &Dataset,
+    costs: CostModel,
+    windows: &[Window],
+    seeds: &[u64],
+) -> TrajectoryContract {
+    TrajectoryContract {
+        schema_version: TrajectoryContract::SCHEMA_VERSION,
+        dataset_sha256: semantic_digest(data),
+        cost_model_sha256: cost_model_digest(costs),
+        engine_version: env!("CARGO_PKG_VERSION").to_string(),
+        windows: windows
+            .iter()
+            .map(|window| TrajectoryWindow {
+                start: window.start,
+                end: window.end,
+            })
+            .collect(),
+        seeds: seeds.to_vec(),
+        runner_artifact_sha256: None,
+    }
 }
 
 /// Like [`run_agent`], but the factory receives the run's execution `seed` — for
@@ -143,6 +210,28 @@ pub fn run_agent_resilient<F>(
     seeds: &[u64],
     max_retries: u32,
     expected_run_len: usize,
+    attempt: F,
+) -> ResilientSubmission
+where
+    F: FnMut(usize, u64) -> Result<sharpebench_core::Run, FailureKind>,
+{
+    run_agent_resilient_by_window(
+        agent_id,
+        &vec![expected_run_len; n_windows],
+        seeds,
+        max_retries,
+        attempt,
+    )
+}
+
+/// Per-window-length variant of [`run_agent_resilient`]. Use this whenever the
+/// execution plan contains unequal windows so an agent-fault sentinel preserves
+/// the exact cell geometry instead of inheriting the first window's length.
+pub fn run_agent_resilient_by_window<F>(
+    agent_id: &str,
+    expected_run_lens: &[usize],
+    seeds: &[u64],
+    max_retries: u32,
     mut attempt: F,
 ) -> ResilientSubmission
 where
@@ -150,7 +239,7 @@ where
 {
     let mut runs = Vec::new();
     let mut failures = FailureLog::default();
-    for w in 0..n_windows {
+    for (w, &expected_run_len) in expected_run_lens.iter().enumerate() {
         for &seed in seeds {
             let (outcome, _) = run_with_retries(max_retries, || attempt(w, seed));
             match outcome {
@@ -247,21 +336,16 @@ where
     A: Agent + TransportDiagnostics,
     F: FnMut() -> Option<A>,
 {
-    let expected_len = windows
-        .first()
-        .map(|w| w.end.saturating_sub(w.start))
-        .unwrap_or(0);
-    run_agent_resilient(
-        agent_id,
-        windows.len(),
-        seeds,
-        max_retries,
-        expected_len,
-        |wi, seed| match spawn() {
+    let expected_lens: Vec<usize> = windows
+        .iter()
+        .map(|window| window.end.saturating_sub(window.start))
+        .collect();
+    run_agent_resilient_by_window(agent_id, &expected_lens, seeds, max_retries, |wi, seed| {
+        match spawn() {
             Some(mut agent) => run_external_backtest(data, &mut agent, windows[wi], seed, costs),
             None => Err(FailureKind::SpawnError),
-        },
-    )
+        }
+    })
 }
 
 /// Produce `n_agents` random "monkey" submissions — the **luck floor**. Each is a
@@ -480,6 +564,156 @@ pub fn verify_trajectory(
         ),
         declared_verdict,
     }
+}
+
+/// Strict separate-verifier path. It refuses legacy or mismatched artifacts
+/// before replay, so a deterministic recomputation cannot silently be a
+/// deterministic recomputation of different market conditions.
+pub fn verify_trajectory_strict(
+    data: &Dataset,
+    traj: &AgentTrajectory,
+    costs: CostModel,
+    cfg: &sharpebench_core::ScoreConfig,
+    runner_artifact_sha256: Option<&str>,
+) -> Result<VerificationResult, String> {
+    if traj.runs.is_empty() {
+        return Err("trajectory has no runs; an empty artifact measured nothing".to_string());
+    }
+    if let Some(index) = traj.runs.iter().position(|run| run.steps.is_empty()) {
+        return Err(format!(
+            "trajectory run {index} has no decision steps; partial evidence cannot be graded as a completed run"
+        ));
+    }
+    let expected = trajectory_contract(data, costs, &[], &[]);
+    let contract = traj.contract.as_ref().ok_or_else(|| {
+        "trajectory has no execution contract; recapture it or pass the CLI's explicit legacy override"
+            .to_string()
+    })?;
+    if contract.schema_version != expected.schema_version {
+        return Err(format!(
+            "trajectory contract schema {} is unsupported (expected {})",
+            contract.schema_version, expected.schema_version
+        ));
+    }
+    if contract.dataset_sha256 != expected.dataset_sha256 {
+        return Err(format!(
+            "trajectory dataset {} does not match verifier dataset {}",
+            contract.dataset_sha256, expected.dataset_sha256
+        ));
+    }
+    if contract.cost_model_sha256 != expected.cost_model_sha256 {
+        return Err(format!(
+            "trajectory cost model {} does not match verifier cost model {}",
+            contract.cost_model_sha256, expected.cost_model_sha256
+        ));
+    }
+    if contract.engine_version != expected.engine_version {
+        return Err(format!(
+            "trajectory engine {} does not match verifier engine {}",
+            contract.engine_version, expected.engine_version
+        ));
+    }
+    if contract.windows.is_empty() || contract.seeds.is_empty() {
+        return Err(
+            "trajectory contract does not declare its complete window-by-seed execution matrix"
+                .to_string(),
+        );
+    }
+    let mut unique_windows = std::collections::BTreeSet::new();
+    for window in &contract.windows {
+        if window.start >= window.end || window.end > data.len() {
+            return Err(format!(
+                "trajectory contract window [{}, {}) is outside dataset length {}",
+                window.start,
+                window.end,
+                data.len()
+            ));
+        }
+        if !unique_windows.insert((window.start, window.end)) {
+            return Err(format!(
+                "trajectory contract repeats window [{}, {})",
+                window.start, window.end
+            ));
+        }
+    }
+    let unique_seeds: std::collections::BTreeSet<u64> = contract.seeds.iter().copied().collect();
+    if unique_seeds.len() != contract.seeds.len() {
+        return Err("trajectory contract repeats an execution seed".to_string());
+    }
+    let expected_runs = contract
+        .windows
+        .len()
+        .checked_mul(contract.seeds.len())
+        .ok_or_else(|| "trajectory execution matrix is too large".to_string())?;
+    if traj.runs.len() != expected_runs {
+        return Err(format!(
+            "trajectory execution matrix is incomplete: expected {expected_runs} runs from {} windows x {} seeds, found {}",
+            contract.windows.len(),
+            contract.seeds.len(),
+            traj.runs.len()
+        ));
+    }
+    for (index, (window, seed)) in contract
+        .windows
+        .iter()
+        .flat_map(|window| contract.seeds.iter().map(move |seed| (window, seed)))
+        .enumerate()
+    {
+        let run = &traj.runs[index];
+        if (run.window_start, run.window_end, run.seed) != (window.start, window.end, *seed) {
+            return Err(format!(
+                "trajectory run {index} has coordinates [{}, {}) seed {}, expected [{}, {}) seed {}",
+                run.window_start,
+                run.window_end,
+                run.seed,
+                window.start,
+                window.end,
+                seed
+            ));
+        }
+        let expected_steps = window.end - window.start;
+        if run.steps.len() != expected_steps {
+            return Err(format!(
+                "trajectory run {index} has {} decision steps, expected {expected_steps}",
+                run.steps.len()
+            ));
+        }
+        for (step_index, step) in run.steps.iter().enumerate() {
+            if step.step != step_index {
+                return Err(format!(
+                    "trajectory run {index} decision {step_index} declares step {}",
+                    step.step
+                ));
+            }
+            let expected_observation = &data.dates[window.start + step_index];
+            if &step.observation_id != expected_observation {
+                return Err(format!(
+                    "trajectory run {index} decision {step_index} names observation `{}`, expected `{expected_observation}`",
+                    step.observation_id
+                ));
+            }
+        }
+    }
+    match (
+        contract.runner_artifact_sha256.as_deref(),
+        runner_artifact_sha256,
+    ) {
+        (Some(captured), Some(current)) if captured != current => {
+            return Err(format!(
+                "trajectory runner {captured} does not match verifier runner {current}"
+            ));
+        }
+        (None, Some(_)) => {
+            return Err(
+                "trajectory has no runner artifact identity; strict cross-process verification requires the exact capture binary"
+                    .to_string(),
+            );
+        }
+        _ => {}
+    }
+    let mut bound_cfg = cfg.clone();
+    bound_cfg.execution_seeds_per_window = contract.seeds.len();
+    Ok(verify_trajectory(data, traj, costs, &bound_cfg))
 }
 
 /// One member of a trading team: a name plus a factory for fresh instances (the
@@ -915,6 +1149,226 @@ mod tests {
     }
 
     #[test]
+    fn strict_replay_refuses_same_geometry_with_different_market_data() {
+        let data = Dataset::synthetic(3, 80, 20_260_621);
+        let windows = [Window { start: 20, end: 80 }];
+        let costs = CostModel::default();
+        let (_, trajectory) = run_agent_capture("momentum", &data, &windows, &[0], costs, || {
+            Box::new(Momentum::default()) as Box<dyn Agent>
+        });
+        let mut changed = data.clone();
+        *changed
+            .closes
+            .values_mut()
+            .next()
+            .and_then(|series| series.get_mut(40))
+            .expect("fixture has the changed bar") += 1.0;
+
+        let error = verify_trajectory_strict(
+            &changed,
+            &trajectory,
+            costs,
+            &sharpebench_core::ScoreConfig::default(),
+            None,
+        )
+        .expect_err("same dates and windows over different prices must be refused");
+        assert!(error.contains("trajectory dataset"));
+    }
+
+    #[test]
+    fn strict_replay_refuses_unbound_and_different_runner_artifacts() {
+        let data = Dataset::synthetic(3, 80, 20_260_621);
+        let windows = [Window { start: 20, end: 80 }];
+        let costs = CostModel::default();
+        let (_, mut trajectory) =
+            run_agent_capture("momentum", &data, &windows, &[0], costs, || {
+                Box::new(Momentum::default()) as Box<dyn Agent>
+            });
+        trajectory
+            .contract
+            .as_mut()
+            .expect("new captures are bound")
+            .runner_artifact_sha256 = Some("11".repeat(32));
+        let error = verify_trajectory_strict(
+            &data,
+            &trajectory,
+            costs,
+            &sharpebench_core::ScoreConfig::default(),
+            Some(&"22".repeat(32)),
+        )
+        .expect_err("different executable identities must be visible");
+        assert!(error.contains("trajectory runner"));
+
+        trajectory.contract = None;
+        let error = verify_trajectory_strict(
+            &data,
+            &trajectory,
+            costs,
+            &sharpebench_core::ScoreConfig::default(),
+            None,
+        )
+        .expect_err("legacy artifacts cannot prove their conditions");
+        assert!(error.contains("no execution contract"));
+
+        let (_, trajectory) = run_agent_capture("momentum", &data, &windows, &[0], costs, || {
+            Box::new(Momentum::default()) as Box<dyn Agent>
+        });
+        let error = verify_trajectory_strict(
+            &data,
+            &trajectory,
+            costs,
+            &sharpebench_core::ScoreConfig::default(),
+            Some(&"22".repeat(32)),
+        )
+        .expect_err("a verifier requiring exact runner identity must not accept an absent one");
+        assert!(error.contains("no runner artifact identity"));
+    }
+
+    #[test]
+    fn strict_replay_refuses_empty_or_partial_evidence_envelopes() {
+        let data = Dataset::synthetic(3, 80, 20_260_621);
+        let costs = CostModel::default();
+        let (_, mut trajectory) = run_agent_capture(
+            "momentum",
+            &data,
+            &[Window { start: 20, end: 80 }],
+            &[0],
+            costs,
+            || Box::new(Momentum::default()) as Box<dyn Agent>,
+        );
+        let run = trajectory.runs.pop().expect("fixture has one run");
+        let error = verify_trajectory_strict(
+            &data,
+            &trajectory,
+            costs,
+            &sharpebench_core::ScoreConfig::default(),
+            None,
+        )
+        .expect_err("an empty envelope cannot prove a benchmark result");
+        assert!(error.contains("measured nothing"));
+
+        trajectory.runs.push(RunTrajectory {
+            steps: Vec::new(),
+            ..run
+        });
+        let error = verify_trajectory_strict(
+            &data,
+            &trajectory,
+            costs,
+            &sharpebench_core::ScoreConfig::default(),
+            None,
+        )
+        .expect_err("a run with no decisions cannot count as completed evidence");
+        assert!(error.contains("partial evidence"));
+    }
+
+    #[test]
+    fn strict_replay_requires_the_exact_declared_execution_matrix() {
+        let data = Dataset::synthetic(3, 100, 20_260_621);
+        let windows = [
+            Window { start: 20, end: 60 },
+            Window {
+                start: 60,
+                end: 100,
+            },
+        ];
+        let seeds = [3, 5];
+        let costs = CostModel::default();
+        let (_, trajectory) = run_agent_capture("momentum", &data, &windows, &seeds, costs, || {
+            Box::new(Momentum::default()) as Box<dyn Agent>
+        });
+        let verify = |candidate: &AgentTrajectory| {
+            verify_trajectory_strict(
+                &data,
+                candidate,
+                costs,
+                &sharpebench_core::ScoreConfig::default(),
+                None,
+            )
+        };
+
+        let mut missing = trajectory.clone();
+        missing.runs.pop();
+        let error = verify(&missing).expect_err("a missing cell must be refused");
+        assert!(error.contains("execution matrix is incomplete"), "{error}");
+
+        let mut duplicated = trajectory.clone();
+        duplicated.runs[1] = duplicated.runs[0].clone();
+        let error = verify(&duplicated).expect_err("a duplicated cell must be refused");
+        assert!(error.contains("has coordinates"), "{error}");
+
+        let mut reordered = trajectory.clone();
+        reordered.runs.swap(0, 1);
+        let error = verify(&reordered).expect_err("cell order is part of the contract");
+        assert!(error.contains("has coordinates"), "{error}");
+
+        let mut truncated = trajectory.clone();
+        truncated.runs[0].steps.truncate(1);
+        let error = verify(&truncated).expect_err("a nonempty partial run must be refused");
+        assert!(error.contains("decision steps"), "{error}");
+
+        let mut wrong_step = trajectory.clone();
+        wrong_step.runs[0].steps[1].step = 9;
+        let error = verify(&wrong_step).expect_err("step metadata must be verified");
+        assert!(error.contains("declares step"), "{error}");
+
+        let mut wrong_observation = trajectory.clone();
+        wrong_observation.runs[0].steps[1].observation_id = "wrong-date".to_string();
+        let error = verify(&wrong_observation).expect_err("observation identity must be verified");
+        assert!(error.contains("names observation"), "{error}");
+
+        verify(&trajectory).expect("the intact execution matrix verifies");
+    }
+
+    #[test]
+    fn strict_replay_derives_the_execution_replicate_count_from_the_contract() {
+        let data = Dataset::synthetic(4, 120, 20_260_621);
+        let windows = [
+            Window { start: 20, end: 70 },
+            Window {
+                start: 70,
+                end: 120,
+            },
+        ];
+        let seeds = [0, 1, 2, 3];
+        let costs = CostModel::default();
+        let (direct, trajectory) =
+            run_agent_capture("momentum", &data, &windows, &seeds, costs, || {
+                Box::new(Momentum::default()) as Box<dyn Agent>
+            });
+        let direct_cfg = sharpebench_core::ScoreConfig {
+            execution_seeds_per_window: seeds.len(),
+            ..sharpebench_core::ScoreConfig::default()
+        };
+        let direct_score = sharpebench_core::score_agent(&direct, &direct_cfg);
+        let verified = verify_trajectory_strict(
+            &data,
+            &trajectory,
+            costs,
+            &sharpebench_core::ScoreConfig::default(),
+            None,
+        )
+        .expect("the verifier derives the four-replicate grouping");
+        assert_eq!(
+            serde_json::to_string(&direct_score).unwrap(),
+            serde_json::to_string(&verified.score).unwrap(),
+            "strict replay must preserve the capture's replicate semantics"
+        );
+    }
+
+    #[test]
+    fn cost_contract_distinguishes_non_finite_bit_patterns() {
+        let infinite = CostModel::default();
+        let mut nan = infinite;
+        nan.max_participation = f64::NAN;
+        assert_ne!(
+            cost_model_digest(infinite),
+            cost_model_digest(nan),
+            "JSON would encode both values as null, so the contract must hash their bits"
+        );
+    }
+
+    #[test]
     fn runtime_crash_is_not_counted_as_an_agent_failure() {
         // A skilled agent whose container crashes (runtime error) on the first
         // seed of each window, then recovers on retry. pass^k must see only the
@@ -973,6 +1427,24 @@ mod tests {
         assert_eq!(res.failures.runtime_failures(), 1);
         assert_eq!(res.failures.agent_faults(), 0);
         assert_eq!(res.submission.runs.len(), 2, "dead container adds no run");
+    }
+
+    #[test]
+    fn resilient_sentinels_preserve_unequal_window_lengths() {
+        let res = run_agent_resilient_by_window(
+            "malformed-agent",
+            &[40, 60],
+            &[0],
+            0,
+            |_window, _seed| Err(FailureKind::AgentProtocolViolation),
+        );
+        let lengths: Vec<usize> = res
+            .submission
+            .runs
+            .iter()
+            .map(|run| run.returns.len())
+            .collect();
+        assert_eq!(lengths, vec![40, 60]);
     }
 
     #[test]

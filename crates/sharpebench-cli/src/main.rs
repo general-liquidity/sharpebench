@@ -7,6 +7,7 @@
 
 use std::process::ExitCode;
 
+use serde::Serialize;
 use sharpebench_core::{rank, AgentSubmission, CompositeScore, ScoreConfig};
 
 mod analysis_cmd;
@@ -597,6 +598,7 @@ fn help() {
     println!("                       --image <repository@sha256:...>: run the agent in the hardened container sandbox (no daemon = refusal)");
     println!("                       --cmd: UNSANDBOXED host execution, for agents you trust; prints a warning on every run");
     println!("                       --checkpoint <path>: resumable external-agent sweep (crash-tolerant)");
+    println!("                       --entrant-sha256 <digest>: exact entrant identity; required with --checkpoint plus --http or --cmd");
     println!("                       --periods-per-year N: bars per year of the dataset (default 252; 1h crypto 8760, 4h 2190, 1d crypto 365, 1w 52)");
     println!("                       --pass-mode all|any|at-least:N|relative-to-benchmark: reliability verdict (default all)");
     println!("                       --benchmark-agent <id>: benchmark for relative-to-benchmark (default buy-and-hold)");
@@ -621,8 +623,9 @@ fn help() {
         "  sharpebench capture <agent> <out.json> [--data <csv>]  capture an agent's raw-decision trajectory artifact"
     );
     println!(
-        "  sharpebench verify-trajectory <traj.json> [--data <csv>]  replay a trajectory → recompute its score from raw decisions"
+        "  sharpebench verify-trajectory <traj.json> [--data <csv>]  strictly replay the complete data/cost/engine/runner/window/seed contract"
     );
+    println!("                       --allow-unbound-trajectory: explicit legacy or cross-version regrade; never the default");
     println!("  sharpebench audit-briefing <briefing.json>  audit a shared briefing for input-side salience bias");
     println!("  sharpebench canary <seed>             derive a do-not-train contamination tripwire token");
     println!("  sharpebench sandbox-check <image@sha256:digest>  run live hostile field-readiness checks (never skips)");
@@ -1097,9 +1100,58 @@ fn run_commit(args: &[String]) -> ExitCode {
 /// wire blip (runtime) or an agent protocol fault is printed to stderr so the
 /// operator sees that some decisions did not come from the agent honestly, rather
 /// than a silently-flattened return series.
-fn report_transport_failures(label: &str, failures: &sharpebench_harness::FailureLog, json: bool) {
+#[derive(Debug, Serialize)]
+struct ExternalSweepCompleteness {
+    expected_cells: usize,
+    completed_cells: usize,
+    runtime_failed_cells: usize,
+    agent_failed_cells: usize,
+    complete: bool,
+}
+
+fn external_sweep_completeness(
+    failures: &sharpebench_harness::FailureLog,
+    expected_cells: usize,
+    completed_cells: usize,
+) -> ExternalSweepCompleteness {
+    let runtime_failed_cells = failures.runtime_failures();
+    ExternalSweepCompleteness {
+        expected_cells,
+        completed_cells,
+        runtime_failed_cells,
+        agent_failed_cells: failures.agent_faults(),
+        complete: runtime_failed_cells == 0 && completed_cells == expected_cells,
+    }
+}
+
+fn report_transport_failures(
+    label: &str,
+    failures: &sharpebench_harness::FailureLog,
+    expected_cells: usize,
+    completed_cells: usize,
+    json: bool,
+) -> bool {
+    let status = external_sweep_completeness(failures, expected_cells, completed_cells);
+    if !status.complete {
+        if json {
+            emit_json(&serde_json::json!({
+                "ok": false,
+                "error": "incomplete_external_sweep",
+                "agent": label,
+                "completeness": status,
+            }));
+        } else {
+            eprintln!(
+                "error: external sweep for {label} is incomplete: expected {} cells, completed {}, runtime failures {}. No score or board was emitted",
+                status.expected_cells,
+                status.completed_cells,
+                status.runtime_failed_cells,
+            );
+        }
+        return false;
+    }
     if failures.is_empty() {
-        return;
+        return true;
     }
     if !json {
         eprintln!(
@@ -1110,6 +1162,76 @@ fn report_transport_failures(label: &str, failures: &sharpebench_harness::Failur
             failures.agent_faults(),
         );
     }
+    true
+}
+
+fn digest_json<T: Serialize>(label: &str, value: &T) -> Result<String, String> {
+    serde_json::to_vec(value)
+        .map(|bytes| sharpebench_attest::content_digest(&bytes))
+        .map_err(|error| format!("cannot serialize {label} for the checkpoint contract: {error}"))
+}
+
+fn current_executable_sha256() -> Result<String, String> {
+    let runner = std::env::current_exe()
+        .map_err(|error| format!("cannot locate the running benchmark binary: {error}"))?;
+    let bytes = std::fs::read(&runner).map_err(|error| {
+        format!(
+            "cannot hash the running benchmark binary {}: {error}",
+            runner.display()
+        )
+    })?;
+    Ok(sharpebench_attest::content_digest(&bytes))
+}
+
+struct CheckpointExecution<'a> {
+    data: &'a sharpebench_sim::Dataset,
+    windows: &'a [sharpebench_sim::Window],
+    seeds: &'a [u64],
+    costs: sharpebench_sim::CostModel,
+    score_config: &'a ScoreConfig,
+    max_retries: u32,
+}
+
+fn checkpoint_contract(
+    args: &[String],
+    execution: CheckpointExecution<'_>,
+    entrant_material: &[u8],
+    require_explicit_entrant_digest: bool,
+) -> Result<sharpebench_harness::SweepContract, String> {
+    let entrant_sha256 = match flag_value(args, "--entrant-sha256") {
+        Some(digest)
+            if digest.len() == 64
+                && digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)) =>
+        {
+            digest.to_string()
+        }
+        Some(digest) => {
+            return Err(format!(
+                "--entrant-sha256 must be 64 lowercase hexadecimal characters, got `{digest}`"
+            ))
+        }
+        None if require_explicit_entrant_digest => {
+            return Err(
+                "--checkpoint with --http or --cmd also requires --entrant-sha256 <digest>; an endpoint address or command line does not prove which entrant artifact is running"
+                    .to_string(),
+            )
+        }
+        None => sharpebench_attest::content_digest(entrant_material),
+    };
+    Ok(sharpebench_harness::SweepContract::new(
+        sharpebench_harness::SweepIdentity {
+            dataset_sha256: digest_json("dataset", execution.data)?,
+            cost_model_sha256: sharpebench_harness::cost_model_digest(execution.costs),
+            score_config_sha256: digest_json("score configuration", execution.score_config)?,
+            runner_artifact_sha256: current_executable_sha256()?,
+            entrant_sha256,
+        },
+        execution.windows,
+        execution.seeds,
+        execution.max_retries,
+    ))
 }
 
 fn run_demo(args: &[String], json: bool) -> ExitCode {
@@ -1216,9 +1338,29 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
         let addr = addr.to_string();
         let label = format!("http:{addr}");
         let res = if let Some(ckpt) = &checkpoint {
-            match sharpebench_harness::run_resumable_sweep(
+            let contract = match checkpoint_contract(
+                args,
+                CheckpointExecution {
+                    data: &data,
+                    windows: &windows,
+                    seeds: &seeds,
+                    costs,
+                    score_config: &cfg,
+                    max_retries: EXTERNAL_MAX_RETRIES,
+                },
+                label.as_bytes(),
+                true,
+            ) {
+                Ok(contract) => contract,
+                Err(error) => {
+                    eprintln!("error: {error}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            match sharpebench_harness::run_resumable_sweep_bound(
                 ckpt,
                 &label,
+                &contract,
                 &windows,
                 &seeds,
                 EXTERNAL_MAX_RETRIES,
@@ -1250,7 +1392,15 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                 || Some(HttpAgent::new(addr.clone())),
             )
         };
-        report_transport_failures(&label, &res.failures, json);
+        if !report_transport_failures(
+            &label,
+            &res.failures,
+            windows.len() * seeds.len(),
+            res.submission.runs.len(),
+            json,
+        ) {
+            return ExitCode::FAILURE;
+        }
         field.insert(0, res.submission);
     } else if let Some(image) = flag_value(args, "--image") {
         let image = image.to_string();
@@ -1303,9 +1453,29 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                 Err(_) => Err(sharpebench_harness::FailureKind::SpawnError),
             };
         let res = if let Some(ckpt) = &checkpoint {
-            match sharpebench_harness::run_resumable_sweep(
+            let contract = match checkpoint_contract(
+                args,
+                CheckpointExecution {
+                    data: &data,
+                    windows: &windows,
+                    seeds: &seeds,
+                    costs,
+                    score_config: &cfg,
+                    max_retries: EXTERNAL_MAX_RETRIES,
+                },
+                label.as_bytes(),
+                false,
+            ) {
+                Ok(contract) => contract,
+                Err(error) => {
+                    eprintln!("error: {error}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            match sharpebench_harness::run_resumable_sweep_bound(
                 ckpt,
                 &label,
+                &contract,
                 &windows,
                 &seeds,
                 EXTERNAL_MAX_RETRIES,
@@ -1318,19 +1488,27 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                 }
             }
         } else {
-            sharpebench_harness::run_agent_resilient(
+            let expected_lens: Vec<usize> = windows
+                .iter()
+                .map(|window| window.end.saturating_sub(window.start))
+                .collect();
+            sharpebench_harness::run_agent_resilient_by_window(
                 &label,
-                windows.len(),
+                &expected_lens,
                 &seeds,
                 EXTERNAL_MAX_RETRIES,
-                windows
-                    .first()
-                    .map(|w| w.end.saturating_sub(w.start))
-                    .unwrap_or(0),
                 sandbox_attempt,
             )
         };
-        report_transport_failures(&label, &res.failures, json);
+        if !report_transport_failures(
+            &label,
+            &res.failures,
+            windows.len() * seeds.len(),
+            res.submission.runs.len(),
+            json,
+        ) {
+            return ExitCode::FAILURE;
+        }
         field.insert(0, res.submission);
     } else if let Some(cmd) = flag_value(args, "--cmd") {
         let parts: Vec<String> = cmd.split_whitespace().map(String::from).collect();
@@ -1359,9 +1537,32 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
         }
         let label = format!("cmd:{prog}");
         let res = if let Some(ckpt) = &checkpoint {
-            match sharpebench_harness::run_resumable_sweep(
+            let passthrough =
+                std::env::var(sharpebench_sim::AGENT_ENV_PASSTHROUGH).unwrap_or_default();
+            let entrant_material = format!("cmd\0{cmd}\0{passthrough}");
+            let contract = match checkpoint_contract(
+                args,
+                CheckpointExecution {
+                    data: &data,
+                    windows: &windows,
+                    seeds: &seeds,
+                    costs,
+                    score_config: &cfg,
+                    max_retries: EXTERNAL_MAX_RETRIES,
+                },
+                entrant_material.as_bytes(),
+                true,
+            ) {
+                Ok(contract) => contract,
+                Err(error) => {
+                    eprintln!("error: {error}");
+                    return ExitCode::FAILURE;
+                }
+            };
+            match sharpebench_harness::run_resumable_sweep_bound(
                 ckpt,
                 &label,
+                &contract,
                 &windows,
                 &seeds,
                 EXTERNAL_MAX_RETRIES,
@@ -1399,7 +1600,15 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                 },
             )
         };
-        report_transport_failures(&label, &res.failures, json);
+        if !report_transport_failures(
+            &label,
+            &res.failures,
+            windows.len() * seeds.len(),
+            res.submission.runs.len(),
+            json,
+        ) {
+            return ExitCode::FAILURE;
+        }
         field.insert(0, res.submission);
     }
 
@@ -1493,8 +1702,19 @@ fn run_capture(args: &[String], json: bool) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let (_sub, traj) =
+    let (_sub, mut traj) =
         sharpebench_harness::run_agent_capture(agent_id, &data, &windows, &seeds, costs, || make());
+    match current_executable_sha256() {
+        Ok(digest) => {
+            if let Some(contract) = &mut traj.contract {
+                contract.runner_artifact_sha256 = Some(digest);
+            }
+        }
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::FAILURE;
+        }
+    }
     let payload = match serde_json::to_string_pretty(&traj) {
         Ok(p) => p,
         Err(e) => {
@@ -1531,7 +1751,9 @@ fn run_verify_trajectory(args: &[String], json: bool) -> ExitCode {
     use sharpebench_sim::CostModel;
 
     if args.len() < 3 {
-        eprintln!("usage: sharpebench verify-trajectory <trajectory.json> [--data <csv>] [--json]");
+        eprintln!(
+            "usage: sharpebench verify-trajectory <trajectory.json> [--data <csv>] [--allow-unbound-trajectory] [--json]"
+        );
         return ExitCode::from(2);
     }
     let text = match std::fs::read_to_string(&args[2]) {
@@ -1555,12 +1777,34 @@ fn run_verify_trajectory(args: &[String], json: bool) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let result = sharpebench_harness::verify_trajectory(
-        &data,
-        &traj,
-        CostModel::default(),
-        &ScoreConfig::default(),
-    );
+    let costs = CostModel::default();
+    let cfg = ScoreConfig::default();
+    let result = if args.iter().any(|arg| arg == "--allow-unbound-trajectory") {
+        sharpebench_harness::verify_trajectory(&data, &traj, costs, &cfg)
+    } else {
+        let runner = match current_executable_sha256() {
+            Ok(digest) => digest,
+            Err(error) => {
+                eprintln!("error: {error}");
+                return ExitCode::FAILURE;
+            }
+        };
+        match sharpebench_harness::verify_trajectory_strict(
+            &data,
+            &traj,
+            costs,
+            &cfg,
+            Some(&runner),
+        ) {
+            Ok(result) => result,
+            Err(error) => {
+                eprintln!(
+                    "error: {error}. Use --allow-unbound-trajectory only for an explicit legacy or cross-version regrade."
+                );
+                return ExitCode::FAILURE;
+            }
+        }
+    };
     if json {
         emit_json(&result);
     } else {
@@ -1773,5 +2017,116 @@ mod tests {
             "0",
         ]);
         assert!(positive_usize_flag(&replicates, "--execution-seeds-per-window").is_err());
+    }
+
+    #[test]
+    fn checkpoint_contract_requires_an_artifact_digest_for_remote_entrants() {
+        let values = args(&["sharpebench", "run", "--checkpoint", "sweep.json"]);
+        let data = sharpebench_sim::Dataset::synthetic(2, 12, 7);
+        let windows = [sharpebench_sim::Window { start: 2, end: 12 }];
+        let error = checkpoint_contract(
+            &values,
+            CheckpointExecution {
+                data: &data,
+                windows: &windows,
+                seeds: &[3],
+                costs: sharpebench_sim::CostModel::default(),
+                score_config: &ScoreConfig::default(),
+                max_retries: 2,
+            },
+            b"http:127.0.0.1:9000",
+            true,
+        )
+        .expect_err("an endpoint address is not an entrant artifact identity");
+        assert!(error.contains("also requires --entrant-sha256"), "{error}");
+    }
+
+    #[test]
+    fn checkpoint_contract_pins_the_declared_remote_artifact() {
+        let digest = "a".repeat(64);
+        let values = args(&[
+            "sharpebench",
+            "run",
+            "--checkpoint",
+            "sweep.json",
+            "--entrant-sha256",
+            &digest,
+        ]);
+        let data = sharpebench_sim::Dataset::synthetic(2, 12, 7);
+        let windows = [sharpebench_sim::Window { start: 2, end: 12 }];
+        let contract = checkpoint_contract(
+            &values,
+            CheckpointExecution {
+                data: &data,
+                windows: &windows,
+                seeds: &[3],
+                costs: sharpebench_sim::CostModel::default(),
+                score_config: &ScoreConfig::default(),
+                max_retries: 2,
+            },
+            b"http:127.0.0.1:9000",
+            true,
+        )
+        .expect("a declared artifact digest binds the checkpoint");
+        assert_eq!(contract.entrant_sha256, digest);
+    }
+
+    #[test]
+    fn checkpoint_contract_rejects_noncanonical_artifact_digests() {
+        for invalid in ["abc".to_string(), "A".repeat(64), "g".repeat(64)] {
+            let values = args(&["sharpebench", "run", "--entrant-sha256", &invalid]);
+            let data = sharpebench_sim::Dataset::synthetic(2, 12, 7);
+            let windows = [sharpebench_sim::Window { start: 2, end: 12 }];
+            let error = checkpoint_contract(
+                &values,
+                CheckpointExecution {
+                    data: &data,
+                    windows: &windows,
+                    seeds: &[3],
+                    costs: sharpebench_sim::CostModel::default(),
+                    score_config: &ScoreConfig::default(),
+                    max_retries: 2,
+                },
+                b"entrant",
+                true,
+            )
+            .expect_err("noncanonical digests must be refused");
+            assert!(error.contains("64 lowercase hexadecimal"), "{error}");
+        }
+    }
+
+    #[test]
+    fn exhausted_runtime_cells_make_an_external_sweep_noncertifying() {
+        let mut failures = sharpebench_harness::FailureLog::default();
+        for seed in 0..8 {
+            failures.push(sharpebench_harness::FailureRecord {
+                window_index: 1,
+                seed,
+                kind: sharpebench_harness::FailureKind::TransportError,
+                attempts: 3,
+                runtime: true,
+            });
+        }
+        let status = external_sweep_completeness(&failures, 16, 8);
+        assert!(!status.complete);
+        assert_eq!(status.expected_cells, 16);
+        assert_eq!(status.completed_cells, 8);
+        assert_eq!(status.runtime_failed_cells, 8);
+    }
+
+    #[test]
+    fn agent_fault_sentinels_preserve_the_execution_denominator() {
+        let mut failures = sharpebench_harness::FailureLog::default();
+        failures.push(sharpebench_harness::FailureRecord {
+            window_index: 1,
+            seed: 7,
+            kind: sharpebench_harness::FailureKind::AgentProtocolViolation,
+            attempts: 1,
+            runtime: false,
+        });
+        let status = external_sweep_completeness(&failures, 16, 16);
+        assert!(status.complete);
+        assert_eq!(status.runtime_failed_cells, 0);
+        assert_eq!(status.agent_failed_cells, 1);
     }
 }

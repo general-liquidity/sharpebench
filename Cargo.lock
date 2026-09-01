@@ -733,6 +733,7 @@ version = "0.15.0"
 dependencies = [
  "serde",
  "serde_json",
+ "sharpebench-attest",
  "sharpebench-core",
  "sharpebench-protocol",
  "sharpebench-sim",

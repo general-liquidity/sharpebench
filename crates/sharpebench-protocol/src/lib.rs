@@ -262,6 +262,39 @@ pub struct RunTrajectory {
     pub steps: Vec<DecisionStep>,
 }
 
+/// Identity of the execution environment that produced a raw-decision
+/// trajectory. The score configuration is intentionally absent: a trajectory
+/// may be regraded under a newer scorer, but it must not be replayed against
+/// different market data, costs, or engine semantics while being described as
+/// the original run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrajectoryWindow {
+    pub start: usize,
+    pub end: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrajectoryContract {
+    pub schema_version: u32,
+    pub dataset_sha256: String,
+    pub cost_model_sha256: String,
+    pub engine_version: String,
+    /// Exact market windows the capture planned, in execution order.
+    #[serde(default)]
+    pub windows: Vec<TrajectoryWindow>,
+    /// Exact execution seeds applied to every window, in execution order.
+    #[serde(default)]
+    pub seeds: Vec<u64>,
+    /// Exact CLI executable when capture came through the command line. Library
+    /// callers may leave this absent and still bind the semantic inputs above.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runner_artifact_sha256: Option<String>,
+}
+
+impl TrajectoryContract {
+    pub const SCHEMA_VERSION: u32 = 2;
+}
+
 /// The mandate an agent declares at submission: which **reliability verdict** it
 /// asks to be judged under. Opt-in and additive: a submission with no
 /// declaration is scored exactly as before.
@@ -305,6 +338,10 @@ pub enum DeclaredMandate {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AgentTrajectory {
     pub agent_id: String,
+    /// The data, costs, and engine that produced the decisions. Absent only on
+    /// legacy or deliberately unbound artifacts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contract: Option<TrajectoryContract>,
     /// In-sample search budget the agent declared (mirrors `AgentSubmission`), so a
     /// recomputed submission carries the same deflation footprint.
     #[serde(default)]
@@ -483,6 +520,7 @@ mod tests {
     fn trajectory_roundtrips_through_json() {
         let traj = AgentTrajectory {
             agent_id: "a".to_string(),
+            contract: None,
             in_sample_trials: 7,
             declared_mandate: None,
             runs: vec![RunTrajectory {
@@ -555,6 +593,7 @@ mod tests {
 
         let declared = AgentTrajectory {
             agent_id: "a".to_string(),
+            contract: None,
             in_sample_trials: 0,
             declared_mandate: Some(DeclaredMandate::OutperformBuyAndHold),
             runs: Vec::new(),

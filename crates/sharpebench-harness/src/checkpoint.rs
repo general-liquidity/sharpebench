@@ -18,6 +18,7 @@
 //! submission from a resumed sweep is byte-identical to an uninterrupted one - the
 //! checkpoint changes *when* work happens, never *what* it computes.
 
+use std::io::Write as _;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -28,6 +29,80 @@ use crate::failure::{
     failing_sentinel_run, run_with_retries, FailureKind, FailureLog, FailureRecord, RunOutcome,
 };
 use crate::ResilientSubmission;
+
+/// Versioned identity of every condition that can change a resumable sweep's
+/// result. A checkpoint is reusable only when this record matches exactly.
+///
+/// The digests bind semantic inputs without copying a dataset, secrets, or a
+/// binary into the checkpoint. Exact windows and seeds stay visible because
+/// they are useful diagnostics rather than opaque implementation details.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SweepIdentity {
+    pub dataset_sha256: String,
+    pub cost_model_sha256: String,
+    pub score_config_sha256: String,
+    pub runner_artifact_sha256: String,
+    pub entrant_sha256: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SweepContract {
+    pub schema_version: u32,
+    pub dataset_sha256: String,
+    pub cost_model_sha256: String,
+    pub score_config_sha256: String,
+    pub runner_artifact_sha256: String,
+    pub entrant_sha256: String,
+    pub windows: Vec<(usize, usize)>,
+    pub seeds: Vec<u64>,
+    pub max_retries: u32,
+}
+
+impl SweepContract {
+    pub const SCHEMA_VERSION: u32 = 1;
+
+    /// Build the contract from already-computed SHA-256 identities.
+    pub fn new(
+        identity: SweepIdentity,
+        windows: &[Window],
+        seeds: &[u64],
+        max_retries: u32,
+    ) -> Self {
+        Self {
+            schema_version: Self::SCHEMA_VERSION,
+            dataset_sha256: identity.dataset_sha256,
+            cost_model_sha256: identity.cost_model_sha256,
+            score_config_sha256: identity.score_config_sha256,
+            runner_artifact_sha256: identity.runner_artifact_sha256,
+            entrant_sha256: identity.entrant_sha256,
+            windows: windows.iter().map(|w| (w.start, w.end)).collect(),
+            seeds: seeds.to_vec(),
+            max_retries,
+        }
+    }
+
+    fn matches_execution(&self, windows: &[Window], seeds: &[u64], max_retries: u32) -> bool {
+        let valid_digest = |digest: &str| {
+            digest.len() == 64
+                && digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        };
+        self.schema_version == Self::SCHEMA_VERSION
+            && [
+                &self.dataset_sha256,
+                &self.cost_model_sha256,
+                &self.score_config_sha256,
+                &self.runner_artifact_sha256,
+                &self.entrant_sha256,
+            ]
+            .into_iter()
+            .all(|digest| valid_digest(digest))
+            && self.windows == windows.iter().map(|w| (w.start, w.end)).collect::<Vec<_>>()
+            && self.seeds == seeds
+            && self.max_retries == max_retries
+    }
+}
 
 /// The lifecycle state of one (window, seed) task in the sweep.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -77,6 +152,10 @@ impl TaskRecord {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SweepCheckpoint {
     pub agent_id: String,
+    /// Absent only in legacy checkpoints created through the compatibility API.
+    /// The CLI uses the bound API and refuses an absent or different contract.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contract: Option<SweepContract>,
     pub tasks: Vec<TaskRecord>,
 }
 
@@ -98,8 +177,16 @@ impl SweepCheckpoint {
         }
         Self {
             agent_id: agent_id.to_string(),
+            contract: None,
             tasks,
         }
+    }
+
+    /// A fresh checkpoint bound to the full execution contract.
+    pub fn new_bound(agent_id: &str, contract: SweepContract) -> Self {
+        let mut checkpoint = Self::new(agent_id, contract.windows.len(), &contract.seeds);
+        checkpoint.contract = Some(contract);
+        checkpoint
     }
 
     /// Does this checkpoint describe the given agent + (n_windows × seeds) matrix, in
@@ -122,19 +209,43 @@ impl SweepCheckpoint {
         true
     }
 
+    /// Whether this checkpoint belongs to exactly this experiment. The legacy
+    /// agent/matrix match is necessary but not sufficient: the same matrix can
+    /// be run over different prices, costs, scorer settings, binaries, or
+    /// entrant artifacts.
+    pub fn matches_bound(&self, agent_id: &str, contract: &SweepContract) -> bool {
+        self.contract.as_ref() == Some(contract)
+            && self.matches(agent_id, contract.windows.len(), &contract.seeds)
+    }
+
     /// Load a checkpoint from `path`. A serde error is surfaced as an I/O error.
     pub fn load(path: &Path) -> std::io::Result<Self> {
         let raw = std::fs::read_to_string(path)?;
         serde_json::from_str(&raw).map_err(std::io::Error::other)
     }
 
-    /// Atomically-enough persist the checkpoint to `path` (write to a sibling temp
-    /// file, then rename), so a crash mid-write can't corrupt the resume point.
+    /// Persist through a sibling temporary file, sync its bytes, rename it, and
+    /// sync the containing directory on Unix. A successful return therefore
+    /// means the checkpoint is durable, not merely present in a page cache.
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
         let payload = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
         let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, payload)?;
-        std::fs::rename(&tmp, path)
+        let result = (|| {
+            let mut file = std::fs::File::create(&tmp)?;
+            file.write_all(payload.as_bytes())?;
+            file.sync_all()?;
+            drop(file);
+            std::fs::rename(&tmp, path)?;
+            #[cfg(unix)]
+            if let Some(parent) = path.parent() {
+                std::fs::File::open(parent)?.sync_all()?;
+            }
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+        result
     }
 
     /// Number of non-terminal (pending or claimed) tasks left.
@@ -265,6 +376,65 @@ impl SweepCheckpoint {
             failures,
         }
     }
+
+    fn validate_terminal(&self, windows: &[Window]) -> std::io::Result<()> {
+        for (index, task) in self.tasks.iter().enumerate() {
+            let expected_len = windows
+                .get(task.window)
+                .map(|window| window.end.saturating_sub(window.start))
+                .ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!(
+                            "checkpoint task {index} names absent window {}",
+                            task.window
+                        ),
+                    )
+                })?;
+            match (&task.state, &task.run) {
+                (TaskState::Done, Some(run)) if run.returns.len() == expected_len => {}
+                (TaskState::AgentFailed { .. }, Some(run))
+                    if run.returns.len() == expected_len.max(1) => {}
+                (TaskState::Done | TaskState::AgentFailed { .. }, Some(run)) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!(
+                            "checkpoint task {index} has run length {}, expected {}",
+                            run.returns.len(),
+                            expected_len
+                        ),
+                    ));
+                }
+                (TaskState::Done | TaskState::AgentFailed { .. }, None) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("checkpoint task {index} is scorable but carries no run"),
+                    ));
+                }
+                (TaskState::RuntimeFailed { attempts, .. }, None) => {
+                    if *attempts == 0 {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!("checkpoint task {index} records zero runtime attempts"),
+                        ));
+                    }
+                }
+                (TaskState::RuntimeFailed { .. }, Some(_)) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("checkpoint task {index} is a runtime failure but carries a run"),
+                    ));
+                }
+                (TaskState::Pending | TaskState::Claimed { .. }, _) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("checkpoint task {index} is not terminal"),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Run (or resume) an external-agent sweep with a JSON checkpoint at `path`.
@@ -295,11 +465,6 @@ where
         _ => SweepCheckpoint::new(agent_id, windows.len(), seeds),
     };
 
-    let expected_len = windows
-        .first()
-        .map(|w| w.end.saturating_sub(w.start))
-        .unwrap_or(0);
-
     // Single-worker driver: claim the next pending task, run it under the retry
     // taxonomy, record the outcome, and persist before moving on.
     while let Some((w, seed)) = cp.claim_next(0, 0) {
@@ -308,18 +473,96 @@ where
             RunOutcome::Completed(run) => cp.complete(w, seed, run),
             RunOutcome::Exhausted { last, attempts } => cp.fail_runtime(w, seed, last, attempts),
             RunOutcome::AgentFault(kind) => {
+                let expected_len = windows
+                    .get(w)
+                    .map(|window| window.end.saturating_sub(window.start))
+                    .unwrap_or(0);
                 cp.fail_agent(w, seed, kind, failing_sentinel_run(expected_len))
             }
         }
         cp.save(path)?;
     }
 
+    cp.validate_terminal(windows)?;
+    Ok(cp.assemble())
+}
+
+/// Strict resumable sweep used by the CLI. Unlike the compatibility function,
+/// an existing malformed, legacy, or differently-bound checkpoint is an error.
+/// It is never overwritten and never mixed into the current experiment.
+pub fn run_resumable_sweep_bound<F>(
+    path: &Path,
+    agent_id: &str,
+    contract: &SweepContract,
+    windows: &[Window],
+    seeds: &[u64],
+    max_retries: u32,
+    mut attempt: F,
+) -> std::io::Result<ResilientSubmission>
+where
+    F: FnMut(usize, u64) -> Result<Run, FailureKind>,
+{
+    if !contract.matches_execution(windows, seeds, max_retries) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "sweep contract does not describe the supplied windows, seeds, and retry policy",
+        ));
+    }
+
+    let mut cp =
+        match SweepCheckpoint::load(path) {
+            Ok(existing) if existing.matches_bound(agent_id, contract) => {
+                let mut existing = existing;
+                existing.requeue_claimed();
+                existing
+            }
+            Ok(_) => return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "checkpoint contract differs from this experiment; choose a new checkpoint path",
+            )),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                SweepCheckpoint::new_bound(agent_id, contract.clone())
+            }
+            Err(error) => return Err(error),
+        };
+
+    while let Some((w, seed)) = cp.claim_next(0, 0) {
+        let (outcome, _) = run_with_retries(max_retries, || attempt(w, seed));
+        match outcome {
+            RunOutcome::Completed(run) => cp.complete(w, seed, run),
+            RunOutcome::Exhausted { last, attempts } => cp.fail_runtime(w, seed, last, attempts),
+            RunOutcome::AgentFault(kind) => {
+                let expected_len = windows
+                    .get(w)
+                    .map(|window| window.end.saturating_sub(window.start))
+                    .unwrap_or(0);
+                cp.fail_agent(w, seed, kind, failing_sentinel_run(expected_len))
+            }
+        }
+        cp.save(path)?;
+    }
+    cp.validate_terminal(windows)?;
     Ok(cp.assemble())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn contract(windows: &[Window], seeds: &[u64], max_retries: u32) -> SweepContract {
+        SweepContract::new(
+            SweepIdentity {
+                dataset_sha256: "11".repeat(32),
+                cost_model_sha256: "22".repeat(32),
+                score_config_sha256: "33".repeat(32),
+                runner_artifact_sha256: "44".repeat(32),
+                entrant_sha256: "55".repeat(32),
+            },
+            windows,
+            seeds,
+            max_retries,
+        )
+    }
 
     fn tmp_path(tag: &str) -> std::path::PathBuf {
         use std::sync::atomic::{AtomicU64, Ordering};
@@ -462,5 +705,150 @@ mod tests {
         assert_eq!(pool.failures.agent_faults(), 1);
         assert_eq!(pool.failures.runtime_failures(), 1);
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn agent_fault_sentinels_follow_each_windows_length() {
+        let path = tmp_path("unequal-window-sentinels");
+        let windows = [
+            Window { start: 20, end: 60 },
+            Window {
+                start: 60,
+                end: 120,
+            },
+        ];
+        let seeds = [0u64];
+        let pool = run_resumable_sweep(&path, "ext", &windows, &seeds, 0, |_w, _seed| {
+            Err(FailureKind::AgentProtocolViolation)
+        })
+        .unwrap();
+        let lengths: Vec<usize> = pool
+            .submission
+            .runs
+            .iter()
+            .map(|run| run.returns.len())
+            .collect();
+        assert_eq!(lengths, vec![40, 60]);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn bound_resume_refuses_a_same_shape_different_experiment() {
+        let path = tmp_path("bound-mismatch");
+        let windows = [Window { start: 20, end: 60 }];
+        let seeds = [0u64, 1];
+        let first = contract(&windows, &seeds, 1);
+        let attempt = |_w: usize, seed: u64| Ok(skilled_run(seed));
+        run_resumable_sweep_bound(&path, "ext", &first, &windows, &seeds, 1, attempt)
+            .expect("first experiment writes its checkpoint");
+
+        let mut changed_dataset = first.clone();
+        changed_dataset.dataset_sha256 = "aa".repeat(32);
+        let error = match run_resumable_sweep_bound(
+            &path,
+            "ext",
+            &changed_dataset,
+            &windows,
+            &seeds,
+            1,
+            attempt,
+        ) {
+            Ok(_) => panic!("same matrix over different data must not resume"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("contract differs"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn bound_resume_refuses_a_legacy_unbound_checkpoint() {
+        let path = tmp_path("bound-legacy");
+        let windows = [Window { start: 20, end: 60 }];
+        let seeds = [0u64];
+        SweepCheckpoint::new("ext", windows.len(), &seeds)
+            .save(&path)
+            .unwrap();
+        let error = match run_resumable_sweep_bound(
+            &path,
+            "ext",
+            &contract(&windows, &seeds, 1),
+            &windows,
+            &seeds,
+            1,
+            |_w, seed| Ok(skilled_run(seed)),
+        ) {
+            Ok(_) => panic!("an unbound checkpoint cannot prove experiment identity"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn bound_resume_refuses_a_terminal_task_without_its_required_run() {
+        let path = tmp_path("bound-terminal-shape");
+        let windows = [Window { start: 20, end: 60 }];
+        let seeds = [0u64];
+        let contract = contract(&windows, &seeds, 1);
+        let mut checkpoint = SweepCheckpoint::new_bound("ext", contract.clone());
+        checkpoint.tasks[0].state = TaskState::Done;
+        checkpoint.tasks[0].run = None;
+        checkpoint.save(&path).unwrap();
+
+        let error = match run_resumable_sweep_bound(
+            &path,
+            "ext",
+            &contract,
+            &windows,
+            &seeds,
+            1,
+            |_window, _seed| Ok(skilled_run(0)),
+        ) {
+            Ok(_) => panic!("a done label without evidence must not disappear at assembly"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("scorable but carries no run"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn bound_resume_validates_the_contract_against_call_arguments() {
+        let path = tmp_path("bound-arguments");
+        let windows = [Window { start: 20, end: 60 }];
+        let different = [Window { start: 21, end: 61 }];
+        let seeds = [0u64];
+        let error = match run_resumable_sweep_bound(
+            &path,
+            "ext",
+            &contract(&windows, &seeds, 1),
+            &different,
+            &seeds,
+            1,
+            |_w, seed| Ok(skilled_run(seed)),
+        ) {
+            Ok(_) => panic!("a caller cannot lie about the contract it supplies"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(!path.exists(), "an invalid contract must write nothing");
+
+        let mut malformed = contract(&windows, &seeds, 1);
+        malformed.entrant_sha256 = "endpoint-label".to_string();
+        let error = match run_resumable_sweep_bound(
+            &path,
+            "ext",
+            &malformed,
+            &windows,
+            &seeds,
+            1,
+            |_w, seed| Ok(skilled_run(seed)),
+        ) {
+            Ok(_) => panic!("a label is not an entrant artifact identity"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(!path.exists());
     }
 }
