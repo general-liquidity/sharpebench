@@ -1,14 +1,15 @@
 //! SharpeBench dev tasks — offline data ingestion (run via `cargo run -p xtask`).
 //!
-//! Fetches public market data over HTTPS (`native-tls`, no `ring`), normalizes it
+//! Fetches publicly reachable market data over HTTPS (`native-tls`, no `ring`), normalizes it
 //! to the frozen point-in-time CSV the benchmark loads, and writes the dataset plus
 //! a SHA-256 sidecar. `publish = false`: these deps never ship in the CLI or the
 //! published library crates, so the scoring tree stays dependency-minimal. The
 //! benchmark only ever reads the *frozen* artifact — there is no network in the
-//! scoring path, which is what keeps a score reproducible forever.
+//! scoring path, which pins replay inputs. Access through these endpoints is not
+//! a redistribution grant; `data/RIGHTS.md` records the unresolved rights issue.
 //!
 //!   cargo run -p xtask -- crypto    # BTC/ETH/SOL/BNB/XRP daily closes (Binance)
-//!   cargo run -p xtask -- indices   # SPX/DJI/IXIC daily closes (FRED, public domain)
+//!   cargo run -p xtask -- indices   # SPX/DJI/IXIC daily closes (FRED; restricted series)
 //!   cargo run -p xtask -- all
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -89,7 +90,9 @@ fn fetch_binance(agent: &ureq::Agent) -> Result<Series, String> {
     Ok(out)
 }
 
-/// Daily closes for US equity indices from FRED's public CSV endpoint (no key).
+/// Daily closes for US equity indices from FRED's keyless CSV endpoint.
+/// The series are copyrighted and marked pre-approval required; endpoint access
+/// does not authorize redistribution. See `data/RIGHTS.md`.
 fn fetch_fred(agent: &ureq::Agent) -> Result<Series, String> {
     let series = [("SP500", "SPX"), ("DJIA", "DJI"), ("NASDAQCOM", "IXIC")];
     let mut out = Series::new();

@@ -72,13 +72,13 @@ index is safe in a bear market, which it is not.
 
 Two consequences for the paper:
 
-1. The headline empirical claim must be stated exactly: on nine frozen
-   datasets spanning four asset classes and four bar sizes, no reference
-   agent is rank-eligible, because every dataset contains a downturn and
-   the reliability gate requires profitability in every window. This is
-   evidence that the gate is strict, not that it is broken. The luck floor
-   never beats a reference agent on raw return (0 of 9), so the floor is
-   behaving.
+1. The headline empirical claim must be stated exactly: on nine frozen files,
+   comprising eight tradable-price datasets across four asset classes plus one
+   rates-yield stress series and using four bar sizes, no reference agent is
+   rank-eligible, because every file contains a downturn and the reliability
+   gate requires profitability in every window. This is evidence that the gate
+   is strict, not that it is broken. The luck floor never beats a reference
+   agent on raw return (0 of 9), so the floor is behaving.
 
 2. There is an honest design question the paper should pose rather than
    resolve: whether the reliability gate should certify "profitable in every
