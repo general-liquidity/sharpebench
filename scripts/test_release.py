@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -22,6 +24,42 @@ class ReleaseDriverTests(unittest.TestCase):
         self.assertEqual(release.next_version("0.15.0", "minor"), "0.16.0")
         self.assertEqual(release.next_version("0.15.0", "major"), "1.0.0")
         self.assertEqual(release.next_version("0.15.0", "2.3.4"), "2.3.4")
+
+    def test_release_surface_guard_catches_a_stale_npm_wrapper(self) -> None:
+        paths = (
+            "Cargo.toml",
+            "Cargo.lock",
+            "npm/package.json",
+            "npm/package-lock.json",
+            "npm/pkg/package.json",
+            "npm/mcp/package.json",
+            "crates/sharpebench-py/Cargo.toml",
+            "crates/sharpebench-py/Cargo.lock",
+            "crates/sharpebench-py/pyproject.toml",
+        )
+        with tempfile.TemporaryDirectory(prefix="sharpebench-version-test-") as raw:
+            root = Path(raw)
+            for relative in paths:
+                source = release.ROOT / relative
+                destination = root / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, destination)
+
+            self.assertEqual(release.surface_version_problems(root, "0.15.0"), [])
+            wrapper = root / "npm/pkg/package.json"
+            payload = json.loads(wrapper.read_text(encoding="utf-8"))
+            payload["version"] = "0.14.0"
+            wrapper.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+
+            self.assertIn(
+                "npm/pkg/package.json reports 0.14.0, tag requires 0.15.0",
+                release.surface_version_problems(root, "0.15.0"),
+            )
+
+    def test_release_tag_requires_a_semantic_version(self) -> None:
+        self.assertEqual(release.tag_version("v0.16.0"), "0.16.0")
+        with self.assertRaises(release.ReleaseError):
+            release.tag_version("release-0.16.0")
 
     def test_a_subheading_without_entries_is_empty(self) -> None:
         self.assertEqual(

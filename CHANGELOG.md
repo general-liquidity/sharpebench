@@ -22,6 +22,12 @@ and links the commits it was built from.
 - sim/cli: **behavior change on `--cmd` and every hermetic external-agent spawn** — `ExternalAgent::spawn` now clears the child's environment instead of inheriting the harness's full environment, API keys included, into a process the user was only warned is unsandboxed. The agent receives an explicit allowlist of what a plain subprocess needs to run at all (`PATH`, temp dirs, the user-profile path; on Windows also `SystemRoot`, `windir`, `ComSpec`, `PATHEXT`, `SystemDrive`, `APPDATA`, `LOCALAPPDATA`; on Unix also `LANG`, `LC_ALL`, `TZ`). A legitimately env-dependent agent passes named variables through with `SHARPEBENCH_AGENT_ENV=NAME1,NAME2`, or a driver names them programmatically via the new `ExternalAgent::spawn_with_env`; refusing silently would be the wrong failure mode, so the `--cmd` warning text and the README name the escape hatch. `ExternalAgent::spawn_inheriting` exists for trusted transport tooling only: the sandbox's `docker` client keeps its `DOCKER_HOST` / `DOCKER_CONFIG` context, while the entrant inside the container gets the container's own fresh environment either way. The `llm_field_eval` and `local_open_weight_field_eval` examples now pass exactly the variables their shims need (`ANTHROPIC_API_KEY`; `PYTHONPATH` and `OLLAMA_HOST`).
 
 ### Fixed
+- release: every publishing job now waits on one provenance-safe annotated-tag
+  validator and checks out the validated commit, rather than independently
+  trusting any pushed `v*` ref. The validator pins the provenance-only rebind
+  shape and every published version surface. Release actions and tool installers
+  are immutable or exact-version pinned, and registry verification now includes
+  all twelve crates, including `sharpebench-memory`.
 - packaging: the Nix derivation reads the workspace version from `Cargo.toml`
   instead of labelling every build `0.0.1`; the release configuration no longer
   documents that obsolete pre-release state, and the flake no longer describes

@@ -10,12 +10,14 @@ atomically pushes the two release commits plus the tag to ``origin/main``.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Callable
@@ -24,6 +26,8 @@ from typing import Callable
 ROOT = Path(__file__).resolve().parents[1]
 BASE_REF = "refs/remotes/origin/main"
 WORKTREE_PREFIX = "sharpebench-release-"
+MANIFEST_PATH = "paper/evidence/provenance.json"
+TAG_RE = re.compile(r"^v(?P<version>[0-9]+\.[0-9]+\.[0-9]+)$")
 _IDENTITY = {
     "GIT_AUTHOR_NAME": "SharpeBench Release",
     "GIT_AUTHOR_EMAIL": "release@general-liquidity.invalid",
@@ -77,6 +81,144 @@ def workspace_version(data: bytes) -> str:
     if match is None:
         raise ReleaseError("Cargo.toml has no workspace package version")
     return match.group(1).decode()
+
+
+def tag_version(tag: str) -> str:
+    matched = TAG_RE.fullmatch(tag)
+    if matched is None:
+        raise ReleaseError(f"release tag must be vMAJOR.MINOR.PATCH, got {tag!r}")
+    return matched.group("version")
+
+
+def _literal_toml_version(root: Path, path: str) -> str:
+    data = tomllib.loads((root / path).read_text(encoding="utf-8"))
+    return str(data["project"]["version"] if "project" in data else data["package"]["version"])
+
+
+def surface_version_problems(root: Path, expected: str) -> list[str]:
+    """Return every published surface that does not report ``expected``.
+
+    The MCP lock is deliberately absent: before the matching main npm package is
+    published, its registry integrity does not exist. The release job installs that
+    dependency without the committed lock and the lock is refreshed after publishing.
+    Every manifest that controls what gets published is checked here.
+    """
+    problems: list[str] = []
+
+    def compare(path: str, actual: str) -> None:
+        if actual != expected:
+            problems.append(f"{path} reports {actual}, tag requires {expected}")
+
+    compare("Cargo.toml", workspace_version((root / "Cargo.toml").read_bytes()))
+    for path in (
+        "npm/package.json",
+        "npm/pkg/package.json",
+        "npm/mcp/package.json",
+    ):
+        payload = json.loads((root / path).read_text(encoding="utf-8"))
+        compare(path, str(payload.get("version")))
+
+    lock_path = "npm/package-lock.json"
+    lock = json.loads((root / lock_path).read_text(encoding="utf-8"))
+    compare(lock_path, str(lock.get("version")))
+    compare(
+        f"{lock_path} root package",
+        str(lock.get("packages", {}).get("", {}).get("version")),
+    )
+
+    for path in (
+        "crates/sharpebench-py/Cargo.toml",
+        "crates/sharpebench-py/pyproject.toml",
+    ):
+        compare(path, _literal_toml_version(root, path))
+
+    mcp = json.loads((root / "npm/mcp/package.json").read_text(encoding="utf-8"))
+    compare(
+        "npm/mcp/package.json @general-liquidity/sharpebench dependency",
+        str(mcp.get("dependencies", {}).get("@general-liquidity/sharpebench", "")).lstrip("^"),
+    )
+
+    for lock_path in ("Cargo.lock", "crates/sharpebench-py/Cargo.lock"):
+        lock = tomllib.loads((root / lock_path).read_text(encoding="utf-8"))
+        for package in lock.get("package", []):
+            name = str(package.get("name", ""))
+            if name == "sharpebench" or name.startswith("sharpebench-"):
+                compare(f"{lock_path} package {name}", str(package.get("version")))
+    return problems
+
+
+def verify_tag(
+    root: Path, tag: str, *, allow_prospective: bool = False
+) -> tuple[list[str], str | None]:
+    expected = tag_version(tag)
+    problems: list[str] = []
+    object_type = run(root, "git", "cat-file", "-t", tag, check=False)
+    if object_type.returncode != 0:
+        return [f"release tag {tag} does not exist"], None
+    if object_type.stdout.strip() != "tag":
+        problems.append(f"release tag {tag} must be annotated")
+
+    commit = git(root, "rev-parse", f"{tag}^{{commit}}")
+    head = git(root, "rev-parse", "HEAD")
+    if commit != head:
+        problems.append(f"checked-out HEAD {head} is not the tagged commit {commit}")
+
+    origin_main = run(
+        root,
+        "git",
+        "rev-parse",
+        "--verify",
+        "refs/remotes/origin/main^{commit}",
+        check=False,
+    )
+    if origin_main.returncode != 0:
+        problems.append("refs/remotes/origin/main is absent; tag lineage is unverifiable")
+    else:
+        main = origin_main.stdout.strip()
+        tag_on_main = run(
+            root, "git", "merge-base", "--is-ancestor", commit, main, check=False
+        ).returncode == 0
+        main_before_tag = run(
+            root, "git", "merge-base", "--is-ancestor", main, commit, check=False
+        ).returncode == 0
+        if not tag_on_main and not (allow_prospective and main_before_tag):
+            problems.append(f"release tag {tag} is not on origin/main")
+
+    parents = git(root, "rev-list", "--parents", "-n", "1", commit).split()
+    if len(parents) != 2:
+        problems.append(f"release tag {tag} must point at a single-parent commit")
+        return problems, commit
+    parent = parents[1]
+    changed = git(root, "diff", "--name-only", parent, commit).splitlines()
+    if changed != [MANIFEST_PATH]:
+        problems.append(f"release tag {tag} must point at a provenance-only rebind commit")
+        problems.extend(
+            f"rebind commit also changes {path}"
+            for path in changed
+            if path != MANIFEST_PATH
+        )
+
+    try:
+        manifest = json.loads(
+            git_bytes(root, f"{commit}:{MANIFEST_PATH}").decode("utf-8")
+        )
+    except (ReleaseError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        problems.append(f"cannot read the tagged provenance manifest: {error}")
+        return problems, commit
+    if manifest.get("generated_at_head_dirty") is not False:
+        problems.append("tagged provenance manifest records a dirty generation")
+    if manifest.get("generated_at_head") != parent:
+        problems.append(
+            "tagged provenance manifest must name the tag commit's parent "
+            f"({parent}), got {manifest.get('generated_at_head')}"
+        )
+
+    if commit == head:
+        checked = run(root, sys.executable, "paper/src/check-provenance.py", check=False)
+        if checked.returncode != 0:
+            problems.append("tagged provenance check failed: " + (checked.stdout + checked.stderr).strip())
+        problems.extend(surface_version_problems(root, expected))
+    return problems, commit
 
 
 def next_version(current: str, bump: str) -> str:
@@ -257,13 +399,21 @@ def release(
     branch = f"release-{tag}-{os.getpid()}"
     parent = Path(tempfile.mkdtemp(prefix=WORKTREE_PREFIX))
     tree = parent / tag
+    tag_created = False
+    tag_pushed = False
     try:
         # Include creation in the cleanup boundary. `git worktree add` can leave a
         # directory, registration, or branch behind when checkout fails midway.
         run(root, "git", "worktree", "add", "--quiet", "-b", branch, str(tree), base)
         head = cut_release(tree, bump, current, target, branch)
+        git(tree, "tag", "-a", tag, "-m", f"SharpeBench {tag}")
+        tag_created = True
+        problems, verified = verify_tag(tree, tag, allow_prospective=True)
+        if problems:
+            raise ReleaseError("release tag validation failed:\n" + "\n".join(problems))
+        if verified != head:
+            raise ReleaseError(f"release tag resolved to {verified}, expected {head}")
         if push:
-            git(tree, "tag", "-a", tag, "-m", f"SharpeBench {tag}")
             run(
                 tree,
                 "git",
@@ -273,8 +423,11 @@ def release(
                 "HEAD:refs/heads/main",
                 f"refs/tags/{tag}",
             )
+            tag_pushed = True
         return head, target
     finally:
+        if tag_created and not tag_pushed:
+            run(root, "git", "tag", "-d", tag, check=False)
         remove_worktree(root, parent, tree)
         run(root, "git", "branch", "-D", branch, check=False)
 
@@ -287,8 +440,21 @@ def main() -> int:
         child.add_argument("bump")
         child.add_argument("--base-ref", default=BASE_REF)
         child.add_argument("--no-fetch", action="store_true")
+    verify = subparsers.add_parser("verify-tag")
+    verify.add_argument("tag")
+    verify.add_argument("--github-output", type=Path)
     args = parser.parse_args()
     try:
+        if args.command == "verify-tag":
+            problems, commit = verify_tag(ROOT, args.tag)
+            if problems:
+                raise ReleaseError("\n".join(problems))
+            assert commit is not None
+            if args.github_output is not None:
+                with args.github_output.open("a", encoding="utf-8", newline="\n") as handle:
+                    handle.write(f"validated_commit={commit}\n")
+            print(f"OK: release tag {args.tag} is bound to its exact in-scope tree")
+            return 0
         head, target = release(
             ROOT,
             args.bump,

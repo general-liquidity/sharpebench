@@ -25,9 +25,35 @@ permissions:
   contents: write # attach the static binary to the GitHub Release
   id-token: write # the OIDC identity used for crates.io trusted publishing
 
+# A release must finish or fail visibly; a newer dispatch must not cancel a
+# partially completed multi-registry publish.
+concurrency:
+  group: release-${{ github.ref }}
+
 jobs:
+  validate_tag:
+    name: provenance-safe release tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      validated_commit: ${{ steps.verify.outputs.validated_commit }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12.14"
+      - name: Verify the exact tagged tree and every package version
+        id: verify
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+        run: python scripts/release.py verify-tag "$RELEASE_TAG" --github-output "$GITHUB_OUTPUT"
+
   binary:
     name: static binary (musl)
+    needs: [validate_tag]
     runs-on: ubuntu-latest
     # Job-level permissions override the workflow-level block, so contents: write
     # must be restated here for the release-attach step.
@@ -36,16 +62,16 @@ jobs:
       id-token: write # OIDC identity for the provenance attestation
       attestations: write # store the attestation on the repo
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ inputs.release_tag || github.ref }}
+          ref: ${{ needs.validate_tag.outputs.validated_commit }}
 
       - name: Install Rust + musl target
         # Pin to the rust-toolchain.toml channel (1.96.0) so the musl target lands
         # on the toolchain cargo actually builds with. With @stable the target is
         # added to the stable toolchain, but the build uses 1.96.0 (rust-toolchain.toml)
         # and then can't find std/core for the musl target.
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # 2026-08-27
         with:
           toolchain: "1.96.0"
           targets: x86_64-unknown-linux-musl
@@ -77,7 +103,7 @@ jobs:
             target/x86_64-unknown-linux-musl/release/sharpebench-x86_64-linux-musl.sha256
 
       - name: Attach to the release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@5113cdc90fd4d541c801c55356214017bf5ae34b # v3.0.3
         with:
           tag_name: ${{ inputs.release_tag || github.ref_name }}
           files: |
@@ -87,29 +113,29 @@ jobs:
   crates:
     name: crates.io (12 sharpebench-* crates)
     if: ${{ vars.PUBLISH_CRATES == 'true' }}
+    needs: [validate_tag]
     runs-on: ubuntu-latest
     # A dedicated publishing environment (configure protection rules under
     # Settings → Environments → crates). Must match the crates.io trusted-publisher
-    # config registered for EACH of the 12 crates (sharpebench-memory is new to this
-    # list: the name is unclaimed, so its first publish must be by hand per
-    # RELEASING.md, and it needs its own trusted-publisher config before the next
-    # tag; the same applied to sharpebench-arena in v0.5.0).
+    # config registered for EACH of the 12 crates.
     environment: crates
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ inputs.release_tag || github.ref }}
-      - uses: dtolnay/rust-toolchain@master
+          ref: ${{ needs.validate_tag.outputs.validated_commit }}
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # 2026-08-27
         with:
           toolchain: "1.96.0"
       - name: Assert the workspace manifest matches the release tag
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
-          TAG="${{ inputs.release_tag || github.ref_name }}"
+          TAG="$RELEASE_TAG"
           TAG="${TAG#v}"
           V="$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
           test "$V" = "$TAG" || { echo "::error::workspace version $V does not match tag $TAG"; exit 1; }
       # Exchanges the GitHub OIDC identity for a short-lived crates.io token.
-      - uses: rust-lang/crates-io-auth-action@v1
+      - uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1 2026-08-27
         id: auth
       # Publish each crate bottom-up. `cargo publish -p` waits for the crate to index
       # before returning, so the next crate's deps resolve. We do NOT use `cargo publish
@@ -147,31 +173,34 @@ jobs:
   npm:
     name: npm (@general-liquidity/sharpebench + -mcp)
     if: ${{ vars.PUBLISH_NPM == 'true' }}
+    needs: [validate_tag]
     runs-on: ubuntu-latest
     # Must match the npm trusted-publisher config for both packages.
     environment: npm
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ inputs.release_tag || github.ref }}
+          ref: ${{ needs.validate_tag.outputs.validated_commit }}
 
       # The npm package ships the compiled WASM kernel (npm/pkg), so build it first.
       - name: Install Rust (pinned) + wasm target
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # 2026-08-27
         with:
           toolchain: "1.96.0"
           targets: wasm32-unknown-unknown
       - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+        uses: taiki-e/install-action@37f7c5781271959fb65b6b35224e28652ff2b63d # v2
+        with:
+          tool: wasm-pack@0.15.0
       - name: Build the WASM kernel
         run: wasm-pack build crates/sharpebench-wasm --target nodejs --out-dir ../../npm/pkg --out-name sharpebench
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: 24
+          node-version: 24.18.0
           registry-url: https://registry.npmjs.org
       # npm trusted publishing (OIDC) needs npm >= 11.5; provenance is automatic.
-      - run: npm install -g npm@latest
+      - run: npm install -g npm@12.0.2
 
       # cargo-release rewrites the npm manifests from Cargo.toml, so they must already
       # equal the tag. If they do not, the steps below read a stale version, find it
@@ -179,8 +208,10 @@ jobs:
       # exactly how npm stalled at 0.0.10 while the crates went to 0.0.11.
       - name: Assert npm manifests match the release tag
         if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
-          TAG="${{ inputs.release_tag || github.ref_name }}"
+          TAG="$RELEASE_TAG"
           TAG="${TAG#v}"
           fail=0
           for f in package.json mcp/package.json; do
@@ -234,13 +265,14 @@ jobs:
   pypi:
     name: PyPI (sharpebench wheel)
     if: ${{ vars.PUBLISH_PYPI == 'true' }}
+    needs: [validate_tag]
     runs-on: ubuntu-latest
     # Must match the PyPI trusted-publisher config for the `sharpebench` project.
     environment: pypi
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ inputs.release_tag || github.ref }}
+          ref: ${{ needs.validate_tag.outputs.validated_commit }}
 
       # cargo-release rewrites crates/sharpebench-py/{Cargo.toml,pyproject.toml} from the
       # workspace version. If they are stale the wheel below builds the OLD version, PyPI
@@ -249,8 +281,10 @@ jobs:
       - name: Assert the Python manifests match the release tag
         if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
         working-directory: crates/sharpebench-py
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
-          TAG="${{ inputs.release_tag || github.ref_name }}"
+          TAG="$RELEASE_TAG"
           TAG="${TAG#v}"
           fail=0
           for f in Cargo.toml pyproject.toml; do
@@ -263,20 +297,23 @@ jobs:
           exit $fail
 
       - name: Build manylinux wheels
-        uses: PyO3/maturin-action@v1
+        uses: PyO3/maturin-action@f0a989e78b427215a87ce3021f5a90507cae75fb # 2026-08-27
         with:
           command: build
           args: --release --out dist --interpreter 3.10 3.11 3.12 3.13 --manifest-path crates/sharpebench-py/Cargo.toml
-          manylinux: auto
+          manylinux: "2014"
+          container: quay.io/pypa/manylinux2014_x86_64@sha256:edb6edbd84c2fa9d40ee83abb160e302ebce82eb93570d43343942a1fb10b962
+          maturin-version: v1.15.0
       - name: Build sdist
-        uses: PyO3/maturin-action@v1
+        uses: PyO3/maturin-action@f0a989e78b427215a87ce3021f5a90507cae75fb # 2026-08-27
         with:
           command: sdist
           args: --out dist --manifest-path crates/sharpebench-py/Cargo.toml
+          maturin-version: v1.15.0
       # Trusted publishing - configure the PyPI publisher for repo `sharpebench`,
       # workflow `release.yml`, environment `pypi`. No token needed.
       - name: Publish to PyPI (OIDC)
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1 2026-08-27
         with:
           packages-dir: dist
           # Idempotent re-runs: a version already on PyPI is skipped, not an error
@@ -288,24 +325,51 @@ jobs:
   # directly, so an incomplete release fails the run instead of passing quietly.
   verify:
     name: verify every registry serves the release
-    needs: [crates, npm, pypi]
+    needs: [validate_tag, crates, npm, pypi]
     # Recovery runs dispatched with release_tag must verify too; a recovery that
     # skips verification reports success without proving the registries serve it.
     if: always() && (startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != '')
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-      - name: Assert crates.io, npm and PyPI all serve the tag version
+      - name: Fail if validation or a publish job failed
+        env:
+          VALIDATE_TAG_RESULT: ${{ needs.validate_tag.result }}
+          CRATES_RESULT: ${{ needs.crates.result }}
+          NPM_RESULT: ${{ needs.npm.result }}
+          PYPI_RESULT: ${{ needs.pypi.result }}
         run: |
-          TAG="${{ inputs.release_tag || github.ref_name }}"
+          fail=0
+          for job in validate_tag crates npm pypi; do
+            case "$job" in
+              validate_tag) result="$VALIDATE_TAG_RESULT" ;;
+              crates) result="$CRATES_RESULT" ;;
+              npm) result="$NPM_RESULT" ;;
+              pypi) result="$PYPI_RESULT" ;;
+            esac
+            echo "$job: $result"
+            if [ "$result" = "failure" ]; then
+              echo "::error::release job '$job' failed"; fail=1
+            fi
+          done
+          exit $fail
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.18.0
+      - name: Assert crates.io, npm and PyPI all serve the tag version
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+          PUBLISH_CRATES: ${{ vars.PUBLISH_CRATES }}
+          PUBLISH_NPM: ${{ vars.PUBLISH_NPM }}
+          PUBLISH_PYPI: ${{ vars.PUBLISH_PYPI }}
+        run: |
+          TAG="$RELEASE_TAG"
           TAG="${TAG#v}"
           UA="sharpebench-release (general-liquidity)" # crates.io rejects requests without a User-Agent
           fail=0
 
-          if [ "${{ vars.PUBLISH_CRATES }}" = "true" ]; then
-            for c in sharpebench-stats sharpebench-edge sharpebench-protocol sharpebench-core \
+          if [ "$PUBLISH_CRATES" = "true" ]; then
+            for c in sharpebench-stats sharpebench-memory sharpebench-edge sharpebench-protocol sharpebench-core \
                      sharpebench-attest sharpebench-sim sharpebench-leaderboard sharpebench-wasm \
                      sharpebench-harness sharpebench-arena sharpebench; do
               if curl -s -A "$UA" "https://crates.io/api/v1/crates/$c/$TAG" | grep -q "\"num\":\"$TAG\""; then
@@ -316,7 +380,7 @@ jobs:
             done
           fi
 
-          if [ "${{ vars.PUBLISH_NPM }}" = "true" ]; then
+          if [ "$PUBLISH_NPM" = "true" ]; then
             for p in @general-liquidity/sharpebench @general-liquidity/sharpebench-mcp; do
               ok=0
               # the registry read-path lags a few seconds behind a publish
@@ -332,7 +396,7 @@ jobs:
             done
           fi
 
-          if [ "${{ vars.PUBLISH_PYPI }}" = "true" ]; then
+          if [ "$PUBLISH_PYPI" = "true" ]; then
             ok=0
             # the PyPI JSON API lags a few seconds behind a publish
             for i in $(seq 1 20); do
