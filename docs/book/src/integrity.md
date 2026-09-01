@@ -72,7 +72,8 @@ material.
 
 ## Agreement and dissent, without a judge
 
-The audit above proves the scorer demotes known attacks. A different question
+The audit above exercises nine fixtures and shows that the current scorer
+demotes those known attacks. A different question
 it could not previously ask is whether the automated gate agrees with the
 **human** who triaged the gold set in the first place. Two deterministic
 modules in `sharpebench-stats` answer it, with no model in either, which is
@@ -92,8 +93,10 @@ or two scorer configurations, which is where it is most useful here.
 ## Why determinism matters here
 
 Because `sharpebench-core` is pure (no clock, no ambient RNG, fixed float
-reduction order), the audit's verdict is a property of the code, not of the machine or the run.
-Anyone can reproduce it byte-for-byte. A benchmark whose integrity proof is
-reproducible cannot be quietly degraded, and a leaderboard whose scorer is open and
-deterministic cannot favour the host. That is the whole design: **verify, don't
-trust.**
+reduction order), the audit is reproducible from the same code and fixtures.
+The measured cross-platform evidence is two committed Rust goldens on Linux,
+macOS, and Windows. The audit catches regressions against nine named attacks;
+it does not prove universal resistance to gaming, host neutrality, or identical
+bytes on untested machines and toolchains. The design principle is to verify
+the properties each artifact actually establishes and state the remaining
+trust assumptions.

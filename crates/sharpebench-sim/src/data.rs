@@ -86,7 +86,9 @@ impl Dataset {
     /// symbol's dates, so `close_at(sym, t)` lines up across symbols; ISO
     /// `YYYY-MM-DD` dates sort chronologically. Pure — no network. The benchmark
     /// only ever reads *frozen* data (online fetch tools live outside `sim`),
-    /// which is what keeps a score reproducible forever.
+    /// which pins the replay inputs. Output identity still depends on the
+    /// implementation and toolchain; CI checks two committed Rust goldens on
+    /// Linux, macOS, and Windows.
     pub fn from_csv(text: &str) -> Result<Dataset, String> {
         let mut per_symbol: BTreeMap<String, BTreeMap<String, f64>> = BTreeMap::new();
         let mut per_div: BTreeMap<String, BTreeMap<String, f64>> = BTreeMap::new();
@@ -185,8 +187,10 @@ impl Dataset {
     /// the same drift + AR(1)-momentum path, with each bar's Gaussian-ish shock
     /// scaled by `vol_mult` and seeded **bounded-uniform jumps** of magnitude
     /// `jump_size` injected with per-bar probability `jump_prob` (a fat-tail stress
-    /// knob). Pure function of `seed`; only mul/add/div/max (no `ln`/`exp`), so the
-    /// path is byte-identical across Rust/WASM/Python.
+    /// knob). Pure function of `seed`; only mul/add/div/max (no `ln`/`exp`).
+    /// Rust pins two committed goldens on Linux, macOS, and Windows. Wrapper
+    /// parity for WASM and Python is checked only on the operating systems used
+    /// by their CI jobs, not universally across runtimes and platforms.
     ///
     /// Determinism note: the jump draws are taken **only** when `jump_prob > 0`, so
     /// the no-jump call consumes the RNG identically to the original `synthetic`

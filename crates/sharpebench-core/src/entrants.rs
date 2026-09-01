@@ -17,7 +17,9 @@
 //! - **State in, state out.** Every stateful primitive takes its previous state
 //!   by value and returns the next one. There is no hidden state, no interior
 //!   mutability, and no clock: replaying the same inputs from the same starting
-//!   state reproduces the same outputs on any platform.
+//!   state under the pinned implementation reproduces the same outputs. The
+//!   workspace's cross-platform evidence is limited to two committed goldens
+//!   checked on Linux, macOS, and Windows.
 //! - **Caller-supplied thresholds.** No primitive fits a parameter to the data
 //!   it is fed. Defaults are published starting points, named as such, not
 //!   values discovered here.

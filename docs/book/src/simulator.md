@@ -1,10 +1,12 @@
 # The simulator
 
 `sharpebench-sim` is the point-in-time engine every score runs through. It is
-deterministic (no clock, no ambient RNG, fixed float reduction order), so a backtest
-reproduces byte-for-byte on any machine. This page documents the parts of the engine
-that shape a score: the cost model, the synthetic data generators, and the state
-snapshots.
+deterministic by construction (no clock, no ambient RNG, fixed float reduction
+order). Continuous integration pins two committed synthetic goldens under Rust
+on Linux, macOS, and Windows. That is the measured cross-platform scope, not a
+claim about every machine or toolchain. This page documents the parts of the
+engine that shape a score: the cost model, the synthetic data generators, and
+the state snapshots.
 
 ## Execution costs
 
@@ -20,9 +22,11 @@ on every fill. An edge has to survive the friction it would actually meet:
   from one step to the next. `trf_factor(weights_prev, weights_new, c)` returns a
   multiplicative factor in `(0, 1]` that discounts return by the turnover incurred;
   `c = 0` returns exactly `1.0` (no turnover charge). The iteration is deterministic
-  (only mul/add/div/max, capped at a pinned number of sweeps), so the cost reproduces on
-  any platform. Turnover cost is what separates an edge that survives rebalancing from
-  one that only looks good before trading frictions.
+  (only mul/add/div/max, capped at a pinned number of sweeps). Its unit tests pin
+  the calculation; the cross-platform evidence remains the two committed
+  goldens on the three CI operating systems. Turnover cost is what separates an
+  edge that survives rebalancing from one that only looks good before trading
+  frictions.
 
 The cost profile is selectable, so an edge can be required to clear the bar even under
 adverse execution. Four ship, each named here as it is named in evidence records and in
@@ -49,9 +53,10 @@ price paths from a seed. There are two generators:
   `jump_prob = 0.0`, so the baseline is reproduced exactly, and prices are kept strictly
   positive by flooring the per-bar growth factor.
 
-Because both are seeded and use the fixed-reduction-order arithmetic, a synthetic
-scenario is a stable fixture: the same seed yields the same bars forever, which is what
-lets the luck floor and the regression tests assert byte-identical results.
+Because both are seeded and use fixed-reduction-order arithmetic, a synthetic
+scenario is a stable fixture for a pinned implementation. The regression tests
+assert two byte-identical goldens on Linux, macOS, and Windows; they do not
+establish perpetual identity under every future compiler, dependency, or target.
 
 ## State snapshots
 
@@ -61,8 +66,9 @@ environment in `O(1)`:
 - `clone_state() -> EnvState` snapshots where the run currently is, including the seeded
   execution-noise RNG cursor. The immutable config (data, window, costs, seed) is not
   copied, since it never changes, so a snapshot is cheap.
-- `restore_state(state)` rewinds the environment to a snapshot, after which it produces
-  the exact byte-identical trajectory it would have produced from that point.
+- `restore_state(state)` rewinds the environment to a snapshot, after which the
+  current implementation reproduces the trajectory it would have produced from
+  that point.
 
 This is what makes what-if rollouts and tree search over the same frozen data cheap:
 branch from a snapshot, explore, restore, branch again, without re-running the backtest

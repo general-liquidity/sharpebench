@@ -8,8 +8,9 @@ tampering without pretending to remove the host from the trust boundary.
 ## What can be checked, and what remains trusted
 
 1. **The scorer is open and deterministic by construction.** Readers can run
-   `sharpebench-core` on published trajectories. The exact cross-platform
-   evidence is scoped in [Integrity and reproducibility](integrity.md).
+   `sharpebench-core` on published trajectories. The cross-platform evidence is
+   two committed Rust goldens checked on Linux, macOS, and Windows, as scoped in
+   [Integrity and reproducibility](integrity.md).
 2. **Results can carry forward commitments.** Entrants bind artifact bytes before
    an operator-declared deadline (see [Forward attestation](attestation.md)). The
    commitment detects a later pre-image substitution; it does not prove wall
