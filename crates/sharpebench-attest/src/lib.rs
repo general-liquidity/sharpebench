@@ -1,6 +1,6 @@
 //! sb-attest — forward-attestation.
 //!
-//! The un-gameable spine of SharpeBench. Two primitives:
+//! Byte-binding and signed-chain primitives for SharpeBench:
 //!
 //! 1. **Commitment** — before the operator-declared commitment deadline, an
 //!    agent publishes a SHA-256 [`Commitment`] binding its identity, target
