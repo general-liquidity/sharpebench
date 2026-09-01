@@ -35,7 +35,6 @@ mdbook serve docs/book
 | Release history | [`CHANGELOG.md`](../CHANGELOG.md) |
 | Release procedure | [`RELEASING.md`](../RELEASING.md) |
 | Registry authentication and recovery | [Publishing model](PUBLISHING.md) |
-| smolvm extraction audit | [smolvm assessment](SMOLVM_ASSESSMENT.md) |
 | Methodology paper and committed evidence | [`paper/`](../paper/) |
 
 Package-specific READMEs remain beside the Rust crates, Python distribution,
