@@ -13,8 +13,8 @@
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs { inherit system overlays; };
 
-        # The pinned toolchain is read straight from rust-toolchain.toml so the
-        # hermetic build and the CI/dev pin can never drift — one source of truth.
+        # The Rust version is read straight from rust-toolchain.toml so the
+        # Nix build and CI/dev use one toolchain-version source of truth.
         toolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
 
         rustPlatform = pkgs.makeRustPlatform {
@@ -24,9 +24,9 @@
         workspaceManifest = builtins.fromTOML (builtins.readFile ./Cargo.toml);
       in
       {
-        # `nix build` — a reproducible, hermetic build of the single `sharpebench`
-        # binary (the sharpebench crate) from the committed Cargo.lock. No network, no
-        # host toolchain: the same inputs yield the identical binary, forever.
+        # `nix build` — an isolated build of the single `sharpebench` binary
+        # (the sharpebench crate) from the committed Cargo.lock. Commit a generated
+        # flake.lock before claiming the nixpkgs and rust-overlay inputs are immutable.
         packages.default = rustPlatform.buildRustPackage {
           pname = "sharpebench";
           # Cargo.toml is the version source shared by every published surface.

@@ -24,7 +24,8 @@ and links the commits it was built from.
 ### Fixed
 - packaging: the Nix derivation reads the workspace version from `Cargo.toml`
   instead of labelling every build `0.0.1`; the release configuration no longer
-  documents that obsolete pre-release state.
+  documents that obsolete pre-release state, and the flake no longer describes
+  its uncommitted input lock as an immutable build input.
 - arena: sandbox startup now waits for Docker to confirm that the named entrant
   container is running. A live `docker run` client can still be queued before
   container creation under daemon load; that state is now a readiness refusal,
