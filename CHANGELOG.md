@@ -29,6 +29,8 @@ and links the commits it was built from.
   container is running. A live `docker run` client can still be queued before
   container creation under daemon load; that state is now a readiness refusal,
   not a silent agent timeout followed by an indeterminate resource verdict.
+  Docker availability, final inspection, and removal also use the bounded
+  command runner, so a wedged daemon cannot hang a field run indefinitely.
 - arena: the hardened `docker run` builder holds its flags and the trailing image positional separately until assembly (`HardenedLaunch`), instead of one flat list ending `"-i", image` that callers `extend`ed after. The flat shape was correct only because the image happened to be last: appending a hardening flag to the list would silently turn it into a *container command* argument, handed to the entrant instead of to Docker. The ordering is now structural — a flag appended at any point lands before the image, an explicit container command can only land after it — and a regression test appends a flag late and asserts where it lands.
 - release: version preparation now rewrites the main npm lockfile and the excluded Python crate's lockfile alongside their manifests. Both had remained at `0.13.0` through the `0.14.x` and `0.15.0` releases; ordinary install/build commands silently repaired them in developer trees, so the stale committed identities escaped the release checks.
 

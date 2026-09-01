@@ -102,9 +102,7 @@ pub struct SandboxReadiness {
 
 /// Is the Docker CLI present and answering? Checked by running `docker version`.
 pub fn docker_available() -> bool {
-    Command::new("docker")
-        .arg("version")
-        .output()
+    command_output_with_timeout("docker", &["version".to_string()], READINESS_TIMEOUT)
         .map(|o| o.status.success())
         .unwrap_or(false)
 }
@@ -815,10 +813,13 @@ pub struct DockerCli;
 
 impl ContainerInspector for DockerCli {
     fn oom_killed(&self, name: &str) -> Result<bool, String> {
-        let output = Command::new("docker")
-            .args(["inspect", "--format", "{{.State.OOMKilled}}", name])
-            .stdin(Stdio::null())
-            .output()
+        let args = [
+            "inspect".to_string(),
+            "--format".to_string(),
+            "{{.State.OOMKilled}}".to_string(),
+            name.to_string(),
+        ];
+        let output = command_output_with_timeout("docker", &args, READINESS_TIMEOUT)
             .map_err(|error| format!("cannot run docker inspect for {name}: {error}"))?;
         if !output.status.success() {
             return Err(format!(
@@ -837,17 +838,17 @@ impl ContainerInspector for DockerCli {
     }
 
     fn remove(&self, name: &str) -> Result<(), String> {
-        let status = Command::new("docker")
-            .args(["rm", "-f", name])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
+        let args = ["rm".to_string(), "-f".to_string(), name.to_string()];
+        let output = command_output_with_timeout("docker", &args, READINESS_TIMEOUT)
             .map_err(|error| format!("cannot run docker rm for {name}: {error}"))?;
-        if status.success() {
+        if output.status.success() {
             Ok(())
         } else {
-            Err(format!("docker rm for {name} exited {status}"))
+            Err(format!(
+                "docker rm for {name} exited {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            ))
         }
     }
 }
