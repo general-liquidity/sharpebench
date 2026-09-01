@@ -1,6 +1,6 @@
 # Frozen datasets
 
-SharpeBench runs on **frozen, point-in-time, checksummed** datasets — never a live
+SharpeBench runs on **frozen, point-in-time, checksummed** datasets: never a live
 API in the scoring path, so a score reproduces byte-for-byte forever. Fetchers are
 offline (the `xtask` crate and `scripts/data/`); the benchmark only ever loads the
 frozen artifact.
@@ -9,8 +9,8 @@ frozen artifact.
 
 - **Symbols:** BTC, ETH, SOL, BNB, XRP (quoted vs USDT, treated as USD).
 - **Bars:** daily closes, ~1000 days.
-- **Source:** Binance public REST API (`/api/v3/klines`, no key) — public market data.
-- **Format:** long — `date,symbol,close` (ISO `YYYY-MM-DD`; series aligned on the
+- **Source:** Binance public REST API (`/api/v3/klines`, no key): public market data.
+- **Format:** long: `date,symbol,close` (ISO `YYYY-MM-DD`; series aligned on the
   date axis common to all symbols).
 - **Integrity:** `crypto-majors-1d.csv.sha256`.
 
@@ -25,8 +25,8 @@ cargo run -p xtask -- crypto                                   # re-fetch + writ
 
 - **Symbols:** SPX (S&P 500), DJI (Dow Jones Industrial Average), IXIC (Nasdaq Composite).
 - **Bars:** daily closes, ~2500 days (10 years).
-- **Source:** FRED public CSV endpoint (`fredgraph.csv`, no key) — **public domain**.
-- **Format:** long — `date,symbol,close` (aligned on the shared NYSE-calendar axis).
+- **Source:** FRED public CSV endpoint (`fredgraph.csv`, no key): **public domain**.
+- **Format:** long: `date,symbol,close` (aligned on the shared NYSE-calendar axis).
 - **Integrity:** `us-indices-1d.csv.sha256`.
 
 ```bash
@@ -43,15 +43,15 @@ and kurtosis, which change with bar size.
 - **Symbols:** BTC, ETH, SOL, BNB, XRP (vs USDT, treated as USD).
 - **Bars:** kline **close** stamped with the kline **open time** (UTC). Intraday
   bars use `YYYY-MM-DDTHH:MM`, which still sorts chronologically for the loader.
-  - `1h`: 24 000 bars / symbol, `2023-09-27T00:00` .. `2026-06-22T23:00` — the
+  - `1h`: 24 000 bars / symbol, `2023-09-27T00:00` .. `2026-06-22T23:00`: the
     same 1000-day window as the daily file, no gaps (120 000 rows).
   - `4h`: 6 000 bars / symbol, `2023-09-27T00:00` .. `2026-06-22T20:00` (30 000 rows).
   - `1w`: 307 bars / symbol, `2020-08-10` .. `2026-06-22` (1 535 rows). Weekly bars
     open Monday 00:00 UTC; the window starts at the earliest week common to all
-    five pairs (SOL listed on Binance 2020-08-11) — the intersection trims the
+    five pairs (SOL listed on Binance 2020-08-11): the intersection trims the
     older BTC/ETH/BNB/XRP history. The first SOL bar is a partial listing week.
 - **Source:** Binance public REST API (`/api/v3/klines`, no key, paginated 1000
-  klines per request) — public market data. Fetched 2026-08-23.
+  klines per request): public market data. Fetched 2026-08-23.
 - **Raw / derived:** raw.
 - **Integrity:** `<file>.sha256`. Regenerate and compare:
 
@@ -69,12 +69,12 @@ left untouched; the 1h/4h/1w files contain only completed bars.
 ## `us-indices-1w.csv` (derived)
 
 - **Symbols:** SPX, DJI, IXIC.
-- **Bars:** weekly — the **last close of each ISO week** (Mon..Sun) taken from
+- **Bars:** weekly: the **last close of each ISO week** (Mon..Sun) taken from
   `us-indices-1d.csv`, stamped with the actual date of that last trading day.
   522 bars / symbol, `2016-06-24` .. `2026-06-17` (1 566 rows). The first and last
   weeks are partial.
 - **Source:** derived offline from the frozen `us-indices-1d.csv` (FRED, public
-  domain) — no network. Derived 2026-08-23.
+  domain): no network. Derived 2026-08-23.
 - **Raw / derived:** **derived**; a pure function of the daily file's bytes.
 - **Integrity:** `us-indices-1w.csv.sha256`.
 
@@ -96,7 +96,7 @@ python scripts/data/derive_weekly.py          # us-indices-1d.csv -> us-indices-
   (EUR to 1999); the window is **capped at 2010-01-01** for comparability across
   the FRED files, and at 2026-08-14, the last date published for all five at
   freeze time.
-- **Source:** FRED `fredgraph.csv` (no key), Federal Reserve Board H.10 release —
+- **Source:** FRED `fredgraph.csv` (no key), Federal Reserve Board H.10 release:
   **public domain**. Fetched 2026-08-23.
 - **Raw / derived:** raw (values inverted for JPY/CHF, nothing else).
 - **Integrity:** `fx-majors-1d.csv.sha256`.
@@ -112,10 +112,10 @@ python scripts/data/fetch_fred.py fx
   `2010-01-04` .. `2026-08-14` (8 252 rows). WTI has 4 168 and Brent 4 205
   observations in the window; the loader's date intersection drops the rest.
 - **Gold is not included:** FRED's daily LBMA gold series (`GOLDAMGBD228NLBM`,
-  `GOLDPMGBD228NLBM`) now return 404 — they were withdrawn from FRED. No keyless,
+  `GOLDPMGBD228NLBM`) now return 404: they were withdrawn from FRED. No keyless,
   redistributable daily gold series was found, so gold is skipped rather than
   sourced from a licensed feed.
-- **WARNING — negative price:** on `2020-04-20` WTI closed at **-36.98**. The row is
+- **WARNING: negative price:** on `2020-04-20` WTI closed at **-36.98**. The row is
   kept as published (no editing of upstream data), but simple returns across it
   are meaningless (`-302%` into the bar, `-124%` out of it) and they dominate the
   pooled moments: the realism battery reports excess kurtosis **+2438** and skew
@@ -123,7 +123,7 @@ python scripts/data/fetch_fred.py fx
   2020-05-01. Run `fetch_fred.py commodities --start 2020-05-01` (or any other
   cap) if a study needs a strictly positive price path, and say so.
 - **Source:** FRED `fredgraph.csv` (no key), data from the U.S. Energy Information
-  Administration — **public domain**. Fetched 2026-08-23.
+  Administration: **public domain**. Fetched 2026-08-23.
 - **Raw / derived:** raw.
 - **Integrity:** `commodities-1d.csv.sha256`.
 
@@ -134,7 +134,7 @@ python scripts/data/fetch_fred.py commodities
 ## `rates-1d.csv`
 
 - **Symbol:** UST10Y (`DGS10`, 10-year Treasury constant-maturity yield).
-- **WARNING — the `close` column is a YIELD IN PERCENT, not a price.** A value of
+- **WARNING: the `close` column is a YIELD IN PERCENT, not a price.** A value of
   `4.2500` means 4.25%. A strategy run on this file trades the **yield series
   directly** (a "long" profits when yields rise), and a "return" of
   `close[t] / close[t-1] - 1` is a relative change in yield, not a bond return.
@@ -143,9 +143,9 @@ python scripts/data/fetch_fred.py commodities
   but it must not be read as a Treasury price or total-return index. Yields near
   zero (DGS10 hit 0.52 in 2020) make relative changes large.
 - **Bars:** daily, 4 157 bars, `2010-01-04` .. `2026-08-14` (4 157 rows). Single
-  symbol — `DGS2` / `DGS30` are a one-line addition in the script if a
+  symbol: `DGS2` / `DGS30` are a one-line addition in the script if a
   cross-section is wanted.
-- **Source:** FRED `fredgraph.csv` (no key), Federal Reserve Board H.15 release —
+- **Source:** FRED `fredgraph.csv` (no key), Federal Reserve Board H.15 release:
   **public domain**. Fetched 2026-08-23.
 - **Raw / derived:** raw.
 - **Integrity:** `rates-1d.csv.sha256`.
@@ -184,8 +184,8 @@ Any source that produces aligned `date,symbol,close[,dividend]` rows works. Live
 crypto (Binance, 1h/4h/1d/1w), US equity indices (FRED, 1d + derived 1w), FX majors,
 oil and the 10-year yield (FRED). Known gaps:
 
-- **Single-name equities** — DJIA / S&P constituents need a keyed source (Tiingo, Nasdaq Data Link) or a JS-capable Stooq fetch; FRED carries indices, not single names. Not attempted.
-- **Gold** — FRED withdrew the daily LBMA series; no keyless, redistributable daily source found.
-- **Fundamentals** — SEC EDGAR financial-statement datasets (public domain) → the `fundamentals` channel.
+- **Single-name equities**: DJIA / S&P constituents need a keyed source (Tiingo, Nasdaq Data Link) or a JS-capable Stooq fetch; FRED carries indices, not single names. Not attempted.
+- **Gold**: FRED withdrew the daily LBMA series; no keyless, redistributable daily source found.
+- **Fundamentals**: SEC EDGAR financial-statement datasets (public domain) → the `fundamentals` channel.
 
 Add new fetchers to `scripts/data/` (Python) or the `xtask` crate (offline, `publish = false`) and keep the scoring path pure.
