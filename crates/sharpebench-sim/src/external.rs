@@ -785,33 +785,40 @@ mod tests {
 
     /// Spawn an agent that reports, in its decision's `reasoning`, whether the
     /// named environment variable reached it and whether `PATH` did.
+    #[cfg(windows)]
+    fn spawn_windows_fixture(argument: &str) -> ExternalAgent {
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("stdio-agent.cmd");
+        assert!(fixture.is_file(), "the Windows agent fixture must exist");
+        // Cargo runs unit tests with the package root as cwd. Keeping the
+        // command itself relative avoids cmd.exe's special, lossy treatment of
+        // nested quotes after `/C` when a checkout path contains spaces.
+        let command = format!(r"call tests\fixtures\stdio-agent.cmd {argument}");
+        ExternalAgent::spawn("cmd.exe", &["/D", "/Q", "/C", &command])
+            .expect("spawning the checked-in Windows agent fixture must work")
+    }
+
     fn spawn_env_probe(var: &str) -> ExternalAgent {
         #[cfg(windows)]
-        let agent = ExternalAgent::spawn(
-            "powershell",
-            &[
-                "-NoProfile",
-                "-Command",
-                &format!(
-                    "$null = [Console]::In.ReadLine(); \
-                     $c = if ([Environment]::GetEnvironmentVariable('{var}')) {{ 1 }} else {{ 0 }}; \
-                     $p = if ($env:PATH) {{ 1 }} else {{ 0 }}; \
-                     Write-Output ('{{\"orders\":[],\"reasoning\":\"var=' + $c + ' path=' + $p + '\"}}')"
-                ),
-            ],
-        );
+        {
+            spawn_windows_fixture(var)
+        }
         #[cfg(not(windows))]
-        let agent = ExternalAgent::spawn(
-            "sh",
-            &[
-                "-c",
-                &format!(
-                    "read line; c=0; [ -n \"${{{var}}}\" ] && c=1; p=0; [ -n \"$PATH\" ] && p=1; \
-                     printf '{{\"orders\":[],\"reasoning\":\"var=%s path=%s\"}}\\n' \"$c\" \"$p\""
-                ),
-            ],
-        );
-        agent.expect("spawning the platform shell must work")
+        {
+            ExternalAgent::spawn(
+                "sh",
+                &[
+                    "-c",
+                    &format!(
+                        "read line; c=0; [ -n \"${{{var}}}\" ] && c=1; p=0; [ -n \"$PATH\" ] && p=1; \
+                         printf '{{\"orders\":[],\"reasoning\":\"var=%s path=%s\"}}\\n' \"$c\" \"$p\""
+                    ),
+                ],
+            )
+            .expect("spawning the platform shell must work")
+        }
     }
 
     /// The hermetic spawn must clear the harness environment — an API key set in
@@ -931,16 +938,10 @@ mod tests {
     #[test]
     fn an_agent_that_answers_then_exits_is_a_success_not_an_exit_fault() {
         #[cfg(windows)]
-        let agent = ExternalAgent::spawn(
-            "powershell",
-            &[
-                "-NoProfile",
-                "-Command",
-                "$null = [Console]::In.ReadLine(); Write-Output '{\"orders\":[]}'",
-            ],
-        );
+        let mut agent = spawn_windows_fixture("--decision-only");
         #[cfg(not(windows))]
         let agent = ExternalAgent::spawn("sh", &["-c", "read line; echo '{\"orders\":[]}'"]);
+        #[cfg(not(windows))]
         let mut agent = agent.expect("spawning the platform shell must work");
         let decision = agent.decide(&one_symbol_observation());
         assert!(decision.orders.is_empty());
