@@ -1225,6 +1225,20 @@ mod tests {
             }))
         };
         ledger.records[1].lineage_binding_sha256 = forged_binding;
+        ledger.summary.family_count = 2;
+        ledger.summary.families = ledger
+            .records
+            .iter()
+            .map(|record| CandidateFamilyCount {
+                family_digest: record.family_digest.clone(),
+                observed_trials: 1,
+                selectable: 1,
+            })
+            .collect();
+        ledger
+            .summary
+            .families
+            .sort_by(|left, right| left.family_digest.cmp(&right.family_digest));
         let error = verify_candidate_lineage(
             &ledger,
             &[
