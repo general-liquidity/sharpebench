@@ -15,6 +15,7 @@ use sharpebench_core::{rank, AgentSubmission, CompositeScore, ScoreConfig};
 mod analysis_cmd;
 mod arena_cmd;
 mod import_cmd;
+mod lineage_cmd;
 #[cfg(feature = "self-update")]
 mod update;
 
@@ -53,6 +54,7 @@ fn main() -> ExitCode {
         Some("greeks") => run_greeks(&args, json),
         Some("check") => run_check(&args, json),
         Some("regime") => run_regime(&args, json),
+        Some("lineage") => ExitCode::from(lineage_cmd::run(&args, json).clamp(0, 255) as u8),
         Some("arena") => ExitCode::from(arena_cmd::run(&args, json).clamp(0, 255) as u8),
         Some("import") => ExitCode::from(import_cmd::run(&args, json).clamp(0, 255) as u8),
         Some(sub @ ("select" | "disqualify" | "rediscover" | "uncertainty" | "decay-prior")) => {
@@ -642,6 +644,9 @@ fn help() {
     );
     println!(
         "  sharpebench regime <a.csv> <b.csv> <regimes.csv> [--col NAME]  compare two return series within each regime (labels are an input)"
+    );
+    println!(
+        "  sharpebench lineage <strategy-evidence.json>                   verify Arena candidate ancestry, sources, and within-family robustness"
     );
     println!(
         "  sharpebench arena <init|open|commit|advance|score|publish|verify> ...  drive a forward-attested scoring window (see docs/book/src/arena.md)"

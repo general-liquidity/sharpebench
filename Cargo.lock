@@ -715,6 +715,7 @@ version = "0.16.0"
 dependencies = [
  "serde",
  "serde_json",
+ "sha2",
  "sharpebench-protocol",
  "sharpebench-stats",
 ]

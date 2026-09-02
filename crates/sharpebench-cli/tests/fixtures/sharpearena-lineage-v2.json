@@ -1,0 +1,170 @@
+{
+  "evidence_class": "retrospective_generated_strategy",
+  "generation": {
+    "edge_manifest_ledger": {
+      "records": [
+        {
+          "binding_sha256": "f68b3c7f55e4b549c454b430240830e4fdb5fafdaa4b446432c2609b095fc433",
+          "declared_lineage": {
+            "idea_source_digests": [
+              "sha256:2b14c0fdd0bff097f4c691bd43e07f81f94e425a5a954bda37942263bfde8893"
+            ],
+            "parent_candidate_ids": []
+          },
+          "duplicate_of_ordinal": null,
+          "evidence_class": "edge_manifest_candidate_pool",
+          "family_digest": "9cda3af2624eb2328180938c4356ff391692eda7dcd9e2d54f6bae4ec1a022bc",
+          "family_preimage": {
+            "instruments": ["synthetic_panel"],
+            "long_when": {
+              "left": {"indicator": "momentum", "window": "parameter"},
+              "op": "gt",
+              "right": {"constant": "parameter"}
+            },
+            "regimes": ["trending"],
+            "short_when": null
+          },
+          "generator_identity": {
+            "digest": "sha256:model-artifact",
+            "model": "fixture:1b",
+            "server": "fixture",
+            "server_version": "1"
+          },
+          "generator_identity_sha256": "47be84dbe9a130f813de3b071803b55feaaa65462ac6142cd8f1c17fa05e7ba3",
+          "idea_provenance": [
+            {
+              "authors": ["Example Authors"],
+              "commit": "0123456789abcdef",
+              "license": "Apache-2.0",
+              "source_digest": "sha256:2b14c0fdd0bff097f4c691bd43e07f81f94e425a5a954bda37942263bfde8893",
+              "source_type": "repository",
+              "url_or_doi": "https://github.com/example/aiuts"
+            }
+          ],
+          "invalid_reason": null,
+          "lineage_binding_sha256": "c0824d06de6dbaa62e700982cb18da4667027a059c8ab9fb3cc0800e34ab5efe",
+          "lineage_status": "declared",
+          "manifest": {
+            "hypothesis": "Momentum persists after explicit transaction costs.",
+            "instruments": ["synthetic_panel"],
+            "invariants": [
+              {
+                "comparator": "gt",
+                "condition_id": "edge",
+                "description": "Net edge remains positive.",
+                "metric": "net_edge",
+                "threshold": {"unit": "basis_points", "value": 0.0}
+              }
+            ],
+            "kill_conditions": [
+              {
+                "comparator": "gt",
+                "condition_id": "drawdown",
+                "description": "Retire after drawdown breach.",
+                "metric": "drawdown",
+                "threshold": {"unit": "percent", "value": 20.0}
+              }
+            ],
+            "mechanism": "Gradual information diffusion creates short-horizon continuation.",
+            "regimes": ["trending"],
+            "verification_plan": {
+              "confirmation_split": "test",
+              "minimum_observations": 8,
+              "selection_metric": "deflated_sharpe",
+              "selection_split": "validation"
+            }
+          },
+          "manifest_sha256": "ba8adfdf00c3766adfbf28bfaa05748db03e212053b7ec06f32f8cf58d923430",
+          "model_digest": "sha256:model-artifact",
+          "parent_candidate_digests": [],
+          "raw_candidate": {
+            "edge_manifest": {
+              "hypothesis": "Momentum persists after explicit transaction costs.",
+              "instruments": ["synthetic_panel"],
+              "invariants": [
+                {
+                  "comparator": "gt",
+                  "condition_id": "edge",
+                  "description": "Net edge remains positive.",
+                  "metric": "net_edge",
+                  "threshold": {"unit": "basis_points", "value": 0.0}
+                }
+              ],
+              "kill_conditions": [
+                {
+                  "comparator": "gt",
+                  "condition_id": "drawdown",
+                  "description": "Retire after drawdown breach.",
+                  "metric": "drawdown",
+                  "threshold": {"unit": "percent", "value": 20.0}
+                }
+              ],
+              "mechanism": "Gradual information diffusion creates short-horizon continuation.",
+              "regimes": ["trending"],
+              "verification_plan": {
+                "confirmation_split": "test",
+                "minimum_observations": 8,
+                "selection_metric": "deflated_sharpe",
+                "selection_split": "validation"
+              }
+            },
+            "gross_target": 0.5,
+            "id": "momentum-v1",
+            "lineage": {
+              "idea_source_digests": [
+                "sha256:2b14c0fdd0bff097f4c691bd43e07f81f94e425a5a954bda37942263bfde8893"
+              ],
+              "parent_candidate_ids": []
+            },
+            "long_when": {
+              "left": {"indicator": "momentum", "window": 3},
+              "op": "gt",
+              "right": {"constant": 0.0}
+            },
+            "short_when": null,
+            "thesis": "Follow recent momentum."
+          },
+          "raw_candidate_sha256": "8b9dc85fd289b37a0afb808ff6e2d3311b890883cd446c7f30c0f6165edbf58c",
+          "schema_version": 2,
+          "split_plan_sha256": "plan-digest",
+          "trial_ordinal": 0
+        }
+      ],
+      "summary": {
+        "duplicates": 0,
+        "evidence_class": "edge_manifest_candidate_pool",
+        "families": [
+          {
+            "family_digest": "9cda3af2624eb2328180938c4356ff391692eda7dcd9e2d54f6bae4ec1a022bc",
+            "observed_trials": 1,
+            "selectable": 1
+          }
+        ],
+        "family_count": 1,
+        "family_grouping_role": "diagnostic-only-never-a-trial-deduplicator",
+        "generator_identity_sha256": "47be84dbe9a130f813de3b071803b55feaaa65462ac6142cd8f1c17fa05e7ba3",
+        "invalid": 0,
+        "model_digest": "sha256:model-artifact",
+        "n_trials_source": "ledger-counted-before-validation-and-deduplication",
+        "observed_trials": 1,
+        "plan_bound_idea_sources": 1,
+        "schema_version": 2,
+        "selectable": 1,
+        "split_plan_sha256": "plan-digest"
+      }
+    },
+    "n_trials_source": "ledger-counted-before-validation-and-deduplication",
+    "observed_n_trials": 1
+  },
+  "schema_version": 2,
+  "status": "completed",
+  "selection": {
+    "metric": "median per-seed deflated_sharpe",
+    "scores": {
+      "momentum-v1": [
+        {"score": {"deflated_sharpe": 0.25}, "seed": 1},
+        {"score": {"deflated_sharpe": 0.75}, "seed": 2}
+      ]
+    }
+  }
+}

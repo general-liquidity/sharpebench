@@ -37,6 +37,7 @@ pub mod attribution;
 pub mod briefing;
 pub mod budget_curve;
 pub mod calibration;
+pub mod candidate_lineage;
 pub mod comparison_sets;
 pub mod composite;
 pub mod correlation;
@@ -64,6 +65,10 @@ pub use briefing::{
     audit_briefing, Briefing, BriefingAudit, BriefingPolicy, BriefingSection, BriefingViolation,
 };
 pub use budget_curve::{budget_curve, BudgetCurveOpts, BudgetCurveReport, BudgetPoint};
+pub use candidate_lineage::{
+    verify_candidate_lineage, CandidateAncestry, CandidateFamilyRobustness, CandidateLineageError,
+    CandidateLineageLedger, CandidateLineageReport, CandidateLineageScore,
+};
 pub use comparison_sets::{
     comparison_set, qualifies, restrict_field, restrict_to_shared, ComparisonSet, TaggedRun,
     TaggedSubmission,
