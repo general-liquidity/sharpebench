@@ -974,13 +974,31 @@ pub fn run_external_sandboxed(
     image: &str,
     opts: &SandboxOptions,
 ) -> Result<SandboxedAgent, SandboxError> {
+    run_external_sandboxed_with_command(image, opts, None)
+}
+
+/// Shared implementation for the production entrant path and live Docker
+/// fixtures. Production deliberately uses the image's own entrypoint. A fixture
+/// may provide an explicit command so its lifecycle does not depend on an
+/// unrelated image default that can change across image or daemon versions.
+fn run_external_sandboxed_with_command(
+    image: &str,
+    opts: &SandboxOptions,
+    container_command: Option<&[&str]>,
+) -> Result<SandboxedAgent, SandboxError> {
     // The refusal logic is shared with `resolve_launch`; the sandboxed branch
     // then swaps `--rm` for a fresh name so post-exit state stays inspectable.
     let launch = resolve_launch(docker_available(), image, opts)?;
     let (program, args, container) = match launch {
         Launch::Docker { program, .. } => {
             let name = fresh_container_name();
-            let args = hardened_docker_args(image, &Retention::Inspectable(name.clone()));
+            let launch = HardenedLaunch::new(image, &Retention::Inspectable(name.clone()));
+            let args = match container_command {
+                Some(command) => {
+                    launch.into_args_with_command(command.iter().map(|arg| (*arg).to_string()))
+                }
+                None => launch.into_args(),
+            };
             (program, args, Some(name))
         }
         Launch::Unsandboxed { program, args } => (program, args, None),
@@ -1664,8 +1682,10 @@ mod tests {
     }
 
     /// Live Docker smoke test: spawns a real container through the production
-    /// entry point and drives one decision over the wrapped `ExternalAgent`
-    /// transport.
+    /// launch path and drives one decision over the wrapped `ExternalAgent`
+    /// transport. The fixture command consumes observations without replying;
+    /// relying on Alpine's default command to remain alive made this test race
+    /// image and daemon behavior unrelated to the boundary under test.
     ///
     /// The old assertion was `decision.orders.is_empty()`, which holds for any
     /// failure mode including a container that never started, because
@@ -1685,8 +1705,13 @@ mod tests {
         );
         use sharpebench_sim::{Agent, DecideError, TransportDiagnostics};
         let image = live_fixture_image();
-        let mut agent = run_external_sandboxed(&image, &SandboxOptions::default())
-            .expect("docker is available and the image is pinned, so the spawn must work");
+        let silent_agent = ["/bin/sh", "-c", "while IFS= read -r _; do :; done"];
+        let mut agent = run_external_sandboxed_with_command(
+            &image,
+            &SandboxOptions::default(),
+            Some(&silent_agent),
+        )
+        .expect("docker is available and the image is pinned, so the spawn must work");
         agent = agent.with_decide_timeout(Duration::from_secs(5));
         let obs = sharpebench_protocol_obs();
         let decision = agent.decide(&obs);

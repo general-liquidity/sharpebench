@@ -12,6 +12,12 @@ and links the commits it was built from.
 
 ## [Unreleased]
 
+### Fixed
+- ci/arena: make the live Docker transport smoke fixture run an explicit silent
+  line-consuming command instead of relying on the base image's default command
+  to remain alive. The release-tag CI exposed the race when Alpine exited before
+  the readiness check even though the sandbox boundary itself was healthy.
+
 ## [0.17.0] - 2026-09-02
 
 ### Added
