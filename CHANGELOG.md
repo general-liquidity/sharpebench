@@ -8,9 +8,11 @@ are the twelve listed in [RELEASING.md](RELEASING.md), and `xtask` and
 `examples/reference-agent` are `publish = false`. Each section is one `v*` tag
 and links the commits it was built from.
 
-[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.17.0...HEAD
 
 ## [Unreleased]
+
+## [0.17.0] - 2026-09-02
 
 ### Added
 - core/cli: independently verify SharpeArena v2 generated-candidate lineage with `sharpebench lineage`. The verifier recomputes canonical raw-candidate, manifest, generator, family, and binding hashes; derives the strategy family again from the raw DSL; resolves parent IDs only to earlier valid rows; checks exact selectable-candidate score coverage; and reports verified in-harness trials, cited sources, ancestry, and best-versus-median DSR within each family. Family grouping is diagnostic only and cannot reduce the DSR trial denominator, change eligibility, or move rank. A producer-shaped fixture pins the Python-to-Rust contract.
@@ -395,6 +397,7 @@ First published release.
 ### Fixed
 - Constant-time HMAC verification and bounded, timed agent HTTP reads ([6c3d174](https://github.com/general-liquidity/sharpebench/commit/6c3d174)).
 
+[0.17.0]: https://github.com/general-liquidity/sharpebench/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/general-liquidity/sharpebench/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/general-liquidity/sharpebench/compare/v0.14.1...v0.15.0
 [0.14.1]: https://github.com/general-liquidity/sharpebench/compare/v0.14.0...v0.14.1
