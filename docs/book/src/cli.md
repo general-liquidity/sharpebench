@@ -109,6 +109,19 @@ CSVs are aligned by row; `regimes.csv` carries one label per period and is an
 input, not something the CLI infers. Exit code is 0 whenever the report is
 produced; read `pooled_hides_reversal` for the verdict.
 
+## `lineage`
+
+```bash
+sharpebench lineage strategy-evidence.json [--json]
+```
+
+Verifies one SharpeArena generated-strategy ledger and reports its observed
+trial count, candidate ancestry, cited idea sources, and best-versus-median
+robustness within each host-derived strategy family. It recomputes the ledger
+and family bindings and requires validation scores for every selectable
+candidate. The report is diagnostic only and cannot alter eligibility, rank, or
+the trial denominator. See [Candidate lineage diagnostics](candidate-lineage.md).
+
 ## `audit-briefing` / `canary` / `score-allocation` / `greeks`
 
 Standalone analysis surfaces over the kernel: lint a shared briefing for

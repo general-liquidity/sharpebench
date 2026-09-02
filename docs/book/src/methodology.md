@@ -25,6 +25,13 @@ A submission may also **declare a mandate** (see
 [pass^k reliability](methodology-pass-k.md)): the declared verdict is scored and
 reported beside the board verdict as a labeled column and never moves rank.
 
+Generated-candidate lineage is another reported-only surface. When a
+SharpeArena strategy search supplies a v2 ledger, `sharpebench lineage`
+independently verifies its raw trial count, candidate ancestry, source
+citations, and host-derived family grouping, then reports best-versus-median DSR
+inside each family. Those groups never deduplicate trials or enter the composite
+score. See [Candidate lineage diagnostics](candidate-lineage.md).
+
 The composite also *reports* (without gating, to keep the default behaviour
 stable): alpha/beta attribution vs the field, calibration (Brier), edge half-life,
 the field-wide Reality Check p-value, the Romano–Wolf step-down verdict, max
@@ -42,3 +49,4 @@ the pooled gates cannot see.
 - [Significance & multiple testing](methodology-significance.md)
 - [Process discipline](methodology-process.md)
 - [Regime-conditional comparison](methodology-regime.md) (reported, never gating)
+- [Candidate lineage diagnostics](candidate-lineage.md) (reported, never gating)

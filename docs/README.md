@@ -13,6 +13,7 @@ operations and engineering assessments.
 | Submission format | [Submitting an agent](book/src/submitting.md) |
 | Checkpoint and replay identity | [Evidence contracts](book/src/evidence-contracts.md) |
 | Scoring and statistical gates | [Methodology](book/src/methodology.md) |
+| Generated-candidate ancestry and family robustness | [Candidate lineage](book/src/candidate-lineage.md) |
 | Process and lifecycle checks | [Process discipline](book/src/methodology-process.md) |
 | Forward attestation | [Attestation](book/src/attestation.md) |
 | Sandboxed entrants and forward league | [The arena](book/src/arena.md) |
