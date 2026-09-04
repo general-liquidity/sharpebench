@@ -1,6 +1,6 @@
 # @general-liquidity/sharpebench
 
-**The luck-robust scoring kernel for AI trading agents.**
+**Luck-robust quantitative evaluation for trading agents.**
 
 Rank agents on risk-adjusted *skill that survives deflation*, not the luckiest run over one quarter. This is the **identical Rust kernel** that powers the [SharpeBench](https://github.com/general-liquidity/sharpebench) benchmark, compiled to WebAssembly, with a typed JS/TS API. No native add-on and no network: pure deterministic scoring.
 

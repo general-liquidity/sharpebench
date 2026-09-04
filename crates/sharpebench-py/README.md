@@ -2,9 +2,9 @@
 
 **Is my Sharpe real, or an artifact of luck and multiple testing?**
 
-Python distribution of **SharpeBench**'s honest-backtest statistics, a pyo3
-binding over the same deterministic Rust kernel the SharpeBench CLI and the
-`@general-liquidity/sharpebench` npm package use. Bring your own return series;
+Python distribution of **SharpeBench**'s luck-robust quantitative evaluation
+statistics, a pyo3 binding over the same deterministic Rust kernel used by the
+SharpeBench CLI and the `@general-liquidity/sharpebench` npm package. Bring your own return series;
 everything takes plain numeric sequences (lists, tuples, numpy arrays,
 `df["ret"].to_numpy()`) and returns plain floats, lists and dicts.
 

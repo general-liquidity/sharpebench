@@ -3,7 +3,7 @@ name = "sharpebench-wasm"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "WASM bindings for the SharpeBench scoring kernel (consumed by Gordon/Bun via the identical kernel)."
+description = "WASM bindings for SharpeBench's deterministic, luck-robust trading-agent scoring kernel."
 repository.workspace = true
 
 [dependencies]

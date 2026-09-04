@@ -1,7 +1,7 @@
 {
   "name": "@general-liquidity/sharpebench",
   "version": "0.18.0",
-  "description": "The luck-robust scoring kernel for AI trading agents — deflated Sharpe, pass^k reliability, and process-discipline gates. The identical Rust kernel as the SharpeBench benchmark, compiled to WASM.",
+  "description": "Luck-robust quantitative evaluation for trading agents: deflated Sharpe, pass^k reliability, process discipline, and risk gates, backed by the identical Rust kernel compiled to WebAssembly.",
   "keywords": [
     "trading",
     "benchmark",

@@ -8,7 +8,7 @@ name = "sharpebench-py"
 version = "0.18.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-description = "Python bindings (pyo3) for SharpeBench's honest-backtest statistics."
+description = "Python bindings for SharpeBench's luck-robust quantitative evaluation statistics."
 repository = "https://github.com/general-liquidity/sharpebench"
 
 [lib]

@@ -1,7 +1,7 @@
 {
   "name": "@general-liquidity/sharpebench-mcp",
   "version": "0.18.0",
-  "description": "MCP server exposing the SharpeBench luck-robust scoring kernel as agent-callable tools (deflated Sharpe, pass^k, process discipline, briefing audit, options Greeks).",
+  "description": "MCP server exposing SharpeBench's luck-robust quantitative evaluation tools for trading agents, including deflated Sharpe, pass^k, process discipline, and risk analysis.",
   "keywords": [
     "mcp",
     "model-context-protocol",

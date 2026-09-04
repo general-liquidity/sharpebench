@@ -1,6 +1,6 @@
 # @general-liquidity/sharpebench-mcp
 
-An **MCP server** that exposes the [SharpeBench](https://github.com/general-liquidity/sharpebench) luck-robust scoring kernel as agent-callable tools. Point an MCP client at it to deflate a Sharpe, check pass^k reliability, compare regimes, audit a briefing, or price option tail risk. Every result comes from the deterministic Rust kernel with no network access.
+An **MCP server** that exposes [SharpeBench](https://github.com/general-liquidity/sharpebench)'s luck-robust quantitative evaluation as agent-callable tools. Point an MCP client at it to deflate a Sharpe, check pass^k reliability, compare regimes, audit a briefing, or price option tail risk. Every result comes from the deterministic Rust kernel with no network access.
 
 ## Tools
 

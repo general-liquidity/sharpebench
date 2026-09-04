@@ -5,7 +5,7 @@ build-backend = "maturin"
 [project]
 name = "sharpebench"
 version = "0.18.0"
-description = "SharpeBench honest-backtest statistics: deflated Sharpe, PSR, PBO/CSCV, Reality Check, SPA, BH-FDR and pass^k for your own return series."
+description = "Luck-robust quantitative evaluation for trading agents and return series: deflated Sharpe, PSR, PBO, Reality Check, SPA, BH-FDR, and pass^k."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT OR Apache-2.0" }

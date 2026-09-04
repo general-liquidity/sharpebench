@@ -1,6 +1,6 @@
 {
   "name": "sharpebench-wasm",
-  "description": "WASM bindings for the SharpeBench scoring kernel (consumed by Gordon/Bun via the identical kernel).",
+  "description": "WASM bindings for SharpeBench's deterministic, luck-robust trading-agent scoring kernel.",
   "version": "0.18.0",
   "license": "MIT OR Apache-2.0",
   "repository": {

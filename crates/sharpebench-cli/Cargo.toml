@@ -3,7 +3,7 @@ name = "sharpebench"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "SharpeBench command-line interface."
+description = "CLI for the SharpeBench luck-robust trading-agent benchmark."
 repository.workspace = true
 
 [[bin]]
