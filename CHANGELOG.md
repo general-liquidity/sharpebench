@@ -8,9 +8,11 @@ are the twelve listed in [RELEASING.md](RELEASING.md), and `xtask` and
 `examples/reference-agent` are `publish = false`. Each section is one `v*` tag
 and links the commits it was built from.
 
-[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.17.1...HEAD
+[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.18.0...HEAD
 
 ## [Unreleased]
+
+## [0.18.0] - 2026-09-04
 
 ### Added
 - core/cli: ingest the closed `sharpe.forecast-evidence.v1` artifact and independently recompute point error, binary and categorical Brier or log loss, Normal CRPS, directional accuracy, and interval score. Reports include resolution and information-exposure counts, binary reliability and Brier skill, categorical confidence calibration, and Normal PIT diagnostics.
@@ -413,6 +415,7 @@ First published release.
 ### Fixed
 - Constant-time HMAC verification and bounded, timed agent HTTP reads ([6c3d174](https://github.com/general-liquidity/sharpebench/commit/6c3d174)).
 
+[0.18.0]: https://github.com/general-liquidity/sharpebench/compare/v0.17.1...v0.18.0
 [0.17.1]: https://github.com/general-liquidity/sharpebench/compare/v0.17.0...v0.17.1
 [0.17.0]: https://github.com/general-liquidity/sharpebench/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/general-liquidity/sharpebench/compare/v0.15.0...v0.16.0
