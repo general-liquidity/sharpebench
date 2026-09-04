@@ -46,6 +46,7 @@ pub mod disqualification;
 pub mod econrationality;
 pub mod entrants;
 pub mod evidence_coverage;
+pub mod forecast;
 pub mod greeks;
 pub mod oos;
 pub mod pass_k;
@@ -95,6 +96,12 @@ pub use entrants::{
 pub use evidence_coverage::{
     Coverage, DigestId, EvidenceInventory, InventoryAudit, PreimageError, RunProvenance,
     COMPOSITE_SCORE_INVENTORY, REDACTED, RUN_PROVENANCE_INVENTORY,
+};
+pub use forecast::{
+    analyze_forecast_quality, parse_forecast_evidence, AgentForecastSummary, BinaryCalibration,
+    CalibrationBin, CommonSupport, ConfidenceCalibration, DistributionCalibration,
+    ForecastAnalysisConfig, ForecastError, ForecastEvidence, ForecastQualityReport, MetricMean,
+    PairwiseForecastComparison,
 };
 pub use greeks::{
     bs_greeks, bs_price, classify_greeks_risk, portfolio_greeks, Greeks, GreeksPolicy, GreeksRisk,

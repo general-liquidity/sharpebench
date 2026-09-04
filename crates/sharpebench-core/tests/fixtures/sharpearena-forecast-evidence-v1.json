@@ -1,0 +1,77 @@
+{
+  "contracts": [
+    {
+      "boundary_ownership": "equal close resolves false",
+      "categories": [],
+      "close_definition": "official close at logical bar 30",
+      "contract_id": "es-up-2026-09-04",
+      "deadline": 20,
+      "fallback_policy": "retry once, then cancel",
+      "instrument": "ES",
+      "interval_alpha": null,
+      "kind": "probability",
+      "missing_data_policy": "cancel",
+      "neutral_threshold": 0.001,
+      "observation_source": "fixture:es-daily-v1",
+      "open_definition": "official close at logical bar 10",
+      "opens_at": 10,
+      "question": "Will ES close above its opening level?",
+      "resolves_at": 30,
+      "schema_version": "sharpearena.forecast-contract.v1",
+      "scoring_rule": "binary_brier",
+      "target": "ES.close_gt_open",
+      "unit": "binary"
+    }
+  ],
+  "generated_at": 31,
+  "identity": {
+    "agent_id": "arena-reference",
+    "config_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "model_id": "model-reference",
+    "model_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "operator_id": "operator-reference",
+    "prompt_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "scaffold_id": "scaffold-reference",
+    "scaffold_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "producer": {
+    "contract": "native",
+    "name": "sharpearena"
+  },
+  "resolutions": [
+    {
+      "available_at": 30,
+      "claim_id": "claim-es",
+      "outcome": 1.0,
+      "reason": null,
+      "recorded_at": 31,
+      "status": "resolved"
+    }
+  ],
+  "revisions": [
+    {
+      "claim_id": "claim-es",
+      "confidence": 0.7,
+      "contract_sha256": "0eb3250fcb87a5e225f476e8a6e18ccdf65ac458919ad0b150594eb5761ecd2d",
+      "exposure": {
+        "consensus_snapshot_sha256": null,
+        "consensus_visible": false,
+        "market_snapshot_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "observed_at": 12,
+        "source_ids": ["market"]
+      },
+      "idempotency_key": "request-1",
+      "ordinal": 0,
+      "prediction": [0.7],
+      "rationale": "frozen public inputs",
+      "reason": null,
+      "revision_id": "claim-es:r0",
+      "revision_reason": null,
+      "status": "eligible",
+      "submitted_at": 12,
+      "supersedes": null,
+      "trigger_event_id": null
+    }
+  ],
+  "schema_version": "sharpe.forecast-evidence.v1"
+}
