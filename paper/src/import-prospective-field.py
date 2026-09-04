@@ -165,14 +165,21 @@ def verify_source(source: Path) -> tuple[Path, str, str, list[str]]:
     contracts = plan.get("contracts")
     if not isinstance(models, list) or not models or not isinstance(contracts, list):
         raise ProspectiveImportError("field plan has no model or contract inventory")
-    agent_ids = sorted(record.get("agent_id") for record in models)
+    if any(not isinstance(record, dict) for record in models):
+        raise ProspectiveImportError("field plan model inventory must contain objects")
+    raw_agent_ids = [record.get("agent_id") for record in models]
     if any(
         not isinstance(value, str) or AGENT_ID.fullmatch(value) is None
-        for value in agent_ids
+        for value in raw_agent_ids
     ):
         raise ProspectiveImportError("field plan has an invalid agent ID")
+    agent_ids = sorted(raw_agent_ids)
     if len(set(agent_ids)) != len(agent_ids):
         raise ProspectiveImportError("field plan repeats an agent ID")
+    if any(not isinstance(record, dict) for record in contracts):
+        raise ProspectiveImportError(
+            "field plan contract inventory must contain objects"
+        )
     contract_ids = [record.get("contract_id") for record in contracts]
     if any(not isinstance(value, str) or not value for value in contract_ids):
         raise ProspectiveImportError("field plan has an invalid contract ID")
