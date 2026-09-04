@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   formal:
-    name: Lean model (kernel, leanchecker, nanoda, axiom audit)
+    name: Lean model (kernel, leanchecker, axiom audit)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -31,8 +31,9 @@ jobs:
           lint: false
           leanchecker: true
           leanchecker-args: SharpeBenchFormal
-          nanoda: true
-          nanoda-allow-sorry: false
+          # nanoda cannot parse Lean 4.28+ exports yet:
+          # https://github.com/leanprover/lean-action/issues/169
+          nanoda: false
           axiom-audit: true
           axiom-audit-root: SharpeBenchFormal
 

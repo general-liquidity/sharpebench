@@ -18,14 +18,7 @@ members = [
 ]
 # pyo3 extension-module crate: it needs a Python interpreter at build time and is
 # built by maturin, not `cargo --workspace`. Excluded so the Rust-only CI stays green.
-exclude = [
-    "crates/sharpebench-py",
-    # leanprover/lean-action checks the proof environment with nanoda by
-    # cloning its Rust helper here. Keep that transient package outside this
-    # unrelated Cargo workspace.
-    "formal/_nanoda_lib",
-    "formal/_lean4export",
-]
+exclude = ["crates/sharpebench-py"]
 
 [workspace.package]
 version = "0.17.1"
