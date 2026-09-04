@@ -14,6 +14,7 @@ use sharpebench_core::{rank, AgentSubmission, CompositeScore, ScoreConfig};
 
 mod analysis_cmd;
 mod arena_cmd;
+mod forecast_cmd;
 mod import_cmd;
 mod lineage_cmd;
 #[cfg(feature = "self-update")]
@@ -56,6 +57,9 @@ fn main() -> ExitCode {
         Some("regime") => run_regime(&args, json),
         Some("lineage") => ExitCode::from(lineage_cmd::run(&args, json).clamp(0, 255) as u8),
         Some("arena") => ExitCode::from(arena_cmd::run(&args, json).clamp(0, 255) as u8),
+        Some("forecast-quality") => {
+            ExitCode::from(forecast_cmd::run(&args, json).clamp(0, 255) as u8)
+        }
         Some("import") => ExitCode::from(import_cmd::run(&args, json).clamp(0, 255) as u8),
         Some(sub @ ("select" | "disqualify" | "rediscover" | "uncertainty" | "decay-prior")) => {
             ExitCode::from(analysis_cmd::run(sub, &args, json).clamp(0, 255) as u8)
@@ -650,6 +654,9 @@ fn help() {
     );
     println!(
         "  sharpebench arena <init|open|commit|advance|score|publish|verify> ...  drive a forward-attested scoring window (see docs/book/src/arena.md)"
+    );
+    println!(
+        "  sharpebench forecast-quality <evidence.json>...              score prospective forecasts on exact common support (reported only)"
     );
     println!(
         "  sharpebench import <csv|stockbench> ... --out subs.json     convert a rival board's return series into a scoreable field"
