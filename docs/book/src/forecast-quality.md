@@ -84,6 +84,50 @@ The example exercises exact common support, resolution-time blocks, revision
 eligibility, and blind versus consensus-visible exposure. It is a compatibility
 fixture, not an empirical agent result.
 
+## Completed prospective field
+
+[`paper/evidence/prospective-forecast-field`](../../../paper/evidence/prospective-forecast-field/)
+is a checked import of one closed SharpeArena field. The importer requires every
+source byte to match the committed Arena HEAD, validates the forecast and
+resolution digest chains, requires identical complete support across agents,
+and records the source repository, commit, path, plan digest, and copied-file
+digests.
+
+The field contains 24 binary contracts for four Binance Spot pairs at six
+resolution clocks. Three already-cached local model snapshots used one fixed
+forecast scaffold. The observed event rate was one third. Descriptive Brier
+losses were 0.2548 for `qwen-7b`, 0.2599 for `phi-4`, and 0.3148 for
+`qwen-0.5b`; all three Brier skill scores were negative against the observed
+base-rate forecast. Every pairwise interval crossed zero.
+
+The preregistered minimum for a comparative claim was 30 settlement blocks, so
+the six-block report does not support model superiority even if a nominal test
+had crossed its threshold. It also does not score a trading loop: the models had
+no tools, memory, portfolio, or order interface. The committed
+`report-check.json` comes from a standalone Python implementation that
+reconstructs support, calibration, Brier loss, block resampling, and Holm
+adjustment from the imported ledgers.
+
+The exact pipeline is:
+
+```bash
+python paper/src/import-prospective-field.py \
+  --source ../sharpearena/paper/evidence/prospective-forecast-field \
+  --output paper/evidence/prospective-forecast-field
+
+sharpebench forecast-quality \
+  paper/evidence/prospective-forecast-field/resolved/phi-4.json \
+  paper/evidence/prospective-forecast-field/resolved/qwen-0.5b.json \
+  paper/evidence/prospective-forecast-field/resolved/qwen-7b.json \
+  --bootstrap-samples 2000 --seed 260904 --confidence 0.95 \
+  --alpha 0.05 --bins 5 \
+  --output paper/evidence/prospective-forecast-field/report.json
+
+python paper/src/check-prospective-forecast-report.py \
+  --field-dir paper/evidence/prospective-forecast-field \
+  --report paper/evidence/prospective-forecast-field/report.json
+```
+
 ## Interpretation limits
 
 - The ledger clock establishes logical order, not independently verified wall
@@ -95,3 +139,6 @@ fixture, not an empirical agent result.
 - Calibration and proper scores describe forecast quality. Trading eligibility
   still requires the Deflated Sharpe, pass^k, significance, process, and mandate
   gates.
+- A normalized next-token logit over labels `0` and `1` is an operational
+  probability under that scaffold, not an unconstrained subjective probability
+  from the model.

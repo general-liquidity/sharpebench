@@ -24,6 +24,10 @@ architecture sketch.
   validation, atomic push, OIDC publishing, package smoke installs, and registry
   verification.
 - The independent `sharpebench-memory` ablation benchmark.
+- Prospective forecast analysis over a closed cross-product artifact, including
+  exact common support, proper scores, fixed-bin calibration, resolution-clock
+  block resampling, Holm adjustment, rank isolation, and an independent report
+  reconstruction. One three-model descriptive protocol pilot is committed.
 
 ## Remaining product work
 
@@ -37,8 +41,10 @@ kernel primitive:
 - Keyed single-name equity data if that universe is admitted.
 - The first completed forward window. The operating record is under
   [`arena/`](../arena/README.md); an open window is not a result.
-- Actual model fields. The local and paid-model harnesses exist, but no result is
-  claimed until a complete, provenance-valid field is run.
+- A full trading-agent model field. The completed prospective pilot evaluates a
+  fixed forecast head with no tools, memory, portfolio, or order loop. Repeated
+  multi-window fields and a complete agent scaffold remain external experiments,
+  not missing scorer primitives.
 
 ## Reproducibility scope
 

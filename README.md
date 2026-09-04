@@ -84,7 +84,10 @@ table is pinned to the
 > This is a deterministic teaching field, not a model leaderboard, and
 > `sharpebench run` does not reproduce the paper's complete evidence sweep. The
 > current paper evaluates author-written entrants and externally specified rules;
-> no LLM trading agent has competed. See the
+> no LLM trading agent has competed. A separate prospective protocol pilot
+> reports proper forecast scores for three fixed local model-scaffold
+> configurations on 24 contracts and six settlement blocks. Those scores never
+> affect trading rank. See the
 > [paper](paper/main.pdf) and its [exact reproduction commands](paper/sections/A-commands.tex).
 
 Common next steps:
@@ -95,7 +98,7 @@ sharpebench run --data data/crypto-majors-1d.csv
 sharpebench audit
 sharpebench arena init league
 sharpebench arena verify league
-sharpebench forecast-quality agent-a.json agent-b.json
+sharpebench forecast-quality agent-a.json agent-b.json --output report.json
 ```
 
 Commands that render reports accept `--json` for structured output. Commands
