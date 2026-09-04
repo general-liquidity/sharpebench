@@ -15,6 +15,7 @@ and links the commits it was built from.
 ### Added
 - core/cli: ingest the closed `sharpe.forecast-evidence.v1` artifact and independently recompute point error, binary and categorical Brier or log loss, Normal CRPS, directional accuracy, and interval score. Reports include resolution and information-exposure counts, binary reliability and Brier skill, categorical confidence calibration, and Normal PIT diagnostics.
 - core/cli: compare forecast agents only on the exact contract intersection resolved by the whole field. Dependence-aware inference resamples all assets and questions sharing a resolution clock as one block, reports percentile intervals and two-sided p-values, and applies Holm familywise correction across every pair. Forecast quality is a separate report and cannot change trading-rank eligibility.
+- paper: specify the prospective forecast report, common-support comparison, dependence-aware inference, rank isolation, executable cross-product tutorial, and selected Lean-checked invariants as capabilities rather than model results. No current-model forecast result is admitted; the superseded engineering pilot is excluded from every result, comparison, leaderboard, and rank claim.
 
 ### Security
 - core: strict forecast ingestion rejects unknown fields and versions, nonfinite values, malformed digests, invalid probability vectors, contract drift, duplicate identities and idempotency keys, broken revision chains, inconsistent lifecycle clocks, incomplete resolution coverage, and late revisions presented as eligible.

@@ -2,7 +2,7 @@
 
 All commands run from the repository root. Commands that reproduce empirical numbers use the v0.9.0 evidence snapshot; commands that test the newer contracts use the current engineering tree. The kernel is deterministic, so its golden outputs reproduce on the three CI targets (Linux, macOS, Windows).
 
-\paragraph{Version.} Findings 1 and 2 were first observed at v0.2.1, and \cref{tab:units} was computed against v0.2.1 deliberately because it documents that kernel's unit error. The units fix shipped in v0.3.0. The admitted result artifacts are from v0.9.0, a cut and published tag, and were regenerated from the content-hashed source snapshot containing corrected execution-seed pooling, the observed-field trial floor, the measured-dispersion floor, clone collapse and the strict forward-window schema. Historical package labels are not substituted for that exact content snapshot. The current engineering tree is on the v0.15.0 development line and includes later checkpoint, trajectory, transport and diagnostic-schema corrections. Those later changes are software claims exercised below, not a new empirical validation; the result JSONL, figures and model field were not rerun.
+\paragraph{Version.} Findings 1 and 2 were first observed at v0.2.1, and \cref{tab:units} was computed against v0.2.1 deliberately because it documents that kernel's unit error. The units fix shipped in v0.3.0. The admitted result artifacts are from v0.9.0, a cut and published tag, and were regenerated from the content-hashed source snapshot containing corrected execution-seed pooling, the observed-field trial floor, the measured-dispersion floor, clone collapse and the strict forward-window schema. Historical package labels are not substituted for that exact content snapshot. Later checkpoint, trajectory, transport, forecast-quality, formal and diagnostic-schema changes are software claims exercised below, not a new empirical validation. The manifest identifies their exact engineering tree; the result JSONL and figures were not regenerated, and no current-model result is admitted.
 
 \paragraph{Content provenance.}
 \begin{verbatim}
@@ -10,7 +10,7 @@ python paper/src/make-provenance.py
   -> paper/evidence/provenance.json
 python paper/src/check-provenance.py
 \end{verbatim}
-The manifest records the commit at which it was generated, whether that tree was dirty, a content hash over the Rust, Python, published-schema, producer and frozen-data source snapshot, and the SHA-256 digest of every admitted result JSONL and figure. Source text is canonicalized from CRLF to LF before hashing so the same Git content has one identity on Windows and Unix; result artifacts remain byte-exact. Build outputs, virtual environments, bytecode caches and dependency trees are excluded by path component, so generated Rust files under a local \texttt{target/} directory cannot enter the source identity. Incomplete paid-LLM caches and fields remain excluded because they contain no admitted model result. The externally specified rule field of \cref{sec:external} is an ordinary recorded artifact, not a separately quoted exception. The validator recomputes every digest and the aggregate source hash, re-expands both recorded scopes to catch files added or removed since generation, and exits nonzero on any discrepancy. It also checks the two recorded generation fields, and what it enforces is narrower than what they record. The dirty flag is enforced outright: a manifest generated from a worktree with uncommitted changes describes source bytes that are in no commit, and the validator refuses it. The recorded head cannot be checked for equality with the current commit, because a manifest cannot contain the hash of the commit that will contain it; the enforced condition is ancestry, that the recorded commit is reachable from the checked-out one. That requires the recorded object, so the \texttt{paper-provenance} job checks out full history; in a shallow clone the validator fails and names the remedy rather than skipping the check. Outside a Git worktree, as in an unpacked source archive, the ancestry leg is reported as not enforced and the dirty flag still is. No digest is copied into this appendix: the manifest is the machine-readable authority, which removes the circularity that arose when this source file quoted a hash over a snapshot containing itself.
+The manifest records the commit at which it was generated, whether that tree was dirty, a content hash over the Rust, Python, published-schema, producer and frozen-data source snapshot, and the SHA-256 digest of every admitted result JSONL and figure. Source text is canonicalized from CRLF to LF before hashing so the same Git content has one identity on Windows and Unix; result artifacts remain byte-exact. Build outputs, virtual environments, bytecode caches and dependency trees are excluded by path component, so generated Rust files under a \texttt{target/} directory cannot enter the source identity. Incomplete model fields remain excluded because they contain no admitted model result. The externally specified rule field of \cref{sec:external} is an ordinary recorded artifact, not a separately quoted exception. The validator recomputes every digest and the aggregate source hash, re-expands both recorded scopes to catch files added or removed since generation, and exits nonzero on any discrepancy. It also checks the two recorded generation fields, and what it enforces is narrower than what they record. The dirty flag is enforced outright: a manifest generated from a worktree with uncommitted changes describes source bytes that are in no commit, and the validator refuses it. The recorded head cannot be checked for equality with the current commit, because a manifest cannot contain the hash of the commit that will contain it; the enforced condition is ancestry, that the recorded commit is reachable from the checked-out one. That requires the recorded object, so the \texttt{paper-provenance} job checks out full history; in a shallow clone the validator fails and names the remedy rather than skipping the check. Outside a Git worktree, as in an unpacked source archive, the ancestry leg is reported as not enforced and the dirty flag still is. No digest is copied into this appendix: the manifest is the machine-readable authority, which removes the circularity that arose when this source file quoted a hash over a snapshot containing itself.
 
 \paragraph{The shipped demonstration (\cref{fig:demotion}).}
 \begin{verbatim}
@@ -119,14 +119,16 @@ sharpebench arena verify <dir> [--pubkey <hex>]
 \end{verbatim}
 The opening command refuses to create a window without the exact scorer artifact digest. The standalone \texttt{commit} command produces the commitment document that \texttt{arena commit} registers; the latter does not accept the agent, artifact and salt as positional fields.
 
-\paragraph{The local open-weight compatibility path (unrun).}
+\paragraph{The prospective forecast report and formal model (\cref{sec:forecast-quality}).}
 \begin{verbatim}
-SHARPEBENCH_LOCAL_MODELS=<exact-ollama-tags> \
-cargo run --release -p sharpebench-harness \
-  --example local_open_weight_field_eval -- \
-  local-open-weight.jsonl [dataset]
+cargo run -q -p sharpebench -- forecast-quality \
+  examples/forecast-quality/fixtures/agent-alpha.json \
+  examples/forecast-quality/fixtures/agent-beta.json \
+  --bootstrap-samples 400 --seed 23 --confidence 0.9 \
+  --alpha 0.05 --bins 5 --json
+cd formal && lake build
 \end{verbatim}
-The example drives each exact local tag through SharpeArena's canonical stdio shim and the same reference-field and ranking path as the historical evaluator. It records model/server identity, cadence, thinking settings and agent protocol failures; an infrastructure failure aborts publication. This command is listed to make the built boundary inspectable. It has not produced an evidence file admitted by this manuscript and supports no result above.
+The first command reproduces the complete committed report from two deterministic SharpeArena ledgers, including exact common support, two resolution-time blocks, late-revision exclusion, calibration, block-bootstrap comparison and Holm adjustment. The second checks the separate abstract proofs of common-support membership, trading-rank isolation, Holm monotonicity and boundedness, and finite-bootstrap count bounds. Neither command produces an empirical model result, and the Lean project is not an extraction of the Rust implementation.
 
 \paragraph{Capturing and strictly replaying a trajectory.}
 \begin{verbatim}
@@ -149,7 +151,7 @@ cargo test -p sharpebench-harness --test evidence_fields_no_clone_merges
 \end{verbatim}
 Rebuilds every committed evidence field twice: once over the streams as submitted, asserting zero merges at the collapse threshold, and once over the seed-averaged pooled streams that ranking actually clusters, asserting the surviving vote count implies the \texttt{trials\_sr\_std\_source} stamped on each committed default cell.
 
-\paragraph{The checks added in this revision (\cref{sec:lifecycle}, \cref{sec:agreement}, \cref{sec:entrants}, \cref{sec:benchmark}, \cref{sec:integrity}).}
+\paragraph{The checks added in this revision (\cref{sec:lifecycle}, \cref{sec:forecast-quality}, \cref{sec:agreement}, \cref{sec:entrants}, \cref{sec:benchmark}, \cref{sec:integrity}).}
 \begin{verbatim}
 cargo test -p sharpebench-core   process
 cargo test -p sharpebench-core   entrants
@@ -157,12 +159,14 @@ cargo test -p sharpebench-core   evidence_coverage
 cargo test -p sharpebench-stats  agreement
 cargo test -p sharpebench-stats  dissent
 cargo test -p sharpebench-protocol --test schema_drift
+cargo test -p sharpebench-core   forecast
+cd formal && lake build
 \end{verbatim}
 The first covers the lifecycle ordering check, including the case that a passing risk evaluation on one instrument does not authorize an order on another. The third is the audit that fails when a new evidence field is neither covered nor excluded with a reason. The last checks the published JSON Schemas against the Rust wire types in both directions. None of these produces a number reported as a result; they are the executable form of the claims in the named sections. The full local suite on the audited engineering tree is
 \begin{verbatim}
 cargo test --workspace
 \end{verbatim}
-which reports 653 passed, 0 failed and 11 ignored.
+The manifest and continuous-integration records, rather than a copied count in prose, identify the exact current test surface.
 
 \paragraph{The live container boundary (\cref{sec:limitations}).}
 \begin{verbatim}
