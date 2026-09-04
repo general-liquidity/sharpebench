@@ -8,9 +8,11 @@ are the twelve listed in [RELEASING.md](RELEASING.md), and `xtask` and
 `examples/reference-agent` are `publish = false`. Each section is one `v*` tag
 and links the commits it was built from.
 
-[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.18.3...HEAD
+[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.18.4...HEAD
 
 ## [Unreleased]
+
+## [0.18.4] - 2026-09-04
 
 ### Fixed
 - arena: distinguish Docker's retryable `created` state from terminal `exited` and `dead` states before handing an entrant to the harness. The former boolean readiness probe collapsed all three to `Running=false`, so daemon scheduling could intermittently refuse a healthy container before its process started.
@@ -433,6 +435,7 @@ First published release.
 ### Fixed
 - Constant-time HMAC verification and bounded, timed agent HTTP reads ([6c3d174](https://github.com/general-liquidity/sharpebench/commit/6c3d174)).
 
+[0.18.4]: https://github.com/general-liquidity/sharpebench/compare/v0.18.3...v0.18.4
 [0.18.3]: https://github.com/general-liquidity/sharpebench/compare/v0.18.2...v0.18.3
 [0.18.2]: https://github.com/general-liquidity/sharpebench/compare/v0.18.1...v0.18.2
 [0.18.1]: https://github.com/general-liquidity/sharpebench/compare/v0.18.0...v0.18.1
