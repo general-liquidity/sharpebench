@@ -1275,7 +1275,12 @@ fn compare_agents(
 }
 
 fn stable_pair_seed(left: &str, right: &str) -> u64 {
-    let digest = Sha256::digest(format!("{left}\0{right}").as_bytes());
+    let (first, second) = if left <= right {
+        (left, right)
+    } else {
+        (right, left)
+    };
+    let digest = Sha256::digest(format!("{first}\0{second}").as_bytes());
     u64::from_be_bytes(digest[..8].try_into().unwrap_or([0; 8]))
 }
 
@@ -1469,6 +1474,48 @@ mod tests {
         assert!((calibration.brier_skill.unwrap() - 0.82).abs() < 1e-12);
         assert_eq!(summary.blind_resolved, 4);
         assert_eq!(report.rank_effect, "reported_only_never_trading_rank");
+    }
+
+    #[test]
+    fn pairwise_bootstrap_is_invariant_to_input_file_order() {
+        let left = parse_forecast_evidence(&fixture(
+            "left",
+            &[0.81, 0.22, 0.73, 0.34, 0.66, 0.15, 0.59, 0.27],
+            &[1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0],
+        ))
+        .unwrap();
+        let right = parse_forecast_evidence(&fixture(
+            "right",
+            &[0.61, 0.42, 0.53, 0.54, 0.46, 0.35, 0.39, 0.47],
+            &[1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0],
+        ))
+        .unwrap();
+        let config = ForecastAnalysisConfig {
+            bootstrap_seed: 260_904,
+            bootstrap_samples: 500,
+            confidence: 0.95,
+            familywise_alpha: 0.05,
+            calibration_bins: 5,
+        };
+
+        let forward = analyze_forecast_quality(&[left.clone(), right.clone()], config)
+            .unwrap()
+            .comparisons
+            .remove(0);
+        let reverse = analyze_forecast_quality(&[right, left], config)
+            .unwrap()
+            .comparisons
+            .remove(0);
+
+        assert_eq!(forward.raw_p_value, reverse.raw_p_value);
+        assert_eq!(forward.holm_adjusted_p_value, reverse.holm_adjusted_p_value);
+        assert_eq!(
+            forward.familywise_significant,
+            reverse.familywise_significant
+        );
+        assert_eq!(forward.mean_loss_difference, -reverse.mean_loss_difference);
+        assert_eq!(forward.confidence_lower, -reverse.confidence_upper);
+        assert_eq!(forward.confidence_upper, -reverse.confidence_lower);
     }
 
     #[test]
