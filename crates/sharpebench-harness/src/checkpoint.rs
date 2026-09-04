@@ -43,6 +43,11 @@ pub struct SweepIdentity {
     pub score_config_sha256: String,
     pub runner_artifact_sha256: String,
     pub entrant_sha256: String,
+    /// SHA-256 of the exact launch descriptor: transport, endpoint or command,
+    /// arguments, and the names of explicitly passed environment variables.
+    /// This is separate from `entrant_sha256`, which identifies the immutable
+    /// code or model artifact rather than how the harness invokes it.
+    pub invocation_sha256: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -53,13 +58,14 @@ pub struct SweepContract {
     pub score_config_sha256: String,
     pub runner_artifact_sha256: String,
     pub entrant_sha256: String,
+    pub invocation_sha256: String,
     pub windows: Vec<(usize, usize)>,
     pub seeds: Vec<u64>,
     pub max_retries: u32,
 }
 
 impl SweepContract {
-    pub const SCHEMA_VERSION: u32 = 1;
+    pub const SCHEMA_VERSION: u32 = 2;
 
     /// Build the contract from already-computed SHA-256 identities.
     pub fn new(
@@ -75,6 +81,7 @@ impl SweepContract {
             score_config_sha256: identity.score_config_sha256,
             runner_artifact_sha256: identity.runner_artifact_sha256,
             entrant_sha256: identity.entrant_sha256,
+            invocation_sha256: identity.invocation_sha256,
             windows: windows.iter().map(|w| (w.start, w.end)).collect(),
             seeds: seeds.to_vec(),
             max_retries,
@@ -95,6 +102,7 @@ impl SweepContract {
                 &self.score_config_sha256,
                 &self.runner_artifact_sha256,
                 &self.entrant_sha256,
+                &self.invocation_sha256,
             ]
             .into_iter()
             .all(|digest| valid_digest(digest))
@@ -557,6 +565,7 @@ mod tests {
                 score_config_sha256: "33".repeat(32),
                 runner_artifact_sha256: "44".repeat(32),
                 entrant_sha256: "55".repeat(32),
+                invocation_sha256: "66".repeat(32),
             },
             windows,
             seeds,
@@ -758,6 +767,23 @@ mod tests {
         };
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
         assert!(error.to_string().contains("contract differs"));
+
+        let mut changed_invocation = first.clone();
+        changed_invocation.invocation_sha256 = "bb".repeat(32);
+        let error = match run_resumable_sweep_bound(
+            &path,
+            "ext",
+            &changed_invocation,
+            &windows,
+            &seeds,
+            1,
+            attempt,
+        ) {
+            Ok(_) => panic!("the same artifact under a different invocation must not resume"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("contract differs"));
         let _ = std::fs::remove_file(&path);
     }
 
@@ -846,6 +872,23 @@ mod tests {
             |_w, seed| Ok(skilled_run(seed)),
         ) {
             Ok(_) => panic!("a label is not an entrant artifact identity"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(!path.exists());
+
+        let mut malformed = contract(&windows, &seeds, 1);
+        malformed.invocation_sha256 = "cmd:agent --flag".to_string();
+        let error = match run_resumable_sweep_bound(
+            &path,
+            "ext",
+            &malformed,
+            &windows,
+            &seeds,
+            1,
+            |_w, seed| Ok(skilled_run(seed)),
+        ) {
+            Ok(_) => panic!("a launch label is not a canonical invocation digest"),
             Err(error) => error,
         };
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);

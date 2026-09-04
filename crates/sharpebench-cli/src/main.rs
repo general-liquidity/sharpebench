@@ -1241,6 +1241,11 @@ fn checkpoint_contract(
             score_config_sha256: digest_json("score configuration", execution.score_config)?,
             runner_artifact_sha256: current_executable_sha256()?,
             entrant_sha256,
+            // The artifact digest and its invocation answer different questions.
+            // A caller-supplied artifact digest must not make a changed command,
+            // endpoint, image reference, or environment pass-through list look
+            // like the same resumable experiment.
+            invocation_sha256: sharpebench_attest::content_digest(entrant_material),
         },
         execution.windows,
         execution.seeds,
@@ -2083,6 +2088,45 @@ mod tests {
         )
         .expect("a declared artifact digest binds the checkpoint");
         assert_eq!(contract.entrant_sha256, digest);
+        assert_eq!(
+            contract.invocation_sha256,
+            sharpebench_attest::content_digest(b"http:127.0.0.1:9000")
+        );
+    }
+
+    #[test]
+    fn checkpoint_contract_separately_binds_artifact_and_invocation() {
+        let digest = "a".repeat(64);
+        let values = args(&[
+            "sharpebench",
+            "run",
+            "--checkpoint",
+            "sweep.json",
+            "--entrant-sha256",
+            &digest,
+        ]);
+        let data = sharpebench_sim::Dataset::synthetic(2, 12, 7);
+        let windows = [sharpebench_sim::Window { start: 2, end: 12 }];
+        let build = |invocation: &[u8]| {
+            checkpoint_contract(
+                &values,
+                CheckpointExecution {
+                    data: &data,
+                    windows: &windows,
+                    seeds: &[3],
+                    costs: sharpebench_sim::CostModel::default(),
+                    score_config: &ScoreConfig::default(),
+                    max_retries: 2,
+                },
+                invocation,
+                true,
+            )
+            .expect("a complete checkpoint contract")
+        };
+        let first = build(b"cmd\0agent --mode conservative\0TOKEN");
+        let second = build(b"cmd\0agent --mode aggressive\0TOKEN");
+        assert_eq!(first.entrant_sha256, second.entrant_sha256);
+        assert_ne!(first.invocation_sha256, second.invocation_sha256);
     }
 
     #[test]
