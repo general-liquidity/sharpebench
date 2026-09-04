@@ -520,29 +520,48 @@ fn docker_output(args: &[&str]) -> Result<Output, SandboxError> {
         .map_err(SandboxError::DockerUnavailable)
 }
 
+/// The startup states relevant to the handoff from Docker to the harness.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ContainerStartupState {
+    /// Docker has created the container record but has not started its process.
+    Created,
+    /// The entrant process is running and the transport can be handed off.
+    Running,
+    /// The process reached a terminal state before the handoff completed.
+    Terminal(String),
+}
+
+fn parse_container_startup_state(name: &str, value: &str) -> Result<ContainerStartupState, String> {
+    match value {
+        "created" => Ok(ContainerStartupState::Created),
+        "running" => Ok(ContainerStartupState::Running),
+        "exited" | "dead" => Ok(ContainerStartupState::Terminal(value.to_string())),
+        value => Err(format!(
+            "docker inspect for {name} returned an unexpected startup state {value:?}"
+        )),
+    }
+}
+
 /// Read the named container's startup state.
 ///
 /// `docker run` being alive proves only that the client process spawned. Under
-/// daemon load it can still be waiting to create the container, which made a
-/// silent pre-start client indistinguishable from a live-but-silent entrant.
-/// `None` is the one retryable state: Docker has not registered the name yet.
-fn inspect_container_running(name: &str) -> Result<Option<bool>, String> {
+/// daemon load it can still be waiting to create or start the container, which
+/// made a silent pre-start client indistinguishable from a live-but-silent
+/// entrant. Both an absent record and Docker's `created` state are retryable;
+/// `.State.Running == false` cannot distinguish `created` from `exited` and was
+/// therefore not a sufficient readiness predicate.
+fn inspect_container_startup(name: &str) -> Result<Option<ContainerStartupState>, String> {
     let args = [
         "container".to_string(),
         "inspect".to_string(),
         "--format".to_string(),
-        "{{.State.Running}}".to_string(),
+        "{{.State.Status}}".to_string(),
         name.to_string(),
     ];
     let output = command_output_with_timeout("docker", &args, READINESS_TIMEOUT)?;
     if output.status.success() {
-        return match String::from_utf8_lossy(&output.stdout).trim() {
-            "true" => Ok(Some(true)),
-            "false" => Ok(Some(false)),
-            value => Err(format!(
-                "docker inspect for {name} returned an invalid running state {value:?}"
-            )),
-        };
+        return parse_container_startup_state(name, String::from_utf8_lossy(&output.stdout).trim())
+            .map(Some);
     }
     let stderr = String::from_utf8_lossy(&output.stderr);
     if stderr.contains("No such object") || stderr.contains("No such container") {
@@ -562,23 +581,23 @@ fn inspect_container_running(name: &str) -> Result<Option<bool>, String> {
 fn wait_for_container_running_with(
     name: &str,
     timeout: Duration,
-    mut inspect: impl FnMut(&str) -> Result<Option<bool>, String>,
+    mut inspect: impl FnMut(&str) -> Result<Option<ContainerStartupState>, String>,
 ) -> Result<(), SandboxError> {
     let deadline = Instant::now() + timeout;
     loop {
         match inspect(name) {
-            Ok(Some(true)) => return Ok(()),
-            Ok(Some(false)) => {
+            Ok(Some(ContainerStartupState::Running)) => return Ok(()),
+            Ok(Some(ContainerStartupState::Terminal(state))) => {
                 return Err(SandboxError::Readiness(format!(
-                    "container {name} exited before it became ready"
+                    "container {name} entered terminal state {state:?} before it became ready"
                 )))
             }
-            Ok(None) if Instant::now() < deadline => {
+            Ok(Some(ContainerStartupState::Created) | None) if Instant::now() < deadline => {
                 thread::sleep(Duration::from_millis(25));
             }
-            Ok(None) => {
+            Ok(Some(ContainerStartupState::Created) | None) => {
                 return Err(SandboxError::Readiness(format!(
-                    "container {name} was not registered within {}s",
+                    "container {name} did not reach running state within {}s",
                     timeout.as_secs()
                 )))
             }
@@ -588,7 +607,7 @@ fn wait_for_container_running_with(
 }
 
 fn wait_for_container_running(name: &str) -> Result<(), SandboxError> {
-    wait_for_container_running_with(name, READINESS_TIMEOUT, inspect_container_running)
+    wait_for_container_running_with(name, READINESS_TIMEOUT, inspect_container_startup)
 }
 
 /// Prove that the live Docker boundary is ready for a field run.
@@ -1188,7 +1207,12 @@ mod tests {
 
     #[test]
     fn container_readiness_retries_absence_but_refuses_an_early_exit() {
-        let mut observations = [Ok(None), Ok(None), Ok(Some(true))].into_iter();
+        let mut observations = [
+            Ok(None),
+            Ok(Some(ContainerStartupState::Created)),
+            Ok(Some(ContainerStartupState::Running)),
+        ]
+        .into_iter();
         assert_eq!(
             wait_for_container_running_with("c-1", Duration::from_secs(1), |_| observations
                 .next()
@@ -1197,13 +1221,32 @@ mod tests {
             "a queued Docker client may precede registration; readiness waits for the daemon fact"
         );
 
-        let error = wait_for_container_running_with("c-2", Duration::ZERO, |_| Ok(Some(false)))
-            .expect_err("an entrant that exited before readiness must be refused");
-        assert!(error.to_string().contains("exited before"), "{error}");
+        let error = wait_for_container_running_with("c-2", Duration::ZERO, |_| {
+            Ok(Some(ContainerStartupState::Terminal("exited".to_string())))
+        })
+        .expect_err("an entrant that exited before readiness must be refused");
+        assert!(error.to_string().contains("terminal state"), "{error}");
 
         let error = wait_for_container_running_with("c-3", Duration::ZERO, |_| Ok(None))
             .expect_err("a name that never appears must not become a live agent");
-        assert!(error.to_string().contains("not registered"), "{error}");
+        assert!(error.to_string().contains("running state"), "{error}");
+    }
+
+    #[test]
+    fn docker_created_is_pending_not_an_exit() {
+        assert_eq!(
+            parse_container_startup_state("c-1", "created"),
+            Ok(ContainerStartupState::Created)
+        );
+        assert_eq!(
+            parse_container_startup_state("c-1", "running"),
+            Ok(ContainerStartupState::Running)
+        );
+        assert_eq!(
+            parse_container_startup_state("c-1", "exited"),
+            Ok(ContainerStartupState::Terminal("exited".to_string()))
+        );
+        assert!(parse_container_startup_state("c-1", "paused").is_err());
     }
 
     /// An inspector whose calls are journaled, so the inspect-then-remove

@@ -12,10 +12,13 @@ and links the commits it was built from.
 
 ## [Unreleased]
 
+### Fixed
+- arena: distinguish Docker's retryable `created` state from terminal `exited` and `dead` states before handing an entrant to the harness. The former boolean readiness probe collapsed all three to `Running=false`, so daemon scheduling could intermittently refuse a healthy container before its process started.
+
 ## [0.18.3] - 2026-09-04
 
 ### Fixed
-- arena tests: keep the live Docker smoke fixture alive independently of stdin attachment, so daemon scheduling cannot turn a healthy boundary into a pre-readiness exit.
+- arena tests: keep the live Docker smoke fixture alive independently of stdin attachment, removing an unrelated lifecycle dependency while the startup-state race above remained to be fixed.
 
 ## [0.18.2] - 2026-09-04
 
