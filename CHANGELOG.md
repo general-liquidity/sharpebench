@@ -12,6 +12,9 @@ and links the commits it was built from.
 
 ## [Unreleased]
 
+### Fixed
+- arena tests: keep the live Docker smoke fixture alive independently of stdin attachment, so daemon scheduling cannot turn a healthy boundary into a pre-readiness exit.
+
 ## [0.18.2] - 2026-09-04
 
 ### Fixed

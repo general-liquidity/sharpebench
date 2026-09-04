@@ -1683,9 +1683,10 @@ mod tests {
 
     /// Live Docker smoke test: spawns a real container through the production
     /// launch path and drives one decision over the wrapped `ExternalAgent`
-    /// transport. The fixture command consumes observations without replying;
-    /// relying on Alpine's default command to remain alive made this test race
-    /// image and daemon behavior unrelated to the boundary under test.
+    /// transport. The fixture command remains alive without reading stdin or
+    /// replying; tying its lifetime to stdin made readiness depend on when the
+    /// Docker client attached its pipe, which is unrelated to the boundary
+    /// under test.
     ///
     /// The old assertion was `decision.orders.is_empty()`, which holds for any
     /// failure mode including a container that never started, because
@@ -1705,7 +1706,11 @@ mod tests {
         );
         use sharpebench_sim::{Agent, DecideError, TransportDiagnostics};
         let image = live_fixture_image();
-        let silent_agent = ["/bin/sh", "-c", "while IFS= read -r _; do :; done"];
+        let silent_agent = [
+            "/bin/sh",
+            "-c",
+            "trap 'exit 0' TERM INT; while :; do sleep 1; done",
+        ];
         let mut agent = run_external_sandboxed_with_command(
             &image,
             &SandboxOptions::default(),
