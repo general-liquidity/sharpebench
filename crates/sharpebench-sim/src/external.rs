@@ -913,7 +913,11 @@ mod tests {
     #[test]
     fn a_child_dead_at_startup_fails_fast_as_an_exit_not_a_timeout() {
         #[cfg(windows)]
-        let agent = ExternalAgent::spawn("powershell", &["-NoProfile", "-Command", "exit 3"]);
+        // Use the native command interpreter for an immediate, dependency-free
+        // exit. Starting PowerShell can itself take most of the 30-second
+        // decision budget on a loaded CI runner, which tests PowerShell startup
+        // latency rather than this transport's child-exit polling.
+        let agent = ExternalAgent::spawn("cmd.exe", &["/D", "/Q", "/C", "exit /B 3"]);
         #[cfg(not(windows))]
         let agent = ExternalAgent::spawn("sh", &["-c", "exit 3"]);
         let mut agent = agent.expect("spawning the platform shell must work");

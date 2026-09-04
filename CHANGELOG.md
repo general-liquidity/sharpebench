@@ -12,6 +12,9 @@ and links the commits it was built from.
 
 ## [Unreleased]
 
+### Fixed
+- tests: use the native Windows command interpreter for the dead-child fail-fast fixture, so the test measures transport exit polling instead of variable PowerShell startup time on a loaded runner.
+
 ## [0.18.1] - 2026-09-04
 
 ### Changed
