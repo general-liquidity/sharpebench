@@ -97,7 +97,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "0c41700a7f8a6ced0249c65cbf63da57706e99a1",
+  "generated_at_head": "4015a1afd312fbf2bf95559c8124580d7fac1120",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -188,6 +188,10 @@
       "sha256": "39f85d9b323753e07269bf7c63a2dab7ddfe064f54dd5c060e4a23eddab68a1a"
     },
     {
+      "path": "crates/sharpebench-cli/src/forecast_cmd.rs",
+      "sha256": "3fe4f152d31c1a5ae00503eb8d552aedc24645f96b852b4752865b0156af6f63"
+    },
+    {
       "path": "crates/sharpebench-cli/src/import_cmd.rs",
       "sha256": "92d98c9f69c00da2acfd407d92752c84166b269fce213a44c1aa8966eab7b95c"
     },
@@ -197,7 +201,7 @@
     },
     {
       "path": "crates/sharpebench-cli/src/main.rs",
-      "sha256": "5d0084ff9aa302ef6d8b09d65bfa091698558be6e21c3251b6bcba4c2f55078c"
+      "sha256": "a8b272b37964f4acc8df0010d94965be8498e107b5f23919d322151c0bb50b9b"
     },
     {
       "path": "crates/sharpebench-cli/src/update.rs",
@@ -268,12 +272,16 @@
       "sha256": "65e9be5ab6e56e5ddc7b69ff6bf410d05897586c898da3923f86d4a722ce147d"
     },
     {
+      "path": "crates/sharpebench-core/src/forecast.rs",
+      "sha256": "3af1e54ec30643e11e633062f3793f878f90ae146e12d967b55cde65ea4d1578"
+    },
+    {
       "path": "crates/sharpebench-core/src/greeks.rs",
       "sha256": "c94bf3e654dd96e153f3af53b2156adf48de5f134221ee2f00cccb01ab72220d"
     },
     {
       "path": "crates/sharpebench-core/src/lib.rs",
-      "sha256": "27fc8d30026b1a0847a5bc617a17e3e31dff493c91e9ebc0517eaa3e88edae0d"
+      "sha256": "bb9f2f25ac5166ce12163641c326031245565c0b8ceff5f059a943a54f4ee4e8"
     },
     {
       "path": "crates/sharpebench-core/src/oos.rs",
@@ -753,5 +761,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "3557806be3291e32fb1aa84c2b1f2bc2718cc6a5348d414c40ceaca9f68add8f"
+  "source_snapshot_sha256": "f36da34365e9400604862bbd4d52e2870b5c04d120b92c2dc029da37141f3594"
 }
