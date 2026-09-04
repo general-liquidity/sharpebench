@@ -30,6 +30,7 @@ jobs:
           test: false
           lint: false
           leanchecker: true
+          leanchecker-args: SharpeBenchFormal
           nanoda: true
           nanoda-allow-sorry: false
           axiom-audit: true

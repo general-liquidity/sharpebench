@@ -1,6 +1,0 @@
-name = "sharpebench-formal"
-version = "0.1.0"
-defaultTargets = ["SharpeBenchFormal"]
-
-[[lean_lib]]
-name = "SharpeBenchFormal"
