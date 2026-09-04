@@ -5,6 +5,8 @@
   ],
   "artifact_scope": [
     "paper/evidence/final/*.jsonl",
+    "paper/evidence/prospective-forecast-field/**/*.json",
+    "paper/evidence/prospective-forecast-field/**/*.sha256",
     "paper/figures/*.pdf"
   ],
   "artifacts": [
@@ -73,6 +75,78 @@
       "sha256": "aa4d8d46ff69a464c64c2080b1ef4c0eaa1403a02e57daac8a1a47de809c105f"
     },
     {
+      "path": "paper/evidence/prospective-forecast-field/field-plan.json",
+      "sha256": "61d225c357ec13dea63851afd17ca66866d841efd71dc1da18b74c85a3342a3c"
+    },
+    {
+      "path": "paper/evidence/prospective-forecast-field/field-plan.sha256",
+      "sha256": "3705d58a7bc372b377e5c259b8a3afcb3782e2e1dafb3c515ca0f16d19d3bbd6"
+    },
+    {
+      "path": "paper/evidence/prospective-forecast-field/forecast-commit.json",
+      "sha256": "cc0e06840ef047d2d149050f0ae410df6a3db273cae4f66da67b0e9e05bf26b9"
+    },
+    {
+      "path": "paper/evidence/prospective-forecast-field/inference/phi-4.json",
+      "sha256": "62d83067212d1f764444cc799fad3f39797001c601df763e2974072f4e7033d0"
+    },
+    {
+      "path": "paper/evidence/prospective-forecast-field/inference/qwen-0.5b.json",
+      "sha256": "e673bc796b74355b715f02f87eddbf55659aa385c3e56e79d544933404f6e140"
+    },
+    {
+      "path": "paper/evidence/prospective-forecast-field/inference/qwen-7b.json",
+      "sha256": "b046e7cbb77438674399377e5e4c998da99ef001f7ba7e5e9b49898cfb23bbb3"
+    },
+    {
+      "path": "paper/evidence/prospective-forecast-field/observation.json",
+      "sha256": "3657bdd797457a64207258a9804b620efe092f02b643ab6423ee254d4750d1b7"
+    },
+    {
+      "path": "paper/evidence/prospective-forecast-field/pending/phi-4.json",
+      "sha256": "fa318d2d520180d35a75526ea3a0abb1025783a26978a33cd479a4d2137a267a"
+    },
+    {
+      "path": "paper/evidence/prospective-forecast-field/pending/qwen-0.5b.json",
+      "sha256": "9aea81d596d0c0c09391051b86a7616b0864afedb2d6853c0265d16470e96e1c"
+    },
+    {
+      "path": "paper/evidence/prospective-forecast-field/pending/qwen-7b.json",
+      "sha256": "ab0dd163998182b7a6e126aa7f737e853c293fbd1d376f2f5b9828bcaf0697a4"
+    },
+    {
+      "path": "paper/evidence/prospective-forecast-field/report-check.json",
+      "sha256": "82f28fd922221080b00c11f5d97b41d91efcff230ce94e0cb64389124614122b"
+    },
+    {
+      "path": "paper/evidence/prospective-forecast-field/report.json",
+      "sha256": "c96d7ec3e946d5cf7f5e9afcfc6004760071b3f0b9bc6ee59160d59e499aad80"
+    },
+    {
+      "path": "paper/evidence/prospective-forecast-field/resolution-manifest.json",
+      "sha256": "c7f213512aa80558bd4c0ded3155798516b2a283911929a6e9c67012e2b78bbc"
+    },
+    {
+      "path": "paper/evidence/prospective-forecast-field/resolution.json",
+      "sha256": "5b9d5530a9b2b57cdd978856dc391159f5b5e67888d057fff6d2688b3b921d3a"
+    },
+    {
+      "path": "paper/evidence/prospective-forecast-field/resolved/phi-4.json",
+      "sha256": "c820b86d5c79ef9da21c1eb84614ae065e97e3bfbafb927890de3d8dafd295d1"
+    },
+    {
+      "path": "paper/evidence/prospective-forecast-field/resolved/qwen-0.5b.json",
+      "sha256": "b8c4468e650e6fb6ebfaa3d1e6d26b75d2bab956bd1c335543fad259738f5bbc"
+    },
+    {
+      "path": "paper/evidence/prospective-forecast-field/resolved/qwen-7b.json",
+      "sha256": "19edce59688fb607c1994b6f6b73607ba049e2108746b7cc92ba1be5b8ac9b5f"
+    },
+    {
+      "path": "paper/evidence/prospective-forecast-field/source-manifest.json",
+      "sha256": "1bcc72d55818e6aa9f9c9d8a8d7920763640f2652b7d2a22113e8d3b13f2fe88"
+    },
+    {
       "path": "paper/figures/evidence-drawdowns.pdf",
       "sha256": "f19269494d13cd28330f5d4be56176aa727dfe3cfc3061a82953822f784b7874"
     },
@@ -97,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "711db28039e661fa7a6e6f9c1eeb29c1234c9f76",
+  "generated_at_head": "662e255fc6ff9a75cb142d622151dfd4eec08d6c",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -741,11 +815,11 @@
     },
     {
       "path": "paper/src/provenance_common.py",
-      "sha256": "6a6e2012fc917fb165374f1189c954446140b0419522a30875c72c2a3eddb318"
+      "sha256": "ca32940dca61606b720a699878af858137e6d94c6f5e314e86d3e7882b25d043"
     },
     {
       "path": "paper/src/test_check_prospective_forecast_report.py",
-      "sha256": "7662cef86bae208c8b97a9de73dcda683823602efe66c96b77602abb3f36307d"
+      "sha256": "6648ab327ed9eb40fd0c29d66d09814ea29472e739f621f5d12244d1614b839f"
     },
     {
       "path": "paper/src/test_import_prospective_field.py",
@@ -753,7 +827,7 @@
     },
     {
       "path": "paper/src/test_provenance.py",
-      "sha256": "4a1f33780d782de36326e3f9187ca49f2422121be0937b3b1ef52b5e92eee5d6"
+      "sha256": "6a2faf76e53bcdafaaefcc8dec8421d1cbb2c6e2888da51d91e452304fcc54af"
     }
   ],
   "source_snapshot_excludes": [
@@ -777,5 +851,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "d151aae0c408626dd493da078a995d4752b66ade5af272b184124cc434c5c828"
+  "source_snapshot_sha256": "fad43445e909104d9654bed11c85f986587f3270b446d5c99daaea48bc4eae7a"
 }
