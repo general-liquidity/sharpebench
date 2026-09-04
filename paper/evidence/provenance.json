@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "a12a0733f3db489fb2f9707f75ca021706497cf4",
+  "generated_at_head": "52fc358cfaa9f9b8181f56172f9b4ab3280bcb2d",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -707,15 +707,15 @@
     },
     {
       "path": "paper/refs.bib",
-      "sha256": "accf0281138071aae45a95198b5e14d1d6770fbaf3d7e55e6c3e4dd802286c2c"
+      "sha256": "1e76dc91840ed5bfe64dd2b2b588402b2f69a383f26e465be1036d5cb287646d"
     },
     {
       "path": "paper/sections/00-abstract.tex",
-      "sha256": "be2622ad8114e369619fc954a49f3b9b68d2140250dee61fae4a7a802f5cb58e"
+      "sha256": "25aad7fdfc09247a4c6a3bde6ce5319fc4c4c33908c9d004300479d6b6cb552e"
     },
     {
       "path": "paper/sections/01-introduction.tex",
-      "sha256": "89e44da5aae4d54b6568127595bf9d251758f07b314427ddeb92b85c3559a1bb"
+      "sha256": "8645f5652b9b3be199322286013f23d2fae41b7535c832cb2ddb5c63346a080f"
     },
     {
       "path": "paper/sections/02-principles.tex",
@@ -723,7 +723,7 @@
     },
     {
       "path": "paper/sections/03-benchmark.tex",
-      "sha256": "3a01202b16a863187d2a68ff9bf154d3f9abd510aa3691b7b1d782d16a046c46"
+      "sha256": "a1d75df6c7d9f9868febfa20680d5d96547a7e1a26cc1def8f4bee2bf295cb09"
     },
     {
       "path": "paper/sections/04-integrity.tex",
@@ -739,11 +739,11 @@
     },
     {
       "path": "paper/sections/07-limitations.tex",
-      "sha256": "ba9d06127645d297fef0338f7bc6ad7baaf308ffc365bd2e9b1cc75504d4adf7"
+      "sha256": "1937f6909df3536e02fa58e0c7d678e5d7d0b7bbe2b377e139ae17b6a63a3147"
     },
     {
       "path": "paper/sections/08-reproducibility.tex",
-      "sha256": "a171a339d8491c2cad56a57ce011471b846b2b88bd708a42606abfb3979736c1"
+      "sha256": "5295567098e351b6bef5be23fa21dc0e75e444e7186116d2c38ade9524318f52"
     },
     {
       "path": "paper/sections/09-ethics.tex",
@@ -751,7 +751,7 @@
     },
     {
       "path": "paper/sections/A-commands.tex",
-      "sha256": "f733650f209123dd96fefc02b9440c6f632a7097f99a0cdc0480a20dbbdcfef1"
+      "sha256": "12d3f055c59ccee679b038d451fe34f9d046a80ed51334477bd7910403896063"
     },
     {
       "path": "paper/sections/B-checklist.tex",
@@ -851,5 +851,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "fad43445e909104d9654bed11c85f986587f3270b446d5c99daaea48bc4eae7a"
+  "source_snapshot_sha256": "d5a97e8d2d56ee1cd97ba472a201d799913cdd7bf3b2c03d5970978f7ee5e18d"
 }
