@@ -11,6 +11,7 @@ The command accepts one `sharpe.forecast-evidence.v1` file per agent:
 ```bash
 sharpebench forecast-quality agent-a.json agent-b.json
 sharpebench forecast-quality agent-a.json agent-b.json --json
+sharpebench forecast-quality agent-a.json agent-b.json --output report.json
 ```
 
 SharpeArena writes the native format, but the boundary is a versioned JSON file,
@@ -66,7 +67,12 @@ Relevant options are:
 --confidence C          interval coverage inside (0, 1)
 --alpha A               familywise significance level inside (0, 1)
 --bins N                calibration and PIT bin count
+--output PATH           write the complete JSON report to PATH
 ```
+
+`--output` is independent of display mode: the CLI writes the same complete,
+pretty-printed report whether stdout is the human table or `--json`. This gives
+paper and CI pipelines a named artifact without shell-dependent redirection.
 
 ## Executable cross-product example
 

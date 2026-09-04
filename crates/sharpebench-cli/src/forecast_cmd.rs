@@ -10,12 +10,20 @@ pub(crate) fn run(args: &[String], json: bool) -> i32 {
     if paths.is_empty() {
         eprintln!(
             "usage: sharpebench forecast-quality <evidence.json>... \
-             [--bootstrap-samples N] [--seed N] [--confidence C] [--alpha A] [--bins N] [--json]"
+             [--bootstrap-samples N] [--seed N] [--confidence C] [--alpha A] [--bins N] \
+             [--output report.json] [--json]"
         );
         return 2;
     }
     let config = match parse_config(args) {
         Ok(config) => config,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return 2;
+        }
+    };
+    let output = match output_path(args) {
+        Ok(output) => output,
         Err(error) => {
             eprintln!("error: {error}");
             return 2;
@@ -40,12 +48,16 @@ pub(crate) fn run(args: &[String], json: bool) -> i32 {
     }
     match analyze_forecast_quality(&documents, config) {
         Ok(report) => {
+            let serialized = serde_json::to_string_pretty(&report)
+                .expect("forecast-quality report is JSON serializable");
+            if let Some(path) = output {
+                if let Err(error) = fs::write(path, format!("{serialized}\n")) {
+                    eprintln!("error: cannot write {path}: {error}");
+                    return 1;
+                }
+            }
             if json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&report)
-                        .expect("forecast-quality report is JSON serializable")
-                );
+                println!("{serialized}");
             } else {
                 print_report(&report);
             }
@@ -65,6 +77,7 @@ fn positional_paths(args: &[String]) -> Vec<&str> {
         "--confidence",
         "--alpha",
         "--bins",
+        "--output",
     ];
     let mut paths = Vec::new();
     let mut index = 2;
@@ -79,6 +92,16 @@ fn positional_paths(args: &[String]) -> Vec<&str> {
         }
     }
     paths
+}
+
+fn output_path(args: &[String]) -> Result<Option<&str>, &'static str> {
+    let Some(index) = args.iter().position(|value| value == "--output") else {
+        return Ok(None);
+    };
+    match args.get(index + 1).map(String::as_str) {
+        Some(path) if !path.starts_with('-') => Ok(Some(path)),
+        _ => Err("--output requires a file path"),
+    }
 }
 
 fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
@@ -180,6 +203,8 @@ fn print_report(report: &ForecastQualityReport) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_string()).collect()
@@ -196,8 +221,65 @@ mod tests {
             "b.json",
             "--bins",
             "5",
+            "--output",
+            "report.json",
         ]);
         assert_eq!(positional_paths(&args), ["a.json", "b.json"]);
+    }
+
+    #[test]
+    fn output_path_is_explicit_and_requires_a_value() {
+        let with_output = args(&[
+            "sharpebench",
+            "forecast-quality",
+            "a.json",
+            "--output",
+            "report.json",
+        ]);
+        assert_eq!(output_path(&with_output), Ok(Some("report.json")));
+
+        let missing = args(&["sharpebench", "forecast-quality", "a.json", "--output"]);
+        assert_eq!(output_path(&missing), Err("--output requires a file path"));
+    }
+
+    #[test]
+    fn output_file_contains_the_complete_machine_report() {
+        let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/forecast-quality/fixtures");
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock is after Unix epoch")
+            .as_nanos();
+        let output = std::env::temp_dir().join(format!(
+            "sharpebench-forecast-report-{}-{nonce}.json",
+            std::process::id()
+        ));
+        let args = vec![
+            "sharpebench".to_string(),
+            "forecast-quality".to_string(),
+            fixtures
+                .join("agent-alpha.json")
+                .to_string_lossy()
+                .into_owned(),
+            fixtures
+                .join("agent-beta.json")
+                .to_string_lossy()
+                .into_owned(),
+            "--bootstrap-samples".to_string(),
+            "20".to_string(),
+            "--output".to_string(),
+            output.to_string_lossy().into_owned(),
+        ];
+
+        assert_eq!(run(&args, false), 0);
+        let report: serde_json::Value = serde_json::from_slice(
+            &fs::read(&output).expect("forecast report was written to --output"),
+        )
+        .expect("--output contains JSON");
+        fs::remove_file(&output).expect("remove temporary forecast report");
+
+        assert_eq!(report["common_support"]["n_contracts"], 8);
+        assert_eq!(report["agents"].as_array().map(Vec::len), Some(2));
     }
 
     #[test]
