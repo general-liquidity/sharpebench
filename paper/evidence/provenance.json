@@ -97,7 +97,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "586168d00ba1c9af79a1198994fe6b64fd8dd0f7",
+  "generated_at_head": "5fa5a9641fed708b26bc3068b2bc8d88c1414f37",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -717,7 +717,7 @@
     },
     {
       "path": "paper/src/import-prospective-field.py",
-      "sha256": "fa4134df8934b5a914fc837ee56cb9410809bb889a130a0215a63cd221daf8e3"
+      "sha256": "ae1adc938852b301f6e17fef45bc107f1d252bf5a1f0ded850a66e4bbb693880"
     },
     {
       "path": "paper/src/make-evidence-figures.py",
@@ -769,5 +769,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "b17706a6dd18e690f9b5ff9a18826c4c39e51fcbef203a80914cc7dcd39eef42"
+  "source_snapshot_sha256": "f463da1a6e33db1b43e7ba5ed590e377ae801b511d2bb3859782fb2857c0e749"
 }
