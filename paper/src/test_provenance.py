@@ -128,6 +128,24 @@ class ProvenancePolicyTests(unittest.TestCase):
             common._matches("crates/demo/src/nested/lib.rs", "crates/**/*.rs")
         )
         self.assertTrue(common._matches("arena/state.json", "arena/**/*.json"))
+        self.assertTrue(
+            common._matches(
+                "paper/evidence/prospective-forecast-field/field-plan.json",
+                "paper/evidence/prospective-forecast-field/**/*.json",
+            )
+        )
+        self.assertTrue(
+            common._matches(
+                "paper/evidence/prospective-forecast-field/resolved/agent.json",
+                "paper/evidence/prospective-forecast-field/**/*.json",
+            )
+        )
+        self.assertFalse(
+            common._matches(
+                "paper/evidence/prospective-forecast-field/private/model.bin",
+                "paper/evidence/prospective-forecast-field/**/*.json",
+            )
+        )
 
     def test_clean_generation_records_match_the_committed_bytes(self) -> None:
         commit = self.manifest["generated_at_head"]

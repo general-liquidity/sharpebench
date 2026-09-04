@@ -1,0 +1,24 @@
+{
+  "field_plan_sha256": "1e6536f7b359b1baa836f6e2a6bec454abb6a7fb5b580a31670dbd11e9f170c8",
+  "files": {
+    "field-plan.json": "61d225c357ec13dea63851afd17ca66866d841efd71dc1da18b74c85a3342a3c",
+    "field-plan.sha256": "3705d58a7bc372b377e5c259b8a3afcb3782e2e1dafb3c515ca0f16d19d3bbd6",
+    "forecast-commit.json": "cc0e06840ef047d2d149050f0ae410df6a3db273cae4f66da67b0e9e05bf26b9",
+    "inference/phi-4.json": "62d83067212d1f764444cc799fad3f39797001c601df763e2974072f4e7033d0",
+    "inference/qwen-0.5b.json": "e673bc796b74355b715f02f87eddbf55659aa385c3e56e79d544933404f6e140",
+    "inference/qwen-7b.json": "b046e7cbb77438674399377e5e4c998da99ef001f7ba7e5e9b49898cfb23bbb3",
+    "observation.json": "3657bdd797457a64207258a9804b620efe092f02b643ab6423ee254d4750d1b7",
+    "pending/phi-4.json": "fa318d2d520180d35a75526ea3a0abb1025783a26978a33cd479a4d2137a267a",
+    "pending/qwen-0.5b.json": "9aea81d596d0c0c09391051b86a7616b0864afedb2d6853c0265d16470e96e1c",
+    "pending/qwen-7b.json": "ab0dd163998182b7a6e126aa7f737e853c293fbd1d376f2f5b9828bcaf0697a4",
+    "resolution-manifest.json": "c7f213512aa80558bd4c0ded3155798516b2a283911929a6e9c67012e2b78bbc",
+    "resolution.json": "5b9d5530a9b2b57cdd978856dc391159f5b5e67888d057fff6d2688b3b921d3a",
+    "resolved/phi-4.json": "c820b86d5c79ef9da21c1eb84614ae065e97e3bfbafb927890de3d8dafd295d1",
+    "resolved/qwen-0.5b.json": "b8c4468e650e6fb6ebfaa3d1e6d26b75d2bab956bd1c335543fad259738f5bbc",
+    "resolved/qwen-7b.json": "19edce59688fb607c1994b6f6b73607ba049e2108746b7cc92ba1be5b8ac9b5f"
+  },
+  "schema_version": "sharpebench.prospective-forecast-field-import.v1",
+  "source_commit": "70ff679bd7e727a89b8d7aaeee67ce62ed7591d6",
+  "source_path": "paper/evidence/prospective-forecast-field",
+  "source_repository": "https://github.com/general-liquidity/sharpearena.git"
+}

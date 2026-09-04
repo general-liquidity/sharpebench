@@ -1,0 +1,200 @@
+{
+  "agent_id": "phi-4",
+  "field_plan_sha256": "1e6536f7b359b1baa836f6e2a6bec454abb6a7fb5b580a31670dbd11e9f170c8",
+  "model_id": "microsoft/phi-4",
+  "model_revision": "187ef0342fff0eb3333be9f00389385e95ef0b61",
+  "model_snapshot_sha256": "d194bc4132c03a8db22e02aec699d5d44b536b5f8a852a5a92ed59dc0ea04997",
+  "parsed_predictions": {
+    "1a06d30f480-bnbusdt": 0.531209409236908,
+    "1a06d30f480-btcusdt": 0.4882833957672119,
+    "1a06d30f480-ethusdt": 0.5350984334945679,
+    "1a06d30f480-solusdt": 0.5078118443489075,
+    "1a06d32c940-bnbusdt": 0.531209409236908,
+    "1a06d32c940-btcusdt": 0.5234203934669495,
+    "1a06d32c940-ethusdt": 0.5389832258224487,
+    "1a06d32c940-solusdt": 0.5039061903953552,
+    "1a06d349e00-bnbusdt": 0.5273165106773376,
+    "1a06d349e00-btcusdt": 0.5039061903953552,
+    "1a06d349e00-ethusdt": 0.5350984334945679,
+    "1a06d349e00-solusdt": 0.5039061903953552,
+    "1a06d3672c0-bnbusdt": 0.5389832258224487,
+    "1a06d3672c0-btcusdt": 0.5,
+    "1a06d3672c0-ethusdt": 0.5506073832511902,
+    "1a06d3672c0-solusdt": 0.5,
+    "1a06d384780-bnbusdt": 0.5350984334945679,
+    "1a06d384780-btcusdt": 0.49609383940696716,
+    "1a06d384780-ethusdt": 0.5273165106773376,
+    "1a06d384780-solusdt": 0.5078118443489075,
+    "1a06d3a1c40-bnbusdt": 0.5467381477355957,
+    "1a06d3a1c40-btcusdt": 0.49609383940696716,
+    "1a06d3a1c40-ethusdt": 0.5583269596099854,
+    "1a06d3a1c40-solusdt": 0.49609383940696716
+  },
+  "prompt_sha256": "002cbc4a024b037220e5391d9cadb331edebd686dc738f2f169ad8c1a7c5e76c",
+  "raw_output": "{\"forecasts\":{\"1a06d30f480-bnbusdt\":0.531209409236908,\"1a06d30f480-btcusdt\":0.4882833957672119,\"1a06d30f480-ethusdt\":0.5350984334945679,\"1a06d30f480-solusdt\":0.5078118443489075,\"1a06d32c940-bnbusdt\":0.531209409236908,\"1a06d32c940-btcusdt\":0.5234203934669495,\"1a06d32c940-ethusdt\":0.5389832258224487,\"1a06d32c940-solusdt\":0.5039061903953552,\"1a06d349e00-bnbusdt\":0.5273165106773376,\"1a06d349e00-btcusdt\":0.5039061903953552,\"1a06d349e00-ethusdt\":0.5350984334945679,\"1a06d349e00-solusdt\":0.5039061903953552,\"1a06d3672c0-bnbusdt\":0.5389832258224487,\"1a06d3672c0-btcusdt\":0.5,\"1a06d3672c0-ethusdt\":0.5506073832511902,\"1a06d3672c0-solusdt\":0.5,\"1a06d384780-bnbusdt\":0.5350984334945679,\"1a06d384780-btcusdt\":0.49609383940696716,\"1a06d384780-ethusdt\":0.5273165106773376,\"1a06d384780-solusdt\":0.5078118443489075,\"1a06d3a1c40-bnbusdt\":0.5467381477355957,\"1a06d3a1c40-btcusdt\":0.49609383940696716,\"1a06d3a1c40-ethusdt\":0.5583269596099854,\"1a06d3a1c40-solusdt\":0.49609383940696716}}",
+  "raw_output_kind": "canonical forecast map derived from recorded binary logits",
+  "raw_output_sha256": "239f4c7546eaab2db101b5e339c9fdaa3cb67d2b4b624f48cecbe31d0b6f7d1d",
+  "runtime": {
+    "class_token_ids": {
+      "false": 15,
+      "true": 16
+    },
+    "contract_count": 24,
+    "cuda_version": "13.0",
+    "elapsed_ms": 58472,
+    "gpu": "NVIDIA RTX A4000",
+    "input_tokens_max": 2041,
+    "input_tokens_min": 2037,
+    "logits": {
+      "1a06d30f480-bnbusdt": {
+        "false_logit": 26.921875,
+        "probability": 0.531209409236908,
+        "true_logit": 27.046875,
+        "unclipped_probability": 0.531209409236908
+      },
+      "1a06d30f480-btcusdt": {
+        "false_logit": 26.984375,
+        "probability": 0.4882833957672119,
+        "true_logit": 26.9375,
+        "unclipped_probability": 0.4882833957672119
+      },
+      "1a06d30f480-ethusdt": {
+        "false_logit": 26.84375,
+        "probability": 0.5350984334945679,
+        "true_logit": 26.984375,
+        "unclipped_probability": 0.5350984334945679
+      },
+      "1a06d30f480-solusdt": {
+        "false_logit": 27.015625,
+        "probability": 0.5078118443489075,
+        "true_logit": 27.046875,
+        "unclipped_probability": 0.5078118443489075
+      },
+      "1a06d32c940-bnbusdt": {
+        "false_logit": 26.921875,
+        "probability": 0.531209409236908,
+        "true_logit": 27.046875,
+        "unclipped_probability": 0.531209409236908
+      },
+      "1a06d32c940-btcusdt": {
+        "false_logit": 26.953125,
+        "probability": 0.5234203934669495,
+        "true_logit": 27.046875,
+        "unclipped_probability": 0.5234203934669495
+      },
+      "1a06d32c940-ethusdt": {
+        "false_logit": 26.859375,
+        "probability": 0.5389832258224487,
+        "true_logit": 27.015625,
+        "unclipped_probability": 0.5389832258224487
+      },
+      "1a06d32c940-solusdt": {
+        "false_logit": 27.03125,
+        "probability": 0.5039061903953552,
+        "true_logit": 27.046875,
+        "unclipped_probability": 0.5039061903953552
+      },
+      "1a06d349e00-bnbusdt": {
+        "false_logit": 26.921875,
+        "probability": 0.5273165106773376,
+        "true_logit": 27.03125,
+        "unclipped_probability": 0.5273165106773376
+      },
+      "1a06d349e00-btcusdt": {
+        "false_logit": 26.953125,
+        "probability": 0.5039061903953552,
+        "true_logit": 26.96875,
+        "unclipped_probability": 0.5039061903953552
+      },
+      "1a06d349e00-ethusdt": {
+        "false_logit": 26.828125,
+        "probability": 0.5350984334945679,
+        "true_logit": 26.96875,
+        "unclipped_probability": 0.5350984334945679
+      },
+      "1a06d349e00-solusdt": {
+        "false_logit": 27.0,
+        "probability": 0.5039061903953552,
+        "true_logit": 27.015625,
+        "unclipped_probability": 0.5039061903953552
+      },
+      "1a06d3672c0-bnbusdt": {
+        "false_logit": 26.921875,
+        "probability": 0.5389832258224487,
+        "true_logit": 27.078125,
+        "unclipped_probability": 0.5389832258224487
+      },
+      "1a06d3672c0-btcusdt": {
+        "false_logit": 26.953125,
+        "probability": 0.5,
+        "true_logit": 26.953125,
+        "unclipped_probability": 0.5
+      },
+      "1a06d3672c0-ethusdt": {
+        "false_logit": 26.796875,
+        "probability": 0.5506073832511902,
+        "true_logit": 27.0,
+        "unclipped_probability": 0.5506073832511902
+      },
+      "1a06d3672c0-solusdt": {
+        "false_logit": 27.0625,
+        "probability": 0.5,
+        "true_logit": 27.0625,
+        "unclipped_probability": 0.5
+      },
+      "1a06d384780-bnbusdt": {
+        "false_logit": 26.90625,
+        "probability": 0.5350984334945679,
+        "true_logit": 27.046875,
+        "unclipped_probability": 0.5350984334945679
+      },
+      "1a06d384780-btcusdt": {
+        "false_logit": 26.9375,
+        "probability": 0.49609383940696716,
+        "true_logit": 26.921875,
+        "unclipped_probability": 0.49609383940696716
+      },
+      "1a06d384780-ethusdt": {
+        "false_logit": 26.828125,
+        "probability": 0.5273165106773376,
+        "true_logit": 26.9375,
+        "unclipped_probability": 0.5273165106773376
+      },
+      "1a06d384780-solusdt": {
+        "false_logit": 27.0,
+        "probability": 0.5078118443489075,
+        "true_logit": 27.03125,
+        "unclipped_probability": 0.5078118443489075
+      },
+      "1a06d3a1c40-bnbusdt": {
+        "false_logit": 26.96875,
+        "probability": 0.5467381477355957,
+        "true_logit": 27.15625,
+        "unclipped_probability": 0.5467381477355957
+      },
+      "1a06d3a1c40-btcusdt": {
+        "false_logit": 27.015625,
+        "probability": 0.49609383940696716,
+        "true_logit": 27.0,
+        "unclipped_probability": 0.49609383940696716
+      },
+      "1a06d3a1c40-ethusdt": {
+        "false_logit": 26.84375,
+        "probability": 0.5583269596099854,
+        "true_logit": 27.078125,
+        "unclipped_probability": 0.5583269596099854
+      },
+      "1a06d3a1c40-solusdt": {
+        "false_logit": 27.0625,
+        "probability": 0.49609383940696716,
+        "true_logit": 27.046875,
+        "unclipped_probability": 0.49609383940696716
+      }
+    },
+    "method": "binary_next_token_logit",
+    "torch_version": "2.9.0+cu130",
+    "transformers_version": "4.57.1"
+  },
+  "schema_version": "sharpearena.prospective-model-inference.v1",
+  "submitted_at_server_ms": 1788535926919
+}

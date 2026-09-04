@@ -1,0 +1,200 @@
+{
+  "agent_id": "qwen-0.5b",
+  "field_plan_sha256": "1e6536f7b359b1baa836f6e2a6bec454abb6a7fb5b580a31670dbd11e9f170c8",
+  "model_id": "Qwen/Qwen2.5-Coder-0.5B-Instruct",
+  "model_revision": "ea3f2471cf1b1f0db85067f1ef93848e38e88c25",
+  "model_snapshot_sha256": "5fbca2113ce8bfcbaa804513bfbfa9c8b507cc82b7c49ae343309f598aade039",
+  "parsed_predictions": {
+    "1a06d30f480-bnbusdt": 0.637030839920044,
+    "1a06d30f480-btcusdt": 0.637030839920044,
+    "1a06d30f480-ethusdt": 0.637030839920044,
+    "1a06d30f480-solusdt": 0.6406359076499939,
+    "1a06d32c940-bnbusdt": 0.637030839920044,
+    "1a06d32c940-btcusdt": 0.637030839920044,
+    "1a06d32c940-ethusdt": 0.637030839920044,
+    "1a06d32c940-solusdt": 0.6406359076499939,
+    "1a06d349e00-bnbusdt": 0.6334102749824524,
+    "1a06d349e00-btcusdt": 0.637030839920044,
+    "1a06d349e00-ethusdt": 0.637030839920044,
+    "1a06d349e00-solusdt": 0.6406359076499939,
+    "1a06d3672c0-bnbusdt": 0.6334102749824524,
+    "1a06d3672c0-btcusdt": 0.637030839920044,
+    "1a06d3672c0-ethusdt": 0.637030839920044,
+    "1a06d3672c0-solusdt": 0.6406359076499939,
+    "1a06d384780-bnbusdt": 0.6334102749824524,
+    "1a06d384780-btcusdt": 0.637030839920044,
+    "1a06d384780-ethusdt": 0.637030839920044,
+    "1a06d384780-solusdt": 0.6406359076499939,
+    "1a06d3a1c40-bnbusdt": 0.6334102749824524,
+    "1a06d3a1c40-btcusdt": 0.6406359076499939,
+    "1a06d3a1c40-ethusdt": 0.6334102749824524,
+    "1a06d3a1c40-solusdt": 0.6406359076499939
+  },
+  "prompt_sha256": "002cbc4a024b037220e5391d9cadb331edebd686dc738f2f169ad8c1a7c5e76c",
+  "raw_output": "{\"forecasts\":{\"1a06d30f480-bnbusdt\":0.637030839920044,\"1a06d30f480-btcusdt\":0.637030839920044,\"1a06d30f480-ethusdt\":0.637030839920044,\"1a06d30f480-solusdt\":0.6406359076499939,\"1a06d32c940-bnbusdt\":0.637030839920044,\"1a06d32c940-btcusdt\":0.637030839920044,\"1a06d32c940-ethusdt\":0.637030839920044,\"1a06d32c940-solusdt\":0.6406359076499939,\"1a06d349e00-bnbusdt\":0.6334102749824524,\"1a06d349e00-btcusdt\":0.637030839920044,\"1a06d349e00-ethusdt\":0.637030839920044,\"1a06d349e00-solusdt\":0.6406359076499939,\"1a06d3672c0-bnbusdt\":0.6334102749824524,\"1a06d3672c0-btcusdt\":0.637030839920044,\"1a06d3672c0-ethusdt\":0.637030839920044,\"1a06d3672c0-solusdt\":0.6406359076499939,\"1a06d384780-bnbusdt\":0.6334102749824524,\"1a06d384780-btcusdt\":0.637030839920044,\"1a06d384780-ethusdt\":0.637030839920044,\"1a06d384780-solusdt\":0.6406359076499939,\"1a06d3a1c40-bnbusdt\":0.6334102749824524,\"1a06d3a1c40-btcusdt\":0.6406359076499939,\"1a06d3a1c40-ethusdt\":0.6334102749824524,\"1a06d3a1c40-solusdt\":0.6406359076499939}}",
+  "raw_output_kind": "canonical forecast map derived from recorded binary logits",
+  "raw_output_sha256": "8c8822e2c1249ec111ff250fffc77bb7373e85cfcd48183a8a308701fd1f22ee",
+  "runtime": {
+    "class_token_ids": {
+      "false": 15,
+      "true": 16
+    },
+    "contract_count": 24,
+    "cuda_version": "13.0",
+    "elapsed_ms": 22953,
+    "gpu": "NVIDIA RTX A4000",
+    "input_tokens_max": 4139,
+    "input_tokens_min": 4138,
+    "logits": {
+      "1a06d30f480-bnbusdt": {
+        "false_logit": 16.703125,
+        "probability": 0.637030839920044,
+        "true_logit": 17.265625,
+        "unclipped_probability": 0.637030839920044
+      },
+      "1a06d30f480-btcusdt": {
+        "false_logit": 16.703125,
+        "probability": 0.637030839920044,
+        "true_logit": 17.265625,
+        "unclipped_probability": 0.637030839920044
+      },
+      "1a06d30f480-ethusdt": {
+        "false_logit": 16.6875,
+        "probability": 0.637030839920044,
+        "true_logit": 17.25,
+        "unclipped_probability": 0.637030839920044
+      },
+      "1a06d30f480-solusdt": {
+        "false_logit": 16.71875,
+        "probability": 0.6406359076499939,
+        "true_logit": 17.296875,
+        "unclipped_probability": 0.6406359076499939
+      },
+      "1a06d32c940-bnbusdt": {
+        "false_logit": 16.703125,
+        "probability": 0.637030839920044,
+        "true_logit": 17.265625,
+        "unclipped_probability": 0.637030839920044
+      },
+      "1a06d32c940-btcusdt": {
+        "false_logit": 16.703125,
+        "probability": 0.637030839920044,
+        "true_logit": 17.265625,
+        "unclipped_probability": 0.637030839920044
+      },
+      "1a06d32c940-ethusdt": {
+        "false_logit": 16.6875,
+        "probability": 0.637030839920044,
+        "true_logit": 17.25,
+        "unclipped_probability": 0.637030839920044
+      },
+      "1a06d32c940-solusdt": {
+        "false_logit": 16.71875,
+        "probability": 0.6406359076499939,
+        "true_logit": 17.296875,
+        "unclipped_probability": 0.6406359076499939
+      },
+      "1a06d349e00-bnbusdt": {
+        "false_logit": 16.6875,
+        "probability": 0.6334102749824524,
+        "true_logit": 17.234375,
+        "unclipped_probability": 0.6334102749824524
+      },
+      "1a06d349e00-btcusdt": {
+        "false_logit": 16.6875,
+        "probability": 0.637030839920044,
+        "true_logit": 17.25,
+        "unclipped_probability": 0.637030839920044
+      },
+      "1a06d349e00-ethusdt": {
+        "false_logit": 16.6875,
+        "probability": 0.637030839920044,
+        "true_logit": 17.25,
+        "unclipped_probability": 0.637030839920044
+      },
+      "1a06d349e00-solusdt": {
+        "false_logit": 16.71875,
+        "probability": 0.6406359076499939,
+        "true_logit": 17.296875,
+        "unclipped_probability": 0.6406359076499939
+      },
+      "1a06d3672c0-bnbusdt": {
+        "false_logit": 16.703125,
+        "probability": 0.6334102749824524,
+        "true_logit": 17.25,
+        "unclipped_probability": 0.6334102749824524
+      },
+      "1a06d3672c0-btcusdt": {
+        "false_logit": 16.703125,
+        "probability": 0.637030839920044,
+        "true_logit": 17.265625,
+        "unclipped_probability": 0.637030839920044
+      },
+      "1a06d3672c0-ethusdt": {
+        "false_logit": 16.6875,
+        "probability": 0.637030839920044,
+        "true_logit": 17.25,
+        "unclipped_probability": 0.637030839920044
+      },
+      "1a06d3672c0-solusdt": {
+        "false_logit": 16.71875,
+        "probability": 0.6406359076499939,
+        "true_logit": 17.296875,
+        "unclipped_probability": 0.6406359076499939
+      },
+      "1a06d384780-bnbusdt": {
+        "false_logit": 16.703125,
+        "probability": 0.6334102749824524,
+        "true_logit": 17.25,
+        "unclipped_probability": 0.6334102749824524
+      },
+      "1a06d384780-btcusdt": {
+        "false_logit": 16.6875,
+        "probability": 0.637030839920044,
+        "true_logit": 17.25,
+        "unclipped_probability": 0.637030839920044
+      },
+      "1a06d384780-ethusdt": {
+        "false_logit": 16.6875,
+        "probability": 0.637030839920044,
+        "true_logit": 17.25,
+        "unclipped_probability": 0.637030839920044
+      },
+      "1a06d384780-solusdt": {
+        "false_logit": 16.703125,
+        "probability": 0.6406359076499939,
+        "true_logit": 17.28125,
+        "unclipped_probability": 0.6406359076499939
+      },
+      "1a06d3a1c40-bnbusdt": {
+        "false_logit": 16.703125,
+        "probability": 0.6334102749824524,
+        "true_logit": 17.25,
+        "unclipped_probability": 0.6334102749824524
+      },
+      "1a06d3a1c40-btcusdt": {
+        "false_logit": 16.6875,
+        "probability": 0.6406359076499939,
+        "true_logit": 17.265625,
+        "unclipped_probability": 0.6406359076499939
+      },
+      "1a06d3a1c40-ethusdt": {
+        "false_logit": 16.703125,
+        "probability": 0.6334102749824524,
+        "true_logit": 17.25,
+        "unclipped_probability": 0.6334102749824524
+      },
+      "1a06d3a1c40-solusdt": {
+        "false_logit": 16.71875,
+        "probability": 0.6406359076499939,
+        "true_logit": 17.296875,
+        "unclipped_probability": 0.6406359076499939
+      }
+    },
+    "method": "binary_next_token_logit",
+    "torch_version": "2.9.0+cu130",
+    "transformers_version": "4.57.1"
+  },
+  "schema_version": "sharpearena.prospective-model-inference.v1",
+  "submitted_at_server_ms": 1788535653861
+}

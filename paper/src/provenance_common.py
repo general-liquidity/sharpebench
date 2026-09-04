@@ -24,7 +24,12 @@ SOURCE_SCOPE = (
     "data/*.csv",
     "arena/**/*.json",
 )
-ARTIFACT_SCOPE = ("paper/evidence/final/*.jsonl", "paper/figures/*.pdf")
+ARTIFACT_SCOPE = (
+    "paper/evidence/final/*.jsonl",
+    "paper/evidence/prospective-forecast-field/**/*.json",
+    "paper/evidence/prospective-forecast-field/**/*.sha256",
+    "paper/figures/*.pdf",
+)
 EXCLUDED_DIR_NAMES = ("target", ".venv", "__pycache__", "node_modules", ".git")
 EXCLUDED_ARTIFACT_PREFIXES = ("llm-cache-", "llm-field-")
 SCHEMA_VERSION = 3

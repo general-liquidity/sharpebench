@@ -1,0 +1,224 @@
+{
+  "candles": [
+    {
+      "close": "79484.65000000",
+      "close_time_ms": 1788538379999,
+      "open": "79489.83000000",
+      "open_time_ms": 1788538320000,
+      "outcome": 0.0,
+      "raw_sha256": "2732c8f376c80a03b281a52ff5e16f000340deb1cc75b1301cb153a02356cf9b",
+      "symbol": "BTCUSDT"
+    },
+    {
+      "close": "2452.83000000",
+      "close_time_ms": 1788538379999,
+      "open": "2453.37000000",
+      "open_time_ms": 1788538320000,
+      "outcome": 0.0,
+      "raw_sha256": "76bccd5001762917f6959eac2234b681a388f353156c4fcffd17ccfbd1a94d68",
+      "symbol": "ETHUSDT"
+    },
+    {
+      "close": "101.57000000",
+      "close_time_ms": 1788538379999,
+      "open": "101.58000000",
+      "open_time_ms": 1788538320000,
+      "outcome": 0.0,
+      "raw_sha256": "3493cd08279a5cd65aedd6b7e7679a36dce8e140ece47652734eb95159994c78",
+      "symbol": "SOLUSDT"
+    },
+    {
+      "close": "717.97000000",
+      "close_time_ms": 1788538379999,
+      "open": "717.48000000",
+      "open_time_ms": 1788538320000,
+      "outcome": 1.0,
+      "raw_sha256": "12c38aa8e65a0b6d178f560795ef5e943f50579e808b85b192ffd290c6759800",
+      "symbol": "BNBUSDT"
+    },
+    {
+      "close": "79454.00000000",
+      "close_time_ms": 1788538499999,
+      "open": "79516.20000000",
+      "open_time_ms": 1788538440000,
+      "outcome": 0.0,
+      "raw_sha256": "3e24ae79903ccccf3e314a2da2ee1685bf19a76bf5eb51a382ffb9a1162df033",
+      "symbol": "BTCUSDT"
+    },
+    {
+      "close": "2450.58000000",
+      "close_time_ms": 1788538499999,
+      "open": "2453.49000000",
+      "open_time_ms": 1788538440000,
+      "outcome": 0.0,
+      "raw_sha256": "58ad88dec45f456b6399e35535f4e7bc1fbfbd08bf3e4430a020bb1406766d55",
+      "symbol": "ETHUSDT"
+    },
+    {
+      "close": "101.54000000",
+      "close_time_ms": 1788538499999,
+      "open": "101.59000000",
+      "open_time_ms": 1788538440000,
+      "outcome": 0.0,
+      "raw_sha256": "966b14a7906acea76882fdcaeb4b415b443d9ecbfdcf7516dbe56a199bb82082",
+      "symbol": "SOLUSDT"
+    },
+    {
+      "close": "716.81000000",
+      "close_time_ms": 1788538499999,
+      "open": "717.88000000",
+      "open_time_ms": 1788538440000,
+      "outcome": 0.0,
+      "raw_sha256": "923d0f1b97c31f4f5708a0252d8d20ca46785b22fa9d895cb738913e421cf152",
+      "symbol": "BNBUSDT"
+    },
+    {
+      "close": "79456.94000000",
+      "close_time_ms": 1788538619999,
+      "open": "79454.43000000",
+      "open_time_ms": 1788538560000,
+      "outcome": 1.0,
+      "raw_sha256": "2a95ac49a17939b7d3b6a99e7ff88847044794c0b887c694af11439fe1572200",
+      "symbol": "BTCUSDT"
+    },
+    {
+      "close": "2450.78000000",
+      "close_time_ms": 1788538619999,
+      "open": "2451.32000000",
+      "open_time_ms": 1788538560000,
+      "outcome": 0.0,
+      "raw_sha256": "cffd412eae47baa22aed21c667bc4ae827948234c323ced111d78b96e95ee5e8",
+      "symbol": "ETHUSDT"
+    },
+    {
+      "close": "101.62000000",
+      "close_time_ms": 1788538619999,
+      "open": "101.58000000",
+      "open_time_ms": 1788538560000,
+      "outcome": 1.0,
+      "raw_sha256": "93fda9d9fcae56d89f79469df2010918ba4562cd939d2dad0e3881b371d2d71d",
+      "symbol": "SOLUSDT"
+    },
+    {
+      "close": "717.58000000",
+      "close_time_ms": 1788538619999,
+      "open": "717.46000000",
+      "open_time_ms": 1788538560000,
+      "outcome": 1.0,
+      "raw_sha256": "cf72e370cfa055f6691768cd03ec0811ff9a2243111a1dff65f92e793d698454",
+      "symbol": "BNBUSDT"
+    },
+    {
+      "close": "79474.00000000",
+      "close_time_ms": 1788538739999,
+      "open": "79495.99000000",
+      "open_time_ms": 1788538680000,
+      "outcome": 0.0,
+      "raw_sha256": "6fcee1875f93d723bca329233b48befa17df8a0fa8b5d62f312f7a3de1919667",
+      "symbol": "BTCUSDT"
+    },
+    {
+      "close": "2451.49000000",
+      "close_time_ms": 1788538739999,
+      "open": "2452.25000000",
+      "open_time_ms": 1788538680000,
+      "outcome": 0.0,
+      "raw_sha256": "f10e224a6bc85e04c719d08db32fe1338ac27d0cd98db48f7065cf73fe61a0b3",
+      "symbol": "ETHUSDT"
+    },
+    {
+      "close": "101.68000000",
+      "close_time_ms": 1788538739999,
+      "open": "101.70000000",
+      "open_time_ms": 1788538680000,
+      "outcome": 0.0,
+      "raw_sha256": "c516e316127425a63c70e611d50d6ed898c59bf37763e68ad78c07288f30f24e",
+      "symbol": "SOLUSDT"
+    },
+    {
+      "close": "717.39000000",
+      "close_time_ms": 1788538739999,
+      "open": "717.64000000",
+      "open_time_ms": 1788538680000,
+      "outcome": 0.0,
+      "raw_sha256": "1837cf2d4a7d42f2d41861e1be9570a4b693ebf406f0592cb85822751212ea39",
+      "symbol": "BNBUSDT"
+    },
+    {
+      "close": "79510.18000000",
+      "close_time_ms": 1788538859999,
+      "open": "79472.00000000",
+      "open_time_ms": 1788538800000,
+      "outcome": 1.0,
+      "raw_sha256": "98c7ea75f84c69dbb9edd07a9136897b7e3aaf8f21bd03dc7969e9d9bfbee5a5",
+      "symbol": "BTCUSDT"
+    },
+    {
+      "close": "2452.99000000",
+      "close_time_ms": 1788538859999,
+      "open": "2451.57000000",
+      "open_time_ms": 1788538800000,
+      "outcome": 1.0,
+      "raw_sha256": "059143895f247e5b3baf6241ade93d6b704ff3c83cfb8e148a2ba4a21e363aca",
+      "symbol": "ETHUSDT"
+    },
+    {
+      "close": "101.73000000",
+      "close_time_ms": 1788538859999,
+      "open": "101.67000000",
+      "open_time_ms": 1788538800000,
+      "outcome": 1.0,
+      "raw_sha256": "43ed12ec1dc1e286ef60ee929ae4e95fcd53c62dbdcffe31d3a50ffd4d5b2c50",
+      "symbol": "SOLUSDT"
+    },
+    {
+      "close": "717.70000000",
+      "close_time_ms": 1788538859999,
+      "open": "717.32000000",
+      "open_time_ms": 1788538800000,
+      "outcome": 1.0,
+      "raw_sha256": "be074209cdb5a7ce9a11f9d985e25ccf95e0f9ddb75ba888a05762f1f96e84df",
+      "symbol": "BNBUSDT"
+    },
+    {
+      "close": "79493.99000000",
+      "close_time_ms": 1788538979999,
+      "open": "79516.57000000",
+      "open_time_ms": 1788538920000,
+      "outcome": 0.0,
+      "raw_sha256": "76248a3a152be322cfb815b4f5556b49d8343092abb5532c28d3a8998f04d20b",
+      "symbol": "BTCUSDT"
+    },
+    {
+      "close": "2452.74000000",
+      "close_time_ms": 1788538979999,
+      "open": "2453.81000000",
+      "open_time_ms": 1788538920000,
+      "outcome": 0.0,
+      "raw_sha256": "2c30aa44e3639c32d7ee0f7ef727e54d413810b3008afbe933f06b939b43ddd1",
+      "symbol": "ETHUSDT"
+    },
+    {
+      "close": "101.74000000",
+      "close_time_ms": 1788538979999,
+      "open": "101.75000000",
+      "open_time_ms": 1788538920000,
+      "outcome": 0.0,
+      "raw_sha256": "1cdeae9fcabba40b0112e5ad67d79b36ff88cc233e25f697b6686f756af36a8a",
+      "symbol": "SOLUSDT"
+    },
+    {
+      "close": "717.73000000",
+      "close_time_ms": 1788538979999,
+      "open": "717.88000000",
+      "open_time_ms": 1788538920000,
+      "outcome": 0.0,
+      "raw_sha256": "cb0866c51b8dad5cd4649c88618a7e642838e89dd22aae3951be987aabcea035",
+      "symbol": "BNBUSDT"
+    }
+  ],
+  "field_plan_sha256": "1e6536f7b359b1baa836f6e2a6bec454abb6a7fb5b580a31670dbd11e9f170c8",
+  "forecast_commit_sha256": "cc0e06840ef047d2d149050f0ae410df6a3db273cae4f66da67b0e9e05bf26b9",
+  "resolved_at_server_ms": 1788539001444,
+  "schema_version": "sharpearena.prospective-forecast-resolution.v1"
+}

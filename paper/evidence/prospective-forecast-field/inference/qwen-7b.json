@@ -1,0 +1,200 @@
+{
+  "agent_id": "qwen-7b",
+  "field_plan_sha256": "1e6536f7b359b1baa836f6e2a6bec454abb6a7fb5b580a31670dbd11e9f170c8",
+  "model_id": "Qwen/Qwen2.5-Coder-7B-Instruct",
+  "model_revision": "c03e6d358207e414f1eca0bb1891e29f1db0e242",
+  "model_snapshot_sha256": "44c4b2618f9e7db0e2d6e87f522dfc9560ef80197a01012c18d60a1116a49c86",
+  "parsed_predictions": {
+    "1a06d30f480-bnbusdt": 0.46101680397987366,
+    "1a06d30f480-btcusdt": 0.5195213556289673,
+    "1a06d30f480-ethusdt": 0.5,
+    "1a06d30f480-solusdt": 0.4804786741733551,
+    "1a06d32c940-bnbusdt": 0.47268345952033997,
+    "1a06d32c940-btcusdt": 0.5350984334945679,
+    "1a06d32c940-ethusdt": 0.5117166042327881,
+    "1a06d32c940-solusdt": 0.4882833957672119,
+    "1a06d349e00-bnbusdt": 0.46101680397987366,
+    "1a06d349e00-btcusdt": 0.5195213556289673,
+    "1a06d349e00-ethusdt": 0.49609383940696716,
+    "1a06d349e00-solusdt": 0.4843800961971283,
+    "1a06d3672c0-bnbusdt": 0.46101680397987366,
+    "1a06d3672c0-btcusdt": 0.5234203934669495,
+    "1a06d3672c0-ethusdt": 0.5,
+    "1a06d3672c0-solusdt": 0.4882833957672119,
+    "1a06d384780-bnbusdt": 0.4532618820667267,
+    "1a06d384780-btcusdt": 0.5117166042327881,
+    "1a06d384780-ethusdt": 0.49218812584877014,
+    "1a06d384780-solusdt": 0.4687906503677368,
+    "1a06d3a1c40-bnbusdt": 0.46490156650543213,
+    "1a06d3a1c40-btcusdt": 0.5234203934669495,
+    "1a06d3a1c40-ethusdt": 0.5039061903953552,
+    "1a06d3a1c40-solusdt": 0.4843800961971283
+  },
+  "prompt_sha256": "002cbc4a024b037220e5391d9cadb331edebd686dc738f2f169ad8c1a7c5e76c",
+  "raw_output": "{\"forecasts\":{\"1a06d30f480-bnbusdt\":0.46101680397987366,\"1a06d30f480-btcusdt\":0.5195213556289673,\"1a06d30f480-ethusdt\":0.5,\"1a06d30f480-solusdt\":0.4804786741733551,\"1a06d32c940-bnbusdt\":0.47268345952033997,\"1a06d32c940-btcusdt\":0.5350984334945679,\"1a06d32c940-ethusdt\":0.5117166042327881,\"1a06d32c940-solusdt\":0.4882833957672119,\"1a06d349e00-bnbusdt\":0.46101680397987366,\"1a06d349e00-btcusdt\":0.5195213556289673,\"1a06d349e00-ethusdt\":0.49609383940696716,\"1a06d349e00-solusdt\":0.4843800961971283,\"1a06d3672c0-bnbusdt\":0.46101680397987366,\"1a06d3672c0-btcusdt\":0.5234203934669495,\"1a06d3672c0-ethusdt\":0.5,\"1a06d3672c0-solusdt\":0.4882833957672119,\"1a06d384780-bnbusdt\":0.4532618820667267,\"1a06d384780-btcusdt\":0.5117166042327881,\"1a06d384780-ethusdt\":0.49218812584877014,\"1a06d384780-solusdt\":0.4687906503677368,\"1a06d3a1c40-bnbusdt\":0.46490156650543213,\"1a06d3a1c40-btcusdt\":0.5234203934669495,\"1a06d3a1c40-ethusdt\":0.5039061903953552,\"1a06d3a1c40-solusdt\":0.4843800961971283}}",
+  "raw_output_kind": "canonical forecast map derived from recorded binary logits",
+  "raw_output_sha256": "0817a5f0ae0a7db7a24390a1e4d5a9dae898043a1eeb7cfa16f162b3c65a8fc5",
+  "runtime": {
+    "class_token_ids": {
+      "false": 15,
+      "true": 16
+    },
+    "contract_count": 24,
+    "cuda_version": "13.0",
+    "elapsed_ms": 86097,
+    "gpu": "NVIDIA RTX A4000",
+    "input_tokens_max": 4139,
+    "input_tokens_min": 4138,
+    "logits": {
+      "1a06d30f480-bnbusdt": {
+        "false_logit": 19.140625,
+        "probability": 0.46101680397987366,
+        "true_logit": 18.984375,
+        "unclipped_probability": 0.46101680397987366
+      },
+      "1a06d30f480-btcusdt": {
+        "false_logit": 19.140625,
+        "probability": 0.5195213556289673,
+        "true_logit": 19.21875,
+        "unclipped_probability": 0.5195213556289673
+      },
+      "1a06d30f480-ethusdt": {
+        "false_logit": 19.234375,
+        "probability": 0.5,
+        "true_logit": 19.234375,
+        "unclipped_probability": 0.5
+      },
+      "1a06d30f480-solusdt": {
+        "false_logit": 19.1875,
+        "probability": 0.4804786741733551,
+        "true_logit": 19.109375,
+        "unclipped_probability": 0.4804786741733551
+      },
+      "1a06d32c940-bnbusdt": {
+        "false_logit": 19.140625,
+        "probability": 0.47268345952033997,
+        "true_logit": 19.03125,
+        "unclipped_probability": 0.47268345952033997
+      },
+      "1a06d32c940-btcusdt": {
+        "false_logit": 19.15625,
+        "probability": 0.5350984334945679,
+        "true_logit": 19.296875,
+        "unclipped_probability": 0.5350984334945679
+      },
+      "1a06d32c940-ethusdt": {
+        "false_logit": 19.234375,
+        "probability": 0.5117166042327881,
+        "true_logit": 19.28125,
+        "unclipped_probability": 0.5117166042327881
+      },
+      "1a06d32c940-solusdt": {
+        "false_logit": 19.203125,
+        "probability": 0.4882833957672119,
+        "true_logit": 19.15625,
+        "unclipped_probability": 0.4882833957672119
+      },
+      "1a06d349e00-bnbusdt": {
+        "false_logit": 19.203125,
+        "probability": 0.46101680397987366,
+        "true_logit": 19.046875,
+        "unclipped_probability": 0.46101680397987366
+      },
+      "1a06d349e00-btcusdt": {
+        "false_logit": 19.21875,
+        "probability": 0.5195213556289673,
+        "true_logit": 19.296875,
+        "unclipped_probability": 0.5195213556289673
+      },
+      "1a06d349e00-ethusdt": {
+        "false_logit": 19.3125,
+        "probability": 0.49609383940696716,
+        "true_logit": 19.296875,
+        "unclipped_probability": 0.49609383940696716
+      },
+      "1a06d349e00-solusdt": {
+        "false_logit": 19.265625,
+        "probability": 0.4843800961971283,
+        "true_logit": 19.203125,
+        "unclipped_probability": 0.4843800961971283
+      },
+      "1a06d3672c0-bnbusdt": {
+        "false_logit": 19.140625,
+        "probability": 0.46101680397987366,
+        "true_logit": 18.984375,
+        "unclipped_probability": 0.46101680397987366
+      },
+      "1a06d3672c0-btcusdt": {
+        "false_logit": 19.140625,
+        "probability": 0.5234203934669495,
+        "true_logit": 19.234375,
+        "unclipped_probability": 0.5234203934669495
+      },
+      "1a06d3672c0-ethusdt": {
+        "false_logit": 19.25,
+        "probability": 0.5,
+        "true_logit": 19.25,
+        "unclipped_probability": 0.5
+      },
+      "1a06d3672c0-solusdt": {
+        "false_logit": 19.203125,
+        "probability": 0.4882833957672119,
+        "true_logit": 19.15625,
+        "unclipped_probability": 0.4882833957672119
+      },
+      "1a06d384780-bnbusdt": {
+        "false_logit": 19.234375,
+        "probability": 0.4532618820667267,
+        "true_logit": 19.046875,
+        "unclipped_probability": 0.4532618820667267
+      },
+      "1a06d384780-btcusdt": {
+        "false_logit": 19.234375,
+        "probability": 0.5117166042327881,
+        "true_logit": 19.28125,
+        "unclipped_probability": 0.5117166042327881
+      },
+      "1a06d384780-ethusdt": {
+        "false_logit": 19.34375,
+        "probability": 0.49218812584877014,
+        "true_logit": 19.3125,
+        "unclipped_probability": 0.49218812584877014
+      },
+      "1a06d384780-solusdt": {
+        "false_logit": 19.3125,
+        "probability": 0.4687906503677368,
+        "true_logit": 19.1875,
+        "unclipped_probability": 0.4687906503677368
+      },
+      "1a06d3a1c40-bnbusdt": {
+        "false_logit": 19.078125,
+        "probability": 0.46490156650543213,
+        "true_logit": 18.9375,
+        "unclipped_probability": 0.46490156650543213
+      },
+      "1a06d3a1c40-btcusdt": {
+        "false_logit": 19.09375,
+        "probability": 0.5234203934669495,
+        "true_logit": 19.1875,
+        "unclipped_probability": 0.5234203934669495
+      },
+      "1a06d3a1c40-ethusdt": {
+        "false_logit": 19.1875,
+        "probability": 0.5039061903953552,
+        "true_logit": 19.203125,
+        "unclipped_probability": 0.5039061903953552
+      },
+      "1a06d3a1c40-solusdt": {
+        "false_logit": 19.171875,
+        "probability": 0.4843800961971283,
+        "true_logit": 19.109375,
+        "unclipped_probability": 0.4843800961971283
+      }
+    },
+    "method": "binary_next_token_logit",
+    "torch_version": "2.9.0+cu130",
+    "transformers_version": "4.57.1"
+  },
+  "schema_version": "sharpearena.prospective-model-inference.v1",
+  "submitted_at_server_ms": 1788535795114
+}
