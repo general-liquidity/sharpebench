@@ -1,7 +1,7 @@
 {
   "name": "sharpebench-wasm",
   "description": "WASM bindings for SharpeBench's deterministic, luck-robust trading-agent scoring kernel.",
-  "version": "0.18.2",
+  "version": "0.18.3",
   "license": "MIT OR Apache-2.0",
   "repository": {
     "type": "git",
