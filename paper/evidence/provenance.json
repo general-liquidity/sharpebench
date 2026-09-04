@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "138e172249336f3bb191432591e4b536cd93ddf3",
+  "generated_at_head": "3aa9ed1ded935cdae8926a86ca66176ac68f3997",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -247,7 +247,7 @@
     },
     {
       "path": "crates/sharpebench-cli/Cargo.toml",
-      "sha256": "defaf75bec53927f5f1f61eb1356b190c8a585e77717ec51e07e3cf6e16198f3"
+      "sha256": "5efe389c50ae929e9c5f4931c90c84960f85323c8b30aaad561bc2d46ddf85ca"
     },
     {
       "path": "crates/sharpebench-cli/release.toml",
@@ -287,7 +287,7 @@
     },
     {
       "path": "crates/sharpebench-core/Cargo.toml",
-      "sha256": "25b955bb6bc3bc40a3dd8c93c171cac7acae4ec980c01e8d768b72d6a62dc08e"
+      "sha256": "461c4301d394e3c434092f1f1146aa894c9698a2ea8597a853b915308797e766"
     },
     {
       "path": "crates/sharpebench-core/src/allocation.rs",
@@ -539,11 +539,11 @@
     },
     {
       "path": "crates/sharpebench-py/Cargo.toml",
-      "sha256": "192cecc3e40829b423dfb3c30ce5d572f5f7bd46fc87ad0ee6515cafce716f38"
+      "sha256": "461488571de4b383eaec46aba04c86a737253a912ed6c6a37fd3ac056ce8ea8e"
     },
     {
       "path": "crates/sharpebench-py/pyproject.toml",
-      "sha256": "c5ab18d760219ffeb5c1450c81346c0bbc9561eacfc9c536f192e0528441b3dd"
+      "sha256": "a08758bd617113a06105f8c951fad4c2aab04fc2f939edaadccf8d4383bab7a3"
     },
     {
       "path": "crates/sharpebench-py/src/lib.rs",
@@ -639,7 +639,7 @@
     },
     {
       "path": "crates/sharpebench-wasm/Cargo.toml",
-      "sha256": "45f2da7ee64702d741facc428d1ae629ed8cdd66c92f3a8e7dfd5cf49384905f"
+      "sha256": "cffda1a9ba4085a1db7c5b020d2e57abc1beaa15344f0f1955cbbc67dd145f76"
     },
     {
       "path": "crates/sharpebench-wasm/src/lib.rs",
@@ -851,5 +851,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "4badc8a9615ae136727d1c1e8c8e5517a2e22d12f3f8c645872cd9925016da9f"
+  "source_snapshot_sha256": "63144c744a112ca9ab985154f68e12946f48f45f656d106cae30503cfacb9506"
 }
