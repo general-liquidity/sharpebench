@@ -21,7 +21,7 @@ members = [
 exclude = ["crates/sharpebench-py"]
 
 [workspace.package]
-version = "0.18.3"
+version = "0.18.4"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/general-liquidity/sharpebench"

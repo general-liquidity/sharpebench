@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "sharpebench"
-version = "0.18.3"
+version = "0.18.4"
 description = "Luck-robust quantitative evaluation for trading agents and return series: deflated Sharpe, PSR, PBO, Reality Check, SPA, BH-FDR, and pass^k."
 readme = "README.md"
 requires-python = ">=3.9"

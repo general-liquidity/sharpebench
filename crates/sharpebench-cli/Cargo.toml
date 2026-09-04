@@ -11,14 +11,14 @@ name = "sharpebench"
 path = "src/main.rs"
 
 [dependencies]
-sharpebench-core = { path = "../sharpebench-core", version = "0.18.3" }
-sharpebench-protocol = { path = "../sharpebench-protocol", version = "0.18.3" }
-sharpebench-sim = { path = "../sharpebench-sim", version = "0.18.3" }
-sharpebench-harness = { path = "../sharpebench-harness", version = "0.18.3" }
-sharpebench-attest = { path = "../sharpebench-attest", version = "0.18.3" }
-sharpebench-leaderboard = { path = "../sharpebench-leaderboard", version = "0.18.3" }
-sharpebench-edge = { path = "../sharpebench-edge", version = "0.18.3" }
-sharpebench-arena = { path = "../sharpebench-arena", version = "0.18.3" }
+sharpebench-core = { path = "../sharpebench-core", version = "0.18.4" }
+sharpebench-protocol = { path = "../sharpebench-protocol", version = "0.18.4" }
+sharpebench-sim = { path = "../sharpebench-sim", version = "0.18.4" }
+sharpebench-harness = { path = "../sharpebench-harness", version = "0.18.4" }
+sharpebench-attest = { path = "../sharpebench-attest", version = "0.18.4" }
+sharpebench-leaderboard = { path = "../sharpebench-leaderboard", version = "0.18.4" }
+sharpebench-edge = { path = "../sharpebench-edge", version = "0.18.4" }
+sharpebench-arena = { path = "../sharpebench-arena", version = "0.18.4" }
 serde = "1"
 serde_json = "1"
 

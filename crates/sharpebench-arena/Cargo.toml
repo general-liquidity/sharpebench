@@ -7,15 +7,15 @@ description = "SharpeBench forward-league driver: file-backed arena windows over
 repository.workspace = true
 
 [dependencies]
-sharpebench-core = { path = "../sharpebench-core", version = "0.18.3" }
-sharpebench-attest = { path = "../sharpebench-attest", version = "0.18.3" }
-sharpebench-leaderboard = { path = "../sharpebench-leaderboard", version = "0.18.3" }
+sharpebench-core = { path = "../sharpebench-core", version = "0.18.4" }
+sharpebench-attest = { path = "../sharpebench-attest", version = "0.18.4" }
+sharpebench-leaderboard = { path = "../sharpebench-leaderboard", version = "0.18.4" }
 # For the sandboxed external-agent transport only (`sandbox.rs` wraps
 # `sharpebench_sim::ExternalAgent`). sim depends on core + protocol and never on
 # arena, so arena -> sim introduces no cycle.
-sharpebench-sim = { path = "../sharpebench-sim", version = "0.18.3" }
+sharpebench-sim = { path = "../sharpebench-sim", version = "0.18.4" }
 # Observation/decision types named by the `Agent` impl on `SandboxedAgent`.
-sharpebench-protocol = { path = "../sharpebench-protocol", version = "0.18.3" }
+sharpebench-protocol = { path = "../sharpebench-protocol", version = "0.18.4" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
