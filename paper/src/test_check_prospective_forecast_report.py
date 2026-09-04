@@ -9,6 +9,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 HERE = Path(__file__).resolve().parent
+ROOT = HERE.parents[1]
 
 
 def _load_checker():
@@ -109,6 +110,14 @@ def _agent_summary(
 
 
 class ProspectiveReportCheckerTests(unittest.TestCase):
+    def test_committed_prospective_field_recomputes_exactly(self) -> None:
+        field = ROOT / "paper/evidence/prospective-forecast-field"
+        result = checker.verify(field, field / "report.json")
+
+        self.assertEqual(result["common_support_contracts"], 24)
+        self.assertEqual(result["settlement_blocks"], 6)
+        self.assertFalse(result["comparative_claim_supported"])
+
     def test_recomputes_the_report_and_rejects_a_changed_score(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)

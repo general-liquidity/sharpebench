@@ -1,0 +1,19 @@
+{
+  "agents": [
+    "phi-4",
+    "qwen-0.5b",
+    "qwen-7b"
+  ],
+  "brier": {
+    "phi-4": 0.2598840959626018,
+    "qwen-0.5b": 0.31484214532004806,
+    "qwen-7b": 0.2548170298064441
+  },
+  "common_support_contracts": 24,
+  "comparative_claim_supported": false,
+  "minimum_comparative_claim_blocks": 30,
+  "rank_effect": "reported_only_never_trading_rank",
+  "schema_version": "sharpebench.prospective-forecast-report-check.v1",
+  "settlement_blocks": 6,
+  "status": "verified"
+}

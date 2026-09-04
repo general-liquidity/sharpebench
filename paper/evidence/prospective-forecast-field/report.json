@@ -1,0 +1,293 @@
+{
+  "schema_version": "sharpebench.forecast-quality.v1",
+  "rank_effect": "reported_only_never_trading_rank",
+  "dependence_unit": "whole resolution-clock block across assets and questions",
+  "config": {
+    "bootstrap_seed": 260904,
+    "bootstrap_samples": 2000,
+    "confidence": 0.95,
+    "familywise_alpha": 0.05,
+    "calibration_bins": 5
+  },
+  "common_support": {
+    "n_contracts": 24,
+    "contract_sha256": [
+      "05e43c870bc98708293580b17cb65e2c88ac1b1f45923ecae51ac7f56650c79d",
+      "1326a4161cbfe7797866f0947c8902440f07e0c546d083f523e2c73955f0fc49",
+      "1a6a0c1fc2a5c29ca10f43cbd2d8bd17d6d78e3a65f390e580dffb238f0022dd",
+      "212c93691975eee9c82e09638eb3785c889ae4099e7ad3b9a6fe0e31562de7aa",
+      "28ee334b05c5547e15dcf95e65e850d8b456110f721f217fb826debb57cde0d4",
+      "2ec67360e7284faf6127ae8a62c2a1c189f28c506d29a2625e562e3e368892ae",
+      "322169c0a483ffb9b608e56c13c47eb44a59bbb318f12dfc23cf913c20b5f97a",
+      "38fa4cfd29be658c2a3785011acc207065be9660203f28f05ad58e79fa9081af",
+      "3d77fdf2b2dedada221216e335cd3926484f460e33af0775f82e22a329e98cab",
+      "42f1283c188b301ef96402c185e6c07b9b9c715d45518962f5897546d7f22658",
+      "5820f32c7ab0b5a1ad6d033f0da1c94962dece954f526ff9c6c03a43b0f40aa8",
+      "6fa6fd3b04de7b5389f444714e4afb733275c2c9b7df480371a58b0007ac5866",
+      "74d41bf1eedb8a412cb4a2eea6b7556d89d2d4d2211f7c129bcdc6b69e3f5aad",
+      "781023ccd99e08fdb4641d3622ecdd0c1012d2f8c89d74d8c38708120b14410b",
+      "7bdda44536e0c45729c69f32852a131a31021c3101bf01cbc85c39f43514eb32",
+      "901445768b2c4e87f0a04be5816d45525c76b3824d371a8a1074bb085058a834",
+      "91e408d37700f869d2c9edced62368be58c1389bc638d15cd79f8830d7cb8d0f",
+      "9c93e3f262bc340083df5bca1ebf9e64d9543abde1a1b1733959bdc313f7ab17",
+      "b15863bb755b2135a4d6f2e4f9a0c88e4abb7c0d7daaab121648369bee8831ca",
+      "c9bc597ad32e1a96b66e41805482a2f625137e62ae6b10befd04cd9550644299",
+      "d879f9ae09040111ef317a9bed4f258467fd08eed675a8e1fe46501851d48115",
+      "dfd51e650d1a09e7ac42a6166efb46b8c6a50ac721398421c509bb84391b3709",
+      "e5bd8586ee5ee3daac05facf1d3c1a7ffdf1aa39cad90209051a40af012fd98d",
+      "ed29c21b8e1c212911c060b2e5d414249962d7fc533f69f13aaef220020bd167"
+    ],
+    "excluded_resolved_by_agent": {
+      "phi-4": 0,
+      "qwen-0.5b": 0,
+      "qwen-7b": 0
+    }
+  },
+  "agents": [
+    {
+      "agent_id": "phi-4",
+      "model_id": "microsoft/phi-4",
+      "n_claims": 24,
+      "n_revisions": 24,
+      "n_eligible_claims": 24,
+      "n_resolved": 24,
+      "n_pending": 0,
+      "n_cancelled": 0,
+      "n_rejected": 0,
+      "resolution_rate": 1.0,
+      "blind_resolved": 24,
+      "consensus_exposed_resolved": 0,
+      "metrics": [
+        {
+          "scoring_rule": "binary_brier",
+          "n": 24,
+          "mean_loss": 0.2598840959626018
+        }
+      ],
+      "binary_calibration": {
+        "n": 24,
+        "brier": 0.2598840959626018,
+        "base_rate": 0.3333333333333333,
+        "reliability": 0.03489600917242215,
+        "resolution": 0.0,
+        "uncertainty": 0.22222222222222224,
+        "brier_skill": -0.1694784318317082,
+        "bins": [
+          {
+            "lower": 0.0,
+            "upper": 0.2,
+            "n": 0,
+            "mean_forecast": null,
+            "event_rate": null
+          },
+          {
+            "lower": 0.2,
+            "upper": 0.4,
+            "n": 0,
+            "mean_forecast": null,
+            "event_rate": null
+          },
+          {
+            "lower": 0.4,
+            "upper": 0.6,
+            "n": 24,
+            "mean_forecast": 0.5201380687455336,
+            "event_rate": 0.3333333333333333
+          },
+          {
+            "lower": 0.6,
+            "upper": 0.8,
+            "n": 0,
+            "mean_forecast": null,
+            "event_rate": null
+          },
+          {
+            "lower": 0.8,
+            "upper": 1.0,
+            "n": 0,
+            "mean_forecast": null,
+            "event_rate": null
+          }
+        ]
+      },
+      "categorical_confidence_calibration": null,
+      "normal_distribution_calibration": null
+    },
+    {
+      "agent_id": "qwen-0.5b",
+      "model_id": "Qwen/Qwen2.5-Coder-0.5B-Instruct",
+      "n_claims": 24,
+      "n_revisions": 24,
+      "n_eligible_claims": 24,
+      "n_resolved": 24,
+      "n_pending": 0,
+      "n_cancelled": 0,
+      "n_rejected": 0,
+      "resolution_rate": 1.0,
+      "blind_resolved": 24,
+      "consensus_exposed_resolved": 0,
+      "metrics": [
+        {
+          "scoring_rule": "binary_brier",
+          "n": 24,
+          "mean_loss": 0.31484214532004806
+        }
+      ],
+      "binary_calibration": {
+        "n": 24,
+        "brier": 0.31484214532004806,
+        "base_rate": 0.3333333333333333,
+        "reliability": 0.0924127778181563,
+        "resolution": 0.0,
+        "uncertainty": 0.22222222222222224,
+        "brier_skill": -0.4167896539402163,
+        "bins": [
+          {
+            "lower": 0.0,
+            "upper": 0.2,
+            "n": 0,
+            "mean_forecast": null,
+            "event_rate": null
+          },
+          {
+            "lower": 0.2,
+            "upper": 0.4,
+            "n": 0,
+            "mean_forecast": null,
+            "event_rate": null
+          },
+          {
+            "lower": 0.4,
+            "upper": 0.6,
+            "n": 0,
+            "mean_forecast": null,
+            "event_rate": null
+          },
+          {
+            "lower": 0.6,
+            "upper": 0.8,
+            "n": 24,
+            "mean_forecast": 0.6373280336459478,
+            "event_rate": 0.3333333333333333
+          },
+          {
+            "lower": 0.8,
+            "upper": 1.0,
+            "n": 0,
+            "mean_forecast": null,
+            "event_rate": null
+          }
+        ]
+      },
+      "categorical_confidence_calibration": null,
+      "normal_distribution_calibration": null
+    },
+    {
+      "agent_id": "qwen-7b",
+      "model_id": "Qwen/Qwen2.5-Coder-7B-Instruct",
+      "n_claims": 24,
+      "n_revisions": 24,
+      "n_eligible_claims": 24,
+      "n_resolved": 24,
+      "n_pending": 0,
+      "n_cancelled": 0,
+      "n_rejected": 0,
+      "resolution_rate": 1.0,
+      "blind_resolved": 24,
+      "consensus_exposed_resolved": 0,
+      "metrics": [
+        {
+          "scoring_rule": "binary_brier",
+          "n": 24,
+          "mean_loss": 0.2548170298064441
+        }
+      ],
+      "binary_calibration": {
+        "n": 24,
+        "brier": 0.2548170298064441,
+        "base_rate": 0.3333333333333333,
+        "reliability": 0.025136740630824803,
+        "resolution": 0.0,
+        "uncertainty": 0.22222222222222224,
+        "brier_skill": -0.14667663412899845,
+        "bins": [
+          {
+            "lower": 0.0,
+            "upper": 0.2,
+            "n": 0,
+            "mean_forecast": null,
+            "event_rate": null
+          },
+          {
+            "lower": 0.2,
+            "upper": 0.4,
+            "n": 0,
+            "mean_forecast": null,
+            "event_rate": null
+          },
+          {
+            "lower": 0.4,
+            "upper": 0.6,
+            "n": 24,
+            "mean_forecast": 0.49187903851270676,
+            "event_rate": 0.3333333333333333
+          },
+          {
+            "lower": 0.6,
+            "upper": 0.8,
+            "n": 0,
+            "mean_forecast": null,
+            "event_rate": null
+          },
+          {
+            "lower": 0.8,
+            "upper": 1.0,
+            "n": 0,
+            "mean_forecast": null,
+            "event_rate": null
+          }
+        ]
+      },
+      "categorical_confidence_calibration": null,
+      "normal_distribution_calibration": null
+    }
+  ],
+  "comparisons": [
+    {
+      "agent_a": "phi-4",
+      "agent_b": "qwen-0.5b",
+      "n_contracts": 24,
+      "n_settlement_blocks": 6,
+      "mean_loss_difference": -0.05495804935744623,
+      "confidence_lower": -0.12410583388919456,
+      "confidence_upper": 0.01580766209115673,
+      "raw_p_value": 0.14792603698150925,
+      "holm_adjusted_p_value": 0.44377811094452774,
+      "familywise_significant": false
+    },
+    {
+      "agent_a": "phi-4",
+      "agent_b": "qwen-7b",
+      "n_contracts": 24,
+      "n_settlement_blocks": 6,
+      "mean_loss_difference": 0.005067066156157707,
+      "confidence_lower": -0.01568691705082918,
+      "confidence_upper": 0.02271329853740219,
+      "raw_p_value": 0.6536731634182908,
+      "holm_adjusted_p_value": 0.6536731634182908,
+      "familywise_significant": false
+    },
+    {
+      "agent_a": "qwen-0.5b",
+      "agent_b": "qwen-7b",
+      "n_contracts": 24,
+      "n_settlement_blocks": 6,
+      "mean_loss_difference": 0.060025115513603934,
+      "confidence_lower": -0.03843963921724051,
+      "confidence_upper": 0.14650583492653715,
+      "raw_p_value": 0.21039480259870064,
+      "holm_adjusted_p_value": 0.44377811094452774,
+      "familywise_significant": false
+    }
+  ]
+}
