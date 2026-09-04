@@ -12,6 +12,12 @@ and links the commits it was built from.
 
 ## [Unreleased]
 
+### Fixed
+- harness/cli: checkpoint contracts now bind entrant artifact identity and invocation identity separately. A caller-supplied `--entrant-sha256` can no longer resume the same checkpoint after changing the command, endpoint, image reference, or environment pass-through list.
+
+### Documentation
+- architecture audit: extend the source review from 65 to all 75 supplied benchmark repositories and record which mechanisms were adopted, already present, deferred, or rejected.
+
 ## [0.18.4] - 2026-09-04
 
 ### Fixed

@@ -1,6 +1,6 @@
 # Benchmark architecture audit
 
-This audit compares SharpeBench with all 65 benchmark source trees supplied in
+This audit compares SharpeBench with all 75 benchmark source trees supplied in
 the workspace `benchmarks/` directory. It is an architecture review, not a
 leaderboard comparison. Each decision asks whether a mechanism closes a
 demonstrated gap in the current trading-agent benchmark.
@@ -20,8 +20,8 @@ architecture, not to reproduce each upstream repository's release history.
 - **Rejected:** not reproducible enough, depends on a mutable or model-judged
   core, or does not fit a trading-agent benchmark.
 
-The final count is 2 adopted rows representing one shared fix, 38 already
-stronger, 17 future, and 8 rejected.
+The final count is 4 adopted rows representing three fixes, 45 already
+stronger, 18 future, and 8 rejected.
 
 ## What changed because of the audit
 
@@ -30,7 +30,10 @@ failure must not shrink the experiment denominator. SharpeBench now closes that
 gap at every relevant boundary.
 
 - `SweepContract` binds dataset, costs, score configuration, runner, entrant,
-  ordered windows, seeds, and retry policy before a checkpoint can resume.
+  invocation, ordered windows, seeds, and retry policy before a checkpoint can
+  resume. Entrant artifact identity and launch identity are separate digests,
+  so supplying `--entrant-sha256` cannot make a changed command, endpoint,
+  image reference, or environment pass-through list look like the same run.
 - `TrajectoryContract` schema 2 binds dataset, costs, engine, runner, ordered
   windows, and seeds.
 - Strict replay requires exactly one run for every declared cell in
@@ -48,6 +51,10 @@ gap at every relevant boundary.
   each sentinel using its own window length.
 - Terminal checkpoint records are validated before assembly so inconsistent
   state cannot silently disappear.
+- SharpeArena's bridge manifest now preserves per-request p50 and p95 inference
+  latency, token counts, reasoning-token availability, retries, and observation
+  sources as a rank-neutral operational profile. The bridge validates the
+  accounting before SharpeBench receives a submission.
 
 The audit also found and fixed a calibration error independent of any one
 reference repository. Confidence and outcome vectors were flattened
@@ -72,7 +79,7 @@ For a Bernoulli rate at 0.5, the standard error is 0.5 at `n=1`, 0.224 at
 0.404 to 0.596. SharpeBench therefore reports denominators rather than imposing
 one universal minimum that would have different meanings across diagnostics.
 
-## Complete 65-repository ledger
+## Complete 75-repository ledger
 
 | # | Repository | Transferable mechanism | Decision | Evidence and reason |
 |---:|---|---|---|---|
@@ -104,7 +111,7 @@ one universal minimum that would have different meanings across diagnostics.
 | 26 | SWEBenchBenchmarkService | Hosted evaluator API with setup, streaming, and aggregation boundaries | Future | Relevant only to a hosted SharpeBench service. Mutable image tags and unsupported evaluation modes are not acceptable in the current kernel. |
 | 27 | TraderBench | Evaluator-only scenario data and unseen market windows | Already stronger | SharpeBench binds held-out windows, scorer configuration, and forward evidence into public commitments. |
 | 28 | ARC-AGI-3 benchmarking | Explicit terminal reasons and per-step budgets in an interactive loop | Already stronger | SharpeBench already records typed completion, resource, runtime, transport, and agent failures for local replay. |
-| 29 | ARC-AGI benchmarking | Record raw attempts, cost, tokens, and duration | Already stronger | Cost is first class, but reliability is pass^k rather than any-correct-attempt success. |
+| 29 | ARC-AGI benchmarking | Record raw attempts, cost, tokens, and duration | Already stronger | Cost and attempt evidence are first class, and reliability is pass^k rather than any-correct-attempt success. Rank-neutral inference timing and token accounting now travel in the SharpeArena bridge manifest; see row 75. |
 | 30 | AstaBench | Bind scorer identity independently from entrant runtime | Already stronger | Checkpoints and strict replay bind exact scorer, runner, entrant, data, and costs. |
 | 31 | Autoresearch Novelty Bench | Freeze the information frontier at time T | Already stronger | Forward windows and point-in-time observations precommit the available evidence without a model judge. |
 | 32 | bench | Common workloads across runtimes | Rejected | One warmup and one timed run with no cross-runtime result-equivalence gate is insufficient methodology. |
@@ -141,6 +148,16 @@ one universal minimum that would have different meanings across diagnostics.
 | 63 | Terminal-Bench Science | Validator registry, planted negatives, valid controls, and full-corpus nonempty checks | Future / partially present | The strongest future task-admission reference. Its rule-level planted-negative idea is already applied to provenance validation; the full community workflow is not needed yet. |
 | 64 | Turbopuffer benchmark | Cold/warm state and tail-latency workload envelopes | Future | Appropriate for hosted operational diagnostics, not agent correctness or trading skill. |
 | 65 | WorkBuddy Bench | Refuse missing tasks, scores, plan items, and shrunken denominators | **Adopted** | This independently exposed the same evidence-geometry gap as SWE-bench. The current fix makes partial execution explicitly noncertifying. |
+| 66 | AutomationBench | Freeze a canonical task contract before mutable normalization and bind resumption to it | **Adopted** | Its explicit task contract exposed a narrower checkpoint gap: when an operator supplied `--entrant-sha256`, SharpeBench bound the artifact but not the command, endpoint, image reference, or environment pass-through list. `SweepContract` schema 2 now carries a separate invocation digest, and a same-artifact changed invocation is refused. See `automationbench/task_contract.py` and `automationbench/runner.py`. |
+| 67 | JudgmentBench | Cluster-first resampling, evaluator agreement, and near-tie handling | Already stronger | SharpeBench resamples at the declared dependence unit, reports paired intervals and multiplicity-adjusted tests, and uses one deterministic scorer instead of estimating agreement with a model evaluator. See `analysis/analysis_vSubmit.R`. |
+| 68 | LocalBench | Normalize task records, retain answer/refusal rates, and report subgroup quality | Already stronger | Closed submission schemas, typed failure categories, complete denominators, and dataset/condition diagnostics already make refusal and subgroup behavior visible without a mutable judge. See `benchmark.py`, `loader.py`, and `metrics/answer_rate.py`. |
+| 69 | MA-ProofBench | Require complete outputs, resume missing samples, statically precheck, then execute a proof witness | Already stronger | SharpeBench retains every declared cell, distinguishes retryable infrastructure failure from entrant failure, replays executable evidence, and carries selected scorer invariants in Lean. Pass^k is deliberately stricter than pass@k. See `evaluation/main.py` and `evaluation/checks.py`. |
+| 70 | RAD-Bench | Diagnose multi-turn retrieval decay and correlate a benchmark with an external ranking | Future | Turn-conditioned evidence could support a future memory or research-agent track, but the current return and forecast protocols do not define retrieval turns. Adding the metric now would create an unscored surface, and the supplied evaluator is weaker than SharpeBench's closed contracts. See `rad_bench/conversation.py` and `rad_bench/gen_judgment.py`. |
+| 71 | ResearchCodeBench | Measure context ablations and contamination by information cutoff | Already stronger | SharpeBench freezes point-in-time observations, precommits forward windows, separates historical from prospective evidence, and records ablations without allowing them to alter the rank key. See `core/generate_solutions.py` and `visualize/contamination_knowledge_cutoff_merged.py`. |
+| 72 | SWE-CARE | Keep unevaluated instances in the denominator and disclose context-source ablations | Already stronger | Missing execution cells make a SharpeBench sweep noncertifying, while entrant faults remain as failing sentinels. Context and data identities are bound into evidence rather than inferred from successful rows. See `scripts/eval_report.py` and `scripts/run_eval_pipeline.py`. |
+| 73 | HealthBench | Combine positive and negative criteria, hard subsets, and bootstrap support | Already stronger | SharpeBench's process and mandate checks include positive obligations and prohibited behavior, while dependence-aware bootstrap and explicit support counts avoid treating rubric points as independent. Its deterministic kernel removes the mutable-judge dependency. See `judge.py` and `README.md`. |
+| 74 | LabBench2 | Stage deterministic validation, preserve failed tasks, and patch retries rather than overwrite them | Already stronger | SharpeBench separates contract, transport, process, outcome, and statistical stages; failed cells remain in the declared geometry; and append-only or checkpointed retries preserve prior evidence. See `evals/evaluators.py`, `evals/run_evals.py`, and `evals/report.py`. |
+| 75 | MU-Bench | Publish tail latency and resource accounting beside quality while keeping it out of rank | **Adopted** | SharpeArena raw-field schema 2 records every inference duration and its observation source. Bridge schema 2 validates call counts and totals, then publishes nearest-rank p50/p95 latency, token totals, reasoning-token provenance, and retries with `rank_input: false`. Locale macro-averaging and model-judge controls do not fit this deterministic trading scorer. See `scripts/latency_stats.py`, `scoring/metrics.py`, and `scripts/significance_test.py`. |
 
 ## Ideas deliberately not built
 

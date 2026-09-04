@@ -15,6 +15,8 @@ matrix. The contract binds:
 - score-configuration digest;
 - running CLI artifact SHA-256;
 - entrant artifact SHA-256;
+- invocation SHA-256, derived from the transport and exact endpoint, image, or
+  command plus the names of explicitly passed environment variables;
 - ordered evaluation windows;
 - ordered execution seeds; and
 - retry policy.
@@ -22,7 +24,9 @@ matrix. The contract binds:
 The digest of an image reference is available from its immutable
 `repository@sha256:...` identity. A command line or HTTP address is not an
 artifact identity, so checkpointed `--cmd` and `--http` runs require
-`--entrant-sha256 <digest>`.
+`--entrant-sha256 <digest>`. Supplying that artifact digest does not weaken the
+invocation binding: changing the address, command arguments, or
+`SHARPEBENCH_AGENT_ENV` names still requires a new checkpoint.
 
 Resume is exact. A missing, malformed, legacy, or different contract is an
 error; SharpeBench does not silently replace it or mix tasks from two

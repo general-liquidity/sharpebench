@@ -149,6 +149,10 @@ sharpebench run --cmd "./trusted-local-agent" \
   --entrant-sha256 <64-lowercase-hex-digest>
 ```
 
+The checkpoint binds the artifact and its invocation separately. Reusing the
+same artifact digest with a changed command, endpoint, image reference, or
+environment pass-through list is refused as a different experiment.
+
 | Transport | Boundary |
 |:--|:--|
 | `--image` | Fail-closed Docker containment: digest-pinned local image, no network or IPC, non-root, read-only root, dropped capabilities, `no-new-privileges`, bounded memory, CPU, PIDs, and files, plus explicit timeouts. |
@@ -321,7 +325,7 @@ does not run agents or own a store. See the
 | Understand scoring | [Methodology](docs/book/src/methodology.md) · [Process discipline](docs/book/src/methodology-process.md) |
 | Analyze prospective forecasts | [Forecast quality](docs/book/src/forecast-quality.md) |
 | Operate the forward league or sandbox | [Arena](docs/book/src/arena.md) · [Attestation](docs/book/src/attestation.md) |
-| Audit integrity and provenance | [Integrity](docs/book/src/integrity.md) · [Evidence contracts](docs/book/src/evidence-contracts.md) · [65-benchmark architecture audit](docs/BENCHMARK_ARCHITECTURE_AUDIT.md) |
+| Audit integrity and provenance | [Integrity](docs/book/src/integrity.md) · [Evidence contracts](docs/book/src/evidence-contracts.md) · [75-benchmark architecture audit](docs/BENCHMARK_ARCHITECTURE_AUDIT.md) |
 | Reproduce the paper | [Paper PDF](paper/main.pdf) · [Commands](paper/sections/A-commands.tex) |
 | Contribute or propose a change | [`CONTRIBUTING.md`](CONTRIBUTING.md) · [Governance](docs/GOVERNANCE.md) |
 | Review releases and licensing | [`CHANGELOG.md`](CHANGELOG.md) · [MIT](LICENSE-MIT) · [Apache-2.0](LICENSE-APACHE) |
