@@ -27,7 +27,9 @@ def _read_json(path: Path) -> Any:
             parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)),
         )
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as error:
-        raise ReportCheckError(f"cannot read strict JSON from {path}: {error}") from error
+        raise ReportCheckError(
+            f"cannot read strict JSON from {path}: {error}"
+        ) from error
 
 
 def _mapping(value: object, label: str) -> dict[str, Any]:
@@ -51,10 +53,14 @@ def _number(value: object, label: str) -> float:
     return result
 
 
-def _close(actual: object, expected: float, label: str, tolerance: float = 1e-12) -> None:
+def _close(
+    actual: object, expected: float, label: str, tolerance: float = 1e-12
+) -> None:
     value = _number(actual, label)
     if not math.isclose(value, expected, rel_tol=tolerance, abs_tol=tolerance):
-        raise ReportCheckError(f"{label} differs: report={value!r}, recomputed={expected!r}")
+        raise ReportCheckError(
+            f"{label} differs: report={value!r}, recomputed={expected!r}"
+        )
 
 
 def _mean(values: list[float]) -> float:
@@ -90,7 +96,9 @@ def _percentile(sorted_values: list[float], probability: float) -> float:
     return sorted_values[index]
 
 
-def _rows(document: dict[str, Any], expected_contracts: set[str]) -> dict[str, dict[str, Any]]:
+def _rows(
+    document: dict[str, Any], expected_contracts: set[str]
+) -> dict[str, dict[str, Any]]:
     revisions = _list(document.get("revisions"), "revisions")
     resolutions = _list(document.get("resolutions"), "resolutions")
     contracts = _list(document.get("contracts"), "contracts")
@@ -99,7 +107,9 @@ def _rows(document: dict[str, Any], expected_contracts: set[str]) -> dict[str, d
         for contract in contracts
     }
     if set(contract_by_id) != expected_contracts:
-        raise ReportCheckError("resolved ledger contract inventory differs from the plan")
+        raise ReportCheckError(
+            "resolved ledger contract inventory differs from the plan"
+        )
     eligible: dict[str, dict[str, Any]] = {}
     for raw in revisions:
         revision = _mapping(raw, "revision")
@@ -112,7 +122,9 @@ def _rows(document: dict[str, Any], expected_contracts: set[str]) -> dict[str, d
         if previous is not None:
             prior_ordinal = previous.get("ordinal")
             current_ordinal = revision.get("ordinal")
-            if not isinstance(prior_ordinal, int) or not isinstance(current_ordinal, int):
+            if not isinstance(prior_ordinal, int) or not isinstance(
+                current_ordinal, int
+            ):
                 raise ReportCheckError("forecast revision ordinal is not an integer")
             if current_ordinal <= prior_ordinal:
                 raise ReportCheckError("forecast revisions are not strictly ordered")
@@ -126,10 +138,17 @@ def _rows(document: dict[str, Any], expected_contracts: set[str]) -> dict[str, d
             or claim_id in resolution_by_id
             or resolution.get("status") != "resolved"
         ):
-            raise ReportCheckError("resolution records are missing, duplicated, or unresolved")
+            raise ReportCheckError(
+                "resolution records are missing, duplicated, or unresolved"
+            )
         resolution_by_id[claim_id] = resolution
-    if set(eligible) != expected_contracts or set(resolution_by_id) != expected_contracts:
-        raise ReportCheckError("resolved ledger does not cover every frozen contract exactly once")
+    if (
+        set(eligible) != expected_contracts
+        or set(resolution_by_id) != expected_contracts
+    ):
+        raise ReportCheckError(
+            "resolved ledger does not cover every frozen contract exactly once"
+        )
 
     rows: dict[str, dict[str, Any]] = {}
     for claim_id in expected_contracts:
@@ -137,14 +156,19 @@ def _rows(document: dict[str, Any], expected_contracts: set[str]) -> dict[str, d
         resolution = resolution_by_id[claim_id]
         contract = _mapping(contract_by_id[claim_id], f"contract {claim_id}")
         prediction = _list(revision.get("prediction"), f"prediction {claim_id}")
-        if contract.get("kind") != "probability" or contract.get("scoring_rule") != "binary_brier":
+        if (
+            contract.get("kind") != "probability"
+            or contract.get("scoring_rule") != "binary_brier"
+        ):
             raise ReportCheckError(f"unsupported prospective contract: {claim_id}")
         if len(prediction) != 1:
             raise ReportCheckError(f"binary prediction has the wrong width: {claim_id}")
         probability = _number(prediction[0], f"probability {claim_id}")
         outcome = _number(resolution.get("outcome"), f"outcome {claim_id}")
         if not 0.0 <= probability <= 1.0 or outcome not in (0.0, 1.0):
-            raise ReportCheckError(f"probability or outcome is outside its domain: {claim_id}")
+            raise ReportCheckError(
+                f"probability or outcome is outside its domain: {claim_id}"
+            )
         contract_sha256 = revision.get("contract_sha256")
         if not isinstance(contract_sha256, str) or len(contract_sha256) != 64:
             raise ReportCheckError(f"invalid contract digest: {claim_id}")
@@ -153,7 +177,9 @@ def _rows(document: dict[str, Any], expected_contracts: set[str]) -> dict[str, d
             "probability": probability,
             "outcome": outcome,
             "loss": (probability - outcome) ** 2,
-            "resolves_at": int(_number(contract.get("resolves_at"), f"resolves_at {claim_id}")),
+            "resolves_at": int(
+                _number(contract.get("resolves_at"), f"resolves_at {claim_id}")
+            ),
         }
     if len(rows) != len(expected_contracts):
         raise ReportCheckError("two frozen contracts share a digest")
@@ -167,7 +193,9 @@ def _calibration(rows: dict[str, dict[str, Any]], bins: int) -> dict[str, Any]:
     brier = sum((probability - outcome) ** 2 for probability, outcome in values) / n
     selected: list[list[tuple[float, float]]] = [[] for _ in range(bins)]
     for probability, outcome in values:
-        selected[min(math.floor(probability * bins), bins - 1)].append((probability, outcome))
+        selected[min(math.floor(probability * bins), bins - 1)].append(
+            (probability, outcome)
+        )
     bin_values = []
     reliability = 0.0
     resolution = 0.0
@@ -216,7 +244,9 @@ def _comparison(
         left = rows_a[digest]
         right = rows_b[digest]
         if left["resolves_at"] != right["resolves_at"]:
-            raise ReportCheckError("common contract digest has unequal settlement clocks")
+            raise ReportCheckError(
+                "common contract digest has unequal settlement clocks"
+            )
         blocks[left["resolves_at"]].append(left["loss"] - right["loss"])
     ordered_blocks = [blocks[key] for key in sorted(blocks)]
     observed_values = [value for block in ordered_blocks for value in block]
@@ -272,7 +302,9 @@ def _compare_calibration(actual: object, expected: dict[str, Any], label: str) -
         if record.get("brier_skill") is not None:
             raise ReportCheckError(f"{label}.brier_skill must be null")
     else:
-        _close(record.get("brier_skill"), expected["brier_skill"], f"{label}.brier_skill")
+        _close(
+            record.get("brier_skill"), expected["brier_skill"], f"{label}.brier_skill"
+        )
     bins = _list(record.get("bins"), f"{label}.bins")
     if len(bins) != len(expected["bins"]):
         raise ReportCheckError(f"{label}.bins has the wrong length")
@@ -294,7 +326,10 @@ def verify(field_dir: Path, report_path: Path) -> dict[str, Any]:
     analysis = _mapping(plan.get("analysis"), "field plan analysis")
     if report.get("schema_version") != REPORT_SCHEMA:
         raise ReportCheckError("forecast-quality report has an unsupported schema")
-    if report.get("rank_effect") != RANK_EFFECT or report.get("dependence_unit") != DEPENDENCE_UNIT:
+    if (
+        report.get("rank_effect") != RANK_EFFECT
+        or report.get("dependence_unit") != DEPENDENCE_UNIT
+    ):
         raise ReportCheckError("report changes the frozen rank or dependence semantics")
     expected_config = {
         "bootstrap_seed": analysis.get("bootstrap_seed"),
@@ -304,11 +339,17 @@ def verify(field_dir: Path, report_path: Path) -> dict[str, Any]:
         "calibration_bins": analysis.get("calibration_bins"),
     }
     if report.get("config") != expected_config:
-        raise ReportCheckError("report configuration differs from the preregistered plan")
+        raise ReportCheckError(
+            "report configuration differs from the preregistered plan"
+        )
     models = _list(plan.get("models"), "field plan models")
-    agent_ids = sorted(str(_mapping(model, "model").get("agent_id")) for model in models)
+    agent_ids = sorted(
+        str(_mapping(model, "model").get("agent_id")) for model in models
+    )
     contracts = _list(plan.get("contracts"), "field plan contracts")
-    contract_ids = {str(_mapping(contract, "contract").get("contract_id")) for contract in contracts}
+    contract_ids = {
+        str(_mapping(contract, "contract").get("contract_id")) for contract in contracts
+    }
     if len(agent_ids) != len(set(agent_ids)) or len(contract_ids) != len(contracts):
         raise ReportCheckError("field plan repeats an agent or contract")
 
@@ -321,29 +362,41 @@ def verify(field_dir: Path, report_path: Path) -> dict[str, Any]:
     }
     common = sorted(set.intersection(*(set(rows) for rows in rows_by_agent.values())))
     support = _mapping(report.get("common_support"), "common_support")
-    if support.get("n_contracts") != len(common) or support.get("contract_sha256") != common:
-        raise ReportCheckError("report common support differs from the resolved ledgers")
+    if (
+        support.get("n_contracts") != len(common)
+        or support.get("contract_sha256") != common
+    ):
+        raise ReportCheckError(
+            "report common support differs from the resolved ledgers"
+        )
     excluded = support.get("excluded_resolved_by_agent")
-    expected_excluded = {agent_id: len(rows_by_agent[agent_id]) - len(common) for agent_id in agent_ids}
+    expected_excluded = {
+        agent_id: len(rows_by_agent[agent_id]) - len(common) for agent_id in agent_ids
+    }
     if excluded != expected_excluded:
         raise ReportCheckError("report excluded-support counts differ")
 
     report_agents = {
-        str(_mapping(raw, "agent summary").get("agent_id")): _mapping(raw, "agent summary")
+        str(_mapping(raw, "agent summary").get("agent_id")): _mapping(
+            raw, "agent summary"
+        )
         for raw in _list(report.get("agents"), "agents")
     }
     if set(report_agents) != set(agent_ids):
         raise ReportCheckError("report agent inventory differs from the field plan")
     recomputed_brier: dict[str, float] = {}
     for agent_id in agent_ids:
-        expected = _calibration(rows_by_agent[agent_id], int(expected_config["calibration_bins"]))
+        expected = _calibration(
+            rows_by_agent[agent_id], int(expected_config["calibration_bins"])
+        )
         actual = report_agents[agent_id]
         if actual.get("n_resolved") != len(rows_by_agent[agent_id]):
             raise ReportCheckError(f"{agent_id}.n_resolved differs")
         metrics = [
             _mapping(metric, f"{agent_id}.metric")
             for metric in _list(actual.get("metrics"), f"{agent_id}.metrics")
-            if _mapping(metric, f"{agent_id}.metric").get("scoring_rule") == "binary_brier"
+            if _mapping(metric, f"{agent_id}.metric").get("scoring_rule")
+            == "binary_brier"
         ]
         if len(metrics) != 1 or metrics[0].get("n") != expected["n"]:
             raise ReportCheckError(f"{agent_id} has the wrong binary-Brier metric row")
@@ -372,7 +425,9 @@ def verify(field_dir: Path, report_path: Path) -> dict[str, Any]:
             for raw in _list(report.get("comparisons"), "comparisons")
         )
     }
-    if set(actual_comparisons) != {(item["agent_a"], item["agent_b"]) for item in recomputed}:
+    if set(actual_comparisons) != {
+        (item["agent_a"], item["agent_b"]) for item in recomputed
+    }:
         raise ReportCheckError("report pairwise comparison inventory differs")
     for expected in recomputed:
         label = f"{expected['agent_a']} vs {expected['agent_b']}"
@@ -389,8 +444,15 @@ def verify(field_dir: Path, report_path: Path) -> dict[str, Any]:
         ):
             _close(actual.get(key), expected[key], f"{label}.{key}")
 
-    blocks = len({int(_number(contract.get("resolves_at"), "resolves_at")) for contract in contracts})
-    minimum_blocks = int(_number(analysis.get("minimum_comparative_claim_blocks"), "minimum blocks"))
+    blocks = len(
+        {
+            int(_number(contract.get("resolves_at"), "resolves_at"))
+            for contract in contracts
+        }
+    )
+    minimum_blocks = int(
+        _number(analysis.get("minimum_comparative_claim_blocks"), "minimum blocks")
+    )
     return {
         "schema_version": "sharpebench.prospective-forecast-report-check.v1",
         "status": "verified",

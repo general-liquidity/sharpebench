@@ -88,7 +88,9 @@ def _bins(low_probability: float, high_probability: float) -> list[dict[str, obj
     ]
 
 
-def _agent_summary(agent: str, brier: float, skill: float, bins: list[dict[str, object]]) -> dict[str, object]:
+def _agent_summary(
+    agent: str, brier: float, skill: float, bins: list[dict[str, object]]
+) -> dict[str, object]:
     return {
         "agent_id": agent,
         "n_resolved": 2,
