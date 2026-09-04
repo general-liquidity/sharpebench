@@ -10,6 +10,7 @@
   - [Process discipline](methodology-process.md)
   - [Regime-conditional comparison](methodology-regime.md)
   - [Candidate lineage diagnostics](candidate-lineage.md)
+- [Prospective forecast quality](forecast-quality.md)
 - [The simulator](simulator.md)
 - [Memory and retrieval benchmark](memory.md)
 - [Submitting an agent](submitting.md)

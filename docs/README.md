@@ -14,6 +14,7 @@ operations and engineering assessments.
 | Checkpoint and replay identity | [Evidence contracts](book/src/evidence-contracts.md) |
 | Scoring and statistical gates | [Methodology](book/src/methodology.md) |
 | Generated-candidate ancestry and family robustness | [Candidate lineage](book/src/candidate-lineage.md) |
+| Prospective forecast scoring and calibration | [Forecast quality](book/src/forecast-quality.md) |
 | Process and lifecycle checks | [Process discipline](book/src/methodology-process.md) |
 | Forward attestation | [Attestation](book/src/attestation.md) |
 | Sandboxed entrants and forward league | [The arena](book/src/arena.md) |

@@ -95,6 +95,7 @@ sharpebench run --data data/crypto-majors-1d.csv
 sharpebench audit
 sharpebench arena init league
 sharpebench arena verify league
+sharpebench forecast-quality agent-a.json agent-b.json
 ```
 
 Commands that render reports accept `--json` for structured output. Commands
@@ -315,6 +316,7 @@ does not run agents or own a store. See the
 | Understand the benchmark and packages | [Introduction](docs/book/src/introduction.md) · [Book contents](docs/book/src/SUMMARY.md) |
 | Use the CLI or submit an agent | [CLI reference](docs/book/src/cli.md) · [Submitting](docs/book/src/submitting.md) |
 | Understand scoring | [Methodology](docs/book/src/methodology.md) · [Process discipline](docs/book/src/methodology-process.md) |
+| Analyze prospective forecasts | [Forecast quality](docs/book/src/forecast-quality.md) |
 | Operate the forward league or sandbox | [Arena](docs/book/src/arena.md) · [Attestation](docs/book/src/attestation.md) |
 | Audit integrity and provenance | [Integrity](docs/book/src/integrity.md) · [Evidence contracts](docs/book/src/evidence-contracts.md) · [65-benchmark architecture audit](docs/BENCHMARK_ARCHITECTURE_AUDIT.md) |
 | Reproduce the paper | [Paper PDF](paper/main.pdf) · [Commands](paper/sections/A-commands.tex) |

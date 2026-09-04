@@ -12,6 +12,13 @@ and links the commits it was built from.
 
 ## [Unreleased]
 
+### Added
+- core/cli: ingest the closed `sharpe.forecast-evidence.v1` artifact and independently recompute point error, binary and categorical Brier or log loss, Normal CRPS, directional accuracy, and interval score. Reports include resolution and information-exposure counts, binary reliability and Brier skill, categorical confidence calibration, and Normal PIT diagnostics.
+- core/cli: compare forecast agents only on the exact contract intersection resolved by the whole field. Dependence-aware inference resamples all assets and questions sharing a resolution clock as one block, reports percentile intervals and two-sided p-values, and applies Holm familywise correction across every pair. Forecast quality is a separate report and cannot change trading-rank eligibility.
+
+### Security
+- core: strict forecast ingestion rejects unknown fields and versions, nonfinite values, malformed digests, invalid probability vectors, contract drift, duplicate identities and idempotency keys, broken revision chains, inconsistent lifecycle clocks, incomplete resolution coverage, and late revisions presented as eligible.
+
 ## [0.17.1] - 2026-09-02
 
 ### Fixed
