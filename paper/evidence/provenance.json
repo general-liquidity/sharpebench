@@ -97,7 +97,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "2682d085126851e24751c71f949bb52251e848f7",
+  "generated_at_head": "711db28039e661fa7a6e6f9c1eeb29c1234c9f76",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -713,7 +713,7 @@
     },
     {
       "path": "paper/src/check-prospective-forecast-report.py",
-      "sha256": "243db1b3146f3a185c60fb4aaff32529cba7f2a8101e242ea08f85c74b26ec15"
+      "sha256": "1abd23deab742a673acae8df3052a551a2a2898d2751ede5948fe9651d4d36ed"
     },
     {
       "path": "paper/src/check-provenance.py",
@@ -745,7 +745,7 @@
     },
     {
       "path": "paper/src/test_check_prospective_forecast_report.py",
-      "sha256": "bf31473294f203c57a2a1bb2cfed5826e49f7f731ffdf1959bc9b33c2f72a283"
+      "sha256": "7662cef86bae208c8b97a9de73dcda683823602efe66c96b77602abb3f36307d"
     },
     {
       "path": "paper/src/test_import_prospective_field.py",
@@ -777,5 +777,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "9ec7c2f309f3a6c719305c2ae370f3c3a8b0e48f5c1a2d5cf56ad4f6a0f3a8d4"
+  "source_snapshot_sha256": "d151aae0c408626dd493da078a995d4752b66ade5af272b184124cc434c5c828"
 }
