@@ -15,6 +15,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  formal:
+    name: Lean model (kernel, leanchecker, nanoda, axiom audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify selected forecast invariants
+        uses: leanprover/lean-action@50fcf42d2e460296f1a34b402e990d1b24f8b596 # v1
+        with:
+          lake-package-directory: formal
+          use-mathlib-cache: false
+          build: true
+          test: false
+          lint: false
+          leanchecker: true
+          nanoda: true
+          nanoda-allow-sorry: false
+          axiom-audit: true
+          axiom-audit-root: SharpeBenchFormal
+
   release-rehearsal:
     name: isolated release rehearsal
     runs-on: ubuntu-latest

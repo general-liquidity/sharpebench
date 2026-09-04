@@ -1436,6 +1436,30 @@ mod tests {
     }
 
     #[test]
+    fn fixed_point_brier_model_matches_the_executable_float_rule() {
+        let base = serde_json::from_str::<ForecastEvidence>(&fixture("formal", &[0.5], &[1.0]))
+            .unwrap()
+            .contracts
+            .remove(0);
+        let scale = 1_000_i64;
+        for probability in [0_i64, 100, 500, 900, 1_000] {
+            for truth in [0_i64, 200, 500, 800, 1_000] {
+                let p = probability as f64 / scale as f64;
+                let q = truth as f64 / scale as f64;
+                let loss_zero = score_prediction(&base, &[p], &Value::from(0.0)).unwrap().0;
+                let loss_one = score_prediction(&base, &[p], &Value::from(1.0)).unwrap().0;
+                let expected = q * loss_one + (1.0 - q) * loss_zero;
+                let numerator =
+                    truth * (scale - probability).pow(2) + (scale - truth) * probability.pow(2);
+                let decomposed =
+                    truth * (scale - truth) * scale + scale * (probability - truth).pow(2);
+                assert_eq!(numerator, decomposed);
+                assert!((expected - numerator as f64 / (scale.pow(3) as f64)).abs() < 1e-15);
+            }
+        }
+    }
+
+    #[test]
     fn late_revision_is_audited_but_never_becomes_the_scored_forecast() {
         let mut document =
             serde_json::from_str::<ForecastEvidence>(&fixture("a", &[0.8], &[1.0])).unwrap();
