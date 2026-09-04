@@ -8,9 +8,11 @@ are the twelve listed in [RELEASING.md](RELEASING.md), and `xtask` and
 `examples/reference-agent` are `publish = false`. Each section is one `v*` tag
 and links the commits it was built from.
 
-[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.18.2...HEAD
+[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.18.3...HEAD
 
 ## [Unreleased]
+
+## [0.18.3] - 2026-09-04
 
 ### Fixed
 - arena tests: keep the live Docker smoke fixture alive independently of stdin attachment, so daemon scheduling cannot turn a healthy boundary into a pre-readiness exit.
@@ -428,6 +430,7 @@ First published release.
 ### Fixed
 - Constant-time HMAC verification and bounded, timed agent HTTP reads ([6c3d174](https://github.com/general-liquidity/sharpebench/commit/6c3d174)).
 
+[0.18.3]: https://github.com/general-liquidity/sharpebench/compare/v0.18.2...v0.18.3
 [0.18.2]: https://github.com/general-liquidity/sharpebench/compare/v0.18.1...v0.18.2
 [0.18.1]: https://github.com/general-liquidity/sharpebench/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/general-liquidity/sharpebench/compare/v0.17.1...v0.18.0
