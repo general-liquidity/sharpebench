@@ -1420,6 +1420,42 @@ mod tests {
     }
 
     #[test]
+    fn cross_product_tutorial_is_content_addressed_and_recomputes_exactly() {
+        let alpha = include_str!("../../../examples/forecast-quality/fixtures/agent-alpha.json");
+        let beta = include_str!("../../../examples/forecast-quality/fixtures/agent-beta.json");
+        let manifest: Value = serde_json::from_str(include_str!(
+            "../../../examples/forecast-quality/fixtures/manifest.json"
+        ))
+        .unwrap();
+        for (name, payload) in [("agent-alpha.json", alpha), ("agent-beta.json", beta)] {
+            let digest = format!("{:x}", Sha256::digest(payload.as_bytes()));
+            assert_eq!(manifest["files"][name].as_str(), Some(digest.as_str()));
+        }
+
+        let documents = [
+            parse_forecast_evidence(alpha).unwrap(),
+            parse_forecast_evidence(beta).unwrap(),
+        ];
+        let report = analyze_forecast_quality(
+            &documents,
+            ForecastAnalysisConfig {
+                bootstrap_seed: 23,
+                bootstrap_samples: 400,
+                confidence: 0.9,
+                familywise_alpha: 0.05,
+                calibration_bins: 5,
+            },
+        )
+        .unwrap();
+        let actual = serde_json::to_string_pretty(&report).unwrap() + "\n";
+        let expected = include_str!("../../../examples/forecast-quality/fixtures/report.json");
+        assert_eq!(actual, expected);
+        assert_eq!(report.common_support.n_contracts, 8);
+        assert_eq!(report.comparisons[0].n_settlement_blocks, 2);
+        assert_eq!(report.rank_effect, "reported_only_never_trading_rank");
+    }
+
+    #[test]
     fn scoring_recomputes_brier_and_calibration_from_raw_evidence() {
         let document =
             parse_forecast_evidence(&fixture("a", &[0.8, 0.2, 0.7, 0.1], &[1.0, 0.0, 1.0, 0.0]))

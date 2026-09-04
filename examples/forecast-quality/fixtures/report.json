@@ -1,0 +1,183 @@
+{
+  "schema_version": "sharpebench.forecast-quality.v1",
+  "rank_effect": "reported_only_never_trading_rank",
+  "dependence_unit": "whole resolution-clock block across assets and questions",
+  "config": {
+    "bootstrap_seed": 23,
+    "bootstrap_samples": 400,
+    "confidence": 0.9,
+    "familywise_alpha": 0.05,
+    "calibration_bins": 5
+  },
+  "common_support": {
+    "n_contracts": 8,
+    "contract_sha256": [
+      "3aae818a553a69f509bbcca4c02c9d7ccfb73c26f57ed64102a9317c3c7951fe",
+      "616a29f17861e3a0e96cf80138bde2ddfb8dedbed2fb3ece3f420ad565cc1927",
+      "6d9abc47926ff6a5d408f2209c6b73d8eab86e89216683a3cac0630675fb0c4f",
+      "9dfb54637b823966590993de454372d759943ab20e09f5552e32b11192318a42",
+      "ac0ee07f6ee9895db258c9a35fffacb93900117ed91b24970cb3baf61ac748d6",
+      "ba9ffd33be0166a0269aa5a510c76b70d6f3bfb21e605df7238dd98ba02fa87a",
+      "c6e4e6a17b123ff3c75a26077b2e5f04227d08fd0be29c8fe0bf81e53c752c06",
+      "d7a11c3b398eb0aff4fe41349343fe2048bb15faa8d3dfd8b828489cc6d8fee4"
+    ],
+    "excluded_resolved_by_agent": {
+      "agent-alpha": 0,
+      "agent-beta": 0
+    }
+  },
+  "agents": [
+    {
+      "agent_id": "agent-alpha",
+      "model_id": "tutorial-model-agent-alpha",
+      "n_claims": 8,
+      "n_revisions": 10,
+      "n_eligible_claims": 8,
+      "n_resolved": 8,
+      "n_pending": 0,
+      "n_cancelled": 0,
+      "n_rejected": 0,
+      "resolution_rate": 1.0,
+      "blind_resolved": 8,
+      "consensus_exposed_resolved": 0,
+      "metrics": [
+        {
+          "scoring_rule": "binary_brier",
+          "n": 8,
+          "mean_loss": 0.0669375
+        }
+      ],
+      "binary_calibration": {
+        "n": 8,
+        "brier": 0.0669375,
+        "base_rate": 0.5,
+        "reliability": 0.06622083333333334,
+        "resolution": 0.25,
+        "uncertainty": 0.25,
+        "brier_skill": 0.7322500000000001,
+        "bins": [
+          {
+            "lower": 0.0,
+            "upper": 0.2,
+            "n": 1,
+            "mean_forecast": 0.18,
+            "event_rate": 0.0
+          },
+          {
+            "lower": 0.2,
+            "upper": 0.4,
+            "n": 3,
+            "mean_forecast": 0.2733333333333334,
+            "event_rate": 0.0
+          },
+          {
+            "lower": 0.4,
+            "upper": 0.6,
+            "n": 0,
+            "mean_forecast": null,
+            "event_rate": null
+          },
+          {
+            "lower": 0.6,
+            "upper": 0.8,
+            "n": 3,
+            "mean_forecast": 0.7166666666666667,
+            "event_rate": 1.0
+          },
+          {
+            "lower": 0.8,
+            "upper": 1.0,
+            "n": 1,
+            "mean_forecast": 0.82,
+            "event_rate": 1.0
+          }
+        ]
+      },
+      "categorical_confidence_calibration": null,
+      "normal_distribution_calibration": null
+    },
+    {
+      "agent_id": "agent-beta",
+      "model_id": "tutorial-model-agent-beta",
+      "n_claims": 8,
+      "n_revisions": 9,
+      "n_eligible_claims": 8,
+      "n_resolved": 8,
+      "n_pending": 0,
+      "n_cancelled": 0,
+      "n_rejected": 0,
+      "resolution_rate": 1.0,
+      "blind_resolved": 7,
+      "consensus_exposed_resolved": 1,
+      "metrics": [
+        {
+          "scoring_rule": "binary_brier",
+          "n": 8,
+          "mean_loss": 0.27221249999999997
+        }
+      ],
+      "binary_calibration": {
+        "n": 8,
+        "brier": 0.27221249999999997,
+        "base_rate": 0.5,
+        "reliability": 0.11186875000000002,
+        "resolution": 0.08333333333333333,
+        "uncertainty": 0.25,
+        "brier_skill": -0.08884999999999987,
+        "bins": [
+          {
+            "lower": 0.0,
+            "upper": 0.2,
+            "n": 0,
+            "mean_forecast": null,
+            "event_rate": null
+          },
+          {
+            "lower": 0.2,
+            "upper": 0.4,
+            "n": 0,
+            "mean_forecast": null,
+            "event_rate": null
+          },
+          {
+            "lower": 0.4,
+            "upper": 0.6,
+            "n": 6,
+            "mean_forecast": 0.5216666666666666,
+            "event_rate": 0.6666666666666666
+          },
+          {
+            "lower": 0.6,
+            "upper": 0.8,
+            "n": 2,
+            "mean_forecast": 0.62,
+            "event_rate": 0.0
+          },
+          {
+            "lower": 0.8,
+            "upper": 1.0,
+            "n": 0,
+            "mean_forecast": null,
+            "event_rate": null
+          }
+        ]
+      },
+      "categorical_confidence_calibration": null,
+      "normal_distribution_calibration": null
+    }
+  ],
+  "comparisons": [
+    {
+      "agent_a": "agent-alpha",
+      "agent_b": "agent-beta",
+      "n_contracts": 8,
+      "n_settlement_blocks": 2,
+      "mean_loss_difference": -0.20527500000000004,
+      "confidence_lower": -0.20634999999999998,
+      "confidence_upper": -0.2042,
+      "raw_p_value": 0.0024937655860349127,
+      "holm_adjusted_p_value": 0.0024937655860349127,
+      "familywise_significant": true
+    }
+  ]
+}
