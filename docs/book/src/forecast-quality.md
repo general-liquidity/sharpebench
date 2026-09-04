@@ -84,7 +84,7 @@ The example exercises exact common support, resolution-time blocks, revision
 eligibility, and blind versus consensus-visible exposure. It is a compatibility
 fixture, not an empirical agent result.
 
-## Completed prospective field
+## Superseded prospective engineering pilot
 
 [`paper/evidence/prospective-forecast-field`](../../../paper/evidence/prospective-forecast-field/)
 is a checked import of one closed SharpeArena field. The importer requires every
@@ -94,13 +94,14 @@ and records the source repository, commit, path, plan digest, and copied-file
 digests.
 
 The field contains 24 binary contracts for four Binance Spot pairs at six
-resolution clocks. Three already-cached local model snapshots used one fixed
-forecast scaffold. The observed event rate was one third. Descriptive Brier
-losses were 0.2548 for `qwen-7b`, 0.2599 for `phi-4`, and 0.3148 for
-`qwen-0.5b`; all three Brier skill scores were negative against the observed
-base-rate forecast. Every pairwise interval crossed zero.
+resolution clocks. Three older, already-cached local model snapshots used one
+fixed forecast scaffold. The raw report remains committed to preserve the
+protocol audit trail, but this convenience-sample panel is superseded and is
+excluded from current model evaluation, the academic paper's empirical
+conclusions, and every trading-rank decision.
 
-The preregistered minimum for a comparative claim was 30 settlement blocks, so
+Even in its original scope, the preregistered minimum for a comparative claim
+was 30 settlement blocks, so
 the six-block report does not support model superiority even if a nominal test
 had crossed its threshold. It also does not score a trading loop: the models had
 no tools, memory, portfolio, or order interface. The committed
