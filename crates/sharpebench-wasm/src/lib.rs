@@ -65,7 +65,7 @@ pub fn score_allocation_json(trajectory_json: &str, policy_json: &str) -> Result
         .map_err(|e| e.to_string())
 }
 
-/// Black-Scholes price + Greeks + tail-risk classification for one option. Input
+/// Black-Scholes price + Greeks + local exposure flags for one long option. Input
 /// JSON: `{spot, strike, t_years, rate, vol, is_call}`. Output JSON:
 /// `{price, greeks, risk}`.
 pub fn greeks_json(params_json: &str) -> Result<String, String> {
@@ -86,9 +86,10 @@ pub fn greeks_json(params_json: &str) -> Result<String, String> {
         .get("is_call")
         .and_then(serde_json::Value::as_bool)
         .ok_or("missing or non-boolean field: is_call")?;
-    let price = bs_price(spot, strike, t, r, vol, is_call);
-    let greeks = bs_greeks(spot, strike, t, r, vol, is_call);
-    let risk = classify_greeks_risk(&greeks, &GreeksPolicy::default());
+    let price = bs_price(spot, strike, t, r, vol, is_call).map_err(|e| e.to_string())?;
+    let greeks = bs_greeks(spot, strike, t, r, vol, is_call).map_err(|e| e.to_string())?;
+    let risk =
+        classify_greeks_risk(&greeks, &GreeksPolicy::default()).map_err(|e| e.to_string())?;
     serde_json::to_string(&serde_json::json!({ "price": price, "greeks": greeks, "risk": risk }))
         .map_err(|e| e.to_string())
 }
@@ -543,6 +544,27 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         let price = v["price"].as_f64().unwrap();
         assert!((price - 10.4506).abs() < 1e-2, "price={price}");
+    }
+
+    #[test]
+    fn greeks_zero_volatility_and_invalid_boundaries() {
+        let mut params = serde_json::json!({"spot":100,"strike":100,"t_years":1,"rate":0.05,"vol":0,"is_call":true});
+        let out = greeks_json(&params.to_string()).unwrap();
+        let quote: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert!((quote["price"].as_f64().unwrap() - 4.877057549928594).abs() < 1e-10);
+        assert_eq!(quote["greeks"]["delta"], 1.0);
+        assert_eq!(quote["risk"]["net_short_gamma"], false);
+        assert!(quote["risk"].get("unbounded_tail").is_none());
+        params["vol"] = serde_json::json!(-0.1);
+        assert_eq!(
+            greeks_json(&params.to_string()).unwrap_err(),
+            "invalid options parameter: vol"
+        );
+        params["vol"] = serde_json::json!(0);
+        params["rate"] = serde_json::json!(0);
+        assert!(greeks_json(&params.to_string())
+            .unwrap_err()
+            .contains("Greeks are undefined"));
     }
 
     #[test]

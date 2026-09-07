@@ -100,7 +100,8 @@ export function scoreAllocation(
   );
 }
 
-/** Black-Scholes price + Greeks + tail-selling (short-gamma/vega) classification. */
+/** Price and local Greeks for one long European option. Throws for invalid inputs
+ * or undefined Greeks at a payoff kink. Does not infer payoff-loss boundedness. */
 export function greeks(params: GreeksParams): GreeksResult {
   return parse(kernel.greeks(JSON.stringify(params)));
 }

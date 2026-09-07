@@ -11,7 +11,7 @@ An **MCP server** that exposes [SharpeBench](https://github.com/general-liquidit
 | `self_audit` | Fire known gaming attacks at the scorer (anti-gaming proof) |
 | `audit_briefing` | Audit a shared briefing for input-side salience bias |
 | `score_allocation` | Score a weight-vector trajectory (validity + turnover) |
-| `greeks` | Black-Scholes price + Greeks + tail-selling risk |
+| `greeks` | One long European option: price, Greeks and local exposure flags |
 | `canary` | Derive a do-not-train contamination tripwire |
 | `is_my_sharpe_real` | Deflate one return series for its search footprint and render the honesty verdict |
 | `regime_compare` | Compare aligned returns inside caller-supplied regimes |
