@@ -136,10 +136,34 @@ pub(crate) fn from_hex(s: &str) -> Option<Vec<u8>> {
     if !s.len().is_multiple_of(2) {
         return None;
     }
-    (0..s.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok())
+    let nibble = |b: u8| match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    };
+    s.as_bytes()
+        .chunks_exact(2)
+        .map(|pair| Some(nibble(pair[0])? * 16 + nibble(pair[1])?))
         .collect()
+}
+
+#[cfg(test)]
+mod hex_boundary_tests {
+    use super::*;
+
+    #[test]
+    fn arbitrary_utf8_is_refused_not_sliced_at_byte_offsets() {
+        for invalid in ["€€", "a€", "🦀", "０１", "é", "00gg", "a"] {
+            assert_eq!(from_hex(invalid), None, "{invalid}");
+            assert!(VerifyingKey::from_hex(invalid).is_none());
+            let mut sealed = seal_dataset(b"dataset", b"key", "canary");
+            sealed.ciphertext = invalid.into();
+            assert!(open_dataset(&sealed, b"key").is_none());
+        }
+        assert_eq!(from_hex("00aAfF"), Some(vec![0, 170, 255]));
+        assert_eq!(from_hex(""), Some(vec![]));
+    }
 }
 
 /// Verify a full chain: every link's `prev_signature` must match the previous

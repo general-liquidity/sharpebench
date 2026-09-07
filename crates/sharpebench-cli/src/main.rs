@@ -1982,16 +1982,39 @@ fn yn(b: bool) -> &'static str {
 }
 
 fn truncate(s: &str, n: usize) -> String {
-    if s.len() <= n {
+    if n == 0 {
+        String::new()
+    } else if s.chars().count() <= n {
         s.to_string()
     } else {
-        format!("{}…", &s[..n - 1])
+        format!("{}…", s.chars().take(n - 1).collect::<String>())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn truncation_preserves_utf8_and_respects_the_character_budget() {
+        for id in [
+            "量化交易代理量化交易代理量化交易代理量化交易代理",
+            "🦀🦀🦀🦀🦀🦀🦀🦀🦀🦀",
+            "e\u{301}name",
+        ] {
+            for n in 0..20 {
+                let result = truncate(id, n);
+                assert!(result.chars().count() <= n);
+                if id.chars().count() <= n {
+                    assert_eq!(result, id);
+                } else if n > 0 {
+                    assert!(result.ends_with('…'));
+                    assert!(id.starts_with(result.trim_end_matches('…')));
+                }
+            }
+        }
+        assert_eq!(truncate("ascii", 4), "asc…");
+    }
 
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_string()).collect()
