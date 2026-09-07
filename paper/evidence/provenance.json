@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "673c1df2a0623a8d591b052357d5a49c3672dc7c",
+  "generated_at_head": "704dfcdbd0c53b528ad43f422ee6170e487f785b",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -711,7 +711,7 @@
     },
     {
       "path": "paper/evidence/analyze.py",
-      "sha256": "a1958238beaf6e370361532ec4a9379bdf436be7ffdcda1c693dd581c16ef085"
+      "sha256": "b45d762e09e56b33e000411fe9cb829229d7615421141c1e5c5377cf8b54d11d"
     },
     {
       "path": "paper/evidence/assemble_llm_field.py",
@@ -719,11 +719,15 @@
     },
     {
       "path": "paper/evidence/assemble_sweep.py",
-      "sha256": "862b7545ff901fc6db9ab68fb5f25858b0e1647ab55dc72121f8676ad07019dd"
+      "sha256": "c18f7d1459ba044e9b11fd5f8f0b04ff89035092be0c6d3c4076f9227216a6fb"
     },
     {
       "path": "paper/evidence/index_sharpe.py",
       "sha256": "6b33572205ca2240e5332a894957d2c30377c9e02d29a8ee7a9e532484749b2f"
+    },
+    {
+      "path": "paper/evidence/sweep_grid.py",
+      "sha256": "456cbe16221adcab575cffb8a6c9f4acb50c5d4af05dd8be87109cf2603e9693"
     },
     {
       "path": "paper/main.tex",
@@ -852,6 +856,10 @@
     {
       "path": "paper/src/test_provenance.py",
       "sha256": "6a2faf76e53bcdafaaefcc8dec8421d1cbb2c6e2888da51d91e452304fcc54af"
+    },
+    {
+      "path": "paper/src/test_sweep_grid.py",
+      "sha256": "002a06d8f22880266e76a03d20c26e043eef2adc45979d2b0dfea7b3228f6a5d"
     }
   ],
   "source_snapshot_excludes": [
@@ -875,5 +883,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "ab70cc8a777ffbd8f678f275a544d93957967228a2e3802747847a704e16eb27"
+  "source_snapshot_sha256": "e27bf3183878ac6067f8b61437a6cd03705469c80eb118a842fa80d5c7945b55"
 }
