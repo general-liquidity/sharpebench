@@ -17,8 +17,8 @@
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
-use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::process::{Child, Command, Stdio};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::time::{Duration, Instant};
 
 use sharpebench_protocol::{Decision, MarketObservation};
@@ -138,8 +138,10 @@ fn parse_decision(
 /// child's death (see [`Drop`]) guarantees.
 pub struct ExternalAgent {
     child: Child,
-    stdin: ChildStdin,
+    input: SyncSender<String>,
+    written: Receiver<std::io::Result<()>>,
     lines: Receiver<std::io::Result<Wire>>,
+    timed_out: bool,
     timeout: Duration,
     breaker: CircuitBreaker,
     health: TransportHealth,
@@ -260,7 +262,7 @@ impl ExternalAgent {
             command.process_group(0);
         }
         let mut child = command.spawn()?;
-        let stdin = child
+        let mut stdin = child
             .stdin
             .take()
             .ok_or_else(|| std::io::Error::other("no stdin"))?;
@@ -268,6 +270,19 @@ impl ExternalAgent {
             .stdout
             .take()
             .ok_or_else(|| std::io::Error::other("no stdout"))?;
+        // Blocking pipe writes live on one owned worker, never on the timed
+        // decision thread. Both request and completion queues have fixed capacity.
+        let (input, requests) = mpsc::sync_channel::<String>(1);
+        let (completed, written) = mpsc::sync_channel(1);
+        std::thread::spawn(move || {
+            while let Ok(line) = requests.recv() {
+                let result = writeln!(stdin, "{line}").and_then(|()| stdin.flush());
+                let failed = result.is_err();
+                if completed.send(result).is_err() || failed {
+                    break;
+                }
+            }
+        });
         let (tx, lines) = mpsc::channel();
         std::thread::spawn(move || {
             let mut reader = BufReader::new(stdout);
@@ -292,8 +307,10 @@ impl ExternalAgent {
         });
         Ok(Self {
             child,
-            stdin,
+            input,
+            written,
             lines,
+            timed_out: false,
             timeout: STDIO_DECIDE_TIMEOUT,
             breaker: CircuitBreaker::new(DEFAULT_BREAKER_THRESHOLD),
             health: TransportHealth::default(),
@@ -311,12 +328,14 @@ impl ExternalAgent {
     /// exit status instead of burning classification on the symptom. The pipe
     /// teardown can precede the observable exit by a beat, so the check gets
     /// the same short grace the other exit paths use.
-    fn stdin_error(&mut self, error: &std::io::Error) -> DecideError {
-        let deadline = Instant::now() + EXIT_DRAIN_GRACE;
+    fn stdin_error(&mut self, error: &std::io::Error, request_deadline: Instant) -> DecideError {
+        let deadline = (Instant::now() + EXIT_DRAIN_GRACE).min(request_deadline);
         loop {
             match self.child.try_wait() {
                 Ok(Some(status)) => return exited_fault(status),
-                Ok(None) if Instant::now() < deadline => std::thread::sleep(DEAD_CHILD_POLL),
+                Ok(None) if Instant::now() < deadline => std::thread::sleep(
+                    DEAD_CHILD_POLL.min(deadline.saturating_duration_since(Instant::now())),
+                ),
                 _ => return classify_io(error),
             }
         }
@@ -332,10 +351,13 @@ impl ExternalAgent {
         &mut self,
         status: std::process::ExitStatus,
         obs: &MarketObservation,
+        request_deadline: Instant,
     ) -> Result<Decision, DecideError> {
-        let deadline = Instant::now() + EXIT_DRAIN_GRACE;
+        let deadline = (Instant::now() + EXIT_DRAIN_GRACE).min(request_deadline);
         loop {
-            match self.lines.recv_timeout(DEAD_CHILD_POLL) {
+            match self.lines.recv_timeout(
+                DEAD_CHILD_POLL.min(deadline.saturating_duration_since(Instant::now())),
+            ) {
                 Ok(Ok(Wire::Line(resp))) => return parse_decision(&resp, obs),
                 Ok(Ok(Wire::Oversized)) => return Err(oversized_fault()),
                 Ok(Err(_)) => return Err(DecideError::Transport),
@@ -355,15 +377,32 @@ impl ExternalAgent {
     /// exit it is, immediately, instead of spending the full budget to call a
     /// startup crash a timeout.
     fn decide_once(&mut self, obs: &MarketObservation) -> Result<Decision, DecideError> {
+        if self.timed_out {
+            return Err(DecideError::Timeout);
+        }
+        let deadline = Instant::now()
+            .checked_add(self.timeout)
+            .ok_or(DecideError::Transport)?;
         let line = serde_json::to_string(obs).map_err(|_| DecideError::Transport)?;
-        if let Err(error) = writeln!(self.stdin, "{line}") {
-            return Err(self.stdin_error(&error));
+        if Instant::now() >= deadline {
+            return Err(DecideError::Timeout);
         }
-        if let Err(error) = self.stdin.flush() {
-            return Err(self.stdin_error(&error));
+        self.input
+            .try_send(line)
+            .map_err(|_| DecideError::Transport)?;
+        match self
+            .written
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => return Err(self.stdin_error(&error, deadline)),
+            Err(RecvTimeoutError::Timeout) => return Err(DecideError::Timeout),
+            Err(RecvTimeoutError::Disconnected) => return Err(DecideError::Transport),
         }
-        let deadline = Instant::now() + self.timeout;
         loop {
+            if Instant::now() >= deadline {
+                return Err(DecideError::Timeout);
+            }
             let slice = DEAD_CHILD_POLL.min(deadline.saturating_duration_since(Instant::now()));
             match self.lines.recv_timeout(slice) {
                 Ok(Ok(Wire::Line(resp))) => return parse_decision(&resp, obs),
@@ -375,20 +414,21 @@ impl ExternalAgent {
                     // `try_wait` can observe the exit — so give the exit the
                     // same short grace the drain gets. A child that merely
                     // closed stdout while still running stays a transport break.
-                    let deadline = Instant::now() + EXIT_DRAIN_GRACE;
+                    let deadline = (Instant::now() + EXIT_DRAIN_GRACE).min(deadline);
                     loop {
                         match self.child.try_wait() {
                             Ok(Some(status)) => return Err(exited_fault(status)),
-                            Ok(None) if Instant::now() < deadline => {
-                                std::thread::sleep(DEAD_CHILD_POLL)
-                            }
+                            Ok(None) if Instant::now() < deadline => std::thread::sleep(
+                                DEAD_CHILD_POLL
+                                    .min(deadline.saturating_duration_since(Instant::now())),
+                            ),
                             _ => return Err(DecideError::Transport),
                         }
                     }
                 }
                 Err(RecvTimeoutError::Timeout) => {
                     if let Ok(Some(status)) = self.child.try_wait() {
-                        return self.drain_after_exit(status, obs);
+                        return self.drain_after_exit(status, obs, deadline);
                     }
                     if Instant::now() >= deadline {
                         return Err(DecideError::Timeout);
@@ -445,6 +485,14 @@ impl Agent for ExternalAgent {
                 d
             }
             Err(e) => {
+                if e == DecideError::Timeout {
+                    // Never match a late response to a later observation. The
+                    // harness may retry only by constructing a fresh process.
+                    self.timed_out = true;
+                    #[cfg(unix)]
+                    signal_group(self.child.id(), "KILL");
+                    let _ = self.child.kill();
+                }
                 let tripped = self.breaker.record_fault();
                 self.health.record(e, tripped);
                 error_hold("external agent transport fault → hold")
@@ -694,6 +742,40 @@ mod tests {
 
         let mut reader = std::io::Cursor::new(Vec::new());
         assert!(matches!(read_wire(&mut reader), Ok(None)), "empty is EOF");
+    }
+
+    #[test]
+    fn the_decision_deadline_includes_a_child_that_never_reads_stdin() {
+        #[cfg(windows)]
+        let spawned = ExternalAgent::spawn(
+            "powershell",
+            &["-NoProfile", "-Command", "Start-Sleep -Seconds 3"],
+        );
+        #[cfg(not(windows))]
+        let spawned = ExternalAgent::spawn("sh", &["-c", "sleep 3"]);
+        let mut agent = spawned
+            .unwrap()
+            .with_decide_timeout(Duration::from_millis(100));
+        let mut observation = one_symbol_observation();
+        observation.symbols[0].close_history = vec![100.0; 100_000];
+        assert!(
+            serde_json::to_string(&observation).unwrap().len() > 128 * 1024,
+            "a tiny observation may fit in the pipe and cannot exercise a blocked write"
+        );
+        let start = Instant::now();
+        agent.decide(&observation);
+        assert_eq!(agent.health().last_error, Some(DecideError::Timeout));
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "the finite three-second fixture must not decide the request deadline"
+        );
+        let start = Instant::now();
+        agent.decide(&observation);
+        assert_eq!(agent.health().last_error, Some(DecideError::Timeout));
+        assert!(
+            start.elapsed() < Duration::from_secs(1),
+            "a timed-out pipe cannot accept a new observation with a stale response pending"
+        );
     }
 
     /// An oversized line is the entrant's fault, not the harness's, so it must
@@ -996,7 +1078,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(100));
             let _ = tx.send(Ok(Wire::Line(r#"{"orders":[]}"#.to_string())));
         });
-        let drained = agent.drain_after_exit(status, &obs);
+        let drained = agent.drain_after_exit(status, &obs, Instant::now() + EXIT_DRAIN_GRACE);
         sender.join().expect("sender thread must finish");
         assert!(
             drained.is_ok(),
@@ -1008,7 +1090,9 @@ mod tests {
         drop(tx);
         let mut agent = make_agent(rx);
         assert_eq!(
-            agent.drain_after_exit(status, &obs).unwrap_err(),
+            agent
+                .drain_after_exit(status, &obs, Instant::now() + EXIT_DRAIN_GRACE)
+                .unwrap_err(),
             DecideError::Exited(Some(7)),
             "an exit with nothing pending must carry its status"
         );
