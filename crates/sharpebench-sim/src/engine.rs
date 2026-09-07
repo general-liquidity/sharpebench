@@ -674,6 +674,11 @@ mod tests {
         };
         let plain = run_backtest(&base, &mut BuyAndHold, w, 0, no_costs);
         let div = run_backtest(&paying, &mut BuyAndHold, w, 0, no_costs);
+        let masked = run_backtest(&paying.masked(), &mut BuyAndHold, w, 0, no_costs);
+        assert_eq!(
+            div.returns, masked.returns,
+            "identifier masking must preserve the entire total-return replay"
+        );
         let sum_plain: f64 = plain.returns.iter().sum();
         let sum_div: f64 = div.returns.iter().sum();
         assert!(
