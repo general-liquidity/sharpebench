@@ -14,6 +14,7 @@
 //! top performer). Borrowed from CapitalBench's briefing-construction rules.
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// What a briefing row asserts: a plain fact, an explicit uncertainty/risk, or a
 /// counterpoint to the prevailing framing. A neutral briefing balances facts with
@@ -82,12 +83,13 @@ pub struct Briefing {
 
 /// Neutrality thresholds the briefing must satisfy.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
 pub struct BriefingPolicy {
     /// Max rows any single asset-area may receive (caps attention concentration).
     pub max_rows_per_area: usize,
     /// Each area with stated facts must also state at least one uncertainty/counterpoint.
     pub require_counterbalance: bool,
-    /// The trailing-return table must not be performance-sorted.
+    /// A present trailing-return table must declare content-independent option order.
     pub require_option_order_sort: bool,
     /// Flag an area whose share of total rows exceeds this fraction (salience tilt).
     pub max_area_salience: f64,
@@ -108,6 +110,10 @@ impl Default for BriefingPolicy {
 #[derive(Clone, Debug, Serialize, PartialEq)]
 #[serde(tag = "violation", rename_all = "snake_case")]
 pub enum BriefingViolation {
+    /// A section has no area identity after whitespace normalization.
+    MissingAssetArea { section_index: usize },
+    /// The salience threshold is nonfinite or outside the closed unit interval.
+    InvalidSalienceThreshold,
     /// An asset-area received more rows than the cap.
     AssetAreaOverweight {
         asset_area: String,
@@ -118,6 +124,8 @@ pub enum BriefingViolation {
     MissingCounterbalance { asset_area: String },
     /// The trailing-return table is sorted by performance (a leading frame).
     PerformanceSortedTable,
+    /// A table does not declare the ordering required by the policy.
+    UnspecifiedTableOrdering,
     /// One asset-area dominates the briefing's attention beyond the salience cap.
     SalienceImbalance { asset_area: String, salience: f64 },
 }
@@ -140,49 +148,70 @@ pub struct BriefingAudit {
     pub salience: Vec<AreaSalience>,
 }
 
-/// Audit a briefing for input-side neutrality. Deterministic: section order is
-/// preserved, so the same briefing always yields the same report.
+/// Audit structural briefing rules, not semantic neutrality or truth of the rows.
+///
+/// Area identities collapse Unicode whitespace and use Unicode lowercase (not
+/// semantic alias resolution or full Unicode normalization). Repeated sections
+/// are aggregated, without deduplicating repeated rows: repetition still consumes
+/// attention. Reports use sorted normalized identities, independent of section order.
+/// Table ordering is a checked declaration, not independent proof of how it was chosen.
 pub fn audit_briefing(briefing: &Briefing, policy: &BriefingPolicy) -> BriefingAudit {
     let mut violations = Vec::new();
+    if !policy.max_area_salience.is_finite() || !(0.0..=1.0).contains(&policy.max_area_salience) {
+        violations.push(BriefingViolation::InvalidSalienceThreshold);
+    }
     let total_rows: usize = briefing.sections.iter().map(|s| s.rows.len()).sum();
-
-    let mut salience = Vec::with_capacity(briefing.sections.len());
-    for section in &briefing.sections {
-        let n = section.rows.len();
+    let mut areas: BTreeMap<String, Vec<&BriefingRow>> = BTreeMap::new();
+    for (section_index, section) in briefing.sections.iter().enumerate() {
+        let area = section
+            .asset_area
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase();
+        if area.is_empty() {
+            violations.push(BriefingViolation::MissingAssetArea { section_index });
+        }
+        areas.entry(area).or_default().extend(&section.rows);
+    }
+    let mut salience = Vec::with_capacity(areas.len());
+    for (asset_area, rows) in areas {
+        let n = rows.len();
         let share = if total_rows == 0 {
             0.0
         } else {
             n as f64 / total_rows as f64
         };
         salience.push(AreaSalience {
-            asset_area: section.asset_area.clone(),
+            asset_area: asset_area.clone(),
             row_count: n,
             salience: share,
         });
 
         if n > policy.max_rows_per_area {
             violations.push(BriefingViolation::AssetAreaOverweight {
-                asset_area: section.asset_area.clone(),
+                asset_area: asset_area.clone(),
                 rows: n,
                 cap: policy.max_rows_per_area,
             });
         }
 
         if policy.require_counterbalance {
-            let has_fact = section.rows.iter().any(|r| r.kind == RowKind::Fact);
-            let has_balance = section.rows.iter().any(|r| r.kind.is_counterbalance());
+            let has_fact = rows.iter().any(|r| r.kind == RowKind::Fact);
+            let has_balance = rows.iter().any(|r| r.kind.is_counterbalance());
             if has_fact && !has_balance {
                 violations.push(BriefingViolation::MissingCounterbalance {
-                    asset_area: section.asset_area.clone(),
+                    asset_area: asset_area.clone(),
                 });
             }
         }
 
         // A single area carrying more than its salience cap of total attention is a
         // tilt even when it is under the per-area row cap (e.g. a small briefing).
-        if briefing.sections.len() > 1 && share > policy.max_area_salience {
+        // A genuinely single-area briefing needs an explicit cap of 1.0.
+        if share > policy.max_area_salience {
             violations.push(BriefingViolation::SalienceImbalance {
-                asset_area: section.asset_area.clone(),
+                asset_area,
                 salience: share,
             });
         }
@@ -190,8 +219,14 @@ pub fn audit_briefing(briefing: &Briefing, policy: &BriefingPolicy) -> BriefingA
 
     if policy.require_option_order_sort {
         if let Some(table) = &briefing.return_table {
-            if table.ordering == TableOrdering::Performance {
-                violations.push(BriefingViolation::PerformanceSortedTable);
+            match table.ordering {
+                TableOrdering::Performance => {
+                    violations.push(BriefingViolation::PerformanceSortedTable)
+                }
+                TableOrdering::Unspecified => {
+                    violations.push(BriefingViolation::UnspecifiedTableOrdering)
+                }
+                TableOrdering::OptionOrder => (),
             }
         }
     }
@@ -338,5 +373,154 @@ mod tests {
         let audit = audit_briefing(&Briefing::default(), &BriefingPolicy::default());
         assert!(audit.balanced);
         assert!(audit.salience.is_empty());
+    }
+
+    #[test]
+    fn splitting_one_normalized_area_cannot_evade_caps() {
+        let briefing = Briefing {
+            sections: vec![
+                balanced_section(" Energy "),
+                balanced_section("ENERGY"),
+                balanced_section("energy"),
+                balanced_section("rates"),
+            ],
+            return_table: None,
+        };
+        let audit = audit_briefing(&briefing, &BriefingPolicy::default());
+        assert!(!audit.balanced);
+        assert_eq!(audit.salience.len(), 2);
+        assert_eq!(
+            audit.salience[0],
+            AreaSalience {
+                asset_area: "energy".into(),
+                row_count: 6,
+                salience: 0.75,
+            }
+        );
+        assert!(audit
+            .violations
+            .contains(&BriefingViolation::AssetAreaOverweight {
+                asset_area: "energy".into(),
+                rows: 6,
+                cap: 5,
+            }));
+        assert!(audit
+            .violations
+            .contains(&BriefingViolation::SalienceImbalance {
+                asset_area: "energy".into(),
+                salience: 0.75,
+            }));
+    }
+
+    #[test]
+    fn normalization_and_section_order_do_not_change_area_accounting() {
+        let mut briefing = Briefing {
+            sections: vec![
+                balanced_section(" Fixed\t Income "),
+                balanced_section("fixed income"),
+                balanced_section("\u{00a0}ÉQUITIES"),
+            ],
+            return_table: None,
+        };
+        let first = audit_briefing(&briefing, &BriefingPolicy::default());
+        briefing.sections.reverse();
+        let second = audit_briefing(&briefing, &BriefingPolicy::default());
+        assert_eq!(first.salience, second.salience);
+        assert_eq!(first.violations, second.violations);
+        assert_eq!(
+            first
+                .salience
+                .iter()
+                .map(|a| a.asset_area.as_str())
+                .collect::<Vec<_>>(),
+            vec!["fixed income", "équities"]
+        );
+    }
+
+    #[test]
+    fn counterbalance_can_be_in_another_section_of_the_same_area() {
+        let briefing = Briefing {
+            sections: vec![
+                BriefingSection {
+                    asset_area: "energy".into(),
+                    rows: vec![row("fact", RowKind::Fact)],
+                },
+                BriefingSection {
+                    asset_area: "ENERGY".into(),
+                    rows: vec![row("risk", RowKind::Uncertainty)],
+                },
+                balanced_section("rates"),
+            ],
+            return_table: None,
+        };
+        assert!(audit_briefing(&briefing, &BriefingPolicy::default()).balanced);
+    }
+
+    #[test]
+    fn a_single_area_still_obeys_the_declared_salience_cap() {
+        let briefing = Briefing {
+            sections: vec![balanced_section("energy")],
+            return_table: None,
+        };
+        let mut policy = BriefingPolicy::default();
+        assert!(!audit_briefing(&briefing, &policy).balanced);
+        policy.max_area_salience = 1.0;
+        assert!(audit_briefing(&briefing, &policy).balanced);
+    }
+
+    #[test]
+    fn an_empty_area_identity_cannot_be_certified_balanced() {
+        let briefing = Briefing {
+            sections: vec![balanced_section(" \t"), balanced_section("rates")],
+            return_table: None,
+        };
+        let audit = audit_briefing(&briefing, &BriefingPolicy::default());
+        assert!(!audit.balanced);
+        assert!(serde_json::to_value(&audit).unwrap()["violations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v["violation"] == "missing_asset_area"));
+    }
+
+    #[test]
+    fn unspecified_table_order_is_not_verified_option_order() {
+        let briefing = Briefing {
+            sections: vec![balanced_section("energy"), balanced_section("rates")],
+            return_table: Some(ReturnTable {
+                ordering: TableOrdering::Unspecified,
+                entries: vec![],
+            }),
+        };
+        let mut policy = BriefingPolicy::default();
+        assert!(!audit_briefing(&briefing, &policy).balanced);
+        policy.require_option_order_sort = false;
+        assert!(audit_briefing(&briefing, &policy).balanced);
+    }
+
+    #[test]
+    fn invalid_salience_threshold_is_a_serializable_violation() {
+        for threshold in [f64::NAN, f64::INFINITY, -0.01, 1.01] {
+            let policy = BriefingPolicy {
+                max_area_salience: threshold,
+                ..BriefingPolicy::default()
+            };
+            let audit = audit_briefing(&Briefing::default(), &policy);
+            assert!(!audit.balanced);
+            let value = serde_json::to_value(audit).unwrap();
+            assert!(value["violations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|v| v["violation"] == "invalid_salience_threshold"));
+        }
+    }
+
+    #[test]
+    fn partial_policy_json_retains_all_other_defaults() {
+        let policy: BriefingPolicy = serde_json::from_str(r#"{"max_area_salience":1.0}"#).unwrap();
+        assert_eq!(policy.max_area_salience, 1.0);
+        assert_eq!(policy.max_rows_per_area, 5);
+        assert!(policy.require_option_order_sort && policy.require_counterbalance);
     }
 }
