@@ -48,6 +48,7 @@ These are implementation audits and design ledgers, not user instructions.
 | Topic | Document |
 |---|---|
 | Cross-benchmark architecture review | [65-benchmark audit](BENCHMARK_ARCHITECTURE_AUDIT.md) |
+| Suite audit and complete repair checklist | [7 September 2026 checkpoint](audits/2026-09-07/README.md) |
 
 Package-specific READMEs remain beside the Rust crates, Python distribution,
 npm package, MCP server, and reference agent so registry consumers do not need
