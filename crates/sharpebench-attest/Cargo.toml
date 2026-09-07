@@ -12,6 +12,9 @@ categories = ["cryptography", "science"]
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10"
 hmac = "0.12"
+# Versioned held-out seals use an AEAD, not a hand-built repeated keystream.
+# Entropy is obtained through the existing target-gated getrandom dependency.
+aes-gcm-siv = { version = "0.12.1", default-features = false, features = ["aes", "alloc", "zeroize"] }
 # Public verifiability of the result chain (see `public.rs`). Pure Rust, no
 # unsafe in its public surface, and Ed25519 is deterministic by construction
 # (RFC 8032) so it keeps the kernel reproducible. Pinned to the 2.x line so it
