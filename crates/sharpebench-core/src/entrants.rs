@@ -338,7 +338,7 @@ pub enum GateStatus {
     Passthrough,
     /// The signal is parked, waiting for confirmation.
     Pending,
-    /// A parked signal was dropped because a fresh signal pointed the other way.
+    /// A signal was dropped because of reversal or the waiting limit.
     Cancelled,
 }
 
@@ -374,10 +374,17 @@ pub struct GateDecision {
 /// **Parameters.** `fast_ma` and `slow_ma` are pre-computed at the current bar;
 /// a long is confirmed when `fast_ma >= slow_ma` and a short when
 /// `fast_ma <= slow_ma`. `max_wait` bounds how long a signal may sit parked; a
-/// signal that waits longer is cancelled rather than filled on stale conviction.
+/// signal is cancelled at the wait limit rather than filled on stale conviction.
+/// Parking counts as wait 1; each later call advances that count before checking
+/// expiry. A zero or one-bar limit does not permit parking, but a fresh signal
+/// that is already confirmed can still execute immediately.
 ///
 /// **State.** Takes the previous [`GateState`] and returns the next one. A
-/// parked signal is cancelled early if a fresh signal points the other way.
+/// parked signal is cancelled if a fresh signal points the other way. Reversal
+/// or expiry takes precedence over confirmation of the old signal, including
+/// equal moving averages. Cancellation clears the state and consumes this bar's
+/// raw signal; it does not open the opposite position in the same call. A fresh
+/// same-direction signal does not restart the parked signal's clock.
 pub fn signal_gate(
     prev: GateState,
     raw: Side,
@@ -391,8 +398,22 @@ pub fn signal_gate(
         Side::Short => fast_ma <= slow_ma,
         Side::None => false,
     };
+    let cancelled = || {
+        (
+            GateDecision {
+                execute: Side::None,
+                status: GateStatus::Cancelled,
+                benefit: None,
+            },
+            GateState::default(),
+        )
+    };
 
     if prev.pending != Side::None {
+        let waited = prev.waited.saturating_add(1);
+        if (raw != Side::None && raw != prev.pending) || waited >= max_wait {
+            return cancelled();
+        }
         if confirms(prev.pending) {
             let benefit = if prev.pending_price == 0.0 {
                 0.0
@@ -406,27 +427,6 @@ pub fn signal_gate(
                     execute: prev.pending,
                     status: GateStatus::ExecutedAfterConfirmation,
                     benefit: Some(benefit),
-                },
-                GateState::default(),
-            );
-        }
-        if raw != Side::None && raw != prev.pending {
-            return (
-                GateDecision {
-                    execute: Side::None,
-                    status: GateStatus::Cancelled,
-                    benefit: None,
-                },
-                GateState::default(),
-            );
-        }
-        let waited = prev.waited + 1;
-        if waited >= max_wait {
-            return (
-                GateDecision {
-                    execute: Side::None,
-                    status: GateStatus::Cancelled,
-                    benefit: None,
                 },
                 GateState::default(),
             );
@@ -463,6 +463,9 @@ pub fn signal_gate(
         );
     }
 
+    if max_wait <= 1 {
+        return cancelled();
+    }
     (
         GateDecision {
             execute: Side::None,
@@ -1175,6 +1178,87 @@ mod tests {
         assert_eq!(d2.status, GateStatus::Cancelled);
         assert_eq!(d2.execute, Side::None);
         assert_eq!(s2, GateState::default());
+    }
+
+    #[test]
+    fn gate_reversal_preempts_confirmation_even_when_both_mas_agree() {
+        for (pending, raw, fast) in [
+            (Side::Long, Side::Short, 11.0),
+            (Side::Short, Side::Long, 9.0),
+            (Side::Long, Side::Short, 10.0),
+        ] {
+            let state = GateState {
+                pending,
+                pending_price: 100.0,
+                waited: 1,
+            };
+            let (decision, next) = signal_gate(state, raw, fast, 10.0, 98.0, 10);
+            assert_eq!(decision.status, GateStatus::Cancelled);
+            assert_eq!(
+                decision.execute,
+                Side::None,
+                "obsolete direction must not execute"
+            );
+            assert_eq!(decision.benefit, None);
+            assert_eq!(next, GateState::default());
+        }
+    }
+
+    #[test]
+    fn gate_expiry_preempts_confirmation_at_the_exact_wait_boundary() {
+        let state = GateState {
+            pending: Side::Long,
+            pending_price: 100.0,
+            waited: 1,
+        };
+        let (before, _) = signal_gate(state, Side::None, 11.0, 10.0, 98.0, 3);
+        assert_eq!(before.status, GateStatus::ExecutedAfterConfirmation);
+        assert_eq!(before.execute, Side::Long);
+        let (at, next) = signal_gate(
+            GateState { waited: 2, ..state },
+            Side::None,
+            11.0,
+            10.0,
+            98.0,
+            3,
+        );
+        assert_eq!(at.status, GateStatus::Cancelled);
+        assert_eq!(at.execute, Side::None);
+        assert_eq!(at.benefit, None);
+        assert_eq!(next, GateState::default());
+    }
+
+    #[test]
+    fn gate_zero_or_one_wait_never_parks_an_unconfirmed_signal() {
+        for max_wait in [0, 1] {
+            let (decision, next) =
+                signal_gate(GateState::default(), Side::Long, 9.0, 10.0, 100.0, max_wait);
+            assert_eq!(decision.status, GateStatus::Cancelled);
+            assert_eq!(decision.execute, Side::None);
+            assert_eq!(next, GateState::default());
+            let (immediate, _) = signal_gate(
+                GateState::default(),
+                Side::Long,
+                11.0,
+                10.0,
+                100.0,
+                max_wait,
+            );
+            assert_eq!(immediate.status, GateStatus::ExecutedImmediately);
+            assert_eq!(immediate.execute, Side::Long);
+        }
+    }
+
+    #[test]
+    fn gate_wait_counter_cannot_wrap_and_renew_an_expired_signal() {
+        let state = GateState {
+            pending: Side::Long,
+            pending_price: 100.0,
+            waited: u32::MAX,
+        };
+        let (decision, next) = signal_gate(state, Side::None, 9.0, 10.0, 100.0, u32::MAX);
+        assert_eq!(decision.status, GateStatus::Cancelled);
+        assert_eq!(next, GateState::default());
     }
 
     #[test]
