@@ -109,7 +109,9 @@ fn parse_honesty_config(json: &str) -> Result<sharpebench_edge::HonestyConfig, S
     let n_trials = v
         .get("n_trials")
         .and_then(serde_json::Value::as_u64)
-        .ok_or("missing or non-integer field: n_trials")? as u32;
+        .and_then(|n| u32::try_from(n).ok())
+        .filter(|&n| n > 0)
+        .ok_or("n_trials must be an integer in 1..=4294967295")?;
     let trials_sr_std = match v.get("trials_sr_std") {
         None | Some(serde_json::Value::Null) => None,
         Some(x) => Some(x.as_f64().ok_or("non-numeric field: trials_sr_std")?),
@@ -256,10 +258,14 @@ pub fn decompose_uncertainty_json(input_json: &str) -> Result<String, String> {
             .as_array()
             .ok_or("outcomes must be an array")?
             .iter()
-            .map(|o| match o {
+            .enumerate()
+            .map(|(index, o)| match o {
                 serde_json::Value::Bool(b) => Ok(*b),
-                serde_json::Value::Number(n) => Ok(n.as_f64().unwrap_or(0.0) != 0.0),
-                _ => Err("outcomes entries must be booleans or 0/1 numbers".to_string()),
+                serde_json::Value::Number(n) if n.as_f64() == Some(0.0) => Ok(false),
+                serde_json::Value::Number(n) if n.as_f64() == Some(1.0) => Ok(true),
+                _ => Err(format!(
+                    "outcomes[{index}] must be a boolean or exact 0/1 number"
+                )),
             })
             .collect::<Result<_, _>>()?,
     };
@@ -587,6 +593,37 @@ mod tests {
     }
 
     #[test]
+    fn honesty_trial_count_rejects_narrowing_and_zero_on_both_paths() {
+        for count in [
+            "0",
+            "4294967296",
+            "4294967297",
+            "18446744073709551615",
+            "-1",
+            "1.5",
+            "true",
+            "\"10\"",
+        ] {
+            let config = format!("{{\"n_trials\":{count}}}");
+            let lite = is_my_sharpe_real_json("[0.01,0.02,-0.01]", &config);
+            let full = is_my_sharpe_real_full_json("[[0.01,0.02,-0.01]]", 0, &config);
+            assert!(lite.unwrap_err().contains("n_trials"), "LITE: {count}");
+            assert!(full.unwrap_err().contains("n_trials"), "FULL: {count}");
+        }
+        assert_eq!(
+            parse_honesty_config(r#"{"n_trials":1}"#).unwrap().n_trials,
+            1
+        );
+        assert_eq!(
+            parse_honesty_config(r#"{"n_trials":4294967295}"#)
+                .unwrap()
+                .n_trials,
+            u32::MAX,
+            "upper boundary remains valid and is preserved exactly"
+        );
+    }
+
+    #[test]
     fn is_my_sharpe_real_full_json_runs_the_family() {
         let field: Vec<Vec<f64>> = (0..5)
             .map(|j| {
@@ -678,6 +715,18 @@ mod tests {
         assert!(decompose_uncertainty_json(r#"{"outcomes":[1,0,1]}"#).is_ok());
         assert!(decompose_uncertainty_json("{}").is_ok());
         assert!(decompose_uncertainty_json("not json").is_err());
+    }
+
+    #[test]
+    fn uncertainty_refuses_nonbinary_numbers_at_their_input_index() {
+        for value in ["-1", "2", "0.3", "1e100", "null", "\"true\""] {
+            let input = format!("{{\"outcomes\":[0,{value},1]}}");
+            let err = decompose_uncertainty_json(&input).unwrap_err();
+            assert!(err.contains("outcomes[1]"), "wrong failure: {err}");
+        }
+        let booleans = decompose_uncertainty_json(r#"{"outcomes":[true,false,true]}"#).unwrap();
+        let numbers = decompose_uncertainty_json(r#"{"outcomes":[1.0,-0.0,1]}"#).unwrap();
+        assert_eq!(booleans, numbers, "exact binary encoding remains accepted");
     }
 
     #[test]

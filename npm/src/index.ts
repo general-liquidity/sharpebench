@@ -112,6 +112,9 @@ export function canary(seed: string): Canary {
 
 /** Map camelCase {@link HonestyOpts} → the snake_case `HonestyConfig` JSON the kernel reads. */
 function honestyConfigJson(opts: HonestyOpts): string {
+  if (!Number.isSafeInteger(opts.nTrials) || opts.nTrials < 1 || opts.nTrials > 0xffffffff) {
+    throw new RangeError("nTrials must be an integer in 1..=4294967295");
+  }
   const cfg: Record<string, unknown> = { n_trials: opts.nTrials };
   if (opts.trialsSrStd !== undefined) cfg.trials_sr_std = opts.trialsSrStd;
   if (opts.confidence !== undefined) cfg.confidence = opts.confidence;
