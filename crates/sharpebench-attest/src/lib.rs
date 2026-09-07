@@ -36,8 +36,8 @@ pub use public::{
     verify_public_chain_with, PublicChain, SigningKey, VerifyingKey, ED25519_SCHEME,
 };
 pub use sealed::{
-    commit_dataset, content_hash, open_dataset, seal_dataset, verify_dataset, DatasetCommitment,
-    SealedDataset,
+    commit_dataset, content_hash, open_dataset, seal_dataset, seal_dataset_with_nonce,
+    verify_dataset, DatasetCommitment, SealError, SealedDataset, SEALED_DATASET_SCHEME,
 };
 
 use std::fmt::Write as _;
@@ -157,9 +157,10 @@ mod hex_boundary_tests {
         for invalid in ["€€", "a€", "🦀", "０１", "é", "00gg", "a"] {
             assert_eq!(from_hex(invalid), None, "{invalid}");
             assert!(VerifyingKey::from_hex(invalid).is_none());
-            let mut sealed = seal_dataset(b"dataset", b"key", "canary");
+            let mut sealed =
+                seal_dataset_with_nonce(b"dataset", &[7; 32], "canary", [1; 12]).unwrap();
             sealed.ciphertext = invalid.into();
-            assert!(open_dataset(&sealed, b"key").is_none());
+            assert!(open_dataset(&sealed, &[7; 32]).is_none());
         }
         assert_eq!(from_hex("00aAfF"), Some(vec![0, 170, 255]));
         assert_eq!(from_hex(""), Some(vec![]));

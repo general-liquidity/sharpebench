@@ -13,6 +13,7 @@ and links the commits it was built from.
 ## [Unreleased]
 
 ### Breaking
+- attest: `seal_dataset` now returns `Result<SealedDataset, SealError>` and requires a 32-byte random key. V2 uses AES-256-GCM-SIV with fresh OS nonces and authenticated commitment metadata; wasm callers can supply host-generated nonces through `seal_dataset_with_nonce`. Unversioned V1 seals are refused because their reused keystream can expose other plaintexts under the same key. Recover trusted originals privately and reseal with fresh keys; do not infer that this reverses prior exposure. See the [sealing migration guide](docs/book/src/sealed-datasets.md).
 - stats: `bootstrap_pvalue`, `benjamini_hochberg` and `fdr_verdict` now return `Result<_, StatisticalError>` in Rust. Invalid data or parameters are not p-values or discovery masks. Propagate the error instead of substituting a favorable result. Python raises `ValueError` for these inputs; valid-call return shapes are unchanged. Composite scores expose an optional `bootstrap_error` and cannot become eligible when it is present; `bootstrap_p = 1` in such a row is a conservative sentinel, not an estimate.
 
 ### Fixed
