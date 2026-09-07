@@ -90,7 +90,11 @@ impl Dataset {
     /// implementation and toolchain; CI checks two committed Rust goldens on
     /// Linux, macOS, and Windows.
     ///
-    /// Closes must be finite and strictly positive. Cash dividends must be finite
+    /// Closes must be finite. Signed/zero raw quotes are preserved, not repaired:
+    /// e.g. the frozen WTI series contains a negative observation. Successful
+    /// parsing does not establish suitability for a positive-price percentage-
+    /// return model; see the dataset's documented domain limitations.
+    /// Cash dividends must be finite
     /// and nonnegative. An absent dividend column declares no dividend adjustment;
     /// when the column is present, every row must supply a valid value (including
     /// an explicit zero for no payment). Duplicate `(date, symbol)` keys and
@@ -133,11 +137,8 @@ impl Dataset {
             let close: f64 = field(close_i)?
                 .parse()
                 .map_err(|_| format!("CSV row {}: non-numeric close", n + 2))?;
-            if !close.is_finite() || close <= 0.0 {
-                return Err(format!(
-                    "CSV row {}: close must be finite and positive",
-                    n + 2
-                ));
+            if !close.is_finite() {
+                return Err(format!("CSV row {}: close must be finite", n + 2));
             }
             let dividend = match div_i {
                 Some(di) => {
@@ -401,7 +402,7 @@ mod tests {
         let d = Dataset::from_csv(valid).unwrap();
         assert_eq!(d.dividend_at("AAA", 0), 1.0);
         assert_eq!(d.dividend_at("AAA", 1), 0.0);
-        for bad in ["NaN", "inf", "-inf", "0", "-1"] {
+        for bad in ["NaN", "inf", "-inf"] {
             let csv = valid.replace("AAA,100,1", &format!("AAA,{bad},1"));
             let error = Dataset::from_csv(&csv).unwrap_err();
             assert!(
@@ -423,6 +424,14 @@ mod tests {
         // invalid cell must not be confused with this intentional omission.
         let price_only = "date,symbol,close\n2025-01-01,AAA,100\n2025-01-02,AAA,101\n";
         assert!(Dataset::from_csv(price_only).unwrap().dividends.is_empty());
+    }
+
+    #[test]
+    fn raw_csv_preserves_signed_quotes_without_implying_return_model_validity() {
+        let csv =
+            "date,symbol,close\n2020-04-17,WTI,18.31\n2020-04-20,WTI,-36.98\n2020-04-21,WTI,0\n";
+        let dataset = Dataset::from_csv(csv).unwrap();
+        assert_eq!(dataset.closes["WTI"], [18.31, -36.98, 0.0]);
     }
 
     #[test]
