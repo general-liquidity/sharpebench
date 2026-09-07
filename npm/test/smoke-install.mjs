@@ -109,6 +109,8 @@ try {
     if (typeof bench.score !== "function") throw new Error("score is not exported");
     const composite = bench.score([{ agent_id: "smoke", runs: [{ returns: [0.01, -0.005, 0.02] }], in_sample_trials: 1 }]);
     if (!Array.isArray(composite) || composite.length !== 1) throw new Error("score(field) must return one row");
+    const declared = bench.score([{ agent_id: "declared", runs: [{ returns: [0.01, 0.02, 0.01] }], declared_mandate: { kind: "relative_to", benchmark_id: "absent" } }]);
+    if (declared[0].declared_passed_k !== false || declared[0].declared_mandate.benchmark_id !== "absent") throw new Error("packed board discarded the declaration");
     const params = { spot: 100, strike: 100, t_years: 1, rate: 0.05, vol: 0, is_call: true };
     const quote = bench.greeks(params);
     if (Math.abs(quote.price - 4.877057549928594) > 1e-10 || quote.greeks.delta !== 1) throw new Error("packed zero-volatility quote is stale");

@@ -7,7 +7,7 @@ export interface Run {
   returns: number[];
   cost?: number;
   confidences?: number[];
-  outcomes?: number[];
+  outcomes?: boolean[];
   trace?: { events: unknown[] };
 }
 
@@ -19,7 +19,15 @@ export interface AgentSubmission {
   in_sample_trials?: number;
   /** Candidate return series from the agent's own selection search. */
   candidates?: number[][];
+  /** A separately reported verdict, never a replacement for host eligibility. */
+  declared_mandate?: DeclaredMandate | null;
 }
+
+export type DeclaredMandate =
+  | { kind: "absolute_return" }
+  | { kind: "relative_to"; benchmark_id: string }
+  | { kind: "outperform_buy_and_hold" }
+  | { kind: "drawdown_capped"; max_per_run_drawdown: number };
 
 /** Scoring configuration. Omit (or pass `{}`) to use the luck-robust defaults. */
 export interface ScoreConfig {
@@ -36,6 +44,10 @@ export interface CompositeScore {
   process_ok: boolean;
   rank_eligible: boolean;
   raw_mean_return: number;
+  declared_mandate?: DeclaredMandate;
+  declared_passed_k?: boolean;
+  declared_mandate_eligible?: boolean;
+  declared_mandate_ordinal?: number;
   [k: string]: unknown;
 }
 
