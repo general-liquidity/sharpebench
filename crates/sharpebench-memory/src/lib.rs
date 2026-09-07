@@ -80,7 +80,9 @@ pub mod poisoning;
 
 pub use confabulation::{confabulation_report, BeliefEvent, ConfabulationReport};
 pub use multisession::{
-    multi_session_report, MultiSessionReport, SessionId, SessionLift, SessionScores,
+    multi_session_report, replicated_multi_session_report, ChainInferenceUnavailable,
+    MemoryChainReplicate, MemoryReplicateReport, MultiSessionReport, ReplicatedMultiSessionReport,
+    SessionId, SessionLift, SessionScores,
 };
 pub use pit::{pit_correctness_report, PitReport};
 pub use poisoning::{poisoning_report, PoisoningReport};
@@ -89,7 +91,7 @@ use sharpebench_stats::{significance::bootstrap_pvalue, stats::mean};
 
 /// Fixed bootstrap parameters so the report is reproducible for a given input.
 /// A benchmark verdict must not move when re-run. Shared with the poisoning and
-/// multi-session legs so every significance test in the crate resamples identically.
+/// poisoning leg. Multi-session inference instead swaps independent whole chains.
 pub(crate) const BOOTSTRAP_SEED: u64 = 0x5EED_A11A_B1E5_0001;
 pub(crate) const BOOTSTRAP_SAMPLES: usize = 4000;
 /// Per-step probability of starting a new block (expected block length = 1/p).
