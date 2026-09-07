@@ -73,6 +73,24 @@ test("isMySharpeReal fails a short series mined over many trials", () => {
   assert.equal(v.verdict, "Fail");
 });
 
+test("honesty wrappers refuse invalid or overflowing search counts", () => {
+  const returns = [0.01, 0.02, -0.01];
+  for (const nTrials of [0, 2 ** 32, 2 ** 32 + 1, Number.MAX_SAFE_INTEGER,
+                         -1, 1.5, NaN, Infinity, "10", true]) {
+    assert.throws(() => sb.isMySharpeReal(returns, { nTrials }), /nTrials|n_trials/);
+    assert.throws(() => sb.isMySharpeRealFull([returns], 0, { nTrials }), /nTrials|n_trials/);
+  }
+  assert.equal(sb.isMySharpeReal(returns, { nTrials: 2 ** 32 - 1 }).nTrials, 2 ** 32 - 1);
+});
+
+test("uncertainty refuses nonbinary outcomes inside the actual wasm module", () => {
+  for (const value of [-1, 2, 0.3, NaN, Infinity, null, "true"]) {
+    assert.throws(() => sb.decomposeUncertainty({outcomes: [0, value, 1]}), /outcomes\[1\]/);
+  }
+  assert.deepEqual(sb.decomposeUncertainty({outcomes: [1, 0, 1]}),
+                   sb.decomposeUncertainty({outcomes: [true, false, true]}));
+});
+
 test("isMySharpeRealFull runs the multiple-testing family + PBO", () => {
   const field = Array.from({ length: 5 }, (_, j) =>
     Array.from(

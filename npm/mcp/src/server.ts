@@ -98,7 +98,7 @@ export function createServer(): McpServer {
     "Answer 'is this Sharpe real, or an artifact of luck and multiple testing?' for a single return series. Deflates the observed Sharpe for n_trials (the search footprint), then returns a Pass/Borderline/Fail verdict with deflated Sharpe, PSR, haircut, MinTRL, and a plain-English explanation. n_trials = 1 is almost always a lie — pass the true number of strategies/configs you tried.",
     {
       returns: z.array(z.number()),
-      n_trials: z.number(),
+      n_trials: z.number().int().min(1).max(0xffffffff),
       trials_sr_std: z.number().optional(),
       confidence: z.number().optional(),
       borderline: z.number().optional(),

@@ -144,7 +144,7 @@ export type Verdict = "Pass" | "Borderline" | "Fail";
  * the caller must think about — `nTrials = 1` is almost always a lie.
  */
 export interface HonestyOpts {
-  /** Number of strategy trials behind this result. REQUIRED. */
+  /** Number of strategy trials behind this result, integer 1..=4294967295. REQUIRED. */
   nTrials: number;
   /** Cross-trial Sharpe dispersion. Omit → estimated at 0.5 and flagged. */
   trialsSrStd?: number;

@@ -46,6 +46,25 @@ test("is_my_sharpe_real tool renders a verdict", async () => {
   await client.close();
 });
 
+test("honesty tool advertises and enforces the kernel search-count bounds", async () => {
+  const client = await connectedClient();
+  try {
+    const { tools } = await client.listTools();
+    const schema = tools.find((tool) => tool.name === "is_my_sharpe_real").inputSchema;
+    assert.equal(schema.properties.n_trials.type, "integer");
+    assert.equal(schema.properties.n_trials.minimum, 1);
+    assert.equal(schema.properties.n_trials.maximum, 2 ** 32 - 1);
+    for (const n_trials of [0, 2 ** 32, 2 ** 32 + 1, 1.5]) {
+      const result = await client.callTool({name: "is_my_sharpe_real",
+        arguments: {returns: [0.01, 0.02, -0.01], n_trials}});
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /n_trials/);
+    }
+  } finally {
+    await client.close();
+  }
+});
+
 test("greeks tool prices an ATM call to ~10.4506", async () => {
   const client = await connectedClient();
   const res = await client.callTool({
