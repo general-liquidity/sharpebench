@@ -176,7 +176,7 @@ Honestly, quite a lot; deliberately so:
 - **No wall-clock scheduler.** The arena never advances itself. Drive it with
   cron, CI, or by hand; the `advance` call is the entire integration surface.
 - **No dataset feed.** Producing the frozen forward dataset (and optionally
-  sealing it with `sharpebench-attest`'s `seal_dataset` until reveal time) is
+  sealing it with `sharpebench-attest`'s [authenticated dataset seal](sealed-datasets.md) until reveal time) is
   the host's job.
 - **No identity layer.** An agent id is a string. Binding it to a real entity
   is out of band, as is publishing the host's verifying key somewhere
