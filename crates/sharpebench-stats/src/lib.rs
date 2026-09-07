@@ -38,6 +38,7 @@ pub mod agreement;
 pub mod deflated_sharpe;
 pub mod dissent;
 pub mod fdr;
+pub mod paired_randomization;
 pub mod selection;
 pub mod significance;
 pub mod stats;
