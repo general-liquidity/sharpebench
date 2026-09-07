@@ -27,7 +27,7 @@ console.log(board[0].agent_id, board[0].deflated_sharpe, board[0].rank_eligible)
 // Run the scorer's built-in checks against its catalogued gaming attacks.
 console.log(selfAudit().all_defended); // true
 
-// Options tail-risk: a short-gamma position a linear Sharpe can't see.
+// Price and local sensitivities for one long European option.
 console.log(greeks({ spot: 100, strike: 100, t_years: 1, rate: 0.05, vol: 0.2, is_call: true }).price);
 ```
 
@@ -40,7 +40,7 @@ console.log(greeks({ spot: 100, strike: 100, t_years: 1, rate: 0.05, vol: 0.2, i
 | `selfAudit()` | `SelfAuditReport`, the benchmark's anti-gaming proof |
 | `auditBriefing(briefing, policy?)` | `BriefingAudit`, an input-side salience-bias audit |
 | `scoreAllocation(trajectory, policy?)` | `AllocationReport`, weight-vector validity plus L1 turnover |
-| `greeks(params)` | `GreeksResult`, Black-Scholes price, Greeks, and tail-selling risk |
+| `greeks(params)` | `GreeksResult`, Black-Scholes price, Greeks, and local exposure flags |
 | `canary(seed)` | `Canary`, a do-not-train contamination tripwire |
 | `isMySharpeReal(returns, opts)` | One-series deflation, PSR, haircut, MinTRL, and verdict |
 | `isMySharpeRealFull(field, winner, opts)` | Fieldwise Reality Check, SPA, step-down, and PBO alongside the one-series verdict |

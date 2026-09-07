@@ -114,8 +114,8 @@ export interface Greeks {
   rho: number;
 }
 export interface GreeksRisk {
-  naked_short_gamma: boolean;
-  unbounded_tail: boolean;
+  /** Local convexity flag, not nakedness or payoff-loss boundedness. */
+  net_short_gamma: boolean;
   short_vega: boolean;
   net_gamma: number;
   net_vega: number;

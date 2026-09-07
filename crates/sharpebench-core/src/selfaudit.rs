@@ -293,7 +293,9 @@ pub fn run_self_audit() -> SelfAuditReport {
     //    honest skilled agent and be ineligible — a linear-return Sharpe alone would
     //    crown it.
     {
-        use crate::greeks::{classify_greeks_risk, portfolio_greeks, GreeksPolicy, Leg};
+        use crate::greeks::{
+            classify_greeks_risk, classify_payoff_tail, portfolio_greeks, GreeksPolicy, Leg,
+        };
         // A naked short call is net-short gamma; confirm the classifier sees it.
         let book = [Leg {
             strike: 100.0,
@@ -302,9 +304,11 @@ pub fn run_self_audit() -> SelfAuditReport {
             qty: -1.0,
         }];
         let risk = classify_greeks_risk(
-            &portfolio_greeks(&book, 100.0, 0.05, 0.2),
+            &portfolio_greeks(&book, 100.0, 0.05, 0.2).expect("finite audit fixture"),
             &GreeksPolicy::default(),
-        );
+        )
+        .expect("valid audit policy");
+        let tail = classify_payoff_tail(&book, 0.0).expect("same-expiry audit fixture");
         let vol_seller = {
             let mut runs: Vec<Run> = (0..5)
                 .map(|_| {
@@ -316,7 +320,7 @@ pub fn run_self_audit() -> SelfAuditReport {
                     )
                 })
                 .collect();
-            if risk.naked_short_gamma {
+            if risk.net_short_gamma && tail.unbounded_loss {
                 runs[0]
                     .trace
                     .events
@@ -329,7 +333,8 @@ pub fn run_self_audit() -> SelfAuditReport {
         let vs = board.iter().find(|s| s.agent_id == "vol-seller").unwrap();
         let hs = board.iter().find(|s| s.agent_id == "honest").unwrap();
         let defended = board[0].agent_id == "honest"
-            && risk.naked_short_gamma
+            && risk.net_short_gamma
+            && tail.unbounded_loss
             && !vs.rank_eligible
             && !vs.process_ok
             && vs.raw_mean_return > hs.raw_mean_return;
@@ -341,7 +346,7 @@ pub fn run_self_audit() -> SelfAuditReport {
             expected_vulnerable: false,
             detail: format!(
                 "vol-seller raw={:.4} eligible={} short_gamma={}; honest ranks #1={}",
-                vs.raw_mean_return, vs.rank_eligible, risk.naked_short_gamma, defended
+                vs.raw_mean_return, vs.rank_eligible, risk.net_short_gamma, defended
             ),
         });
     }

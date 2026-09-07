@@ -37,6 +37,29 @@ test("greeks prices an ATM call to ~10.4506", () => {
   assert.ok(Math.abs(r.price - 10.4506) < 1e-2, `price=${r.price}`);
 });
 
+test("greeks zero-volatility boundaries execute in the shipped wasm", () => {
+  const raw = require("../pkg/sharpebench.js");
+  const params = { spot: 100, strike: 100, t_years: 1, rate: 0.05, vol: 0, is_call: true };
+  const result = sb.greeks(params);
+  assert.ok(Math.abs(result.price - 4.877057549928594) < 1e-10);
+  assert.equal(result.greeks.delta, 1);
+  assert.equal(result.risk.net_short_gamma, false);
+  assert.equal(Object.hasOwn(result.risk, "unbounded_tail"), false);
+  assert.equal(Object.hasOwn(result.risk, "naked_short_gamma"), false);
+  assert.deepEqual(JSON.parse(raw.greeks(JSON.stringify(params))), result);
+  for (const invalid of [
+    { ...params, vol: -0.1 },
+    { ...params, spot: 0 },
+    { ...params, t_years: -1 },
+    { ...params, rate: 0 },
+  ]) {
+    const expected = invalid.rate === 0 ? /Greeks are undefined/ : /invalid options parameter/;
+    assert.throws(() => sb.greeks(invalid), expected);
+    // The raw export must refuse too; a JS-only guard would mask a stale wasm.
+    assert.match(JSON.parse(raw.greeks(JSON.stringify(invalid))).error, expected);
+  }
+});
+
 test("selfAudit reports all attacks defended", () => {
   assert.equal(sb.selfAudit().all_defended, true);
 });

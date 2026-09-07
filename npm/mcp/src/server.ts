@@ -74,7 +74,7 @@ export function createServer(): McpServer {
 
   server.tool(
     "greeks",
-    "Black-Scholes price + Greeks (delta/gamma/theta/vega/rho) + tail-selling (short-gamma/vega) classification for one option.",
+    "Black-Scholes price and local Greeks for one long European option. Invalid inputs and undefined Greeks are refused; local gamma does not establish payoff-loss boundedness.",
     {
       spot: z.number(),
       strike: z.number(),

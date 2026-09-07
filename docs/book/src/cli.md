@@ -18,7 +18,7 @@ sharpebench audit-briefing <briefing.json>            audit a shared briefing fo
 sharpebench canary <seed>                             derive a do-not-train contamination tripwire
 sharpebench sandbox-check <image@sha256:digest>       run the live Docker-boundary acceptance checks
 sharpebench score-allocation <alloc.json>             score a weight-vector trajectory (turnover)
-sharpebench greeks <spot> <strike> <t> <r> <vol> <call|put>   Black-Scholes price + Greeks + tail-risk
+sharpebench greeks <spot> <strike> <t> <r> <vol> <call|put>   Black-Scholes price + Greeks + local exposure
 sharpebench self-update                               update an update-enabled binary in place
 ```
 
@@ -137,7 +137,9 @@ the trial denominator. See [Candidate lineage diagnostics](candidate-lineage.md)
 Standalone analysis surfaces over the kernel: lint a shared briefing for
 input-side salience bias, derive a do-not-train contamination tripwire, score a
 target-allocation weight-vector trajectory (validity + L1 turnover), and price an
-option with its Greeks and short-gamma/vega tail-risk classification.
+one long European option with its Greeks and local gamma/vega exposure flags.
+Invalid inputs and undefined Greek vectors are refused. Local Greeks do not
+establish payoff boundedness; see [Options pricing and payoff risk](options-risk.md).
 
 ## `select`
 
