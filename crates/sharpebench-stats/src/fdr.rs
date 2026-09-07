@@ -29,7 +29,7 @@ use crate::validation::{fdr_inputs, StatisticalError};
 ///
 /// Returns a rejection mask in the caller's *original* order (`true` = discovery).
 /// An empty batch, or `q == 0`, rejects nothing. Nonfinite values or probabilities
-/// outside [0,1] return a typed error. Ties break by original index.
+/// outside `[0,1]` return a typed error. Ties break by original index.
 pub fn benjamini_hochberg(p_values: &[f64], q: f64) -> Result<Vec<bool>, StatisticalError> {
     fdr_inputs(p_values, q)?;
     let m = p_values.len();
