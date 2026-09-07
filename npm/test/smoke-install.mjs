@@ -109,6 +109,14 @@ try {
     if (typeof bench.score !== "function") throw new Error("score is not exported");
     const composite = bench.score([{ agent_id: "smoke", runs: [{ returns: [0.01, -0.005, 0.02] }], in_sample_trials: 1 }]);
     if (!Array.isArray(composite) || composite.length !== 1) throw new Error("score(field) must return one row");
+    const params = { spot: 100, strike: 100, t_years: 1, rate: 0.05, vol: 0, is_call: true };
+    const quote = bench.greeks(params);
+    if (Math.abs(quote.price - 4.877057549928594) > 1e-10 || quote.greeks.delta !== 1) throw new Error("packed zero-volatility quote is stale");
+    if (quote.risk.net_short_gamma !== false || Object.hasOwn(quote.risk, "unbounded_tail")) throw new Error("packed risk contract is stale");
+    let refused = false;
+    try { bench.greeks({ ...params, vol: -0.1 }); }
+    catch (error) { refused = /invalid options parameter: vol/.test(error.message); }
+    if (!refused) throw new Error("packed kernel accepted negative volatility");
     console.log("smoke-install ok: packed tarball installs offline and the wasm kernel answers");
   `;
   const output = execFileSync(process.execPath, ["-e", probe], {

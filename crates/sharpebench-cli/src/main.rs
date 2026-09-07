@@ -244,10 +244,22 @@ fn run_greeks(args: &[String], json: bool) -> ExitCode {
         }
     };
     let (spot, strike, t, r, vol) = (n[0], n[1], n[2], n[3], n[4]);
-    let price = sharpebench_core::bs_price(spot, strike, t, r, vol, is_call);
-    let greeks = sharpebench_core::bs_greeks(spot, strike, t, r, vol, is_call);
-    let risk =
-        sharpebench_core::classify_greeks_risk(&greeks, &sharpebench_core::GreeksPolicy::default());
+    let quote = (|| {
+        let price = sharpebench_core::bs_price(spot, strike, t, r, vol, is_call)?;
+        let greeks = sharpebench_core::bs_greeks(spot, strike, t, r, vol, is_call)?;
+        let risk = sharpebench_core::classify_greeks_risk(
+            &greeks,
+            &sharpebench_core::GreeksPolicy::default(),
+        )?;
+        Ok::<_, sharpebench_core::OptionsError>((price, greeks, risk))
+    })();
+    let (price, greeks, risk) = match quote {
+        Ok(quote) => quote,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::from(2);
+        }
+    };
     if json {
         emit_json(&serde_json::json!({ "price": price, "greeks": greeks, "risk": risk }));
     } else {
@@ -257,8 +269,8 @@ fn run_greeks(args: &[String], json: bool) -> ExitCode {
             greeks.delta, greeks.gamma, greeks.theta, greeks.vega, greeks.rho
         );
         println!(
-            "tail-risk: short_gamma={} unbounded_tail={} short_vega={}",
-            risk.naked_short_gamma, risk.unbounded_tail, risk.short_vega
+            "local exposure: net_short_gamma={} short_vega={}",
+            risk.net_short_gamma, risk.short_vega
         );
     }
     ExitCode::SUCCESS
@@ -641,7 +653,7 @@ fn help() {
         "  sharpebench score-allocation <alloc.json>  score a weight-vector trajectory (validity + turnover)"
     );
     println!(
-        "  sharpebench greeks <spot> <strike> <t> <r> <vol> <call|put>  Black-Scholes price + Greeks + tail-risk"
+        "  sharpebench greeks <spot> <strike> <t> <r> <vol> <call|put>  Black-Scholes price + Greeks + local exposure"
     );
     println!(
         "  sharpebench check <returns.csv> --trials N [--col NAME] [--confidence C]  is this Sharpe real? (deflated/MinTRL)"

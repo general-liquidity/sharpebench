@@ -104,8 +104,8 @@ pub use forecast::{
     PairwiseForecastComparison,
 };
 pub use greeks::{
-    bs_greeks, bs_price, classify_greeks_risk, portfolio_greeks, Greeks, GreeksPolicy, GreeksRisk,
-    Leg,
+    bs_greeks, bs_price, classify_greeks_risk, classify_payoff_tail, portfolio_greeks, Greeks,
+    GreeksPolicy, GreeksRisk, Leg, OptionsError, PayoffTailRisk,
 };
 pub use oos::{oos_decay, OosDecayReport};
 pub use pass_k::{pass_k, PassMode};

@@ -76,6 +76,29 @@ test("greeks tool prices an ATM call to ~10.4506", async () => {
   await client.close();
 });
 
+test("greeks tool preserves zero-volatility pricing and explicit refusals", async () => {
+  const client = await connectedClient();
+  try {
+    const params = { spot: 100, strike: 100, t_years: 1, rate: 0.05, vol: 0, is_call: true };
+    const response = await client.callTool({ name: "greeks", arguments: params });
+    assert.notEqual(response.isError, true);
+    const quote = JSON.parse(response.content[0].text);
+    assert.ok(Math.abs(quote.price - 4.877057549928594) < 1e-10);
+    assert.equal(quote.risk.net_short_gamma, false);
+    assert.equal(Object.hasOwn(quote.risk, "unbounded_tail"), false);
+    for (const [change, expected] of [
+      [{ vol: -0.1 }, /invalid options parameter: vol/],
+      [{ rate: 0 }, /Greeks are undefined/],
+    ]) {
+      const result = await client.callTool({ name: "greeks", arguments: { ...params, ...change } });
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, expected);
+    }
+  } finally {
+    await client.close();
+  }
+});
+
 test("self_audit tool reports all defended", async () => {
   const client = await connectedClient();
   const res = await client.callTool({ name: "self_audit", arguments: {} });

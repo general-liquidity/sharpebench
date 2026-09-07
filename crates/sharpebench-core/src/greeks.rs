@@ -8,10 +8,73 @@
 //! flags the tail-selling exposures a benchmark for *trustworthy* trading agents
 //! should charge against.
 //!
-//! Pure f64, no dependencies: the normal CDF is an Abramowitz-Stegun erf
-//! approximation (abs error < 1.5e-7), so prices reproduce byte-for-byte.
+//! Local gamma/vega are sensitivities, not proofs of unbounded loss. Payoff-tail
+//! classification separately requires positions and hedges. The pricer assumes
+//! European exercise, a non-dividend-paying positive underlying and constant
+//! rate/volatility. Pure f64 with an approximate normal CDF; no cross-platform
+//! bit-identity or exact-arithmetic guarantee follows from that choice.
 
 use serde::{Deserialize, Serialize};
+
+/// Invalid options inputs or an unavailable numerical result, never a risk pass.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OptionsError {
+    InvalidParameter(&'static str),
+    NumericalRange,
+    UndefinedGreeks,
+    MismatchedExpiries,
+}
+
+impl std::fmt::Display for OptionsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidParameter(name) => write!(f, "invalid options parameter: {name}"),
+            Self::NumericalRange => {
+                f.write_str("options calculation exceeds finite numerical range")
+            }
+            Self::UndefinedGreeks => {
+                f.write_str("Greeks are undefined at the deterministic payoff kink")
+            }
+            Self::MismatchedExpiries => {
+                f.write_str("payoff-tail classification requires a common expiry")
+            }
+        }
+    }
+}
+
+impl std::error::Error for OptionsError {}
+
+fn validate_inputs(spot: f64, strike: f64, t: f64, r: f64, vol: f64) -> Result<(), OptionsError> {
+    for (name, valid) in [
+        ("spot", spot.is_finite() && spot > 0.0),
+        ("strike", strike.is_finite() && strike > 0.0),
+        ("t_years", t.is_finite() && t >= 0.0),
+        ("rate", r.is_finite()),
+        ("vol", vol.is_finite() && vol >= 0.0),
+    ] {
+        if !valid {
+            return Err(OptionsError::InvalidParameter(name));
+        }
+    }
+    Ok(())
+}
+
+fn finite(value: f64) -> Result<f64, OptionsError> {
+    if value.is_finite() {
+        Ok(value)
+    } else {
+        Err(OptionsError::NumericalRange)
+    }
+}
+
+fn discounted_strike(strike: f64, t: f64, r: f64) -> Result<f64, OptionsError> {
+    let discount = finite((-finite(r * t)?).exp())?;
+    let discounted = finite(strike * discount)?;
+    if discount == 0.0 || discounted == 0.0 {
+        return Err(OptionsError::NumericalRange);
+    }
+    Ok(discounted)
+}
 
 /// Standard-normal PDF.
 fn norm_pdf(x: f64) -> f64 {
@@ -50,49 +113,102 @@ pub struct Greeks {
     pub rho: f64,
 }
 
-fn d1_d2(spot: f64, strike: f64, t: f64, r: f64, vol: f64) -> (f64, f64) {
-    let sqrt_t = t.sqrt();
-    let d1 = ((spot / strike).ln() + (r + 0.5 * vol * vol) * t) / (vol * sqrt_t);
-    (d1, d1 - vol * sqrt_t)
+impl Greeks {
+    fn checked(self) -> Result<Self, OptionsError> {
+        for value in [self.delta, self.gamma, self.theta, self.vega, self.rho] {
+            finite(value)?;
+        }
+        Ok(self)
+    }
 }
 
-/// Black-Scholes price of a European option. Degenerate inputs (`t <= 0` or
-/// `vol <= 0`) collapse to discounted intrinsic value.
-pub fn bs_price(spot: f64, strike: f64, t: f64, r: f64, vol: f64, is_call: bool) -> f64 {
-    if t <= 0.0 || vol <= 0.0 {
-        let intrinsic = if is_call {
-            spot - strike
-        } else {
-            strike - spot
-        };
-        return intrinsic.max(0.0);
+fn d1_d2(spot: f64, strike: f64, t: f64, r: f64, vol: f64) -> Result<(f64, f64), OptionsError> {
+    let std_dev = finite(vol * t.sqrt())?;
+    if std_dev == 0.0 {
+        return Err(OptionsError::NumericalRange);
     }
-    let (d1, d2) = d1_d2(spot, strike, t, r, vol);
-    let disc = (-r * t).exp();
-    if is_call {
-        spot * norm_cdf(d1) - strike * disc * norm_cdf(d2)
+    let d1 = finite((spot.ln() - strike.ln() + finite(r * t)?) / std_dev + 0.5 * std_dev)?;
+    Ok((d1, finite(d1 - std_dev)?))
+}
+
+/// European Black-Scholes price under the module's model assumptions.
+/// At expiry use spot intrinsic. With positive time and zero volatility, use
+/// `max(S - K exp(-r t), 0)` for a call and the reverse difference for a put.
+/// Inputs must be finite, spot/strike positive and time/volatility nonnegative.
+pub fn bs_price(
+    spot: f64,
+    strike: f64,
+    t: f64,
+    r: f64,
+    vol: f64,
+    is_call: bool,
+) -> Result<f64, OptionsError> {
+    validate_inputs(spot, strike, t, r, vol)?;
+    let kd = if t == 0.0 {
+        strike
     } else {
-        strike * disc * norm_cdf(-d2) - spot * norm_cdf(-d1)
+        discounted_strike(strike, t, r)?
+    };
+    if t == 0.0 || vol == 0.0 {
+        return Ok(if is_call { spot - kd } else { kd - spot }.max(0.0));
     }
+    let (d1, d2) = d1_d2(spot, strike, t, r, vol)?;
+    let price = if is_call {
+        spot * norm_cdf(d1) - kd * norm_cdf(d2)
+    } else {
+        kd * norm_cdf(-d2) - spot * norm_cdf(-d1)
+    };
+    // The CDF approximation can round a far-OTM value slightly below zero.
+    Ok(finite(price)?.max(0.0))
 }
 
-/// Black-Scholes Greeks for a European option. Degenerate inputs return zeroed
-/// sensitivities except a step-function delta.
-pub fn bs_greeks(spot: f64, strike: f64, t: f64, r: f64, vol: f64, is_call: bool) -> Greeks {
-    if t <= 0.0 || vol <= 0.0 {
+/// Black-Scholes Greeks, with theta = negative derivative with respect to time
+/// remaining. At zero volatility away from the discounted-strike kink, delta is
+/// a step, gamma/vega zero, and theta/rho retain discounting. Exactly at the kink
+/// the full vector is unavailable, not a fabricated set of zero sensitivities.
+/// At expiry away from the spot-strike kink, only payoff delta is reported;
+/// the other fields use the explicit post-expiry zero convention.
+pub fn bs_greeks(
+    spot: f64,
+    strike: f64,
+    t: f64,
+    r: f64,
+    vol: f64,
+    is_call: bool,
+) -> Result<Greeks, OptionsError> {
+    validate_inputs(spot, strike, t, r, vol)?;
+    let kd = if t == 0.0 {
+        strike
+    } else {
+        discounted_strike(strike, t, r)?
+    };
+    if t == 0.0 || vol == 0.0 {
+        if spot == kd {
+            return Err(OptionsError::UndefinedGreeks);
+        }
         let delta = if is_call {
-            f64::from(spot > strike)
+            f64::from(spot > kd)
         } else {
-            -f64::from(spot < strike)
+            -f64::from(spot < kd)
         };
-        return Greeks {
+        return (Greeks {
             delta,
+            theta: if t == 0.0 || delta == 0.0 {
+                0.0
+            } else {
+                -delta * r * kd
+            },
+            rho: if t == 0.0 || delta == 0.0 {
+                0.0
+            } else {
+                delta * t * kd
+            },
             ..Greeks::default()
-        };
+        })
+        .checked();
     }
-    let (d1, d2) = d1_d2(spot, strike, t, r, vol);
+    let (d1, d2) = d1_d2(spot, strike, t, r, vol)?;
     let sqrt_t = t.sqrt();
-    let disc = (-r * t).exp();
     let pdf_d1 = norm_pdf(d1);
 
     let delta = if is_call {
@@ -100,25 +216,26 @@ pub fn bs_greeks(spot: f64, strike: f64, t: f64, r: f64, vol: f64, is_call: bool
     } else {
         norm_cdf(d1) - 1.0
     };
-    let gamma = pdf_d1 / (spot * vol * sqrt_t);
+    let gamma = (pdf_d1 / (vol * sqrt_t)) / spot;
     let vega = spot * pdf_d1 * sqrt_t;
     let theta = if is_call {
-        -(spot * pdf_d1 * vol) / (2.0 * sqrt_t) - r * strike * disc * norm_cdf(d2)
+        -(spot * pdf_d1 * vol) / (2.0 * sqrt_t) - r * kd * norm_cdf(d2)
     } else {
-        -(spot * pdf_d1 * vol) / (2.0 * sqrt_t) + r * strike * disc * norm_cdf(-d2)
+        -(spot * pdf_d1 * vol) / (2.0 * sqrt_t) + r * kd * norm_cdf(-d2)
     };
     let rho = if is_call {
-        strike * t * disc * norm_cdf(d2)
+        kd * t * norm_cdf(d2)
     } else {
-        -strike * t * disc * norm_cdf(-d2)
+        -kd * t * norm_cdf(-d2)
     };
-    Greeks {
+    (Greeks {
         delta,
         gamma,
         theta,
         vega,
         rho,
-    }
+    })
+    .checked()
 }
 
 /// One leg of an options position. `qty` is signed: negative is short (sold).
@@ -132,17 +249,26 @@ pub struct Leg {
 
 /// Net Greeks of a multi-leg position (Σ per-leg Greeks × qty), all legs priced off
 /// the same spot / rate / vol.
-pub fn portfolio_greeks(legs: &[Leg], spot: f64, r: f64, vol: f64) -> Greeks {
+pub fn portfolio_greeks(legs: &[Leg], spot: f64, r: f64, vol: f64) -> Result<Greeks, OptionsError> {
+    validate_inputs(spot, 1.0, 0.0, r, vol)?;
     let mut g = Greeks::default();
     for leg in legs {
-        let lg = bs_greeks(spot, leg.strike, leg.t_years, r, vol, leg.is_call);
+        if !leg.qty.is_finite() {
+            return Err(OptionsError::InvalidParameter("qty"));
+        }
+        validate_inputs(spot, leg.strike, leg.t_years, r, vol)?;
+        if leg.qty == 0.0 {
+            continue;
+        }
+        let lg = bs_greeks(spot, leg.strike, leg.t_years, r, vol, leg.is_call)?;
         g.delta += leg.qty * lg.delta;
         g.gamma += leg.qty * lg.gamma;
         g.theta += leg.qty * lg.theta;
         g.vega += leg.qty * lg.vega;
         g.rho += leg.qty * lg.rho;
+        g.checked()?;
     }
-    g
+    Ok(g)
 }
 
 /// Net payoff of the position at expiry for a terminal `spot` (intrinsic value ×
@@ -189,9 +315,9 @@ pub fn payoff_breakevens(legs: &[Leg], net_premium: f64, spots: &[f64]) -> Vec<f
 /// gamma or vega.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct GreeksPolicy {
-    /// Net gamma at or below this is "short gamma" (default 0.0).
+    /// Net gamma strictly below this is flagged (finite, nonpositive; default 0).
     pub gamma_floor: f64,
-    /// Net vega at or below this is "short vega" (default 0.0).
+    /// Net vega strictly below this is flagged (finite, nonpositive; default 0).
     pub vega_floor: f64,
 }
 
@@ -204,13 +330,12 @@ impl Default for GreeksPolicy {
     }
 }
 
-/// The tail-risk verdict for a position's net Greeks.
+/// Local exposure flags at the supplied Greeks and policy thresholds.
 #[derive(Clone, Copy, Debug, Serialize, PartialEq)]
 pub struct GreeksRisk {
-    /// Net short gamma — losses accelerate as the underlying moves.
-    pub naked_short_gamma: bool,
-    /// Short gamma implies negative convexity → unbounded tail loss potential.
-    pub unbounded_tail: bool,
+    /// Negative local convexity below the policy floor. Does not imply nakedness
+    /// or an unbounded loss; those cannot be recovered from net Greeks alone.
+    pub net_short_gamma: bool,
     /// Net short vega — loses on a volatility spike.
     pub short_vega: bool,
     pub net_gamma: f64,
@@ -218,15 +343,94 @@ pub struct GreeksRisk {
 }
 
 /// Classify a position's net Greeks for tail-selling exposure.
-pub fn classify_greeks_risk(greeks: &Greeks, policy: &GreeksPolicy) -> GreeksRisk {
-    let naked_short_gamma = greeks.gamma < policy.gamma_floor;
-    GreeksRisk {
-        naked_short_gamma,
-        unbounded_tail: naked_short_gamma,
+pub fn classify_greeks_risk(
+    greeks: &Greeks,
+    policy: &GreeksPolicy,
+) -> Result<GreeksRisk, OptionsError> {
+    greeks.checked()?;
+    for (name, floor) in [
+        ("gamma_floor", policy.gamma_floor),
+        ("vega_floor", policy.vega_floor),
+    ] {
+        if !floor.is_finite() || floor > 0.0 {
+            return Err(OptionsError::InvalidParameter(name));
+        }
+    }
+    Ok(GreeksRisk {
+        net_short_gamma: greeks.gamma < policy.gamma_floor,
         short_vega: greeks.vega < policy.vega_floor,
         net_gamma: greeks.gamma,
         net_vega: greeks.vega,
+    })
+}
+
+/// Terminal loss classification, conditional on a complete same-underlying,
+/// same-expiry European vanilla portfolio and nonnegative terminal spot.
+/// Finite premiums/cash shift the payoff but do not change its boundedness.
+#[derive(Clone, Copy, Debug, Serialize, PartialEq)]
+pub struct PayoffTailRisk {
+    pub unbounded_loss: bool,
+    /// Above every strike, payoff slope is underlying units plus signed calls.
+    pub high_spot_slope: f64,
+}
+
+/// Unlike local gamma, a negative terminal upper-tail slope establishes unbounded
+/// loss in this model. Puts have bounded loss on S >= 0. Include the underlying
+/// hedge in payoff units (after applying each contract multiplier to leg qty).
+/// Mixed-expiry books are refused: a calendar hedge need not survive each expiry.
+/// This is not a bound on interim margin calls, early assignment or trading costs.
+pub fn classify_payoff_tail(
+    legs: &[Leg],
+    underlying_qty: f64,
+) -> Result<PayoffTailRisk, OptionsError> {
+    if !underlying_qty.is_finite() {
+        return Err(OptionsError::InvalidParameter("underlying_qty"));
     }
+    let mut expiry = None;
+    // Retain each addition's rounding residual. A naive running sum can label
+    // 1e16 underlying units plus calls [-1, -1e16] as a zero-slope hedge even
+    // though its terminal slope is -1. Nonoverlapping partials preserve the sign
+    // of the sum of the represented f64 quantities; overflow is still refused.
+    let mut partials = vec![underlying_qty];
+    for leg in legs {
+        validate_inputs(1.0, leg.strike, leg.t_years, 0.0, 0.0)?;
+        if !leg.qty.is_finite() {
+            return Err(OptionsError::InvalidParameter("qty"));
+        }
+        if leg.qty == 0.0 {
+            continue;
+        }
+        if expiry.is_some_and(|t| t != leg.t_years) {
+            return Err(OptionsError::MismatchedExpiries);
+        }
+        expiry = Some(leg.t_years);
+        if leg.is_call {
+            let mut x = leg.qty;
+            let mut retained = 0;
+            for i in 0..partials.len() {
+                let mut y = partials[i];
+                if x.abs() < y.abs() {
+                    std::mem::swap(&mut x, &mut y);
+                }
+                let hi = finite(x + y)?;
+                let lo = y - (hi - x);
+                if lo != 0.0 {
+                    partials[retained] = lo;
+                    retained += 1;
+                }
+                x = hi;
+            }
+            partials.truncate(retained);
+            if x != 0.0 {
+                partials.push(x);
+            }
+        }
+    }
+    let slope = finite(partials.iter().sum())?;
+    Ok(PayoffTailRisk {
+        unbounded_loss: slope < 0.0,
+        high_spot_slope: slope,
+    })
 }
 
 #[cfg(test)]
@@ -242,14 +446,14 @@ mod tests {
     #[test]
     fn atm_call_matches_textbook_value() {
         // S=K=100, T=1, r=5%, vol=20% → ≈ 10.4506.
-        let c = bs_price(S, K, T, R, VOL, true);
+        let c = bs_price(S, K, T, R, VOL, true).unwrap();
         assert!((c - 10.4506).abs() < 1e-2, "call={c}");
     }
 
     #[test]
     fn put_call_parity_holds() {
-        let c = bs_price(S, K, T, R, VOL, true);
-        let p = bs_price(S, K, T, R, VOL, false);
+        let c = bs_price(S, K, T, R, VOL, true).unwrap();
+        let p = bs_price(S, K, T, R, VOL, false).unwrap();
         // C - P == S - K e^{-rT}
         let rhs = S - K * (-R * T).exp();
         assert!((c - p - rhs).abs() < 1e-6, "parity off: {}", c - p - rhs);
@@ -257,13 +461,13 @@ mod tests {
 
     #[test]
     fn deep_itm_call_delta_approaches_one() {
-        let g = bs_greeks(200.0, K, T, R, VOL, true);
+        let g = bs_greeks(200.0, K, T, R, VOL, true).unwrap();
         assert!(g.delta > 0.99, "delta={}", g.delta);
     }
 
     #[test]
     fn gamma_is_non_negative_and_vega_positive_for_a_long_option() {
-        let g = bs_greeks(S, K, T, R, VOL, true);
+        let g = bs_greeks(S, K, T, R, VOL, true).unwrap();
         assert!(g.gamma >= 0.0);
         assert!(g.vega > 0.0);
         // A long call decays in time.
@@ -271,18 +475,18 @@ mod tests {
     }
 
     #[test]
-    fn short_call_is_naked_short_gamma_and_unbounded_tail() {
+    fn short_call_has_short_gamma_and_a_negative_terminal_tail_slope() {
         let legs = [Leg {
             strike: K,
             t_years: T,
             is_call: true,
             qty: -1.0,
         }];
-        let g = portfolio_greeks(&legs, S, R, VOL);
+        let g = portfolio_greeks(&legs, S, R, VOL).unwrap();
         assert!(g.gamma < 0.0, "short call must be net-short gamma");
-        let risk = classify_greeks_risk(&g, &GreeksPolicy::default());
-        assert!(risk.naked_short_gamma);
-        assert!(risk.unbounded_tail);
+        let risk = classify_greeks_risk(&g, &GreeksPolicy::default()).unwrap();
+        assert!(risk.net_short_gamma);
+        assert!(classify_payoff_tail(&legs, 0.0).unwrap().unbounded_loss);
         assert!(risk.short_vega);
     }
 
@@ -294,10 +498,10 @@ mod tests {
             is_call: true,
             qty: 1.0,
         }];
-        let g = portfolio_greeks(&legs, S, R, VOL);
-        let risk = classify_greeks_risk(&g, &GreeksPolicy::default());
-        assert!(!risk.naked_short_gamma);
-        assert!(!risk.unbounded_tail);
+        let g = portfolio_greeks(&legs, S, R, VOL).unwrap();
+        let risk = classify_greeks_risk(&g, &GreeksPolicy::default()).unwrap();
+        assert!(!risk.net_short_gamma);
+        assert!(!classify_payoff_tail(&legs, 0.0).unwrap().unbounded_loss);
         assert!(!risk.short_vega);
     }
 
@@ -318,9 +522,9 @@ mod tests {
     }
 
     #[test]
-    fn degenerate_inputs_collapse_to_intrinsic() {
-        assert_eq!(bs_price(120.0, 100.0, 0.0, R, VOL, true), 20.0);
-        assert_eq!(bs_price(80.0, 100.0, 0.0, R, VOL, true), 0.0);
-        assert_eq!(bs_price(80.0, 100.0, 1.0, R, 0.0, false), 20.0);
+    fn expiration_uses_spot_intrinsic() {
+        assert_eq!(bs_price(120.0, 100.0, 0.0, R, VOL, true).unwrap(), 20.0);
+        assert_eq!(bs_price(80.0, 100.0, 0.0, R, VOL, true).unwrap(), 0.0);
+        assert_eq!(bs_price(80.0, 100.0, 0.0, R, 0.0, false).unwrap(), 20.0);
     }
 }
