@@ -78,6 +78,31 @@ test("auditBriefing and scoreAllocation bridge", () => {
   );
 });
 
+test("briefing audit aggregates repeated area identities in the shipped wasm", () => {
+  const section = (asset_area) => ({
+    asset_area,
+    rows: [
+      { text: "observable", kind: "fact" },
+      { text: "uncertainty", kind: "uncertainty" },
+    ],
+  });
+  const audit = sb.auditBriefing({
+    sections: [section(" Energy "), section("ENERGY"), section("energy"), section("rates")],
+  });
+  assert.equal(audit.balanced, false);
+  assert.deepEqual(audit.salience, [
+    { asset_area: "energy", row_count: 6, salience: 0.75 },
+    { asset_area: "rates", row_count: 2, salience: 0.25 },
+  ]);
+  assert.ok(audit.violations.some((v) => v.violation === "asset_area_overweight" && v.rows === 6));
+  assert.equal(sb.auditBriefing({ sections: [section("energy")] }, { max_area_salience: 1 }).balanced, true);
+  const unverified = sb.auditBriefing({
+    sections: [section("energy"), section("rates")],
+    return_table: { ordering: "unspecified", entries: [] },
+  });
+  assert.ok(unverified.violations.some((v) => v.violation === "unspecified_table_ordering"));
+});
+
 test("isMySharpeReal passes a long clean single-trial edge", () => {
   const returns = Array.from(
     { length: 400 },
