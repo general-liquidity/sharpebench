@@ -11,6 +11,7 @@
 
 use crate::deflated_sharpe::deflated_sharpe_ratio_against_null;
 use crate::stats::{mean, norm_ppf};
+use crate::validation::{bootstrap_inputs, StatisticalError};
 
 /// Minimal deterministic PRNG (SplitMix64). Not cryptographic — used only for a
 /// reproducible bootstrap.
@@ -43,15 +44,26 @@ impl SplitMix64 {
 /// Stationary-bootstrap p-value for the hypothesis that `excess` has a positive
 /// mean. `block_prob` is the per-step probability of starting a new block
 /// (expected block length = 1/block_prob; ~0.1 is typical for daily data).
-/// Returns 1.0 (no evidence) when the observed mean is non-positive.
-pub fn bootstrap_pvalue(excess: &[f64], seed: u64, n_boot: usize, block_prob: f64) -> f64 {
+/// Returns `Ok(1.0)` when a valid observed mean is non-positive. Invalid numbers,
+/// invalid resampling parameters and fewer than two observations return an error,
+/// not an inferential result. Two observations are an arithmetic minimum, not a
+/// guarantee of adequate independent support or calibrated bootstrap inference.
+pub fn bootstrap_pvalue(
+    excess: &[f64],
+    seed: u64,
+    n_boot: usize,
+    block_prob: f64,
+) -> Result<f64, StatisticalError> {
+    bootstrap_inputs(excess, n_boot, block_prob)?;
     let n = excess.len();
-    if n == 0 || n_boot == 0 {
-        return 1.0;
-    }
     let observed = mean(excess);
+    if !observed.is_finite() {
+        return Err(StatisticalError::NonFiniteComputation {
+            quantity: "observed mean",
+        });
+    }
     if observed <= 0.0 {
-        return 1.0;
+        return Ok(1.0);
     }
     let mut rng = SplitMix64(seed ^ 0x5DEE_CE66_D8B4_2A57);
     let mut at_least_as_large = 0usize;
@@ -67,12 +79,17 @@ pub fn bootstrap_pvalue(excess: &[f64], seed: u64, n_boot: usize, block_prob: f6
                 idx = (idx + 1) % n;
             }
         }
+        if !sum.is_finite() {
+            return Err(StatisticalError::NonFiniteComputation {
+                quantity: "bootstrap sum",
+            });
+        }
         if sum / n as f64 >= observed {
             at_least_as_large += 1;
         }
     }
     // +1 smoothing so the p-value is never exactly 0.
-    (at_least_as_large as f64 + 1.0) / (n_boot as f64 + 1.0)
+    Ok((at_least_as_large as f64 + 1.0) / (n_boot as f64 + 1.0))
 }
 
 /// A bootstrapped confidence interval on the Deflated Sharpe Ratio: the sampling
@@ -508,11 +525,49 @@ mod tests {
     use super::*;
 
     #[test]
+    fn bootstrap_rejects_nonfinite_data_and_invalid_parameters() {
+        let valid = [0.01, 0.02, 0.03];
+        assert!(bootstrap_pvalue(&valid, 1, 100, 0.1).unwrap() < 0.05);
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(
+                bootstrap_pvalue(&[0.01, bad, 0.02], 1, 100, 0.1),
+                Err(StatisticalError::NonFiniteObservation { index: 1 })
+            );
+        }
+        for block_prob in [f64::NAN, f64::INFINITY, -0.1, 0.0, 1.1] {
+            assert!(matches!(
+                bootstrap_pvalue(&valid, 1, 100, block_prob),
+                Err(StatisticalError::InvalidParameter {
+                    name: "block_prob",
+                    ..
+                })
+            ));
+        }
+        assert!(bootstrap_pvalue(&valid, 1, 100, 1.0).is_ok());
+        assert!(matches!(
+            bootstrap_pvalue(&valid, 1, 0, 0.1),
+            Err(StatisticalError::InvalidParameter { name: "n_boot", .. })
+        ));
+        for data in [&[][..], &[0.01][..]] {
+            assert!(matches!(
+                bootstrap_pvalue(data, 1, 100, 0.1),
+                Err(StatisticalError::InsufficientObservations { .. })
+            ));
+        }
+        assert!(matches!(
+            bootstrap_pvalue(&[f64::MAX, f64::MAX], 1, 100, 0.1),
+            Err(StatisticalError::NonFiniteComputation {
+                quantity: "observed mean"
+            })
+        ));
+    }
+
+    #[test]
     fn strong_edge_is_significant() {
         let r: Vec<f64> = (0..200)
             .map(|i| 0.002 + 0.0005 * ((i % 3) as f64 - 1.0))
             .collect();
-        let p = bootstrap_pvalue(&r, 42, 2000, 0.1);
+        let p = bootstrap_pvalue(&r, 42, 2000, 0.1).unwrap();
         assert!(p < 0.05, "p={p}");
     }
 
@@ -521,7 +576,7 @@ mod tests {
         let r: Vec<f64> = (0..200)
             .map(|i| if i % 2 == 0 { 0.01 } else { -0.01 })
             .collect();
-        let p = bootstrap_pvalue(&r, 42, 2000, 0.1);
+        let p = bootstrap_pvalue(&r, 42, 2000, 0.1).unwrap();
         assert!(p > 0.2, "p={p}");
     }
 

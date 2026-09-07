@@ -42,6 +42,9 @@ pub mod selection;
 pub mod significance;
 pub mod stats;
 pub mod stylized_facts;
+pub mod validation;
+
+pub use validation::StatisticalError;
 
 pub use agreement::{
     binarize, cohens_kappa, cohens_kappa_binary, gate_vs_human, spearman_rho, GateAgreement,

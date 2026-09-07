@@ -753,7 +753,12 @@ pub struct CompositeScore {
     pub psr: f64,
     pub passed_k: bool,
     pub process_ok: bool,
+    /// Conservative 1.0 sentinel when `bootstrap_error` is present; in that case
+    /// this is not an estimated p-value and eligibility is always false.
     pub bootstrap_p: f64,
+    /// Why the single-series bootstrap was unavailable. Omitted for valid inputs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bootstrap_error: Option<String>,
     pub raw_mean_return: f64,
     pub rank_eligible: bool,
     /// The ranking key: the deflated Sharpe when eligible, else 0.0.
@@ -1189,7 +1194,9 @@ fn score_agent_with(
         0.0
     };
 
-    let bootstrap_p = bootstrap_pvalue(&pooled, cfg.bootstrap_seed, cfg.n_boot, cfg.block_prob);
+    let bootstrap = bootstrap_pvalue(&pooled, cfg.bootstrap_seed, cfg.n_boot, cfg.block_prob);
+    let bootstrap_error = bootstrap.as_ref().err().map(ToString::to_string);
+    let bootstrap_p = bootstrap.unwrap_or(1.0);
     let raw_mean_return = mean(&pooled);
 
     // Calibration: does stated conviction predict outcomes? (None if not reported.)
@@ -1346,8 +1353,12 @@ fn score_agent_with(
     // pooled result. Reported, never gating; empty when not estimable.
     let role_contributions = attribute_behavior_roles(&sub.runs);
 
-    let rank_eligible =
-        dsr >= cfg.dsr_bar && passed_k && process_ok && bootstrap_p < cfg.alpha && mandate_ok;
+    let rank_eligible = dsr >= cfg.dsr_bar
+        && passed_k
+        && process_ok
+        && bootstrap_error.is_none()
+        && bootstrap_p < cfg.alpha
+        && mandate_ok;
     let composite = if rank_eligible { dsr } else { 0.0 };
 
     // The declared verdict, if any: the same predicate as `rank_eligible` with
@@ -1369,6 +1380,7 @@ fn score_agent_with(
         let eligible = dsr >= cfg.dsr_bar
             && declared_passed_k
             && process_ok
+            && bootstrap_error.is_none()
             && bootstrap_p < cfg.alpha
             && mandate_ok
             && verdict.drawdown_bound_holds(worst_run_drawdown);
@@ -1387,6 +1399,7 @@ fn score_agent_with(
         passed_k,
         process_ok,
         bootstrap_p,
+        bootstrap_error,
         raw_mean_return,
         rank_eligible,
         composite,
@@ -2090,6 +2103,27 @@ mod tests {
         assert!(score.process_ok && score.rank_eligible);
         assert_eq!(score.process_warnings, 1);
         assert!((score.process_score - 0.9).abs() < 1e-12);
+    }
+
+    #[test]
+    fn unavailable_bootstrap_is_reported_and_cannot_admit_an_agent() {
+        let entrant = agent("entrant", vec![run(0.002, 0.0005, 60); 2]);
+        assert!(score_agent(&entrant, &ScoreConfig::default()).rank_eligible);
+        let cfg = ScoreConfig {
+            n_boot: 0,
+            alpha: 2.0,
+            ..ScoreConfig::default()
+        };
+        // An invalid alpha would admit a p=1 fallback without the independent
+        // availability gate. No caller's threshold can legitimize a failed test.
+        let score = score_agent_declared(&entrant, Some(&DeclaredMandate::AbsoluteReturn), &cfg);
+        assert_eq!(
+            score.bootstrap_error.as_deref(),
+            Some("n_boot must be positive")
+        );
+        assert_eq!(score.bootstrap_p, 1.0);
+        assert!(!score.rank_eligible);
+        assert_eq!(score.declared_mandate_eligible, Some(false));
     }
 
     /// The headline property: a lucky agent with a *higher raw return* ranks

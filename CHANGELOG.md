@@ -12,6 +12,9 @@ and links the commits it was built from.
 
 ## [Unreleased]
 
+### Breaking
+- stats: `bootstrap_pvalue`, `benjamini_hochberg` and `fdr_verdict` now return `Result<_, StatisticalError>` in Rust. Invalid data or parameters are not p-values or discovery masks. Propagate the error instead of substituting a favorable result. Python raises `ValueError` for these inputs; valid-call return shapes are unchanged. Composite scores expose an optional `bootstrap_error` and cannot become eligible when it is present; `bootstrap_p = 1` in such a row is a conservative sentinel, not an estimate.
+
 ### Fixed
 - stats: compute empirical skewness and non-excess kurtosis with an n-normalized second moment, consistent with their third/fourth moments. This changes PSR/DSR and confidence estimates. Exact small-vector regressions cover the convention; existing synthetic score fixtures are refreshed, not historical paper evidence.
 - core: common-support comparisons retain every submitted process trace for eligibility, declared-mandate eligibility, warning counts and the process return floor. A peer omitting a run can no longer erase another entrant's violation.

@@ -174,7 +174,8 @@ pub fn budget_curve(
         let oos_dsr = deflated_sharpe_ratio(returns, opts.base_n_trials, opts.trials_sr_std);
         let oos_sharpe = sharpe_ratio(returns);
         let oos_p_value =
-            bootstrap_pvalue(returns, opts.bootstrap_seed, opts.n_boot, opts.block_prob);
+            bootstrap_pvalue(returns, opts.bootstrap_seed, opts.n_boot, opts.block_prob)
+                .map_err(|error| format!("point {i}: {error}"))?;
         let marginal_dsr_per_budget = if i == 0 {
             None
         } else {
