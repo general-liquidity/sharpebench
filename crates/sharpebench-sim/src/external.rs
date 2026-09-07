@@ -17,8 +17,8 @@
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
-use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::process::{Child, Command, Stdio};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::time::{Duration, Instant};
 
 use sharpebench_protocol::{Decision, MarketObservation};
@@ -41,12 +41,51 @@ const MAX_AGENT_RESPONSE: u64 = 8 * 1024 * 1024;
 /// with it, losing every other agent's results in the same sweep.
 const MAX_AGENT_LINE: u64 = MAX_AGENT_RESPONSE;
 
+/// Total accepted stdout per spawned agent (one harness attempt), including
+/// newlines. Backpressure separately bounds resident queued output. A long-lived
+/// entrant must remain within this explicit 64 MiB wire quota.
+const MAX_AGENT_STDOUT: u64 = 64 * 1024 * 1024;
+
 /// One item pulled off an agent's stdout.
 enum Wire {
     /// A newline-terminated (or final, unterminated) line within budget.
     Line(String),
     /// The agent wrote past [`MAX_AGENT_LINE`] without ending the line.
     Oversized,
+    /// Cumulative accepted stdout exceeded the per-process quota.
+    OutputBudgetExceeded,
+}
+
+fn spawn_line_reader<R: BufRead + Send + 'static>(
+    mut reader: R,
+    total_budget: u64,
+) -> Receiver<std::io::Result<Wire>> {
+    // At most one queued line and one line being read/sent, each independently
+    // bounded. The reader cannot turn a stream of small lines into an unbounded
+    // host allocation outside the entrant's container memory limit.
+    let (tx, lines) = mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let mut remaining = total_budget;
+        loop {
+            let (message, terminal) = match read_wire(&mut reader) {
+                Ok(None) => break,
+                Ok(Some(Wire::Line(line))) => {
+                    if line.len() as u64 > remaining {
+                        (Ok(Wire::OutputBudgetExceeded), true)
+                    } else {
+                        remaining -= line.len() as u64;
+                        (Ok(Wire::Line(line)), false)
+                    }
+                }
+                Ok(Some(wire)) => (Ok(wire), true),
+                Err(error) => (Err(error), true),
+            };
+            if tx.send(message).is_err() || terminal {
+                break;
+            }
+        }
+    });
+    lines
 }
 
 /// Read one line from `reader`, bounded by [`MAX_AGENT_LINE`]. `Ok(None)` is EOF.
@@ -138,8 +177,10 @@ fn parse_decision(
 /// child's death (see [`Drop`]) guarantees.
 pub struct ExternalAgent {
     child: Child,
-    stdin: ChildStdin,
+    input: SyncSender<String>,
+    written: Receiver<std::io::Result<()>>,
     lines: Receiver<std::io::Result<Wire>>,
+    timed_out: bool,
     timeout: Duration,
     breaker: CircuitBreaker,
     health: TransportHealth,
@@ -260,7 +301,7 @@ impl ExternalAgent {
             command.process_group(0);
         }
         let mut child = command.spawn()?;
-        let stdin = child
+        let mut stdin = child
             .stdin
             .take()
             .ok_or_else(|| std::io::Error::other("no stdin"))?;
@@ -268,32 +309,26 @@ impl ExternalAgent {
             .stdout
             .take()
             .ok_or_else(|| std::io::Error::other("no stdout"))?;
-        let (tx, lines) = mpsc::channel();
+        // Blocking pipe writes live on one owned worker, never on the timed
+        // decision thread. Both request and completion queues have fixed capacity.
+        let (input, requests) = mpsc::sync_channel::<String>(1);
+        let (completed, written) = mpsc::sync_channel(1);
         std::thread::spawn(move || {
-            let mut reader = BufReader::new(stdout);
-            loop {
-                match read_wire(&mut reader) {
-                    Ok(None) => break,
-                    Ok(Some(wire)) => {
-                        // An agent that blew the budget is finished: the rest of
-                        // that line is not a sequence of further decisions, and
-                        // draining it is the memory burn this cap exists to stop.
-                        let overflowed = matches!(wire, Wire::Oversized);
-                        if tx.send(Ok(wire)).is_err() || overflowed {
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        let _ = tx.send(Err(e));
-                        break;
-                    }
+            while let Ok(line) = requests.recv() {
+                let result = writeln!(stdin, "{line}").and_then(|()| stdin.flush());
+                let failed = result.is_err();
+                if completed.send(result).is_err() || failed {
+                    break;
                 }
             }
         });
+        let lines = spawn_line_reader(BufReader::new(stdout), MAX_AGENT_STDOUT);
         Ok(Self {
             child,
-            stdin,
+            input,
+            written,
             lines,
+            timed_out: false,
             timeout: STDIO_DECIDE_TIMEOUT,
             breaker: CircuitBreaker::new(DEFAULT_BREAKER_THRESHOLD),
             health: TransportHealth::default(),
@@ -311,12 +346,14 @@ impl ExternalAgent {
     /// exit status instead of burning classification on the symptom. The pipe
     /// teardown can precede the observable exit by a beat, so the check gets
     /// the same short grace the other exit paths use.
-    fn stdin_error(&mut self, error: &std::io::Error) -> DecideError {
-        let deadline = Instant::now() + EXIT_DRAIN_GRACE;
+    fn stdin_error(&mut self, error: &std::io::Error, request_deadline: Instant) -> DecideError {
+        let deadline = (Instant::now() + EXIT_DRAIN_GRACE).min(request_deadline);
         loop {
             match self.child.try_wait() {
                 Ok(Some(status)) => return exited_fault(status),
-                Ok(None) if Instant::now() < deadline => std::thread::sleep(DEAD_CHILD_POLL),
+                Ok(None) if Instant::now() < deadline => std::thread::sleep(
+                    DEAD_CHILD_POLL.min(deadline.saturating_duration_since(Instant::now())),
+                ),
                 _ => return classify_io(error),
             }
         }
@@ -332,12 +369,16 @@ impl ExternalAgent {
         &mut self,
         status: std::process::ExitStatus,
         obs: &MarketObservation,
+        request_deadline: Instant,
     ) -> Result<Decision, DecideError> {
-        let deadline = Instant::now() + EXIT_DRAIN_GRACE;
+        let deadline = (Instant::now() + EXIT_DRAIN_GRACE).min(request_deadline);
         loop {
-            match self.lines.recv_timeout(DEAD_CHILD_POLL) {
+            match self.lines.recv_timeout(
+                DEAD_CHILD_POLL.min(deadline.saturating_duration_since(Instant::now())),
+            ) {
                 Ok(Ok(Wire::Line(resp))) => return parse_decision(&resp, obs),
                 Ok(Ok(Wire::Oversized)) => return Err(oversized_fault()),
+                Ok(Ok(Wire::OutputBudgetExceeded)) => return Err(output_budget_fault()),
                 Ok(Err(_)) => return Err(DecideError::Transport),
                 Err(RecvTimeoutError::Disconnected) => break,
                 Err(RecvTimeoutError::Timeout) if Instant::now() >= deadline => break,
@@ -355,19 +396,37 @@ impl ExternalAgent {
     /// exit it is, immediately, instead of spending the full budget to call a
     /// startup crash a timeout.
     fn decide_once(&mut self, obs: &MarketObservation) -> Result<Decision, DecideError> {
+        if self.timed_out {
+            return Err(DecideError::Timeout);
+        }
+        let deadline = Instant::now()
+            .checked_add(self.timeout)
+            .ok_or(DecideError::Transport)?;
         let line = serde_json::to_string(obs).map_err(|_| DecideError::Transport)?;
-        if let Err(error) = writeln!(self.stdin, "{line}") {
-            return Err(self.stdin_error(&error));
+        if Instant::now() >= deadline {
+            return Err(DecideError::Timeout);
         }
-        if let Err(error) = self.stdin.flush() {
-            return Err(self.stdin_error(&error));
+        self.input
+            .try_send(line)
+            .map_err(|_| DecideError::Transport)?;
+        match self
+            .written
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => return Err(self.stdin_error(&error, deadline)),
+            Err(RecvTimeoutError::Timeout) => return Err(DecideError::Timeout),
+            Err(RecvTimeoutError::Disconnected) => return Err(DecideError::Transport),
         }
-        let deadline = Instant::now() + self.timeout;
         loop {
+            if Instant::now() >= deadline {
+                return Err(DecideError::Timeout);
+            }
             let slice = DEAD_CHILD_POLL.min(deadline.saturating_duration_since(Instant::now()));
             match self.lines.recv_timeout(slice) {
                 Ok(Ok(Wire::Line(resp))) => return parse_decision(&resp, obs),
                 Ok(Ok(Wire::Oversized)) => return Err(oversized_fault()),
+                Ok(Ok(Wire::OutputBudgetExceeded)) => return Err(output_budget_fault()),
                 Ok(Err(_)) => return Err(DecideError::Transport),
                 Err(RecvTimeoutError::Disconnected) => {
                     // The reader saw EOF and the channel is empty. EOF races the
@@ -375,20 +434,21 @@ impl ExternalAgent {
                     // `try_wait` can observe the exit — so give the exit the
                     // same short grace the drain gets. A child that merely
                     // closed stdout while still running stays a transport break.
-                    let deadline = Instant::now() + EXIT_DRAIN_GRACE;
+                    let deadline = (Instant::now() + EXIT_DRAIN_GRACE).min(deadline);
                     loop {
                         match self.child.try_wait() {
                             Ok(Some(status)) => return Err(exited_fault(status)),
-                            Ok(None) if Instant::now() < deadline => {
-                                std::thread::sleep(DEAD_CHILD_POLL)
-                            }
+                            Ok(None) if Instant::now() < deadline => std::thread::sleep(
+                                DEAD_CHILD_POLL
+                                    .min(deadline.saturating_duration_since(Instant::now())),
+                            ),
                             _ => return Err(DecideError::Transport),
                         }
                     }
                 }
                 Err(RecvTimeoutError::Timeout) => {
                     if let Ok(Some(status)) = self.child.try_wait() {
-                        return self.drain_after_exit(status, obs);
+                        return self.drain_after_exit(status, obs, deadline);
                     }
                     if Instant::now() >= deadline {
                         return Err(DecideError::Timeout);
@@ -429,6 +489,13 @@ fn oversized_fault() -> DecideError {
     DecideError::Oversized
 }
 
+fn output_budget_fault() -> DecideError {
+    eprintln!(
+        "agent protocol fault: stdout exceeded the {MAX_AGENT_STDOUT}-byte per-process quota"
+    );
+    DecideError::Oversized
+}
+
 impl Agent for ExternalAgent {
     fn decide(&mut self, obs: &MarketObservation) -> Decision {
         // A tripped breaker fails fast: don't keep hammering a dead subprocess, but
@@ -445,6 +512,14 @@ impl Agent for ExternalAgent {
                 d
             }
             Err(e) => {
+                if e == DecideError::Timeout {
+                    // Never match a late response to a later observation. The
+                    // harness may retry only by constructing a fresh process.
+                    self.timed_out = true;
+                    #[cfg(unix)]
+                    signal_group(self.child.id(), "KILL");
+                    let _ = self.child.kill();
+                }
                 let tripped = self.breaker.record_fault();
                 self.health.record(e, tripped);
                 error_hold("external agent transport fault → hold")
@@ -694,6 +769,116 @@ mod tests {
 
         let mut reader = std::io::Cursor::new(Vec::new());
         assert!(matches!(read_wire(&mut reader), Ok(None)), "empty is EOF");
+    }
+
+    #[test]
+    fn cumulative_stdout_quota_accepts_the_boundary_and_refuses_the_next_line() {
+        let lines = spawn_line_reader(std::io::Cursor::new(b"{}\n{}\n{}\n".to_vec()), 6);
+        for _ in 0..2 {
+            assert!(matches!(lines.recv().unwrap().unwrap(), Wire::Line(line) if line == "{}\n"));
+        }
+        assert!(matches!(
+            lines.recv().unwrap().unwrap(),
+            Wire::OutputBudgetExceeded
+        ));
+        assert!(
+            lines.recv().is_err(),
+            "the quota violation must terminate the reader"
+        );
+        assert_eq!(output_budget_fault(), DecideError::Oversized);
+        assert!(!output_budget_fault().is_retryable());
+    }
+
+    #[test]
+    fn stdout_backpressure_bounds_consumption_without_dropping_lines() {
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+        struct Counted {
+            inner: std::io::Cursor<Vec<u8>>,
+            consumed: Arc<AtomicUsize>,
+        }
+        impl Read for Counted {
+            fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+                let n = self.inner.read(output)?;
+                self.consumed.fetch_add(n, Ordering::SeqCst);
+                Ok(n)
+            }
+        }
+        impl BufRead for Counted {
+            fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+                self.inner.fill_buf()
+            }
+            fn consume(&mut self, n: usize) {
+                self.inner.consume(n);
+                self.consumed.fetch_add(n, Ordering::SeqCst);
+            }
+        }
+        let consumed = Arc::new(AtomicUsize::new(0));
+        let reader = Counted {
+            inner: std::io::Cursor::new(b"{}\n".repeat(256)),
+            consumed: consumed.clone(),
+        };
+        let lines = spawn_line_reader(reader, MAX_AGENT_STDOUT);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while consumed.load(Ordering::SeqCst) < 6 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(
+            consumed.load(Ordering::SeqCst) >= 6,
+            "reader must actually run"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+        assert_eq!(
+            consumed.load(Ordering::SeqCst),
+            6,
+            "one queued line plus one blocked sender; an unbounded channel drains all 256"
+        );
+        let mut count = 0;
+        while let Ok(wire) = lines.recv_timeout(Duration::from_secs(5)) {
+            assert!(matches!(wire.unwrap(), Wire::Line(line) if line == "{}\n"));
+            count += 1;
+        }
+        assert_eq!(
+            count, 256,
+            "backpressure must preserve every legitimate line"
+        );
+        assert_eq!(consumed.load(Ordering::SeqCst), 256 * 3);
+    }
+
+    #[test]
+    fn the_decision_deadline_includes_a_child_that_never_reads_stdin() {
+        #[cfg(windows)]
+        let spawned = ExternalAgent::spawn(
+            "powershell",
+            &["-NoProfile", "-Command", "Start-Sleep -Seconds 3"],
+        );
+        #[cfg(not(windows))]
+        let spawned = ExternalAgent::spawn("sh", &["-c", "sleep 3"]);
+        let mut agent = spawned
+            .unwrap()
+            .with_decide_timeout(Duration::from_millis(100));
+        let mut observation = one_symbol_observation();
+        observation.symbols[0].close_history = vec![100.0; 100_000];
+        assert!(
+            serde_json::to_string(&observation).unwrap().len() > 128 * 1024,
+            "a tiny observation may fit in the pipe and cannot exercise a blocked write"
+        );
+        let start = Instant::now();
+        agent.decide(&observation);
+        assert_eq!(agent.health().last_error, Some(DecideError::Timeout));
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "the finite three-second fixture must not decide the request deadline"
+        );
+        let start = Instant::now();
+        agent.decide(&observation);
+        assert_eq!(agent.health().last_error, Some(DecideError::Timeout));
+        assert!(
+            start.elapsed() < Duration::from_secs(1),
+            "a timed-out pipe cannot accept a new observation with a stale response pending"
+        );
     }
 
     /// An oversized line is the entrant's fault, not the harness's, so it must
@@ -996,7 +1181,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(100));
             let _ = tx.send(Ok(Wire::Line(r#"{"orders":[]}"#.to_string())));
         });
-        let drained = agent.drain_after_exit(status, &obs);
+        let drained = agent.drain_after_exit(status, &obs, Instant::now() + EXIT_DRAIN_GRACE);
         sender.join().expect("sender thread must finish");
         assert!(
             drained.is_ok(),
@@ -1008,7 +1193,9 @@ mod tests {
         drop(tx);
         let mut agent = make_agent(rx);
         assert_eq!(
-            agent.drain_after_exit(status, &obs).unwrap_err(),
+            agent
+                .drain_after_exit(status, &obs, Instant::now() + EXIT_DRAIN_GRACE)
+                .unwrap_err(),
             DecideError::Exited(Some(7)),
             "an exit with nothing pending must carry its status"
         );
