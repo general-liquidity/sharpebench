@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "8d531bb6120e920cc4f0f46eae66a55bfaf0e9dd",
+  "generated_at_head": "8fd3e8e2210cb9e3be0fc495b0594cdc7a16699c",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -571,7 +571,7 @@
     },
     {
       "path": "crates/sharpebench-py/src/lib.rs",
-      "sha256": "d77b9e6b9b5802e0dbf0177a6e46939947ab563c19879b8ef1579933b6c73ab3"
+      "sha256": "96ca71c61a50b9e4419f5b671f2e96dfe83ccb50be79f2581124282884b5501f"
     },
     {
       "path": "crates/sharpebench-sim/Cargo.toml",
@@ -895,5 +895,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "3752a7d7cd04e04c03a7719102873c57b473ef6c417a09495bb583eee39b2fc5"
+  "source_snapshot_sha256": "7feb8e1ee56a1c5c06daed32b7f23121a3ae0dccfe2c973d3482143e952b8ecc"
 }
