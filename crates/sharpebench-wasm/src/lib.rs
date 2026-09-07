@@ -10,9 +10,9 @@
 #![forbid(unsafe_code)]
 
 use sharpebench_core::{
-    audit_briefing, bs_greeks, bs_price, classify_greeks_risk, compare_by_regime, rank,
-    score_agent, AgentSubmission, AllocationPolicy, AllocationTrajectory, Briefing, BriefingPolicy,
-    GreeksPolicy, RegimeCompareOpts, ScoreConfig,
+    audit_briefing, bs_greeks, bs_price, classify_greeks_risk, compare_by_regime,
+    parse_declared_field, rank_declared, score_agent, AgentSubmission, AllocationPolicy,
+    AllocationTrajectory, Briefing, BriefingPolicy, GreeksPolicy, RegimeCompareOpts, ScoreConfig,
 };
 
 /// Parse an optional config blob: blank → `T::default()`.
@@ -27,10 +27,9 @@ fn parse_or_default<T: serde::de::DeserializeOwned + Default>(json: &str) -> Res
 /// Score and rank a JSON array of submissions → JSON array of `CompositeScore`.
 /// Blank `config_json` uses the defaults.
 pub fn score_json(submissions_json: &str, config_json: &str) -> Result<String, String> {
-    let subs: Vec<AgentSubmission> =
-        serde_json::from_str(submissions_json).map_err(|e| e.to_string())?;
+    let (subs, declarations) = parse_declared_field(submissions_json)?;
     let cfg: ScoreConfig = parse_or_default(config_json)?;
-    serde_json::to_string(&rank(&subs, &cfg)).map_err(|e| e.to_string())
+    serde_json::to_string(&rank_declared(&subs, &declarations, &cfg)).map_err(|e| e.to_string())
 }
 
 /// Score a single submission → one `CompositeScore` (carries the deflated Sharpe,
@@ -334,15 +333,14 @@ pub fn classify_disqualification_json(
 ) -> Result<String, String> {
     use sharpebench_core::{classify_disqualification, DisqualThresholds};
 
-    let subs: Vec<AgentSubmission> =
-        serde_json::from_str(submissions_json).map_err(|e| e.to_string())?;
+    let (subs, declarations) = parse_declared_field(submissions_json)?;
     let cfg: ScoreConfig = parse_or_default(config_json)?;
     let thresholds = DisqualThresholds::from_score_config(&cfg);
-    let out: Vec<serde_json::Value> = subs
+    let board = rank_declared(&subs, &declarations, &cfg);
+    let out: Vec<serde_json::Value> = board
         .iter()
-        .map(|sub| {
-            let score = score_agent(sub, &cfg);
-            let reasons = classify_disqualification(&score, &thresholds, None, None);
+        .map(|score| {
+            let reasons = classify_disqualification(score, &thresholds, None, None);
             serde_json::json!({
                 "agent_id": score.agent_id,
                 "rank_eligible": score.rank_eligible,

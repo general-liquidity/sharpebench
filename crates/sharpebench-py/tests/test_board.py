@@ -26,7 +26,13 @@ from sharpebench import (  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SUITE = REPO_ROOT / "suites" / "example_submissions.json"
-GOLDEN = REPO_ROOT / "crates" / "sharpebench-core" / "golden" / "example_submissions.scores.json"
+GOLDEN = (
+    REPO_ROOT
+    / "crates"
+    / "sharpebench-core"
+    / "golden"
+    / "example_submissions.scores.json"
+)
 
 
 def example_field() -> str:
@@ -45,7 +51,11 @@ def test_rank_board_matches_the_committed_golden_scores():
 
 def test_rank_board_orders_the_example_field():
     board = json.loads(rank_board(example_field()))
-    assert [s["agent_id"] for s in board] == ["skilled-momentum", "lucky-yolo", "ungated-bot"]
+    assert [s["agent_id"] for s in board] == [
+        "skilled-momentum",
+        "lucky-yolo",
+        "ungated-bot",
+    ]
     assert board[0]["rank_eligible"] is True
     assert board[0]["rank_ordinal"] == 1
     assert not any(s["rank_eligible"] for s in board[1:])
@@ -56,6 +66,39 @@ def test_rank_board_orders_the_example_field():
 
 def test_rank_board_is_deterministic():
     assert rank_board(example_field()) == rank_board(example_field())
+
+
+def test_rank_board_keeps_declared_verdict_separate_from_host_rank():
+    field = json.loads(example_field())
+    before = json.loads(rank_board(json.dumps(field)))
+    field[0]["declared_mandate"] = {"kind": "relative_to", "benchmark_id": "absent"}
+    after = json.loads(rank_board(json.dumps(field)))
+    declared = next(row for row in after if row["agent_id"] == field[0]["agent_id"])
+    assert declared["declared_mandate"] == field[0]["declared_mandate"]
+    assert declared["declared_passed_k"] is False
+    assert declared["declared_mandate_eligible"] is False
+    for original, updated in zip(before, after, strict=True):
+        for key in (
+            "agent_id",
+            "rank_eligible",
+            "rank_ordinal",
+            "deflated_sharpe",
+            "passed_k",
+        ):
+            assert original[key] == updated[key]
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        [{"agent_id": "a", "runs": []}, {"agent_id": "a", "runs": []}],
+        [{"agent_id": "  ", "runs": []}],
+        [{"agent_id": "a", "runs": [], "declared_mandate": {"kind": "relative_typo"}}],
+    ],
+)
+def test_rank_board_refuses_ambiguous_identity_and_invalid_mandates(field):
+    with pytest.raises(ValueError):
+        rank_board(json.dumps(field))
 
 
 # --------------------------------------------------------------------- score_one
@@ -132,7 +175,10 @@ def test_rank_returns_matches_rank_board_on_equivalent_submissions():
         "steady": [track(0.002, 0.0005) for _ in range(5)],
         "flat": [track(0.0, 0.003) for _ in range(5)],
     }
-    subs = [{"agent_id": aid, "runs": [{"returns": r} for r in rs]} for aid, rs in returns.items()]
+    subs = [
+        {"agent_id": aid, "runs": [{"returns": r} for r in rs]}
+        for aid, rs in returns.items()
+    ]
     assert json.loads(rank_returns(returns)) == json.loads(rank_board(json.dumps(subs)))
 
     board = json.loads(rank_returns(returns))

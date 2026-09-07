@@ -11,6 +11,7 @@
 //!   included), not mere correlation;
 //! - the selection alpha warns below the recommended floor but never vetoes.
 
+use crate::csv_columns::{read_all_numeric_columns, read_returns_column};
 use sharpebench_core::calibration::decompose_uncertainty;
 use sharpebench_core::decay::{compare_decay_to_prior, CrowdingParams};
 use sharpebench_core::selection::{
@@ -18,8 +19,8 @@ use sharpebench_core::selection::{
     MIN_RECOMMENDED_SELECTION_ALPHA,
 };
 use sharpebench_core::{
-    classify_disqualification, classify_rediscovery, score_agent, AgentSubmission,
-    DisqualThresholds, FailReason, ScoreConfig, DEFAULT_REDISCOVERY_THRESHOLD,
+    classify_disqualification, classify_rediscovery, DisqualThresholds, FailReason,
+    DEFAULT_REDISCOVERY_THRESHOLD,
 };
 
 /// Run one analysis subcommand. `args` is the full argv with `--json` already
@@ -75,82 +76,6 @@ fn parse_f64_flag_or(args: &[String], flag: &str, default: f64) -> Result<f64, S
             .parse::<f64>()
             .map_err(|_| format!("{flag} must be a number, got `{raw}`")),
     }
-}
-
-/// Read a single column of per-period numbers from CSV text. With `col = None`
-/// the first column is used (a header row is skipped if its first cell is
-/// non-numeric); with `Some(name)` the column under that header is read.
-/// Duplicated from `main.rs` (which owns its own private copy) so this module
-/// stays standalone.
-fn read_returns_column(text: &str, col: Option<&str>) -> Result<Vec<f64>, String> {
-    let mut lines = text.lines().filter(|l| !l.trim().is_empty());
-    let Some(first) = lines.next() else {
-        return Err("empty file".to_string());
-    };
-    let header: Vec<&str> = first.split(',').map(str::trim).collect();
-    let (col_idx, skip_first) = match col {
-        Some(name) => {
-            let idx = header
-                .iter()
-                .position(|h| *h == name)
-                .ok_or_else(|| format!("column `{name}` not found in header"))?;
-            (idx, true)
-        }
-        None => {
-            let skip = header.first().map(|c| c.parse::<f64>().is_err()) == Some(true);
-            (0, skip)
-        }
-    };
-    let mut out = Vec::new();
-    let body = if skip_first { Vec::new() } else { vec![first] };
-    for line in body.into_iter().chain(lines) {
-        let cell = line
-            .split(',')
-            .nth(col_idx)
-            .map(str::trim)
-            .unwrap_or_default();
-        if cell.is_empty() {
-            continue;
-        }
-        let v = cell
-            .parse::<f64>()
-            .map_err(|_| format!("non-numeric value `{cell}` in returns column"))?;
-        out.push(v);
-    }
-    Ok(out)
-}
-
-/// Read every column of a CSV as a named numeric series. A first row whose cells
-/// are all non-numeric is treated as the header; otherwise columns are named
-/// `col0`, `col1`, ... Empty cells are skipped per column.
-fn read_all_numeric_columns(text: &str) -> Result<Vec<(String, Vec<f64>)>, String> {
-    let mut lines = text.lines().filter(|l| !l.trim().is_empty());
-    let Some(first) = lines.next() else {
-        return Err("empty file".to_string());
-    };
-    let first_cells: Vec<&str> = first.split(',').map(str::trim).collect();
-    let has_header = first_cells
-        .iter()
-        .all(|c| !c.is_empty() && c.parse::<f64>().is_err());
-    let names: Vec<String> = if has_header {
-        first_cells.iter().map(|c| (*c).to_string()).collect()
-    } else {
-        (0..first_cells.len()).map(|i| format!("col{i}")).collect()
-    };
-    let mut columns: Vec<Vec<f64>> = vec![Vec::new(); names.len()];
-    let body = if has_header { Vec::new() } else { vec![first] };
-    for line in body.into_iter().chain(lines) {
-        for (i, cell) in line.split(',').map(str::trim).enumerate() {
-            if i >= columns.len() || cell.is_empty() {
-                continue;
-            }
-            let v = cell
-                .parse::<f64>()
-                .map_err(|_| format!("non-numeric value `{cell}` in column `{}`", names[i]))?;
-            columns[i].push(v);
-        }
-    }
-    Ok(names.into_iter().zip(columns).collect())
 }
 
 fn read_file(path: &str) -> Result<String, String> {
@@ -340,7 +265,7 @@ fn is_advisory(reason: FailReason) -> bool {
 /// over the composite score: nothing here changes eligibility semantics.
 fn run_disqualify(args: &[String], json: bool) -> i32 {
     let Some(path) = args.get(2).filter(|p| !p.starts_with('-')) else {
-        eprintln!("usage: sharpebench disqualify <submissions.json> [--json]");
+        eprintln!("usage: sharpebench disqualify <submissions.json> [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode MODE] [--benchmark-agent ID] [--json]");
         return 2;
     };
     let data = match read_file(path) {
@@ -350,20 +275,26 @@ fn run_disqualify(args: &[String], json: bool) -> i32 {
             return 1;
         }
     };
-    let subs: Vec<AgentSubmission> = match serde_json::from_str(&data) {
+    let (subs, declarations) = match sharpebench_core::parse_declared_field(&data) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("error: invalid submissions JSON: {e}");
+            eprintln!("error: {e}");
             return 1;
         }
     };
-    let cfg = ScoreConfig::default();
+    let cfg = match crate::score_config_from_args(args) {
+        Ok(cfg) => cfg,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return 2;
+        }
+    };
     let thresholds = DisqualThresholds::from_score_config(&cfg);
-    let classified: Vec<(String, bool, Vec<FailReason>)> = subs
+    let board = sharpebench_core::rank_declared(&subs, &declarations, &cfg);
+    let classified: Vec<(String, bool, Vec<FailReason>)> = board
         .iter()
-        .map(|sub| {
-            let score = score_agent(sub, &cfg);
-            let reasons = classify_disqualification(&score, &thresholds, None, None);
+        .map(|score| {
+            let reasons = classify_disqualification(score, &thresholds, None, None);
             (score.agent_id.clone(), score.rank_eligible, reasons)
         })
         .collect();
