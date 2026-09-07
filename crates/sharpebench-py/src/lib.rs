@@ -588,8 +588,8 @@ fn to_json<T: serde::Serialize>(value: &T) -> PyResult<String> {
 #[pyfunction]
 #[pyo3(signature = (submissions_json, config_json = None))]
 fn rank_board(submissions_json: &str, config_json: Option<&str>) -> PyResult<String> {
-    let (subs, declarations) = sharpebench_core::parse_declared_field(submissions_json)
-        .map_err(PyValueError::new_err)?;
+    let (subs, declarations) =
+        sharpebench_core::parse_declared_field(submissions_json).map_err(PyValueError::new_err)?;
     let cfg = parse_score_config(config_json)?;
     to_json(&sharpebench_core::rank_declared(&subs, &declarations, &cfg))
 }
