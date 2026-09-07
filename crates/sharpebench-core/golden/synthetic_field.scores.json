@@ -240,7 +240,7 @@
     "field_spa_p": 0.0704647676161919,
     "field_spa_consistent_p": 0.03248375812093953,
     "field_significance_benchmark": "buy-and-hold",
-    "field_crowdedness": 0.623372978919637,
+    "field_crowdedness": 0.6233729789196369,
     "field_crowdedness_peers": 2,
     "in_sample_trials": 0,
     "effective_n_trials": 50,
