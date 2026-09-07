@@ -233,21 +233,54 @@ impl SweepCheckpoint {
     }
 
     /// Persist through a sibling temporary file, sync its bytes, rename it, and
-    /// sync the containing directory on Unix. A successful return therefore
-    /// means the checkpoint is durable, not merely present in a page cache.
+    /// sync the containing directory on Unix. Durability assumes the filesystem
+    /// honors those sync/rename operations; parent-directory sync is Unix-only.
+    /// Concurrent saves own distinct temporary files (the final rename is last-writer-wins).
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
         let payload = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
-        let tmp = path.with_extension("json.tmp");
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+        let parent = path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        let name = path.file_name().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "checkpoint path needs a filename",
+            )
+        })?;
+        let mut collisions = 0;
+        let (tmp, mut file) = loop {
+            let mut temp_name = name.to_os_string();
+            temp_name.push(format!(
+                ".{}.{}.tmp",
+                std::process::id(),
+                NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+            ));
+            let tmp = parent.join(temp_name);
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&tmp)
+            {
+                Ok(file) => break (tmp, file),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    collisions += 1;
+                    if collisions == 64 {
+                        return Err(error);
+                    }
+                }
+                Err(error) => return Err(error),
+            }
+        };
         let result = (|| {
-            let mut file = std::fs::File::create(&tmp)?;
             file.write_all(payload.as_bytes())?;
             file.sync_all()?;
             drop(file);
             std::fs::rename(&tmp, path)?;
             #[cfg(unix)]
-            if let Some(parent) = path.parent() {
-                std::fs::File::open(parent)?.sync_all()?;
-            }
+            std::fs::File::open(parent)?.sync_all()?;
             Ok(())
         })();
         if result.is_err() {
@@ -594,6 +627,53 @@ mod tests {
             outcomes: Vec::new(),
             cost: 0.0,
         }
+    }
+
+    #[test]
+    fn relative_path_save_is_durable() {
+        const CHILD: &str = "SHARPEBENCH_TEST_RELATIVE_CHECKPOINT";
+        if std::env::var_os(CHILD).is_some() {
+            let checkpoint = SweepCheckpoint::new("relative", 1, &[7]);
+            checkpoint.save(Path::new("checkpoint.json")).unwrap();
+            assert!(SweepCheckpoint::load(Path::new("checkpoint.json"))
+                .unwrap()
+                .matches("relative", 1, &[7]));
+            return;
+        }
+        // A child process owns its cwd: never race other tests with set_current_dir.
+        let dir = tmp_path("relative-save");
+        std::fs::create_dir(&dir).unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "checkpoint::tests::relative_path_save_is_durable",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        let published = dir.join("checkpoint.json").is_file();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(published, "the child must execute the save, not zero tests");
+    }
+
+    #[test]
+    fn save_never_overwrites_a_preexisting_sibling_temp() {
+        let path = tmp_path("owned-temp");
+        let stale = path.with_extension("json.tmp");
+        std::fs::write(&stale, "not owned by this save").unwrap();
+        let checkpoint = SweepCheckpoint::new("owned", 1, &[7]);
+        checkpoint.save(&path).unwrap();
+        let unchanged = std::fs::read_to_string(&stale).ok();
+        let _ = std::fs::remove_file(&stale);
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(unchanged.as_deref(), Some("not owned by this save"));
     }
 
     #[test]
