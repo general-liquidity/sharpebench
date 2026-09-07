@@ -969,7 +969,7 @@ mod tests {
 
     #[test]
     fn cheat_agent_is_demoted_and_never_ranks() {
-        use sharpebench_core::{rank, ScoreConfig};
+        use sharpebench_core::{rank, Run, ScoreConfig};
         let data = Dataset::synthetic(5, 120, 20_260_621);
         let windows = [Window {
             start: 20,
@@ -984,7 +984,7 @@ mod tests {
         let honest = run_agent("momentum", &data, &windows, &seeds, costs, || {
             Box::new(Momentum::default()) as Box<dyn Agent>
         });
-        let board = rank(&[cheat, honest], &ScoreConfig::default());
+        let board = rank(&[cheat.clone(), honest], &ScoreConfig::default());
         let cheat_s = board.iter().find(|s| s.agent_id == "cheat").unwrap();
         assert!(
             !cheat_s.rank_eligible,
@@ -994,11 +994,36 @@ mod tests {
             !cheat_s.process_ok,
             "the manipulative order must mark the process dirty"
         );
-        // And it must sort below any eligible honest agent.
+        assert_eq!(cheat_s.rank_ordinal, 0, "display position is not a rank");
+
+        // The market run above need not produce any eligible honest agent.
+        // A scoring-only synthetic positive control makes the stronger ordering
+        // assertion conditional on an actually observed eligible row, not its id.
+        let control = AgentSubmission {
+            agent_id: "synthetic-eligible-control".into(),
+            runs: (0..seeds.len())
+                .map(|_| Run {
+                    returns: (0..100)
+                        .map(|i| 0.002 + 0.0005 * (i as f64 * 0.7).sin())
+                        .collect(),
+                    ..Run::default()
+                })
+                .collect(),
+            ..AgentSubmission::default()
+        };
+        let controlled = rank(&[cheat, control], &ScoreConfig::default());
+        let eligible = controlled
+            .iter()
+            .find(|s| s.agent_id == "synthetic-eligible-control")
+            .unwrap();
         assert!(
-            board[0].agent_id != "cheat",
-            "the cheat must not lead the board"
+            eligible.rank_eligible,
+            "positive control must qualify: {eligible:?}"
         );
+        assert_eq!(controlled[0].agent_id, eligible.agent_id);
+        assert_eq!(controlled[0].rank_ordinal, 1);
+        assert!(!controlled[1].rank_eligible);
+        assert_eq!(controlled[1].rank_ordinal, 0);
     }
 
     #[test]
@@ -1038,8 +1063,9 @@ mod tests {
 
     #[test]
     fn rationality_probe_separates_discriminating_agents() {
-        // Momentum concentrates on the single best asset → fully rational.
-        let mut mo = Momentum::default();
+        // The elicitor supplies two closes, enough for one return interval.
+        // Do not shorten the default agent's ten-interval warmup to fit a probe.
+        let mut mo = Momentum { lookback: 1 };
         let r_mo = probe_rationality(&mut mo, 8, 4);
         assert_eq!(
             r_mo.rationality_score, 1.0,

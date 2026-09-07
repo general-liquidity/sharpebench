@@ -32,6 +32,16 @@ Runs the reference agents (buy-and-hold, momentum) through the point-in-time
 simulator over multiple windows × seeds with costs on, and prints the ranked
 board. The teaching demo: watch deflation and pass^k in action.
 
+The built-in momentum agent uses a 10-return-interval lookback, requiring 11
+observed closes per symbol. It equal-weights symbols with a positive return over
+that exact trailing window. Shorter histories, nonpositive or nonfinite trailing
+prices, or nonfinite returns receive explicit zero targets, not a shorter-window signal.
+Rust callers can set `Momentum { lookback: L }`; zero or overflowing lookbacks
+also leave the signal unavailable. The observation's history budget is separate:
+requesting a lookback beyond it does not expose additional bars. Older versions
+ignored this setting and used all supplied history, so their reference-agent
+results must not be presented as measurements of the repaired strategy.
+
 Three external-agent transports are explicit rather than interchangeable:
 
 - `--image <repository@sha256:...>` launches an already-present, digest-pinned
