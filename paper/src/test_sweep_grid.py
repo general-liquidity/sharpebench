@@ -167,6 +167,14 @@ class SweepGridTests(unittest.TestCase):
         self.assertEqual(shuffled.returncode, 0, shuffled.stderr)
         self.assertEqual(target.read_bytes(), expected)
 
+    def test_unicode_separator_inside_json_string_is_not_a_record_boundary(self):
+        self.rows[0]["note"] = "a\u2028b"
+        line = json.dumps(self.rows[0], ensure_ascii=False)
+        proc, target = self.assemble(self.rows, extra_line=line)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("a\u2028b".encode(), target.read_bytes())
+        self.assertEqual(len(target.read_bytes().split(b"\n")), 513)
+
     def test_reducer_refuses_duplicate_grid_before_any_table_output(self):
         rows = copy.deepcopy(self.rows)
         rows[1] = copy.deepcopy(rows[0])

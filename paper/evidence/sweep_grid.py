@@ -66,7 +66,12 @@ def _finite(value):
 def read_records(path: Path):
     """Return (decoded record, original line) pairs; never skip malformed lines."""
     result = []
-    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+    # JSONL uses newline delimiters, not every Unicode line-separator character.
+    # U+2028, for example, is legal inside a JSON string and belongs to that record.
+    lines = path.read_text(encoding="utf-8").split("\n")
+    if lines[-1] == "":
+        lines.pop()
+    for number, line in enumerate(lines, 1):
         try:
             row = json.loads(line, object_pairs_hook=_object)
             _finite(row)
