@@ -1,11 +1,14 @@
 # Sharpe suite audit implementation
 
-Goal started 2026-09-07. Status: active; accelerated implementation resumed.
+Goal started 2026-09-07. Status: finalizing the current batch; pause requested
+after its verified commit/push/main merges. The overall goal remains unfinished.
 
-All nine checklist sections are preserved: 93 rows, 35 closed and 58 open. The
-preceding saved checkpoint had 29 closed and 64 open; AI9, AD4, BM9, R16, R21
-and the R15 evidence-producer row are newly closed. The combined R15/BI3
-CSV/ranking row remains open.
+All nine checklist sections are preserved: 93 rows, 36 closed and 57 open. The
+earlier saved checkpoint had 29 closed and 64 open; AI9, AD4, BM9, R16, R21,
+the R15 evidence-producer row and BI2/BI8 are now closed. BI2/BI8 is locally
+validated; publication requires exact-head CI and normal main merge, with the
+final PR record authoritative for those gates. The combined R15/BI3 and BI3/BI4
+CSV/ranking identity rows remain open.
 Unchecked rows include partially implemented work and unconfirmed probes, so these
 counts are checklist dispositions, not a count of independent confirmed defects.
 
@@ -20,7 +23,26 @@ or release publication are authorized by this implementation goal. Synthetic
 regressions, existing-fixture tests, package checks and finite diagnostics are in scope.
 Existing published numerical evidence stays frozen until its validity is assessed.
 
-## Accelerated checkpoint
+## Current batch and requested pause
+
+The user requested completion of only the current CSV/board-context batch,
+including commit, push and normal main merges, followed by a break. Do not
+start another audit entry. Bench implementation `7f80fee` and the rebuilt
+npm/WASM surface `b22ecdd` are locally validated. Publication requires successful
+Actions checks on the exact pushed head and normal main merges; the final PR
+records are authoritative for those gates. This checkpoint records local
+validation, not a future merge result. The remaining 57 entries stay open,
+and the overall repair goal is unfinished.
+
+BI2/BI8 now preserves declared mandates and explains host scores from the ranked
+field across CLI, Python and WASM/npm. BI4's numerical analysis readers preserve
+complete selected observations, with explicit regime columns and optional
+ordered period IDs. The separate import command is unchanged. BI3's broader
+run identity remains open: unkeyed legacy `Run` arrays still depend on
+caller-supplied window, seed and period alignment. No new experiment or
+historical evidence regeneration is part of this batch.
+
+## Preceding merged checkpoint
 
 Bench code is merged normally at `7cfc954881437013d6c6f9457143b104a546549f`
 ([PR #22](https://github.com/general-liquidity/sharpebench/pull/22)).
@@ -118,7 +140,7 @@ listed below, not silently omitted from the goal.
 - [ ] R15, BI3: complete expected geometry, keyed support rather than positional ambiguity. The assembler portion is implemented in Bench `c9dc85f`; CSV/ranking keyed support remains open.
 - [ ] BM1: observed search-footprint floors and valid/unavailable PBO.
 - [ ] BM2, BS6: displayed board content/count/order and trusted terminal receipt anchor.
-- [ ] BI2, BI8: identical declared mandates and rank-context explanations on all surfaces.
+- [x] BI2, BI8: Bench `7f80fee` preserves declared mandates through CLI/Python/WASM board parsing, rejects duplicate/blank agent IDs, and classifies disqualification from the ranked field under shared host controls. Rebuilt npm/WASM and executing tests are in `b22ecdd`. Declarations add a second verdict without changing host rank; reasons explain the host score only. Locally validated; publication requires exact-head Actions checks and normal main merge, recorded by the final PR.
 - [ ] BR1: effective nonsecret configuration identity on resume; separate credential handling.
 
 ## 3. Bench simulation and diagnostics
@@ -126,7 +148,7 @@ listed below, not silently omitted from the goal.
 - [ ] R09: Bench inventory/cash fix in `4378ad4`; propagation to Arena remains.
 - [x] R19: masking preserves dividends and total-return economics. Bench `1bd06e2`.
 - [x] R20: finite/domain CSV validation, duplicates, dividend missingness. Bench `1bd06e2`, `d882803`; signed raw closes remain permitted, consistent with the archived WTI data contract.
-- [ ] BI3, BI4: shared CSV support and explicit columns/run identities.
+- [ ] BI3, BI4: BI4's strict numerical analysis readers and explicit return/regime/period columns are repaired in Bench `7f80fee`; missing selected cells are not compacted and regime inputs are not truncated. BI3's full run identity remains open: the import command is unchanged, period-free CSV alignment is caller-asserted, and legacy JSON `Run` arrays remain unkeyed.
 - [ ] BM3: dated role/durability support and correct IC versus return-trend descriptions.
 - [x] BM6: validated DAG and qualified transitive prerequisites in Bench `7719f53`; complete-chain inference uses the checked paired-randomization helper `e68d1d8`, recomputing qualification under whole-arm swaps with explicit unavailable single-chain inference. Migration `1f64ad5`, provenance `ffedd3a`. PR #18 merged normally at `e6f2ab1` after all 17 Actions jobs passed on tested `ffedd3a`; merged tree equals tested tree. Replicate independence and arm exchangeability remain assumptions.
 - [ ] Memory supplementary: matching oracle/task populations, finite parameters, oracle floor.
@@ -221,6 +243,32 @@ listed below, not silently omitted from the goal.
 - [ ] Probe child OOM versus surviving wrapper classification.
 
 ## Verification log
+
+- CSV/board-context batch, Bench `7f80fee`: five CSV module tests, four actual
+  CLI integration tests, three WASM board-context tests, 62 Python tests and
+  18 npm tests pass. The complete product workspace (`cargo test --workspace
+  --exclude xtask`) passes, including four frozen-evidence regressions and
+  three native/WASM golden-parity tests. Product-workspace and standalone PyO3
+  Clippy pass; all 28 `paper/src` unit tests pass. Local `xtask` still lacks
+  OpenSSL development files; publication also requires the full CI workspace.
+  The expanded offline npm tarball smoke passes, including a declared relative
+  mandate through the installed tarball. The rebuilt binary, types and executing
+  npm tests are committed in `b22ecdd`.
+  In isolated temporary copies, bypassing period-ID agreement fails one test
+  and reintroducing missing-cell compaction fails one test. All three new npm
+  regressions fail against the old committed main WASM and pass against the
+  rebuilt WASM, including actual host eligibility/reason differences rather
+  than only changed array order. No mutation touched production source.
+  CSV readers refuse blank/ragged input, invalid selected numbers and missing
+  selected data. Regime comparison requires equal complete row counts, with
+  identical unique ordered IDs when `--period-col` is supplied. These checks
+  do not establish temporal support without IDs or repair the separate import
+  path. Board declarations retain their second verdict, host ranking is
+  unchanged by them, and reasons explain the host score only. No model call,
+  new benchmark experiment or historical-artifact rewrite ran.
+  The batch must pass exact-head Actions checks and normal main merges before
+  the requested break; the final PR records establish those publication results.
+  No additional goal entry is to be started.
 
 - R15 evidence-producer closure: Bench `c9dc85f` adds
   declared 4 × 4 × 4 × 8 coverage, strict JSON, dataset/configuration agreement
