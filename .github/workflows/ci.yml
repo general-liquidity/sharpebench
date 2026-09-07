@@ -327,5 +327,7 @@ jobs:
           python-version: "3.12"
       - name: Provenance policy cannot be narrowed by its manifest
         run: python -m unittest paper/src/test_provenance.py
+      - name: Sweep coverage requires the declared grid, not row count
+        run: python -m unittest paper/src/test_sweep_grid.py
       - name: Every recorded source and artifact matches the committed scope
         run: python paper/src/check-provenance.py
