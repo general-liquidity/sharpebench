@@ -26,6 +26,7 @@ and links the commits it was built from.
 - harness/cli: checkpoint contracts now bind entrant artifact identity and invocation identity separately. A caller-supplied `--entrant-sha256` can no longer resume the same checkpoint after changing the command, endpoint, image reference, or environment pass-through list.
 
 ### Documentation
+- Tests distinguish current-engine reconstructions from frozen historical evidence. The corrected inventory path leaves only two finite-Sharpe streams in the commodities reconstruction, while the archived default rows retain their historical measured-dispersion stamp. No archived result was rewritten; percentage-return claims across the negative WTI quote require separate validity assessment.
 - architecture audit: extend the source review from 65 to all 75 supplied benchmark repositories and record which mechanisms were adopted, already present, deferred, or rejected.
 
 ## [0.18.4] - 2026-09-04
