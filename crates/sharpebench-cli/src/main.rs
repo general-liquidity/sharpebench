@@ -12,8 +12,11 @@ use std::process::ExitCode;
 use serde::Serialize;
 use sharpebench_core::{rank, AgentSubmission, CompositeScore, ScoreConfig};
 
+use csv_columns::read_returns_column;
+
 mod analysis_cmd;
 mod arena_cmd;
+mod csv_columns;
 mod forecast_cmd;
 mod import_cmd;
 mod lineage_cmd;
@@ -364,15 +367,24 @@ fn run_check(args: &[String], json: bool) -> ExitCode {
 
 /// `sharpebench regime <a.csv> <b.csv> <regimes.csv>`: compare two strategies'
 /// per-period returns inside each market regime. The three files are aligned by
-/// row; the regimes file carries one label per period (string column, header
+/// row unless `--period-col` requires identical ordered period identities.
+/// The regimes file carries one label per period (string column, header
 /// optional). Labels are an input: nothing here infers a regime.
 fn run_regime(args: &[String], json: bool) -> ExitCode {
     let (Some(path_a), Some(path_b), Some(path_r)) = (args.get(2), args.get(3), args.get(4)) else {
         eprintln!(
-            "usage: sharpebench regime <returns_a.csv> <returns_b.csv> <regimes.csv> [--col NAME] [--json]"
+            "usage: sharpebench regime <returns_a.csv> <returns_b.csv> <regimes.csv> [--col NAME] [--regime-col NAME] [--period-col NAME] [--json]"
         );
         return ExitCode::from(2);
     };
+    for name in ["--col", "--regime-col", "--period-col"] {
+        if args.iter().any(|arg| arg == name)
+            && flag_value(args, name).is_none_or(|value| value.is_empty() || value.starts_with('-'))
+        {
+            eprintln!("error: {name} requires a column name");
+            return ExitCode::from(2);
+        }
+    }
     let col = flag_value(args, "--col");
 
     let read = |path: &str| -> Result<String, ExitCode> {
@@ -385,35 +397,20 @@ fn run_regime(args: &[String], json: bool) -> ExitCode {
         (Ok(a), Ok(b), Ok(r)) => (a, b, r),
         (Err(c), _, _) | (_, Err(c), _) | (_, _, Err(c)) => return c,
     };
-    let (a, b) = match (
-        read_returns_column(&text_a, col),
-        read_returns_column(&text_b, col),
+    let csv_columns::RegimeInputs { a, b, labels } = match csv_columns::read_regime_inputs(
+        &text_a,
+        &text_b,
+        &text_r,
+        col,
+        flag_value(args, "--regime-col"),
+        flag_value(args, "--period-col"),
     ) {
-        (Ok(a), Ok(b)) => (a, b),
-        (Err(e), _) | (_, Err(e)) => {
-            eprintln!("error: {e}");
+        Ok(inputs) => inputs,
+        Err(error) => {
+            eprintln!("error: {error}");
             return ExitCode::FAILURE;
         }
     };
-    let labels = read_label_column(&text_r, col);
-    if a.is_empty() || b.is_empty() || labels.is_empty() {
-        eprintln!(
-            "error: need at least one aligned period, got a={} b={} regimes={}",
-            a.len(),
-            b.len(),
-            labels.len()
-        );
-        return ExitCode::FAILURE;
-    }
-    if a.len() != b.len() || a.len() != labels.len() {
-        eprintln!(
-            "warning: lengths differ (a={} b={} regimes={}); comparing the first {} periods",
-            a.len(),
-            b.len(),
-            labels.len(),
-            a.len().min(b.len()).min(labels.len())
-        );
-    }
 
     let regimes: Vec<&str> = labels.iter().map(String::as_str).collect();
     let report = sharpebench_core::compare_by_regime(
@@ -462,83 +459,6 @@ fn run_regime(args: &[String], json: bool) -> ExitCode {
         }
     }
     ExitCode::SUCCESS
-}
-
-/// Read a column of regime labels from CSV text, one per period. With
-/// `col = None` column 0 is used and a first row whose cell reads `regime` or
-/// `label` (case-insensitive) is treated as a header; with `Some(name)` the
-/// column under that header is read. Empty cells are skipped.
-fn read_label_column(text: &str, col: Option<&str>) -> Vec<String> {
-    let mut lines = text.lines().filter(|l| !l.trim().is_empty());
-    let Some(first) = lines.next() else {
-        return Vec::new();
-    };
-    let header: Vec<&str> = first.split(',').map(str::trim).collect();
-    let (col_idx, skip_first) = match col {
-        Some(name) => match header.iter().position(|h| *h == name) {
-            Some(idx) => (idx, true),
-            None => (0, false),
-        },
-        None => {
-            let skip = header
-                .first()
-                .map(|c| c.eq_ignore_ascii_case("regime") || c.eq_ignore_ascii_case("label"))
-                == Some(true);
-            (0, skip)
-        }
-    };
-    let body = if skip_first { Vec::new() } else { vec![first] };
-    body.into_iter()
-        .chain(lines)
-        .filter_map(|line| line.split(',').nth(col_idx).map(str::trim))
-        .filter(|cell| !cell.is_empty())
-        .map(str::to_string)
-        .collect()
-}
-
-/// Read a single column of per-period returns from CSV text. With `col = None`
-/// the first numeric column is used (a header row is skipped if its first cell is
-/// non-numeric); with `Some(name)` the column under that header is read.
-fn read_returns_column(text: &str, col: Option<&str>) -> Result<Vec<f64>, String> {
-    let mut lines = text.lines().filter(|l| !l.trim().is_empty());
-    let Some(first) = lines.next() else {
-        return Err("empty file".to_string());
-    };
-    let header: Vec<&str> = first.split(',').map(str::trim).collect();
-
-    let (col_idx, skip_first) = match col {
-        Some(name) => {
-            let idx = header
-                .iter()
-                .position(|h| *h == name)
-                .ok_or_else(|| format!("column `{name}` not found in header"))?;
-            (idx, true)
-        }
-        None => {
-            // No column named: pick column 0. Skip the first row only if it is a
-            // non-numeric header.
-            let skip = header.first().map(|c| c.parse::<f64>().is_err()) == Some(true);
-            (0, skip)
-        }
-    };
-
-    let mut out = Vec::new();
-    let body = if skip_first { Vec::new() } else { vec![first] };
-    for line in body.into_iter().chain(lines) {
-        let cell = line
-            .split(',')
-            .nth(col_idx)
-            .map(str::trim)
-            .unwrap_or_default();
-        if cell.is_empty() {
-            continue;
-        }
-        let v = cell
-            .parse::<f64>()
-            .map_err(|_| format!("non-numeric value `{cell}` in returns column"))?;
-        out.push(v);
-    }
-    Ok(out)
 }
 
 /// Print a value as pretty JSON to stdout (machine-readable mode).
@@ -1867,40 +1787,51 @@ fn run_score(path: &str, args: &[String], json: bool) -> ExitCode {
     };
     // Each object is a submission plus an optional `declared_mandate`; the
     // declaration is scored as a labeled second verdict and never moves rank.
-    let field: Vec<sharpebench_core::DeclaredSubmission> = match serde_json::from_str(&data) {
+    let (subs, declarations) = match sharpebench_core::parse_declared_field(&data) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("error: invalid submissions JSON: {e}");
+            eprintln!("error: {e}");
             return ExitCode::FAILURE;
         }
     };
-    let (subs, declarations) = sharpebench_core::split_declarations(field);
-    let periods_per_year = match positive_f64_flag(args, "--periods-per-year") {
-        Ok(Some(value)) => value,
-        Ok(None) => ScoreConfig::default().periods_per_year,
+    let cfg = match score_config_from_args(args) {
+        Ok(cfg) => cfg,
         Err(error) => {
             eprintln!("error: {error}");
             return ExitCode::from(2);
         }
     };
-    let mut cfg = ScoreConfig::for_periods_per_year(periods_per_year);
-    match positive_usize_flag(args, "--execution-seeds-per-window") {
-        Ok(Some(value)) => cfg.execution_seeds_per_window = value,
-        Ok(None) => {}
-        Err(error) => {
-            eprintln!("error: {error}");
-            return ExitCode::from(2);
-        }
-    }
-    if let Err(e) = apply_pass_mode_flags(args, &mut cfg) {
-        eprintln!("error: {e}");
-        return ExitCode::from(2);
-    }
     emit_board(
         &sharpebench_core::rank_declared(&subs, &declarations, &cfg),
         json,
     );
     ExitCode::SUCCESS
+}
+
+/// Shared by `score` and `disqualify`: explanations use the same host verdict,
+/// annualization and execution-replicate controls as the displayed board.
+fn score_config_from_args(args: &[String]) -> Result<ScoreConfig, String> {
+    for name in [
+        "--periods-per-year",
+        "--execution-seeds-per-window",
+        "--pass-mode",
+        "--benchmark-agent",
+    ] {
+        if args.iter().any(|arg| arg == name)
+            && flag_value(args, name)
+                .is_none_or(|value| value.is_empty() || value.starts_with("--"))
+        {
+            return Err(format!("{name} requires a value"));
+        }
+    }
+    let periods = positive_f64_flag(args, "--periods-per-year")?
+        .unwrap_or(ScoreConfig::default().periods_per_year);
+    let mut cfg = ScoreConfig::for_periods_per_year(periods);
+    if let Some(width) = positive_usize_flag(args, "--execution-seeds-per-window")? {
+        cfg.execution_seeds_per_window = width;
+    }
+    apply_pass_mode_flags(args, &mut cfg)?;
+    Ok(cfg)
 }
 
 fn positive_f64_flag(args: &[String], flag: &str) -> Result<Option<f64>, String> {

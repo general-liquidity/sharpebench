@@ -110,6 +110,29 @@ pub fn split_declarations(
     (subs, declarations)
 }
 
+/// Parse the board JSON accepted by CLI, Python and WASM. Declarations travel
+/// through every board boundary. Agent IDs must be nonempty and unique because
+/// declarations and relative benchmarks are resolved by that identity.
+///
+/// This validates identity, not temporal alignment: legacy `Run` arrays still
+/// require the caller to supply the same window/seed/period order.
+pub fn parse_declared_field(
+    json: &str,
+) -> Result<(Vec<AgentSubmission>, MandateDeclarations), String> {
+    let field: Vec<DeclaredSubmission> =
+        serde_json::from_str(json).map_err(|error| format!("invalid submissions JSON: {error}"))?;
+    let mut ids = std::collections::BTreeSet::new();
+    for item in &field {
+        let id = &item.submission.agent_id;
+        if id.trim().is_empty() || !ids.insert(id) {
+            return Err(format!(
+                "agent identity must be nonempty and unique: `{id}`"
+            ));
+        }
+    }
+    Ok(split_declarations(field))
+}
+
 /// The reliability verdict a [`DeclaredMandate`] resolves to: the question the
 /// kernel actually tests for it. [`DeclaredMandate::OutperformBuyAndHold`] resolves to
 /// [`MandateVerdict::RelativeTo`] buy-and-hold, so two declarations that ask the
