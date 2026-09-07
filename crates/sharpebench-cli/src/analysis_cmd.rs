@@ -492,6 +492,24 @@ fn run_rediscover(args: &[String], json: bool) -> i32 {
 
 // --- uncertainty -------------------------------------------------------------
 
+fn binary_outcomes(values: Vec<f64>) -> Result<Vec<bool>, String> {
+    values
+        .into_iter()
+        .enumerate()
+        .map(|(index, value)| {
+            if value == 0.0 {
+                Ok(false)
+            } else if value == 1.0 {
+                Ok(true)
+            } else {
+                Err(format!(
+                    "outcomes[{index}] must be exactly 0 or 1, got {value}"
+                ))
+            }
+        })
+        .collect()
+}
+
 /// `uncertainty <returns.csv> [--reference <csv>] [--outcomes <csv>]
 /// [--confidences <csv>]...`: decompose the uncertainty behind one scored case
 /// into its aleatoric, epistemic and distributional legs. The legs are reported
@@ -525,8 +543,11 @@ fn run_uncertainty(args: &[String], json: bool) -> i32 {
     };
     let outcomes: Vec<bool> = match flag_value(args, "--outcomes") {
         None => Vec::new(),
-        Some(p) => match read_file(p).and_then(|t| read_returns_column(&t, None)) {
-            Ok(r) => r.into_iter().map(|v| v != 0.0).collect(),
+        Some(p) => match read_file(p)
+            .and_then(|t| read_returns_column(&t, None))
+            .and_then(binary_outcomes)
+        {
+            Ok(r) => r,
             Err(e) => {
                 eprintln!("error: {p}: {e}");
                 return 1;
@@ -816,6 +837,26 @@ mod tests {
         assert_eq!(run("uncertainty", &argv("uncertainty", &[]), false), 2);
         let args = argv("uncertainty", &["no-such-file.csv"]);
         assert_eq!(run("uncertainty", &args, false), 1);
+    }
+
+    #[test]
+    fn uncertainty_refuses_nonbinary_outcomes() {
+        assert_eq!(
+            binary_outcomes(vec![0.0, -0.0, 1.0]).unwrap(),
+            vec![false, false, true]
+        );
+        assert!(binary_outcomes(vec![0.0, f64::NAN])
+            .unwrap_err()
+            .contains("outcomes[1]"));
+        let case_f = temp_file("unc-binary-case.csv", &csv_of(&[0.01, -0.01, 0.02]));
+        for (i, value) in [-1.0, 2.0, 0.3, f64::NAN, f64::INFINITY].iter().enumerate() {
+            let out_f = temp_file(
+                &format!("unc-invalid-outcome-{i}.csv"),
+                &csv_of(&[0.0, *value, 1.0]),
+            );
+            let args = argv("uncertainty", &[&case_f, "--outcomes", &out_f]);
+            assert_eq!(run("uncertainty", &args, true), 1, "must refuse {value}");
+        }
     }
 
     #[test]

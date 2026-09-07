@@ -81,6 +81,15 @@ test("honesty wrappers refuse invalid or overflowing search counts", () => {
     assert.throws(() => sb.isMySharpeRealFull([returns], 0, { nTrials }), /nTrials|n_trials/);
   }
   assert.equal(sb.isMySharpeReal(returns, { nTrials: 2 ** 32 - 1 }).nTrials, 2 ** 32 - 1);
+  // Bypass the TypeScript guard as well: a stale unsafe wasm must fail this test.
+  const kernel = require("../pkg/sharpebench.js");
+  const config = JSON.stringify({n_trials: 2 ** 32 + 1});
+  for (const raw of [kernel.is_my_sharpe_real(JSON.stringify(returns), config),
+                    kernel.is_my_sharpe_real_full(JSON.stringify([returns]), 0, config)]) {
+    const result = JSON.parse(raw);
+    assert.deepEqual(Object.keys(result), ["error"]);
+    assert.match(result.error, /n_trials/);
+  }
 });
 
 test("uncertainty refuses nonbinary outcomes inside the actual wasm module", () => {

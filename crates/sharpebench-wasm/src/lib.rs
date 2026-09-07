@@ -258,10 +258,14 @@ pub fn decompose_uncertainty_json(input_json: &str) -> Result<String, String> {
             .as_array()
             .ok_or("outcomes must be an array")?
             .iter()
-            .map(|o| match o {
+            .enumerate()
+            .map(|(index, o)| match o {
                 serde_json::Value::Bool(b) => Ok(*b),
-                serde_json::Value::Number(n) => Ok(n.as_f64().unwrap_or(0.0) != 0.0),
-                _ => Err("outcomes entries must be booleans or 0/1 numbers".to_string()),
+                serde_json::Value::Number(n) if n.as_f64() == Some(0.0) => Ok(false),
+                serde_json::Value::Number(n) if n.as_f64() == Some(1.0) => Ok(true),
+                _ => Err(format!(
+                    "outcomes[{index}] must be a boolean or exact 0/1 number"
+                )),
             })
             .collect::<Result<_, _>>()?,
     };
