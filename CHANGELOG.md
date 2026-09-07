@@ -13,6 +13,7 @@ and links the commits it was built from.
 ## [Unreleased]
 
 ### Fixed
+- stats: compute empirical skewness and non-excess kurtosis with an n-normalized second moment, consistent with their third/fourth moments. This changes PSR/DSR and confidence estimates. Exact small-vector regressions cover the convention; existing synthetic score fixtures are refreshed, not historical paper evidence.
 - core: common-support comparisons retain every submitted process trace for eligibility, declared-mandate eligibility, warning counts and the process return floor. A peer omitting a run can no longer erase another entrant's violation.
 - harness/cli: checkpoint contracts now bind entrant artifact identity and invocation identity separately. A caller-supplied `--entrant-sha256` can no longer resume the same checkpoint after changing the command, endpoint, image reference, or environment pass-through list.
 
