@@ -348,7 +348,11 @@ impl Agent for RiskManaged {
 }
 
 /// Cross-sectional momentum: equal-weight the symbols with positive trailing return.
+/// A lookback of L is L return intervals and requires L+1 observed closes.
+/// Insufficient history, zero lookback or an invalid trailing price window means
+/// an explicit zero target for that symbol, not a shorter-window signal.
 pub struct Momentum {
+    /// Number of trailing return intervals (default 10), not all supplied history.
     pub lookback: usize,
 }
 
@@ -358,23 +362,34 @@ impl Default for Momentum {
     }
 }
 
+impl Momentum {
+    fn trailing_return(&self, history: &[f64]) -> Option<f64> {
+        if self.lookback == 0 {
+            return None;
+        }
+        let need = self.lookback.checked_add(1)?;
+        let start = history.len().checked_sub(need)?;
+        let tail = &history[start..];
+        if tail.iter().any(|price| !price.is_finite() || *price <= 0.0) {
+            return None;
+        }
+        let score = tail[tail.len() - 1] / tail[0] - 1.0;
+        score.is_finite().then_some(score)
+    }
+}
+
 impl Agent for Momentum {
     fn decide(&mut self, obs: &MarketObservation) -> Decision {
-        let scores: Vec<(String, f64)> = obs
+        let scores: Vec<(String, Option<f64>)> = obs
             .symbols
             .iter()
-            .map(|s| {
-                let h = &s.close_history;
-                let score = if h.len() >= 2 && h[0] > 0.0 {
-                    h[h.len() - 1] / h[0] - 1.0
-                } else {
-                    0.0
-                };
-                (s.symbol.clone(), score)
-            })
+            .map(|s| (s.symbol.clone(), self.trailing_return(&s.close_history)))
             .collect();
 
-        let n_winners = scores.iter().filter(|(_, sc)| *sc > 0.0).count();
+        let n_winners = scores
+            .iter()
+            .filter(|(_, sc)| sc.is_some_and(|r| r > 0.0))
+            .count();
         let w = if n_winners > 0 {
             1.0 / n_winners as f64
         } else {
@@ -384,16 +399,18 @@ impl Agent for Momentum {
         let orders = scores
             .iter()
             .map(|(sym, sc)| {
-                let positive = *sc > 0.0;
+                let positive = sc.is_some_and(|r| r > 0.0);
                 Order {
                     symbol: sym.clone(),
                     action: if positive { Action::Buy } else { Action::Close },
                     target_weight: if positive { w } else { 0.0 },
-                    confidence: (0.5 + sc.abs()).min(1.0),
-                    rationale: if positive {
-                        format!("positive trailing return {sc:.3}")
-                    } else {
-                        "non-positive trailing return".to_string()
+                    confidence: sc.map_or(0.5, |r| (0.5 + r.abs()).min(1.0)),
+                    rationale: match sc {
+                        Some(r) => format!("{}-interval trailing return {r:.3}", self.lookback),
+                        None => format!(
+                            "{}-interval momentum unavailable: requires positive lookback, complete finite positive trailing prices and a finite return",
+                            self.lookback
+                        ),
                     },
                 }
             })
@@ -446,6 +463,84 @@ mod tests {
 
     fn gross_of(d: &Decision) -> f64 {
         d.orders.iter().map(|o| o.target_weight).sum()
+    }
+
+    #[test]
+    fn momentum_lookbacks_can_choose_opposite_positions() {
+        let market = obs(&[("A", vec![200.0, 150.0, 80.0, 90.0, 100.0])], 100.0);
+        let short = Momentum { lookback: 2 }.decide(&market);
+        let long = Momentum { lookback: 4 }.decide(&market);
+        assert_eq!(short.orders[0].target_weight, 1.0);
+        assert!(matches!(short.orders[0].action, Action::Buy));
+        assert_eq!(long.orders[0].target_weight, 0.0);
+        assert!(matches!(long.orders[0].action, Action::Close));
+    }
+
+    #[test]
+    fn momentum_ignores_history_before_the_requested_window() {
+        let a = obs(&[("A", vec![200.0, 80.0, 90.0, 100.0])], 100.0);
+        let b = obs(&[("A", vec![f64::NAN, 1.0, 80.0, 90.0, 100.0])], 100.0);
+        let mut agent = Momentum { lookback: 2 };
+        assert_eq!(
+            serde_json::to_value(agent.decide(&a)).unwrap(),
+            serde_json::to_value(agent.decide(&b)).unwrap()
+        );
+    }
+
+    #[test]
+    fn momentum_requires_exactly_lookback_plus_one_closes() {
+        let mut agent = Momentum::default();
+        assert_eq!(agent.lookback, 10);
+        for count in [0, 1, 9, 10] {
+            let d = agent.decide(&obs(&[("A", geometric(100.0, 0.01, count))], 100.0));
+            assert_eq!(gross_of(&d), 0.0, "premature allocation at {count} closes");
+            assert!(d.orders[0].rationale.contains("unavailable"));
+        }
+        let d = agent.decide(&obs(&[("A", geometric(100.0, 0.01, 11))], 100.0));
+        assert_eq!(gross_of(&d), 1.0);
+        assert_eq!(
+            gross_of(&Momentum { lookback: 1 }.decide(&obs(&[("A", vec![1.0, 2.0])], 100.0))),
+            1.0
+        );
+    }
+
+    #[test]
+    fn momentum_unavailable_symbols_do_not_dilute_the_winners() {
+        let d = Momentum { lookback: 2 }.decide(&obs(
+            &[
+                ("warmup", vec![1.0, 2.0]),
+                ("winner_a", vec![1.0, 2.0, 3.0]),
+                ("winner_b", vec![4.0, 5.0, 6.0]),
+                ("loser", vec![3.0, 2.0, 1.0]),
+            ],
+            100.0,
+        ));
+        assert_eq!(
+            d.orders.iter().map(|o| o.target_weight).collect::<Vec<_>>(),
+            vec![0.0, 0.5, 0.5, 0.0]
+        );
+    }
+
+    #[test]
+    fn momentum_invalid_window_or_prices_cannot_allocate_or_panic() {
+        let market = obs(&[("A", vec![1.0, 2.0, 3.0])], 100.0);
+        for lookback in [0, usize::MAX] {
+            let d = Momentum { lookback }.decide(&market);
+            assert_eq!(gross_of(&d), 0.0);
+            assert!(d.orders[0].rationale.contains("unavailable"));
+        }
+        for history in [
+            vec![0.0, 2.0, 3.0],
+            vec![1.0, -2.0, 3.0],
+            vec![1.0, f64::NAN, 3.0],
+            vec![1.0, 2.0, f64::INFINITY],
+            vec![f64::MIN_POSITIVE, 1.0, f64::MAX],
+        ] {
+            let d = Momentum { lookback: 2 }.decide(&obs(&[("A", history)], 100.0));
+            assert_eq!(gross_of(&d), 0.0);
+            assert!(d.orders[0].confidence.is_finite());
+            assert!(d.orders[0].rationale.contains("unavailable"));
+        }
     }
 
     #[test]
