@@ -12,6 +12,7 @@
   - [Candidate lineage diagnostics](candidate-lineage.md)
 - [Prospective forecast quality](forecast-quality.md)
 - [The simulator](simulator.md)
+- [Options pricing and payoff risk](options-risk.md)
 - [Memory and retrieval benchmark](memory.md)
 - [Submitting an agent](submitting.md)
 - [Evidence contracts](evidence-contracts.md)
