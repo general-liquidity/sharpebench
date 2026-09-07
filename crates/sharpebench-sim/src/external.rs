@@ -41,12 +41,51 @@ const MAX_AGENT_RESPONSE: u64 = 8 * 1024 * 1024;
 /// with it, losing every other agent's results in the same sweep.
 const MAX_AGENT_LINE: u64 = MAX_AGENT_RESPONSE;
 
+/// Total accepted stdout per spawned agent (one harness attempt), including
+/// newlines. Backpressure separately bounds resident queued output. A long-lived
+/// entrant must remain within this explicit 64 MiB wire quota.
+const MAX_AGENT_STDOUT: u64 = 64 * 1024 * 1024;
+
 /// One item pulled off an agent's stdout.
 enum Wire {
     /// A newline-terminated (or final, unterminated) line within budget.
     Line(String),
     /// The agent wrote past [`MAX_AGENT_LINE`] without ending the line.
     Oversized,
+    /// Cumulative accepted stdout exceeded the per-process quota.
+    OutputBudgetExceeded,
+}
+
+fn spawn_line_reader<R: BufRead + Send + 'static>(
+    mut reader: R,
+    total_budget: u64,
+) -> Receiver<std::io::Result<Wire>> {
+    // At most one queued line and one line being read/sent, each independently
+    // bounded. The reader cannot turn a stream of small lines into an unbounded
+    // host allocation outside the entrant's container memory limit.
+    let (tx, lines) = mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let mut remaining = total_budget;
+        loop {
+            let (message, terminal) = match read_wire(&mut reader) {
+                Ok(None) => break,
+                Ok(Some(Wire::Line(line))) => {
+                    if line.len() as u64 > remaining {
+                        (Ok(Wire::OutputBudgetExceeded), true)
+                    } else {
+                        remaining -= line.len() as u64;
+                        (Ok(Wire::Line(line)), false)
+                    }
+                }
+                Ok(Some(wire)) => (Ok(wire), true),
+                Err(error) => (Err(error), true),
+            };
+            if tx.send(message).is_err() || terminal {
+                break;
+            }
+        }
+    });
+    lines
 }
 
 /// Read one line from `reader`, bounded by [`MAX_AGENT_LINE`]. `Ok(None)` is EOF.
@@ -283,28 +322,7 @@ impl ExternalAgent {
                 }
             }
         });
-        let (tx, lines) = mpsc::channel();
-        std::thread::spawn(move || {
-            let mut reader = BufReader::new(stdout);
-            loop {
-                match read_wire(&mut reader) {
-                    Ok(None) => break,
-                    Ok(Some(wire)) => {
-                        // An agent that blew the budget is finished: the rest of
-                        // that line is not a sequence of further decisions, and
-                        // draining it is the memory burn this cap exists to stop.
-                        let overflowed = matches!(wire, Wire::Oversized);
-                        if tx.send(Ok(wire)).is_err() || overflowed {
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        let _ = tx.send(Err(e));
-                        break;
-                    }
-                }
-            }
-        });
+        let lines = spawn_line_reader(BufReader::new(stdout), MAX_AGENT_STDOUT);
         Ok(Self {
             child,
             input,
@@ -360,6 +378,7 @@ impl ExternalAgent {
             ) {
                 Ok(Ok(Wire::Line(resp))) => return parse_decision(&resp, obs),
                 Ok(Ok(Wire::Oversized)) => return Err(oversized_fault()),
+                Ok(Ok(Wire::OutputBudgetExceeded)) => return Err(output_budget_fault()),
                 Ok(Err(_)) => return Err(DecideError::Transport),
                 Err(RecvTimeoutError::Disconnected) => break,
                 Err(RecvTimeoutError::Timeout) if Instant::now() >= deadline => break,
@@ -407,6 +426,7 @@ impl ExternalAgent {
             match self.lines.recv_timeout(slice) {
                 Ok(Ok(Wire::Line(resp))) => return parse_decision(&resp, obs),
                 Ok(Ok(Wire::Oversized)) => return Err(oversized_fault()),
+                Ok(Ok(Wire::OutputBudgetExceeded)) => return Err(output_budget_fault()),
                 Ok(Err(_)) => return Err(DecideError::Transport),
                 Err(RecvTimeoutError::Disconnected) => {
                     // The reader saw EOF and the channel is empty. EOF races the
@@ -465,6 +485,13 @@ fn oversized_fault() -> DecideError {
     eprintln!(
         "agent protocol fault: one decision exceeded the {MAX_AGENT_LINE}-byte line \
          budget without a newline; the contract is one JSON decision per line"
+    );
+    DecideError::Oversized
+}
+
+fn output_budget_fault() -> DecideError {
+    eprintln!(
+        "agent protocol fault: stdout exceeded the {MAX_AGENT_STDOUT}-byte per-process quota"
     );
     DecideError::Oversized
 }
@@ -742,6 +769,82 @@ mod tests {
 
         let mut reader = std::io::Cursor::new(Vec::new());
         assert!(matches!(read_wire(&mut reader), Ok(None)), "empty is EOF");
+    }
+
+    #[test]
+    fn cumulative_stdout_quota_accepts_the_boundary_and_refuses_the_next_line() {
+        let lines = spawn_line_reader(std::io::Cursor::new(b"{}\n{}\n{}\n".to_vec()), 6);
+        for _ in 0..2 {
+            assert!(matches!(lines.recv().unwrap().unwrap(), Wire::Line(line) if line == "{}\n"));
+        }
+        assert!(matches!(
+            lines.recv().unwrap().unwrap(),
+            Wire::OutputBudgetExceeded
+        ));
+        assert!(
+            lines.recv().is_err(),
+            "the quota violation must terminate the reader"
+        );
+        assert_eq!(output_budget_fault(), DecideError::Oversized);
+        assert!(!output_budget_fault().is_retryable());
+    }
+
+    #[test]
+    fn stdout_backpressure_bounds_consumption_without_dropping_lines() {
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+        struct Counted {
+            inner: std::io::Cursor<Vec<u8>>,
+            consumed: Arc<AtomicUsize>,
+        }
+        impl Read for Counted {
+            fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+                let n = self.inner.read(output)?;
+                self.consumed.fetch_add(n, Ordering::SeqCst);
+                Ok(n)
+            }
+        }
+        impl BufRead for Counted {
+            fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+                self.inner.fill_buf()
+            }
+            fn consume(&mut self, n: usize) {
+                self.inner.consume(n);
+                self.consumed.fetch_add(n, Ordering::SeqCst);
+            }
+        }
+        let consumed = Arc::new(AtomicUsize::new(0));
+        let reader = Counted {
+            inner: std::io::Cursor::new(b"{}\n".repeat(256)),
+            consumed: consumed.clone(),
+        };
+        let lines = spawn_line_reader(reader, MAX_AGENT_STDOUT);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while consumed.load(Ordering::SeqCst) < 6 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(
+            consumed.load(Ordering::SeqCst) >= 6,
+            "reader must actually run"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+        assert_eq!(
+            consumed.load(Ordering::SeqCst),
+            6,
+            "one queued line plus one blocked sender; an unbounded channel drains all 256"
+        );
+        let mut count = 0;
+        while let Ok(wire) = lines.recv_timeout(Duration::from_secs(5)) {
+            assert!(matches!(wire.unwrap(), Wire::Line(line) if line == "{}\n"));
+            count += 1;
+        }
+        assert_eq!(
+            count, 256,
+            "backpressure must preserve every legitimate line"
+        );
+        assert_eq!(consumed.load(Ordering::SeqCst), 256 * 3);
     }
 
     #[test]
