@@ -76,6 +76,45 @@ Ranks a JSON field of pre-computed submissions (see
 bootstrap p, and raw return, with a footer naming how many of the submitted agents
 are eligible.
 
+`score` and [`disqualify`](#disqualify) share these host scoring controls:
+
+| Flag | Meaning |
+|---|---|
+| `--periods-per-year N` | Positive finite annualization frequency |
+| `--execution-seeds-per-window N` | Positive integer number of adjacent execution replicates per window |
+| `--pass-mode MODE` | `all`, `any`, `at-least:N`, or `relative-to-benchmark` |
+| `--benchmark-agent ID` | Field member used for the relative verdict; defaults to `buy-and-hold` |
+
+Each supplied flag requires a value; an omitted value is a usage error in both
+commands.
+
+Each submission may carry `declared_mandate`, as described under
+[declaring a mandate](methodology-pass-k.md#declaring-a-mandate-at-submission).
+The declaration adds `declared_passed_k` and `declared_mandate_eligible` beside
+the host verdict; it does not change host eligibility, rank order or ordinal.
+Unknown declaration kinds, duplicate agent IDs and whitespace-only IDs are
+refused. IDs are compared exactly, without trimming or case normalization.
+
+These identity checks do not verify temporal alignment of legacy JSON `runs`.
+The caller still supplies consistent window, seed and period order across the
+field; use [captured trajectory contracts](evidence-contracts.md#captured-trajectories)
+when the task requires their stronger identity checks.
+
+## Analysis CSV input
+
+`check`, `regime`, `select`, `rediscover`, `uncertainty` and `decay-prior` share
+readers for unquoted comma-separated analysis tables. They refuse quoted fields,
+blank observations, ragged rows, missing selected cells and nonfinite or invalid
+selected numbers. Headers must contain distinct, nonempty names. A multi-column
+`select` file requires every candidate column to contain complete finite data.
+Missing cells are never dropped independently to make shorter vectors.
+
+Header detection is heuristic when no column is named: numeric series inspect
+the first cell, while multi-column `select` inspects the whole first row. Prefer
+explicit names where `--col` is offered. Other columns may hold text when only
+one numeric column is selected. These checks apply to the numerical analysis
+readers; the separate `import` command is unchanged.
+
 ## `stress`
 
 Runs the adversarial stress suite (flash-crash, whipsaw, …) with
@@ -110,14 +149,31 @@ See [Evidence contracts](evidence-contracts.md).
 ## `regime`
 
 ```bash
-sharpebench regime returns_a.csv returns_b.csv regimes.csv [--col NAME] [--json]
+sharpebench regime returns_a.csv returns_b.csv regimes.csv [--col NAME] [--regime-col NAME] [--period-col NAME] [--json]
 ```
 
 Compares two strategies' per-period returns *within* each market regime instead
-of pooled. See [Regime-conditional comparison](methodology-regime.md). The three
-CSVs are aligned by row; `regimes.csv` carries one label per period and is an
-input, not something the CLI infers. Exit code is 0 whenever the report is
-produced; read `pooled_hides_reversal` for the verdict.
+of pooled. See [Regime-conditional comparison](methodology-regime.md).
+`--col` selects the return column in both strategy files; `--regime-col` selects
+the label column independently. Without those flags, each reader uses its first
+column. Regime labels are supplied by the caller.
+
+All three files must have the same number of complete observations; no series
+is truncated. `--period-col NAME` additionally requires a nonempty, unique period
+ID on every row and the identical ordered ID sequence in all three files. The
+period column must differ from the selected value column. It compares trimmed
+ID strings, without parsing dates, sorting rows or joining an intersection:
+
+```sh
+sharpebench regime a.csv b.csv labels.csv \
+  --col return --regime-col state --period-col period --json
+```
+
+Here the strategy files have `period,return` headers and the label file has
+`period,state`. Without `--period-col`, row alignment is the caller's assertion;
+equal lengths do not establish common dates or temporal support. Invalid input
+produces no report and a nonzero exit. A produced report exits 0; read
+`pooled_hides_reversal` for its verdict.
 
 ## `lineage`
 
@@ -166,16 +222,23 @@ for. The warning flags a choice; it does not veto one. Deterministic given
 ## `disqualify`
 
 ```bash
-sharpebench disqualify <submissions.json> [--json]
+sharpebench disqualify <submissions.json> [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode MODE] [--benchmark-agent ID] [--json]
 ```
 
 Scores a JSON field of submissions (same format as `score`) and names every
 disqualification/quality signal that fired for each agent, instead of the
-single rank-eligible verdict. Five reasons mirror the scorer's hard eligibility
+single rank-eligible verdict. Pass the same field and [host controls](#score) as
+`score`: explanations come from the ranked field, including its benchmark and
+field-dependent deflation, rather than separately scoring each submission.
+Five reasons mirror the scorer's hard eligibility
 gates (`FailedPassK`, `DsrBelowBar`, `ProcessViolation`,
 `BootstrapInsignificant`, `MandateBreached`); the advisory flags
 (`HighSelectionGap`, `IsRediscovery`, `OosDecay`) are reported but never gate.
-Pure legibility: nothing here changes eligibility semantics.
+JSON rows contain `agent_id`, host `rank_eligible` and `reasons`. These reasons
+explain the host score only, including its drawdown mandate; they do not explain
+the separate declared-mandate verdict. To inspect that verdict, use the
+`declared_*` fields returned by `score`. Explanation generation changes neither
+eligibility nor rank.
 
 ## `rediscover`
 
