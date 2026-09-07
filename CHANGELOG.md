@@ -13,6 +13,7 @@ and links the commits it was built from.
 ## [Unreleased]
 
 ### Fixed
+- core: common-support comparisons retain every submitted process trace for eligibility, declared-mandate eligibility, warning counts and the process return floor. A peer omitting a run can no longer erase another entrant's violation.
 - harness/cli: checkpoint contracts now bind entrant artifact identity and invocation identity separately. A caller-supplied `--entrant-sha256` can no longer resume the same checkpoint after changing the command, endpoint, image reference, or environment pass-through list.
 
 ### Documentation
