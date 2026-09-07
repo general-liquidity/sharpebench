@@ -30,6 +30,12 @@ passed all 11 Actions jobs on `14cf1022bd195a4e01af8c2c9f41143ed76493d1`.
 The merged and tested Arena trees both equal `e679593ed55f92a49f1e2832839d4d011be8b872`.
 These are verified code checkpoints, not releases or completion of the remaining goal.
 
+Bench's R15 evidence-producer repair is implemented in `c9dc85f`, with operator
+documentation in `e60e1f7`. Local checks pass; exact-head CI and normal merge
+remain pending. Its producer row stays unchecked, and the combined R15/BI3
+ranking-geometry row remains open for CSV/ranking keyed support. The checklist
+totals remain 93 rows, 34 closed and 59 open.
+
 ## Status at the preceding saved checkpoint
 
 Bench main is [`e6f2ab189622a8e27d78b0ae8183fdd7cc5e84f4`](https://github.com/general-liquidity/sharpebench/commit/e6f2ab189622a8e27d78b0ae8183fdd7cc5e84f4).
@@ -94,7 +100,7 @@ listed below, not silently omitted from the goal.
 ## 2. Bench ranking and verification
 
 - [x] R01: original process evidence survives common-support restriction. Bench `dff0d84`.
-- [ ] R15, BI3: complete expected geometry, keyed support rather than positional ambiguity.
+- [ ] R15, BI3: complete expected geometry, keyed support rather than positional ambiguity. The assembler portion is implemented in Bench `c9dc85f`; CSV/ranking keyed support remains open.
 - [ ] BM1: observed search-footprint floors and valid/unavailable PBO.
 - [ ] BM2, BS6: displayed board content/count/order and trusted terminal receipt anchor.
 - [ ] BI2, BI8: identical declared mandates and rank-context explanations on all surfaces.
@@ -157,7 +163,7 @@ listed below, not silently omitted from the goal.
 
 ## 7. Evidence producers
 
-- [ ] R15: declared unique Cartesian sweep support, not just row count.
+- [ ] R15: declared unique Cartesian sweep support implemented in Bench `c9dc85f`, documented in `e60e1f7`; exact-head CI and normal merge pending. This evidence-producer row remains unchecked until both are verified.
 - [ ] BP1: requested/effective model identity and no silent substitution.
 - [ ] BP2: collision-free calibration seed tuples with explicit CRN policy.
 - [ ] BP3: full effective request/scaffold/parser cache identity.
@@ -200,6 +206,37 @@ listed below, not silently omitted from the goal.
 - [ ] Probe child OOM versus surviving wrapper classification.
 
 ## Verification log
+
+- R15 evidence-producer implementation, pending CI/merge: Bench `c9dc85f` adds
+  declared 4 × 4 × 4 × 8 coverage, strict JSON, dataset/configuration agreement
+  and required table-input validation. Assembly preserves original JSON line
+  contents in fixed key order with LF endings; the reducer validates all nine
+  required datasets before printing tables. Operator documentation is `e60e1f7`.
+  All 16 focused tests and all 28 tests discovered under `paper/src` pass.
+  The nine frozen principal datasets each contain 512 unique declared cells;
+  this validates STRUCTURE ONLY, without rescoring or establishing numerical
+  parity with the current engine. The new paper CI command is
+  `python -m unittest paper/src/test_sweep_grid.py`, which executes the actual
+  16-test suite; exact-head Actions results are still pending.
+  A newline-boundary follow-up replaces `splitlines()` with `split('\n')` so
+  legal U+2028 inside a JSON string stays within its record. The new regression
+  fails against the old temporary reader and passes with the repair; its
+  follow-up commit is pending.
+  Three isolated temporary mutations fail as expected: bypassing grid validation
+  fails five tests, disabling duplicate-JSON-key rejection fails one subcase,
+  and bypassing renderer-field validation fails seven subcases. Restoring the
+  temporary copy passes all 15 tests. No mutation touched production source.
+  Before repair, the initial 10 tests produced 22 failures, including changed
+  diagnostics; those are not 22 independent accepted defects. No benchmark
+  experiment or historical-artifact rewrite ran. The section 2 combined R15/BI3
+  row remains open because CSV/ranking keyed support is separate from this
+  assembler repair.
+
+- Final-paper follow-up: [A-commands.tex](../../../paper/sections/A-commands.tex#L55)
+  still connects shard assembly with output identical to the serial producer.
+  Revise that claim during the final paper pass: the new fixed grid-key order
+  differs from the serial producer's score-rank order, even though original JSON
+  lines are preserved. No paper edit or evidence regeneration has been made.
 
 - Arena producer replay: 51 focused promotion cases and 4 Node-forwarding cases
   pass. The initial two output-only/changed-identity regressions failed before
