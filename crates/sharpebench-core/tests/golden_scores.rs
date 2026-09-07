@@ -38,6 +38,26 @@ use sharpebench_core::{rank, AgentSubmission, CompositeScore, ScoreConfig};
 
 const UPDATE_ENV: &str = "SHARPEBENCH_UPDATE_GOLDEN";
 
+#[test]
+fn numeric_json_roundtrips_are_part_of_the_scoring_contract() {
+    // Feature unification must not decide how this crate reads a return: test
+    // this crate in isolation as well as in the whole workspace. Native f64
+    // formatting/parsing supplies an independent correctly-rounded control.
+    for i in 0_u64..2048 {
+        let bits = i.wrapping_mul(0x9E37_79B9_7F4A_7C15) & 0x7FEF_FFFF_FFFF_FFFF;
+        for x in [f64::from_bits(bits), -f64::from_bits(bits)] {
+            let text = serde_json::to_string(&x).unwrap();
+            assert_eq!(text.parse::<f64>().unwrap().to_bits(), x.to_bits());
+            let parsed: f64 = serde_json::from_str(&text).unwrap();
+            assert_eq!(
+                parsed.to_bits(),
+                x.to_bits(),
+                "numeric JSON drift for {text}"
+            );
+        }
+    }
+}
+
 fn golden_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("golden")
 }

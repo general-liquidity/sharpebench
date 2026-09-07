@@ -299,8 +299,9 @@ fn bootstrap_dsr_ci<'py>(
 /// null of zero mean excess return.
 #[pyfunction]
 #[pyo3(signature = (excess, seed = DEFAULT_SEED, n_boot = 2000, block_prob = 0.1))]
-fn bootstrap_pvalue(excess: Vec<f64>, seed: u64, n_boot: usize, block_prob: f64) -> f64 {
+fn bootstrap_pvalue(excess: Vec<f64>, seed: u64, n_boot: usize, block_prob: f64) -> PyResult<f64> {
     core_bootstrap_pvalue(&excess, seed, n_boot, block_prob)
+        .map_err(|error| PyValueError::new_err(error.to_string()))
 }
 
 /// White's Reality Check p-value over a field of candidates (**N rows x T cols**
@@ -371,8 +372,8 @@ fn probability_of_backtest_overfitting(perf_matrix: Vec<Vec<f64>>, s: usize) -> 
 /// rate `q`. Returns one bool per input p-value, in input order.
 #[pyfunction]
 #[pyo3(signature = (p_values, q = 0.05))]
-fn benjamini_hochberg(p_values: Vec<f64>, q: f64) -> Vec<bool> {
-    core_bh(&p_values, q)
+fn benjamini_hochberg(p_values: Vec<f64>, q: f64) -> PyResult<Vec<bool>> {
+    core_bh(&p_values, q).map_err(|error| PyValueError::new_err(error.to_string()))
 }
 
 /// Benjamini-Hochberg with the summary an operator wants: `{"q", "n_tested",
@@ -381,7 +382,8 @@ fn benjamini_hochberg(p_values: Vec<f64>, q: f64) -> Vec<bool> {
 #[pyfunction]
 #[pyo3(signature = (p_values, q = 0.05))]
 fn fdr_verdict<'py>(py: Python<'py>, p_values: Vec<f64>, q: f64) -> PyResult<Bound<'py, PyDict>> {
-    let v = core_fdr_verdict(&p_values, q);
+    let v =
+        core_fdr_verdict(&p_values, q).map_err(|error| PyValueError::new_err(error.to_string()))?;
     let d = PyDict::new(py);
     d.set_item("q", v.q)?;
     d.set_item("n_tested", v.n_tested)?;

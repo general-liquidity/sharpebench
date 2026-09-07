@@ -60,14 +60,22 @@ pub fn sortino_ratio(xs: &[f64], target: f64) -> Option<f64> {
     Some((mean(xs) - target) / dd)
 }
 
-/// Population skewness (third standardized moment). 0.0 if undefined.
+// Standardized empirical moments use m2 = sum((x - mean)^2) / n, not
+// the n-1 sample variance used to estimate return volatility for the Sharpe.
+fn population_std_dev(xs: &[f64], center: f64) -> f64 {
+    (xs.iter().map(|x| (x - center).powi(2)).sum::<f64>() / xs.len() as f64).sqrt()
+}
+
+/// Empirical population skewness (third standardized moment, no bias adjustment).
+/// Returns the conventional 0.0 fallback for fewer than 2 points or zero variance;
+/// that fallback is not evidence that an unobserved distribution is symmetric.
 pub fn skewness(xs: &[f64]) -> f64 {
     let n = xs.len();
-    if n < 3 {
+    if n < 2 {
         return 0.0;
     }
     let m = mean(xs);
-    let s = std_dev(xs);
+    let s = population_std_dev(xs, m);
     if s == 0.0 {
         return 0.0;
     }
@@ -75,14 +83,17 @@ pub fn skewness(xs: &[f64]) -> f64 {
     sum / n as f64
 }
 
-/// Population kurtosis (fourth standardized moment, **non-excess**; normal = 3.0).
+/// Empirical population kurtosis (fourth standardized moment, **non-excess**).
+/// No finite-sample bias adjustment. Normal = 3.0; that value is also the
+/// conventional fallback for fewer than 2 points or zero variance, not an estimate
+/// of an unobserved distribution's kurtosis.
 pub fn kurtosis(xs: &[f64]) -> f64 {
     let n = xs.len();
-    if n < 4 {
+    if n < 2 {
         return 3.0;
     }
     let m = mean(xs);
-    let s = std_dev(xs);
+    let s = population_std_dev(xs, m);
     if s == 0.0 {
         return 3.0;
     }
@@ -178,6 +189,37 @@ mod tests {
         let xs = [1.0, 2.0, 3.0, 4.0, 5.0];
         assert!(approx(mean(&xs), 3.0, 1e-12));
         assert!(approx(std_dev(&xs), 1.5811388300841898, 1e-9));
+    }
+
+    #[test]
+    fn standardized_moments_use_one_population_normalization() {
+        // Exact central moments, not another implementation of the same loop:
+        // [0,0,0,1]: m2=3/16, m3=3/32, m4=21/256.
+        let asymmetric = [0.0, 0.0, 0.0, 1.0];
+        assert!(approx(skewness(&asymmetric), 2.0 / 3.0_f64.sqrt(), 1e-12));
+        assert!(approx(kurtosis(&asymmetric), 7.0 / 3.0, 1e-12));
+        // [1,2,3,4]: m2=5/4 and m4=41/16, hence kurtosis=41/25.
+        assert!(approx(kurtosis(&[1.0, 2.0, 3.0, 4.0]), 41.0 / 25.0, 1e-12));
+        assert!(approx(skewness(&[1.0, 2.0, 3.0, 4.0]), 0.0, 1e-12));
+    }
+
+    #[test]
+    fn standardized_moments_are_defined_for_small_nonconstant_samples() {
+        assert!(approx(skewness(&[1.0, 2.0]), 0.0, 1e-12));
+        assert!(approx(kurtosis(&[1.0, 2.0]), 1.0, 1e-12));
+        assert!(approx(kurtosis(&[1.0, 2.0, 3.0]), 1.5, 1e-12));
+        assert!(approx(
+            skewness(&[0.0, 0.0, 1.0]),
+            1.0 / 2.0_f64.sqrt(),
+            1e-12
+        ));
+        // Affine transforms preserve kurtosis; reflection reverses skewness.
+        assert!(approx(kurtosis(&[10.0, 10.0, 10.0, 8.0]), 7.0 / 3.0, 1e-12));
+        assert!(approx(
+            skewness(&[10.0, 10.0, 10.0, 8.0]),
+            -2.0 / 3.0_f64.sqrt(),
+            1e-12
+        ));
     }
 
     #[test]

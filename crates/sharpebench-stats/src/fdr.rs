@@ -17,6 +17,8 @@
 //! Pure and deterministic: plain `f64`, a fixed index-order tie-break, no I/O and
 //! no randomness.
 
+use crate::validation::{fdr_inputs, StatisticalError};
+
 /// Benjamini-Hochberg (1995) step-up procedure at false-discovery level `q`.
 ///
 /// Given `m` p-values, sort them ascending as `p_(1) <= ... <= p_(m)`, find the
@@ -26,20 +28,21 @@
 /// Benjamini-Yekutieli 2001).
 ///
 /// Returns a rejection mask in the caller's *original* order (`true` = discovery).
-/// An empty batch, or `q <= 0`, rejects nothing. Ties break by original index so
-/// the result is fully deterministic.
-pub fn benjamini_hochberg(p_values: &[f64], q: f64) -> Vec<bool> {
+/// An empty batch, or `q == 0`, rejects nothing. Nonfinite values or probabilities
+/// outside `[0,1]` return a typed error. Ties break by original index.
+pub fn benjamini_hochberg(p_values: &[f64], q: f64) -> Result<Vec<bool>, StatisticalError> {
+    fdr_inputs(p_values, q)?;
     let m = p_values.len();
     let mut rejected = vec![false; m];
     if m == 0 || q <= 0.0 {
-        return rejected;
+        return Ok(rejected);
     }
     if let Some((order, k)) = bh_cutoff(p_values, q) {
         for &orig in &order[..k] {
             rejected[orig] = true;
         }
     }
-    rejected
+    Ok(rejected)
 }
 
 /// A false-discovery-controlled summary over a batch of candidate strategies:
@@ -62,7 +65,8 @@ pub struct FdrVerdict {
 /// Run Benjamini-Hochberg over a batch and summarize how many discoveries survive
 /// false-discovery control at level `q`. See [`benjamini_hochberg`] for the
 /// procedure; this wraps it with the batch counts and the admitted-p threshold.
-pub fn fdr_verdict(p_values: &[f64], q: f64) -> FdrVerdict {
+pub fn fdr_verdict(p_values: &[f64], q: f64) -> Result<FdrVerdict, StatisticalError> {
+    fdr_inputs(p_values, q)?;
     let m = p_values.len();
     let (rejected, threshold) = match (m, q) {
         (0, _) => (Vec::new(), None),
@@ -79,13 +83,13 @@ pub fn fdr_verdict(p_values: &[f64], q: f64) -> FdrVerdict {
         },
     };
     let n_discoveries = rejected.iter().filter(|&&r| r).count();
-    FdrVerdict {
+    Ok(FdrVerdict {
         q,
         n_tested: m,
         n_discoveries,
         rejected,
         threshold,
-    }
+    })
 }
 
 /// Shared core: order the p-values ascending (deterministic index tie-break) and
@@ -116,6 +120,36 @@ mod tests {
     use super::*;
 
     #[test]
+    fn malformed_probabilities_cannot_become_discoveries() {
+        assert_eq!(
+            benjamini_hochberg(&[0.001, 0.9], 0.05).unwrap(),
+            [true, false]
+        );
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.1, 1.1] {
+            for values in [[bad, 0.001], [0.001, bad]] {
+                assert!(matches!(
+                    benjamini_hochberg(&values, 0.05),
+                    Err(StatisticalError::InvalidProbability { .. })
+                ));
+                assert!(matches!(
+                    fdr_verdict(&values, 0.05),
+                    Err(StatisticalError::InvalidProbability { .. })
+                ));
+            }
+            assert!(matches!(
+                benjamini_hochberg(&[0.001], bad),
+                Err(StatisticalError::InvalidParameter { name: "q", .. })
+            ));
+            assert!(matches!(
+                fdr_verdict(&[0.001], bad),
+                Err(StatisticalError::InvalidParameter { name: "q", .. })
+            ));
+        }
+        assert!(fdr_verdict(&[], f64::NAN).is_err());
+        assert_eq!(benjamini_hochberg(&[0.0, 1.0], 1.0).unwrap(), [true, true]);
+    }
+
+    #[test]
     fn known_vector_rejects_the_correct_count() {
         // Classic Benjamini-Hochberg worked example (m = 10, q = 0.05). Sorted
         // p-values with the (k/m)*q line:
@@ -129,7 +163,7 @@ mod tests {
         let p = [
             0.9, 0.009, 0.205, 0.0008, 0.58, 0.51, 0.35, 0.165, 0.396, 0.75,
         ];
-        let rej = benjamini_hochberg(&p, 0.05);
+        let rej = benjamini_hochberg(&p, 0.05).unwrap();
         assert_eq!(rej.iter().filter(|&&r| r).count(), 2);
         // The two smallest p-values (0.0008 at idx 3, 0.009 at idx 1) are rejected.
         assert!(rej[3] && rej[1]);
@@ -143,9 +177,9 @@ mod tests {
     fn all_null_rejects_none() {
         // Uniformly high p-values: no rank clears the step-up line.
         let p = [0.4, 0.6, 0.55, 0.9, 0.72, 0.83];
-        let rej = benjamini_hochberg(&p, 0.05);
+        let rej = benjamini_hochberg(&p, 0.05).unwrap();
         assert!(rej.iter().all(|&r| !r));
-        let v = fdr_verdict(&p, 0.05);
+        let v = fdr_verdict(&p, 0.05).unwrap();
         assert_eq!(v.n_discoveries, 0);
         assert_eq!(v.threshold, None);
     }
@@ -153,7 +187,7 @@ mod tests {
     #[test]
     fn all_significant_rejects_all() {
         let p = [0.001, 0.002, 0.0005, 0.003];
-        let rej = benjamini_hochberg(&p, 0.05);
+        let rej = benjamini_hochberg(&p, 0.05).unwrap();
         assert!(rej.iter().all(|&r| r));
     }
 
@@ -162,7 +196,7 @@ mod tests {
         // A batch where several real edges sit just under q but above q/m. FDR
         // control keeps them; the FWER-style Bonferroni cutoff (q/m) would not.
         let p = [0.001, 0.006, 0.012, 0.018, 0.9, 0.8, 0.7, 0.95, 0.6, 0.85];
-        let rej = benjamini_hochberg(&p, 0.05);
+        let rej = benjamini_hochberg(&p, 0.05).unwrap();
         let bonferroni = 0.05 / p.len() as f64; // 0.005
         let bonf_count = p.iter().filter(|&&x| x <= bonferroni).count();
         let bh_count = rej.iter().filter(|&&r| r).count();
@@ -177,7 +211,7 @@ mod tests {
         let p = [
             0.9, 0.009, 0.205, 0.0008, 0.58, 0.51, 0.35, 0.165, 0.396, 0.75,
         ];
-        let v = fdr_verdict(&p, 0.05);
+        let v = fdr_verdict(&p, 0.05).unwrap();
         assert_eq!(v.n_tested, 10);
         assert_eq!(v.n_discoveries, 2);
         assert_eq!(v.q, 0.05);
@@ -187,10 +221,13 @@ mod tests {
     }
 
     #[test]
-    fn empty_and_nonpositive_q_are_safe() {
-        assert!(benjamini_hochberg(&[], 0.05).is_empty());
-        assert!(benjamini_hochberg(&[0.001, 0.002], 0.0).iter().all(|&r| !r));
-        let v = fdr_verdict(&[], 0.05);
+    fn empty_and_zero_q_are_safe() {
+        assert!(benjamini_hochberg(&[], 0.05).unwrap().is_empty());
+        assert!(benjamini_hochberg(&[0.001, 0.002], 0.0)
+            .unwrap()
+            .iter()
+            .all(|&r| !r));
+        let v = fdr_verdict(&[], 0.05).unwrap();
         assert_eq!(v.n_tested, 0);
         assert_eq!(v.n_discoveries, 0);
         assert_eq!(v.threshold, None);

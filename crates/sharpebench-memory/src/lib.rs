@@ -322,7 +322,8 @@ pub fn ablation_report(
         BOOTSTRAP_SEED,
         BOOTSTRAP_SAMPLES,
         BOOTSTRAP_BLOCK_PROB,
-    );
+    )
+    .map_err(|error| error.to_string())?;
 
     let headroom_to_oracle = oracle_mean - retr_mean;
 

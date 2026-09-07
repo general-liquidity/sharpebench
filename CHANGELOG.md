@@ -12,10 +12,21 @@ and links the commits it was built from.
 
 ## [Unreleased]
 
+### Breaking
+- stats: `bootstrap_pvalue`, `benjamini_hochberg` and `fdr_verdict` now return `Result<_, StatisticalError>` in Rust. Invalid data or parameters are not p-values or discovery masks. Propagate the error instead of substituting a favorable result. Python raises `ValueError` for these inputs; valid-call return shapes are unchanged. Composite scores expose an optional `bootstrap_error` and cannot become eligible when it is present; `bootstrap_p = 1` in such a row is a conservative sentinel, not an estimate.
+
 ### Fixed
+- harness: checkpoint saves accept a filename in the current directory and exclusively create an owned temporary sibling instead of overwriting a shared `.tmp` file. File sync and Unix parent-directory sync remain explicit; temporary-name collision retries are bounded.
+- attest/cli: malformed UTF-8 hex input is refused without panicking; all key/signature/ciphertext decoders share byte-wise ASCII validation. Human-readable agent identifiers truncate by Unicode scalar count instead of slicing arbitrary UTF-8 bytes, including zero-width budgets.
+- core/protocol: require correctly rounded JSON float parsing explicitly, so an isolated scorer and a feature-unified workspace give the same numeric meaning to the same input. A 4,096-value bit-exact roundtrip regression pins this contract; one synthetic crowdedness value changes by one ULP.
+- sim: derive target share quantities at the observed mark and debit execution notional plus fees from cash. Fully filled zero targets now close exactly rather than crossing into unintended shorts. Financing always uses absolute gross exposure. Simulator/scorer synthetic regression fixtures change intentionally; frozen paper trajectories are not rewritten.
+- sim: contamination masking preserves cash dividends under the same stable symbol mapping as prices. CSV imports refuse duplicate keys/columns, nonfinite closes, and invalid or missing cells in a declared dividend column; an omitted dividend column still declares price-only data. Finite signed raw quotes remain unchanged, including the documented negative WTI observation. Parsing them does not establish validity of percentage-return analysis across nonpositive prices.
+- stats: compute empirical skewness and non-excess kurtosis with an n-normalized second moment, consistent with their third/fourth moments. This changes PSR/DSR and confidence estimates. Exact small-vector regressions cover the convention; existing synthetic score fixtures are refreshed, not historical paper evidence.
+- core: common-support comparisons retain every submitted process trace for eligibility, declared-mandate eligibility, warning counts and the process return floor. A peer omitting a run can no longer erase another entrant's violation.
 - harness/cli: checkpoint contracts now bind entrant artifact identity and invocation identity separately. A caller-supplied `--entrant-sha256` can no longer resume the same checkpoint after changing the command, endpoint, image reference, or environment pass-through list.
 
 ### Documentation
+- Tests distinguish current-engine reconstructions from frozen historical evidence. The corrected inventory path leaves only two finite-Sharpe streams in the commodities reconstruction, while the archived default rows retain their historical measured-dispersion stamp. No archived result was rewritten; percentage-return claims across the negative WTI quote require separate validity assessment.
 - architecture audit: extend the source review from 65 to all 75 supplied benchmark repositories and record which mechanisms were adopted, already present, deferred, or rejected.
 
 ## [0.18.4] - 2026-09-04

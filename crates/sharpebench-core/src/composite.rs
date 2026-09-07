@@ -753,7 +753,12 @@ pub struct CompositeScore {
     pub psr: f64,
     pub passed_k: bool,
     pub process_ok: bool,
+    /// Conservative 1.0 sentinel when `bootstrap_error` is present; in that case
+    /// this is not an estimated p-value and eligibility is always false.
     pub bootstrap_p: f64,
+    /// Why the single-series bootstrap was unavailable. Omitted for valid inputs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bootstrap_error: Option<String>,
     pub raw_mean_return: f64,
     pub rank_eligible: bool,
     /// The ranking key: the deflated Sharpe when eligible, else 0.0.
@@ -1097,7 +1102,7 @@ impl Deflation {
 /// cross-trial dispersion on, the configured annualized prior applies, converted
 /// to per period once.
 pub fn score_agent(sub: &AgentSubmission, cfg: &ScoreConfig) -> CompositeScore {
-    score_agent_with(sub, cfg, Deflation::configured(cfg), None, None)
+    score_agent_with(sub, &sub.runs, cfg, Deflation::configured(cfg), None, None)
 }
 
 /// [`score_agent`] with the agent's declared mandate. With no field there is no
@@ -1126,11 +1131,19 @@ pub fn score_agent_declared(
         mandate,
         benchmark: None,
     });
-    score_agent_with(sub, cfg, Deflation::configured(cfg), None, resolved)
+    score_agent_with(
+        sub,
+        &sub.runs,
+        cfg,
+        Deflation::configured(cfg),
+        None,
+        resolved,
+    )
 }
 
 fn score_agent_with(
     sub: &AgentSubmission,
+    process_runs: &[Run],
     cfg: &ScoreConfig,
     defl: Deflation,
     benchmark: Option<&AgentSubmission>,
@@ -1159,14 +1172,18 @@ fn score_agent_with(
     let per_run = per_run_passes(sub, benchmark, cfg);
     let passed_k = pass_k(&per_run, cfg.pass_mode);
 
-    // process: a single block-severity violation in any run is disqualifying.
+    // Process evidence covers every submitted run, including cells excluded
+    // from the common-support comparison. A peer cannot erase a violation by
+    // omitting the cell in which it happened.
     // Alongside the binary gate, the graded scalar and the warn count are
     // reported: warn-severity events (concentration breaches, hedged
     // tail-selling) are real information, but not calibrated enough to gate, so
     // they never touch `rank_eligible`; they surface in the score and, in
     // [`rank`], order agents within a DSR tie band only.
-    let per_run_process: Vec<ProcessScore> =
-        sub.runs.iter().map(|r| process_score(&r.trace)).collect();
+    let per_run_process: Vec<ProcessScore> = process_runs
+        .iter()
+        .map(|r| process_score(&r.trace))
+        .collect();
     let process_ok = per_run_process.iter().all(ProcessScore::is_clean);
     let process_warnings: usize = per_run_process.iter().map(|p| p.warn_violations).sum();
     // The graded score of the concatenated trace: any block zeroes it, each
@@ -1177,7 +1194,9 @@ fn score_agent_with(
         0.0
     };
 
-    let bootstrap_p = bootstrap_pvalue(&pooled, cfg.bootstrap_seed, cfg.n_boot, cfg.block_prob);
+    let bootstrap = bootstrap_pvalue(&pooled, cfg.bootstrap_seed, cfg.n_boot, cfg.block_prob);
+    let bootstrap_error = bootstrap.as_ref().err().map(ToString::to_string);
+    let bootstrap_p = bootstrap.unwrap_or(1.0);
     let raw_mean_return = mean(&pooled);
 
     // Calibration: does stated conviction predict outcomes? (None if not reported.)
@@ -1334,8 +1353,12 @@ fn score_agent_with(
     // pooled result. Reported, never gating; empty when not estimable.
     let role_contributions = attribute_behavior_roles(&sub.runs);
 
-    let rank_eligible =
-        dsr >= cfg.dsr_bar && passed_k && process_ok && bootstrap_p < cfg.alpha && mandate_ok;
+    let rank_eligible = dsr >= cfg.dsr_bar
+        && passed_k
+        && process_ok
+        && bootstrap_error.is_none()
+        && bootstrap_p < cfg.alpha
+        && mandate_ok;
     let composite = if rank_eligible { dsr } else { 0.0 };
 
     // The declared verdict, if any: the same predicate as `rank_eligible` with
@@ -1357,6 +1380,7 @@ fn score_agent_with(
         let eligible = dsr >= cfg.dsr_bar
             && declared_passed_k
             && process_ok
+            && bootstrap_error.is_none()
             && bootstrap_p < cfg.alpha
             && mandate_ok
             && verdict.drawdown_bound_holds(worst_run_drawdown);
@@ -1375,6 +1399,7 @@ fn score_agent_with(
         passed_k,
         process_ok,
         bootstrap_p,
+        bootstrap_error,
         raw_mean_return,
         rank_eligible,
         composite,
@@ -1571,6 +1596,7 @@ fn measured_trials_sr_std(
 /// - **Shared cells** (`cfg.shared_run_set`, default on): every submission is
 ///   restricted to the run positions all agents completed, so an agent scored on
 ///   an easy subset of cells is compared on the same cells as everyone else.
+///   Process judgments still include every original submitted trace.
 /// - **Measured deflation** (`cfg.min_field_for_measured_sr_std`): with enough
 ///   agents, `trials_sr_std` is the measured Sharpe dispersion of the field rather
 ///   than the configured prior. Smaller fields use the configured value, byte for
@@ -1644,6 +1670,7 @@ pub fn rank_declared(
     // Shared-cell restriction first: everything below — attribution, the
     // data-snooping family, crowdedness and the scores themselves — must see the
     // same field, or the fairness control would apply to the rank key only.
+    // Keep `subs` intact: safety judgments must not discard unshared traces.
     let restricted;
     let field: &[AgentSubmission] = if cfg.shared_run_set {
         restricted = restrict_to_shared_positions(subs);
@@ -1729,7 +1756,7 @@ pub fn rank_declared(
                         .benchmark_id()
                         .and_then(|id| field.iter().find(|b| b.agent_id == id)),
                 });
-            let mut cs = score_agent_with(s, &rank_cfg, defl, benchmark, declared);
+            let mut cs = score_agent_with(s, &subs[idx].runs, &rank_cfg, defl, benchmark, declared);
             cs.runs_submitted = subs[idx].runs.len();
             cs.field_significance_benchmark = significance_benchmark_label.clone();
             if min_len >= 2 {
@@ -2015,6 +2042,88 @@ mod tests {
         let s = score_agent(&agent("violator", runs), &ScoreConfig::default());
         assert!(!s.process_ok);
         assert!(!s.rank_eligible, "a risk-gate bypass must disqualify");
+    }
+
+    #[test]
+    fn shared_support_cannot_erase_a_process_violation() {
+        let cfg = ScoreConfig::default();
+        let clean = agent("entrant", vec![run(0.002, 0.0005, 60); 2]);
+        let peer = agent("peer", vec![clean.runs[0].clone()]);
+        let clean_board = rank(&[clean.clone(), peer.clone()], &cfg);
+        assert!(clean_board.iter().all(|s| s.rank_eligible));
+
+        let mut violator = clean;
+        violator.runs[1]
+            .trace
+            .events
+            .push(ProcessEvent::DenylistBypass);
+        assert!(!score_agent(&violator, &cfg).rank_eligible);
+        // The peer lacks exactly the cell carrying the violation. Checking only
+        // a violation in the shared cell would also pass on the broken scorer.
+        for field in [
+            vec![violator.clone(), peer.clone()],
+            vec![peer.clone(), violator.clone()],
+        ] {
+            let declarations = MandateDeclarations::from([(
+                "entrant".to_string(),
+                DeclaredMandate::AbsoluteReturn,
+            )]);
+            let board = rank_declared(&field, &declarations, &cfg);
+            let score = board.iter().find(|s| s.agent_id == "entrant").unwrap();
+            assert_eq!((score.runs_submitted, score.runs_scored), (2, 1));
+            assert!(!score.process_ok);
+            assert!(!score.rank_eligible);
+            assert_eq!(score.declared_mandate_eligible, Some(false));
+            assert_eq!(score.rank_ordinal, 0);
+            assert_eq!(score.composite, 0.0);
+            assert_eq!(score.process_score, 0.0);
+            assert!(score.process_floored);
+            assert_eq!(score.realized_floored_return, 0.0);
+            assert!(
+                board
+                    .iter()
+                    .find(|s| s.agent_id == "peer")
+                    .unwrap()
+                    .rank_eligible
+            );
+        }
+    }
+
+    #[test]
+    fn shared_support_retains_warnings_from_all_submitted_runs() {
+        let mut warned = agent("warned", vec![run(0.002, 0.0005, 60); 2]);
+        warned.runs[1]
+            .trace
+            .events
+            .push(ProcessEvent::ConcentrationBreach);
+        let peer = agent("peer", vec![warned.runs[0].clone()]);
+        let board = rank(&[warned, peer], &ScoreConfig::default());
+        let score = board.iter().find(|s| s.agent_id == "warned").unwrap();
+        assert_eq!((score.runs_submitted, score.runs_scored), (2, 1));
+        assert!(score.process_ok && score.rank_eligible);
+        assert_eq!(score.process_warnings, 1);
+        assert!((score.process_score - 0.9).abs() < 1e-12);
+    }
+
+    #[test]
+    fn unavailable_bootstrap_is_reported_and_cannot_admit_an_agent() {
+        let entrant = agent("entrant", vec![run(0.002, 0.0005, 60); 2]);
+        assert!(score_agent(&entrant, &ScoreConfig::default()).rank_eligible);
+        let cfg = ScoreConfig {
+            n_boot: 0,
+            alpha: 2.0,
+            ..ScoreConfig::default()
+        };
+        // An invalid alpha would admit a p=1 fallback without the independent
+        // availability gate. No caller's threshold can legitimize a failed test.
+        let score = score_agent_declared(&entrant, Some(&DeclaredMandate::AbsoluteReturn), &cfg);
+        assert_eq!(
+            score.bootstrap_error.as_deref(),
+            Some("n_boot must be positive")
+        );
+        assert_eq!(score.bootstrap_p, 1.0);
+        assert!(!score.rank_eligible);
+        assert_eq!(score.declared_mandate_eligible, Some(false));
     }
 
     /// The headline property: a lucky agent with a *higher raw return* ranks

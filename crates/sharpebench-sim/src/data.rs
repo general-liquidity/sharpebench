@@ -89,6 +89,16 @@ impl Dataset {
     /// which pins the replay inputs. Output identity still depends on the
     /// implementation and toolchain; CI checks two committed Rust goldens on
     /// Linux, macOS, and Windows.
+    ///
+    /// Closes must be finite. Signed/zero raw quotes are preserved, not repaired:
+    /// e.g. the frozen WTI series contains a negative observation. Successful
+    /// parsing does not establish suitability for a positive-price percentage-
+    /// return model; see the dataset's documented domain limitations.
+    /// Cash dividends must be finite
+    /// and nonnegative. An absent dividend column declares no dividend adjustment;
+    /// when the column is present, every row must supply a valid value (including
+    /// an explicit zero for no payment). Duplicate `(date, symbol)` keys and
+    /// duplicate header names are refused, even when the rows agree.
     pub fn from_csv(text: &str) -> Result<Dataset, String> {
         let mut per_symbol: BTreeMap<String, BTreeMap<String, f64>> = BTreeMap::new();
         let mut per_div: BTreeMap<String, BTreeMap<String, f64>> = BTreeMap::new();
@@ -96,6 +106,10 @@ impl Dataset {
         let mut lines = text.lines();
         let header = lines.next().ok_or("empty CSV")?;
         let cols: Vec<&str> = header.split(',').map(str::trim).collect();
+        let unique: std::collections::BTreeSet<_> = cols.iter().copied().collect();
+        if unique.len() != cols.len() {
+            return Err("CSV header contains duplicate column names".to_string());
+        }
         let col = |name: &str| cols.iter().position(|c| *c == name);
         let date_i = col("date").ok_or("CSV header missing 'date'")?;
         let sym_i = col("symbol").ok_or("CSV header missing 'symbol'")?;
@@ -114,17 +128,43 @@ impl Dataset {
             };
             let date = field(date_i)?.to_string();
             let symbol = field(sym_i)?.to_string();
+            if date.is_empty() || symbol.is_empty() {
+                return Err(format!(
+                    "CSV row {}: date and symbol must be nonempty",
+                    n + 2
+                ));
+            }
             let close: f64 = field(close_i)?
                 .parse()
                 .map_err(|_| format!("CSV row {}: non-numeric close", n + 2))?;
-            per_symbol
-                .entry(symbol.clone())
-                .or_default()
-                .insert(date.clone(), close);
-            if let Some(di) = div_i {
-                if let Some(Ok(d)) = f.get(di).map(|s| s.trim().parse::<f64>()) {
-                    per_div.entry(symbol).or_default().insert(date, d);
+            if !close.is_finite() {
+                return Err(format!("CSV row {}: close must be finite", n + 2));
+            }
+            let dividend = match div_i {
+                Some(di) => {
+                    let d: f64 = field(di)?
+                        .parse()
+                        .map_err(|_| format!("CSV row {}: non-numeric dividend", n + 2))?;
+                    if !d.is_finite() || d < 0.0 {
+                        return Err(format!(
+                            "CSV row {}: dividend must be finite and nonnegative",
+                            n + 2
+                        ));
+                    }
+                    Some(d)
                 }
+                None => None,
+            };
+            let prices = per_symbol.entry(symbol.clone()).or_default();
+            if prices.contains_key(&date) {
+                return Err(format!(
+                    "CSV row {}: duplicate (date, symbol) key ({date}, {symbol})",
+                    n + 2
+                ));
+            }
+            prices.insert(date.clone(), close);
+            if let Some(d) = dividend {
+                per_div.entry(symbol).or_default().insert(date, d);
             }
         }
         if per_symbol.is_empty() {
@@ -300,7 +340,8 @@ impl Dataset {
 
     /// A contamination-masked copy: symbols renamed to opaque ids and dates
     /// replaced with plain indices, so an agent can't pattern-match a memorized
-    /// ticker or calendar window. Prices are preserved. (After KTD-Fin's data-side
+    /// ticker or calendar window. Prices and cash dividends are preserved using
+    /// the same symbol mapping. (After KTD-Fin's data-side
     /// masking.)
     pub fn masked(&self) -> Dataset {
         let dates: Vec<String> = (0..self.dates.len()).map(|i| format!("t{i}")).collect();
@@ -310,10 +351,20 @@ impl Dataset {
             .enumerate()
             .map(|(i, series)| (format!("ASSET_{i:03}"), series.clone()))
             .collect();
+        let dividends = self
+            .closes
+            .keys()
+            .enumerate()
+            .filter_map(|(i, symbol)| {
+                self.dividends
+                    .get(symbol)
+                    .map(|series| (format!("ASSET_{i:03}"), series.clone()))
+            })
+            .collect();
         Dataset {
             dates,
             closes,
-            dividends: BTreeMap::new(),
+            dividends,
         }
     }
 }
@@ -343,6 +394,97 @@ mod tests {
         assert!(
             Dataset::from_csv("date,symbol,close\n2025-01-01,AAA,oops\n2025-01-02,AAA,11").is_err()
         ); // non-numeric close
+    }
+
+    #[test]
+    fn csv_requires_valid_complete_economic_rows() {
+        let valid = "date,symbol,close,dividend\n2025-01-01,AAA,100,1\n2025-01-02,AAA,101,0\n";
+        let d = Dataset::from_csv(valid).unwrap();
+        assert_eq!(d.dividend_at("AAA", 0), 1.0);
+        assert_eq!(d.dividend_at("AAA", 1), 0.0);
+        for bad in ["NaN", "inf", "-inf"] {
+            let csv = valid.replace("AAA,100,1", &format!("AAA,{bad},1"));
+            let error = Dataset::from_csv(&csv).unwrap_err();
+            assert!(
+                error.contains("row 2") && error.contains("close"),
+                "{error}"
+            );
+        }
+        for bad in ["NaN", "inf", "-inf", "-1", "garbage", ""] {
+            let csv = valid.replace("AAA,100,1", &format!("AAA,100,{bad}"));
+            let error = Dataset::from_csv(&csv).unwrap_err();
+            assert!(
+                error.contains("row 2") && error.contains("dividend"),
+                "{error}"
+            );
+        }
+        let missing = valid.replace("AAA,100,1", "AAA,100");
+        assert!(Dataset::from_csv(&missing).unwrap_err().contains("row 2"));
+        // Omitted dividend column declares a price-only dataset; a present but
+        // invalid cell must not be confused with this intentional omission.
+        let price_only = "date,symbol,close\n2025-01-01,AAA,100\n2025-01-02,AAA,101\n";
+        assert!(Dataset::from_csv(price_only).unwrap().dividends.is_empty());
+    }
+
+    #[test]
+    fn raw_csv_preserves_signed_quotes_without_implying_return_model_validity() {
+        let csv =
+            "date,symbol,close\n2020-04-17,WTI,18.31\n2020-04-20,WTI,-36.98\n2020-04-21,WTI,0\n";
+        let dataset = Dataset::from_csv(csv).unwrap();
+        assert_eq!(dataset.closes["WTI"], [18.31, -36.98, 0.0]);
+    }
+
+    #[test]
+    fn csv_duplicate_keys_and_ambiguous_columns_are_refused() {
+        let valid = "date,symbol,close,dividend\n2025-01-01,AAA,100,1\n2025-01-02,AAA,101,0\n";
+        // Even identical rows are duplicates: row count must not imply distinct
+        // observations. A conflicting row must never combine two rows' fields.
+        for duplicate in ["2025-01-01,AAA,100,1", "2025-01-01,AAA,102,0"] {
+            let error = Dataset::from_csv(&format!("{valid}{duplicate}\n")).unwrap_err();
+            assert!(
+                error.contains("duplicate") && error.contains("row 4"),
+                "{error}"
+            );
+        }
+        let header = valid.replace("close,dividend", "close,close");
+        assert!(Dataset::from_csv(&header)
+            .unwrap_err()
+            .contains("duplicate"));
+        for csv in [
+            valid.replace("2025-01-01,AAA", ",AAA"),
+            valid.replace("2025-01-01,AAA", "2025-01-01,"),
+        ] {
+            assert!(Dataset::from_csv(&csv).unwrap_err().contains("row 2"));
+        }
+    }
+
+    #[test]
+    fn masking_preserves_dividends_under_the_price_symbol_mapping() {
+        let mut d = Dataset::synthetic(3, 4, 1);
+        // Only the middle symbol pays: enumerating dividend keys separately
+        // would falsely attach this stream to ASSET_000.
+        d.dividends.insert("SYM01".into(), vec![0.0, 1.0, 2.0, 0.0]);
+        let masked = d.masked();
+        assert_eq!(masked.dividends.len(), 1);
+        for (i, original) in d.symbols().iter().enumerate() {
+            let renamed = format!("ASSET_{i:03}");
+            for t in 0..d.len() {
+                assert_eq!(d.close_at(original, t), masked.close_at(&renamed, t));
+                assert_eq!(d.dividend_at(original, t), masked.dividend_at(&renamed, t));
+            }
+            // Hold one share throughout, reinvesting nothing. Every step's
+            // liquidation wealth, not just the price series, must be preserved.
+            let mut cash = 0.0;
+            let mut masked_cash = 0.0;
+            for t in 0..d.len() {
+                cash += d.dividend_at(original, t);
+                masked_cash += masked.dividend_at(&renamed, t);
+                assert_eq!(
+                    cash + d.close_at(original, t).unwrap(),
+                    masked_cash + masked.close_at(&renamed, t).unwrap()
+                );
+            }
+        }
     }
 
     #[test]

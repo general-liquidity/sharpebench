@@ -61,16 +61,6 @@ pub(crate) struct Book {
     /// the serialized snapshot, under the default cost model.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub(crate) pending: BTreeMap<String, PendingOrder>,
-    /// Whether this run has deliberately requested a negative target.  Kept
-    /// separately from tiny execution-price overshoots around a zero target so
-    /// the signed-short financing path can use gross exposure without changing
-    /// the committed long-only engine bytes.
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub(crate) has_short_target: bool,
-}
-
-fn is_false(value: &bool) -> bool {
-    !*value
 }
 
 /// An order carried from a previous bar: the target weight still to be reached.
@@ -88,7 +78,6 @@ impl Book {
             trace: Trace::default(),
             prev_nav: 1.0_f64,
             pending: BTreeMap::new(),
-            has_short_target: false,
         }
     }
 }
@@ -147,8 +136,8 @@ enum OrderOutcome {
 /// Fill one order (fresh or carried) toward `target_weight` on `symbol` at step
 /// `t`: liquidity cap, base seeded slippage, own-order impact, fees, and, when
 /// the cost model carries [`ExecutionNoise`], the seed-driven delay / partial
-/// fill / queue slippage. With `costs.noise == None` the arithmetic is exactly
-/// the historical fill path, in the same order.
+/// fill / queue slippage. Target inventory is determined at the observed mark;
+/// adverse execution prices change cash and fees, not the requested share count.
 #[allow(clippy::too_many_arguments)]
 fn apply_order(
     data: &Dataset,
@@ -170,13 +159,13 @@ fn apply_order(
     // desired value signed so a negative target opens or maintains a short;
     // clamping here used to make every advertised short-capable environment
     // silently behave as long-only.
-    let target_value = target_weight * cur_nav;
-    let cur_value = book.shares[symbol] * p;
+    let target_shares = target_weight * cur_nav / p;
+    let desired_shares = target_shares - book.shares[symbol];
+    let desired_value = desired_shares * p;
     // Liquidity cap: a trade larger than the per-step participation limit
     // only partially fills; the rest is left for later steps.
-    let mut delta_value =
-        liquidity_capped_delta(target_value - cur_value, costs.max_participation, cur_nav);
-    if delta_value.abs() < 1e-9 {
+    let mut delta_value = liquidity_capped_delta(desired_value, costs.max_participation, cur_nav);
+    if delta_value == 0.0 || (delta_value.abs() < 1e-9 && target_weight != 0.0) {
         return OrderOutcome::Noop;
     }
     let mut queue_slip = 0.0;
@@ -236,12 +225,24 @@ fn apply_order(
     } else {
         p * (1.0 - slip)
     };
-    let dshares = delta_value / exec_p;
-    let fee = delta_value.abs() * (costs.fee_bps / 10_000.0);
+    let fully_filled = delta_value == desired_value;
+    let dshares = if fully_filled {
+        desired_shares
+    } else {
+        delta_value / p
+    };
+    let executed_notional = dshares * exec_p;
+    let fee = executed_notional.abs() * (costs.fee_bps / 10_000.0);
     if let Some(sh) = book.shares.get_mut(symbol) {
-        *sh += dshares;
+        // Assign the full target directly, so closing is exactly zero rather
+        // than a rounding residual. Partial fills retain their remaining risk.
+        if fully_filled {
+            *sh = target_shares;
+        } else {
+            *sh += dshares;
+        }
     }
-    book.cash -= dshares * exec_p + fee;
+    book.cash -= executed_notional + fee;
     OrderOutcome::Filled
 }
 
@@ -308,9 +309,6 @@ pub(crate) fn step_once(
         if ord.target_weight.abs() > CONCENTRATION_CAP {
             book.trace.events.push(ProcessEvent::ConcentrationBreach);
         }
-        if ord.target_weight < 0.0 {
-            book.has_short_target = true;
-        }
         let outcome = apply_order(
             data,
             symbols,
@@ -359,19 +357,11 @@ pub(crate) fn step_once(
         // Financing is a function of gross, not net, exposure.  Netting a long
         // against a short must not let a leveraged dollar-neutral book avoid the
         // carry charged to an equally levered long-only book.
-        let gross = if book.has_short_target {
-            symbols
-                .iter()
-                .map(|s| (book.shares[s] * price(data, s, t)).abs())
-                .sum::<f64>()
-                / nav_now
-        } else {
-            // Preserve the historical long-only arithmetic exactly.  Small
-            // execution-price overshoots around a zero target existed in the
-            // frozen engine before signed shorts were supported; treating those
-            // as intentional shorts would move every committed golden.
-            positions_value / nav_now
-        };
+        let gross = symbols
+            .iter()
+            .map(|s| (book.shares[s] * price(data, s, t)).abs())
+            .sum::<f64>()
+            / nav_now;
         book.cash -= crate::costs::financing_cost_frac(costs.financing_bps, gross) * nav_now;
     }
 
@@ -674,12 +664,86 @@ mod tests {
         };
         let plain = run_backtest(&base, &mut BuyAndHold, w, 0, no_costs);
         let div = run_backtest(&paying, &mut BuyAndHold, w, 0, no_costs);
+        let masked = run_backtest(&paying.masked(), &mut BuyAndHold, w, 0, no_costs);
+        assert_eq!(
+            div.returns, masked.returns,
+            "identifier masking must preserve the entire total-return replay"
+        );
         let sum_plain: f64 = plain.returns.iter().sum();
         let sum_div: f64 = div.returns.iter().sum();
         assert!(
             sum_div > sum_plain,
             "dividends should raise total return: {sum_div} vs {sum_plain}"
         );
+    }
+
+    #[test]
+    fn costly_rebalances_reach_target_inventory_without_crossing_flat() {
+        let data =
+            Dataset::from_csv("date,symbol,close\nt0,AAA,100\nt1,AAA,100\nt2,AAA,100\n").unwrap();
+        let symbols = data.symbols();
+        let costs = CostModel {
+            financing_bps: 0.0,
+            ..CostModel::default()
+        };
+        for opening in [0.5, -0.5] {
+            for target in [0.0, opening * 0.5] {
+                let mut book = Book::new(&symbols, 7);
+                let mut decision = Decision {
+                    orders: vec![Order {
+                        symbol: "AAA".into(),
+                        action: Action::Buy,
+                        target_weight: opening,
+                        confidence: 0.5,
+                        rationale: String::new(),
+                    }],
+                    reasoning: String::new(),
+                    cost: None,
+                };
+                step_once(&data, &symbols, &mut book, &costs, 7, 0, &decision);
+                assert_eq!(book.shares["AAA"], opening / 100.0);
+                let before_nav = nav(&data, &symbols, &book.shares, book.cash, 1);
+                let before_cash = book.cash;
+                let before_shares = book.shares["AAA"];
+                decision.orders[0].target_weight = target;
+                decision.orders[0].action = Action::Sell;
+                step_once(&data, &symbols, &mut book, &costs, 7, 1, &decision);
+                let after_shares = book.shares["AAA"];
+                assert!((after_shares - target * before_nav / 100.0).abs() < 1e-14,
+                    "target inventory differs: opening={opening}, target={target}, realized={after_shares}");
+                if target == 0.0 {
+                    assert_eq!(after_shares, 0.0);
+                }
+                // Mid-marked liquidation wealth strictly loses execution costs.
+                assert!(book.cash + after_shares * 100.0 < before_cash + before_shares * 100.0);
+            }
+        }
+    }
+
+    #[test]
+    fn execution_costs_debit_cash_not_target_quantity() {
+        let data = Dataset::from_csv("date,symbol,close\nt0,AAA,100\nt1,AAA,100\n").unwrap();
+        let symbols = data.symbols();
+        let costs = CostModel {
+            slippage_bps: 0.0,
+            impact_bps: 100.0,
+            financing_bps: 0.0,
+            fee_bps: 10.0,
+            ..CostModel::default()
+        };
+        for target in [0.25, -0.25] {
+            let mut book = Book::new(&symbols, 0);
+            apply_order(
+                &data, &symbols, &mut book, &costs, 0, 0, 1.0, "AAA", target, false,
+            );
+            // At 25% participation, 100 bps * sqrt(.25) = 50 bps impact.
+            let expected_notional = target * (if target > 0.0 { 1.005 } else { 0.995 });
+            assert_eq!(book.shares["AAA"], target / 100.0);
+            assert!(
+                (book.cash - (1.0 - expected_notional - expected_notional.abs() * 0.001)).abs()
+                    < 1e-14
+            );
+        }
     }
 
     #[test]

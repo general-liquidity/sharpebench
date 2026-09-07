@@ -270,6 +270,7 @@ pub const COMPOSITE_SCORE_INVENTORY: EvidenceInventory = EvidenceInventory {
         ("passed_k", COVERED_SCORE),
         ("process_ok", COVERED_SCORE),
         ("bootstrap_p", COVERED_SCORE),
+        ("bootstrap_error", COVERED_SCORE),
         ("raw_mean_return", COVERED_SCORE),
         ("rank_eligible", COVERED_SCORE),
         ("composite", COVERED_SCORE),
@@ -481,10 +482,8 @@ mod tests {
 
     /// Every field name a `CompositeScore` can carry.
     ///
-    /// Five of the declared-mandate fields are `skip_serializing_if =
-    /// "Option::is_none"`, so one probe never shows the whole schema. The union
-    /// over a declared and an undeclared probe does, and taking the union is
-    /// what makes the audit total rather than a sample.
+    /// Conditional fields require declared, undeclared and unavailable-statistic
+    /// probes. A successful score alone cannot exercise the error field.
     fn observed_composite_score_fields() -> Vec<String> {
         let subs = vec![
             probe_submission("declared-probe", 0.002),
@@ -495,7 +494,15 @@ mod tests {
             "declared-probe".to_string(),
             DeclaredMandate::AbsoluteReturn,
         );
-        let scored = rank_declared(&subs, &declarations, &ScoreConfig::default());
+        let mut scored = rank_declared(&subs, &declarations, &ScoreConfig::default());
+        scored.extend(rank_declared(
+            &subs,
+            &declarations,
+            &ScoreConfig {
+                n_boot: 0,
+                ..ScoreConfig::default()
+            },
+        ));
 
         let mut names: BTreeSet<String> = BTreeSet::new();
         for s in &scored {

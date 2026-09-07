@@ -1,14 +1,18 @@
-//! The clone collapse must not touch the paper's committed evidence.
+//! Current-engine regression characterizations over the paper's frozen input data.
+//!
+//! Reconstructing a field with today's engine is not replay of a historical
+//! artifact. Changes here require an explicit impact assessment; they never
+//! authorize rewriting the paper's frozen results. In particular, the corrected
+//! inventory path changes the commodities support (see the paired historical
+//! assertion below), whose raw WTI prices include a documented negative quote.
 //!
 //! `rank` collapses near-clone streams to one vote each before it measures
 //! `trials_sr_std` (see `sharpebench_core::CLONE_COLLAPSE_COSINE`). On a field
-//! with no clusters the collapse is the identity, so the committed evidence
-//! (`paper/evidence/final/*.jsonl`, the risk-managed run and the pass witness)
-//! is byte-identical to a pre-collapse kernel exactly when the collapse's
-//! clustering merges nothing on those fields. This test rebuilds every one of
-//! those fields the way its example does (same agents, seeds, windows and cost
-//! model, all pinned) and asserts zero merges at the collapse threshold. It
-//! also records the maximum honest pair, which is the number the threshold was
+//! with no clusters the collapse is the identity for that input to the collapse,
+//! not a proof that a revised engine reproduces a historical artifact. These
+//! tests reconstruct the examples' fields (same agents, seeds, windows and cost
+//! model) and pin the observed clustering, separating raw and seed-averaged inputs. They
+//! also record the maximum honest pair, which is the number the threshold was
 //! chosen above: long-only agents on tiny universes are collinear with
 //! buy-and-hold at 0.97 to 0.99, which the rediscovery screen's 0.97 would
 //! have merged and the collapse's 0.995 must not.
@@ -200,25 +204,23 @@ fn committed_evidence_fields_have_no_clone_merges() {
 /// market-average exposure. This test reproduces the live clustering, counts
 /// post-collapse dispersion votes the way `measured_trials_sr_std` does
 /// (finite-Sharpe qualifiers, clusters vote once, `min_field` five), and
-/// asserts the vote count implies exactly the `trials_sr_std_source` stamped
-/// on the committed default cells: `configured` (fewer than five votes) on
-/// us-indices-1w, crypto-majors-1w, crypto-majors-1d, us-indices-1d and
-/// crypto-majors-4h; measured (five or more) on crypto-majors-1h, fx-majors-1d,
-/// commodities-1d and rates-1d.
+/// asserts current-engine support. The commodities field no longer reproduces
+/// its historical measured stamp: only two current streams have finite Sharpe.
+/// This test records the incompatibility; neither successful CSV parsing nor a
+/// dispersion fallback validates percentage returns across a negative raw quote.
 #[test]
-fn seed_averaged_streams_match_committed_dispersion_source() {
+fn current_seed_averaged_streams_have_expected_dispersion_support() {
     use sharpebench_core::composite::pooled_returns;
     use sharpebench_core::deflated_sharpe::sharpe_ratio;
 
-    /// Datasets whose committed default cells stamp `trials_sr_std_source:
-    /// "configured"` (paper/evidence/final/<dataset>.jsonl at dsr_bar 0.95,
-    /// host N 50, unpinned dispersion).
+    /// Current support, not a relabelling of the frozen artifact stamps.
     const CONFIGURED_FALLBACK: &[&str] = &[
         "us-indices-1w",
         "crypto-majors-1w",
         "crypto-majors-1d",
         "us-indices-1d",
         "crypto-majors-4h",
+        "commodities-1d",
     ];
     const MIN_FIELD: usize = 5;
 
@@ -278,11 +280,36 @@ fn seed_averaged_streams_match_committed_dispersion_source() {
         );
 
         let expect_configured = CONFIGURED_FALLBACK.contains(name);
+        if *name == "commodities-1d" {
+            assert_eq!(
+                averaged.len(),
+                2,
+                "review the documented nonfinite-support limitation if this changes"
+            );
+            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../paper/evidence/final/commodities-1d.jsonl");
+            let artifact = std::fs::read_to_string(path).unwrap();
+            let historical: Vec<serde_json::Value> = artifact
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .filter(|row: &serde_json::Value| {
+                    row["n_trials"] == 50
+                        && row["dsr_bar"] == 0.95
+                        && row["sr_std_pinned"].is_null()
+                })
+                .collect();
+            assert!(
+                !historical.is_empty(),
+                "the historical comparison must actually exist"
+            );
+            assert!(historical
+                .iter()
+                .all(|row| row["trials_sr_std_source"] == "measured_floored"));
+        }
         assert_eq!(
             votes < MIN_FIELD,
             expect_configured,
-            "{name}: {votes} post-collapse votes contradicts the committed \
-             trials_sr_std_source (expected {})",
+            "{name}: {votes} post-collapse votes contradicts reviewed current-engine support (expected {})",
             if expect_configured {
                 "configured fallback (< 5 votes)"
             } else {

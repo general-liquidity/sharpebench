@@ -11,7 +11,8 @@ import random
 
 import pytest
 
-sharpebench = pytest.importorskip("sharpebench")
+
+import sharpebench
 
 from sharpebench import (  # noqa: E402
     METHODOLOGY_VERSION,
@@ -40,6 +41,27 @@ from sharpebench import (  # noqa: E402
 )
 
 N = 500
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -float("inf")])
+def test_bootstrap_rejects_nonfinite_observations(bad):
+    with pytest.raises(ValueError, match="observation 1 must be finite"):
+        bootstrap_pvalue([0.01, bad, 0.02], n_boot=100)
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -0.1, 1.1])
+def test_fdr_rejects_malformed_probabilities(bad):
+    for fn in (benjamini_hochberg, fdr_verdict):
+        with pytest.raises(ValueError, match="p-value 0"):
+            fn([bad, 0.001], 0.05)
+        with pytest.raises(ValueError, match="q must be finite"):
+            fn([0.001], bad)
+
+
+def test_bootstrap_rejects_invalid_resampling_parameters():
+    for kwargs in ({"n_boot": 0}, {"block_prob": 0.0}, {"block_prob": float("nan")}):
+        with pytest.raises(ValueError):
+            bootstrap_pvalue([0.01, 0.02], **kwargs)
 
 
 def edge_track(n: int = N, drift: float = 0.001) -> list:

@@ -10,7 +10,9 @@ categories = ["science", "finance"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# Numeric replay cannot depend on which other workspace crate enables this
+# feature. The isolated scorer must read exactly the same f64s as the harness.
+serde_json = { version = "1", features = ["float_roundtrip"] }
 sha2 = "0.10"
 sharpebench-protocol = { path = "../sharpebench-protocol", version = "0.18.4" }
 sharpebench-stats = { path = "../sharpebench-stats", version = "0.18.4" }

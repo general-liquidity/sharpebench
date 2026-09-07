@@ -115,7 +115,8 @@ pub fn poisoning_report(
         BOOTSTRAP_SEED,
         BOOTSTRAP_SAMPLES,
         BOOTSTRAP_BLOCK_PROB,
-    );
+    )
+    .map_err(|error| error.to_string())?;
 
     Ok(PoisoningReport {
         integrity_delta,

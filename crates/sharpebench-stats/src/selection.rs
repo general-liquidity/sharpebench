@@ -482,7 +482,7 @@ mod tests {
         let mine = (at_least_as_large as f64 + 1.0) / (n_boot as f64 + 1.0);
         assert_eq!(
             mine,
-            crate::significance::bootstrap_pvalue(&data, seed, n_boot, block_prob),
+            crate::significance::bootstrap_pvalue(&data, seed, n_boot, block_prob).unwrap(),
             "the copied resampler must walk the identical path"
         );
     }

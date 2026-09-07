@@ -1,0 +1,98 @@
+//! Checked statistical boundaries. Failure to compute is not a p-value.
+
+use std::fmt;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StatisticalError {
+    NonFiniteObservation {
+        index: usize,
+    },
+    InvalidProbability {
+        index: usize,
+    },
+    InvalidParameter {
+        name: &'static str,
+        requirement: &'static str,
+    },
+    InsufficientObservations {
+        required: usize,
+        actual: usize,
+    },
+    NonFiniteComputation {
+        quantity: &'static str,
+    },
+}
+
+impl fmt::Display for StatisticalError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NonFiniteObservation { index } => write!(f, "observation {index} must be finite"),
+            Self::InvalidProbability { index } => {
+                write!(f, "p-value {index} must be finite and in [0, 1]")
+            }
+            Self::InvalidParameter { name, requirement } => write!(f, "{name} {requirement}"),
+            Self::InsufficientObservations { required, actual } => write!(
+                f,
+                "at least {required} observations are required, got {actual}"
+            ),
+            Self::NonFiniteComputation { quantity } => write!(f, "{quantity} is not finite"),
+        }
+    }
+}
+
+impl std::error::Error for StatisticalError {}
+
+pub fn finite_observations(values: &[f64]) -> Result<(), StatisticalError> {
+    match values.iter().position(|x| !x.is_finite()) {
+        Some(index) => Err(StatisticalError::NonFiniteObservation { index }),
+        None => Ok(()),
+    }
+}
+
+pub fn probability(value: f64, name: &'static str) -> Result<(), StatisticalError> {
+    if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+        return Err(StatisticalError::InvalidParameter {
+            name,
+            requirement: "must be finite and in [0, 1]",
+        });
+    }
+    Ok(())
+}
+
+pub fn bootstrap_inputs(
+    values: &[f64],
+    n_boot: usize,
+    block_prob: f64,
+) -> Result<(), StatisticalError> {
+    finite_observations(values)?;
+    if values.len() < 2 {
+        return Err(StatisticalError::InsufficientObservations {
+            required: 2,
+            actual: values.len(),
+        });
+    }
+    if n_boot == 0 {
+        return Err(StatisticalError::InvalidParameter {
+            name: "n_boot",
+            requirement: "must be positive",
+        });
+    }
+    if !block_prob.is_finite() || block_prob <= 0.0 || block_prob > 1.0 {
+        return Err(StatisticalError::InvalidParameter {
+            name: "block_prob",
+            requirement: "must be finite and in (0, 1]",
+        });
+    }
+    Ok(())
+}
+
+pub fn fdr_inputs(values: &[f64], q: f64) -> Result<(), StatisticalError> {
+    probability(q, "q")?;
+    if let Some(index) = values
+        .iter()
+        .position(|p| !p.is_finite() || !(0.0..=1.0).contains(p))
+    {
+        return Err(StatisticalError::InvalidProbability { index });
+    }
+    Ok(())
+}
