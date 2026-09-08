@@ -467,11 +467,36 @@ impl Rng {
     }
 }
 
-fn witness_submission(id: &str, base_seed: u64, s: f64, window_len: usize) -> AgentSubmission {
+/// The example's population tags and per-stream seed, mirrored so this test
+/// draws the field the committed witness evidence was generated from.
+const DOMAIN_ZERO_EDGE: u64 = 2;
+const DOMAIN_WITNESS: u64 = 3;
+
+fn stream_seed(domain: u64, member: usize, window: usize, exec_seed: usize) -> u64 {
+    let mut mixed = domain;
+    for coordinate in [member as u64, window as u64, exec_seed as u64] {
+        mixed = mix(mixed ^ coordinate.wrapping_mul(0x9E37_79B9_7F4A_7C15));
+    }
+    mixed
+}
+
+fn mix(mut z: u64) -> u64 {
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
+fn witness_submission(
+    id: &str,
+    domain: u64,
+    member: usize,
+    s: f64,
+    window_len: usize,
+) -> AgentSubmission {
     let mut runs = Vec::new();
     for w in 0..N_WINDOWS {
         for k in 0..N_SEEDS {
-            let mut rng = Rng::new(base_seed ^ ((w as u64) << 32) ^ (k as u64 + 1));
+            let mut rng = Rng::new(stream_seed(domain, member, w, k));
             let returns: Vec<f64> = (0..window_len)
                 .map(|_| SIGMA * (s + rng.normal()))
                 .collect();
@@ -492,12 +517,13 @@ fn witness_submission(id: &str, base_seed: u64, s: f64, window_len: usize) -> Ag
 #[test]
 fn pass_witness_fields_have_no_clone_merges() {
     for (shape, window_len) in SHAPES {
-        for (i, &s) in EDGES.iter().enumerate() {
+        for &s in EDGES {
             let mut subs: Vec<AgentSubmission> = (0..N_ZERO_EDGE)
                 .map(|k| {
                     witness_submission(
                         &format!("zero-edge-{k:02}"),
-                        0x00AA_0000 + k as u64,
+                        DOMAIN_ZERO_EDGE,
+                        k,
                         0.0,
                         *window_len,
                     )
@@ -505,7 +531,8 @@ fn pass_witness_fields_have_no_clone_merges() {
                 .collect();
             subs.push(witness_submission(
                 "witness",
-                0x00BB_0000 + i as u64,
+                DOMAIN_WITNESS,
+                0,
                 s,
                 *window_len,
             ));
