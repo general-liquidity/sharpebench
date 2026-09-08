@@ -13,6 +13,13 @@
 //!
 //!   cargo run --release -p sharpebench-harness --example evidence_sweep -- <out.jsonl>
 //!
+//! Both optional selectors are resolved against the declared sets before the
+//! output is opened, the run is staged through `<out>.partial`, and the file is
+//! published under the requested name only once the planned datasets have all
+//! loaded and the produced records equal the declared grid. A selector that
+//! matches nothing, or a dataset that fails to load, is a refusal with a
+//! non-zero exit: it used to skip silently and publish anyway.
+//!
 //! The grid: dsr_bar in {0.80, 0.90, 0.95, 0.99}, n_trials in {1, 10, 50, 200},
 //! and trials_sr_std measured from the field when the field is large enough (the
 //! 0.2.0 default) or pinned to each of {0.20, 0.35, 0.50} with measurement off, so
@@ -30,6 +37,12 @@ use sharpebench_harness::luck_floor;
 use sharpebench_sim::{
     run_backtest, tag_regime, walk_forward, Agent, BuyAndHold, CostModel, Dataset, HoldAgent,
     Momentum, Window,
+};
+
+#[path = "support/declared_support.rs"]
+mod declared_support;
+use declared_support::{
+    or_refuse, refuse, require_evaluated, require_grid, resolve_numeric_selector, resolve_selector,
 };
 
 /// Frozen datasets, their asset class and bar size. Timeframe is what the deflation
@@ -57,6 +70,9 @@ const SR_STD: &[Option<f64>] = &[None, Some(0.20), Some(0.35), Some(0.50)];
 
 const EXEC_SEEDS: [u64; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
 const LUCK_FLOOR_AGENTS: usize = 5;
+/// Three reference agents plus the luck floor: the rows `rank` returns per cell,
+/// and so the multiplier of the declared grid the published file must contain.
+const FIELD_AGENTS: usize = 3 + LUCK_FLOOR_AGENTS;
 /// Per-run drawdown bound for the never-catastrophic ablation. 20 percent is the
 /// pooled cap the mandate docs use as their example, applied per regime.
 const NEVER_CATASTROPHIC_RUN_DD: f64 = 0.20;
@@ -165,34 +181,43 @@ fn main() {
         eprintln!("usage: evidence_sweep <out.jsonl> [dataset] [dsr_bar]");
         std::process::exit(2);
     });
-    let mut w = BufWriter::new(File::create(&out).expect("create output"));
-    let mut n_records = 0usize;
-
     // Optional second argument: run only the named dataset. The sweep is
     // embarrassingly parallel across datasets and the hourly crypto file alone
     // takes longer than the other eight together, so one process per dataset is
     // how the evidence is actually produced. Results are identical to a serial
     // run because every seed is pinned.
-    let only = env::args().nth(2);
+    let declared: Vec<&str> = DATASETS.iter().map(|(name, ..)| *name).collect();
+    let planned = or_refuse(resolve_selector(
+        "dataset",
+        &declared,
+        env::args().nth(2).as_deref(),
+    ));
     // Optional third argument: restrict to one dsr_bar, so the 64-config grid of a
     // single large dataset can be split across processes. The intraday crypto
     // files are the long pole; four processes per file instead of one.
-    let only_bar: Option<f64> = env::args().nth(3).map(|b| b.parse().expect("dsr_bar"));
+    let requested_bar: Option<f64> = env::args().nth(3).map(|b| b.parse().expect("dsr_bar"));
+    let planned_bars = or_refuse(resolve_numeric_selector("dsr_bar", DSR_BARS, requested_bar));
+
+    // Both selectors are known good before an output file exists.
+    let partial = format!("{out}.partial");
+    let mut w = BufWriter::new(File::create(&partial).expect("create partial output"));
+    let mut n_records = 0usize;
+    let mut evaluated: Vec<String> = Vec::new();
+
     for (name, class, tf, ppy) in DATASETS {
-        if let Some(ref o) = only {
-            if o != name {
-                continue;
-            }
+        if !planned.iter().any(|d| d == name) {
+            continue;
         }
         let path = format!("data/{name}.csv");
         let data = match Dataset::from_csv_file(&path) {
             Ok(d) => d,
-            Err(e) => {
-                eprintln!("skip {name}: {e}");
-                continue;
-            }
+            // A planned dataset that does not load is missing support, not a
+            // cell to drop: the remaining records would still be published
+            // under a filename that claims the whole declared sweep.
+            Err(e) => refuse(format!("declared dataset {name} did not load: {e}")),
         };
         let n = data.len();
+        let before = n_records;
         let (windows, window_len) = windows_for(n);
         let regimes: Vec<String> = windows
             .iter()
@@ -206,10 +231,8 @@ fn main() {
         let subs = field(&data, &windows);
 
         for &dsr_bar in DSR_BARS {
-            if let Some(b) = only_bar {
-                if (dsr_bar - b).abs() > 1e-9 {
-                    continue;
-                }
+            if !planned_bars.iter().any(|b| (dsr_bar - b).abs() <= 1e-9) {
+                continue;
             }
             for &n_trials in N_TRIALS {
                 for &pinned in SR_STD {
@@ -286,7 +309,20 @@ fn main() {
                 }
             }
         }
+        if n_records > before {
+            evaluated.push((*name).to_string());
+        }
     }
     w.flush().expect("flush");
+    drop(w);
+
+    // The declared grid, not merely a non-empty file: planned datasets times
+    // planned bars times the trial and prior axes times the scored field.
+    or_refuse(require_evaluated("dataset", &planned, &evaluated));
+    or_refuse(require_grid(
+        planned.len() * planned_bars.len() * N_TRIALS.len() * SR_STD.len() * FIELD_AGENTS,
+        n_records,
+    ));
+    std::fs::rename(&partial, &out).expect("publish complete sweep atomically");
     eprintln!("wrote {n_records} records to {out}");
 }

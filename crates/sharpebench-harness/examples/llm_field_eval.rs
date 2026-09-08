@@ -13,7 +13,11 @@
 //! Run from the repo root with ANTHROPIC_API_KEY (and optionally LLM_CACHE_DIR /
 //! LLM_STATS_DIR / LLM_STRIDE / LLM_MAX_CALLS) exported. The run fails closed:
 //! a provider/transport error or an exhausted call budget aborts the field, and
-//! only a completely evaluated field is renamed to the requested output.
+//! only a completely evaluated field is renamed to the requested output. The
+//! optional dataset selector is resolved against the declared set before the
+//! output is opened, and every planned dataset must have contributed records
+//! before the rename: a selector that names nothing is a refusal, not an empty
+//! field published under the requested name.
 //!
 //!   cargo run --release -p sharpebench-harness --example llm_field_eval -- <out.jsonl> [dataset]
 
@@ -31,6 +35,10 @@ use sharpebench_sim::{
     run_backtest, tag_regime, walk_forward, Agent, BuyAndHold, CostModel, Dataset, ExternalAgent,
     HoldAgent, Momentum, Window,
 };
+
+#[path = "support/declared_support.rs"]
+mod declared_support;
+use declared_support::{or_refuse, require_evaluated, resolve_selector};
 
 const DATASETS: &[(&str, &str, &str, f64)] = &[
     ("us-indices-1d", "equity-index", "1d", 252.0),
@@ -163,17 +171,24 @@ fn main() {
         eprintln!("usage: llm_field_eval <out.jsonl> [dataset]");
         std::process::exit(2);
     });
-    let only = env::args().nth(2);
+    // Resolve the optional dataset selector before anything is opened: an
+    // unrecognized name used to skip every dataset and publish an empty field.
+    let declared: Vec<&str> = DATASETS.iter().map(|(name, ..)| *name).collect();
+    let planned = or_refuse(resolve_selector(
+        "dataset",
+        &declared,
+        env::args().nth(2).as_deref(),
+    ));
     let partial = format!("{out}.partial");
     let mut w = BufWriter::new(File::create(&partial).expect("create partial output"));
     let mut n_records = 0usize;
+    let mut evaluated: Vec<String> = Vec::new();
 
     for (name, class, tf, ppy) in DATASETS {
-        if let Some(ref o) = only {
-            if o != name {
-                continue;
-            }
+        if !planned.iter().any(|d| d == name) {
+            continue;
         }
+        let before = n_records;
         let path = format!("data/{name}.csv");
         let data = Dataset::from_csv_file(&path).expect("load dataset");
         let n = data.len();
@@ -285,10 +300,15 @@ fn main() {
             w.write_all(b"\n").expect("newline");
             n_records += 1;
         }
+        if n_records > before {
+            evaluated.push((*name).to_string());
+        }
         w.flush().expect("flush");
     }
     w.flush().expect("flush completed field");
     drop(w);
+    // The rename is the publication. Everything planned must be in the file.
+    or_refuse(require_evaluated("dataset", &planned, &evaluated));
     std::fs::rename(&partial, &out).expect("publish completed field atomically");
     eprintln!("wrote {n_records} complete records to {out}");
 }
