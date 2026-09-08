@@ -220,6 +220,11 @@ pub fn percentile_selection_json(
     serde_json::to_string(&serde_json::json!({
         "alpha": s.alpha,
         "alpha_warning": s.alpha_warning,
+        // Built field by field, so a new field on the Rust struct is invisible
+        // here until it is added. `input_error` carries the refusal reason for an
+        // alpha that is not a percentile or a degenerate block probability, and
+        // without it this surface would report an empty ranking with no cause.
+        "input_error": s.input_error.map(|e| e.to_string()),
         "candidates": s.candidates.iter().map(|c| serde_json::json!({
             "index": c.index,
             "point_utility": c.point_utility,

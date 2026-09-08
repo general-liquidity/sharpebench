@@ -22,7 +22,7 @@ use sharpebench_stats::{
 };
 
 use crate::mintrl::min_track_record_length;
-use crate::pbo::probability_of_backtest_overfitting;
+use crate::pbo::pbo_status;
 
 /// The statistics version stamped into every verdict, so an archived result is
 /// reproducible against the exact `sharpebench-stats` math that produced it.
@@ -144,6 +144,10 @@ pub struct FullVerdict {
     /// observed statistic and the +1 smoothing then does the rest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snooping_error: Option<String>,
+    /// Why the overfitting probability is unavailable, when it is. `pbo` is NaN
+    /// in that case rather than a fabricated probability.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pbo_error: Option<String>,
 }
 
 /// LITE: "is my Sharpe real?" from a single per-period return series.
@@ -243,7 +247,21 @@ pub fn is_my_sharpe_real_full(
     winner_idx: usize,
     cfg: &HonestyConfig,
 ) -> FullVerdict {
-    let honesty = is_my_sharpe_real(&field[winner_idx], cfg);
+    // The search this function can see is at least the field it was handed. The
+    // caller picks the winner out of `field`, so scoring that winner at the
+    // caller's declared `n_trials` prices a selection that demonstrably happened
+    // over more candidates than that: the Python entry point defaults to 1 and
+    // selects the highest Sharpe itself, so the headline priced one trial for a
+    // search over the whole field. `rank` in the core applies the same floor for
+    // the same reason, and the sidecar field tests below never fed back into this
+    // verdict. Declared private search still adds on top.
+    let observed = HonestyConfig {
+        n_trials: cfg
+            .n_trials
+            .max(u32::try_from(field.len()).unwrap_or(u32::MAX)),
+        ..*cfg
+    };
+    let honesty = is_my_sharpe_real(&field[winner_idx], &observed);
 
     let reality_check_p = reality_check_pvalue(field, SNOOP_SEED, SNOOP_N_BOOT, SNOOP_BLOCK_PROB);
     let spa_p = spa_pvalue(field, SNOOP_SEED, SNOOP_N_BOOT, SNOOP_BLOCK_PROB);
@@ -256,8 +274,13 @@ pub fn is_my_sharpe_real_full(
         SNOOP_ALPHA,
     );
 
-    // Transpose N×T (strategy rows) → T×N (time rows) for CSCV.
-    let pbo = probability_of_backtest_overfitting(&transpose(field), default_pbo_blocks());
+    // Transpose N×T (strategy rows) → T×N (time rows) for CSCV. Through the status
+    // API, so an unestimable matrix reports why instead of a number: a single
+    // non-finite cell used to yield 1.0, a confident systematic-overfitting
+    // verdict, because every Sharpe over it is NaN and NaN loses every comparison.
+    let pbo_status = pbo_status(&transpose(field), default_pbo_blocks());
+    let pbo_error = pbo_status.as_ref().err().map(|e| e.to_string());
+    let pbo = pbo_status.unwrap_or(f64::NAN);
 
     // Harvey-Liu-Zhu factor gate on the winner. The t-statistic of a mean return
     // is sharpe * sqrt(n) (per-period Sharpe = mean / std).
@@ -281,6 +304,7 @@ pub fn is_my_sharpe_real_full(
         pbo,
         hlz,
         snooping_error,
+        pbo_error,
     }
 }
 
@@ -605,5 +629,66 @@ mod tests {
         assert_eq!(txn[0], vec![1.0, 4.0]);
         // Ragged → empty.
         assert!(transpose(&[vec![1.0, 2.0], vec![3.0]]).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod bm1_search_footprint {
+    use super::*;
+
+    fn field(n: usize) -> Vec<Vec<f64>> {
+        (0..n)
+            .map(|i| {
+                (0..64)
+                    .map(|t| ((i * 64 + t) as f64 * 0.37).sin() * 0.01 + 0.001)
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_headline_prices_the_field_it_selected_over() {
+        // The caller picks the winner out of `field`, so a declared n_trials of 1
+        // prices a selection that demonstrably ranged over every candidate.
+        let f = field(40);
+        let cfg = HonestyConfig {
+            n_trials: 1,
+            ..Default::default()
+        };
+        let full = is_my_sharpe_real_full(&f, 0, &cfg);
+        let declared_only = is_my_sharpe_real(&f[0], &cfg);
+        assert!(
+            full.honesty.expected_max_sharpe > declared_only.expected_max_sharpe,
+            "the observed field must raise the deflation bar above the declared one"
+        );
+    }
+
+    #[test]
+    fn a_declared_search_larger_than_the_field_is_not_lowered() {
+        // The floor only ever raises: declared private search still dominates.
+        let f = field(4);
+        let cfg = HonestyConfig {
+            n_trials: 500,
+            ..Default::default()
+        };
+        let full = is_my_sharpe_real_full(&f, 0, &cfg);
+        let declared_only = is_my_sharpe_real(&f[0], &cfg);
+        assert_eq!(
+            full.honesty.expected_max_sharpe.to_bits(),
+            declared_only.expected_max_sharpe.to_bits()
+        );
+    }
+
+    #[test]
+    fn an_unestimable_matrix_reports_no_overfitting_probability() {
+        let mut f = field(8);
+        f[3][7] = f64::NAN;
+        let full = is_my_sharpe_real_full(&f, 0, &HonestyConfig::default());
+        assert!(
+            full.pbo.is_nan(),
+            "a non-finite cell must not produce a confident probability, got {}",
+            full.pbo
+        );
+        assert!(full.pbo_error.is_some(), "the reason must be reported");
     }
 }
