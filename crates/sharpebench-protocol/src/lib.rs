@@ -29,6 +29,8 @@
 //! produces the diagnostic that names the offending field.
 #![forbid(unsafe_code)]
 
+pub mod canonical;
+
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};

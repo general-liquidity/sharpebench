@@ -26,11 +26,13 @@
 #![forbid(unsafe_code)]
 
 pub mod canary;
+pub mod framing;
 pub mod public;
 pub mod registry;
 pub mod sealed;
 
 pub use canary::{detect_leak, embed_canary, make_canary, verify_canary, Canary};
+pub use framing::{framed_preimage, FRAMING_VERSION};
 pub use public::{
     publish_public_chain, sign_chain_receipt_public, sign_result_public, verify_chain_public,
     verify_chain_public_anchored, verify_chain_receipt_public, verify_public_chain,
@@ -57,9 +59,20 @@ type HmacSha256 = Hmac<Sha256>;
 pub struct Commitment {
     pub agent_id: String,
     pub target_window: String,
-    /// Hex SHA-256 of `agent_id | target_window | artifact_digest | salt`.
+    /// Hex SHA-256 of [`framed_preimage`] over [`COMMITMENT_DOMAIN`] and
+    /// `agent_id`, `target_window`, `artifact_digest`, `salt`, in that order.
     pub commit_hash: String,
 }
+
+/// Domain and framing version of a [`Commitment`] pre-image.
+///
+/// `v1` pasted the four fields between literal `|` separators, so an agent
+/// could move a separator from one field into the next and commit to the same
+/// hash under a different identity: `("a|b", "c", ..)` and `("a", "b|c", ..)`
+/// produced one pre-image. `v2` frames the fields by length, which is not a
+/// reinterpretation of the old digest but a different one; a commitment
+/// computed under `v1` does not verify here, and must be recomputed.
+pub const COMMITMENT_DOMAIN: &str = "sharpebench-attest/commitment/v2";
 
 /// Build a commitment. `artifact_digest` is a hash of the agent's frozen
 /// binary/config; `salt` is a private nonce revealed only at reveal time.
@@ -70,10 +83,10 @@ pub fn make_commitment(
     salt: &str,
 ) -> Commitment {
     let mut h = Sha256::new();
-    for part in [agent_id, target_window, artifact_digest, salt] {
-        h.update(part.as_bytes());
-        h.update(b"|");
-    }
+    h.update(framed_preimage(
+        COMMITMENT_DOMAIN,
+        &[agent_id, target_window, artifact_digest, salt],
+    ));
     Commitment {
         agent_id: agent_id.to_string(),
         target_window: target_window.to_string(),
