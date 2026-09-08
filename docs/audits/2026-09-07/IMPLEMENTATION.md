@@ -5,7 +5,7 @@ review of progress against both repositories. The overall goal remains
 unfinished. This file is mirrored byte-for-byte in the Bench and Arena
 repositories; edit both or neither.
 
-Status: 100 checklist rows, 89 closed and 11 open. The restructured plan
+Status: 100 checklist rows, 99 closed and 1 open. The restructured plan
 opened at 39 closed. Batches A, B, C, D and G are complete. Batch I resolved
 three of its four probes, one of which was then reverted after failing on a
 Docker-enabled runner, so two of its rows remain open and both need a live
@@ -150,16 +150,16 @@ every row in it is closed under the rules above.
 - [x] BM7: the declared branch checked the declaration against itself and against earlier records and never read `raw_candidate`, so a record could hash one candidate and display the lineage of another while its digest still verified. The success fixture proved the gap by passing: it hashed a candidate with no lineage field while the record displayed one. The declaration is now bound to the hashed bytes. Bench `f1b4a67`. Counting before dedup, which the paper's honor-system claim rests on, was verified sound and needed no change.
 - [x] BI6: a team kept only its members' orders and reported no cost, so a team of paid agents showed zero compute spend even when every member supplied one, and its cost-normalized columns went unavailable rather than reflecting real expenditure. Member costs are now summed onto the consensus decision with the unit recorded, and mixed denominations are refused rather than reduced to a dollar total that would silently drop a token reporter's entire spend. Bench `de7ef82`. The concurrency semantics the sum assumes are documented and pinned; latency is neither summed nor scored.
 - [x] Memory: the oracle series was never length-checked against the paired arms, so `fraction_of_ceiling` could divide a lift from one task mix by a ceiling gap from another. The documented zero floor was implemented as a near-zero guard on the absolute gap, so an oracle below baseline kept the ratio's sign and a retrieval arm that also lost ground reported a favourable positive fraction. Scores, costs and alpha are now finite-checked at the boundary on the poisoning leg too. Bench `50e147b`. Equal length cannot establish identical task identities; that stays an explicit caller contract.
-- [ ] Budget support and search population semantics.
-- [ ] Plateau terminology.
-- [ ] Zero-return versus no-trade distinction.
-- [ ] Regime reversals.
-- [ ] Aligned noncausal attribution.
-- [ ] Unknown process checks.
-- [ ] Turnover semantics.
-- [ ] Configured disqualification rollups.
-- [ ] Dated rediscovery.
-- [ ] Explicit transitive clone-cluster semantics.
+- [x] Budget support and search population: the selection footprint was already sound, re-deflating the peak at base trials plus budget points, which only ever raises the bar. Comparable support across budgets was never stated and the module cannot check it, since it receives returns and not dates, so the caller contract and the per-point sample size are now written down. Bench `637852e`. Documentation only.
+- [x] Plateau terminology: the onset predicate is non-strict, so an honest plateau set the overfit marker while the field claimed more compute had lowered held-out edge. The pre-existing test hedged on exactly that case, which was the tree admitting its own uncertainty. It is documented as a non-improvement marker that is not uncertainty-tested, and the test now pins the plateau setting it with no point declining. Bench `637852e`. Renaming the published key is a separate decision.
+- [x] Zero-return versus no-trade: the split filters on magnitude alone, so it cannot separate sitting out from a position that went nowhere or a period whose gain went to fees. No trade or position flag reaches the module, yet the documentation said it identified inactivity. Core, CLI columns and the book now say near-zero-return mass. Bench `637852e`. The wire field name is unchanged pending the npm and WASM surface decision.
+- [x] Regime reversals: a reversal was reported only when the pooled gap had a sign to contradict, so exact cancellation, the case pooling hides best, reported none. The module's own motivating fixture proved it by asserting the two opposite regime signs and pointedly never asserting the verdict. A tied pooled gap now lists every counted regime when both signs are present. Bench `26a7b42`.
+- [x] Aligned noncausal attribution: the regression pairs by index and silently truncates, and its two callers differed, with the composite path trimming to a common prefix and the role path not. The pairing is now explicit at the call site and asserted in debug, and the loading is documented as a marginal association from a univariate fit against a non-orthogonal regressor, which does not decompose the return additively and does not identify cause. Bench `637852e` and `14a4729`.
+- [x] Unknown process checks: a point-in-time arm that made no recalls scored perfect compliance and counted as fully compliant, indistinguishable from an audited clean arm, and the suite rollup could not see it. A non-finite allocation cap made the leverage comparison false for every input, reporting a check that never ran. Both fail closed now. Bench `26a7b42`. Confabulation already separated unresolved from resolved and needed no change.
+- [x] Turnover semantics: the arithmetic is churn in the stated target weights and is correct; the documentation called it realized. No price reaches the module, so drift between rebalances is unmodelled and a repeated target scores zero churn where a real account traded. Bench `637852e`. Documentation only.
+- [x] Configured disqualification rollups: the rollup built default thresholds internally, so an explanation of a board scored at other bars could contradict that board. It now takes the board's own thresholds. Bench `26a7b42`. The CLI and WASM paths already passed them, so only the rollup could disagree.
+- [x] Dated rediscovery: similarity is positional with unequal lengths truncated rather than intersected on a calendar, and nothing reads a date. The dated-alignment contract and the advisory framing are now explicit. Bench `637852e`.
+- [x] Explicit transitive clone-cluster semantics: single linkage means membership is reachability through a chain of near-clone pairs, not similarity between every pair, so a cluster can join endpoints that are not clones of each other. Documented with why that trade-off suits the vote collapse, and pinned by a regression where three directions four degrees apart cluster while the endpoints sit below the threshold. Bench `637852e`.
 
 ### Batch G: remaining Arena telemetry
 
