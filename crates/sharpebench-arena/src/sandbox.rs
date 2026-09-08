@@ -1804,6 +1804,49 @@ mod tests {
     /// Exercise the Docker/kernel fact that the injected inspector otherwise has to
     /// stand in for: crossing the actual cgroup memory budget sets
     /// ``State.OOMKilled=true`` before the named container is removed.
+    /// What ENTRYPOINT does the pinned fixture actually declare?
+    ///
+    /// The audit found that an appended `/bin/sh` command replaces `CMD` and not
+    /// `ENTRYPOINT`, so against an image declaring one the readiness and egress
+    /// probes would report on whatever that entrypoint did with the script as its
+    /// argv. That is true of the launch construction. Whether this repository can
+    /// OBSERVE it is a separate question, and it turns on the fixture: `alpine`
+    /// declares `CMD ["/bin/sh"]` and no entrypoint, so with this image the
+    /// appended command lands exactly where an override would have put it, and
+    /// both the defect and any fix for it are invisible.
+    ///
+    /// That is why the first repair looked correct in unit tests and still broke
+    /// `live_memory_limit_sets_the_oom_killed_verdict`: the override changed which
+    /// process is PID 1 on the one launch whose contract depends on that, while
+    /// buying nothing observable on a fixture with no entrypoint to override.
+    ///
+    /// This test records the fixture's declared entrypoint so the row rests on
+    /// evidence. If a future fixture DOES declare one, it fails, which is the
+    /// signal that the override is now both testable and required.
+    #[test]
+    #[ignore = "needs a running Docker daemon and SHARPEBENCH_SANDBOX_FIXTURE"]
+    fn live_fixture_declares_no_entrypoint_to_override() {
+        assert!(
+            docker_available(),
+            "this test was requested explicitly with --ignored, so an absent Docker daemon is a failure"
+        );
+        let image = live_fixture_image();
+        let out = docker_output(&[
+            "image",
+            "inspect",
+            "--format",
+            "{{json .Config.Entrypoint}}",
+            &image,
+        ])
+        .expect("the pinned fixture must be inspectable");
+        let declared = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        println!("fixture entrypoint probe: {image} declares Config.Entrypoint={declared}");
+        assert!(
+            declared == "null" || declared.is_empty(),
+            "the fixture now declares an entrypoint ({declared}), so the appended-command              defect is finally observable here: give `into_args_with_command` an              `--entrypoint` override, and keep the memory-limited launch out of it because              its OOM contract depends on the image entrypoint being namespace PID 1"
+        );
+    }
+
     /// Does a surviving wrapper hide its child's OOM kill?
     ///
     /// The audit's fourth probe, which source alone cannot settle. Dropping
