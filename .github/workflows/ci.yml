@@ -335,3 +335,81 @@ jobs:
         run: python -m unittest paper/src/test_check_prospective_forecast_report.py
       - name: Every recorded source and artifact matches the committed scope
         run: python paper/src/check-provenance.py
+
+  # --- packaged consumers: usability, not identity ----------------------------------
+  # Every other packaging guard in this repository checks that the right version, commit
+  # and registry are involved. None of them checks that the artifact a consumer actually
+  # downloads builds, installs and runs. npm.yml already packs the tarball and installs it
+  # offline; these two do the same for the crate archive and the wheel, on every pull
+  # request rather than only at a tag, so a package that cannot be consumed is caught
+  # before it is published rather than after.
+
+  packaged-crate-consumer:
+    name: cargo package, fresh consumer crate, run
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96.0"
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Build a throwaway crate against the packaged archives and run it
+        run: python scripts/check-packaged-consumer.py
+
+  wheel-install-import:
+    name: maturin build, pip install the wheel, import
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Rust 1.96.0
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96.0"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/sharpebench-py
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Build the wheel
+        working-directory: crates/sharpebench-py
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip maturin
+          maturin build --out "$RUNNER_TEMP/dist"
+          wheels=("$RUNNER_TEMP"/dist/*.whl)
+          test "${#wheels[@]}" -eq 1
+          test -s "${wheels[0]}"
+          echo "WHEEL=${wheels[0]}" >> "$GITHUB_ENV"
+      - name: Install it into a fresh venv and score one series
+        # Run from outside the checkout so the import resolves to the installed wheel and
+        # not to the source tree, and install only the wheel's declared dependencies: the
+        # pytest job installs numpy and pytest as well, which would hide a runtime
+        # dependency the wheel forgot to declare.
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          python -m venv consumer
+          ./consumer/bin/pip install --quiet "$WHEEL"
+          cat > smoke.py <<'PY'
+          import sharpebench
+
+          assert isinstance(sharpebench.METHODOLOGY_VERSION, str), sharpebench.METHODOLOGY_VERSION
+          returns = [0.001 + 0.0001 * ((i % 5) - 2) for i in range(500)]
+          verdict = sharpebench.is_my_sharpe_real(returns, n_trials=200)
+          assert verdict["verdict"] in {"pass", "borderline", "fail"}, verdict
+          # Two entry points into the compiled kernel must agree on the same series, so a
+          # wheel that shipped a stale extension beside a current pure-Python layer fails
+          # here instead of quietly returning two different numbers.
+          assert verdict["sharpe"] == sharpebench.sharpe_ratio(returns), verdict
+          assert verdict["n_obs"] == len(returns), verdict
+          assert sharpebench.pass_k([True, True, True], mode="all")
+          assert not sharpebench.pass_k([True, False, True], mode="all")
+          print("imported the wheel and scored one series")
+          PY
+          ./consumer/bin/python smoke.py

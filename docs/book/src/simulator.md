@@ -60,17 +60,19 @@ establish perpetual identity under every future compiler, dependency, or target.
 
 ## State snapshots
 
-`clone_state` and `restore_state` capture and restore the mutable cursor of a running
-environment in `O(1)`:
+`clone_state` and `restore_state` capture and restore the mutable state of a running
+environment without replaying it:
 
 - `clone_state() -> EnvState` snapshots where the run currently is, including the seeded
   execution-noise RNG cursor. The immutable config (data, window, costs, seed) is not
-  copied, since it never changes, so a snapshot is cheap.
+  copied, since it never changes. The mutable book is copied, so the cost of a snapshot
+  grows with the number of held positions, the pending orders and the length of the
+  accumulated decision trace; it is not constant time.
 - `restore_state(state)` rewinds the environment to a snapshot, after which the
   current implementation reproduces the trajectory it would have produced from
   that point.
 
-This is what makes what-if rollouts and tree search over the same frozen data cheap:
+This is what makes what-if rollouts and tree search over the same frozen data practical:
 branch from a snapshot, explore, restore, branch again, without re-running the backtest
-from the start. Because the RNG cursor is part of the snapshot, every branch stays
-deterministic.
+from the start. The saving is the avoided replay, not a constant-time copy. Because the
+RNG cursor is part of the snapshot, every branch stays deterministic.

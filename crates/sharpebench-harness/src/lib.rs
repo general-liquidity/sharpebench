@@ -15,12 +15,19 @@ pub use checkpoint::{
     TaskRecord, TaskState,
 };
 pub use failure::{
-    apply_oom_verdict, failing_sentinel_run, run_with_retries, FailureKind, FailureLog,
-    FailureRecord, RunOutcome,
+    apply_oom_verdict, failing_sentinel_run, run_with_retries, AttemptDuration, AttemptLedger,
+    AttemptOutcome, AttemptRecord, AttemptSummary, AttemptedRun, DurationSource, FailureKind,
+    FailureLog, FailureRecord, RunOutcome,
 };
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use sharpebench_core::{AgentSubmission, MandateVerdict};
-use sharpebench_protocol::{AgentTrajectory, RunTrajectory, TrajectoryContract, TrajectoryWindow};
+use sharpebench_protocol::{
+    AgentTrajectory, Decision, DecisionCost, MarketObservation, RunTrajectory, TrajectoryContract,
+    TrajectoryWindow,
+};
 use sharpebench_sim::{
     run_backtest, run_backtest_capture, Agent, CostModel, Dataset, RandomAgent, TeamAgent,
     TransportDiagnostics, TransportHealth, Window,
@@ -193,6 +200,10 @@ where
 pub struct ResilientSubmission {
     pub submission: AgentSubmission,
     pub failures: FailureLog,
+    /// Rank-neutral totals over every attempt the sweep spent, failed and
+    /// retried ones included. It sits beside the scored pool above rather than
+    /// inside it: the pool is the completed cells, this is what they cost.
+    pub attempts: AttemptSummary,
 }
 
 /// Like [`run_agent`], but resilient to container/runtime flakiness via the
@@ -239,10 +250,16 @@ where
 {
     let mut runs = Vec::new();
     let mut failures = FailureLog::default();
+    let mut ledger = AttemptLedger::default();
     for (w, &expected_run_len) in expected_run_lens.iter().enumerate() {
         for &seed in seeds {
-            let (outcome, _) = run_with_retries(max_retries, || attempt(w, seed));
-            match outcome {
+            let driven = run_with_retries(max_retries, || attempt(w, seed));
+            // Append before branching on the outcome: a cell that failed twice
+            // before completing spent that time, and the completion must not be
+            // the only thing the accounting sees.
+            let spent = driven.ledger.len();
+            ledger.extend(&driven.ledger);
+            match driven.outcome {
                 RunOutcome::Completed(run) => runs.push(run),
                 RunOutcome::Exhausted { last, attempts } => {
                     // Harness fault: excluded from the pass^k pool entirely.
@@ -260,7 +277,8 @@ where
                         window_index: w,
                         seed,
                         kind,
-                        attempts: 1,
+                        // Retries that preceded the fault are attempts too.
+                        attempts: u32::try_from(spent).unwrap_or(u32::MAX).max(1),
                         runtime: false,
                     });
                     runs.push(failing_sentinel_run(expected_run_len));
@@ -268,6 +286,7 @@ where
             }
         }
     }
+    let attempts = ledger.summary();
     ResilientSubmission {
         submission: AgentSubmission {
             agent_id: agent_id.to_string(),
@@ -276,6 +295,7 @@ where
             candidates: Vec::new(),
         },
         failures,
+        attempts,
     }
 }
 
@@ -738,13 +758,163 @@ impl TeamMember {
 /// A team run: the team's own submission (scored as a unit) plus each member's
 /// solo pooled return series over the same windows × seeds — exactly the inputs
 /// [`sharpebench_core::attribute_roles`] needs to estimate who carried the team.
+#[derive(Debug)]
 pub struct TeamResult {
     pub team: AgentSubmission,
     pub role_returns: Vec<(String, Vec<f64>)>,
+    /// What the `cost` on every run of `team` is denominated in. Without it the
+    /// number is unreadable: `Run.cost` is a bare scalar and the cost-normalized
+    /// leaderboard columns divide by it.
+    pub cost_unit: TeamCostUnit,
+}
+
+/// The unit a team's members reported their compute spend in.
+///
+/// [`DecisionCost::billable_units`] reduces a report to one scalar by preferring a
+/// reported dollar figure and falling back to billable tokens, so a single team
+/// decision cannot carry both denominations at once.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TeamCostUnit {
+    /// No member reported a cost on any decision. Every team `Run.cost` is `0.0`
+    /// and the cost-normalized columns stay unavailable, exactly as for a solo
+    /// agent that reports nothing.
+    NotReported,
+    /// Every reporting member reported dollars; each team `Run.cost` is their sum.
+    Usd,
+    /// Every reporting member reported token counts only; each team `Run.cost` is
+    /// their summed billable tokens (`tokens_in + tokens_out`).
+    BillableTokens,
+}
+
+/// Why a team's member costs could not be reduced to one run cost.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TeamCostError {
+    /// One member billed in dollars and another in tokens only. Summing them
+    /// would publish the dollar total and silently drop the token reporter's
+    /// entire spend, so the team run is refused instead of priced wrongly.
+    MixedCostUnits {
+        usd_member: String,
+        token_member: String,
+    },
+}
+
+impl std::fmt::Display for TeamCostError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MixedCostUnits {
+                usd_member,
+                token_member,
+            } => write!(
+                f,
+                "team member {usd_member} reports cost in dollars and member {token_member} \
+                 reports tokens only; one team run cost cannot carry both denominations"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for TeamCostError {}
+
+/// What the members of one team reported, accumulated across the whole sweep.
+#[derive(Default)]
+struct TeamCostLedger {
+    usd_member: Option<String>,
+    token_member: Option<String>,
+}
+
+impl TeamCostLedger {
+    fn record(&mut self, member: &str, cost: &DecisionCost) {
+        if cost.cost_usd > 0.0 {
+            if self.usd_member.is_none() {
+                self.usd_member = Some(member.to_string());
+            }
+        } else if (cost.tokens_in > 0 || cost.tokens_out > 0) && self.token_member.is_none() {
+            self.token_member = Some(member.to_string());
+        }
+    }
+
+    fn unit(&self) -> Result<TeamCostUnit, TeamCostError> {
+        match (&self.usd_member, &self.token_member) {
+            (Some(usd_member), Some(token_member)) => Err(TeamCostError::MixedCostUnits {
+                usd_member: usd_member.clone(),
+                token_member: token_member.clone(),
+            }),
+            (Some(_), None) => Ok(TeamCostUnit::Usd),
+            (None, Some(_)) => Ok(TeamCostUnit::BillableTokens),
+            (None, None) => Ok(TeamCostUnit::NotReported),
+        }
+    }
+}
+
+/// One team member wrapped so its own reported spend is visible to the consensus
+/// agent. [`TeamAgent`] keeps only each member's orders, so without this the
+/// member's `cost` is discarded before the engine can accumulate it.
+struct MeteredMember {
+    name: String,
+    inner: Box<dyn Agent>,
+    spend: Rc<RefCell<Vec<(String, DecisionCost)>>>,
+}
+
+impl Agent for MeteredMember {
+    fn decide(&mut self, obs: &MarketObservation) -> Decision {
+        let decision = self.inner.decide(obs);
+        if let Some(cost) = decision.cost {
+            self.spend.borrow_mut().push((self.name.clone(), cost));
+        }
+        decision
+    }
+}
+
+/// The consensus [`TeamAgent`] with its members' compute spend added back onto the
+/// consensus decision.
+///
+/// Concurrency semantics, because the accounting depends on them: the members are
+/// polled sequentially inside one `decide`, in `members` order, each against the
+/// same point-in-time observation and none of them seeing another's orders. There
+/// is no interleaving and no shared mutable state between members, so a team is as
+/// deterministic as its members are. Consequently the *spend* of a team decision
+/// is the sum over its members, which is what this reports. Elapsed time is not: a
+/// team that ran its members in parallel would spend the same and wait less, and
+/// [`DecisionCost`] carries no time field, so latency is neither summed here nor
+/// scored anywhere.
+struct MeteredTeam {
+    inner: TeamAgent,
+    spend: Rc<RefCell<Vec<(String, DecisionCost)>>>,
+    ledger: Rc<RefCell<TeamCostLedger>>,
+}
+
+impl Agent for MeteredTeam {
+    fn decide(&mut self, obs: &MarketObservation) -> Decision {
+        self.spend.borrow_mut().clear();
+        let mut decision = self.inner.decide(obs);
+        let reported = self.spend.borrow();
+        if reported.is_empty() {
+            return decision;
+        }
+        let mut total = DecisionCost::default();
+        for (member, cost) in reported.iter() {
+            self.ledger.borrow_mut().record(member, cost);
+            total.cost_usd += cost.cost_usd;
+            total.tokens_in = total.tokens_in.saturating_add(cost.tokens_in);
+            total.tokens_out = total.tokens_out.saturating_add(cost.tokens_out);
+            total.reasoning_tokens = total.reasoning_tokens.saturating_add(cost.reasoning_tokens);
+        }
+        decision.cost = Some(total);
+        decision
+    }
 }
 
 /// Run a `members` team as a consensus [`TeamAgent`] across every window × seed,
 /// and separately run each member solo to capture its role-level return series.
+///
+/// The team is charged for what its members spend: each member's self-reported
+/// [`DecisionCost`] is summed onto the consensus decision, so a team of paid
+/// agents reports its actual expenditure instead of the zero a bare `TeamAgent`
+/// produces. Members are polled once each, sequentially, in declaration order,
+/// against one shared observation, which is what makes a plain sum the right
+/// aggregation; latency is neither summed nor scored. Members that bill in
+/// different denominations are refused rather than reduced to a number that
+/// drops one of them.
 pub fn run_team(
     team_id: &str,
     data: &Dataset,
@@ -752,15 +922,31 @@ pub fn run_team(
     seeds: &[u64],
     costs: CostModel,
     members: &[TeamMember],
-) -> TeamResult {
+) -> Result<TeamResult, TeamCostError> {
+    let ledger = Rc::new(RefCell::new(TeamCostLedger::default()));
     let mut runs = Vec::new();
     for &w in windows {
         for &seed in seeds {
-            let instances: Vec<Box<dyn Agent>> = members.iter().map(|m| (m.make)()).collect();
-            let mut team = TeamAgent { members: instances };
+            let spend = Rc::new(RefCell::new(Vec::new()));
+            let instances: Vec<Box<dyn Agent>> = members
+                .iter()
+                .map(|m| {
+                    Box::new(MeteredMember {
+                        name: m.name.clone(),
+                        inner: (m.make)(),
+                        spend: Rc::clone(&spend),
+                    }) as Box<dyn Agent>
+                })
+                .collect();
+            let mut team = MeteredTeam {
+                inner: TeamAgent { members: instances },
+                spend,
+                ledger: Rc::clone(&ledger),
+            };
             runs.push(run_backtest(data, &mut team, w, seed, costs));
         }
     }
+    let cost_unit = ledger.borrow().unit()?;
     let team = AgentSubmission {
         agent_id: team_id.to_string(),
         runs,
@@ -781,7 +967,11 @@ pub fn run_team(
         })
         .collect();
 
-    TeamResult { team, role_returns }
+    Ok(TeamResult {
+        team,
+        role_returns,
+        cost_unit,
+    })
 }
 
 #[cfg(test)]
@@ -1044,7 +1234,9 @@ mod tests {
             &seeds,
             CostModel::default(),
             &members,
-        );
+        )
+        .expect("cost-free reference members share one denomination");
+        assert_eq!(res.cost_unit, TeamCostUnit::NotReported);
 
         assert_eq!(res.role_returns.len(), 2);
         let team_pooled: Vec<f64> = res

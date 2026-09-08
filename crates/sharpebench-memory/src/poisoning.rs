@@ -22,7 +22,10 @@
 //! Pure and deterministic like the rest of the crate: it shares the fixed bootstrap
 //! seed and sample count, so a given input always yields the same verdict.
 
-use crate::{Arm, ArmScores, BOOTSTRAP_BLOCK_PROB, BOOTSTRAP_SAMPLES, BOOTSTRAP_SEED};
+use crate::{
+    validate_alpha, validate_arm_values, Arm, ArmScores, BOOTSTRAP_BLOCK_PROB, BOOTSTRAP_SAMPLES,
+    BOOTSTRAP_SEED,
+};
 use sharpebench_stats::{significance::bootstrap_pvalue, stats::mean};
 
 /// The scored poisoning arm: how much a set of injected corrupted records degraded
@@ -62,7 +65,9 @@ pub struct PoisoningReport {
 /// # Errors
 ///
 /// Returns `Err` at the boundary when either arm is empty, when an arm is mistagged,
-/// or when the two arms have mismatched lengths (they cannot be paired).
+/// when the two arms have mismatched lengths (they cannot be paired), when any
+/// score or reported cost is not finite, or when `alpha` is not a finite value
+/// inside `(0, 1)`.
 pub fn poisoning_report(
     clean: &ArmScores,
     poisoned: &ArmScores,
@@ -90,6 +95,9 @@ pub fn poisoning_report(
             poisoned.len()
         ));
     }
+    validate_arm_values(clean)?;
+    validate_arm_values(poisoned)?;
+    validate_alpha(alpha)?;
 
     let integrity_delta = mean(&clean.scores) - mean(&poisoned.scores);
 

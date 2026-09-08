@@ -35,7 +35,8 @@
 //!   fixed constant so a given input always yields the same report.
 //! - **Deterministic.** Plain `f64` math, fixed reduction order.
 //! - **No `unsafe`.** Inputs are validated only at the boundary
-//!   ([`ablation_report`] returns `Err` on empty or mismatched arms).
+//!   ([`ablation_report`] returns `Err` on empty, mismatched or nonfinite arms,
+//!   and on an `alpha` outside `(0, 1)`).
 //!
 //! ## Beyond the three arms
 //!
@@ -98,8 +99,8 @@ pub(crate) const BOOTSTRAP_SAMPLES: usize = 4000;
 /// ~0.1 is the standard stationary-bootstrap default for lightly serial data.
 pub(crate) const BOOTSTRAP_BLOCK_PROB: f64 = 0.1;
 
-/// Denominators below this magnitude are treated as zero when forming
-/// [`AblationReport::fraction_of_ceiling`].
+/// Ceiling gaps at or below this value are treated as no ceiling at all when
+/// forming [`AblationReport::fraction_of_ceiling`].
 const CEILING_EPSILON: f64 = 1e-12;
 
 /// A retrieval-over-baseline cost overhead at or below this magnitude is treated
@@ -217,7 +218,8 @@ pub struct AblationReport {
     pub headroom_to_oracle: f64,
     /// retrieval_lift / (Mean(Oracle) - Mean(Baseline)): the fraction of the
     /// achievable ceiling the retrieval layer captured. ~1.0 ⇒ near the ceiling.
-    /// 0.0 when the ceiling gap is degenerate (oracle no better than baseline).
+    /// 0.0 whenever the oracle is no better than baseline: that ceiling gap is
+    /// degenerate, so the captured fraction is floored rather than inverted.
     pub fraction_of_ceiling: f64,
     /// Whether the lift is significant at `alpha` (i.e. `lift_pvalue < alpha`).
     pub significant: bool,
@@ -244,6 +246,38 @@ pub struct AblationReport {
     pub lift_per_latency: Option<f64>,
 }
 
+/// Shared significance-threshold guard. A verdict is only meaningful for a
+/// finite alpha strictly inside `(0, 1)`: `alpha >= 1` would call every result
+/// significant and a nonfinite alpha would silently call none of them.
+pub(crate) fn validate_alpha(alpha: f64) -> Result<(), String> {
+    if !alpha.is_finite() || alpha <= 0.0 || alpha >= 1.0 {
+        return Err("alpha must be finite and in (0, 1)".to_string());
+    }
+    Ok(())
+}
+
+/// Boundary check for one arm's caller-supplied numbers. A nonfinite score or
+/// cost would propagate into the reported means, the paired bootstrap and the
+/// per-cost guards, where it reads as an ordinary comparison failure rather than
+/// as bad input.
+pub(crate) fn validate_arm_values(arm: &ArmScores) -> Result<(), String> {
+    for (task, score) in arm.scores.iter().enumerate() {
+        if !score.is_finite() {
+            return Err(format!(
+                "{} arm task {task}: outcome scores must be finite",
+                arm.arm.as_str()
+            ));
+        }
+    }
+    if !arm.cost.tokens.is_finite() || !arm.cost.latency.is_finite() {
+        return Err(format!(
+            "{} arm: reported token and latency cost must be finite",
+            arm.arm.as_str()
+        ));
+    }
+    Ok(())
+}
+
 /// Lift per unit of cost overhead, or `None` when the overhead is unreported or
 /// non-positive (nothing to normalize against). Kept as a free function so both
 /// the token and latency axes share one guard.
@@ -262,16 +296,20 @@ fn per_cost_lift(lift: f64, overhead: f64) -> Option<f64> {
 /// differences `retrieval[i] - baseline[i]`, delegated to
 /// [`sharpebench_stats::significance::bootstrap_pvalue`] - this crate does not implement its own
 /// statistics. Pairing requires the baseline and retrieval arms to be aligned and
-/// equal length; the oracle arm only contributes its mean, so it may differ in
-/// length.
+/// equal length. The oracle arm contributes only its mean, but that mean is a
+/// ceiling for *these* tasks, so it must cover the same task population: all
+/// three arms are required to have equal length, in one caller-fixed task order.
+/// Equal lengths cannot prove that the caller aligned the same task identities;
+/// that alignment is the caller's contract.
 ///
 /// Deterministic: the bootstrap seed and sample count are fixed constants.
 ///
 /// # Errors
 ///
 /// Returns `Err` at the boundary when any arm is empty, when an arm is tagged with
-/// the wrong [`Arm`] for its position, or when the baseline and retrieval arms have
-/// mismatched lengths (they cannot be paired).
+/// the wrong [`Arm`] for its position, when the three arms have mismatched task
+/// counts, when any score or reported cost is not finite, or when `alpha` is not a
+/// finite value inside `(0, 1)`.
 pub fn ablation_report(
     baseline: &ArmScores,
     retrieval: &ArmScores,
@@ -303,6 +341,19 @@ pub fn ablation_report(
             retrieval.len()
         ));
     }
+    // The ceiling has to be measured over the same task population as the lift,
+    // or `fraction_of_ceiling` divides one task mix by another.
+    if oracle.len() != baseline.len() {
+        return Err(format!(
+            "oracle ({}) must cover the same task population as baseline ({}): equal task counts",
+            oracle.len(),
+            baseline.len()
+        ));
+    }
+    validate_arm_values(baseline)?;
+    validate_arm_values(retrieval)?;
+    validate_arm_values(oracle)?;
+    validate_alpha(alpha)?;
 
     let base_mean = baseline.mean();
     let retr_mean = retrieval.mean();
@@ -329,8 +380,12 @@ pub fn ablation_report(
 
     let headroom_to_oracle = oracle_mean - retr_mean;
 
+    // A supplied oracle that is no better than baseline has not established a
+    // ceiling, so no fraction of one was captured. Dividing by a non-positive gap
+    // instead reports a sign-flipped ratio, which turns a retrieval arm that also
+    // lost ground into a favorable positive fraction.
     let ceiling_gap = oracle_mean - base_mean;
-    let fraction_of_ceiling = if ceiling_gap.abs() < CEILING_EPSILON {
+    let fraction_of_ceiling = if ceiling_gap <= CEILING_EPSILON {
         0.0
     } else {
         retrieval_lift / ceiling_gap

@@ -17,6 +17,13 @@ use crate::stats::mean;
 /// Estimate the half-life (in periods) of an IC series. Returns `None` if the
 /// series is too short or is *not* decaying (flat or improving) — in which case
 /// there's nothing to penalize.
+///
+/// The input must be a *chronological* information-coefficient series: one
+/// signal/outcome correlation per successive period. It is an IC estimator only
+/// because of what the caller passes. Feeding it realized returns measures
+/// return drift, not information decay, and feeding it a series whose index is
+/// not time measures nothing at all; use [`return_drift_half_life`] for the
+/// first of those and reject the second.
 pub fn edge_half_life(ic_series: &[f64]) -> Option<f64> {
     // Use (t, ln|ic|) points where |ic| is meaningfully non-zero.
     let pts: Vec<(f64, f64)> = ic_series
@@ -52,6 +59,29 @@ pub fn edge_half_life(ic_series: &[f64]) -> Option<f64> {
         return None; // not decaying
     }
     Some(std::f64::consts::LN_2 / -slope)
+}
+
+/// Estimate the half-life (in windows) of the *magnitude of realized mean
+/// return* across successive market windows: one mean return per window, in
+/// window order.
+///
+/// This is deliberately a different measurement from [`edge_half_life`], not a
+/// synonym with a longer name. An information coefficient is a correlation
+/// between signal and outcome, so its decay is the signal losing predictive
+/// content; a mean return also moves with sizing, cost and regime, and can decay
+/// while the signal is intact. Sharing the log-linear estimator does not make
+/// the two quantities the same, and reporting return drift as IC decay claims a
+/// measurement the input never carried.
+///
+/// The input must be dated by *window*, one observation per market window.
+/// Execution-seed replicates of one window are repeated draws of the same dates,
+/// not successive periods of edge aging: passing them as separate observations
+/// lets a permutation of the seed order change the reported durability without
+/// any change to economic history. Aggregate them into their window first (see
+/// [`crate::composite::pooled_returns`], which does exactly that for the pooled
+/// track).
+pub fn return_drift_half_life(per_window_mean_returns: &[f64]) -> Option<f64> {
+    edge_half_life(per_window_mean_returns)
 }
 
 /// Parameters of the crowding decay model behind [`crowding_half_life`].

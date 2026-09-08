@@ -62,13 +62,7 @@
     "process_warnings": 0,
     "econ_rationality_score": null,
     "econ_dominance_violations": null,
-    "role_contributions": [
-      {
-        "role": "clean_active",
-        "beta_to_team": 1.0,
-        "mean_return": 0.00034489971421507534
-      }
-    ]
+    "role_contributions": []
   },
   {
     "agent_id": "momentum",
@@ -133,13 +127,7 @@
     "process_warnings": 60,
     "econ_rationality_score": null,
     "econ_dominance_violations": null,
-    "role_contributions": [
-      {
-        "role": "warned",
-        "beta_to_team": 1.0,
-        "mean_return": 0.00023615019078043653
-      }
-    ]
+    "role_contributions": []
   },
   {
     "agent_id": "hold",
@@ -204,13 +192,7 @@
     "process_warnings": 0,
     "econ_rationality_score": null,
     "econ_dominance_violations": null,
-    "role_contributions": [
-      {
-        "role": "idle",
-        "beta_to_team": 0.0,
-        "mean_return": 0.0
-      }
-    ]
+    "role_contributions": []
   },
   {
     "agent_id": "random",
@@ -275,12 +257,6 @@
     "process_warnings": 42,
     "econ_rationality_score": null,
     "econ_dominance_violations": null,
-    "role_contributions": [
-      {
-        "role": "warned",
-        "beta_to_team": 1.0,
-        "mean_return": -0.0015689608916652567
-      }
-    ]
+    "role_contributions": []
   }
 ]

@@ -205,6 +205,15 @@ fn run_select(args: &[String], json: bool) -> i32 {
     let series: Vec<Vec<f64>> = named.into_iter().map(|(_, s)| s).collect();
     let s = percentile_selection(&series, utility, alpha, seed, n_boot, block_prob);
 
+    // A refused argument exits as a usage error rather than printing a ranking.
+    // The old clamp turned `--alpha 4` into 1.0 and let `--alpha nan` through to
+    // pick each candidate's worst resample, and the header still printed an
+    // alpha the run had not used.
+    if let Some(error) = s.input_error {
+        eprintln!("error: {error}");
+        return 2;
+    }
+
     if s.alpha_warning {
         eprintln!(
             "warning: alpha {:.2} sits below the recommended floor {MIN_RECOMMENDED_SELECTION_ALPHA}; \

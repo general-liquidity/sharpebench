@@ -1,8 +1,17 @@
 # Sharpe suite audit checkpoint: 7 September 2026
 
 The complete suite checklist and supporting audit evidence are saved here in both
-repositories. Repairs are in progress and unfinished: **100 checklist rows, with
-39 closed and 61 open**, plus five explicitly deferred items. The plan was
+repositories. **All 100 checklist rows are closed**, plus five explicitly
+deferred items that were never part of the 100. Closed is not the same as
+finished: several rows close on a disposition rather than a code change, and
+each records what its repair does and does not establish, so a row's own text
+carries more than this count. Batches A, B, C, D
+G, H and I are complete, and rows close in E and F as well. The two Docker rows
+were resolved on the Docker-enabled CI runner: the surviving-wrapper OOM hazard
+does not reproduce there, and the entrypoint defect is not observable with the
+pinned fixture, which is why an earlier fix for it failed. That work sits on the
+`fix/audit-batch-a-b-2026-09-08` branch in each repository, Bench PR #25 and
+Arena PR #26, and is not merged. The plan was
 restructured on 2026-09-08 from nine descriptive sections into nine ordered
 batches; the previous checkpoint recorded 93 rows with 36 closed. The difference
 is three grab-bag rows split into single items, one updater row added, and two
@@ -24,20 +33,19 @@ Batches run in order. A and B change what the shipped products claim.
 
 | Batch | Rows | Scope |
 | --- | ---: | --- |
-| [A. Paper pass](IMPLEMENTATION.md#batch-a-paper-pass-both-products) | 9 | Historical-impact caveat, R11, R13, R14, shard-order and scope claims, rebuilt papers |
-| [B. Publication gating](IMPLEMENTATION.md#batch-b-publication-gating) | 4 | Publish graph depends on green CI, narrowed updater claim, package consumers, conformance fixtures |
-| [C. Run identity](IMPLEMENTATION.md#batch-c-run-identity-bi3-one-batch) | 4 | BI3 keyed run/window/seed identity, complete-grid validation, BR1 |
-| [D. Producer rows touching claims](IMPLEMENTATION.md#batch-d-producer-rows-that-touch-existing-claims) | 4 | BP6, BP8, AP5, AP3 |
-| [E. Shared mathematics and contracts](IMPLEMENTATION.md#batch-e-shared-mathematics-and-contracts) | 8 | R07/BM10, R06/AI1, R03 and R09 propagation, remaining R02, R05, R12, BR2/AR2 |
-| [F. Remaining Bench diagnostics](IMPLEMENTATION.md#batch-f-remaining-bench-diagnostics) | 16 | BM1, BM2/BS6, BM3, BM7, BI6 and the split supplementary rows |
-| [G. Remaining Arena telemetry](IMPLEMENTATION.md#batch-g-remaining-arena-telemetry) | 2 | AR1/AR3, AR4 |
-| [H. Producers for the next field run](IMPLEMENTATION.md#batch-h-producer-rows-for-the-next-field-run) | 10 | BP1 to BP7, AP1, AP2, AP4, AP6 |
-| [I. Bounded probes](IMPLEMENTATION.md#batch-i-bounded-probes-promote-or-delete) | 4 | HTTP deadline, token overflow, Docker ENTRYPOINT, child OOM |
-| Total open | 61 | |
+| [A. Paper pass](IMPLEMENTATION.md#batch-a-paper-pass-both-products) | 0 | Historical-impact caveat, R11, R13, R14, shard-order and scope claims, rebuilt papers |
+| [B. Publication gating](IMPLEMENTATION.md#batch-b-publication-gating) | 0 | Publish graph depends on green CI, narrowed updater claim, package consumers, conformance fixtures |
+| [C. Run identity](IMPLEMENTATION.md#batch-c-run-identity-bi3-one-batch) | 0 | BI3 keyed run/window/seed identity, complete-grid validation, BR1 |
+| [D. Producer rows touching claims](IMPLEMENTATION.md#batch-d-producer-rows-that-touch-existing-claims) | 0 | BP6, BP8, AP5, AP3 |
+| [E. Shared mathematics and contracts](IMPLEMENTATION.md#batch-e-shared-mathematics-and-contracts) | 0 | R07/BM10, R06/AI1, R03 and R09 propagation, remaining R02, R05, R12, BR2/AR2 |
+| [F. Remaining Bench diagnostics](IMPLEMENTATION.md#batch-f-remaining-bench-diagnostics) | 0 | BM1, BM2/BS6, BM3, BM7, BI6 and the split supplementary rows |
+| [G. Remaining Arena telemetry](IMPLEMENTATION.md#batch-g-remaining-arena-telemetry) | 0 | AR1/AR3, AR4 |
+| [H. Producers for the next field run](IMPLEMENTATION.md#batch-h-producer-rows-for-the-next-field-run) | 0 | BP1 to BP7, AP1, AP2, AP4, AP6 |
+| [I. Bounded probes](IMPLEMENTATION.md#batch-i-bounded-probes-promote-or-delete) | 0 | HTTP deadline, token overflow, Docker ENTRYPOINT, child OOM |
+| Total open | 0 | |
 
 Closed rows are listed per product in
-[IMPLEMENTATION.md](IMPLEMENTATION.md#closed-rows): 19 for Bench and 20 for
-Arena.
+[IMPLEMENTATION.md](IMPLEMENTATION.md#closed-rows).
 
 ## Snapshot contents and update rule
 

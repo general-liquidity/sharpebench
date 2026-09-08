@@ -16,13 +16,28 @@ default. Per-model request shape:
     model, so a refusal is recorded and scored as a hold, never silently
     answered by a different model.
 
+Model identity: the requested id is the policy identity, and substitution is
+refused rather than absorbed. An unknown-model error is a failure of this
+run, not a cue to retry a different model, and the id the API reports back is
+checked against the request: the same id, or a versioned expansion of a
+requested alias (`claude-haiku-4-5` served as `claude-haiku-4-5-20251001`),
+is the requested policy; anything else is a different policy answering under
+the requested name and fails the subprocess. Both identities are recorded on
+every cached decision, so a replay states which model actually answered.
+
 Determinism and cost controls:
   - temperature 0 where the API accepts it; the summarization is a pure
     function of the observation. On the frontier tier the API offers no
     sampling control, so bitwise determinism is not guaranteed; the response
     cache is what makes the recorded run replayable.
-  - Decisions are cached to a per-model JSONL keyed by SHA-256 of
-    (model, prompt), so reruns and cross-seed repeats are free.
+  - Decisions are cached to a per-model JSONL keyed by SHA-256 of the whole
+    effective request (model, system prompt, message, temperature, max_tokens,
+    thinking settings) plus SCAFFOLD_VERSION, which names the summarizer,
+    system prompt and parser that produced and will interpret it. Keying on
+    (model, prompt) alone let a changed system prompt, token budget or parser
+    reuse decisions taken under a different policy configuration, so a rerun
+    could report the current scaffold while replaying an older one. Reruns and
+    cross-seed repeats under an unchanged configuration remain free.
   - A decision stride (default 5): the model is consulted every Nth bar and
     the book is left untouched in between (empty orders = hold).
   - A hard per-model cap on fresh API calls (default 800), measured by cache
@@ -57,7 +72,15 @@ _START_NS = time.time_ns()
 MODEL = sys.argv[1] if len(sys.argv) > 1 else os.environ.get(
     "LLM_MODEL", "claude-haiku-4-5-20251001"
 )
-HAIKU_FALLBACK = "claude-haiku-4-5"
+# The requested id is the policy identity and is never rebound: a run that
+# cannot use it has failed, and a different model answering under it would be
+# a different policy published under this name.
+REQUESTED_MODEL = MODEL
+# Names the parts of the scaffold that are not in the request itself: the
+# observation summarizer, the reply parser, and the order validation between
+# them. Bump it whenever any of those change meaning, so cached decisions taken
+# under the old ones are not replayed as if this one produced them.
+SCAFFOLD_VERSION = "summarize-v1/parse-v1"
 STRIDE = int(os.environ.get("LLM_STRIDE", "5"))
 MAX_CALLS = int(os.environ.get("LLM_MAX_CALLS", "800"))
 HERE = Path(__file__).resolve().parent
@@ -103,6 +126,12 @@ STATS = {
     "tokens_out": 0,
     "cost_usd": 0.0,
     "model": MODEL,
+    "model_requested": REQUESTED_MODEL,
+    # Filled in from the first response the API returns. None until then, so an
+    # unanswered run never claims an effective identity it did not observe.
+    "model_effective": None,
+    "scaffold_version": SCAFFOLD_VERSION,
+    "cache_records_ignored": 0,
     "stride": STRIDE,
 }
 
@@ -123,7 +152,35 @@ def request_kwargs(model, prompt):
     return kw
 
 
+def request_identity(model, prompt):
+    """The full configuration a cached decision was taken under.
+
+    Everything the provider is sent, plus the scaffold that built the prompt
+    and will interpret the reply. A cached decision is only reusable for a
+    request identical in all of it.
+    """
+    return {
+        "scaffold_version": SCAFFOLD_VERSION,
+        "requested_model": REQUESTED_MODEL,
+        "request": request_kwargs(model, prompt),
+    }
+
+
+def cache_key(model, prompt):
+    canonical = json.dumps(
+        request_identity(model, prompt), sort_keys=True, separators=(",", ":")
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def load_cache():
+    """Cached decisions whose stored identity matches this configuration.
+
+    A record that names a different scaffold version, or whose stored request
+    digest is not its own key, was taken under a configuration this process is
+    not running. It is dropped rather than replayed, and counted so the drop is
+    reported instead of silent.
+    """
     cache = {}
     if CACHE_PATH.exists():
         with CACHE_PATH.open("r", encoding="utf-8") as f:
@@ -133,16 +190,39 @@ def load_cache():
                     continue
                 try:
                     rec = json.loads(line)
-                    cache[rec["key"]] = rec
+                    key = rec["key"]
                 except (json.JSONDecodeError, KeyError):
+                    STATS["cache_records_ignored"] += 1
                     continue
+                if (
+                    rec.get("scaffold_version") != SCAFFOLD_VERSION
+                    or rec.get("request_sha256") != key
+                    or rec.get("model_requested") != REQUESTED_MODEL
+                ):
+                    STATS["cache_records_ignored"] += 1
+                    continue
+                cache[key] = rec
     return cache
 
 
-def append_cache(rec):
+def record_decision(cache, key, effective, fields):
+    """Stamp a decision with the identity it was taken under, store and return it.
+
+    The request digest, the scaffold version and both model identities travel
+    with every cached decision, so a replay can state which configuration and
+    which model actually produced it instead of inferring it from the file name.
+    """
+    rec = dict(fields)
+    rec["key"] = key
+    rec["request_sha256"] = key
+    rec["scaffold_version"] = SCAFFOLD_VERSION
+    rec["model_requested"] = REQUESTED_MODEL
+    rec["model_effective"] = effective
     CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
     with CACHE_PATH.open("a", encoding="utf-8") as f:
         f.write(json.dumps(rec, sort_keys=True) + "\n")
+    cache[key] = rec
+    return rec
 
 
 def write_stats():
@@ -232,17 +312,39 @@ def hold(reason, cost=None):
     return d
 
 
+def effective_model(response):
+    """The id the API says answered, and whether it is the policy requested.
+
+    A provider may expand a requested alias into the pinned version it served;
+    that names the same policy more precisely and is recorded. Any other id is
+    a different policy answering under the requested name, which is the one
+    thing this benchmark must not publish, so it fails the subprocess.
+    """
+    served = getattr(response, "model", None)
+    if served is None:
+        return REQUESTED_MODEL
+    if served == REQUESTED_MODEL or served.startswith(REQUESTED_MODEL):
+        return served
+    raise RuntimeError(
+        f"model substitution: requested {REQUESTED_MODEL}, served {served}; "
+        "the field pins policy identity to the requested model"
+    )
+
+
 def call_model(client, prompt):
-    global MODEL
-    kw = request_kwargs(MODEL, prompt)
+    """One request under the requested model. No substitution on any path.
+
+    An unknown or unavailable model is a failure of this run: retrying under a
+    different model would evaluate a policy the field does not name, and the
+    result would be recorded and replayed as the requested one.
+    """
     try:
-        return client.messages.create(**kw)
-    except anthropic.NotFoundError:
-        if not MODEL.startswith("claude-haiku"):
-            raise
-        MODEL = HAIKU_FALLBACK
-        STATS["model"] = MODEL
-        return client.messages.create(**request_kwargs(MODEL, prompt))
+        return client.messages.create(**request_kwargs(REQUESTED_MODEL, prompt))
+    except anthropic.NotFoundError as e:
+        raise RuntimeError(
+            f"model {REQUESTED_MODEL} is not available to this account; "
+            "no fallback model is configured, so the field is incomplete"
+        ) from e
 
 
 def main():
@@ -261,7 +363,7 @@ def main():
             decision = hold("stride hold (rebalance cadence)")
         else:
             prompt = summarize(obs)
-            key = hashlib.sha256((MODEL + "\x00" + prompt).encode()).hexdigest()
+            key = cache_key(REQUESTED_MODEL, prompt)
             if key in cache:
                 STATS["cache_hits"] += 1
                 if cache[key].get("malformed"):
@@ -294,6 +396,8 @@ def main():
                 try:
                     STATS["llm_calls"] += 1
                     resp = call_model(client, prompt)
+                    effective = effective_model(resp)
+                    STATS["model_effective"] = effective
                     text = "".join(
                         b.text for b in resp.content if b.type == "text"
                     )
@@ -301,7 +405,7 @@ def main():
                     tout = resp.usage.output_tokens
                     STATS["tokens_in"] += tin
                     STATS["tokens_out"] += tout
-                    pin, pout = price_for(MODEL)
+                    pin, pout = price_for(effective)
                     usd = tin * pin + tout * pout
                     STATS["cost_usd"] += usd
                     cost = {
@@ -312,37 +416,37 @@ def main():
                     if getattr(resp, "stop_reason", None) == "refusal":
                         STATS["refusals"] += 1
                         decision = hold("model refusal -> hold", cost)
-                        append_cache(
-                            {"key": key, "orders": [], "refusal": True,
-                             "tokens_in": tin, "tokens_out": tout, "cost": cost}
+                        record_decision(
+                            cache, key, effective,
+                            {"orders": [], "refusal": True,
+                             "tokens_in": tin, "tokens_out": tout, "cost": cost},
                         )
-                        cache[key] = {"orders": [], "refusal": True, "cost": cost}
                     else:
                         orders = parse_decision(text, valid)
                         if orders is None:
                             STATS["malformed"] += 1
                             decision = {"protocol_error": "malformed model output"}
-                            append_cache(
-                                {"key": key, "orders": [], "malformed": True,
-                                 "tokens_in": tin, "tokens_out": tout}
+                            record_decision(
+                                cache, key, effective,
+                                {"orders": [], "malformed": True,
+                                 "tokens_in": tin, "tokens_out": tout},
                             )
-                            cache[key] = {"orders": [], "malformed": True}
                         else:
                             decision = {
                                 "orders": orders,
                                 "reasoning": "llm allocation",
                                 "cost": cost,
                             }
-                            append_cache(
-                                {"key": key, "orders": orders,
-                                 "tokens_in": tin, "tokens_out": tout, "cost": cost}
+                            record_decision(
+                                cache, key, effective,
+                                {"orders": orders, "tokens_in": tin,
+                                 "tokens_out": tout, "cost": cost},
                             )
-                            cache[key] = {"orders": orders, "cost": cost}
                 except anthropic.APIError as e:
                     STATS["api_errors"] += 1
                     write_stats()
                     raise RuntimeError(
-                        f"Anthropic API failure for {MODEL}: {type(e).__name__}"
+                        f"Anthropic API failure for {REQUESTED_MODEL}: {type(e).__name__}"
                     ) from e
         step += 1
         sys.stdout.write(json.dumps(decision) + "\n")

@@ -83,6 +83,159 @@ pub fn apply_oom_verdict(
     }
 }
 
+/// How long one attempt took, and which clock saw it.
+///
+/// A failed attempt spends real wall-clock time and real money. Dropping it
+/// before accounting, or folding an unmeasured attempt in as a zero, makes a
+/// slow and error-prone agent look cheaper and faster than it was. An attempt
+/// nobody timed is therefore *typed* as unavailable rather than summed as zero.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "source")]
+pub enum AttemptDuration {
+    /// Measured end to end on the driver's monotonic host clock.
+    HostClock { nanos: u64 },
+    /// No clock observed this attempt.
+    Unavailable,
+}
+
+/// What one attempt produced. A failure keeps its kind, so the ledger shows
+/// *what* was paid for as well as how much.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "outcome")]
+pub enum AttemptOutcome {
+    Completed,
+    Failed { kind: FailureKind },
+}
+
+/// One attempt: its outcome and what it spent.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttemptRecord {
+    pub outcome: AttemptOutcome,
+    pub duration: AttemptDuration,
+}
+
+impl AttemptRecord {
+    pub fn completed(duration: AttemptDuration) -> Self {
+        Self {
+            outcome: AttemptOutcome::Completed,
+            duration,
+        }
+    }
+
+    pub fn failed(kind: FailureKind, duration: AttemptDuration) -> Self {
+        Self {
+            outcome: AttemptOutcome::Failed { kind },
+            duration,
+        }
+    }
+
+    pub fn is_failure(&self) -> bool {
+        matches!(self.outcome, AttemptOutcome::Failed { .. })
+    }
+}
+
+/// An append-only record of every attempt spent on one cell.
+///
+/// Scoring keeps only the terminal outcome of a cell. If operational accounting
+/// reads that terminal record alone, a completion that resumed a failed attempt
+/// erases everything the failed attempt spent. The ledger is the other half:
+/// rank-neutral, never scored, and never rewritten in place.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttemptLedger {
+    pub attempts: Vec<AttemptRecord>,
+}
+
+impl AttemptLedger {
+    pub fn push(&mut self, record: AttemptRecord) {
+        self.attempts.push(record);
+    }
+
+    pub fn len(&self) -> usize {
+        self.attempts.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.attempts.is_empty()
+    }
+
+    /// Append `other`, except when it exactly repeats the records already at the
+    /// tail. A resumed completion must never replace the failed attempt it
+    /// superseded, and re-recording the same batch onto a reloaded checkpoint
+    /// must never inflate the cost. The cost of that guarantee: two genuinely
+    /// identical consecutive batches collapse into one.
+    pub fn append(&mut self, other: &AttemptLedger) {
+        if other.is_empty() {
+            return;
+        }
+        let tail = self.attempts.len().checked_sub(other.attempts.len());
+        if let Some(start) = tail {
+            if self.attempts[start..] == other.attempts[..] {
+                return;
+            }
+        }
+        self.extend(other);
+    }
+
+    /// Concatenate `other` unconditionally. This is the right operation for
+    /// gathering distinct cells into one sweep total: two cells that happen to
+    /// have identical records are two attempts, not one, and deduplicating them
+    /// would delete real spend. Only a replay of the *same* cell is a duplicate,
+    /// which is what `append` is for.
+    pub fn extend(&mut self, other: &AttemptLedger) {
+        self.attempts.extend(other.attempts.iter().cloned());
+    }
+
+    /// Rank-neutral totals over every attempt, failed ones included.
+    pub fn summary(&self) -> AttemptSummary {
+        let mut duration_ns_total: u64 = 0;
+        let mut timed = 0usize;
+        for record in &self.attempts {
+            if let AttemptDuration::HostClock { nanos } = record.duration {
+                duration_ns_total = duration_ns_total.saturating_add(nanos);
+                timed += 1;
+            }
+        }
+        AttemptSummary {
+            attempts: self.attempts.len(),
+            failed: self.attempts.iter().filter(|a| a.is_failure()).count(),
+            completed: self.attempts.iter().filter(|a| !a.is_failure()).count(),
+            duration_ns_total,
+            duration_source: if timed == 0 {
+                DurationSource::Unavailable
+            } else if timed == self.attempts.len() {
+                DurationSource::HostClock
+            } else {
+                DurationSource::Mixed
+            },
+        }
+    }
+}
+
+/// Which clocks stand behind an aggregated duration.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DurationSource {
+    /// Every attempt in the total was timed on the host clock.
+    HostClock,
+    /// Some attempts were timed and some were not: the total covers only the
+    /// timed ones and understates the real spend.
+    Mixed,
+    /// No attempt carried an observed duration. The total is not a measurement.
+    #[default]
+    Unavailable,
+}
+
+/// Rank-neutral totals published beside the scored pool. Never an input to a
+/// score, a rank, or a pass^k pool.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AttemptSummary {
+    pub attempts: usize,
+    pub completed: usize,
+    pub failed: usize,
+    pub duration_ns_total: u64,
+    pub duration_source: DurationSource,
+}
+
 /// The outcome of attempting one (window, seed) run, after any retries.
 #[derive(Clone, Debug)]
 pub enum RunOutcome {
@@ -134,34 +287,70 @@ impl FailureLog {
     }
 }
 
+/// One driven cell: what it ended as, and everything it spent getting there.
+#[derive(Clone, Debug)]
+pub struct AttemptedRun {
+    /// The terminal outcome the submission-assembler maps to pass^k.
+    pub outcome: RunOutcome,
+    /// The failure that ended the cell, if it ended in one.
+    pub last_failure: Option<FailureKind>,
+    /// Every attempt, in order, including the failed ones a later completion
+    /// supersedes. Rank-neutral: it never reaches a score.
+    pub ledger: AttemptLedger,
+}
+
 /// Drive one (window, seed) run with bounded retries on runtime errors.
 ///
 /// `attempt` produces either a scorable [`Run`] (`Ok`) or a typed [`FailureKind`]
 /// (`Err`). A runtime error ([`FailureKind::is_runtime`]) is retried up to
-/// `max_retries` additional times; an agent-fault is returned immediately. The
-/// returned [`RunOutcome`] is what the submission-assembler maps to pass^k.
-pub fn run_with_retries<F>(max_retries: u32, mut attempt: F) -> (RunOutcome, Option<FailureKind>)
+/// `max_retries` additional times; an agent-fault is returned immediately.
+///
+/// Every attempt is timed on the host clock and recorded, whether it succeeded
+/// or failed, so a cell that failed twice before completing reports the time
+/// those two failures actually spent instead of reporting only the completion.
+pub fn run_with_retries<F>(max_retries: u32, mut attempt: F) -> AttemptedRun
 where
     F: FnMut() -> Result<Run, FailureKind>,
 {
     let mut tries: u32 = 0;
+    let mut ledger = AttemptLedger::default();
     loop {
         tries += 1;
-        match attempt() {
-            Ok(run) => return (RunOutcome::Completed(run), None),
-            Err(kind) if kind.is_runtime() => {
+        let started = std::time::Instant::now();
+        let result = attempt();
+        let duration = AttemptDuration::HostClock {
+            nanos: u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX),
+        };
+        match result {
+            Ok(run) => {
+                ledger.push(AttemptRecord::completed(duration));
+                return AttemptedRun {
+                    outcome: RunOutcome::Completed(run),
+                    last_failure: None,
+                    ledger,
+                };
+            }
+            Err(kind) => {
+                ledger.push(AttemptRecord::failed(kind.clone(), duration));
+                if !kind.is_runtime() {
+                    return AttemptedRun {
+                        outcome: RunOutcome::AgentFault(kind.clone()),
+                        last_failure: Some(kind),
+                        ledger,
+                    };
+                }
                 if tries > max_retries {
-                    return (
-                        RunOutcome::Exhausted {
+                    return AttemptedRun {
+                        outcome: RunOutcome::Exhausted {
                             last: kind.clone(),
                             attempts: tries,
                         },
-                        Some(kind),
-                    );
+                        last_failure: Some(kind),
+                        ledger,
+                    };
                 }
                 // else: loop and retry
             }
-            Err(kind) => return (RunOutcome::AgentFault(kind.clone()), Some(kind)),
         }
     }
 }
@@ -187,7 +376,7 @@ mod tests {
     #[test]
     fn runtime_error_is_retried_then_recovers() {
         let mut calls = 0;
-        let (outcome, _) = run_with_retries(3, || {
+        let driven = run_with_retries(3, || {
             calls += 1;
             if calls < 3 {
                 Err(FailureKind::TransportError)
@@ -195,38 +384,43 @@ mod tests {
                 Ok(failing_sentinel_run(5))
             }
         });
-        assert!(matches!(outcome, RunOutcome::Completed(_)));
+        assert!(matches!(driven.outcome, RunOutcome::Completed(_)));
         assert_eq!(calls, 3, "should retry until it recovers");
+        assert_eq!(
+            driven.ledger.len(),
+            3,
+            "the two failures stay in the ledger"
+        );
     }
 
     #[test]
     fn runtime_error_exhausts_after_bounded_retries() {
         let mut calls = 0;
-        let (outcome, last) = run_with_retries(2, || {
+        let driven = run_with_retries(2, || {
             calls += 1;
             Err(FailureKind::SpawnError)
         });
         // 1 initial + 2 retries = 3 attempts.
         assert_eq!(calls, 3);
-        match outcome {
+        match driven.outcome {
             RunOutcome::Exhausted { last, attempts } => {
                 assert_eq!(last, FailureKind::SpawnError);
                 assert_eq!(attempts, 3);
             }
             other => panic!("expected Exhausted, got {other:?}"),
         }
-        assert_eq!(last, Some(FailureKind::SpawnError));
+        assert_eq!(driven.last_failure, Some(FailureKind::SpawnError));
     }
 
     #[test]
     fn agent_fault_is_not_retried() {
         let mut calls = 0;
-        let (outcome, _) = run_with_retries(5, || {
+        let driven = run_with_retries(5, || {
             calls += 1;
             Err(FailureKind::AgentProtocolViolation)
         });
         assert_eq!(calls, 1, "an agent fault must not be retried");
-        assert!(matches!(outcome, RunOutcome::AgentFault(_)));
+        assert!(matches!(driven.outcome, RunOutcome::AgentFault(_)));
     }
 
     /// An OOM kill must override every other outcome: a transport-classified
@@ -265,12 +459,12 @@ mod tests {
     fn a_resource_limit_breach_is_an_agent_fault_and_is_not_retried() {
         assert!(!FailureKind::ResourceLimitExceeded.is_runtime());
         let mut calls = 0;
-        let (outcome, _) = run_with_retries(5, || {
+        let driven = run_with_retries(5, || {
             calls += 1;
             Err(FailureKind::ResourceLimitExceeded)
         });
         assert_eq!(calls, 1, "a budget breach must not be retried");
-        assert!(matches!(outcome, RunOutcome::AgentFault(_)));
+        assert!(matches!(driven.outcome, RunOutcome::AgentFault(_)));
     }
 
     #[test]

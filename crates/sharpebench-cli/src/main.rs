@@ -39,7 +39,7 @@ fn main() -> ExitCode {
         Some("score") => match args.get(2) {
             Some(path) => run_score(path, &args, json),
             None => {
-                eprintln!("usage: sharpebench score <submissions.json> [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode <mode>] [--benchmark-agent <id>] [--json]");
+                eprintln!("usage: sharpebench score <submissions.json> [--require-run-keys] [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode <mode>] [--benchmark-agent <id>] [--json]");
                 ExitCode::from(2)
             }
         },
@@ -429,7 +429,7 @@ fn run_regime(args: &[String], json: bool) -> ExitCode {
         );
         println!(
             "{:<14} {:>5} {:>9} {:>9} {:>10} {:>10} {:>7} {:>5} counted",
-            "regime", "n", "zero_a", "zero_b", "mean_gap", "cont_gap", "ks", "edge"
+            "regime", "n", "nearzr_a", "nearzr_b", "mean_gap", "cont_gap", "ks", "edge"
         );
         for r in &report.regimes {
             println!(
@@ -450,10 +450,12 @@ fn run_regime(args: &[String], json: bool) -> ExitCode {
             report.edge_dispersion
         );
         if report.pooled_hides_reversal {
-            println!(
-                "REVERSAL: the pooled sign is contradicted in {}",
-                report.reversal_regimes.join(", ")
-            );
+            let what = if report.pooled_edge_sign == 0 {
+                "the pooled gap is a tie and counted regimes disagree in"
+            } else {
+                "the pooled sign is contradicted in"
+            };
+            println!("REVERSAL: {what} {}", report.reversal_regimes.join(", "));
         } else {
             println!("No sign reversal among counted regimes.");
         }
@@ -546,6 +548,13 @@ fn help() {
         "  sharpebench score <submissions.json>  rank a JSON field of pre-computed submissions"
     );
     println!("                       --pass-mode / --benchmark-agent: as for run");
+    println!(
+        "                       --require-run-keys: every submission declares one `run_keys` entry"
+    );
+    println!(
+        "                         per run; refuse an unkeyed, partial or duplicated cell grid"
+    );
+    println!("                         instead of aligning runs across agents by position");
     println!(
         "  sharpebench commit <agent> <window> <digest> <salt>  forward-attestation pre-registration"
     );
@@ -650,7 +659,10 @@ fn run_sign(args: &[String], json: bool) -> ExitCode {
     };
     let pb = sharpebench_leaderboard::publish(&rank(&subs, &ScoreConfig::default()), &key);
 
-    // Without --ed25519 the output is byte-identical to the pre-Ed25519 CLI.
+    // Without --ed25519 the output carries the HMAC chain exactly as before, plus
+    // the terminal receipt that anchors its length. That receipt is new, so the
+    // bytes are no longer identical to the pre-Ed25519 CLI; a reader that ignores
+    // unknown fields is unaffected.
     let Some(secret_spec) = flag_value(args, "--ed25519") else {
         return match sharpebench_leaderboard::save(&pb, &args[4]) {
             Ok(()) => {
@@ -819,13 +831,30 @@ fn run_verify(args: &[String], json: bool) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let ok = sharpebench_leaderboard::verify_board(&pb.chain, &key);
+    // The whole board, not just its chain. `verify_board` recomputes the chain and
+    // never reads `pb.scores`, so a board whose displayed scores were rewritten,
+    // reordered or truncated printed the same OK as an honest one, which is the
+    // opposite of what an operator runs this command to learn.
+    let ok = sharpebench_leaderboard::verify_published(&pb, &key);
     if json {
-        emit_json(&serde_json::json!({ "ok": ok, "entries": pb.chain.len() }));
+        emit_json(&serde_json::json!({
+            "ok": ok,
+            "entries": pb.chain.len(),
+            "scores": pb.scores.len(),
+            "anchored": pb.receipt.is_some(),
+        }));
     } else if ok {
-        println!("OK — {} entries, signature chain valid", pb.chain.len());
+        println!(
+            "OK - {} entries, {} displayed scores bound to the anchored chain",
+            pb.chain.len(),
+            pb.scores.len()
+        );
+    } else if pb.receipt.is_none() {
+        eprintln!(
+            "FAIL - the document carries no terminal receipt, so its length is unanchored and              records may have been removed from the end"
+        );
     } else {
-        eprintln!("FAIL — signature chain invalid (tampered or wrong key)");
+        eprintln!("FAIL - chain, displayed scores or terminal anchor did not verify");
     }
     if ok {
         ExitCode::SUCCESS
@@ -1127,6 +1156,22 @@ fn current_executable_sha256() -> Result<String, String> {
         )
     })?;
     Ok(sharpebench_attest::content_digest(&bytes))
+}
+
+/// The invocation identity of a `--cmd` entrant: the command line plus the
+/// effective non-secret environment it will be handed.
+///
+/// The passed-through variable *names* are not the configuration; the agent
+/// receives their current values. Binding names alone let one checkpoint span
+/// `AGENT_MODE=conservative` and `AGENT_MODE=aggressive`, so completed cells
+/// from one policy could be resumed into the other and pooled as one result.
+/// Credential values stay out of the identity by design; see
+/// [`sharpebench_sim::agent_env_identity`].
+fn cmd_entrant_material(cmd: &str) -> String {
+    format!(
+        "cmd\0{cmd}\0{}",
+        sharpebench_sim::effective_agent_env_identity()
+    )
 }
 
 struct CheckpointExecution<'a> {
@@ -1488,9 +1533,13 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
         }
         let label = format!("cmd:{prog}");
         let res = if let Some(ckpt) = &checkpoint {
-            let passthrough =
-                std::env::var(sharpebench_sim::AGENT_ENV_PASSTHROUGH).unwrap_or_default();
-            let entrant_material = format!("cmd\0{cmd}\0{passthrough}");
+            // The passed-through variable *names* are not the configuration:
+            // the agent receives their current values. Binding names alone let
+            // one checkpoint span AGENT_MODE=conservative and
+            // AGENT_MODE=aggressive, so completed cells from one policy could
+            // be resumed into the other. Bind the effective non-secret values.
+            // Credentials stay out by design; see `agent_env_identity`.
+            let entrant_material = cmd_entrant_material(cmd);
             let contract = match checkpoint_contract(
                 args,
                 CheckpointExecution {
@@ -1787,11 +1836,28 @@ fn run_score(path: &str, args: &[String], json: bool) -> ExitCode {
     };
     // Each object is a submission plus an optional `declared_mandate`; the
     // declaration is scored as a labeled second verdict and never moves rank.
-    let (subs, declarations) = match sharpebench_core::parse_declared_field(&data) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return ExitCode::FAILURE;
+    //
+    // Cross-agent comparison reads `runs[i]` for every agent. Without
+    // `--require-run-keys` that alignment is the caller's assertion, unchecked.
+    // With it, every submission must carry one `run_keys` entry per run; the
+    // field is refused unless the cells are complete, unique and shared, and the
+    // runs are reordered into one canonical cell order before scoring.
+    let require_run_keys = args.iter().any(|a| a == "--require-run-keys");
+    let (subs, declarations) = if require_run_keys {
+        match sharpebench_core::parse_keyed_field(&data) {
+            Ok(field) => (field.submissions, field.declarations),
+            Err(e) => {
+                eprintln!("error: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        match sharpebench_core::parse_declared_field(&data) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: {e}");
+                return ExitCode::FAILURE;
+            }
         }
     };
     let cfg = match score_config_from_args(args) {
@@ -2093,6 +2159,46 @@ mod tests {
         let second = build(b"cmd\0agent --mode aggressive\0TOKEN");
         assert_eq!(first.entrant_sha256, second.entrant_sha256);
         assert_ne!(first.invocation_sha256, second.invocation_sha256);
+    }
+
+    /// The `--cmd` invocation identity binds the *effective* value of every
+    /// passed-through non-secret variable, not just its name, so a policy
+    /// change cannot resume into a checkpoint started under the other policy.
+    /// A rotated credential is a separate concern and must not do the same.
+    #[test]
+    fn cmd_invocation_identity_binds_nonsecret_values_and_excludes_credentials() {
+        const MODE: &str = "SHARPEBENCH_TEST_BR1_MODE";
+        const TOKEN: &str = "SHARPEBENCH_TEST_BR1_TOKEN";
+        std::env::set_var(
+            sharpebench_sim::AGENT_ENV_PASSTHROUGH,
+            format!("{MODE},{TOKEN}"),
+        );
+        std::env::set_var(TOKEN, "sk-first");
+
+        std::env::set_var(MODE, "conservative");
+        let conservative = cmd_entrant_material("agent.py");
+        std::env::set_var(MODE, "aggressive");
+        let aggressive = cmd_entrant_material("agent.py");
+        assert_ne!(
+            conservative, aggressive,
+            "a changed policy value must not share a checkpoint identity"
+        );
+
+        std::env::set_var(MODE, "conservative");
+        std::env::set_var(TOKEN, "sk-second");
+        assert_eq!(
+            conservative,
+            cmd_entrant_material("agent.py"),
+            "rotating a credential must not invalidate the checkpoint"
+        );
+        assert!(
+            !conservative.contains("sk-first"),
+            "no secret material in the identity: {conservative}"
+        );
+
+        std::env::remove_var(MODE);
+        std::env::remove_var(TOKEN);
+        std::env::remove_var(sharpebench_sim::AGENT_ENV_PASSTHROUGH);
     }
 
     #[test]

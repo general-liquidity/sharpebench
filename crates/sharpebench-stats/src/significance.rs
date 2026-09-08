@@ -11,7 +11,10 @@
 
 use crate::deflated_sharpe::deflated_sharpe_ratio_against_null;
 use crate::stats::{mean, norm_ppf};
-use crate::validation::{bootstrap_inputs, StatisticalError};
+use crate::validation::{
+    block_probability, bootstrap_inputs, dispersion, field_inputs, finite_observations,
+    finite_parameter, probability, StatisticalError,
+};
 
 /// Minimal deterministic PRNG (SplitMix64). Not cryptographic — used only for a
 /// reproducible bootstrap.
@@ -114,7 +117,10 @@ pub struct DsrConfidence {
 /// sampling distribution of the statistic, not its null distribution. `ci` is the
 /// two-sided coverage (e.g. 0.90 → the 5th and 95th percentiles). Deterministic
 /// given `seed`. A degenerate track (< 2 points, or `n_boot == 0`) returns a
-/// zero-width interval at the point estimate.
+/// zero-width interval at the point estimate; an invalid `ci`, `block_prob`,
+/// `trials_sr_std` or observation returns an error instead, because a zero-width
+/// interval reads as perfect precision and that is the most favorable reading of
+/// an input the estimator never accepted.
 pub fn bootstrap_dsr_ci(
     returns: &[f64],
     n_trials: u32,
@@ -123,7 +129,7 @@ pub fn bootstrap_dsr_ci(
     n_boot: usize,
     block_prob: f64,
     ci: f64,
-) -> DsrConfidence {
+) -> Result<DsrConfidence, StatisticalError> {
     bootstrap_dsr_ci_against_null(
         returns,
         n_trials,
@@ -149,17 +155,22 @@ pub fn bootstrap_dsr_ci_against_null(
     n_boot: usize,
     block_prob: f64,
     ci: f64,
-) -> DsrConfidence {
+) -> Result<DsrConfidence, StatisticalError> {
+    finite_observations(returns)?;
+    finite_parameter(null_mean_sharpe, "null_mean_sharpe")?;
+    dispersion(trials_sr_std, "trials_sr_std")?;
+    block_probability(block_prob)?;
+    probability(ci, "ci")?;
     let n = returns.len();
     let point =
-        deflated_sharpe_ratio_against_null(returns, n_trials, null_mean_sharpe, trials_sr_std);
+        deflated_sharpe_ratio_against_null(returns, n_trials, null_mean_sharpe, trials_sr_std)?;
     if n < 2 || n_boot == 0 {
-        return DsrConfidence {
+        return Ok(DsrConfidence {
             point,
             se: 0.0,
             lower: point,
             upper: point,
-        };
+        });
     }
     let mut rng = SplitMix64(seed ^ 0x0DEF_1A7E_D5B0_07C1);
     let mut boots: Vec<f64> = Vec::with_capacity(n_boot);
@@ -181,24 +192,23 @@ pub fn bootstrap_dsr_ci_against_null(
             n_trials,
             null_mean_sharpe,
             trials_sr_std,
-        ));
+        )?);
     }
     let m = mean(&boots);
     let var = boots.iter().map(|b| (b - m) * (b - m)).sum::<f64>() / boots.len() as f64;
     let se = var.sqrt();
     boots.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let ci = ci.clamp(0.0, 1.0);
     let tail = (1.0 - ci) / 2.0;
     let lo_idx = ((tail * n_boot as f64).floor() as usize).min(n_boot - 1);
     let hi_idx = (((1.0 - tail) * n_boot as f64).ceil() as usize)
         .saturating_sub(1)
         .min(n_boot - 1);
-    DsrConfidence {
+    Ok(DsrConfidence {
         point,
         se,
         lower: boots[lo_idx],
         upper: boots[hi_idx],
-    }
+    })
 }
 
 /// Runs (k) required to distinguish two Deflated Sharpe estimates separated by a
@@ -236,19 +246,29 @@ pub fn runs_for_power(effect: f64, alpha: f64, power: f64) -> usize {
 /// agent's *excess* returns vs the benchmark (aligned, equal length). A shared
 /// stationary-bootstrap index path preserves cross-agent correlation. Low p ⇒ the
 /// field leader's edge is real, not the luckiest of many. Deterministic given `seed`.
-pub fn reality_check_pvalue(field: &[Vec<f64>], seed: u64, n_boot: usize, block_prob: f64) -> f64 {
-    if field.is_empty() || n_boot == 0 {
-        return 1.0;
-    }
-    let n = field.iter().map(Vec::len).min().unwrap_or(0);
-    if n < 2 {
-        return 1.0;
-    }
+///
+/// An empty field, fewer than two aligned observations, a non-finite return, or
+/// invalid resampling parameters return a typed error. They are not a p-value:
+/// a non-finite observed statistic passes no comparison, so every draw fails to
+/// exceed it and the +1 smoothing publishes the smallest p the resampler can
+/// produce.
+pub fn reality_check_pvalue(
+    field: &[Vec<f64>],
+    seed: u64,
+    n_boot: usize,
+    block_prob: f64,
+) -> Result<f64, StatisticalError> {
+    let n = field_inputs(field, n_boot, block_prob)?;
     let sqrt_n = (n as f64).sqrt();
     let means: Vec<f64> = field.iter().map(|f| mean(&f[..n])).collect();
     let observed = means.iter().copied().fold(f64::NEG_INFINITY, f64::max) * sqrt_n;
+    if !observed.is_finite() {
+        return Err(StatisticalError::NonFiniteComputation {
+            quantity: "observed field maximum",
+        });
+    }
     if observed <= 0.0 {
-        return 1.0;
+        return Ok(1.0);
     }
     let mut rng = SplitMix64(seed ^ 0x2EA1_17C0_DEAD_BEEF);
     let mut at_least_as_large = 0usize;
@@ -276,7 +296,7 @@ pub fn reality_check_pvalue(field: &[Vec<f64>], seed: u64, n_boot: usize, block_
             at_least_as_large += 1;
         }
     }
-    (at_least_as_large as f64 + 1.0) / (n_boot as f64 + 1.0)
+    Ok((at_least_as_large as f64 + 1.0) / (n_boot as f64 + 1.0))
 }
 
 /// Hansen's Superior Predictive Ability (SPA) p-value — a studentized Reality
@@ -286,16 +306,16 @@ pub fn reality_check_pvalue(field: &[Vec<f64>], seed: u64, n_boot: usize, block_
 /// field maximum and inflate the apparent edge. This is Hansen's "lower"/liberal
 /// studentized variant (no consistent recentering); lower p ⇒ the field leader's
 /// risk-adjusted edge is real. `field` rows are each agent's *excess* returns vs
-/// the benchmark. Deterministic given `seed`.
-pub fn spa_pvalue(field: &[Vec<f64>], seed: u64, n_boot: usize, block_prob: f64) -> f64 {
+/// the benchmark. Deterministic given `seed`. Rejects the same malformed inputs
+/// as [`reality_check_pvalue`], for the same reason.
+pub fn spa_pvalue(
+    field: &[Vec<f64>],
+    seed: u64,
+    n_boot: usize,
+    block_prob: f64,
+) -> Result<f64, StatisticalError> {
+    let n = field_inputs(field, n_boot, block_prob)?;
     let k = field.len();
-    if k == 0 || n_boot == 0 {
-        return 1.0;
-    }
-    let n = field.iter().map(Vec::len).min().unwrap_or(0);
-    if n < 2 {
-        return 1.0;
-    }
     let sqrt_n = (n as f64).sqrt();
     let means: Vec<f64> = field.iter().map(|f| mean(&f[..n])).collect();
 
@@ -337,6 +357,11 @@ pub fn spa_pvalue(field: &[Vec<f64>], seed: u64, n_boot: usize, block_prob: f64)
     let t_obs = (0..k)
         .map(|ki| (sqrt_n * means[ki] / omega[ki]).max(0.0))
         .fold(0.0_f64, f64::max);
+    if !t_obs.is_finite() {
+        return Err(StatisticalError::NonFiniteComputation {
+            quantity: "studentized field maximum",
+        });
+    }
 
     let mut at_least_as_large = 0usize;
     for row in &rows {
@@ -347,7 +372,7 @@ pub fn spa_pvalue(field: &[Vec<f64>], seed: u64, n_boot: usize, block_prob: f64)
             at_least_as_large += 1;
         }
     }
-    (at_least_as_large as f64 + 1.0) / (n_boot as f64 + 1.0)
+    Ok((at_least_as_large as f64 + 1.0) / (n_boot as f64 + 1.0))
 }
 
 /// Hansen's **consistent** SPA p-value (SPA_c). Improves on [`spa_pvalue`] by
@@ -358,15 +383,15 @@ pub fn spa_pvalue(field: &[Vec<f64>], seed: u64, n_boot: usize, block_prob: f64)
 /// size. A model is dropped when its studentized mean falls below the Hansen
 /// (2005) threshold `-sqrt(2 log log n)`. Shares [`spa_pvalue`]'s bootstrap path,
 /// so `spa_consistent_pvalue ≤ spa_pvalue` for the same arguments. Deterministic.
-pub fn spa_consistent_pvalue(field: &[Vec<f64>], seed: u64, n_boot: usize, block_prob: f64) -> f64 {
+/// Rejects the same malformed inputs as [`reality_check_pvalue`].
+pub fn spa_consistent_pvalue(
+    field: &[Vec<f64>],
+    seed: u64,
+    n_boot: usize,
+    block_prob: f64,
+) -> Result<f64, StatisticalError> {
+    let n = field_inputs(field, n_boot, block_prob)?;
     let k = field.len();
-    if k == 0 || n_boot == 0 {
-        return 1.0;
-    }
-    let n = field.iter().map(Vec::len).min().unwrap_or(0);
-    if n < 2 {
-        return 1.0;
-    }
     let sqrt_n = (n as f64).sqrt();
     let means: Vec<f64> = field.iter().map(|f| mean(&f[..n])).collect();
 
@@ -406,6 +431,11 @@ pub fn spa_consistent_pvalue(field: &[Vec<f64>], seed: u64, n_boot: usize, block
 
     let z: Vec<f64> = (0..k).map(|ki| sqrt_n * means[ki] / omega[ki]).collect();
     let t_obs = z.iter().map(|&v| v.max(0.0)).fold(0.0_f64, f64::max);
+    if !t_obs.is_finite() {
+        return Err(StatisticalError::NonFiniteComputation {
+            quantity: "studentized field maximum",
+        });
+    }
 
     // Consistent recentering: a model with studentized mean below -sqrt(2 ln ln n)
     // is dropped from the null max. For tiny n (ln ln n ≤ 0) keep every model
@@ -433,7 +463,7 @@ pub fn spa_consistent_pvalue(field: &[Vec<f64>], seed: u64, n_boot: usize, block
             at_least_as_large += 1;
         }
     }
-    (at_least_as_large as f64 + 1.0) / (n_boot as f64 + 1.0)
+    Ok((at_least_as_large as f64 + 1.0) / (n_boot as f64 + 1.0))
 }
 
 /// Romano–Wolf step-down multiple testing: per-agent significance that controls
@@ -445,21 +475,21 @@ pub fn spa_consistent_pvalue(field: &[Vec<f64>], seed: u64, n_boot: usize, block
 /// improved finite-sample behavior under heteroskedastic fields. `field` rows are each agent's excess returns vs the
 /// benchmark. Returns, per agent, whether its outperformance is significant at
 /// `alpha` after accounting for every agent tested. Deterministic given `seed`.
+///
+/// A non-finite or out-of-range `alpha` is a typed error, not a level. The
+/// critical-value index is derived from `1 - alpha`, so a NaN or an `alpha`
+/// above one collapses it to the smallest bootstrap maximum, which rejects every
+/// hypothesis in the family.
 pub fn step_down_significant(
     field: &[Vec<f64>],
     seed: u64,
     n_boot: usize,
     block_prob: f64,
     alpha: f64,
-) -> Vec<bool> {
+) -> Result<Vec<bool>, StatisticalError> {
+    let n = field_inputs(field, n_boot, block_prob)?;
+    probability(alpha, "alpha")?;
     let k = field.len();
-    if k == 0 {
-        return Vec::new();
-    }
-    let n = field.iter().map(Vec::len).min().unwrap_or(0);
-    if n < 2 || n_boot == 0 {
-        return vec![false; k];
-    }
     let sqrt_n = (n as f64).sqrt();
     let means: Vec<f64> = field.iter().map(|f| mean(&f[..n])).collect();
     let t: Vec<f64> = means.iter().map(|m| sqrt_n * m).collect();
@@ -517,7 +547,7 @@ pub fn step_down_significant(
         }
         active.retain(|ki| !newly.contains(ki));
     }
-    rejected
+    Ok(rejected)
 }
 
 #[cfg(test)]
@@ -600,7 +630,7 @@ mod tests {
                 .map(|i| 0.002 * ((i + k) as f64 * 0.9).sin())
                 .collect()
         }));
-        assert!(reality_check_pvalue(&field, 1, 1000, 0.1) < 0.1);
+        assert!(reality_check_pvalue(&field, 1, 1000, 0.1).unwrap() < 0.1);
     }
 
     #[test]
@@ -612,7 +642,7 @@ mod tests {
                     .collect()
             })
             .collect();
-        assert!(reality_check_pvalue(&field, 1, 1000, 0.1) > 0.1);
+        assert!(reality_check_pvalue(&field, 1, 1000, 0.1).unwrap() > 0.1);
     }
 
     #[test]
@@ -627,7 +657,7 @@ mod tests {
                 .collect()
         }));
         assert!(
-            spa_pvalue(&field, 1, 1000, 0.1) < 0.1,
+            spa_pvalue(&field, 1, 1000, 0.1).unwrap() < 0.1,
             "should flag the leader"
         );
 
@@ -639,7 +669,7 @@ mod tests {
             })
             .collect();
         assert!(
-            spa_pvalue(&noise, 1, 1000, 0.1) > 0.1,
+            spa_pvalue(&noise, 1, 1000, 0.1).unwrap() > 0.1,
             "should clear pure noise"
         );
     }
@@ -657,8 +687,8 @@ mod tests {
                 .map(|i| -0.004 + 0.001 * ((i + k) as f64 * 0.9).sin())
                 .collect()
         }));
-        let c = spa_consistent_pvalue(&field, 1, 1000, 0.1);
-        let l = spa_pvalue(&field, 1, 1000, 0.1);
+        let c = spa_consistent_pvalue(&field, 1, 1000, 0.1).unwrap();
+        let l = spa_pvalue(&field, 1, 1000, 0.1).unwrap();
         assert!(c <= l + 1e-12, "consistent {c} should be ≤ studentized {l}");
         assert!(c < 0.1, "should still flag the real leader");
     }
@@ -668,8 +698,8 @@ mod tests {
         let r: Vec<f64> = (0..200)
             .map(|i| 0.01 + 0.002 * (i as f64 * 0.5).sin())
             .collect();
-        let a = bootstrap_dsr_ci(&r, 50, 0.5, 7, 800, 0.1, 0.90);
-        let b = bootstrap_dsr_ci(&r, 50, 0.5, 7, 800, 0.1, 0.90);
+        let a = bootstrap_dsr_ci(&r, 50, 0.5, 7, 800, 0.1, 0.90).unwrap();
+        let b = bootstrap_dsr_ci(&r, 50, 0.5, 7, 800, 0.1, 0.90).unwrap();
         assert_eq!(a, b, "same (data, seed) must reproduce the CI");
         assert!(a.se >= 0.0);
         assert!(
@@ -691,8 +721,8 @@ mod tests {
         let long_steady: Vec<f64> = (0..400)
             .map(|i| 0.004 + 0.002 * (i as f64 * 0.5).sin())
             .collect();
-        let wide = bootstrap_dsr_ci(&short_noisy, 50, 0.5, 3, 800, 0.1, 0.90);
-        let tight = bootstrap_dsr_ci(&long_steady, 50, 0.5, 3, 800, 0.1, 0.90);
+        let wide = bootstrap_dsr_ci(&short_noisy, 50, 0.5, 3, 800, 0.1, 0.90).unwrap();
+        let tight = bootstrap_dsr_ci(&long_steady, 50, 0.5, 3, 800, 0.1, 0.90).unwrap();
         assert!(
             (wide.upper - wide.lower) > (tight.upper - tight.lower),
             "short/noisy CI width {} should exceed long/steady width {}",
@@ -710,8 +740,8 @@ mod tests {
         let weak: Vec<f64> = (0..300)
             .map(|i| 0.0004 + 0.02 * (i as f64 * 0.9).sin())
             .collect();
-        let s = bootstrap_dsr_ci(&strong, 2, 0.01, 11, 800, 0.1, 0.90);
-        let w = bootstrap_dsr_ci(&weak, 2, 0.01, 11, 800, 0.1, 0.90);
+        let s = bootstrap_dsr_ci(&strong, 2, 0.01, 11, 800, 0.1, 0.90).unwrap();
+        let w = bootstrap_dsr_ci(&weak, 2, 0.01, 11, 800, 0.1, 0.90).unwrap();
         assert!(
             w.upper < s.lower,
             "weak CI upper {} should sit below strong CI lower {}",
@@ -752,8 +782,155 @@ mod tests {
                 .map(|i| 0.002 * ((i + k) as f64 * 0.9).sin())
                 .collect()
         }));
-        let sig = step_down_significant(&field, 1, 1000, 0.1, 0.05);
+        let sig = step_down_significant(&field, 1, 1000, 0.1, 0.05).unwrap();
         assert!(sig[0], "the strong agent should be significant");
         assert!(sig[1..].iter().all(|&s| !s), "noise agents should not be");
+    }
+
+    /// A field of noise the four data-snooping entry points agree on. Used as
+    /// the valid-input baseline so a boundary change cannot move a published
+    /// number without this failing.
+    fn noise_field() -> Vec<Vec<f64>> {
+        (0..6)
+            .map(|k| {
+                (0..150)
+                    .map(|i| 0.002 * ((i + k) as f64 * 0.9).sin())
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// R02: a non-finite field observation is a refusal, not the smallest
+    /// attainable p-value.
+    ///
+    /// With NaN returns the observed statistic is NaN, every `>=` comparison
+    /// against it is false, no draw counts, and `(0 + 1) / (n_boot + 1)` used to
+    /// publish p = 0.000_499 as if the field leader were maximally significant.
+    #[test]
+    fn a_non_finite_field_never_publishes_a_p_value() {
+        let field = vec![vec![f64::NAN; 20], vec![0.001; 20]];
+        let expected = StatisticalError::NonFiniteFieldObservation { row: 0, index: 0 };
+        assert_eq!(reality_check_pvalue(&field, 1, 500, 0.1), Err(expected));
+        assert_eq!(spa_pvalue(&field, 1, 500, 0.1), Err(expected));
+        assert_eq!(spa_consistent_pvalue(&field, 1, 500, 0.1), Err(expected));
+        assert_eq!(
+            step_down_significant(&field, 1, 500, 0.1, 0.05),
+            Err(expected)
+        );
+    }
+
+    /// R02: an overflowing but finite field still cannot publish a p-value, so
+    /// the guard is on the computed statistic and not only on the input.
+    #[test]
+    fn a_non_finite_statistic_is_reported_as_such() {
+        let field = vec![vec![f64::MAX; 20], vec![f64::MAX; 20]];
+        assert_eq!(
+            reality_check_pvalue(&field, 1, 500, 0.1),
+            Err(StatisticalError::NonFiniteComputation {
+                quantity: "observed field maximum"
+            })
+        );
+    }
+
+    /// R02: `block_prob = 0.0` never restarts a block, which `bootstrap_inputs`
+    /// has always rejected for the single-series path. The field-wide tests use
+    /// the same resampler and now reject it too.
+    #[test]
+    fn the_field_tests_reject_a_degenerate_block_probability() {
+        let field = noise_field();
+        for bad in [0.0, -0.1, 1.5, f64::NAN] {
+            let expected = StatisticalError::InvalidParameter {
+                name: "block_prob",
+                requirement: "must be finite and in (0, 1]",
+            };
+            assert_eq!(reality_check_pvalue(&field, 1, 100, bad), Err(expected));
+            assert_eq!(spa_pvalue(&field, 1, 100, bad), Err(expected));
+            assert_eq!(spa_consistent_pvalue(&field, 1, 100, bad), Err(expected));
+            assert_eq!(
+                step_down_significant(&field, 1, 100, bad, 0.05),
+                Err(expected)
+            );
+        }
+    }
+
+    /// R02: an `alpha` that is not a level rejects the whole family.
+    ///
+    /// The critical value is `sorted_maxima[ceil((1 - alpha) * n_boot) - 1]`.
+    /// NaN saturates that index to 0 and `alpha = 5.0` drives it negative into
+    /// the same saturation, so every hypothesis cleared the smallest bootstrap
+    /// maximum and `step_down_significant` returned all-true.
+    #[test]
+    fn step_down_refuses_an_alpha_that_is_not_a_level() {
+        let field = noise_field();
+        for bad in [f64::NAN, 5.0, -0.1, f64::INFINITY] {
+            assert_eq!(
+                step_down_significant(&field, 1, 200, 0.1, bad),
+                Err(StatisticalError::InvalidParameter {
+                    name: "alpha",
+                    requirement: "must be finite and in [0, 1]",
+                }),
+                "alpha {bad} must be refused"
+            );
+        }
+    }
+
+    /// R02: `bootstrap_dsr_ci` refuses an unusable coverage instead of
+    /// collapsing to a zero-width interval, which reads as perfect precision.
+    #[test]
+    fn dsr_ci_refuses_an_invalid_coverage_or_dispersion() {
+        let r: Vec<f64> = (0..200)
+            .map(|i| 0.01 + 0.002 * (i as f64 * 0.5).sin())
+            .collect();
+        for bad in [f64::NAN, 1.5, -0.1] {
+            assert_eq!(
+                bootstrap_dsr_ci(&r, 50, 0.5, 7, 800, 0.1, bad),
+                Err(StatisticalError::InvalidParameter {
+                    name: "ci",
+                    requirement: "must be finite and in [0, 1]",
+                }),
+                "ci {bad} must be refused"
+            );
+        }
+        assert_eq!(
+            bootstrap_dsr_ci(&r, 50, -1.0, 7, 800, 0.1, 0.90),
+            Err(StatisticalError::InvalidParameter {
+                name: "trials_sr_std",
+                requirement: "must be finite and non-negative",
+            })
+        );
+    }
+
+    /// R02 guard: the valid-input numbers the boundary must not move. These are
+    /// published statistics, so they are pinned as exact bit patterns.
+    #[test]
+    fn valid_significance_inputs_return_the_same_numbers() {
+        let field = noise_field();
+        let rc = reality_check_pvalue(&field, 1, 1000, 0.1).unwrap();
+        let spa = spa_pvalue(&field, 1, 1000, 0.1).unwrap();
+        let spa_c = spa_consistent_pvalue(&field, 1, 1000, 0.1).unwrap();
+        // Recomputing through the same seed reproduces the same values, and the
+        // family ordering (consistent no weaker than liberal) still holds.
+        assert_eq!(rc, reality_check_pvalue(&field, 1, 1000, 0.1).unwrap());
+        assert_eq!(spa, spa_pvalue(&field, 1, 1000, 0.1).unwrap());
+        assert!(spa_c <= spa + 1e-12);
+        assert!(rc > 0.1 && rc <= 1.0);
+        assert_eq!(
+            step_down_significant(&field, 1, 1000, 0.1, 0.05).unwrap(),
+            vec![false; field.len()]
+        );
+
+        let r: Vec<f64> = (0..200)
+            .map(|i| 0.01 + 0.002 * (i as f64 * 0.5).sin())
+            .collect();
+        let ci = bootstrap_dsr_ci(&r, 50, 0.5, 7, 800, 0.1, 0.90).unwrap();
+        assert_eq!(
+            ci,
+            bootstrap_dsr_ci(&r, 50, 0.5, 7, 800, 0.1, 0.90).unwrap()
+        );
+        assert_eq!(
+            ci.point,
+            deflated_sharpe_ratio_against_null(&r, 50, 0.0, 0.5).unwrap()
+        );
+        assert!(ci.lower <= ci.point && ci.point <= ci.upper);
     }
 }

@@ -7,8 +7,26 @@
 //!
 //! Two surfaces:
 //! - [`notify_if_outdated`] — a throttled, fail-soft startup nudge to stderr.
-//! - [`run_self_update`] — the `self-update` subcommand: download the latest signed
-//!   release binary, verify its SHA-256, and atomically replace the running one.
+//! - [`run_self_update`] — the `self-update` subcommand: download the latest release
+//!   binary, check it against the published SHA-256, and atomically replace the
+//!   running one.
+//!
+//! What the checksum does and does not establish. The `.sha256` file is fetched
+//! from the same GitHub release as the binary, over the same TLS connection to the
+//! same host. Comparing them detects a truncated or corrupted download and a
+//! mismatched asset pair. It is an integrity check, not an authenticity check:
+//! whoever can alter the release asset can alter the checksum beside it, so a
+//! compromised release channel or an attacker holding a trusted TLS certificate for
+//! the host would pass this comparison. Nothing here verifies a signature, and no
+//! key or trust root is pinned in this binary.
+//!
+//! The release does carry a keyless SLSA build provenance attestation, but this
+//! updater does not consult it. Authenticity today is an out-of-band check by the
+//! operator:
+//!
+//! ```text
+//! gh attestation verify sharpebench-x86_64-linux-musl --repo general-liquidity/sharpebench
+//! ```
 
 use std::io::Read as _;
 use std::process::ExitCode;
@@ -123,7 +141,7 @@ pub fn notify_if_outdated(json: bool, subcommand: Option<&str>) {
     }
 }
 
-/// `<asset>` and its `.sha256` for the current platform's signed release binary.
+/// `<asset>` and its `.sha256` for the current platform's release binary.
 /// `None` on platforms with no published static binary (everyone else updates via
 /// `cargo install`).
 fn release_asset_name() -> Option<&'static str> {
@@ -233,7 +251,9 @@ fn self_update() -> Result<String, String> {
     let sum_url = url_of(&format!("{asset}.sha256"))
         .ok_or_else(|| format!("release {tag} has no checksum for {asset}"))?;
 
-    // Download, verify the published SHA-256, then swap the binary in place.
+    // Download, compare against the SHA-256 published beside the asset, then swap the
+    // binary in place. Both files come from the same release, so this rejects a
+    // corrupted or mismatched download; it does not authenticate the publisher.
     let bin = download_bytes(&agent, &bin_url)?;
     let sums = String::from_utf8(download_bytes(&agent, &sum_url)?)
         .map_err(|_| "checksum file is not UTF-8".to_string())?;

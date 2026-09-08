@@ -9,12 +9,16 @@
 //!
 //! This module adds an *asymmetric* chain with the same shape: every link is an
 //! Ed25519 signature over `prev_signature | payload`, genesis-anchored, so an
-//! altered payload, a dropped row, or a reordered pair breaks the chain exactly
-//! as it does under HMAC. The difference is who can check it. The host publishes
-//! its [`VerifyingKey`] inside the board ([`PublicChain`]); anyone with the
-//! document can run [`verify_public_chain`] with no secret at all. That check
-//! binds the chain to the embedded key; it does not establish whose key it is,
-//! when the chain was signed, or whether the signer operated neutrally.
+//! altered payload, an *interior* dropped row, or a reordered pair breaks the
+//! chain exactly as it does under HMAC. Dropping *terminal* rows does not: a
+//! prefix of a valid chain is a valid chain, so completeness needs the separate
+//! signed [`ChainReceipt`] anchor that [`PublicChain`] carries and
+//! [`verify_public_chain`] requires. The difference is who can check it. The
+//! host publishes its [`VerifyingKey`] inside the board ([`PublicChain`]);
+//! anyone with the document can run [`verify_public_chain`] with no secret at
+//! all. That check binds the chain to the embedded key; it does not establish
+//! whose key it is, when the chain was signed, or whether the signer operated
+//! neutrally.
 //!
 //! What each scheme guarantees, precisely:
 //!
@@ -40,7 +44,9 @@ use ed25519_dalek::{Signature, Signer};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::{from_hex, to_hex, SignedResult, GENESIS};
+use crate::{
+    from_hex, receipt_message, terminal_signature, to_hex, ChainReceipt, SignedResult, GENESIS,
+};
 
 /// Scheme tag written into a [`PublicChain`] so a reader can tell at a glance
 /// which verifier applies.
@@ -164,6 +170,11 @@ pub fn sign_result_public(payload: &str, prev_signature: &str, key: &SigningKey)
 /// `prev_signature` must equal the previous link's signature (genesis-anchored)
 /// and every signature must verify under `key`. No secret is involved, so this
 /// is safe to run anywhere the document is.
+///
+/// This establishes that the supplied links are genuine and ordered. It cannot
+/// establish that they are complete, because every prefix of a valid chain is a
+/// valid chain. Use [`verify_chain_public_anchored`] when a caller holds the
+/// signed terminal receipt.
 pub fn verify_chain_public(results: &[SignedResult], key: &VerifyingKey) -> bool {
     let mut prev = GENESIS.to_string();
     for r in results {
@@ -178,6 +189,42 @@ pub fn verify_chain_public(results: &[SignedResult], key: &VerifyingKey) -> bool
     true
 }
 
+/// Sign a terminal receipt for an Ed25519 chain, anchoring its record count and
+/// final signature so a truncated copy is detectable. See [`ChainReceipt`].
+pub fn sign_chain_receipt_public(results: &[SignedResult], key: &SigningKey) -> ChainReceipt {
+    let terminal = terminal_signature(results);
+    let sig = key.0.sign(&receipt_message(results.len(), terminal));
+    ChainReceipt {
+        records: results.len(),
+        terminal_signature: terminal.to_string(),
+        signature: to_hex(&sig.to_bytes()),
+    }
+}
+
+/// Check a terminal receipt against the chain actually supplied: the signature
+/// must verify under `key`, and the count and terminal signature it commits to
+/// must be the ones observed. A truncated chain fails on both counts.
+pub fn verify_chain_receipt_public(
+    results: &[SignedResult],
+    receipt: &ChainReceipt,
+    key: &VerifyingKey,
+) -> bool {
+    key.verify(
+        &receipt_message(receipt.records, &receipt.terminal_signature),
+        &receipt.signature,
+    ) && receipt.records == results.len()
+        && receipt.terminal_signature == terminal_signature(results)
+}
+
+/// Verify a public chain **and** its terminal receipt: the complete check.
+pub fn verify_chain_public_anchored(
+    results: &[SignedResult],
+    receipt: &ChainReceipt,
+    key: &VerifyingKey,
+) -> bool {
+    verify_chain_public(results, key) && verify_chain_receipt_public(results, receipt, key)
+}
+
 /// A publicly verifiable chain together with the key that verifies it. Embedding
 /// the key makes the document self-contained: a reader needs this JSON and
 /// nothing else to run [`verify_public_chain`].
@@ -188,9 +235,16 @@ pub struct PublicChain {
     /// Hex Ed25519 verifying key (32 bytes, 64 chars).
     pub verifying_key: String,
     pub chain: Vec<SignedResult>,
+    /// Signed anchor for the end of `chain`. `None` only in a document written
+    /// before the anchor existed, which [`verify_public_chain`] refuses: an
+    /// unanchored chain cannot be checked for terminal deletion, and a reader
+    /// must not be told a completeness check passed when none was run.
+    #[serde(default)]
+    pub receipt: Option<ChainReceipt>,
 }
 
-/// Sign an ordered sequence of canonical payloads into a [`PublicChain`].
+/// Sign an ordered sequence of canonical payloads into a [`PublicChain`],
+/// including the terminal receipt that anchors the chain's length.
 pub fn publish_public_chain(payloads: &[String], key: &SigningKey) -> PublicChain {
     let mut chain = Vec::with_capacity(payloads.len());
     let mut prev = GENESIS.to_string();
@@ -199,24 +253,31 @@ pub fn publish_public_chain(payloads: &[String], key: &SigningKey) -> PublicChai
         prev = link.signature.clone();
         chain.push(link);
     }
+    let receipt = sign_chain_receipt_public(&chain, key);
     PublicChain {
         scheme: ED25519_SCHEME.to_string(),
         verifying_key: key.verifying_key().to_hex(),
         chain,
+        receipt: Some(receipt),
     }
 }
 
 /// Verify a [`PublicChain`] from the document alone, using the key it carries.
-/// Proves the chain is internally consistent under that key; see the module
-/// docs for why identity still needs an out-of-band pin.
+/// Proves the chain is internally consistent **and complete** under that key:
+/// the receipt is required, so removing the final records fails here even
+/// though the surviving prefix still recomputes. See the module docs for why
+/// identity still needs an out-of-band pin.
 pub fn verify_public_chain(board: &PublicChain) -> bool {
     if board.scheme != ED25519_SCHEME {
         return false;
     }
-    match VerifyingKey::from_hex(&board.verifying_key) {
-        Some(vk) => verify_chain_public(&board.chain, &vk),
-        None => false,
-    }
+    let (Some(vk), Some(receipt)) = (
+        VerifyingKey::from_hex(&board.verifying_key),
+        board.receipt.as_ref(),
+    ) else {
+        return false;
+    };
+    verify_chain_public_anchored(&board.chain, receipt, &vk)
 }
 
 /// Verify a [`PublicChain`] against a key the caller trusts independently. The

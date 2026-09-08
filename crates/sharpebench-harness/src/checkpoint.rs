@@ -26,16 +26,26 @@ use sharpebench_core::{AgentSubmission, Run};
 use sharpebench_sim::Window;
 
 use crate::failure::{
-    failing_sentinel_run, run_with_retries, FailureKind, FailureLog, FailureRecord, RunOutcome,
+    failing_sentinel_run, run_with_retries, AttemptLedger, FailureKind, FailureLog, FailureRecord,
+    RunOutcome,
 };
 use crate::ResilientSubmission;
 
-/// Versioned identity of every condition that can change a resumable sweep's
-/// result. A checkpoint is reusable only when this record matches exactly.
+/// Versioned identity of the conditions a resumable sweep binds: dataset, cost
+/// model, score configuration, runner artifact, entrant artifact and
+/// invocation. A checkpoint is reusable only when this record matches exactly.
 ///
 /// The digests bind semantic inputs without copying a dataset, secrets, or a
 /// binary into the checkpoint. Exact windows and seeds stay visible because
 /// they are useful diagnostics rather than opaque implementation details.
+///
+/// What it deliberately does not bind: credential values. The CLI folds the
+/// effective *non-secret* environment handed to a `--cmd` entrant into
+/// `invocation_sha256` (see `sharpebench_sim::agent_env_identity`), so changing
+/// a policy variable invalidates the checkpoint, while rotating a token does
+/// not and never reaches the checkpoint file. Anything the harness cannot
+/// observe, such as state inside a remote endpoint behind `--http`, is outside
+/// this record too.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SweepIdentity {
     pub dataset_sha256: String,
@@ -65,7 +75,11 @@ pub struct SweepContract {
 }
 
 impl SweepContract {
-    pub const SCHEMA_VERSION: u32 = 2;
+    /// Bumped to 3 when the per-task attempt ledger landed: a version-2
+    /// checkpoint carries no failed-attempt evidence, and resuming into it would
+    /// report everything its attempts already spent as zero. It is refused
+    /// rather than read that way.
+    pub const SCHEMA_VERSION: u32 = 3;
 
     /// Build the contract from already-computed SHA-256 identities.
     pub fn new(
@@ -143,6 +157,11 @@ pub struct TaskRecord {
     /// The scorable run, present for `Done` (real) and `AgentFailed` (sentinel).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run: Option<Run>,
+    /// Every attempt this cell has cost, in order, across resumes. Append-only:
+    /// a completion that resumes a failed attempt is added after it, never over
+    /// it. Rank-neutral, and never part of the assembled run pool.
+    #[serde(default)]
+    pub attempts: AttemptLedger,
 }
 
 impl TaskRecord {
@@ -180,6 +199,7 @@ impl SweepCheckpoint {
                     seed,
                     state: TaskState::Pending,
                     run: None,
+                    attempts: AttemptLedger::default(),
                 });
             }
         }
@@ -344,29 +364,67 @@ impl SweepCheckpoint {
             .find(|t| t.window == window && t.seed == seed)
     }
 
-    /// Mark a task done with its scorable run.
-    pub fn complete(&mut self, window: usize, seed: u64, run: Run) {
+    /// Record what a cell has spent so far without settling its state. A worker
+    /// that persists an attempt before retrying keeps that attempt's cost even
+    /// if it dies before the cell reaches a terminal state.
+    pub fn record_attempts(&mut self, window: usize, seed: u64, ledger: &AttemptLedger) {
+        if let Some(t) = self.task_mut(window, seed) {
+            t.attempts.append(ledger);
+        }
+    }
+
+    /// Mark a task done with its scorable run, appending what the completion and
+    /// the attempts it supersedes cost.
+    pub fn complete(&mut self, window: usize, seed: u64, run: Run, ledger: &AttemptLedger) {
         if let Some(t) = self.task_mut(window, seed) {
             t.state = TaskState::Done;
             t.run = Some(run);
+            t.attempts.append(ledger);
         }
     }
 
     /// Mark a task as an exhausted runtime failure (excluded from the score).
-    pub fn fail_runtime(&mut self, window: usize, seed: u64, kind: FailureKind, attempts: u32) {
+    pub fn fail_runtime(
+        &mut self,
+        window: usize,
+        seed: u64,
+        kind: FailureKind,
+        attempts: u32,
+        ledger: &AttemptLedger,
+    ) {
         if let Some(t) = self.task_mut(window, seed) {
             t.state = TaskState::RuntimeFailed { kind, attempts };
             t.run = None;
+            t.attempts.append(ledger);
         }
     }
 
     /// Mark a task as an agent fault, storing the failing sentinel run that counts
     /// against pass^k.
-    pub fn fail_agent(&mut self, window: usize, seed: u64, kind: FailureKind, sentinel: Run) {
+    pub fn fail_agent(
+        &mut self,
+        window: usize,
+        seed: u64,
+        kind: FailureKind,
+        sentinel: Run,
+        ledger: &AttemptLedger,
+    ) {
         if let Some(t) = self.task_mut(window, seed) {
             t.state = TaskState::AgentFailed { kind };
             t.run = Some(sentinel);
+            t.attempts.append(ledger);
         }
+    }
+
+    /// The whole sweep's attempts, cell by cell in matrix order. Rank-neutral.
+    pub fn attempt_ledger(&self) -> AttemptLedger {
+        let mut ledger = AttemptLedger::default();
+        for t in &self.tasks {
+            // Concatenation, never the replay merge: two cells with identical
+            // records are two attempts.
+            ledger.extend(&t.attempts);
+        }
+        ledger
     }
 
     /// Assemble the terminal tasks into the submission + failure log the scorer
@@ -391,7 +449,10 @@ impl SweepCheckpoint {
                         window_index: t.window,
                         seed: t.seed,
                         kind: kind.clone(),
-                        attempts: 1,
+                        // Every attempt this cell cost, not only the one that
+                        // ended it: two transport failures then an agent fault
+                        // is three attempts, not one.
+                        attempts: u32::try_from(t.attempts.len()).unwrap_or(u32::MAX).max(1),
                         runtime: false,
                     });
                 }
@@ -415,6 +476,7 @@ impl SweepCheckpoint {
                 candidates: Vec::new(),
             },
             failures,
+            attempts: self.attempt_ledger().summary(),
         }
     }
 
@@ -473,6 +535,15 @@ impl SweepCheckpoint {
                     ));
                 }
             }
+            // A terminal cell cost at least the attempt that ended it. An empty
+            // ledger is a checkpoint written before attempts were recorded, and
+            // reading it would report that cost as zero.
+            if task.attempts.is_empty() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("checkpoint task {index} is terminal but records no attempt"),
+                ));
+            }
         }
         Ok(())
     }
@@ -509,16 +580,19 @@ where
     // Single-worker driver: claim the next pending task, run it under the retry
     // taxonomy, record the outcome, and persist before moving on.
     while let Some((w, seed)) = cp.claim_next(0, 0) {
-        let (outcome, _) = run_with_retries(max_retries, || attempt(w, seed));
-        match outcome {
-            RunOutcome::Completed(run) => cp.complete(w, seed, run),
-            RunOutcome::Exhausted { last, attempts } => cp.fail_runtime(w, seed, last, attempts),
+        let driven = run_with_retries(max_retries, || attempt(w, seed));
+        let ledger = driven.ledger;
+        match driven.outcome {
+            RunOutcome::Completed(run) => cp.complete(w, seed, run, &ledger),
+            RunOutcome::Exhausted { last, attempts } => {
+                cp.fail_runtime(w, seed, last, attempts, &ledger)
+            }
             RunOutcome::AgentFault(kind) => {
                 let expected_len = windows
                     .get(w)
                     .map(|window| window.end.saturating_sub(window.start))
                     .unwrap_or(0);
-                cp.fail_agent(w, seed, kind, failing_sentinel_run(expected_len))
+                cp.fail_agent(w, seed, kind, failing_sentinel_run(expected_len), &ledger)
             }
         }
         cp.save(path)?;
@@ -568,16 +642,19 @@ where
         };
 
     while let Some((w, seed)) = cp.claim_next(0, 0) {
-        let (outcome, _) = run_with_retries(max_retries, || attempt(w, seed));
-        match outcome {
-            RunOutcome::Completed(run) => cp.complete(w, seed, run),
-            RunOutcome::Exhausted { last, attempts } => cp.fail_runtime(w, seed, last, attempts),
+        let driven = run_with_retries(max_retries, || attempt(w, seed));
+        let ledger = driven.ledger;
+        match driven.outcome {
+            RunOutcome::Completed(run) => cp.complete(w, seed, run, &ledger),
+            RunOutcome::Exhausted { last, attempts } => {
+                cp.fail_runtime(w, seed, last, attempts, &ledger)
+            }
             RunOutcome::AgentFault(kind) => {
                 let expected_len = windows
                     .get(w)
                     .map(|window| window.end.saturating_sub(window.start))
                     .unwrap_or(0);
-                cp.fail_agent(w, seed, kind, failing_sentinel_run(expected_len))
+                cp.fail_agent(w, seed, kind, failing_sentinel_run(expected_len), &ledger)
             }
         }
         cp.save(path)?;
@@ -604,6 +681,16 @@ mod tests {
             seeds,
             max_retries,
         )
+    }
+
+    /// One completed attempt that no clock observed: what a caller recording an
+    /// outcome from outside the retry driver can honestly say.
+    fn untimed_completion() -> AttemptLedger {
+        let mut ledger = AttemptLedger::default();
+        ledger.push(crate::failure::AttemptRecord::completed(
+            crate::failure::AttemptDuration::Unavailable,
+        ));
+        ledger
     }
 
     fn tmp_path(tag: &str) -> std::path::PathBuf {
@@ -682,8 +769,8 @@ mod tests {
         let mut cp = SweepCheckpoint::new("agent", 2, &seeds); // 6 tasks
         assert_eq!(cp.tasks.len(), 6);
         assert_eq!(cp.remaining(), 6);
-        cp.complete(0, 0, skilled_run(0));
-        cp.complete(0, 1, skilled_run(1));
+        cp.complete(0, 0, skilled_run(0), &untimed_completion());
+        cp.complete(0, 1, skilled_run(1), &untimed_completion());
         assert_eq!(cp.remaining(), 4);
 
         // Round-trips through JSON with progress intact.
@@ -720,7 +807,7 @@ mod tests {
         let mut cp = SweepCheckpoint::new("ext", windows.len(), &seeds);
         for _ in 0..2 {
             let (w, seed) = cp.claim_next(0, 0).unwrap();
-            cp.complete(w, seed, skilled_run(seed));
+            cp.complete(w, seed, skilled_run(seed), &untimed_completion());
         }
         cp.save(&path).unwrap();
         assert_eq!(cp.remaining(), 2);
@@ -763,7 +850,7 @@ mod tests {
         let mut cp = SweepCheckpoint::new("ext", windows.len(), &seeds);
         for _ in 0..3 {
             let (w, seed) = cp.claim_next(0, 0).unwrap();
-            cp.complete(w, seed, skilled_run(seed));
+            cp.complete(w, seed, skilled_run(seed), &untimed_completion());
         }
         cp.save(&part_path).unwrap();
         let resumed = run_resumable_sweep(&part_path, "ext", &windows, &seeds, 2, attempt).unwrap();

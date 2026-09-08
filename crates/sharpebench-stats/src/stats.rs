@@ -51,8 +51,12 @@ pub fn downside_deviation(xs: &[f64], target: f64) -> f64 {
 /// Sortino ratio: excess mean return over `target` per unit of [`downside_deviation`].
 /// Unlike the Sharpe, it does not punish upside volatility, so it rewards skill
 /// that arrives without downside churn. `None` when there is no downside (the ratio
-/// is undefined).
+/// is undefined), and `None` when any return or the target is non-finite: a
+/// shortfall against a value that is not a real number is not a measured risk.
 pub fn sortino_ratio(xs: &[f64], target: f64) -> Option<f64> {
+    if !target.is_finite() || crate::validation::finite_observations(xs).is_err() {
+        return None;
+    }
     let dd = downside_deviation(xs, target);
     if dd == 0.0 {
         return None;

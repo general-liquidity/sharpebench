@@ -18,8 +18,10 @@ rank.
 Per regime, per strategy, a **ZAGA split** (zero-adjusted gamma, after the
 "Regime-Conditional Distributional Comparison of Trading Strategies" paper):
 
-- the zero / no-trade mass (periods with `|r| <= zero_tol`), which is how often
-  the strategy simply did not play;
+- the near-zero-return mass `zero_mass` (periods with `|r| <= zero_tol`). No
+  trade or position flag reaches this module, so it cannot separate sitting out
+  from holding a position that went nowhere or from a period whose gain went to
+  fees: it is a return mass, not a participation rate;
 - the continuous part: mean, standard deviation, median, and the share of
   positive returns;
 - a method-of-moments gamma (shape, rate) matched to the *magnitudes* of the
@@ -27,9 +29,9 @@ Per regime, per strategy, a **ZAGA split** (zero-adjusted gamma, after the
 
 Per regime, head to head:
 
-- `mean_gap` (pooled within the regime) and `cont_mean_gap` (no-trade periods
-  removed). When the two diverge, the pooled comparison was mostly measuring
-  participation rate, not per-trade skill;
+- `mean_gap` (pooled within the regime) and `cont_mean_gap` (near-zero-return
+  periods removed). When the two diverge, the pooled comparison was mostly
+  measuring how often each strategy moved at all, not how well it moved;
 - `zero_mass_gap`, a behavioural difference that survives even when the means
   agree;
 - a two-sample Kolmogorov-Smirnov statistic between the two continuous parts,
@@ -37,11 +39,19 @@ Per regime, head to head:
 - `edge_sign` and whether the regime cleared `min_periods` and therefore
   `counted` toward the verdict.
 
-Across regimes: the pooled mean gap and its sign, the list of counted regimes
-whose sign contradicts it, `pooled_hides_reversal` (the headline finding: the
-pooled number is averaging over a sign change), and `edge_dispersion`, the
-spread between the best and worst counted regime. A large spread with no
-reversal still says the edge is concentrated, not general.
+Across regimes: the pooled mean gap and its sign, `reversal_regimes`,
+`pooled_hides_reversal` (the headline finding: the pooled number is averaging
+over a sign change), and `edge_dispersion`, the spread between the best and
+worst counted regime. A large spread with no reversal still says the edge is
+concentrated, not general.
+
+`reversal_regimes` holds the counted regimes the pooled verdict does not
+represent. With a signed pooled gap those are the counted regimes whose own sign
+opposes it. With a tied pooled gap there is no sign to contradict, and that is
+where a reversal hides best: equal and opposite regime edges cancel exactly. So
+a tie lists every counted regime with a sign whenever both signs are present,
+and lists none otherwise, since one regime carrying the whole edge is
+concentration rather than reversal.
 
 Regimes come out in lexicographic label order, so the report is byte-identical
 on every recompute.

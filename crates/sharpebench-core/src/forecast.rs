@@ -2,7 +2,10 @@
 //!
 //! SharpeArena owns the commit-time ledger. SharpeBench accepts only the closed
 //! `sharpe.forecast-evidence.v1` file contract, reconstructs every score locally,
-//! and compares agents only on the exact contracts resolved for the whole field.
+//! and compares agents only on the exact contracts resolved for the whole field,
+//! settled to the exact same outcome. Bench takes documents from any producer, so
+//! contract identity alone does not license differencing two losses; the realized
+//! outcome and its availability time are retained past scoring and must agree.
 //! This module does not import [`crate::composite`] and its report is not an input
 //! to trading-rank eligibility.
 
@@ -617,6 +620,19 @@ fn contract_sha256(contract: &ForecastContract) -> Result<String, ForecastError>
     Ok(format!("{:x}", Sha256::digest(preimage.as_bytes())))
 }
 
+/// Content address of a realized outcome, over the same canonical encoding as the
+/// contract digest.
+///
+/// The contract digest fixes the question. It says nothing about how the question
+/// was settled, so two producers can present the identical contract with opposite
+/// realized outcomes. Comparing agents requires both, and the outcome must survive
+/// scoring rather than be discarded once a loss has been computed from it.
+fn outcome_sha256(outcome: &Value) -> Result<String, ForecastError> {
+    let mut preimage = String::new();
+    canonical_json(outcome, &mut preimage)?;
+    Ok(format!("{:x}", Sha256::digest(preimage.as_bytes())))
+}
+
 fn number_outcome(outcome: &Value) -> Result<f64, ForecastError> {
     let value = outcome
         .as_f64()
@@ -631,6 +647,10 @@ struct ScoredForecast {
     instrument: String,
     resolves_at: u64,
     scoring_rule: String,
+    /// Retained settlement identity: which outcome this loss was computed against.
+    outcome_sha256: String,
+    /// Retained settlement availability, when the resolution record carries one.
+    outcome_available_at: Option<u64>,
     loss: f64,
     probability: Option<(f64, bool)>,
     categorical_confidence: Option<(f64, bool)>,
@@ -780,6 +800,8 @@ fn scored_forecasts(evidence: &ForecastEvidence) -> Result<Vec<ScoredForecast>, 
             instrument: contract.instrument.clone(),
             resolves_at: contract.resolves_at,
             scoring_rule: contract.scoring_rule.clone(),
+            outcome_sha256: outcome_sha256(outcome)?,
+            outcome_available_at: resolution.available_at,
             loss,
             probability,
             categorical_confidence,
@@ -893,11 +915,98 @@ pub struct PairwiseForecastComparison {
     pub n_settlement_blocks: usize,
     /// Mean loss(A) minus mean loss(B); negative favors A.
     pub mean_loss_difference: f64,
-    pub confidence_lower: f64,
-    pub confidence_upper: f64,
-    pub raw_p_value: f64,
-    pub holm_adjusted_p_value: f64,
+    /// Absent, together with the other three inference fields, when
+    /// `inference_error` says the block resampling law cannot support the claim.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence_lower: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confidence_upper: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw_p_value: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub holm_adjusted_p_value: Option<f64>,
     pub familywise_significant: bool,
+    /// Present only when inference was withheld. Omitted for a supported comparison.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inference_error: Option<String>,
+}
+
+/// Why a paired comparison carries no interval, no p-value and no significance.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ForecastInferenceError {
+    NoSettlementBlock,
+    LevelBelowResamplingResolution {
+        blocks: usize,
+        degenerate_mass: f64,
+        familywise_alpha: f64,
+    },
+}
+
+impl Display for ForecastInferenceError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoSettlementBlock => formatter.write_str(
+                "no settlement block on exact common support: there is nothing to resample",
+            ),
+            Self::LevelBelowResamplingResolution {
+                blocks,
+                degenerate_mass,
+                familywise_alpha,
+            } => write!(
+                formatter,
+                "familywise level {familywise_alpha} is finer than a {blocks}-block resampling \
+                 law can resolve: single-block resamples hold {degenerate_mass} of its mass, and \
+                 more bootstrap replications estimate that same law without adding blocks"
+            ),
+        }
+    }
+}
+
+impl Error for ForecastInferenceError {}
+
+/// Mass the block resampling law places on resamples that are one block repeated.
+///
+/// The comparison resamples whole resolution-clock blocks with replacement. A draw
+/// that takes the same block every time reproduces one block's mean and carries no
+/// information about variation between blocks. Drawing `blocks` times from `blocks`
+/// blocks lands on such a draw with probability `blocks * blocks^-blocks`, that is
+/// `blocks^(1 - blocks)`: 1 at one block, 1/2 at two, 1/9 at three, 1/64 at four.
+fn degenerate_resample_mass(blocks: usize) -> f64 {
+    if blocks == 0 {
+        return 1.0;
+    }
+    let blocks = blocks as f64;
+    blocks.powf(1.0 - blocks)
+}
+
+/// The independent-block requirement this protocol enforces before it reports
+/// significance.
+///
+/// A claim at familywise level `familywise_alpha` is withheld unless the block
+/// resampling law places at most that much mass on its own degenerate draws. At one
+/// block every resample is the observed sample: the percentile interval has zero
+/// width by construction and the exceedance count is zero, so the reported p-value
+/// is the `(0 + 1) / (samples + 1)` smoothing floor and shrinks as replications are
+/// added. At two blocks half the law's mass is degenerate, at three blocks a ninth.
+/// The bar is passed at four blocks for the default alpha of 0.05.
+///
+/// This is a necessary condition on the reported level, not a certificate of
+/// calibration. Clearing it does not establish that blocks are independent, that the
+/// resolution clock is the right dependence unit, or that the percentile interval has
+/// its nominal coverage in finite samples. Those remain assumptions of the protocol.
+fn inference_support(blocks: usize, familywise_alpha: f64) -> Result<(), ForecastInferenceError> {
+    if blocks == 0 {
+        return Err(ForecastInferenceError::NoSettlementBlock);
+    }
+    let degenerate_mass = degenerate_resample_mass(blocks);
+    if degenerate_mass > familywise_alpha {
+        return Err(ForecastInferenceError::LevelBelowResamplingResolution {
+            blocks,
+            degenerate_mass,
+            familywise_alpha,
+        });
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1220,28 +1329,46 @@ fn compare_agents(
                 "equal contract digest resolved to unequal contract semantics",
             ));
         }
+        // Contract equality is not outcome equality. Bench takes documents from any
+        // producer, so the settlement each loss was computed against has to agree
+        // before the two losses may be differenced.
+        if left.outcome_sha256 != right.outcome_sha256 {
+            return Err(reject(
+                "equal contract digest settled to unequal realized outcomes",
+            ));
+        }
+        if left.outcome_available_at != right.outcome_available_at {
+            return Err(reject(
+                "equal contract digest settled at unequal outcome availability times",
+            ));
+        }
         blocks
             .entry(left.resolves_at)
             .or_default()
             .push(left.loss - right.loss);
     }
     let observed_values: Vec<f64> = blocks.values().flatten().copied().collect();
-    if observed_values.is_empty() {
+    let block_values: Vec<&Vec<f64>> = blocks.values().collect();
+    if let Err(unsupported) = inference_support(block_values.len(), config.familywise_alpha) {
         return Ok(PairwiseForecastComparison {
             agent_a: agent_a.to_string(),
             agent_b: agent_b.to_string(),
-            n_contracts: 0,
-            n_settlement_blocks: 0,
-            mean_loss_difference: 0.0,
-            confidence_lower: 0.0,
-            confidence_upper: 0.0,
-            raw_p_value: 1.0,
-            holm_adjusted_p_value: 1.0,
+            n_contracts: observed_values.len(),
+            n_settlement_blocks: block_values.len(),
+            mean_loss_difference: if observed_values.is_empty() {
+                0.0
+            } else {
+                mean(&observed_values)
+            },
+            confidence_lower: None,
+            confidence_upper: None,
+            raw_p_value: None,
+            holm_adjusted_p_value: None,
             familywise_significant: false,
+            inference_error: Some(unsupported.to_string()),
         });
     }
     let observed = mean(&observed_values);
-    let block_values: Vec<&Vec<f64>> = blocks.values().collect();
     let mut rng = SplitMix64(config.bootstrap_seed ^ stable_pair_seed(agent_a, agent_b));
     let mut samples = Vec::with_capacity(config.bootstrap_samples);
     let mut null_extreme = 0usize;
@@ -1266,11 +1393,12 @@ fn compare_agents(
         n_contracts: observed_values.len(),
         n_settlement_blocks: block_values.len(),
         mean_loss_difference: observed,
-        confidence_lower: percentile(&samples, tail),
-        confidence_upper: percentile(&samples, 1.0 - tail),
-        raw_p_value: (null_extreme as f64 + 1.0) / (config.bootstrap_samples as f64 + 1.0),
-        holm_adjusted_p_value: 1.0,
+        confidence_lower: Some(percentile(&samples, tail)),
+        confidence_upper: Some(percentile(&samples, 1.0 - tail)),
+        raw_p_value: Some((null_extreme as f64 + 1.0) / (config.bootstrap_samples as f64 + 1.0)),
+        holm_adjusted_p_value: None,
         familywise_significant: false,
+        inference_error: None,
     })
 }
 
@@ -1284,20 +1412,28 @@ fn stable_pair_seed(left: &str, right: &str) -> u64 {
     u64::from_be_bytes(digest[..8].try_into().unwrap_or([0; 8]))
 }
 
+/// Holm over the comparisons that produced a p-value.
+///
+/// A withheld comparison is not a test and receives no adjusted p-value, but it stays
+/// in the family size: dropping it would shrink the multiplier and make the surviving
+/// comparisons look more significant because a neighbour could not be evaluated.
 fn holm_adjust(comparisons: &mut [PairwiseForecastComparison], alpha: f64) {
-    let mut order: Vec<usize> = (0..comparisons.len()).collect();
+    let mut order: Vec<usize> = (0..comparisons.len())
+        .filter(|index| comparisons[*index].raw_p_value.is_some())
+        .collect();
     order.sort_by(|left, right| {
         comparisons[*left]
             .raw_p_value
-            .total_cmp(&comparisons[*right].raw_p_value)
+            .unwrap_or(1.0)
+            .total_cmp(&comparisons[*right].raw_p_value.unwrap_or(1.0))
     });
     let mut prior = 0.0_f64;
     let family = comparisons.len();
     for (rank, index) in order.into_iter().enumerate() {
-        let adjusted = ((family - rank) as f64 * comparisons[index].raw_p_value)
+        let adjusted = ((family - rank) as f64 * comparisons[index].raw_p_value.unwrap_or(1.0))
             .max(prior)
             .min(1.0);
-        comparisons[index].holm_adjusted_p_value = adjusted;
+        comparisons[index].holm_adjusted_p_value = Some(adjusted);
         comparisons[index].familywise_significant = adjusted <= alpha;
         prior = adjusted;
     }
@@ -1514,8 +1650,10 @@ mod tests {
             reverse.familywise_significant
         );
         assert_eq!(forward.mean_loss_difference, -reverse.mean_loss_difference);
-        assert_eq!(forward.confidence_lower, -reverse.confidence_upper);
-        assert_eq!(forward.confidence_upper, -reverse.confidence_lower);
+        let negated = |value: Option<f64>| value.map(|value| -value);
+        assert_eq!(forward.confidence_lower, negated(reverse.confidence_upper));
+        assert_eq!(forward.confidence_upper, negated(reverse.confidence_lower));
+        assert!(forward.inference_error.is_none());
     }
 
     #[test]
@@ -1615,17 +1753,18 @@ mod tests {
                 n_contracts: 10,
                 n_settlement_blocks: 5,
                 mean_loss_difference: -0.1,
-                confidence_lower: -0.2,
-                confidence_upper: -0.01,
-                raw_p_value: p,
-                holm_adjusted_p_value: 0.0,
+                confidence_lower: Some(-0.2),
+                confidence_upper: Some(-0.01),
+                raw_p_value: Some(p),
+                holm_adjusted_p_value: None,
                 familywise_significant: false,
+                inference_error: None,
             })
             .collect::<Vec<_>>();
         holm_adjust(&mut comparisons, 0.05);
-        assert_eq!(comparisons[0].holm_adjusted_p_value, 0.03);
-        assert_eq!(comparisons[1].holm_adjusted_p_value, 0.06);
-        assert_eq!(comparisons[2].holm_adjusted_p_value, 0.06);
+        assert_eq!(comparisons[0].holm_adjusted_p_value, Some(0.03));
+        assert_eq!(comparisons[1].holm_adjusted_p_value, Some(0.06));
+        assert_eq!(comparisons[2].holm_adjusted_p_value, Some(0.06));
         assert!(comparisons[0].familywise_significant);
         assert!(!comparisons[1].familywise_significant);
     }

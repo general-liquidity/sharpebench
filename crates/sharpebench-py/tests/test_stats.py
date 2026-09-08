@@ -134,6 +134,31 @@ def test_expected_max_sharpe_grows_with_trials():
     assert expected_max_sharpe(0.0, 1000) == 0.0
 
 
+@pytest.mark.parametrize("bad", [-1.0, float("nan"), float("inf")])
+def test_a_negative_dispersion_is_refused_not_read_as_no_search(bad):
+    """R02: the binding raises instead of returning the most flattering number.
+
+    expected_max_sharpe(-1.0, 500) used to return 0.0, collapsing the deflation
+    bar and handing back a deflated Sharpe of 1.0 for a malformed footprint.
+    """
+    with pytest.raises(ValueError):
+        expected_max_sharpe(bad, 500)
+    with pytest.raises(ValueError):
+        deflated_sharpe_ratio(edge_track(), 500, bad)
+
+
+def test_a_non_finite_track_has_no_deflated_sharpe():
+    with pytest.raises(ValueError):
+        deflated_sharpe_ratio([0.01, float("nan"), 0.02], 10)
+
+
+@pytest.mark.parametrize("bad", [float("nan"), 1.5, -0.1])
+def test_dsr_ci_refuses_an_invalid_coverage(bad):
+    """R02: a zero-width interval would read as perfect precision."""
+    with pytest.raises(ValueError):
+        bootstrap_dsr_ci(edge_track(), n_trials=10, n_boot=200, ci=bad)
+
+
 def test_min_track_record_length():
     assert min_track_record_length(edge_track()) > 0.0
     # A track that does not beat the benchmark can never clear it.
@@ -246,6 +271,30 @@ def test_snooping_rejects_an_empty_field(fn):
         fn([])
 
 
+@pytest.mark.parametrize("fn", [reality_check_pvalue, spa_pvalue, spa_consistent_pvalue, step_down_significant])
+def test_snooping_rejects_a_non_finite_field(fn):
+    """R02: a NaN field used to publish the smallest attainable p-value.
+
+    The observed statistic is NaN, so no bootstrap draw exceeds it and the +1
+    smoothing reported p = 1 / (n_boot + 1) as if the leader were certain.
+    """
+    with pytest.raises(ValueError):
+        fn([[float("nan")] * 20, [0.001] * 20])
+
+
+@pytest.mark.parametrize("fn", [reality_check_pvalue, spa_pvalue, spa_consistent_pvalue, step_down_significant])
+def test_snooping_rejects_a_degenerate_block_probability(fn):
+    with pytest.raises(ValueError):
+        fn(noise_field(4, 60), block_prob=0.0)
+
+
+@pytest.mark.parametrize("bad", [float("nan"), 5.0, -0.1])
+def test_step_down_refuses_an_alpha_that_is_not_a_level(bad):
+    """R02: a NaN or out-of-range alpha rejected every hypothesis."""
+    with pytest.raises(ValueError):
+        step_down_significant(noise_field(4, 60), n_boot=200, alpha=bad)
+
+
 def test_pbo_on_pure_noise_is_not_confident():
     """T x N orientation (the transpose of the snooping field)."""
     field = noise_field(8, 240)
@@ -311,6 +360,13 @@ def test_selection_robustness_gap_is_large_when_the_winner_is_a_fluke():
 def test_selection_robustness_empty():
     r = selection_robustness([], n_trials=1)
     assert r["n_candidates"] == 0
+
+
+def test_selection_robustness_refuses_an_unscorable_candidate():
+    """R02: one NaN candidate made every summary field NaN, and a NaN gap does
+    not compare as a wide gap: it drops out of every downstream comparison."""
+    with pytest.raises(ValueError):
+        selection_robustness([[0.001, float("nan"), 0.002], [0.001] * 30], n_trials=10)
 
 
 # ------------------------------------------------------------------ power / pass^k

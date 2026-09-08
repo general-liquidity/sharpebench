@@ -8,6 +8,8 @@
 //!
 //! After ALE-Bench's percentile-against-a-human-population framing.
 
+use sharpebench_stats::StatisticalError;
+
 /// Percentile (0..=100) of `value` within a reference population: the fraction
 /// of the population it meets or exceeds, times 100. Empty population → 0.0.
 pub fn percentile_of(value: f64, population: &[f64]) -> f64 {
@@ -64,12 +66,19 @@ impl HumanBaseline {
     /// Sharpe is mapped to the Deflated Sharpe a *clean normal track* of that
     /// per-period Sharpe and `track_len` periods would earn against `n_trials`
     /// (skew 0, kurtosis 3: a reference marker, not a real return stream).
+    ///
+    /// # Errors
+    ///
+    /// `trials_sr_std` must be a dispersion: finite and non-negative. A negative
+    /// one used to collapse the deflation bar to zero, which would have mapped
+    /// every band Sharpe to its most flattering DSR and made the reference
+    /// population the agent is scored against easier than it is.
     pub fn reference_dsr_population(
         &self,
         track_len: usize,
         n_trials: u32,
         trials_sr_std: f64,
-    ) -> Vec<f64> {
+    ) -> Result<Vec<f64>, StatisticalError> {
         [self.floor_sharpe, self.median_sharpe, self.ceiling_sharpe]
             .iter()
             .map(|&sr| dsr_from_sharpe(sr, track_len, n_trials, trials_sr_std))
@@ -79,22 +88,27 @@ impl HumanBaseline {
     /// Classify a Deflated Sharpe against the band: `Below` the floor, `Within`
     /// the skilled-human range, or `Above` the ceiling. Uses the same normal-track
     /// mapping as the `reference_dsr_population` score field.
+    ///
+    /// # Errors
+    ///
+    /// Same boundary as [`Self::reference_dsr_population`]: a band that cannot be
+    /// placed is not a band the agent sits `Within`.
     pub fn classify_dsr(
         &self,
         dsr: f64,
         track_len: usize,
         n_trials: u32,
         trials_sr_std: f64,
-    ) -> BaselineBand {
-        let floor = dsr_from_sharpe(self.floor_sharpe, track_len, n_trials, trials_sr_std);
-        let ceiling = dsr_from_sharpe(self.ceiling_sharpe, track_len, n_trials, trials_sr_std);
-        if dsr < floor {
+    ) -> Result<BaselineBand, StatisticalError> {
+        let floor = dsr_from_sharpe(self.floor_sharpe, track_len, n_trials, trials_sr_std)?;
+        let ceiling = dsr_from_sharpe(self.ceiling_sharpe, track_len, n_trials, trials_sr_std)?;
+        Ok(if dsr < floor {
             BaselineBand::Below
         } else if dsr > ceiling {
             BaselineBand::Above
         } else {
             BaselineBand::Within
-        }
+        })
     }
 }
 
@@ -103,15 +117,20 @@ impl HumanBaseline {
 /// z-statistic evaluated for a normal return distribution, deflated by the
 /// expected maximum Sharpe over the trial footprint: the human-baseline analogue
 /// of [`crate::deflated_sharpe::deflated_sharpe_ratio`] on summary statistics.
-fn dsr_from_sharpe(sr: f64, track_len: usize, n_trials: u32, trials_sr_std: f64) -> f64 {
+fn dsr_from_sharpe(
+    sr: f64,
+    track_len: usize,
+    n_trials: u32,
+    trials_sr_std: f64,
+) -> Result<f64, StatisticalError> {
+    let sr_star = crate::deflated_sharpe::expected_max_sharpe(trials_sr_std, n_trials)?;
     if track_len < 2 {
-        return 0.0;
+        return Ok(0.0);
     }
-    let sr_star = crate::deflated_sharpe::expected_max_sharpe(trials_sr_std, n_trials);
     // Normal-track PSR denominator: 1 - g3*sr + ((g4-1)/4)*sr^2 with g3=0, g4=3.
     let denom = (1.0 + 0.5 * sr * sr).max(1e-12).sqrt();
     let z = (sr - sr_star) * (track_len as f64 - 1.0).sqrt() / denom;
-    crate::stats::norm_cdf(z)
+    Ok(crate::stats::norm_cdf(z))
 }
 
 #[cfg(test)]
@@ -147,7 +166,7 @@ mod tests {
     #[test]
     fn reference_population_is_ordered_and_scores_a_dsr() {
         let b = HumanBaseline::skilled_trader();
-        let pop = b.reference_dsr_population(500, 50, 0.5);
+        let pop = b.reference_dsr_population(500, 50, 0.5).unwrap();
         assert_eq!(pop.len(), 3);
         assert!(
             pop[0] <= pop[1] && pop[1] <= pop[2],
@@ -162,19 +181,63 @@ mod tests {
     fn classify_dsr_brackets_the_band() {
         let b = HumanBaseline::skilled_trader();
         let (len, nt, disp) = (500, 50, 0.5);
-        let pop = b.reference_dsr_population(len, nt, disp);
+        let pop = b.reference_dsr_population(len, nt, disp).unwrap();
         // A DSR under the floor, inside the band, and over the ceiling classify right.
         assert_eq!(
-            b.classify_dsr(pop[0] - 0.1, len, nt, disp),
+            b.classify_dsr(pop[0] - 0.1, len, nt, disp).unwrap(),
             BaselineBand::Below
         );
         assert_eq!(
-            b.classify_dsr((pop[0] + pop[2]) / 2.0, len, nt, disp),
+            b.classify_dsr((pop[0] + pop[2]) / 2.0, len, nt, disp)
+                .unwrap(),
             BaselineBand::Within
         );
         assert_eq!(
-            b.classify_dsr(pop[2] + 1e-6, len, nt, disp),
+            b.classify_dsr(pop[2] + 1e-6, len, nt, disp).unwrap(),
             BaselineBand::Above
+        );
+    }
+
+    /// R02: a dispersion that is not a dispersion cannot place the human band.
+    ///
+    /// A negative `trials_sr_std` used to reach `expected_max_sharpe`'s
+    /// "nothing to deflate for" branch, zeroing the bar and lifting every
+    /// reference DSR toward 1.0, so an agent would be compared against a band
+    /// that had been quietly made easier.
+    #[test]
+    fn an_invalid_dispersion_cannot_place_the_band() {
+        let b = HumanBaseline::skilled_trader();
+        let expected = StatisticalError::InvalidParameter {
+            name: "trials_sr_std",
+            requirement: "must be finite and non-negative",
+        };
+        for bad in [-1.0, f64::NAN, f64::INFINITY] {
+            assert_eq!(b.reference_dsr_population(500, 50, bad), Err(expected));
+            assert_eq!(b.classify_dsr(0.9, 500, 50, bad), Err(expected));
+            // A short track is refused too: the boundary precedes the
+            // degenerate-length shortcut, so it cannot be stepped around.
+            assert_eq!(b.reference_dsr_population(1, 50, bad), Err(expected));
+        }
+    }
+
+    /// R02 guard: the valid-input population and its classification are the
+    /// numbers the board publishes, so they are pinned exactly.
+    #[test]
+    fn valid_baseline_inputs_return_the_same_numbers() {
+        let b = HumanBaseline::skilled_trader();
+        let pop = b.reference_dsr_population(500, 50, 0.5).unwrap();
+        let sr_star = crate::deflated_sharpe::expected_max_sharpe(0.5, 50).unwrap();
+        let expect = |sr: f64| {
+            let denom = (1.0 + 0.5 * sr * sr).max(1e-12).sqrt();
+            crate::stats::norm_cdf((sr - sr_star) * (500.0_f64 - 1.0).sqrt() / denom)
+        };
+        assert_eq!(pop[0], expect(b.floor_sharpe));
+        assert_eq!(pop[1], expect(b.median_sharpe));
+        assert_eq!(pop[2], expect(b.ceiling_sharpe));
+        // A track too short to score still reports the historical 0.0 band.
+        assert_eq!(
+            b.reference_dsr_population(1, 50, 0.5).unwrap(),
+            vec![0.0; 3]
         );
     }
 }

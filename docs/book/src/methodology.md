@@ -18,7 +18,7 @@ eligible = DSR ≥ dsr_bar          (survives multiple-testing deflation)
 ```
 
 Eligible agents sort by the **rank key** (Deflated Sharpe by default, or Alpha).
-Ineligible agents sort last, by raw return, for display only — raw return never
+Ineligible agents sort last, by raw return, for display only; raw return never
 buys rank.
 
 A submission may also **declare a mandate** (see
@@ -33,13 +33,13 @@ inside each family. Those groups never deduplicate trials or enter the composite
 score. See [Candidate lineage diagnostics](candidate-lineage.md).
 
 The composite also *reports* (without gating, to keep the default behaviour
-stable): alpha/beta attribution vs the field, calibration (Brier), edge half-life,
+stable): alpha/beta attribution vs the field, calibration (Brier), edge half-life (per-window return drift, not information-coefficient decay),
 the field-wide Reality Check p-value, the Romano–Wolf step-down verdict, max
 drawdown, turnover, Pareto-optimality, confidence-weighted return, cost-efficiency,
 rolling worst-case Sharpe, selection robustness, and the **Sortino ratio** with its
-downside deviation (excess return per unit of *downside* volatility, MAR = 0 — it
+downside deviation (excess return per unit of *downside* volatility, MAR = 0). It
 rewards an edge that doesn't arrive with downside churn, where the Sharpe penalizes
-all volatility symmetrically).
+all volatility symmetrically.
 
 The following sections explain each gate, then one reported-only diagnostic that
 the pooled gates cannot see.

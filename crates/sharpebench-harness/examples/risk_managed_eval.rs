@@ -14,6 +14,13 @@
 //! Deterministic: no clock, no ambient RNG. Run with
 //!
 //!   cargo run --release -p sharpebench-harness --example risk_managed_eval -- <out.jsonl>
+//!
+//! The declared support is all nine datasets, the N-sensitivity block on its
+//! anchor dataset and the perturbation report on its own. A dataset that failed
+//! to load, or a missing perturbation section, used to warn on stderr and still
+//! reach the ordinary output filename. The run is now staged through
+//! `<out>.partial` and published only when every declared section is present;
+//! otherwise it refuses with a non-zero exit.
 
 use std::env;
 use std::fs::File;
@@ -25,6 +32,10 @@ use sharpebench_harness::perturb::perturbed_field;
 use sharpebench_harness::{luck_floor, run_agent, TeamMember};
 use sharpebench_sim::agent::RiskManaged;
 use sharpebench_sim::{walk_forward, Agent, BuyAndHold, CostModel, Dataset, Window};
+
+#[path = "support/declared_support.rs"]
+mod declared_support;
+use declared_support::{or_refuse, refuse, require_declared_member, require_evaluated};
 
 /// Frozen datasets and their periods per year — same table as `evidence_sweep`.
 const DATASETS: &[(&str, &str, f64)] = &[
@@ -119,16 +130,33 @@ fn main() {
         eprintln!("usage: risk_managed_eval <out.jsonl>");
         std::process::exit(2);
     });
-    let mut w = BufWriter::new(File::create(&out).expect("create output"));
+    // The two named constants are support this producer promises to report on.
+    // Checking them against the dataset table before an output file exists keeps
+    // a renamed dataset from becoming a silently absent section.
+    let declared: Vec<&str> = DATASETS.iter().map(|(name, ..)| *name).collect();
+    or_refuse(require_declared_member(
+        "n-sensitivity dataset",
+        &declared,
+        N_SENSITIVITY_DATASET,
+    ));
+    or_refuse(require_declared_member(
+        "perturbation dataset",
+        &declared,
+        PERTURB_DATASET,
+    ));
+    let planned: Vec<String> = declared.iter().map(|d| (*d).to_string()).collect();
+    let partial = format!("{out}.partial");
+    let mut w = BufWriter::new(File::create(&partial).expect("create partial output"));
+    let mut evaluated: Vec<String> = Vec::new();
+    let mut n_sensitivity_rows = 0usize;
 
     for (name, tf, ppy) in DATASETS {
         let path = format!("data/{name}.csv");
         let data = match Dataset::from_csv_file(&path) {
             Ok(d) => d,
-            Err(e) => {
-                eprintln!("skip {name}: {e}");
-                continue;
-            }
+            // Dropping a declared dataset leaves the remaining rows under a
+            // filename that claims the whole nine-dataset evaluation.
+            Err(e) => refuse(format!("declared dataset {name} did not load: {e}")),
         };
         let n = data.len();
         let windows = windows_for(n);
@@ -250,13 +278,24 @@ fn main() {
                     };
                     serde_json::to_writer(&mut w, &rec).expect("write record");
                     w.write_all(b"\n").expect("newline");
+                    n_sensitivity_rows += 1;
                 }
             }
         }
+        if !scored.is_empty() {
+            evaluated.push((*name).to_string());
+        }
+    }
+    or_refuse(require_evaluated("dataset", &planned, &evaluated));
+    if n_sensitivity_rows == 0 {
+        refuse(format!(
+            "no N-sensitivity records for declared anchor {N_SENSITIVITY_DATASET}"
+        ));
     }
 
     // Perturbation robustness report on one frozen dataset.
     let path = format!("data/{PERTURB_DATASET}.csv");
+    let mut perturbation_rows = 0usize;
     match Dataset::from_csv_file(&path) {
         Ok(data) => {
             let windows = windows_for(data.len());
@@ -308,11 +347,23 @@ fn main() {
                 };
                 serde_json::to_writer(&mut w, &rec).expect("write record");
                 w.write_all(b"\n").expect("newline");
+                perturbation_rows += 1;
             }
         }
-        Err(e) => eprintln!("skip perturbation report: {e}"),
+        // The self-audit's "no perturbed windows" limit is closed by this
+        // section existing, so a skipped report must not be published as one.
+        Err(e) => refuse(format!(
+            "declared perturbation dataset {PERTURB_DATASET} did not load: {e}"
+        )),
+    }
+    if perturbation_rows == 0 {
+        refuse(format!(
+            "the perturbation report on {PERTURB_DATASET} produced no rows"
+        ));
     }
 
     w.flush().expect("flush");
+    drop(w);
+    std::fs::rename(&partial, &out).expect("publish complete evaluation atomically");
     eprintln!("\nwrote {out}");
 }

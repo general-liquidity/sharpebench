@@ -15,6 +15,16 @@
 //! optional (`center: false` by default) — for raw return streams the direction
 //! is the strategy; centering would conflate it with Pearson.
 //!
+//! **Comparison is positional, and the dates are the caller's contract.** Streams
+//! are paired by index and nothing here reads a date, so index `i` is the same
+//! observation in both streams only if the caller made it so. Two streams that cover
+//! different dates, or the same dates with one starting a period late, produce a
+//! similarity between observations that never coexisted. Unequal lengths are
+//! truncated to the shorter side rather than intersected on a common calendar, which
+//! is the same hazard in a quieter form. Screen streams that already share a dated
+//! support; where that cannot be arranged, treat the number as uninformative rather
+//! than low.
+//!
 //! Pure and deterministic: fixed index-order reduction, no RNG.
 
 use serde::{Deserialize, Serialize};
@@ -22,9 +32,10 @@ use serde::{Deserialize, Serialize};
 use crate::stats::mean;
 
 /// Cosine similarity of two series, paired by index (extra tail entries on the
-/// longer side are ignored). When `center` is true each series is de-meaned first
-/// (which makes this Pearson). `None` — never `NaN` — when there are fewer than 2
-/// pairs or either series has zero norm (direction is undefined there).
+/// longer side are ignored, with no check that the retained pairs are the same dated
+/// observations: see the module header). When `center` is true each series is
+/// de-meaned first (which makes this Pearson). `None` — never `NaN` — when there are
+/// fewer than 2 pairs or either series has zero norm (direction is undefined there).
 pub fn cosine_similarity(a: &[f64], b: &[f64], center: bool) -> Option<f64> {
     let n = a.len().min(b.len());
     if n < 2 {
@@ -75,6 +86,10 @@ pub const DEFAULT_REDISCOVERY_THRESHOLD: f64 = 0.97;
 /// strategy streams. Flags rediscovery when the maximum `|cosine|` similarity
 /// against any known stream meets or exceeds `threshold`.
 ///
+/// Advisory. The verdict is a review prompt, not an eligibility gate: a high
+/// similarity is a reason for a human to look at a submission, and the comparison it
+/// rests on is only as sound as the caller's dated alignment of the two streams.
+///
 /// `center` is forwarded to [`cosine_similarity`]; pass `false` (the default
 /// semantics) to compare raw direction, `true` to de-mean first.
 pub fn classify_rediscovery(
@@ -124,6 +139,19 @@ pub const CLONE_COLLAPSE_COSINE: f64 = 0.995;
 /// exceeds `threshold`, and clusters are the connected components of that
 /// relation (single linkage). A stream with an undefined similarity to every
 /// other, a zero-norm one for instance, is its own singleton.
+///
+/// **Single linkage is transitive, and membership is not mutual similarity.** A
+/// cluster asserts that its members are *connected* through a chain of pairs that
+/// each cleared `threshold`, not that every pair inside it did. Streams at 0.996 to
+/// their neighbour along a chain land in one cluster even though the two endpoints
+/// sit well below the threshold to each other, and a long enough chain of small
+/// steps joins streams that are not near-clones at all. That is the intended
+/// trade-off for the vote collapse it feeds: an agent that could break a puppet ring
+/// by interpolating between its members would defeat a mutual-similarity rule, and
+/// over-merging a chain costs the field a vote while under-merging one lets a ring
+/// manufacture dispersion. Read a cluster as "reachable at this threshold", and use
+/// the pairwise [`cosine_similarity`] when the question is whether two specific
+/// streams are clones.
 ///
 /// The partition is a property of the pairwise similarities alone, so it does
 /// not depend on submission order: every component is listed by ascending
@@ -288,6 +316,30 @@ mod tests {
         let streams = vec![b.clone(), a.clone(), flat, a2, a_inv];
         let clusters = clone_clusters(&streams, DEFAULT_REDISCOVERY_THRESHOLD, false);
         assert_eq!(clusters, vec![vec![0], vec![1, 3, 4], vec![2]]);
+    }
+
+    #[test]
+    fn single_linkage_joins_endpoints_that_are_not_clones_of_each_other() {
+        // Three directions 4 degrees apart in a plane. Neighbours clear the collapse
+        // threshold; the two endpoints, 8 degrees apart, do not. Single linkage puts
+        // all three in one cluster, so cluster membership means "reachable at this
+        // threshold", not "similar to every other member".
+        let step = 4.0_f64.to_radians();
+        let dir = |k: f64| vec![(k * step).cos(), (k * step).sin()];
+        let (a, b, c) = (dir(0.0), dir(1.0), dir(2.0));
+        let ab = cosine_similarity(&a, &b, false).unwrap();
+        let bc = cosine_similarity(&b, &c, false).unwrap();
+        let ac = cosine_similarity(&a, &c, false).unwrap();
+        assert!(ab >= CLONE_COLLAPSE_COSINE, "neighbour ab={ab}");
+        assert!(bc >= CLONE_COLLAPSE_COSINE, "neighbour bc={bc}");
+        assert!(
+            ac < CLONE_COLLAPSE_COSINE,
+            "endpoints must not be clones: ac={ac}"
+        );
+        assert_eq!(
+            clone_clusters(&[a, b, c], CLONE_COLLAPSE_COSINE, false),
+            vec![vec![0, 1, 2]]
+        );
     }
 
     #[test]

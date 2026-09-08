@@ -29,6 +29,8 @@
 //! produces the diagnostic that names the offending field.
 #![forbid(unsafe_code)]
 
+pub mod canonical;
+
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
@@ -114,11 +116,17 @@ impl DecisionCost {
     /// with no dollars reported it falls back to total billable tokens
     /// (`tokens_in + tokens_out`). Reasoning tokens are a sub-breakdown of the
     /// output and are not added again.
+    ///
+    /// The counts arrive from the entrant over an untrusted transport and no
+    /// semantic rule bounds them, so the total saturates rather than adding
+    /// unchecked: an unchecked sum panics the sweep where overflow checks are on
+    /// and wraps toward a near-zero cost where they are off, and a wrapped cost
+    /// flatters the cost-normalized columns of the agent that reported it.
     pub fn billable_units(&self) -> f64 {
         if self.cost_usd > 0.0 {
             self.cost_usd
         } else {
-            (self.tokens_in + self.tokens_out) as f64
+            self.tokens_in.saturating_add(self.tokens_out) as f64
         }
     }
 }
@@ -404,6 +412,37 @@ mod tests {
         assert!((parsed.orders[0].confidence - 0.5).abs() < 1e-12);
         // A legacy decision omits `cost` entirely (back-compat → None).
         assert!(parsed.cost.is_none());
+    }
+
+    /// An entrant supplies its own token counts over an untrusted transport, so
+    /// the reduction has to survive the extremes of the declared `u64` type. An
+    /// unchecked `tokens_in + tokens_out` panics the sweep where overflow checks
+    /// are on and wraps to a near-zero cost where they are off, which is the
+    /// favorable direction for the cost-normalized columns.
+    #[test]
+    fn extreme_token_counts_saturate_instead_of_wrapping() {
+        let wire = format!(
+            r#"{{"orders":[],"reasoning":"","cost":{{"cost_usd":0.0,
+            "tokens_in":{},"tokens_out":1,"reasoning_tokens":0}}}}"#,
+            u64::MAX
+        );
+        let decision: Decision = serde_json::from_str(&wire).expect("extremes are valid u64 wire");
+        let observation = MarketObservation {
+            date: "2026-01-01".to_string(),
+            cash: 0.0,
+            symbols: Vec::new(),
+            portfolio: Vec::new(),
+        };
+        assert!(
+            decision.validate_for(&observation).is_ok(),
+            "no semantic rule rejects extreme token counts, so the reduction must hold"
+        );
+        let cost = decision.cost.expect("cost channel present");
+        assert_eq!(
+            cost.billable_units(),
+            u64::MAX as f64,
+            "the token total saturates at the type maximum, never wraps toward cheap"
+        );
     }
 
     #[test]

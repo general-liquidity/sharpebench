@@ -8,14 +8,46 @@ not run an agent, retrieve documents, or own a store.
 
 The required arms are:
 
-1. **baseline** — no memory, the performance floor;
-2. **retrieval** — the system under test; and
-3. **oracle** — gold records only, the attainable ceiling.
+1. **baseline**: no memory, the performance floor;
+2. **retrieval**: the system under test; and
+3. **oracle**: gold records only, the attainable ceiling.
 
 The report includes retrieval lift, stationary-bootstrap significance through
 `sharpebench-stats`, fraction of the oracle ceiling, and cost-normalized lift per
 extra token and unit of latency. A larger raw lift can therefore rank below a
 smaller one if it costs much more to obtain.
+
+### Ablation input contract
+
+`ablation_report` validates its inputs at the boundary and returns an error
+rather than a number derived from inputs it cannot score. It requires all three
+arms to be non-empty, correctly tagged, and of equal length: the lift is paired
+per task, and the oracle mean is a ceiling for the same task population, not for
+a different task mix. Equal lengths cannot prove that the caller aligned the same
+task identities in the same order; that alignment stays the caller's contract and
+the crate states it rather than assuming it away. Every outcome score and every
+reported token/latency cost must be finite, and `alpha` must be finite and inside
+`(0, 1)`. `poisoning_report` applies the same finite-score, finite-cost and alpha
+checks to its clean and poisoned arms.
+
+`fraction_of_ceiling` is `retrieval_lift / (mean(oracle) - mean(baseline))` and
+is floored at `0.0` whenever the oracle is no better than baseline. An oracle at
+or below the baseline has not established a ceiling, so no fraction of one was
+captured. Dividing by a negative gap instead returns a sign-flipped ratio, which
+reports a retrieval arm that also lost ground as having captured a favorable
+positive share of the ceiling.
+
+#### Migration from the unmatched-oracle report
+
+An oracle arm of a different length used to be accepted, and `fraction_of_ceiling`
+then divided a lift measured on one task population by a gap measured on another.
+That input is now an error. Supply the oracle scores for the same tasks, in the
+same order, as the baseline and retrieval arms. Do not pad or truncate an oracle
+series to clear the length check: that substitutes a fabricated ceiling for the
+missing measurement. A previously reported `fraction_of_ceiling` computed from an
+unmatched oracle, or from an oracle below baseline, is not corrected by re-running
+the same inputs through the new code, because the new code refuses the first case
+and floors the second.
 
 ## Integrity legs
 

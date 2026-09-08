@@ -182,20 +182,38 @@ fn print_report(report: &ForecastQualityReport) {
     if !report.comparisons.is_empty() {
         println!("\nexact-common-support comparisons (loss A minus loss B):");
         for comparison in &report.comparisons {
-            println!(
-                "  {} vs {}  diff={:.6}  CI=[{:.6}, {:.6}]  Holm p={:.6}{}",
-                comparison.agent_a,
-                comparison.agent_b,
-                comparison.mean_loss_difference,
+            // A withheld comparison prints why, not a blank where a number
+            // should be. The interval and the p-value are unavailable together
+            // whenever the block resampling law cannot resolve the level being
+            // claimed, so the operator sees the reason rather than inferring a
+            // failure from missing output.
+            match (
                 comparison.confidence_lower,
                 comparison.confidence_upper,
                 comparison.holm_adjusted_p_value,
-                if comparison.familywise_significant {
-                    "  significant"
-                } else {
-                    ""
-                }
-            );
+            ) {
+                (Some(low), Some(high), Some(p)) => println!(
+                    "  {} vs {}  diff={:.6}  CI=[{low:.6}, {high:.6}]  Holm p={p:.6}{}",
+                    comparison.agent_a,
+                    comparison.agent_b,
+                    comparison.mean_loss_difference,
+                    if comparison.familywise_significant {
+                        "  significant"
+                    } else {
+                        ""
+                    }
+                ),
+                _ => println!(
+                    "  {} vs {}  diff={:.6}  inference withheld: {}",
+                    comparison.agent_a,
+                    comparison.agent_b,
+                    comparison.mean_loss_difference,
+                    comparison
+                        .inference_error
+                        .as_deref()
+                        .unwrap_or("insufficient settlement support")
+                ),
+            }
         }
     }
 }

@@ -28,6 +28,8 @@
 //!   by the midrank convention, i.e. Pearson correlation of the tied ranks
 //!   (Kendall, M. G., *Rank Correlation Methods*, 1948).
 
+use crate::validation::finite_observations;
+
 /// Turn continuous severities into decisions at a threshold.
 ///
 /// `values[i] >= threshold` becomes `true`. This is the binarizer that makes a
@@ -98,8 +100,16 @@ fn pearson(x: &[f64], y: &[f64]) -> Option<f64> {
 /// is deliberately not used. `None` when fewer than two pairs are supplied, when
 /// the lengths differ, or when either series is constant (a constant series has
 /// no ordering to correlate).
+///
+/// `None` when either series carries a non-finite value: a NaN sorts as equal to
+/// everything under `partial_cmp` and an infinity has no position on the severity
+/// scale, so the midranks would be an artifact of input order rather than a
+/// measurement. Invalid input is not an agreement score.
 pub fn spearman_rho(x: &[f64], y: &[f64]) -> Option<f64> {
     if x.len() != y.len() {
+        return None;
+    }
+    if finite_observations(x).is_err() || finite_observations(y).is_err() {
         return None;
     }
     pearson(&midranks(x), &midranks(y))
@@ -194,7 +204,10 @@ impl GateAgreement {
 /// counts the disagreements that let something through, which is the direction
 /// that costs money.
 ///
-/// `None` when the series are empty or their lengths disagree.
+/// `None` when the series are empty, their lengths disagree, or any supplied
+/// severity or the threshold is non-finite. A gate severity that is not a real
+/// number has no side of the operating point, so neither the verdict split nor
+/// the rank leg is defined.
 pub fn gate_vs_human(
     gate_severity: &[f64],
     gate_threshold: f64,
@@ -205,8 +218,11 @@ pub fn gate_vs_human(
     if n == 0 || n != human_verdict.len() {
         return None;
     }
+    if !gate_threshold.is_finite() || finite_observations(gate_severity).is_err() {
+        return None;
+    }
     if let Some(hs) = human_severity {
-        if hs.len() != n {
+        if hs.len() != n || finite_observations(hs).is_err() {
             return None;
         }
     }

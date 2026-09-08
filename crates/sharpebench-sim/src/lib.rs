@@ -23,7 +23,10 @@ pub use costs::{CostModel, CostProfile, ExecutionNoise};
 pub use data::Dataset;
 pub use engine::{run_backtest, Window};
 pub use env::{EnvState, Scenario, StepInfo, StepResult, TradingEnv};
-pub use external::{ExternalAgent, HttpAgent, AGENT_ENV_PASSTHROUGH};
+pub use external::{
+    agent_env_identity, effective_agent_env_identity, is_credential_name, ExternalAgent, HttpAgent,
+    AGENT_ENV_PASSTHROUGH, AGENT_ENV_SECRET,
+};
 pub use trajectory::{replay_run, replay_submission, run_backtest_capture};
 pub use transport::{
     decide_with_retry, CircuitBreaker, DecideError, TransportDiagnostics, TransportHealth,

@@ -122,7 +122,11 @@ impl TradingEnv {
         self.cursor.min(self.end.saturating_sub(1))
     }
 
-    /// Snapshot the mutable sim state (time cursor + book) in O(1) — no replay.
+    /// Snapshot the mutable sim state (time cursor + book) without replaying.
+    ///
+    /// The copy is not constant time: it clones the book, whose holdings, pending
+    /// orders and accumulated trace all grow during a run. What is saved is the
+    /// replay, not the copy.
     /// The returned [`EnvState`] is a value: clone it, stash it, restore it later
     /// with [`restore_state`](Self::restore_state) to fork the env from this exact
     /// point (e.g. tree search / what-if rollouts over the same frozen data). The
@@ -145,7 +149,7 @@ impl TradingEnv {
     }
 }
 
-/// An O(1), serializable snapshot of a [`TradingEnv`]'s mutable state — the time
+/// A serializable snapshot of a [`TradingEnv`]'s mutable state: the time
 /// cursor plus the full `Book` (holdings, cash, RNG cursor, decision trace, prior
 /// NAV). Everything an env needs to resume an exact trajectory; the immutable
 /// config (frozen data, window, costs, seed) lives in the env and is not copied.
@@ -273,7 +277,7 @@ mod tests {
         }
     }
 
-    /// O(1) snapshot/restore reproduces an exact forward trajectory: step N, snap,
+    /// Snapshot and restore reproduce an exact forward trajectory: step N, snap,
     /// step on, then restore and re-step — the observations after the snapshot point
     /// are byte-identical to the first continuation (RNG cursor included). This is
     /// the replay-free fork the closed loop cannot offer.

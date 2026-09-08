@@ -18,22 +18,41 @@
 //! future data and the total number of recalls, and returns a compliance score per
 //! arm (`1 - violations/total`), a per-arm leak flag, and the suite-level rollup.
 //! Pure exact counting - no bootstrap needed, so it is trivially deterministic.
+//!
+//! **An arm that made no recalls was not audited.** Its compliance is 1.0 because
+//! nothing violated the boundary, which is a vacuous pass and not evidence of a
+//! compliant retrieval layer: an arm whose recall audit was never wired up, or one
+//! whose recalls were dropped upstream, looks exactly like a perfectly clean arm in
+//! the compliance score. The unmeasured arms are therefore reported separately in
+//! [`PitReport::per_arm_unmeasured`] and [`PitReport::any_unmeasured`], and a clean
+//! verdict is only as strong as the recall counts behind it.
 
 /// The scored PIT-correctness audit, one entry per arm in the caller's arm order.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PitReport {
     /// `1 - violations/total` per arm: the fraction of recalls that respected the
-    /// point-in-time boundary. 1.0 for an arm that made no recalls (vacuously
-    /// compliant). In `[0, 1]`.
+    /// point-in-time boundary. 1.0 for an arm that made no recalls, which is a
+    /// vacuous pass rather than a measurement: read
+    /// [`PitReport::per_arm_unmeasured`] alongside it. In `[0, 1]`.
     pub per_arm_compliance: Vec<f64>,
+    /// Per arm: whether the arm made no recalls at all, so its compliance score is
+    /// vacuous. Distinguishes "audited and clean" from "nothing was audited".
+    pub per_arm_unmeasured: Vec<bool>,
     /// Per arm: whether the arm leaked future data at least once (`violations > 0`).
     /// The caller reads the retrieval arm's entry to answer "did retrieval leak?".
     pub per_arm_leaked: Vec<bool>,
     /// The lowest per-arm compliance score - the worst offender in the suite.
+    /// Unmeasured arms contribute a vacuous 1.0, so they never lower it.
     pub worst_compliance: f64,
     /// Whether any arm leaked future data.
     pub any_leak: bool,
-    /// Whether every arm was fully PIT-compliant (no arm leaked).
+    /// Whether at least one arm made no recalls, so the suite verdict rests partly
+    /// on a vacuous pass. Not a failure, and deliberately not folded into
+    /// [`PitReport::fully_compliant`]: it says the evidence is thinner than the
+    /// verdict looks.
+    pub any_unmeasured: bool,
+    /// Whether every arm was fully PIT-compliant (no arm leaked). An arm with no
+    /// recalls cannot leak, so this is only a claim about the arms that recalled.
     pub fully_compliant: bool,
 }
 
@@ -68,6 +87,7 @@ pub fn pit_correctness_report(
 
     let mut per_arm_compliance = Vec::with_capacity(per_arm_total_recalls.len());
     let mut per_arm_leaked = Vec::with_capacity(per_arm_total_recalls.len());
+    let mut per_arm_unmeasured = Vec::with_capacity(per_arm_total_recalls.len());
     for (i, (&violations, &total)) in per_arm_lookahead_violations
         .iter()
         .zip(per_arm_total_recalls.iter())
@@ -85,6 +105,7 @@ pub fn pit_correctness_report(
         };
         per_arm_compliance.push(compliance);
         per_arm_leaked.push(violations > 0);
+        per_arm_unmeasured.push(total == 0);
     }
 
     let worst_compliance = per_arm_compliance
@@ -92,12 +113,15 @@ pub fn pit_correctness_report(
         .copied()
         .fold(f64::INFINITY, f64::min);
     let any_leak = per_arm_leaked.iter().any(|&l| l);
+    let any_unmeasured = per_arm_unmeasured.iter().any(|&u| u);
 
     Ok(PitReport {
         per_arm_compliance,
+        per_arm_unmeasured,
         per_arm_leaked,
         worst_compliance,
         any_leak,
+        any_unmeasured,
         fully_compliant: !any_leak,
     })
 }
@@ -137,6 +161,28 @@ mod tests {
         assert!((rep.per_arm_compliance[0] - 1.0).abs() < EPS);
         assert!(!rep.per_arm_leaked[0]);
         assert!(rep.fully_compliant);
+    }
+
+    #[test]
+    fn an_unaudited_arm_is_reported_separately_from_a_clean_one() {
+        // Arm 0 recalled 40 times and leaked nothing; arm 1 never recalled. Both
+        // score 1.0, and only one of them is evidence of anything.
+        let rep = pit_correctness_report(&[0, 0], &[40, 0]).unwrap();
+        assert!((rep.per_arm_compliance[0] - 1.0).abs() < EPS);
+        assert!((rep.per_arm_compliance[1] - 1.0).abs() < EPS);
+        assert!(!rep.per_arm_unmeasured[0], "arm 0 was audited");
+        assert!(rep.per_arm_unmeasured[1], "arm 1 made no recalls");
+        assert!(rep.any_unmeasured);
+        // The vacuous pass does not change the leak verdict either way.
+        assert!(rep.fully_compliant);
+        assert!(!rep.any_leak);
+    }
+
+    #[test]
+    fn a_fully_audited_suite_reports_nothing_unmeasured() {
+        let rep = pit_correctness_report(&[0, 8, 0], &[10, 40, 5]).unwrap();
+        assert!(!rep.any_unmeasured);
+        assert!(rep.per_arm_unmeasured.iter().all(|&u| !u));
     }
 
     #[test]

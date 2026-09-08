@@ -5,8 +5,18 @@ using **OIDC Trusted Publishing** — there are **no tokens to store or rotate**
 the one-time crate claim, below). Each registry trusts this workflow directly; GitHub
 mints a short-lived identity per run.
 
-A tag (`v*`) always builds and attaches the signed static **musl** binary to the
-GitHub Release. The crates.io and npm jobs only run when you opt them in.
+A tag (`v*`) always builds and attaches the static **musl** binary, with a SLSA
+build provenance attestation, to the GitHub Release. The crates.io and npm jobs only
+run when you opt them in.
+
+**Nothing publishes over a red CI run.** The `require_green_ci` job sits between
+`validate_tag` and every publishing job. It asks the GitHub API for
+[`ci.yml`](.github/workflows/ci.yml) runs at the exact commit the tag resolves to and
+proceeds only once one of them has concluded `success`. Because the release driver
+pushes the version commit and its tag together, that CI run is normally still in
+flight when the release workflow starts, so the job waits up to an hour for it. A run
+that is cancelled, red, or never created blocks the release. There is no bypass
+input, and a manual `workflow_dispatch` recovery run is gated the same way.
 
 ## What ships where
 
@@ -157,3 +167,24 @@ The `binary` job always runs on a `v*` tag (no opt-in). It builds a fully static
 and uploads both via `softprops/action-gh-release@v3` to the Release for that tag.
 `cargo install sharpebench` (once the crate is published) is the alternate install
 path.
+
+The job also records a keyless SLSA build provenance attestation for the binary and
+its checksum. That attestation, not the checksum, is what ties an artifact to this
+repository and commit:
+
+```bash
+gh attestation verify sharpebench-x86_64-linux-musl --repo general-liquidity/sharpebench
+```
+
+### What `sharpebench self-update` checks
+
+The optional `self-update` subcommand downloads the release binary and the `.sha256`
+file published beside it, compares the two, and refuses to install on a mismatch.
+
+That comparison is an **integrity** check. It catches a truncated or corrupted
+download and an asset paired with the wrong checksum. It is **not** an authenticity
+check: the checksum is served from the same release, over the same connection, by
+the same host as the binary, so anyone able to alter one can alter the other. The
+updater verifies no signature and pins no key or trust root, and it does not consult
+the SLSA attestation above. Run `gh attestation verify` yourself if you need to
+establish that a downloaded binary came from this repository.

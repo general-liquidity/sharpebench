@@ -62,13 +62,7 @@
     "process_warnings": 0,
     "econ_rationality_score": null,
     "econ_dominance_violations": null,
-    "role_contributions": [
-      {
-        "role": "idle",
-        "beta_to_team": 1.0,
-        "mean_return": 0.0020197983333333333
-      }
-    ]
+    "role_contributions": []
   },
   {
     "agent_id": "lucky-yolo",
@@ -133,13 +127,7 @@
     "process_warnings": 0,
     "econ_rationality_score": null,
     "econ_dominance_violations": null,
-    "role_contributions": [
-      {
-        "role": "idle",
-        "beta_to_team": 1.0,
-        "mean_return": 0.0041108751
-      }
-    ]
+    "role_contributions": []
   },
   {
     "agent_id": "ungated-bot",
@@ -204,17 +192,6 @@
     "process_warnings": 0,
     "econ_rationality_score": null,
     "econ_dominance_violations": null,
-    "role_contributions": [
-      {
-        "role": "idle",
-        "beta_to_team": 1.0,
-        "mean_return": 0.0020197983333333333
-      },
-      {
-        "role": "block_violating",
-        "beta_to_team": 1.0,
-        "mean_return": 0.0020197983333333333
-      }
-    ]
+    "role_contributions": []
   }
 ]

@@ -51,9 +51,77 @@ jobs:
           RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: python scripts/release.py verify-tag "$RELEASE_TAG" --github-output "$GITHUB_OUTPUT"
 
+  # A tag proves what the tree says, not that the tree works. Without this job every
+  # publishing job hung off validate_tag alone, so a tag on a commit whose ci.yml run
+  # was red, cancelled or absent still published to crates.io, npm and PyPI. Five of
+  # the first nine tags were cut that way. This job is the only thing between a tag
+  # and the registries, and it has no bypass input: a manual workflow_dispatch
+  # recovery run resolves the same commit through validate_tag and is gated the same.
+  #
+  # The release driver pushes the version commit and its tag together, so ci.yml for
+  # that commit is usually still running when this job starts. Waiting for it to
+  # finish is the point; failing instantly on "no completed run yet" would block every
+  # legitimate release instead of only the red ones.
+  require_green_ci:
+    name: CI is green for the tagged commit
+    needs: [validate_tag]
+    runs-on: ubuntu-latest
+    # CI's own slowest leg (`build · test`) is capped at 45 minutes and queues behind
+    # runner availability; allow for that plus a margin before giving up.
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read # list ci.yml workflow runs for the release commit
+    steps:
+      - name: Require a successful ci.yml run at the exact release commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RELEASE_COMMIT: ${{ needs.validate_tag.outputs.validated_commit }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$RELEASE_COMMIT" ]; then
+            echo "::error::validate_tag produced no commit; refusing to publish"
+            exit 1
+          fi
+          echo "release commit: $RELEASE_COMMIT"
+
+          # head_sha pins the query to this exact commit. A green run on any other
+          # commit, the release commit's own parent included, does not count.
+          QUERY="repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$RELEASE_COMMIT&per_page=100"
+          JQ='.workflow_runs[] | [.status, (.conclusion // "pending"), .html_url] | @tsv'
+
+          # 80 attempts at 45s is about 60 minutes, inside the job timeout above.
+          for attempt in $(seq 1 80); do
+            gh api --paginate "$QUERY" --jq "$JQ" > ci-runs.tsv
+
+            if [ -s ci-runs.tsv ]; then
+              echo "ci.yml runs at $RELEASE_COMMIT:"
+              cat ci-runs.tsv
+
+              if awk -F'\t' '$1 == "completed" && $2 == "success" { ok = 1 } END { exit ok ? 0 : 1 }' ci-runs.tsv; then
+                echo "CI concluded successfully for $RELEASE_COMMIT"
+                exit 0
+              fi
+
+              # Every run for this commit has finished and none of them passed.
+              # More waiting cannot change that, so fail now, not at the timeout.
+              if ! awk -F'\t' '$1 != "completed" { pending = 1 } END { exit pending ? 0 : 1 }' ci-runs.tsv; then
+                echo "::error::every ci.yml run for $RELEASE_COMMIT has concluded and none concluded 'success'. Publishing is blocked. Fix CI on this commit and cut a new tag."
+                exit 1
+              fi
+            fi
+
+            echo "waiting for a completed ci.yml run at $RELEASE_COMMIT ($attempt/80)..."
+            sleep 45
+          done
+
+          echo "::error::timed out waiting for ci.yml to conclude for $RELEASE_COMMIT. No green CI run, so nothing was published. If CI never ran for this commit, push it to main or to a pull request, let it pass, then re-dispatch this workflow."
+          exit 1
   binary:
     name: static binary (musl)
-    needs: [validate_tag]
+    needs: [validate_tag, require_green_ci]
     runs-on: ubuntu-latest
     # Job-level permissions override the workflow-level block, so contents: write
     # must be restated here for the release-attach step.
@@ -113,7 +181,7 @@ jobs:
   crates:
     name: crates.io (12 sharpebench-* crates)
     if: ${{ vars.PUBLISH_CRATES == 'true' }}
-    needs: [validate_tag]
+    needs: [validate_tag, require_green_ci]
     runs-on: ubuntu-latest
     # A dedicated publishing environment (configure protection rules under
     # Settings → Environments → crates). Must match the crates.io trusted-publisher
@@ -173,7 +241,7 @@ jobs:
   npm:
     name: npm (@general-liquidity/sharpebench + -mcp)
     if: ${{ vars.PUBLISH_NPM == 'true' }}
-    needs: [validate_tag]
+    needs: [validate_tag, require_green_ci]
     runs-on: ubuntu-latest
     # Must match the npm trusted-publisher config for both packages.
     environment: npm
@@ -265,7 +333,7 @@ jobs:
   pypi:
     name: PyPI (sharpebench wheel)
     if: ${{ vars.PUBLISH_PYPI == 'true' }}
-    needs: [validate_tag]
+    needs: [validate_tag, require_green_ci]
     runs-on: ubuntu-latest
     # Must match the PyPI trusted-publisher config for the `sharpebench` project.
     environment: pypi
@@ -325,7 +393,7 @@ jobs:
   # directly, so an incomplete release fails the run instead of passing quietly.
   verify:
     name: verify every registry serves the release
-    needs: [validate_tag, crates, npm, pypi]
+    needs: [validate_tag, require_green_ci, crates, npm, pypi]
     # Recovery runs dispatched with release_tag must verify too; a recovery that
     # skips verification reports success without proving the registries serve it.
     if: always() && (startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != '')
@@ -335,21 +403,26 @@ jobs:
       - name: Fail if validation or a publish job failed
         env:
           VALIDATE_TAG_RESULT: ${{ needs.validate_tag.result }}
+          GREEN_CI_RESULT: ${{ needs.require_green_ci.result }}
           CRATES_RESULT: ${{ needs.crates.result }}
           NPM_RESULT: ${{ needs.npm.result }}
           PYPI_RESULT: ${{ needs.pypi.result }}
         run: |
           fail=0
-          for job in validate_tag crates npm pypi; do
+          # require_green_ci is checked here too: with every PUBLISH_* variable unset
+          # the registry assertions below are all no-ops, so a blocked release would
+          # otherwise reach this job and report green having proved nothing.
+          for job in validate_tag require_green_ci crates npm pypi; do
             case "$job" in
               validate_tag) result="$VALIDATE_TAG_RESULT" ;;
+              require_green_ci) result="$GREEN_CI_RESULT" ;;
               crates) result="$CRATES_RESULT" ;;
               npm) result="$NPM_RESULT" ;;
               pypi) result="$PYPI_RESULT" ;;
             esac
             echo "$job: $result"
-            if [ "$result" = "failure" ]; then
-              echo "::error::release job '$job' failed"; fail=1
+            if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
+              echo "::error::release job '$job' did not succeed ($result)"; fail=1
             fi
           done
           exit $fail

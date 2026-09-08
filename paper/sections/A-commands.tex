@@ -52,7 +52,7 @@ python scripts/data/derive_weekly.py --check
 cargo run --release -p sharpebench-harness \
   --example evidence_sweep -- out.jsonl [dataset] [dsr_bar]
 \end{verbatim}
-One JSON record per (dataset, configuration, agent), 512 per dataset. The grid, seeds, window rule, cost profile, effective trial count, dispersion-floor settings, both SPA values and both reliability configurations are emitted on every record. The optional arguments restrict a run to one dataset or one deflation bar so the grid can be split across processes; because every seed is pinned, concatenating the four bar shards in the documented order is identical to a serial run. \texttt{paper/evidence/assemble\_sweep.py} validates that assembly, and \texttt{analyze.py} reduces the records into the tables.
+One JSON record per (dataset, configuration, agent), 512 per dataset. The grid, seeds, window rule, cost profile, effective trial count, dispersion-floor settings, both SPA values and both reliability configurations are emitted on every record. The optional arguments restrict a run to one dataset or one deflation bar so the grid can be split across processes; because every seed is pinned, the four bar shards together carry the same set of records with the same contents as a serial run. \texttt{paper/evidence/assemble\_sweep.py} validates that assembly and writes the original JSON lines back out in a fixed grid-key order, which is not the serial producer's score-rank order, so the assembled file is identical to a serial run record for record and not byte for byte. \texttt{analyze.py} reduces the records into the tables.
 
 \paragraph{The risk-managed agent (\cref{sec:riskmanaged}), its deflation N-sensitivity, and the perturbation report (\cref{sec:perturb}).}
 \begin{verbatim}

@@ -56,6 +56,7 @@ pub mod rediscovery;
 pub mod regime_compare;
 pub mod roles;
 pub mod rolling;
+pub mod run_identity;
 pub mod selfaudit;
 
 pub use allocation::{
@@ -125,5 +126,6 @@ pub use roles::{
     attribute_behavior_roles, attribute_roles, elicit_behavior_roles, RoleContribution,
 };
 pub use rolling::{rolling_sharpe, RollingSharpe};
+pub use run_identity::{parse_keyed_field, KeyedField, RunIdentity, RunIdentityError, RunKey};
 pub use selection::{selection_robustness, SelectionRobustness};
 pub use selfaudit::{run_self_audit, SelfAuditReport};

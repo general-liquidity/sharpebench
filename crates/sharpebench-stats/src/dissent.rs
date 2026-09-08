@@ -31,6 +31,8 @@
 //! inside that range, the reading is bounded in [0, 1] by construction, with no
 //! clamping and no distributional assumption.
 
+use crate::validation::finite_observations;
+
 /// Default ceiling on rank movement for a board to be publishable as a ranking.
 ///
 /// 0.05 corresponds to tau-b >= 0.90. This is an operating requirement, not a
@@ -122,11 +124,17 @@ impl DissentReport {
 /// tied-pair counts within `x` and within `y` respectively. Pairs tied in both
 /// series contribute to neither numerator nor either denominator term.
 ///
-/// `None` when fewer than two values are supplied, when the lengths differ, or
-/// when either series is entirely tied (the denominator vanishes).
+/// `None` when fewer than two values are supplied, when the lengths differ, when
+/// either series carries a non-finite value, or when either series is entirely
+/// tied (the denominator vanishes). A NaN pair is already undefined under
+/// `partial_cmp`; an infinity compares but is not a score, and counting it as
+/// concordant or tied would report rank agreement that was never measured.
 pub fn kendall_tau_b(x: &[f64], y: &[f64]) -> Option<f64> {
     let n = x.len();
     if n < 2 || n != y.len() {
+        return None;
+    }
+    if finite_observations(x).is_err() || finite_observations(y).is_err() {
         return None;
     }
     let mut concordant = 0i64;

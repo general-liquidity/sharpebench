@@ -19,7 +19,7 @@ pub use sharpebench_protocol::DeclaredMandate;
 
 use crate::calibration::brier_score;
 use crate::comparison_sets::{comparison_set, restrict_to_shared, TaggedRun, TaggedSubmission};
-use crate::decay::edge_half_life;
+use crate::decay::return_drift_half_life;
 use crate::deflated_sharpe::{
     deflated_sharpe_ratio_against_null, expected_max_sharpe, probabilistic_sharpe_ratio,
     sharpe_ratio,
@@ -266,11 +266,15 @@ pub struct Mandate {
     /// more than this. It is the safety half of the "never catastrophic in any
     /// regime" verdict (see [`ScoreConfig::reliability_never_catastrophic`]).
     ///
-    /// Drawdown is multiplicative, so a run's own drawdown is never above the
-    /// pooled track's (every within-run peak-to-trough pair is also a pooled
-    /// pair). The bound therefore only bites when set below `max_drawdown`,
-    /// which is how it is meant to be used: a loose whole-track budget and a
-    /// tight per-regime one.
+    /// This bound is not implied by `max_drawdown`. Under plain concatenation a
+    /// run's own drawdown could not exceed the pooled track's, but execution
+    /// seeds are averaged within a window before the pooled track is formed
+    /// (see [`pooled_returns`]), and averaging can cancel a within-run trough
+    /// against the opposite move in a sibling seed. Two aligned runs
+    /// `[0.1, -0.2]` and `[-0.1, 0.2]` scored as two seeds of one window pool to
+    /// `[0.0, 0.0]`: pooled drawdown 0.0, worst-run drawdown 0.20. The two caps
+    /// are independent, and both are applied. The typical configuration is
+    /// still a loose whole-track budget with a tight per-regime one.
     #[serde(default = "default_max_run_drawdown")]
     pub max_run_drawdown: f64,
 }
@@ -782,6 +786,18 @@ pub struct CompositeScore {
     /// Why the single-series bootstrap was unavailable. Omitted for valid inputs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bootstrap_error: Option<String>,
+    /// Why the deflation family (the Deflated Sharpe, its bar and its bootstrap
+    /// interval) was unavailable. Omitted for valid inputs. When present,
+    /// `deflated_sharpe`, `deflation_bar_per_period`, `dsr_ci_low`,
+    /// `dsr_ci_high` and `dsr_se` are the no-skill floor rather than estimates,
+    /// `composite` is 0.0 and `rank_eligible` is always false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deflation_error: Option<String>,
+    /// Why the selection-robustness diagnostic was unavailable. Omitted for
+    /// valid inputs and for a submission that declared no candidates; when
+    /// present, `selection_median_dsr` and `selection_gap` are both `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selection_error: Option<String>,
     pub raw_mean_return: f64,
     pub rank_eligible: bool,
     /// The ranking key: the deflated Sharpe when eligible, else 0.0.
@@ -797,8 +813,15 @@ pub struct CompositeScore {
     /// Pairing is performed inside each run, never across a run boundary.
     #[serde(default)]
     pub calibration_observations: usize,
-    /// Edge durability: half-life (in runs) of the per-run edge. `None` if there
-    /// are too few runs or the edge isn't decaying.
+    /// Edge durability: half-life, **in market windows**, of the magnitude of
+    /// the realized mean return, with execution-seed replicates averaged into
+    /// their window first (see [`crate::decay::return_drift_half_life`]). `None`
+    /// if there are too few windows or the series isn't decaying.
+    ///
+    /// This measures *return drift*, not information-coefficient decay: mean
+    /// return also moves with sizing, cost and regime, and can decay while the
+    /// signal is intact. The serialized name is historical and unchanged; read
+    /// it as return drift.
     pub edge_half_life: Option<f64>,
     /// Field-wide data-snooping p-value (White's Reality Check), filled by [`rank`]:
     /// the probability the *leader's* edge is luck given how many agents were tried.
@@ -811,8 +834,10 @@ pub struct CompositeScore {
     pub mandate_ok: bool,
     /// The largest maximum drawdown of any single run, in [0, 1], each run
     /// measured from its own starting equity: the number the per-run mandate
-    /// bound is checked against. Never above `max_drawdown`, the pooled figure,
-    /// which also counts losing streaks that span runs. 0.0 with no runs.
+    /// bound is checked against. Not bounded by `max_drawdown`: the pooled
+    /// figure counts losing streaks that span runs, but it is also formed by
+    /// averaging execution seeds within a window, which can cancel a within-run
+    /// trough and leave this value above the pooled one. 0.0 with no runs.
     #[serde(default)]
     pub worst_run_drawdown: f64,
     /// Turnover proxy: average orders placed per run (trading frequency / capacity).
@@ -994,9 +1019,12 @@ pub struct CompositeScore {
     pub econ_dominance_violations: Option<usize>,
     /// Behavior-role attribution over the recorded runs (see
     /// [`crate::roles::attribute_behavior_roles`]): the regression loading of
-    /// each populated behavior class (clean-active / idle / warned /
-    /// block-violating) on the equal-weight team stream. Empty when not
-    /// estimable. Reported, never gating.
+    /// each estimable behavior class (clean-active / idle / warned /
+    /// block-violating) on the window-dated team stream, each class estimated on
+    /// the windows it occurs in. Empty when not estimable, which includes the
+    /// ordinary one-execution-per-window submission: behavior is then confounded
+    /// with the window and every loading would be 1.0 by construction. Reported,
+    /// never gating.
     #[serde(default)]
     pub role_contributions: Vec<RoleContribution>,
     /// The mandate the submitter declared (see [`DeclaredMandate`]), echoed so
@@ -1179,14 +1207,22 @@ fn score_agent_with(
     // footprint: an agent that tried 5000 configs to find this strategy faces a
     // higher bar than one that tried none (front-end data-snooping control).
     let effective_n_trials = cfg.n_trials.saturating_add(sub.in_sample_trials);
-    let dsr = deflated_sharpe_ratio_against_null(
-        &pooled,
-        effective_n_trials,
-        defl.null_mean_per_period,
-        defl.sr_std,
-    );
-    let deflation_bar_per_period =
-        defl.null_mean_per_period + expected_max_sharpe(defl.sr_std, effective_n_trials);
+    // The deflation family shares one boundary (the pooled track, the null and
+    // the trial dispersion), so it shares one error. On a refusal the agent is
+    // scored at the no-skill floor and `deflation_error` says why: substituting
+    // a number here is the exact failure R02 closes, since the favorable
+    // substitution (a zero deflation bar) is also the flattering one.
+    let deflation = expected_max_sharpe(defl.sr_std, effective_n_trials).and_then(|bar| {
+        let dsr = deflated_sharpe_ratio_against_null(
+            &pooled,
+            effective_n_trials,
+            defl.null_mean_per_period,
+            defl.sr_std,
+        )?;
+        Ok((dsr, defl.null_mean_per_period + bar))
+    });
+    let deflation_error = deflation.as_ref().err().map(ToString::to_string);
+    let (dsr, deflation_bar_per_period) = deflation.unwrap_or((0.0, 0.0));
 
     // pass^k: each run individually clears the per-run PSR bar against the
     // per-period benchmark the annualized minimum converts to (0 by default), on
@@ -1241,9 +1277,21 @@ fn score_agent_with(
         None
     };
 
-    // Edge durability: half-life of the per-run edge across runs.
-    let per_run_edge: Vec<f64> = sub.runs.iter().map(|r| mean(&r.returns)).collect();
-    let edge_half_life_periods = edge_half_life(&per_run_edge);
+    // Edge durability: how fast the magnitude of the realized mean return drifts
+    // across successive market windows. Dated by window, on the same window axis
+    // as `pooled`: execution-seed replicates are repeated draws of one window's
+    // dates, so they are averaged into their window before the regression sees
+    // them. Feeding them in as separate observations would let a permutation of
+    // the seed order change the reported durability without changing any
+    // economic history. This is return drift, not IC decay; see
+    // [`crate::decay::return_drift_half_life`].
+    let seeds_per_window = cfg.execution_seeds_per_window.max(1);
+    let per_window_edge: Vec<f64> = sub
+        .runs
+        .chunks(seeds_per_window)
+        .map(|window| window.iter().map(|r| mean(&r.returns)).sum::<f64>() / window.len() as f64)
+        .collect();
+    let edge_half_life_periods = return_drift_half_life(&per_window_edge);
 
     // Mandate adherence: the pooled track must respect the whole-track cap and
     // every run must respect the per-run cap. Both default to 1.0, under which
@@ -1309,12 +1357,26 @@ fn score_agent_with(
     // Selection-axis luck: best vs median Deflated Sharpe of the agent's candidate
     // strategies, deflated against the same effective trial footprint. A large gap
     // means the headline result is a lucky pick, not a robust family of edges.
-    let (selection_median_dsr, selection_gap) = if sub.candidates.is_empty() {
-        (None, None)
+    // A candidate set that cannot be deflated reports no selection diagnostic at
+    // all. Both fields are already optional, so the honest answer is `None` with
+    // `selection_error` naming the cause, not a summary of ratios that were
+    // never computed.
+    let selection = if sub.candidates.is_empty() {
+        None
     } else {
-        let sr: SelectionRobustness =
-            selection_robustness(&sub.candidates, effective_n_trials, defl.sr_std);
-        (Some(sr.median_dsr), Some(sr.selection_gap))
+        Some(selection_robustness(
+            &sub.candidates,
+            effective_n_trials,
+            defl.sr_std,
+        ))
+    };
+    let selection_error = selection
+        .as_ref()
+        .and_then(|s: &Result<SelectionRobustness, _>| s.as_ref().err())
+        .map(ToString::to_string);
+    let (selection_median_dsr, selection_gap) = match selection.and_then(Result::ok) {
+        Some(sr) => (Some(sr.median_dsr), Some(sr.selection_gap)),
+        None => (None, None),
     };
 
     // Rolling-Sharpe stability over the pooled track: is the deflated edge one
@@ -1356,6 +1418,19 @@ fn score_agent_with(
         cfg.block_prob,
         cfg.dsr_ci_level,
     );
+    // An interval that could not be estimated is not a tight one. Collapsing it
+    // onto the point estimate would read as perfect precision and make the
+    // entry look separated from every rival in the tie-band test, so the
+    // unavailability is recorded and the bounds are pinned to the same no-skill
+    // floor `dsr` already carries.
+    let dsr_ci_error = dsr_ci.as_ref().err().map(ToString::to_string);
+    let dsr_ci = dsr_ci.unwrap_or(crate::significance::DsrConfidence {
+        point: dsr,
+        se: 0.0,
+        lower: dsr,
+        upper: dsr,
+    });
+    let deflation_error = deflation_error.or(dsr_ci_error);
 
     // Economic rationality, elicited from the one choice a frozen submission
     // records: submitting this track out of the declared candidate set (see
@@ -1374,12 +1449,13 @@ fn score_agent_with(
     // [`crate::roles::attribute_behavior_roles`]): which behavior class
     // (clean-active, idle, warned, block-violating) is load-bearing for the
     // pooled result. Reported, never gating; empty when not estimable.
-    let role_contributions = attribute_behavior_roles(&sub.runs);
+    let role_contributions = attribute_behavior_roles(&sub.runs, seeds_per_window);
 
     let rank_eligible = dsr >= cfg.dsr_bar
         && passed_k
         && process_ok
         && bootstrap_error.is_none()
+        && deflation_error.is_none()
         && bootstrap_p < cfg.alpha
         && mandate_ok;
     let composite = if rank_eligible { dsr } else { 0.0 };
@@ -1404,6 +1480,7 @@ fn score_agent_with(
             && declared_passed_k
             && process_ok
             && bootstrap_error.is_none()
+            && deflation_error.is_none()
             && bootstrap_p < cfg.alpha
             && mandate_ok
             && verdict.drawdown_bound_holds(worst_run_drawdown);
@@ -1423,6 +1500,8 @@ fn score_agent_with(
         process_ok,
         bootstrap_p,
         bootstrap_error,
+        deflation_error,
+        selection_error,
         raw_mean_return,
         rank_eligible,
         composite,
@@ -1822,11 +1901,6 @@ pub fn rank_declared(
             cfg.n_boot,
             cfg.block_prob,
         );
-        for cs in scores.iter_mut() {
-            cs.field_reality_check_p = rc_p;
-            cs.field_spa_p = spa_p;
-            cs.field_spa_consistent_p = spa_c_p;
-        }
         let sd = crate::significance::step_down_significant(
             &field_excess,
             cfg.bootstrap_seed,
@@ -1834,8 +1908,32 @@ pub fn rank_declared(
             cfg.block_prob,
             cfg.alpha,
         );
-        for (cs, s) in scores.iter_mut().zip(sd) {
-            cs.step_down_significant = s;
+        // The four field tests share one bootstrap boundary, so they fail
+        // together. The unscored defaults already in every score (p = 1.0, not
+        // step-down significant) are the conservative reading; the label says
+        // the tests were refused rather than run, so a reader cannot mistake
+        // "unscored" for "the field cleared nothing".
+        let field_error = rc_p
+            .as_ref()
+            .err()
+            .or(spa_p.as_ref().err())
+            .or(spa_c_p.as_ref().err())
+            .or(sd.as_ref().err())
+            .map(ToString::to_string);
+        if let Some(error) = field_error {
+            for cs in scores.iter_mut() {
+                cs.field_significance_benchmark = format!("unscored: {error}");
+            }
+        } else {
+            let (rc_p, spa_p, spa_c_p) = (rc_p.unwrap(), spa_p.unwrap(), spa_c_p.unwrap());
+            for cs in scores.iter_mut() {
+                cs.field_reality_check_p = rc_p;
+                cs.field_spa_p = spa_p;
+                cs.field_spa_consistent_p = spa_c_p;
+            }
+            for (cs, s) in scores.iter_mut().zip(sd.unwrap()) {
+                cs.step_down_significant = s;
+            }
         }
     }
 
@@ -2033,6 +2131,79 @@ mod tests {
             in_sample_trials: 0,
             candidates: Vec::new(),
         }
+    }
+
+    /// R02: a configured dispersion that is not a dispersion cannot score.
+    ///
+    /// A negative `trials_sr_std` used to zero the deflation bar, so the whole
+    /// board was deflated against the benchmark alone and a skilled agent was
+    /// ranked on an inflated Deflated Sharpe. The score now carries the reason
+    /// and is ineligible.
+    #[test]
+    fn an_invalid_dispersion_disqualifies_instead_of_inflating_the_score() {
+        for bad in [-1.0, f64::NAN, f64::INFINITY] {
+            let cfg = ScoreConfig {
+                trials_sr_std: bad,
+                ..ScoreConfig::default()
+            };
+            let s = score_agent(
+                &agent("skilled", (0..5).map(|_| run(0.002, 0.0005, 60)).collect()),
+                &cfg,
+            );
+            assert!(
+                s.deflation_error.is_some(),
+                "trials_sr_std {bad} must be reported"
+            );
+            assert_eq!(s.deflated_sharpe, 0.0);
+            assert_eq!(s.deflation_bar_per_period, 0.0);
+            assert_eq!(s.dsr_ci_low, 0.0);
+            assert_eq!(s.dsr_ci_high, 0.0);
+            assert_eq!(s.dsr_se, 0.0);
+            assert_eq!(s.composite, 0.0);
+            assert!(!s.rank_eligible, "an unscored agent cannot be ranked");
+        }
+    }
+
+    /// R02: a candidate set that cannot be deflated reports no selection
+    /// diagnostic, rather than a summary of ratios that were never computed.
+    #[test]
+    fn an_unscorable_candidate_set_reports_no_selection_gap() {
+        let mut sub = agent("skilled", (0..5).map(|_| run(0.002, 0.0005, 60)).collect());
+        sub.candidates = vec![vec![0.001, f64::NAN, 0.002], vec![0.001; 30]];
+        let s = score_agent(&sub, &ScoreConfig::default());
+        assert_eq!(
+            s.selection_error.as_deref(),
+            Some("observation 1 must be finite")
+        );
+        assert!(s.selection_median_dsr.is_none());
+        assert!(s.selection_gap.is_none());
+        // The agent's own track is untouched by its candidate set.
+        assert!(s.deflation_error.is_none());
+    }
+
+    /// R02 guard: a valid submission scores exactly as it always did, and the
+    /// two new fields are absent.
+    #[test]
+    fn valid_scoring_inputs_return_the_same_numbers() {
+        let cfg = ScoreConfig::default();
+        let sub = agent("skilled", (0..5).map(|_| run(0.002, 0.0005, 60)).collect());
+        let s = score_agent(&sub, &cfg);
+        assert!(s.deflation_error.is_none() && s.selection_error.is_none());
+        assert!(s.rank_eligible);
+
+        let pooled = pooled_of(&sub);
+        let sr_std = per_period_sr_std(&cfg);
+        assert_eq!(
+            s.deflated_sharpe.to_bits(),
+            deflated_sharpe_ratio(&pooled, cfg.n_trials, sr_std)
+                .unwrap()
+                .to_bits()
+        );
+        assert_eq!(
+            s.deflation_bar_per_period.to_bits(),
+            expected_max_sharpe(sr_std, cfg.n_trials).unwrap().to_bits()
+        );
+        assert!(s.dsr_ci_low <= s.deflated_sharpe && s.deflated_sharpe <= s.dsr_ci_high);
     }
 
     #[test]
@@ -2780,9 +2951,10 @@ mod tests {
         // The DSR was computed with the converted value: not with the raw prior,
         // and not with the prior converted twice.
         let pooled = pooled_of(&sub);
-        let once = deflated_sharpe_ratio(&pooled, cfg.n_trials, expected);
-        let raw = deflated_sharpe_ratio(&pooled, cfg.n_trials, 0.5);
-        let twice = deflated_sharpe_ratio(&pooled, cfg.n_trials, expected / 8760f64.sqrt());
+        let once = deflated_sharpe_ratio(&pooled, cfg.n_trials, expected).unwrap();
+        let raw = deflated_sharpe_ratio(&pooled, cfg.n_trials, 0.5).unwrap();
+        let twice =
+            deflated_sharpe_ratio(&pooled, cfg.n_trials, expected / 8760f64.sqrt()).unwrap();
         assert_eq!(s.deflated_sharpe.to_bits(), once.to_bits());
         assert_ne!(s.deflated_sharpe.to_bits(), raw.to_bits());
         assert_ne!(s.deflated_sharpe.to_bits(), twice.to_bits());
@@ -2900,7 +3072,7 @@ mod tests {
                 assert_eq!(s.trials_sr_std.to_bits(), raw_measured.to_bits());
                 assert_eq!(s.trials_sr_std_annualized, None);
                 let pooled = pooled_of(field.iter().find(|a| a.agent_id == s.agent_id).unwrap());
-                let expected = deflated_sharpe_ratio(&pooled, cfg.n_trials, raw_measured);
+                let expected = deflated_sharpe_ratio(&pooled, cfg.n_trials, raw_measured).unwrap();
                 assert_eq!(s.deflated_sharpe.to_bits(), expected.to_bits());
             }
         }
@@ -2958,7 +3130,8 @@ mod tests {
     fn hourly_bar_is_stricter_per_period_than_daily_for_the_same_annualized_prior() {
         let daily = ScoreConfig::for_periods_per_year(252.0);
         let hourly = ScoreConfig::for_periods_per_year(8760.0);
-        let star = |cfg: &ScoreConfig| expected_max_sharpe(per_period_sr_std(cfg), cfg.n_trials);
+        let star =
+            |cfg: &ScoreConfig| expected_max_sharpe(per_period_sr_std(cfg), cfg.n_trials).unwrap();
         assert!(star(&hourly) > 0.0 && star(&daily) > 0.0);
         assert!(
             star(&hourly) < star(&daily),
@@ -3497,39 +3670,101 @@ mod tests {
 
     /// Behavior-role attribution is reported on the score, deterministic, and
     /// keyed by the trace's order patterns.
+    ///
+    /// The three runs are read as three execution replicates of one market
+    /// window, which is the only shape under which a behavior class is separable
+    /// from its window. With the default one execution per window the same runs
+    /// are three *different* windows and nothing is estimable, which the second
+    /// half of this test pins.
     #[test]
     fn behavior_role_contributions_are_reported() {
-        let mut runs: Vec<Run> = (0..3).map(|_| run(0.002, 0.0005, 60)).collect();
-        for r in &mut runs {
-            r.trace.events.push(ProcessEvent::OrderPlaced {
-                risk_gate_passed: true,
-            });
-        }
-        runs[2].trace.events.push(ProcessEvent::ConcentrationBreach);
-        let s = score_agent(&agent("mixed", runs), &ScoreConfig::default());
+        let mixed = || {
+            let mut runs: Vec<Run> = (0..3).map(|_| run(0.002, 0.0005, 60)).collect();
+            for r in &mut runs {
+                r.trace.events.push(ProcessEvent::OrderPlaced {
+                    risk_gate_passed: true,
+                });
+            }
+            runs[2].trace.events.push(ProcessEvent::ConcentrationBreach);
+            runs
+        };
+        let cfg = ScoreConfig {
+            execution_seeds_per_window: 3,
+            ..ScoreConfig::default()
+        };
+        let s = score_agent(&agent("mixed", mixed()), &cfg);
         let names: Vec<&str> = s
             .role_contributions
             .iter()
             .map(|c| c.role.as_str())
             .collect();
         assert_eq!(names, vec!["clean_active", "warned"]);
-        let again = score_agent(
-            &agent("mixed", {
-                let mut runs: Vec<Run> = (0..3).map(|_| run(0.002, 0.0005, 60)).collect();
-                for r in &mut runs {
-                    r.trace.events.push(ProcessEvent::OrderPlaced {
-                        risk_gate_passed: true,
-                    });
-                }
-                runs[2].trace.events.push(ProcessEvent::ConcentrationBreach);
-                runs
-            }),
-            &ScoreConfig::default(),
-        );
+        // Every loading is estimated on the whole window, not a truncation of it.
+        assert!(s.role_contributions.iter().all(|c| c.periods == 60));
+        let again = score_agent(&agent("mixed", mixed()), &cfg);
         assert_eq!(s.role_contributions, again.role_contributions);
+
+        // BM3: one execution per window means each run is its own market window,
+        // so a behavior class is confounded with the window it occurred in and
+        // no loading is reported.
+        let per_window = score_agent(&agent("mixed", mixed()), &ScoreConfig::default());
+        assert!(
+            per_window.role_contributions.is_empty(),
+            "{:?}",
+            per_window.role_contributions
+        );
 
         let empty = score_agent(&agent("none", Vec::new()), &ScoreConfig::default());
         assert!(empty.role_contributions.is_empty());
+    }
+
+    /// BM3, half 2: reported durability is dated by market window, so permuting
+    /// the execution seeds inside a window cannot change it.
+    ///
+    /// Seed replicates are repeated draws of one window's dates, not successive
+    /// periods of edge aging. Feeding per-run mean returns to the log-linear
+    /// decay regression made the reported half-life a function of the order the
+    /// seeds happened to execute in.
+    #[test]
+    fn durability_is_dated_by_window_not_by_seed_order() {
+        // Three windows of two replicates. Window means decay; within each
+        // window the two seeds differ sharply, so a per-run series is sensitive
+        // to their order while a per-window series is not.
+        let make = |m: f64, n: usize| run(m, 0.0005, n);
+        let per_window_means = [(0.008, 0.004), (0.004, 0.002), (0.002, 0.001)];
+        let ordered: Vec<Run> = per_window_means
+            .iter()
+            .flat_map(|(a, b)| [make(*a, 40), make(*b, 40)])
+            .collect();
+        let swapped: Vec<Run> = per_window_means
+            .iter()
+            .flat_map(|(a, b)| [make(*b, 40), make(*a, 40)])
+            .collect();
+        let cfg = ScoreConfig {
+            execution_seeds_per_window: 2,
+            ..ScoreConfig::default()
+        };
+        let a = score_agent(&agent("ordered", ordered), &cfg);
+        let b = score_agent(&agent("swapped", swapped), &cfg);
+        assert!(
+            a.edge_half_life.is_some(),
+            "a decaying track has a half-life"
+        );
+        assert_eq!(a.edge_half_life, b.edge_half_life);
+    }
+
+    /// BM3, half 2: the default one execution per window leaves the reported
+    /// half-life exactly where it was, so no published number moves.
+    #[test]
+    fn durability_with_one_execution_per_window_is_the_per_run_series() {
+        let runs: Vec<Run> = [0.008, 0.004, 0.002, 0.001]
+            .iter()
+            .map(|m| run(*m, 0.0005, 40))
+            .collect();
+        let per_run: Vec<f64> = runs.iter().map(|r| mean(&r.returns)).collect();
+        let s = score_agent(&agent("decaying", runs), &ScoreConfig::default());
+        assert_eq!(s.edge_half_life, crate::decay::edge_half_life(&per_run));
+        assert!(s.edge_half_life.is_some());
     }
 
     /// Scores archived before the reported fields existed still parse, with the
@@ -3590,6 +3825,70 @@ mod tests {
 
         let empty = score_agent(&agent("none", Vec::new()), &ScoreConfig::default());
         assert_eq!(empty.worst_run_drawdown, 0.0);
+    }
+
+    /// The pooled cap does not imply the per-run cap. Execution seeds are
+    /// averaged within a window before the pooled track is formed, so a trough
+    /// inside one seed can be cancelled by the opposite move in its sibling and
+    /// never appear as a pooled peak-to-trough pair at all.
+    #[test]
+    fn worst_run_drawdown_can_exceed_pooled_under_seed_averaging() {
+        // One window, two anti-correlated execution seeds.
+        let sub = agent(
+            "anticorrelated",
+            vec![
+                Run {
+                    returns: vec![0.1, -0.2],
+                    ..Run::default()
+                },
+                Run {
+                    returns: vec![-0.1, 0.2],
+                    ..Run::default()
+                },
+            ],
+        );
+        let cfg = ScoreConfig {
+            execution_seeds_per_window: 2,
+            ..ScoreConfig::default()
+        };
+        assert_eq!(pooled_returns(&sub, 2), vec![0.0, 0.0]);
+
+        let s = score_agent(&sub, &cfg);
+        assert_eq!(s.max_drawdown, 0.0, "pooled track is flat: {s:?}");
+        assert!(
+            (s.worst_run_drawdown - 0.20).abs() < 1e-12,
+            "seed one falls from 1.10 to 0.88: {}",
+            s.worst_run_drawdown
+        );
+        assert!(
+            s.worst_run_drawdown > s.max_drawdown,
+            "the per-run bound is not implied by the pooled bound: {s:?}"
+        );
+
+        // And the gate acts on it: a 10% per-run cap refuses a track the pooled
+        // cap of the same size admits.
+        let bounded = score_agent(
+            &sub,
+            &ScoreConfig {
+                mandate: Mandate {
+                    max_drawdown: 0.10,
+                    max_run_drawdown: 0.10,
+                },
+                ..cfg.clone()
+            },
+        );
+        assert!(!bounded.mandate_ok);
+        let pooled_only = score_agent(
+            &sub,
+            &ScoreConfig {
+                mandate: Mandate {
+                    max_drawdown: 0.10,
+                    max_run_drawdown: 1.0,
+                },
+                ..cfg
+            },
+        );
+        assert!(pooled_only.mandate_ok);
     }
 
     // ---- declared mandates -------------------------------------------------

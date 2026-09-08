@@ -4,6 +4,112 @@ Chronological repair diary moved out of [IMPLEMENTATION.md](IMPLEMENTATION.md) o
 
 ## Verification log
 
+- R02 blocked work, 2026-09-08. Closing the open half widens eight return types.
+  Recording the callers here so the next pass does not have to rediscover them.
+  `reality_check_pvalue`, `spa_pvalue` and `spa_consistent_pvalue` are called
+  from `sharpebench-core/src/composite.rs` around lines 1813 to 1825, from
+  `sharpebench-edge/src/verdict.rs` lines 213 to 215, and from
+  `sharpebench-py/src/lib.rs` lines 319 to 326 plus the `core_spa_consistent`
+  import. `step_down_significant` from `composite.rs:1836`,
+  `edge/verdict.rs:216`, `py/src/lib.rs:356`. `expected_max_sharpe` is the
+  largest: `composite.rs:1195` and `:2967`, `core/percentile.rs:110`,
+  `edge/verdict.rs:159`, `py/src/lib.rs:135`, and it cascades into
+  `deflated_sharpe_ratio` and `probabilistic_sharpe_ratio` at
+  `composite.rs:606`, `:618`, `:1183`, `:1188`, `budget_curve.rs:174` and
+  `:212`, `edge/verdict.rs:160` and `:161`, and `edge/mintrl.rs:52`.
+  `bootstrap_dsr_ci_against_null` from `composite.rs:1355` and the `core_dsr_ci`
+  import. `percentile_selection` from `sharpebench-cli/src/analysis_cmd.rs:206`,
+  which already has an error-exit path and is the cheapest of the set.
+  `selection_robustness` from `composite.rs:1322`.
+
+  One documentation consequence is already outstanding: the `moments` docstring
+  at `sharpebench-py/src/lib.rs:467` says `sortino` is `None` only when downside
+  deviation is zero. After the stats repair it is also `None` for a non-finite
+  input, so that docstring is one clause short of the behaviour.
+
+- Batch A and B, 2026-09-08. Work is on `fix/audit-batch-a-b-2026-09-08` in
+  each repository, Bench PR #25 and Arena PR #26, both opened as drafts. Eight
+  checklist rows close. At the time of writing every CI check on both pull
+  requests passes except the provenance gate, which fails by construction until
+  the manifest is rebound on a clean tree after the last commit.
+
+  R13. The false containment claim was corrected in the paper, in
+  `Mandate::max_run_drawdown` and in `CompositeScore::worst_run_drawdown`. A
+  repository-wide grep for the same assertion found no other site. The new
+  regression `worst_run_drawdown_can_exceed_pooled_under_seed_averaging` runs
+  the real `score_agent` path with `execution_seeds_per_window: 2` and asserts
+  pooled 0.0 against worst-run 0.20, plus the gate consequence that a 10 percent
+  per-run cap refuses what the same pooled cap admits. Two mutations were run in
+  an isolated copy: replacing the per-run fold with the pooled figure fails the
+  test, and weakening the assertion to compare pooled against pooled also fails
+  it, so the assertion is not vacuous. `cargo test -p sharpebench-core`,
+  `clippy` and `fmt --check` all exit 0.
+
+  R11. Corrected twice. The first rewrite said the endogenous market fills every
+  order at one cleared price. Reading `market.rs` showed that is false: the fill
+  is `cleared_mid * (1 + f * (lambda * Q + eta * q_i) / V)`, so each agent pays
+  for its own size and no two agents transact at the same price. The committed
+  text says neither model is uniform-price, gives the book its price-time
+  priority and queue-position semantics, and grounds the latency-race exclusion
+  in discrete time rather than in single-price clearing.
+
+  R14. Arithmetic checked against the declared field of six policies, three
+  tiers and 256 seeds. A single agent on one tier is 256 of 4,608, one
+  eighteenth; one sixth is one agent across three tiers.
+
+  Shard order. Verified in source rather than from the log: `validate_grid`
+  returns `[found[key] for key in expected_keys()]` and writes the original
+  decoded line, and `test_shuffling_input_has_canonical_output` asserts reversed
+  input yields byte-identical output, so the order is a function of the grid key
+  alone and differs from the serial producer's score-rank order.
+
+  Baseline scope. The four literature rules are scored in the paper on nine
+  datasets under three cost profiles, 351 records, no rank-eligible cell and no
+  pass^k pass; those rule names and that count were checked against
+  `05-experiments.tex`. The seven primitives in `sharpebench_core::entrants`
+  have no field evaluation, and the four rules are implemented in the harness
+  example rather than in that module.
+
+  Publish gate. `require_green_ci` queries `ci.yml` runs at
+  `validate_tag.outputs.validated_commit` and passes only on a completed
+  success. The workflow parses under `yaml.safe_load` and the job graph was
+  dumped to confirm that `binary`, `crates`, `npm`, `pypi` and `verify` all
+  depend on it. Both crate publish lists carry the same 12 crates as the
+  workspace, `sharpebench-memory` included. A second defect was found while
+  fixing this: `verify` runs with `if: always()` and its result loop did not
+  inspect the gate, so a blocked release would have reported success.
+
+  Updater. The checksum is fetched from the same release over the same
+  connection as the asset, so it establishes integrity and not authenticity.
+  The documentation now says so and names the SLSA attestation as the
+  out-of-band route. No signature verification was implemented.
+
+  Snapshot cost. `clone_state` copies a `Book` holding shares, cash, RNG, an
+  accumulating trace and pending orders, so the cost grows with the run. The
+  claim of constant time was corrected in the mdBook page, both changelogs, four
+  Bench rustdoc sites and one Arena comment. No optimization was implemented;
+  shared immutable trace prefixes would require a measurement that was not run.
+
+  AP5 and AP3. The sealed reveal compared only each symbol's opening close in a
+  two-day calm environment while the declared evaluation is 120 days at the hard
+  tier. The full replay was measured at 0.14 s for all 16 slots before choosing
+  to implement it rather than weaken the claim. Four mutations were run in an
+  isolated copy and each failed the expected tests; restoring the pristine copy
+  passed all seven. No committed artifact was rewritten, and the deltas a future
+  run would produce are recorded. The frozen `reveal_replay_verified` count of
+  16 was measured under the weaker check and is not evidence for the stronger
+  one; the Arena paper now says so.
+
+  Propagation. Confirmed by ancestry rather than assumed: neither `0cd7d37`
+  (moments) nor `4378ad4` (inventory and cash) is an ancestor of `v0.15.0` or of
+  `v0.18.4`, so both repairs are unreleased, and Arena's pin of `=0.15.0` cannot
+  carry them. Both changelogs record that.
+
+  Scope note. An em dash sweep initially reached archived peer-review records
+  under `paper/review/` and the internal assessment documents. Those were
+  restored file by file. Rewriting a historical record is out of scope; the row
+  covers user-facing documentation only.
+
 - CSV/board-context batch, Bench `7f80fee`: five CSV module tests, four actual
   CLI integration tests, three WASM board-context tests, 62 Python tests and
   18 npm tests pass. The complete product workspace (`cargo test --workspace
