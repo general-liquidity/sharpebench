@@ -21,6 +21,7 @@ use crate::deflated_sharpe::deflated_sharpe_ratio;
 // `significance` owns it and this module draws from the same definition.
 use crate::significance::SplitMix64;
 use crate::stats::{mean, std_dev};
+use crate::validation::{block_probability, probability, StatisticalError};
 
 /// Deflated-Sharpe summary across a set of candidate return streams.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -51,32 +52,38 @@ fn median_sorted(sorted: &[f64]) -> f64 {
 /// Compute selection robustness over candidate return streams. Each slice is one
 /// candidate strategy's pooled returns; they are deflated with the same trial
 /// footprint and summarized. Empty input → all-zero.
+///
+/// Fails closed on an invalid candidate rather than summarizing it. Every field
+/// here is a function of the deflated ratios, so one non-finite candidate made
+/// `best_dsr`, `median_dsr` and `selection_gap` all NaN, and a NaN gap does not
+/// compare as a wide gap: it silently drops out of every downstream comparison.
+/// A refusal names the candidate instead.
 pub fn selection_robustness(
     candidates: &[Vec<f64>],
     n_trials: u32,
     trials_sr_std: f64,
-) -> SelectionRobustness {
+) -> Result<SelectionRobustness, StatisticalError> {
     if candidates.is_empty() {
-        return SelectionRobustness {
+        return Ok(SelectionRobustness {
             n_candidates: 0,
             best_dsr: 0.0,
             median_dsr: 0.0,
             selection_gap: 0.0,
-        };
+        });
     }
     let mut dsrs: Vec<f64> = candidates
         .iter()
         .map(|c| deflated_sharpe_ratio(c, n_trials, trials_sr_std))
-        .collect();
+        .collect::<Result<Vec<f64>, StatisticalError>>()?;
     dsrs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let best = *dsrs.last().unwrap_or(&0.0);
     let median = median_sorted(&dsrs);
-    SelectionRobustness {
+    Ok(SelectionRobustness {
         n_candidates: dsrs.len(),
         best_dsr: best,
         median_dsr: median,
         selection_gap: best - median,
-    }
+    })
 }
 
 /// Recommended selection percentile: the **middle** of the measured band.
@@ -156,11 +163,23 @@ pub struct CandidateUtility {
 /// Selection on a percentile of a bootstrapped utility distribution.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PercentileSelection {
-    /// The percentile actually used, clamped to [0, 1].
+    /// The percentile actually used, clamped to [0, 1]. When `input_error` is
+    /// present this is the rejected argument as supplied, not a percentile.
     pub alpha: f64,
     /// True when `alpha` sits below [`MIN_RECOMMENDED_SELECTION_ALPHA`]. The
     /// result is still computed: this flags a choice, it does not veto one.
+    /// Always true alongside an `input_error`, which is not a choice at all.
     pub alpha_warning: bool,
+    /// Why no selection was made. `None` for valid inputs.
+    ///
+    /// An `alpha` outside [0, 1] used to be clamped and a NaN one survived the
+    /// clamp untouched, so `alpha_warning` stayed false and the quantile index
+    /// `(alpha * n_boot).floor() as usize` collapsed to 0: the ranking was then
+    /// decided by each candidate's single worst resample while the output
+    /// claimed a percentile it had never used. There is no percentile to report
+    /// for such an argument, so the whole selection is withheld and `selected`,
+    /// `point_argmax` and `candidates` are empty.
+    pub input_error: Option<StatisticalError>,
     /// Every candidate, in input order.
     pub candidates: Vec<CandidateUtility>,
     /// Index of the candidate with the best percentile utility: the robust pick.
@@ -195,6 +214,10 @@ pub struct PercentileSelection {
 ///
 /// Empty input, `n_boot == 0`, or an empty candidate series all degrade quietly:
 /// a candidate with no returns scores 0.0 on both legs.
+///
+/// An `alpha` that is not a percentile, or a `block_prob` the stationary
+/// bootstrap never accepted, is reported through
+/// [`PercentileSelection::input_error`] with no candidate selected.
 pub fn percentile_selection(
     candidates: &[Vec<f64>],
     utility: Utility,
@@ -203,7 +226,18 @@ pub fn percentile_selection(
     n_boot: usize,
     block_prob: f64,
 ) -> PercentileSelection {
-    let alpha = alpha.clamp(0.0, 1.0);
+    if let Err(error) = probability(alpha, "alpha").and_then(|()| block_probability(block_prob)) {
+        return PercentileSelection {
+            alpha,
+            alpha_warning: true,
+            candidates: Vec::new(),
+            selected: None,
+            point_argmax: None,
+            agrees_with_point_argmax: false,
+            point_winner_optimism: 0.0,
+            input_error: Some(error),
+        };
+    }
     let alpha_warning = alpha < MIN_RECOMMENDED_SELECTION_ALPHA;
 
     let mut out: Vec<CandidateUtility> = Vec::with_capacity(candidates.len());
@@ -258,6 +292,7 @@ pub fn percentile_selection(
         point_argmax,
         agrees_with_point_argmax: selected == point_argmax,
         point_winner_optimism,
+        input_error: None,
     }
 }
 
@@ -277,7 +312,7 @@ mod tests {
         // One strong candidate among many noisy ones → big selection gap.
         let mut candidates = vec![stream(0.004, 0.001, 80)];
         candidates.extend((0..8).map(|_| stream(0.0, 0.003, 80)));
-        let s = selection_robustness(&candidates, 50, 0.5);
+        let s = selection_robustness(&candidates, 50, 0.5).unwrap();
         assert_eq!(s.n_candidates, 9);
         assert!(s.best_dsr >= s.median_dsr);
         assert!(
@@ -290,7 +325,7 @@ mod tests {
     fn robust_family_has_small_gap() {
         // Many similarly-skilled candidates → best ≈ median, small gap.
         let candidates: Vec<Vec<f64>> = (0..9).map(|_| stream(0.003, 0.0005, 80)).collect();
-        let s = selection_robustness(&candidates, 50, 0.5);
+        let s = selection_robustness(&candidates, 50, 0.5).unwrap();
         assert!(
             s.selection_gap < 0.10,
             "a robust family should have a small gap: {s:?}"
@@ -299,7 +334,7 @@ mod tests {
 
     #[test]
     fn empty_is_zero() {
-        let s = selection_robustness(&[], 50, 0.5);
+        let s = selection_robustness(&[], 50, 0.5).unwrap();
         assert_eq!(s.n_candidates, 0);
         assert_eq!(s.selection_gap, 0.0);
     }
@@ -415,9 +450,69 @@ mod tests {
             0.1,
         );
         assert!(!mid.alpha_warning);
-        // Out-of-range alphas clamp rather than panic.
-        let hi = percentile_selection(&candidates, Utility::MeanReturn, 4.0, 1, 200, 0.1);
-        assert_eq!(hi.alpha, 1.0);
+    }
+
+    /// R02: an `alpha` that is not a percentile is withheld, not clamped.
+    ///
+    /// The clamp used to turn 4.0 into 1.0 and left NaN untouched. Either way
+    /// `(alpha * n_boot).floor() as usize` saturated at 0 for NaN, so the
+    /// ranking was decided by each candidate's single worst resample while
+    /// `alpha_warning` said nothing was wrong.
+    #[test]
+    fn a_non_percentile_alpha_is_refused_rather_than_coerced() {
+        let candidates = vec![steady(60), one_lucky_spike(60)];
+        for bad in [f64::NAN, 4.0, -0.5, f64::INFINITY] {
+            let s = percentile_selection(&candidates, Utility::MeanReturn, bad, 1, 200, 0.1);
+            assert_eq!(
+                s.input_error,
+                Some(StatisticalError::InvalidParameter {
+                    name: "alpha",
+                    requirement: "must be finite and in [0, 1]",
+                }),
+                "alpha {bad} must be refused"
+            );
+            assert!(s.alpha_warning, "a refused alpha is never a silent choice");
+            assert!(s.selected.is_none(), "no candidate may be selected");
+            assert!(s.point_argmax.is_none());
+            assert!(s.candidates.is_empty());
+        }
+    }
+
+    /// R02: `block_prob = 0.0` never restarts a block, so the "stationary
+    /// bootstrap" is one contiguous wrap-around of the observed path. The
+    /// estimator refuses it exactly as `bootstrap_inputs` always did.
+    #[test]
+    fn a_degenerate_block_probability_is_refused() {
+        let candidates = vec![steady(60)];
+        for bad in [0.0, -0.1, 1.5, f64::NAN] {
+            let s = percentile_selection(&candidates, Utility::MeanReturn, 0.5, 1, 200, bad);
+            assert_eq!(
+                s.input_error,
+                Some(StatisticalError::InvalidParameter {
+                    name: "block_prob",
+                    requirement: "must be finite and in (0, 1]",
+                }),
+                "block_prob {bad} must be refused"
+            );
+            assert!(s.selected.is_none());
+        }
+    }
+
+    /// R02 guard: a valid call is untouched by the new boundary. These are the
+    /// published numbers, so they are pinned exactly, not approximately.
+    #[test]
+    fn valid_selection_inputs_return_the_same_numbers() {
+        let candidates = vec![steady(100), one_lucky_spike(100)];
+        let s = percentile_selection(&candidates, Utility::MeanReturn, 0.3, 11, 4000, 0.1);
+        assert!(s.input_error.is_none());
+        assert_eq!(s.alpha, 0.3);
+        assert!(!s.alpha_warning);
+        assert_eq!(s.selected, Some(0));
+        assert_eq!(s.point_argmax, Some(1));
+        assert_eq!(s.candidates.len(), 2);
+        assert_eq!(s.candidates[0].point_utility, mean(&steady(100)));
+        assert_eq!(s.candidates[1].point_utility, mean(&one_lucky_spike(100)));
+        assert_eq!(s.point_winner_optimism, s.candidates[1].optimism_gap);
     }
 
     #[test]

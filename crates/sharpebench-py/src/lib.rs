@@ -62,6 +62,13 @@ fn require_non_empty(field: &[Vec<f64>], what: &str) -> PyResult<()> {
     Ok(())
 }
 
+/// A refused statistical boundary surfaces to Python as `ValueError`, the same
+/// way `bootstrap_pvalue` and the FDR family already report theirs. A caller
+/// gets the reason, never a number the kernel declined to compute.
+fn statistical_error(error: sharpebench_stats::StatisticalError) -> PyErr {
+    PyValueError::new_err(error.to_string())
+}
+
 fn verdict_label(v: Verdict) -> &'static str {
     match v {
         Verdict::Pass => "pass",
@@ -102,6 +109,7 @@ fn honesty_dict<'py>(py: Python<'py>, v: &HonestyVerdict) -> PyResult<Bound<'py,
     d.set_item("verdict", verdict_label(v.verdict))?;
     d.set_item("explanation", v.explanation.as_str())?;
     d.set_item("methodology_version", v.methodology_version.as_str())?;
+    d.set_item("statistics_error", v.statistics_error.as_deref())?;
     Ok(d)
 }
 
@@ -132,8 +140,8 @@ fn probabilistic_sharpe_ratio(returns: Vec<f64>, sr_benchmark: f64) -> f64 {
 /// show under the null of zero true skill.
 #[pyfunction]
 #[pyo3(signature = (trials_sr_std, n_trials))]
-fn expected_max_sharpe(trials_sr_std: f64, n_trials: u32) -> f64 {
-    core_expected_max(trials_sr_std, n_trials)
+fn expected_max_sharpe(trials_sr_std: f64, n_trials: u32) -> PyResult<f64> {
+    core_expected_max(trials_sr_std, n_trials).map_err(statistical_error)
 }
 
 /// Deflated Sharpe Ratio: the probability the edge survives the search that found
@@ -141,8 +149,8 @@ fn expected_max_sharpe(trials_sr_std: f64, n_trials: u32) -> f64 {
 /// footprint) grows. `n_trials = 1` is almost always a lie.
 #[pyfunction]
 #[pyo3(signature = (returns, n_trials, trials_sr_std = DEFAULT_TRIALS_SR_STD))]
-fn deflated_sharpe_ratio(returns: Vec<f64>, n_trials: u32, trials_sr_std: f64) -> f64 {
-    core_dsr(&returns, n_trials, trials_sr_std)
+fn deflated_sharpe_ratio(returns: Vec<f64>, n_trials: u32, trials_sr_std: f64) -> PyResult<f64> {
+    core_dsr(&returns, n_trials, trials_sr_std).map_err(statistical_error)
 }
 
 /// Minimum track record length (in periods) needed for the observed Sharpe to be
@@ -251,6 +259,7 @@ fn is_my_sharpe_real_full<'py>(
     d.set_item("step_down", full.step_down)?;
     d.set_item("pbo", full.pbo)?;
     d.set_item("hlz", hlz_dict(py, &full.hlz)?)?;
+    d.set_item("snooping_error", full.snooping_error.as_deref())?;
     Ok(d)
 }
 
@@ -286,7 +295,8 @@ fn bootstrap_dsr_ci<'py>(
         n_boot,
         block_prob,
         ci,
-    );
+    )
+    .map_err(statistical_error)?;
     let d = PyDict::new(py);
     d.set_item("point", c.point)?;
     d.set_item("se", c.se)?;
@@ -316,7 +326,7 @@ fn reality_check_pvalue(
     block_prob: f64,
 ) -> PyResult<f64> {
     require_non_empty(&field, "field")?;
-    Ok(core_reality_check(&field, seed, n_boot, block_prob))
+    core_reality_check(&field, seed, n_boot, block_prob).map_err(statistical_error)
 }
 
 /// Hansen's Superior Predictive Ability p-value (liberal / lower studentized
@@ -325,7 +335,7 @@ fn reality_check_pvalue(
 #[pyo3(signature = (field, seed = DEFAULT_SEED, n_boot = 2000, block_prob = 0.1))]
 fn spa_pvalue(field: Vec<Vec<f64>>, seed: u64, n_boot: usize, block_prob: f64) -> PyResult<f64> {
     require_non_empty(&field, "field")?;
-    Ok(core_spa(&field, seed, n_boot, block_prob))
+    core_spa(&field, seed, n_boot, block_prob).map_err(statistical_error)
 }
 
 /// Hansen's consistent SPA p-value over the same **N x T** field.
@@ -338,7 +348,7 @@ fn spa_consistent_pvalue(
     block_prob: f64,
 ) -> PyResult<f64> {
     require_non_empty(&field, "field")?;
-    Ok(core_spa_consistent(&field, seed, n_boot, block_prob))
+    core_spa_consistent(&field, seed, n_boot, block_prob).map_err(statistical_error)
 }
 
 /// Romano-Wolf step-down: per-candidate significance at `alpha` controlling the
@@ -353,7 +363,7 @@ fn step_down_significant(
     alpha: f64,
 ) -> PyResult<Vec<bool>> {
     require_non_empty(&field, "field")?;
-    Ok(core_step_down(&field, seed, n_boot, block_prob, alpha))
+    core_step_down(&field, seed, n_boot, block_prob, alpha).map_err(statistical_error)
 }
 
 /// CSCV Probability of Backtest Overfitting.
@@ -421,7 +431,7 @@ fn selection_robustness<'py>(
     n_trials: u32,
     trials_sr_std: f64,
 ) -> PyResult<Bound<'py, PyDict>> {
-    let r = core_selection(&candidates, n_trials, trials_sr_std);
+    let r = core_selection(&candidates, n_trials, trials_sr_std).map_err(statistical_error)?;
     let d = PyDict::new(py);
     d.set_item("n_candidates", r.n_candidates)?;
     d.set_item("best_dsr", r.best_dsr)?;

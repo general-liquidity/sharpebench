@@ -25,7 +25,9 @@
 //! let sr = sharpe_ratio(&returns); // observed, per-period
 //! let psr = probabilistic_sharpe_ratio(&returns, 0.0); // P(true Sharpe > 0)
 //! // Deflate for the 200 strategies tried, with ~0.5 cross-trial Sharpe dispersion:
-//! let dsr = deflated_sharpe_ratio(&returns, 200, 0.5); // P(skill survives the search)
+//! // `Err` when an input is not one the estimator accepts: a non-finite return
+//! // or a `trials_sr_std` that is not a dispersion has no deflated Sharpe.
+//! let dsr = deflated_sharpe_ratio(&returns, 200, 0.5).unwrap(); // P(skill survives the search)
 //!
 //! assert!(sr > 0.0);
 //! assert!((0.0..=1.0).contains(&psr));

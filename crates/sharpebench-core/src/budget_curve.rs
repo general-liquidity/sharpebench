@@ -135,7 +135,11 @@ pub struct BudgetCurveReport {
 ///
 /// Returns `Err` at the boundary when: the input is empty or has a single point (a
 /// curve needs at least two); the budgets are not strictly increasing; or any point
-/// has fewer than two held-out returns (a Sharpe needs dispersion).
+/// has fewer than two held-out returns (a Sharpe needs dispersion); or the
+/// deflated Sharpe at a point could not be estimated, which includes a
+/// `trials_sr_std` that is not a dispersion. The curve is a sequence of
+/// comparable deflated Sharpes, so one that could not be estimated has no
+/// stand-in value: the whole curve is withheld.
 pub fn budget_curve(
     points: &[(f64, &[f64])],
     opts: &BudgetCurveOpts,
@@ -171,7 +175,8 @@ pub fn budget_curve(
     let mut curve: Vec<BudgetPoint> = Vec::with_capacity(n_budget_points);
     for i in 0..n_budget_points {
         let (budget, returns) = points[i];
-        let oos_dsr = deflated_sharpe_ratio(returns, opts.base_n_trials, opts.trials_sr_std);
+        let oos_dsr = deflated_sharpe_ratio(returns, opts.base_n_trials, opts.trials_sr_std)
+            .map_err(|error| format!("point {i}: {error}"))?;
         let oos_sharpe = sharpe_ratio(returns);
         let oos_p_value =
             bootstrap_pvalue(returns, opts.bootstrap_seed, opts.n_boot, opts.block_prob)
@@ -209,7 +214,8 @@ pub fn budget_curve(
     // search over N, so the honest peak clears a higher bar.
     let peak_footprint = opts.base_n_trials.saturating_add(n_budget_points as u32);
     let peak_dsr_deflated_for_selection =
-        deflated_sharpe_ratio(points[peak_idx].1, peak_footprint, opts.trials_sr_std);
+        deflated_sharpe_ratio(points[peak_idx].1, peak_footprint, opts.trials_sr_std)
+            .map_err(|error| format!("peak point {peak_idx}: {error}"))?;
 
     // First budget where more compute did not raise held-out edge.
     let overfit_onset = curve
