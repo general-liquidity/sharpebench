@@ -12,6 +12,21 @@ use crate::stats::{mean, variance};
 /// CAPM decomposition of `agent` returns against an aligned `market` series.
 /// Returns `(alpha_per_period, beta)`: alpha is the agent's mean return net of its
 /// beta-weighted market exposure — the part that isn't just market drift.
+///
+/// **Alignment is the caller's contract, and it is not checked.** The two series
+/// are paired by index and the longer one is silently truncated to the length of
+/// the shorter, so `agent[i]` is only the same period as `market[i]` if the caller
+/// made it so. A series that starts one period late produces a regression on
+/// mismatched periods and no error. Pass exactly aligned slices; the field-relative
+/// caller in [`crate::composite`] does this by trimming every pooled stream to the
+/// common `min_len` prefix before it calls here. Fewer than two paired points is
+/// not a regression: the agent's mean is returned with a zero beta.
+///
+/// **These are marginal associations, not causal or additive contributions.** Alpha
+/// and beta come from one univariate regression on one proxy. They do not identify
+/// what the agent caused, and per-regressor figures obtained this way do not
+/// decompose a return into parts that sum back to it, because the regressors are
+/// not orthogonal. Read them as "how this stream co-moved with that proxy".
 pub fn alpha_beta(agent: &[f64], market: &[f64]) -> (f64, f64) {
     let n = agent.len().min(market.len());
     if n < 2 {

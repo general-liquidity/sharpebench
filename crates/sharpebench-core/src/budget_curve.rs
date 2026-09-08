@@ -33,6 +33,15 @@
 //! [`BudgetCurveReport::peak_dsr_deflated_for_selection`], is strictly `<=` the naive
 //! max, closing the budget-selection snooping loophole with existing machinery.
 //!
+//! **Comparable support is the caller's contract.** Nothing here can check that
+//! two points were evaluated on the same market: the module receives returns, not
+//! dates. A curve is only readable as "what budget bought" when every point's
+//! held-out slice covers the same evaluation window and a comparable number of
+//! periods, because both the Sharpe and its deflation move with the sample size
+//! alone. Where that cannot be arranged, read the per-point
+//! [`BudgetPoint::n_returns`] beside every figure: an unmatched support is a
+//! confound in the curve, not a property of the budget.
+//!
 //! **Reported, never a rank gate.** Everything here is diagnostic. The curve, its
 //! peak, and the overfit onset are surfaced for the operator; they do not gate
 //! eligibility or rank. Wiring any of this into a rank key would silently recreate
@@ -99,7 +108,8 @@ pub struct BudgetPoint {
     /// `(oos_dsr[i] - oos_dsr[i-1]) / (budget[i] - budget[i-1])`: the multi-point
     /// generalization of the single-point `dsr_per_cost`. `None` for the first
     /// point. `<= 0` means more budget bought *no* extra held-out edge: the
-    /// overfit signature single-point scoring cannot see.
+    /// non-improvement signature single-point scoring cannot see. `== 0` is a
+    /// plateau and `< 0` a decline; neither is uncertainty-tested here.
     pub marginal_dsr_per_budget: Option<f64>,
 }
 
@@ -118,9 +128,18 @@ pub struct BudgetCurveReport {
     /// trial footprint (`base_n_trials + n_budget_points`): the honest peak that
     /// pays for the search over budgets. Strictly `<=` [`Self::peak_dsr`].
     pub peak_dsr_deflated_for_selection: f64,
-    /// The first budget where `marginal_dsr_per_budget <= 0` (more compute lowered
-    /// held-out edge). `None` when the curve never turns down. This is the overfit
-    /// onset a monotone-fit scaling law structurally cannot report.
+    /// The first budget where `marginal_dsr_per_budget <= 0`: the first budget that
+    /// bought **no further** held-out edge. `None` when every step still rose.
+    ///
+    /// This is a **non-improvement** marker, not a measured deterioration. The
+    /// condition is non-strict, so an exact plateau (marginal `0.0`, the shape an
+    /// honestly saturating curve has) sets it just as a genuine turn-down does, and
+    /// neither case is tested against the estimate's uncertainty: one negative
+    /// marginal can be sampling noise. It is the onset a monotone-fit scaling law
+    /// structurally cannot report; it is not, on its own, evidence that more compute
+    /// made the agent worse. Read it beside that point's
+    /// [`BudgetPoint::marginal_dsr_per_budget`] and [`BudgetPoint::oos_p_value`]
+    /// before calling anything overfitting.
     pub overfit_onset: Option<f64>,
     /// Whether `oos_dsr` strictly increases across *every* consecutive point: a
     /// genuinely monotone-improving curve, which is rare and honest in trading.
@@ -217,7 +236,8 @@ pub fn budget_curve(
         deflated_sharpe_ratio(points[peak_idx].1, peak_footprint, opts.trials_sr_std)
             .map_err(|error| format!("peak point {peak_idx}: {error}"))?;
 
-    // First budget where more compute did not raise held-out edge.
+    // First budget where more compute did not raise held-out edge. Non-strict, so a
+    // plateau counts as non-improvement; it is not a claim of deterioration.
     let overfit_onset = curve
         .iter()
         .skip(1)
@@ -302,15 +322,22 @@ mod tests {
         let r = budget_curve(&c, &BudgetCurveOpts::default()).unwrap();
 
         assert_eq!(r.peak_budget, 3.0, "peak sits at the plateau start: {r:?}");
-        // The only non-positive marginal is the flat tail (identical windows ⇒
-        // marginal exactly 0), never an interior turn-down.
-        match r.overfit_onset {
-            None => {}
-            Some(b) => assert!(
-                b >= 4.0,
-                "any onset must be on the flat tail (budget {b}), not before the plateau"
-            ),
-        }
+        // `overfit_onset` is a non-improvement marker, not a deterioration one: the
+        // flat tail (identical windows ⇒ marginal exactly 0) sets it even though no
+        // step ever declined. Pinning both halves keeps the field's name from being
+        // read as evidence that more budget made the agent worse.
+        assert_eq!(
+            r.overfit_onset,
+            Some(4.0),
+            "the plateau start sets the non-improvement onset: {r:?}"
+        );
+        assert!(
+            r.points
+                .iter()
+                .skip(1)
+                .all(|p| p.marginal_dsr_per_budget.is_some_and(|m| m >= 0.0)),
+            "no point declined, so nothing here is measured deterioration: {r:?}"
+        );
         assert!(
             !r.is_monotone_improving,
             "a flat tail is not strictly rising"
