@@ -128,7 +128,7 @@ cargo run -q -p sharpebench -- forecast-quality \
   --alpha 0.05 --bins 5 --json
 cd formal && lake build
 \end{verbatim}
-The first command reproduces the complete committed report from two deterministic SharpeArena ledgers, including exact common support, two resolution-time blocks, late-revision exclusion, calibration, block-bootstrap comparison and Holm adjustment. The second checks the separate abstract proofs of common-support membership, trading-rank isolation, Holm monotonicity and boundedness, and finite-bootstrap count bounds. Neither command produces an empirical model result, and the Lean project is not an extraction of the Rust implementation.
+The first command reproduces the complete committed report from two deterministic SharpeArena ledgers, including exact common support over twelve contracts in six resolution-time blocks, late-revision exclusion, calibration, block-bootstrap comparison and Holm adjustment. The same command over \texttt{fixtures/withheld/}, the first eight of those contracts in two blocks, reproduces the companion report in which inference is withheld with its reason recorded (\cref{sec:forecast-quality}). The second checks the separate abstract proofs of common-support membership, trading-rank isolation, Holm monotonicity and boundedness, and finite-bootstrap count bounds. Neither command produces an empirical model result, and the Lean project is not an extraction of the Rust implementation.
 
 \paragraph{Capturing and strictly replaying a trajectory.}
 \begin{verbatim}
