@@ -2,7 +2,7 @@
 
 The complete suite checklist and supporting audit evidence are saved here in both
 repositories. Repairs are in progress and unfinished: **100 checklist rows, with
-69 closed and 31 open**, plus five explicitly deferred items. Batches A, B, C, D
+73 closed and 27 open**, plus five explicitly deferred items. Batches A, B, C, D
 and G are complete, and rows close in E, F, H and I as well. Two batch I rows
 stay open because both need a Docker-enabled runner. That work sits on the
 `fix/audit-batch-a-b-2026-09-08` branch in each repository, Bench PR #25 and
@@ -33,11 +33,11 @@ Batches run in order. A and B change what the shipped products claim.
 | [C. Run identity](IMPLEMENTATION.md#batch-c-run-identity-bi3-one-batch) | 0 | BI3 keyed run/window/seed identity, complete-grid validation, BR1 |
 | [D. Producer rows touching claims](IMPLEMENTATION.md#batch-d-producer-rows-that-touch-existing-claims) | 0 | BP6, BP8, AP5, AP3 |
 | [E. Shared mathematics and contracts](IMPLEMENTATION.md#batch-e-shared-mathematics-and-contracts) | 5 | R07/BM10, R06/AI1, R03 and R09 propagation, remaining R02, R05, R12, BR2/AR2 |
-| [F. Remaining Bench diagnostics](IMPLEMENTATION.md#batch-f-remaining-bench-diagnostics) | 15 | BM1, BM2/BS6, BM3, BM7, BI6 and the split supplementary rows |
+| [F. Remaining Bench diagnostics](IMPLEMENTATION.md#batch-f-remaining-bench-diagnostics) | 14 | BM1, BM2/BS6, BM3, BM7, BI6 and the split supplementary rows |
 | [G. Remaining Arena telemetry](IMPLEMENTATION.md#batch-g-remaining-arena-telemetry) | 0 | AR1/AR3, AR4 |
-| [H. Producers for the next field run](IMPLEMENTATION.md#batch-h-producer-rows-for-the-next-field-run) | 9 | BP1 to BP7, AP1, AP2, AP4, AP6 |
+| [H. Producers for the next field run](IMPLEMENTATION.md#batch-h-producer-rows-for-the-next-field-run) | 6 | BP1 to BP7, AP1, AP2, AP4, AP6 |
 | [I. Bounded probes](IMPLEMENTATION.md#batch-i-bounded-probes-promote-or-delete) | 2 | HTTP deadline, token overflow, Docker ENTRYPOINT, child OOM |
-| Total open | 31 | |
+| Total open | 27 | |
 
 Closed rows are listed per product in
 [IMPLEMENTATION.md](IMPLEMENTATION.md#closed-rows).

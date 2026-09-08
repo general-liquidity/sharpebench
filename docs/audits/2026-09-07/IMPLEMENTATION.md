@@ -5,7 +5,7 @@ review of progress against both repositories. The overall goal remains
 unfinished. This file is mirrored byte-for-byte in the Bench and Arena
 repositories; edit both or neither.
 
-Status: 100 checklist rows, 69 closed and 31 open. The restructured plan
+Status: 100 checklist rows, 73 closed and 27 open. The restructured plan
 opened at 39 closed. Batches A, B, C, D and G are complete. Batch I resolved
 three of its four probes, one of which was then reverted after failing on a
 Docker-enabled runner, so two of its rows remain open and both need a live
@@ -145,7 +145,7 @@ every row in it is closed under the rules above.
 ### Batch F: remaining Bench diagnostics
 
 - [ ] BM1: observed search-footprint floors and valid/unavailable PBO status.
-- [ ] BM2, BS6: displayed board content/count/order and trusted terminal receipt anchor.
+- [x] BM2, BS6: board verification claimed to prove the integrity of the published scores and compared only the spec payload, so rewriting every displayed score left the verifier's answer unchanged. And a genesis-anchored chain is prefix-closed, so removing its final records left a document that still verified, against a module doc claiming a dropped row breaks it. `ChainReceipt` now signs the record count and terminal signature under the chain's own scheme on both the HMAC and Ed25519 surfaces, a document with no anchor is refused rather than reported complete, and each displayed score is bound to the link that signed it by content, count and order. Bench `879f370`, with the CLI wired in `acf7c54` because `sharpebench verify` was still running the chain-only check. Arena's `state.json` publication-order anchor is a separate arena-crate gap and stays open.
 - [ ] BM3: dated role/durability support; correct IC versus return-trend descriptions.
 - [ ] BM7: raw-candidate lineage/rediscovery validation and identity binding.
 - [ ] BI6: team-member resource accounting and concurrency semantics.
@@ -177,10 +177,10 @@ papers.
 - [ ] BP4: explicit hermetic passthrough/readback of supported nonsecret controls.
 - [ ] BP5: collision-resistant model artifact identifiers.
 - [ ] BP7: strict JSONL and complete figure/summary support.
-- [ ] AP1: oracle/causal equal bars, warmup and costs.
+- [x] AP1: the predictability oracle was scored on the full tape while the two causal predictors started at the warmup bar, so the reported deflated-Sharpe gap mixed predictive power with 30 extra scored bars and a prefix the others never traded. The oracle is masked to the same window, a run whose adversaries disagree on support fails rather than reporting the gap, and the window and costs are serialized beside the numbers. Arena `8ce15a1`. Replaying the frozen tapes shows the published gap unaffected past the sixth decimal, because the oracle's deflated Sharpe saturates at 1.0 either way.
 - [x] AP2: `make-throughput.py` runs `node bench/throughput.js` and folds its JSON into the evidence, but the source scope covered only Rust, Python, TeX and selected root configuration, so the WebAssembly throughput producer could change without moving `source_snapshot_sha256`. That is exactly the not-yet-committed working-tree case the snapshot claims to bind. The script and the package manifest that pins what it runs against are now in scope, taking the manifest from 144 sources to 146. Arena `a42c47c`.
-- [ ] AP4: persist pre-execution commitment separately from reveal; witness limits explicit.
-- [ ] AP6: complete frozen-input figure renderer registry.
+- [x] AP4: the salt commitment was computed before the attacks but only reached disk together with the reveal, so ordering inside one process was not an externally checkable commitment. It now writes its own artifact carrying no reveal field before either attack runs, the reveal is checked against that file rather than the in-memory digest, and the record states what the separation does and does not witness. Arena `8ce15a1`. It becomes an audit guarantee only when published before the reveal, which the record says in its own limits field.
+- [x] AP6: the all-figure renderer claimed to rebuild every committed figure and reached 10 of 17. Dispatch is now an explicit registry naming, per entry, the evidence file it reads and every PDF it writes, and it prints an omission notice for any figure no entry claims. Arena `8ce15a1`. It also drops a duplicated F5 layout that drew two committed figures at a different size than their own producer, so the documented rebuild would have silently replaced them.
 
 ### Batch I: bounded probes (promote or delete)
 
