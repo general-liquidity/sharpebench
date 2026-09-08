@@ -2,9 +2,11 @@
 
 The complete suite checklist and supporting audit evidence are saved here in both
 repositories. Repairs are in progress and unfinished: **100 checklist rows, with
-83 closed and 17 open**, plus five explicitly deferred items. Batches A, B, C, D
-and G are complete, and rows close in E, F, H and I as well. Two batch I rows
-stay open because both need a Docker-enabled runner. That work sits on the
+85 closed and 15 open**, plus five explicitly deferred items. Batches A, B, C, D
+G, H and I are complete, and rows close in E and F as well. The two Docker rows
+were resolved on the Docker-enabled CI runner: the surviving-wrapper OOM hazard
+does not reproduce there, and the entrypoint defect is not observable with the
+pinned fixture, which is why an earlier fix for it failed. That work sits on the
 `fix/audit-batch-a-b-2026-09-08` branch in each repository, Bench PR #25 and
 Arena PR #26, and is not merged. The plan was
 restructured on 2026-09-08 from nine descriptive sections into nine ordered
@@ -36,8 +38,8 @@ Batches run in order. A and B change what the shipped products claim.
 | [F. Remaining Bench diagnostics](IMPLEMENTATION.md#batch-f-remaining-bench-diagnostics) | 11 | BM1, BM2/BS6, BM3, BM7, BI6 and the split supplementary rows |
 | [G. Remaining Arena telemetry](IMPLEMENTATION.md#batch-g-remaining-arena-telemetry) | 0 | AR1/AR3, AR4 |
 | [H. Producers for the next field run](IMPLEMENTATION.md#batch-h-producer-rows-for-the-next-field-run) | 0 | BP1 to BP7, AP1, AP2, AP4, AP6 |
-| [I. Bounded probes](IMPLEMENTATION.md#batch-i-bounded-probes-promote-or-delete) | 2 | HTTP deadline, token overflow, Docker ENTRYPOINT, child OOM |
-| Total open | 17 | |
+| [I. Bounded probes](IMPLEMENTATION.md#batch-i-bounded-probes-promote-or-delete) | 0 | HTTP deadline, token overflow, Docker ENTRYPOINT, child OOM |
+| Total open | 15 | |
 
 Closed rows are listed per product in
 [IMPLEMENTATION.md](IMPLEMENTATION.md#closed-rows).
