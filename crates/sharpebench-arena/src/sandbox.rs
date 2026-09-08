@@ -266,13 +266,25 @@ impl HardenedLaunch {
         args
     }
 
-    /// Assemble `docker run <flags> <image> <command...>` — the probe launch,
-    /// where the container command is explicit. The command can only ever land
-    /// after the image positional.
-    fn into_args_with_command<I>(self, command: I) -> Vec<String>
+    /// Assemble `docker run <flags> --entrypoint <program> <image> <args...>` -
+    /// the probe launch, where the container command is explicit.
+    ///
+    /// A trailing command replaces the image's `CMD` and nothing else: an image
+    /// that declares an `ENTRYPOINT` still runs it and receives the appended
+    /// script as its own arguments, so the readiness probe would report on
+    /// whatever that entrypoint chose to do instead of on the boundary. The same
+    /// is true of the live fixtures, whose `exec` is what makes the measured
+    /// process namespace PID 1. `--entrypoint` is the only override Docker has
+    /// for that field, so the executable goes there and its arguments stay
+    /// positional after the image.
+    fn into_args_with_command<I>(mut self, command: I) -> Vec<String>
     where
         I: IntoIterator<Item = String>,
     {
+        let mut command = command.into_iter();
+        if let Some(program) = command.next() {
+            self.flags.extend(["--entrypoint".to_string(), program]);
+        }
         let mut args = self.into_args();
         args.extend(command);
         args
@@ -1529,15 +1541,73 @@ mod tests {
                  a Docker flag: {args:?}"
             );
             if with_command {
+                // The executable moved to `--entrypoint` (see
+                // `into_args_with_command`); its arguments stay positional.
                 assert_eq!(
                     args[image_at + 1],
-                    "/bin/sh",
-                    "the command follows the image"
+                    "-c",
+                    "the command arguments follow the image"
                 );
             } else {
                 assert_eq!(args.last(), Some(&image), "the image stays trailing");
             }
         }
+    }
+
+    /// A trailing command replaces `CMD` only. Against an image that declares an
+    /// `ENTRYPOINT`, the appended `/bin/sh` script would become arguments to that
+    /// entrypoint, and the readiness verdict, the egress verdicts and the live
+    /// OOM fixture would all describe whatever the entrypoint ran instead. Every
+    /// launch that supplies its own command must therefore override the field
+    /// Docker actually reads.
+    #[test]
+    fn an_explicit_command_overrides_the_image_entrypoint() {
+        let image = format!("fixture@sha256:{}", "a".repeat(64));
+        for retention in [
+            Retention::AutoRemove,
+            Retention::Inspectable("sharpebench-agent-test-0".to_string()),
+        ] {
+            let args = HardenedLaunch::new(&image, &retention).into_args_with_command([
+                "/bin/sh".to_string(),
+                "-ceu".to_string(),
+                "exit 0".to_string(),
+            ]);
+            let entrypoint_at = args
+                .iter()
+                .position(|arg| arg == "--entrypoint")
+                .expect("an explicit command must override the image entrypoint");
+            let image_at = args
+                .iter()
+                .position(|arg| *arg == image)
+                .expect("the image positional must be in the command");
+            assert!(
+                entrypoint_at < image_at,
+                "--entrypoint is a Docker flag, not a container argument: {args:?}"
+            );
+            assert_eq!(
+                args[entrypoint_at + 1],
+                "/bin/sh",
+                "the supplied executable is what the container runs"
+            );
+            assert_eq!(
+                args[image_at + 1..],
+                ["-ceu".to_string(), "exit 0".to_string()],
+                "the remaining arguments stay positional after the image"
+            );
+        }
+    }
+
+    /// The agent launch is the one path that deliberately runs the image's own
+    /// entrypoint, so it must not acquire an override.
+    #[test]
+    fn the_entrant_launch_still_runs_the_image_entrypoint() {
+        let image = format!("fixture@sha256:{}", "a".repeat(64));
+        let args = hardened_docker_args(&image, &Retention::AutoRemove);
+        assert!(
+            !args.iter().any(|arg| arg == "--entrypoint"),
+            "a production entrant runs its image entrypoint: {args:?}"
+        );
+        assert_eq!(args.last(), Some(&image), "the image stays trailing");
     }
 
     #[test]
