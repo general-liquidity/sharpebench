@@ -1,27 +1,43 @@
 # Sharpe suite audit implementation
 
 Goal started 2026-09-07. Plan restructured 2026-09-08 after an independent
-review of progress against both repositories. The overall goal remains
-unfinished. This file is mirrored byte-for-byte in the Bench and Arena
-repositories; edit both or neither.
+review of progress against both repositories. This file is mirrored
+byte-for-byte in the Bench and Arena repositories; edit both or neither.
 
-Status: 100 checklist rows, 99 closed and 1 open. The restructured plan
-opened at 39 closed. Batches A, B, C, D and G are complete. Batch I resolved
-three of its four probes, one of which was then reverted after failing on a
-Docker-enabled runner, so two of its rows remain open and both need a live
-daemon. Rows also close in E, F and H. All of it is on the
-`fix/audit-batch-a-b-2026-09-08` branch in each repository and is not merged.
-Every commit cited on a closed row was verified to be reachable in the named
-repository. Open rows are ordered into batches below; the count is a checklist
-disposition, not a count of confirmed defects. Five deferred items are listed
-without checkboxes.
+Status: 100 checklist rows, all 100 closed. The restructured plan opened at 39.
+All of it is on the `fix/audit-batch-a-b-2026-09-08` branch in each repository,
+Bench PR #25 and Arena PR #26, and is **not merged**. Every commit cited on a
+closed row was verified to be reachable in the named repository, and every new
+regression was mutation-checked in an isolated copy before its row was closed.
+Five deferred items are listed at the end without checkboxes; they were never
+part of the 100.
 
-Two defects were found while repairing, neither in the original audit. The
-release workflow's `verify` job runs with `if: always()` and did not inspect
-the new publish gate, so a blocked release would have reported success. The
-paper's description of the endogenous market as single-price was wrong in its
-own right: each agent pays a size-dependent execution price, so that model is
-not uniform-price either. Both are fixed in the commits cited on their rows.
+**Closed is not the same as finished.** Each row records what its repair does
+and does not establish, and several close on a disposition rather than a code
+change: a finding shown to be already repaired, a description corrected where
+the arithmetic was right, or a probe run on a real Docker daemon and found not
+to reproduce. Reading a row's own text matters more than reading this count.
+Three consequences are deliberately left as decisions rather than folded into a
+fix: migrating contract digests to the versioned canonical form, which would
+invalidate 24 committed digests; renaming the serialized zero-mass and
+budget-onset keys, which moves a published Python key and needs rebuilt npm and
+WebAssembly artifacts; and merging these branches at all.
+
+Published numerical evidence stays frozen. Where a repair changes what a
+producer would now compute, both papers say so rather than regenerating the
+number. Two committed artifacts will not reproduce and are recorded in the
+papers: the synthetic witness, whose seed expression collided, and the
+forecast-quality tutorial fixture, which was itself an instance of R05.
+
+Defects found while repairing that the original audit did not report: the
+release workflow's `verify` job ran with `if: always()` and did not inspect the
+new publish gate, so a blocked release would have reported success; the paper
+described the endogenous market as single-price when each agent pays a
+size-dependent execution price; a commitment preimage could have a separator
+moved between the artifact digest and the salt, letting an entrant reveal a
+different frozen artifact against the same published hash; and the in-memory
+sweep driver hardcoded a single attempt exactly as the checkpoint did. Each is
+fixed in the commits cited on its row.
 
 Source baselines: [Bench `933e0c1` (0.18.4)](https://github.com/general-liquidity/sharpebench/tree/933e0c1056a2e4707b28762c294323bf05bdab65)
 and [Arena `1be915f` (0.24.1)](https://github.com/general-liquidity/sharpearena/tree/1be915f330acabacd171cc350bec0def58d9e134).
@@ -140,7 +156,7 @@ every row in it is closed under the rules above.
 - [x] R02 closed. The first half landed in `895a623` and the agreement and downside legs in `70229a1`; the data-snooping family closes in Bench `1aa8a14`.
 - [x] R05: two one-contract documents produced one settlement block, a zero-width interval and familywise significance at p = 1/401, and raising the replication count only made that look smaller without adding evidence. Resampling B blocks with replacement lands on a single repeated block with probability B^(1-B), so a level finer than that mass is finer than the law can resolve; at the default alpha the bar is met from four blocks. The interval and p-values are withheld with the reason recorded rather than coerced, and Holm keeps a withheld comparison in the family size so it cannot inflate its neighbours. Bench `b66f942`. This is a necessary condition on the reported level, not a certificate of calibration. The shipped tutorial fixture was itself an instance of the defect and is regenerated; the frozen field has six blocks and is unchanged.
 - [x] R12: an optional default lets a reader accept an older message, not a newer one, because the published schemas set `additionalProperties: false`. Compatibility is now stated by direction: decisions travel to the harness, always the newer reader, so an added decision field needs no coordination, while an added observation field reaches an older reader and needs version negotiation, a parallel namespace or a declared-unvalidated envelope. The minor-bump rule is split the same way. Arena `118ddc4`.
-- [ ] BR2, AR2: the Arena half is closed in Arena `88d054a`. A failed request reached `continue` before accounting and a resumed completion replaced its failed attempt, so everything that attempt spent disappeared and slow, error-prone models looked cheaper and faster than they were. Attempts are now timed on the host clock, failures carry their elapsed time or a typed unavailability, and the bridge keeps every attempt as a rank-neutral ledger beside the completed-cell profile. **Open on the Bench side**: the harness needs its own append-only attempt ledger; Arena's is diagnostic and does not reach Bench, which pins an unreleased version anyway.
+- [x] BR2, AR2: both halves closed. Arena in `88d054a`, where a failed request reached `continue` before accounting and a resumed completion replaced its failed attempt. Bench in `a2dc1bf`: the retry path returned the completed run and dropped everything before it, the checkpoint had no attempt field at all, and an eventual agent fault was logged as one attempt however many transport failures preceded it, so a cell that failed twice before completing reported the cost of the completion alone. The in-memory driver had the same hardcoded single attempt, which the finding did not name. Every attempt is now timed and recorded, an unobserved duration is typed rather than summed as zero, a completion is appended after the attempts it superseded, and a terminal cell with no attempt evidence is refused. The checkpoint schema goes to 3 so a pre-ledger file is refused rather than resumed with its spend read as zero. Totals sit beside the scored pool and never enter a score, a rank or a pass^k pool. The architecture audit's claim that retries already preserved prior evidence is corrected in `c86267f`.
 
 ### Batch F: remaining Bench diagnostics
 
