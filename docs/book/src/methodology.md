@@ -33,7 +33,7 @@ inside each family. Those groups never deduplicate trials or enter the composite
 score. See [Candidate lineage diagnostics](candidate-lineage.md).
 
 The composite also *reports* (without gating, to keep the default behaviour
-stable): alpha/beta attribution vs the field, calibration (Brier), edge half-life,
+stable): alpha/beta attribution vs the field, calibration (Brier), edge half-life (per-window return drift, not information-coefficient decay),
 the field-wide Reality Check p-value, the Romano–Wolf step-down verdict, max
 drawdown, turnover, Pareto-optimality, confidence-weighted return, cost-efficiency,
 rolling worst-case Sharpe, selection robustness, and the **Sortino ratio** with its

@@ -19,7 +19,7 @@ pub use sharpebench_protocol::DeclaredMandate;
 
 use crate::calibration::brier_score;
 use crate::comparison_sets::{comparison_set, restrict_to_shared, TaggedRun, TaggedSubmission};
-use crate::decay::edge_half_life;
+use crate::decay::return_drift_half_life;
 use crate::deflated_sharpe::{
     deflated_sharpe_ratio_against_null, expected_max_sharpe, probabilistic_sharpe_ratio,
     sharpe_ratio,
@@ -813,8 +813,15 @@ pub struct CompositeScore {
     /// Pairing is performed inside each run, never across a run boundary.
     #[serde(default)]
     pub calibration_observations: usize,
-    /// Edge durability: half-life (in runs) of the per-run edge. `None` if there
-    /// are too few runs or the edge isn't decaying.
+    /// Edge durability: half-life, **in market windows**, of the magnitude of
+    /// the realized mean return, with execution-seed replicates averaged into
+    /// their window first (see [`crate::decay::return_drift_half_life`]). `None`
+    /// if there are too few windows or the series isn't decaying.
+    ///
+    /// This measures *return drift*, not information-coefficient decay: mean
+    /// return also moves with sizing, cost and regime, and can decay while the
+    /// signal is intact. The serialized name is historical and unchanged; read
+    /// it as return drift.
     pub edge_half_life: Option<f64>,
     /// Field-wide data-snooping p-value (White's Reality Check), filled by [`rank`]:
     /// the probability the *leader's* edge is luck given how many agents were tried.
@@ -1012,9 +1019,12 @@ pub struct CompositeScore {
     pub econ_dominance_violations: Option<usize>,
     /// Behavior-role attribution over the recorded runs (see
     /// [`crate::roles::attribute_behavior_roles`]): the regression loading of
-    /// each populated behavior class (clean-active / idle / warned /
-    /// block-violating) on the equal-weight team stream. Empty when not
-    /// estimable. Reported, never gating.
+    /// each estimable behavior class (clean-active / idle / warned /
+    /// block-violating) on the window-dated team stream, each class estimated on
+    /// the windows it occurs in. Empty when not estimable, which includes the
+    /// ordinary one-execution-per-window submission: behavior is then confounded
+    /// with the window and every loading would be 1.0 by construction. Reported,
+    /// never gating.
     #[serde(default)]
     pub role_contributions: Vec<RoleContribution>,
     /// The mandate the submitter declared (see [`DeclaredMandate`]), echoed so
@@ -1267,9 +1277,21 @@ fn score_agent_with(
         None
     };
 
-    // Edge durability: half-life of the per-run edge across runs.
-    let per_run_edge: Vec<f64> = sub.runs.iter().map(|r| mean(&r.returns)).collect();
-    let edge_half_life_periods = edge_half_life(&per_run_edge);
+    // Edge durability: how fast the magnitude of the realized mean return drifts
+    // across successive market windows. Dated by window, on the same window axis
+    // as `pooled`: execution-seed replicates are repeated draws of one window's
+    // dates, so they are averaged into their window before the regression sees
+    // them. Feeding them in as separate observations would let a permutation of
+    // the seed order change the reported durability without changing any
+    // economic history. This is return drift, not IC decay; see
+    // [`crate::decay::return_drift_half_life`].
+    let seeds_per_window = cfg.execution_seeds_per_window.max(1);
+    let per_window_edge: Vec<f64> = sub
+        .runs
+        .chunks(seeds_per_window)
+        .map(|window| window.iter().map(|r| mean(&r.returns)).sum::<f64>() / window.len() as f64)
+        .collect();
+    let edge_half_life_periods = return_drift_half_life(&per_window_edge);
 
     // Mandate adherence: the pooled track must respect the whole-track cap and
     // every run must respect the per-run cap. Both default to 1.0, under which
@@ -1427,7 +1449,7 @@ fn score_agent_with(
     // [`crate::roles::attribute_behavior_roles`]): which behavior class
     // (clean-active, idle, warned, block-violating) is load-bearing for the
     // pooled result. Reported, never gating; empty when not estimable.
-    let role_contributions = attribute_behavior_roles(&sub.runs);
+    let role_contributions = attribute_behavior_roles(&sub.runs, seeds_per_window);
 
     let rank_eligible = dsr >= cfg.dsr_bar
         && passed_k
@@ -3648,39 +3670,101 @@ mod tests {
 
     /// Behavior-role attribution is reported on the score, deterministic, and
     /// keyed by the trace's order patterns.
+    ///
+    /// The three runs are read as three execution replicates of one market
+    /// window, which is the only shape under which a behavior class is separable
+    /// from its window. With the default one execution per window the same runs
+    /// are three *different* windows and nothing is estimable, which the second
+    /// half of this test pins.
     #[test]
     fn behavior_role_contributions_are_reported() {
-        let mut runs: Vec<Run> = (0..3).map(|_| run(0.002, 0.0005, 60)).collect();
-        for r in &mut runs {
-            r.trace.events.push(ProcessEvent::OrderPlaced {
-                risk_gate_passed: true,
-            });
-        }
-        runs[2].trace.events.push(ProcessEvent::ConcentrationBreach);
-        let s = score_agent(&agent("mixed", runs), &ScoreConfig::default());
+        let mixed = || {
+            let mut runs: Vec<Run> = (0..3).map(|_| run(0.002, 0.0005, 60)).collect();
+            for r in &mut runs {
+                r.trace.events.push(ProcessEvent::OrderPlaced {
+                    risk_gate_passed: true,
+                });
+            }
+            runs[2].trace.events.push(ProcessEvent::ConcentrationBreach);
+            runs
+        };
+        let cfg = ScoreConfig {
+            execution_seeds_per_window: 3,
+            ..ScoreConfig::default()
+        };
+        let s = score_agent(&agent("mixed", mixed()), &cfg);
         let names: Vec<&str> = s
             .role_contributions
             .iter()
             .map(|c| c.role.as_str())
             .collect();
         assert_eq!(names, vec!["clean_active", "warned"]);
-        let again = score_agent(
-            &agent("mixed", {
-                let mut runs: Vec<Run> = (0..3).map(|_| run(0.002, 0.0005, 60)).collect();
-                for r in &mut runs {
-                    r.trace.events.push(ProcessEvent::OrderPlaced {
-                        risk_gate_passed: true,
-                    });
-                }
-                runs[2].trace.events.push(ProcessEvent::ConcentrationBreach);
-                runs
-            }),
-            &ScoreConfig::default(),
-        );
+        // Every loading is estimated on the whole window, not a truncation of it.
+        assert!(s.role_contributions.iter().all(|c| c.periods == 60));
+        let again = score_agent(&agent("mixed", mixed()), &cfg);
         assert_eq!(s.role_contributions, again.role_contributions);
+
+        // BM3: one execution per window means each run is its own market window,
+        // so a behavior class is confounded with the window it occurred in and
+        // no loading is reported.
+        let per_window = score_agent(&agent("mixed", mixed()), &ScoreConfig::default());
+        assert!(
+            per_window.role_contributions.is_empty(),
+            "{:?}",
+            per_window.role_contributions
+        );
 
         let empty = score_agent(&agent("none", Vec::new()), &ScoreConfig::default());
         assert!(empty.role_contributions.is_empty());
+    }
+
+    /// BM3, half 2: reported durability is dated by market window, so permuting
+    /// the execution seeds inside a window cannot change it.
+    ///
+    /// Seed replicates are repeated draws of one window's dates, not successive
+    /// periods of edge aging. Feeding per-run mean returns to the log-linear
+    /// decay regression made the reported half-life a function of the order the
+    /// seeds happened to execute in.
+    #[test]
+    fn durability_is_dated_by_window_not_by_seed_order() {
+        // Three windows of two replicates. Window means decay; within each
+        // window the two seeds differ sharply, so a per-run series is sensitive
+        // to their order while a per-window series is not.
+        let make = |m: f64, n: usize| run(m, 0.0005, n);
+        let per_window_means = [(0.008, 0.004), (0.004, 0.002), (0.002, 0.001)];
+        let ordered: Vec<Run> = per_window_means
+            .iter()
+            .flat_map(|(a, b)| [make(*a, 40), make(*b, 40)])
+            .collect();
+        let swapped: Vec<Run> = per_window_means
+            .iter()
+            .flat_map(|(a, b)| [make(*b, 40), make(*a, 40)])
+            .collect();
+        let cfg = ScoreConfig {
+            execution_seeds_per_window: 2,
+            ..ScoreConfig::default()
+        };
+        let a = score_agent(&agent("ordered", ordered), &cfg);
+        let b = score_agent(&agent("swapped", swapped), &cfg);
+        assert!(
+            a.edge_half_life.is_some(),
+            "a decaying track has a half-life"
+        );
+        assert_eq!(a.edge_half_life, b.edge_half_life);
+    }
+
+    /// BM3, half 2: the default one execution per window leaves the reported
+    /// half-life exactly where it was, so no published number moves.
+    #[test]
+    fn durability_with_one_execution_per_window_is_the_per_run_series() {
+        let runs: Vec<Run> = [0.008, 0.004, 0.002, 0.001]
+            .iter()
+            .map(|m| run(*m, 0.0005, 40))
+            .collect();
+        let per_run: Vec<f64> = runs.iter().map(|r| mean(&r.returns)).collect();
+        let s = score_agent(&agent("decaying", runs), &ScoreConfig::default());
+        assert_eq!(s.edge_half_life, crate::decay::edge_half_life(&per_run));
+        assert!(s.edge_half_life.is_some());
     }
 
     /// Scores archived before the reported fields existed still parse, with the
