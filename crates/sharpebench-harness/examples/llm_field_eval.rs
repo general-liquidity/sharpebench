@@ -11,7 +11,13 @@
 //! the same measured-dispersion safeguards as every other ranked field.
 //!
 //! Run from the repo root with ANTHROPIC_API_KEY (and optionally LLM_CACHE_DIR /
-//! LLM_STATS_DIR / LLM_STRIDE / LLM_MAX_CALLS) exported. The run fails closed:
+//! LLM_STATS_DIR / LLM_STRIDE / LLM_MAX_CALLS) exported. Those four controls
+//! are passed through the hermetic spawn and their effective values are written
+//! into every record: the documented invocation previously allowlisted only the
+//! credential, so an exported spending cap, decision cadence or evidence-cache
+//! location was dropped and the shim silently used its own defaults. The
+//! credential stays separately allowlisted and never reaches the evidence.
+//! The run fails closed:
 //! a provider/transport error or an exhausted call budget aborts the field, and
 //! only a completely evaluated field is renamed to the requested output. The
 //! optional dataset selector is resolved against the declared set before the
@@ -32,8 +38,8 @@ use sharpebench_core::AgentSubmission;
 use sharpebench_core::PassMode;
 use sharpebench_harness::luck_floor;
 use sharpebench_sim::{
-    run_backtest, tag_regime, walk_forward, Agent, BuyAndHold, CostModel, Dataset, ExternalAgent,
-    HoldAgent, Momentum, Window,
+    is_credential_name, run_backtest, tag_regime, walk_forward, Agent, BuyAndHold, CostModel,
+    Dataset, ExternalAgent, HoldAgent, Momentum, Window,
 };
 
 #[path = "support/declared_support.rs"]
@@ -59,6 +65,17 @@ const LLM_MODELS: &[&str] = &[
     "claude-haiku-4-5-20251001",
 ];
 const LLM_SCRIPT: &str = "examples/llm-agent/llm_agent.py";
+/// The credential the shim needs, allowlisted on its own so no cost control can
+/// widen what carries secret material.
+const LLM_CREDENTIAL: &str = "ANTHROPIC_API_KEY";
+/// The non-secret controls the module docs tell operators to export. They must
+/// reach the shim, or the documented invocation does not do what it says.
+const LLM_CONTROLS: &[&str] = &[
+    "LLM_CACHE_DIR",
+    "LLM_STATS_DIR",
+    "LLM_STRIDE",
+    "LLM_MAX_CALLS",
+];
 const EXTERNAL_MAX_RETRIES: u32 = 2;
 /// Generous per-decision budget: an API round trip (frontier-tier thinking
 /// included) plus SDK retries.
@@ -82,8 +99,25 @@ struct Record<'a> {
     agent_id: String,
     /// The LLM behind the agent, for LLM rows; None for reference agents and
     /// the luck floor.
+    ///
+    /// This is the *requested* model id, and it is also the effective one: the
+    /// shim pins policy identity to the requested model, refuses any
+    /// substitution the provider would serve under that name, and fails the
+    /// subprocess instead. A run that reaches this record therefore has no
+    /// requested/effective gap to report. Before that, an unknown-model error
+    /// silently rebound the shim to an unversioned alias while the producer
+    /// went on writing the requested id here.
     #[serde(skip_serializing_if = "Option::is_none")]
     model: Option<String>,
+    /// `NAME=value` for every non-secret control the hermetic spawn passed to
+    /// the shim, resolved at spawn time, with credential-shaped names bound as
+    /// `NAME=<secret>`.
+    ///
+    /// Written on every row, LLM or reference, because it describes the run and
+    /// not the agent. Without it the record could not distinguish a field run
+    /// under a lowered call cap or a widened decision stride from one under the
+    /// shim's own defaults.
+    agent_env_controls: Vec<String>,
     /// Model-output protocol failures are agent evidence and become sentinel
     /// runs. Host/provider/runtime failures still abort the whole field.
     ///
@@ -118,6 +152,37 @@ struct Record<'a> {
 }
 
 type AgentFactory = Box<dyn Fn() -> Box<dyn Agent>>;
+
+/// Every variable the hermetic spawn passes to the shim: the credential plus the
+/// documented controls, and nothing else.
+fn agent_passthrough() -> Vec<&'static str> {
+    let mut names = vec![LLM_CREDENTIAL];
+    names.extend_from_slice(LLM_CONTROLS);
+    names
+}
+
+/// The effective value of each control, for the evidence record.
+///
+/// Same shape as the sweep checkpoint identity in `agent_env_identity`: an
+/// unset name binds `<unset>`, which is distinct from any value it could hold,
+/// and a credential-shaped name binds `<secret>` so no key material can reach
+/// a published record through a control that was later renamed. Pure in its
+/// inputs so the binding can be asserted without an ambient environment.
+fn effective_controls(names: &[&str], lookup: impl Fn(&str) -> Option<String>) -> Vec<String> {
+    names
+        .iter()
+        .map(|name| {
+            if is_credential_name(name) {
+                format!("{name}=<secret>")
+            } else {
+                match lookup(name) {
+                    Some(value) => format!("{name}={value}"),
+                    None => format!("{name}=<unset>"),
+                }
+            }
+        })
+        .collect()
+}
 
 fn windows_for(n: usize) -> (Vec<Window>, usize) {
     let warmup = (n / 10).clamp(20, 60);
@@ -179,6 +244,11 @@ fn main() {
         &declared,
         env::args().nth(2).as_deref(),
     ));
+    // Resolved once, before anything is spawned, so every record in the file
+    // reports the same controls the first spawn actually received.
+    let passthrough = agent_passthrough();
+    let controls = effective_controls(&passthrough, |name| env::var(name).ok());
+    eprintln!("agent controls: {}", controls.join(" "));
     let partial = format!("{out}.partial");
     let mut w = BufWriter::new(File::create(&partial).expect("create partial output"));
     let mut n_records = 0usize;
@@ -217,15 +287,12 @@ fn main() {
                 CostModel::default(),
                 EXTERNAL_MAX_RETRIES,
                 || {
-                    // Hermetic spawn + exactly the one variable the paid-model
-                    // shim needs; the rest of the harness environment stays out.
-                    ExternalAgent::spawn_with_env(
-                        "python",
-                        &[LLM_SCRIPT, model],
-                        &["ANTHROPIC_API_KEY"],
-                    )
-                    .ok()
-                    .map(|a| a.with_decide_timeout(LLM_DECIDE_TIMEOUT))
+                    // Hermetic spawn + exactly the credential and the four
+                    // documented controls; the rest of the harness environment
+                    // stays out.
+                    ExternalAgent::spawn_with_env("python", &[LLM_SCRIPT, model], &passthrough)
+                        .ok()
+                        .map(|a| a.with_decide_timeout(LLM_DECIDE_TIMEOUT))
                 },
             );
             if res.failures.runtime_failures() > 0 {
@@ -274,6 +341,7 @@ fn main() {
                     .iter()
                     .find(|(a, _, _)| *a == s.agent_id)
                     .map(|(_, m, _)| m.clone()),
+                agent_env_controls: controls.clone(),
                 agent_protocol_failures: model_by_agent
                     .iter()
                     .find(|(a, _, _)| *a == s.agent_id)
@@ -311,4 +379,72 @@ fn main() {
     or_refuse(require_evaluated("dataset", &planned, &evaluated));
     std::fs::rename(&partial, &out).expect("publish completed field atomically");
     eprintln!("wrote {n_records} complete records to {out}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The documented invocation must actually reach the shim. Before this,
+    /// only the credential was allowlisted and an exported cap or stride was
+    /// dropped by `env_clear`.
+    #[test]
+    fn every_documented_control_is_passed_through() {
+        let names = agent_passthrough();
+        for control in LLM_CONTROLS {
+            assert!(
+                names.contains(control),
+                "{control} is documented but not passed to the shim"
+            );
+        }
+        assert!(names.contains(&LLM_CREDENTIAL));
+    }
+
+    /// Passthrough is an allowlist, not a hole: nothing beyond the credential
+    /// and the four documented controls may cross the hermetic boundary.
+    #[test]
+    fn passthrough_is_exactly_the_credential_and_the_controls() {
+        let names = agent_passthrough();
+        assert_eq!(names.len(), 1 + LLM_CONTROLS.len());
+        for name in &names {
+            assert!(
+                *name == LLM_CREDENTIAL || LLM_CONTROLS.contains(name),
+                "{name} is neither the credential nor a documented control"
+            );
+        }
+    }
+
+    /// An unset control binds a value distinct from anything it could hold, so
+    /// "the operator exported nothing" is readable off the record.
+    #[test]
+    fn unset_control_is_distinguishable_from_any_value() {
+        let bound = effective_controls(&["LLM_MAX_CALLS"], |_| None);
+        assert_eq!(bound, vec!["LLM_MAX_CALLS=<unset>".to_string()]);
+        let set = effective_controls(&["LLM_MAX_CALLS"], |_| Some("40".into()));
+        assert_eq!(set, vec!["LLM_MAX_CALLS=40".to_string()]);
+        assert_ne!(bound, set);
+    }
+
+    /// The credential's presence is recorded; its value never is. A control
+    /// renamed into credential shape must not leak either.
+    #[test]
+    fn credential_values_never_reach_the_record() {
+        let bound = effective_controls(&agent_passthrough(), |name| {
+            if name == LLM_CREDENTIAL {
+                Some("sk-live-do-not-log".into())
+            } else {
+                Some(format!("value-of-{name}"))
+            }
+        });
+        assert!(
+            bound.contains(&format!("{LLM_CREDENTIAL}=<secret>")),
+            "the credential must be bound by presence, not by value"
+        );
+        assert!(
+            !bound
+                .iter()
+                .any(|entry| entry.contains("sk-live-do-not-log")),
+            "a secret value reached the evidence: {bound:?}"
+        );
+    }
 }

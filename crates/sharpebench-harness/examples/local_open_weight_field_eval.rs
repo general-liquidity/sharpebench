@@ -153,17 +153,58 @@ fn model_tags() -> Vec<String> {
         .collect::<Vec<_>>()
 }
 
+/// A filesystem- and identifier-safe encoding of an exact Ollama tag, injective
+/// on bytes.
+///
+/// The previous encoding folded every character outside `[A-Za-z0-9-_]` to `-`,
+/// so the distinct tags `a:b` and `a-b` both became `a-b`. That name is the
+/// agent id, the identity-file stem, and the key both the model metadata and
+/// the alternative-gate verdict are joined on by first match, so two colliding
+/// entries would overwrite one identity artifact and one of them would be
+/// published carrying the other's metadata and eligibility.
+///
+/// The encoding here is reversible, which is what makes it collision-free:
+/// ASCII alphanumerics and `-` stand for themselves, `_` doubles to `__`, and
+/// every other byte becomes `_x` followed by two lowercase hex digits. Reading
+/// left to right, a `_` is followed either by `_` (one underscore) or by `x`
+/// and two hex digits (one byte), so no two byte strings can encode alike.
 fn safe_name(model: &str) -> String {
-    model
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() || character == '-' || character == '_' {
-                character
-            } else {
-                '-'
-            }
-        })
-        .collect()
+    let mut encoded = String::with_capacity(model.len());
+    for byte in model.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' => encoded.push(byte as char),
+            b'_' => encoded.push_str("__"),
+            other => encoded.push_str(&format!("_x{other:02x}")),
+        }
+    }
+    encoded
+}
+
+/// Refuse a model list whose entries cannot be told apart downstream.
+///
+/// Two checks, because they fail for different reasons: a tag repeated in
+/// `SHARPEBENCH_LOCAL_MODELS` would run the same model twice under one id, and
+/// two distinct tags encoding alike would silently merge two models' evidence.
+/// The second is impossible while `safe_name` stays injective, and is asserted
+/// anyway so that a future edit relaxing the encoding fails here instead of in
+/// a published field.
+fn check_model_ids(models: &[String]) -> Result<(), String> {
+    let mut seen: Vec<(&str, String)> = Vec::new();
+    for model in models {
+        let id = format!("local-{}", safe_name(model));
+        if let Some((first, _)) = seen.iter().find(|(tag, _)| *tag == model.as_str()) {
+            return Err(format!(
+                "SHARPEBENCH_LOCAL_MODELS repeats the tag {first:?}; each model may appear once"
+            ));
+        }
+        if let Some((first, _)) = seen.iter().find(|(_, other)| *other == id) {
+            return Err(format!(
+                "SHARPEBENCH_LOCAL_MODELS tags {first:?} and {model:?} both encode to the agent id {id:?}"
+            ));
+        }
+        seen.push((model.as_str(), id));
+    }
+    Ok(())
 }
 
 fn windows_for(n: usize) -> (Vec<Window>, usize) {
@@ -258,6 +299,12 @@ fn main() {
         !models.is_empty(),
         "SHARPEBENCH_LOCAL_MODELS contains no tags"
     );
+    // Before any model is started: two entries that cannot be told apart
+    // downstream would share one identity artifact and cross their metadata.
+    if let Err(diagnostic) = check_model_ids(&models) {
+        eprintln!("{diagnostic}");
+        std::process::exit(2);
+    }
     let python = env::var("SHARPEARENA_PYTHON").unwrap_or_else(|_| "python".to_string());
     // Fail before touching any dataset: the shim is the whole model path, and a
     // run that cannot reach it has nothing to produce.
@@ -463,5 +510,72 @@ mod tests {
     fn present_shim_passes_the_preflight() {
         let python = env::var("SHARPEARENA_PYTHON").unwrap_or_else(|_| "python".to_string());
         probe_shim(&python).expect("the shim is installed for this interpreter");
+    }
+
+    /// The reported collision: two accepted Ollama tags that folded to one
+    /// agent id, one identity path, and one first-match metadata join.
+    #[test]
+    fn colon_and_dash_tags_no_longer_encode_alike() {
+        assert_ne!(safe_name("a:b"), safe_name("a-b"));
+        assert_eq!(safe_name("a-b"), "a-b");
+    }
+
+    /// Injectivity over every byte a tag can hold, checked on the whole ASCII
+    /// alphabet plus the shapes Ollama tags actually take.
+    #[test]
+    fn distinct_tags_never_encode_alike() {
+        let mut tags: Vec<String> = (0u8..=127).map(|b| format!("m{}", b as char)).collect();
+        tags.extend(
+            [
+                "llama3.1:8b",
+                "llama3.1-8b",
+                "llama3_1:8b",
+                "llama3__1-8b",
+                "qwen2.5:14b-instruct",
+                "qwen2-5-14b-instruct",
+                "a_xb",
+                "a_x5fb",
+            ]
+            .into_iter()
+            .map(str::to_string),
+        );
+        let mut seen: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        for tag in &tags {
+            if let Some(other) = seen.insert(safe_name(tag), tag.clone()) {
+                assert_eq!(&other, tag, "{other:?} and {tag:?} encode alike");
+            }
+        }
+    }
+
+    /// The encoded name is still a usable file stem and agent id: nothing in it
+    /// can be a path separator, a drive marker or a wildcard.
+    #[test]
+    fn encoded_names_stay_filesystem_safe() {
+        for tag in ["llama3.1:8b", "a/b", r"a\b", "a b", "a*b", "..", "a_b"] {
+            let encoded = safe_name(tag);
+            assert!(
+                encoded
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'),
+                "{tag:?} encoded to {encoded:?}"
+            );
+        }
+    }
+
+    /// A repeated tag is refused before any model starts, rather than running
+    /// the same model twice under one id.
+    #[test]
+    fn a_repeated_tag_is_refused() {
+        let models = ["llama3.1:8b".to_string(), "llama3.1:8b".to_string()];
+        let diagnostic = check_model_ids(&models).expect_err("a repeated tag must be refused");
+        assert!(diagnostic.contains("llama3.1:8b"), "got: {diagnostic}");
+    }
+
+    /// The tags the finding named pass the duplicate check now that they encode
+    /// differently, so the guard is not a blanket refusal.
+    #[test]
+    fn distinct_tags_are_accepted() {
+        let models = ["a:b".to_string(), "a-b".to_string()];
+        check_model_ids(&models).expect("distinct tags must be accepted");
     }
 }

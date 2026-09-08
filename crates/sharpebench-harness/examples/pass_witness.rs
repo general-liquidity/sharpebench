@@ -94,13 +94,54 @@ impl Rng {
     }
 }
 
+/// Domain tags. One per synthetic population, so a stream is identified by
+/// which population it belongs to and never only by an arithmetic offset.
+const DOMAIN_CALIBRATION: u64 = 1;
+const DOMAIN_ZERO_EDGE: u64 = 2;
+const DOMAIN_WITNESS: u64 = 3;
+
+/// The RNG seed for one synthetic return stream, from the tuple that names it.
+///
+/// The old expression was `base_seed ^ (window << 32) ^ (exec_seed + 1)` with
+/// `base_seed = 0x00CC_0000 + member`, which put the member index and the
+/// execution-seed value in overlapping low bits: `0xCC0000 ^ 3` equals
+/// `0xCC0001 ^ 2`, so calibration member 0 at execution value 3 and member 1 at
+/// execution value 2 drew the identical series. Five members by eight seeds
+/// yielded 13 distinct streams per window instead of 40, and the "independent
+/// zero-edge calibrators" that fix the dispersion bar were not independent.
+///
+/// Each coordinate is now mixed in its own round rather than folded into
+/// shared bits, so no coordinate can cancel another. Uniqueness is not argued
+/// from the construction: `every_stream_tuple_has_its_own_seed` enumerates the
+/// whole grid this example draws and is the guarantee.
+///
+/// The common random numbers this example does want are deliberately outside
+/// the tuple: the injected edge `s` is not a coordinate, so the witness
+/// redraws the same streams at every point of the edge sweep and the
+/// monotonicity assertion still compares like with like.
+fn stream_seed(domain: u64, member: usize, window: usize, exec_seed: usize) -> u64 {
+    let mut mixed = domain;
+    for coordinate in [member as u64, window as u64, exec_seed as u64] {
+        mixed = mix(mixed ^ coordinate.wrapping_mul(0x9E37_79B9_7F4A_7C15));
+    }
+    mixed
+}
+
+/// splitmix64's finalizer: a bijection on u64, so distinct inputs to any single
+/// round stay distinct.
+fn mix(mut z: u64) -> u64 {
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
 /// One submission: `N_WINDOWS x N_SEEDS` runs of `window_len` returns with true
 /// per-period Sharpe `s`, each run its own seeded stream.
-fn submission(id: &str, base_seed: u64, s: f64, window_len: usize) -> AgentSubmission {
+fn submission(id: &str, domain: u64, member: usize, s: f64, window_len: usize) -> AgentSubmission {
     let mut runs = Vec::new();
     for w in 0..N_WINDOWS {
         for k in 0..N_SEEDS {
-            let mut rng = Rng::new(base_seed ^ ((w as u64) << 32) ^ (k as u64 + 1));
+            let mut rng = Rng::new(stream_seed(domain, member, w, k));
             let returns: Vec<f64> = (0..window_len)
                 .map(|_| SIGMA * (s + rng.normal()))
                 .collect();
@@ -142,7 +183,8 @@ fn main() {
             .map(|k| {
                 submission(
                     &format!("calibration-zero-edge-{k:02}"),
-                    0x00CC_0000 + k as u64,
+                    DOMAIN_CALIBRATION,
+                    k,
                     0.0,
                     *window_len,
                 )
@@ -172,7 +214,8 @@ fn main() {
                 .map(|k| {
                     submission(
                         &format!("zero-edge-{k:02}"),
-                        0x00AA_0000 + k as u64,
+                        DOMAIN_ZERO_EDGE,
+                        k,
                         0.0,
                         *window_len,
                     )
@@ -180,10 +223,12 @@ fn main() {
                 .collect();
             subs.push(submission(
                 "witness",
-                // Common random numbers across the edge sweep: only the
-                // injected mean changes. Without this, a reported first pass
+                // Common random numbers across the edge sweep: the seed tuple
+                // does not include the injected mean, so only the mean changes
+                // between sweep points. Without this, a reported first pass
                 // could be a local crossing caused by a different noise draw.
-                0x00BB_0000,
+                DOMAIN_WITNESS,
+                0,
                 s,
                 *window_len,
             ));
@@ -253,4 +298,97 @@ fn main() {
     }
     w.flush().expect("flush");
     eprintln!("wrote {out}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    /// Every (domain, member, window, execution seed) tuple in the example's
+    /// full grid must own its stream. The finding was that it did not: the
+    /// calibration field drew 13 distinct streams per window where 40 were
+    /// claimed.
+    #[test]
+    fn every_stream_tuple_has_its_own_seed() {
+        let mut seen: HashMap<u64, (u64, usize, usize, usize)> = HashMap::new();
+        for domain in [DOMAIN_CALIBRATION, DOMAIN_ZERO_EDGE, DOMAIN_WITNESS] {
+            for member in 0..N_ZERO_EDGE {
+                for window in 0..N_WINDOWS {
+                    for exec_seed in 0..N_SEEDS {
+                        let tuple = (domain, member, window, exec_seed);
+                        let seed = stream_seed(domain, member, window, exec_seed);
+                        if let Some(other) = seen.insert(seed, tuple) {
+                            panic!("seed {seed:#x} shared by {other:?} and {tuple:?}");
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(seen.len(), 3 * N_ZERO_EDGE * N_WINDOWS * N_SEEDS);
+    }
+
+    /// The exact historical collision, kept as a named case: calibration member
+    /// 0 with execution seed 3 and member 1 with execution seed 2 drew one
+    /// stream, because `0xCC0000 ^ 3 == 0xCC0001 ^ 2`.
+    #[test]
+    fn the_reported_calibration_collision_is_gone() {
+        // The old expression bound execution-seed index k to the value k + 1,
+        // so this equality is member 0 at index 2 against member 1 at index 1.
+        assert_eq!(0x00CC_0000u64 ^ 3, 0x00CC_0001u64 ^ 2);
+        assert_ne!(
+            stream_seed(DOMAIN_CALIBRATION, 0, 0, 2),
+            stream_seed(DOMAIN_CALIBRATION, 1, 0, 1)
+        );
+    }
+
+    /// Calibration members must be independent draws, which is the property the
+    /// frozen dispersion bar is claimed to rest on.
+    #[test]
+    fn calibration_members_do_not_share_return_series() {
+        let a = submission("a", DOMAIN_CALIBRATION, 0, 0.0, 16);
+        let b = submission("b", DOMAIN_CALIBRATION, 1, 0.0, 16);
+        for (i, (run_a, run_b)) in a.runs.iter().zip(b.runs.iter()).enumerate() {
+            assert_ne!(run_a.returns, run_b.returns, "run {i} is a shared stream");
+        }
+        for run_a in &a.runs {
+            for run_b in &b.runs {
+                assert_ne!(run_a.returns, run_b.returns);
+            }
+        }
+    }
+
+    /// The distinct populations must not overlap either: a calibration stream
+    /// reappearing as a zero-edge control or as the witness would make the
+    /// "separate, frozen" calibration field circular.
+    #[test]
+    fn the_three_populations_do_not_share_streams() {
+        let calibration = submission("c", DOMAIN_CALIBRATION, 0, 0.0, 16);
+        let control = submission("z", DOMAIN_ZERO_EDGE, 0, 0.0, 16);
+        let witness = submission("w", DOMAIN_WITNESS, 0, 0.0, 16);
+        for run in &calibration.runs {
+            assert!(!control.runs.iter().any(|r| r.returns == run.returns));
+            assert!(!witness.runs.iter().any(|r| r.returns == run.returns));
+        }
+    }
+
+    /// The common random numbers the edge sweep does want are still there: the
+    /// injected mean is not a seed coordinate, so two edge levels differ by a
+    /// constant shift and nothing else. Without this the monotonicity assertion
+    /// in `main` would be comparing different noise draws.
+    #[test]
+    fn the_witness_keeps_common_random_numbers_across_edges() {
+        let low = submission("w", DOMAIN_WITNESS, 0, 0.10, 16);
+        let high = submission("w", DOMAIN_WITNESS, 0, 0.50, 16);
+        assert_eq!(low.runs.len(), high.runs.len());
+        for (run_low, run_high) in low.runs.iter().zip(high.runs.iter()) {
+            for (a, b) in run_low.returns.iter().zip(run_high.returns.iter()) {
+                let shift = b - a;
+                assert!(
+                    (shift - SIGMA * (0.50 - 0.10)).abs() < 1e-12,
+                    "edge levels differ by more than the injected mean"
+                );
+            }
+        }
+    }
 }

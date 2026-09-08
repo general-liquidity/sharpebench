@@ -17,6 +17,9 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+# Records are separated by a bare newline, never by the platform separator: the
+# cases below stage byte-level damage and must not depend on the host.
+NL = chr(10)
 EVIDENCE = ROOT / "paper/evidence/final"
 PRODUCER = ROOT / "paper/src/make-evidence-figures.py"
 
@@ -169,6 +172,93 @@ class FigureSupportTests(unittest.TestCase):
         ]
         self.rewrite("luck-floor-1000", rows)
         self.assert_refused("luck-floor-1000", "no summary record for crypto-majors-1d")
+
+    def test_truncated_record_is_refused_not_dropped(self):
+        """A record cut off mid-write used to be skipped by the `endswith("}")`
+        line filter, so a damaged file rendered as a smaller normal-looking
+        figure."""
+        self.stage("luck-floor-1000")
+        text = self.path("luck-floor-1000").read_text(encoding="utf-8")
+        lines = text.splitlines()
+        lines[3] = lines[3][: len(lines[3]) // 2]
+        self.path("luck-floor-1000").write_text(
+            NL.join(lines) + NL, encoding="utf-8"
+        )
+        self.assert_refused("luck-floor-1000", "not a JSON record")
+
+    def test_trailing_garbage_after_a_record_is_refused(self):
+        """The old filter accepted any line ending in "}", so a concatenated or
+        doubled record passed the check and then failed inside json.loads, or
+        worse, parsed as something else."""
+        self.stage("drawdowns")
+        text = self.path("rates-1d").read_text(encoding="utf-8")
+        lines = text.splitlines()
+        lines[0] = lines[0] + " {}"
+        self.path("rates-1d").write_text(NL.join(lines) + NL, encoding="utf-8")
+        self.assert_refused("drawdowns", "not a JSON record")
+
+    def test_a_bare_json_value_is_not_accepted_as_a_record(self):
+        """A line that parses but is not an object is not a record. It would
+        otherwise reach the plotting code and fail on a key lookup, or silently
+        count toward a support total."""
+        self.stage("drawdowns")
+        text = self.path("rates-1d").read_text(encoding="utf-8")
+        self.path("rates-1d").write_text("[1, 2]" + NL + text, encoding="utf-8")
+        self.assert_refused("drawdowns", "not an object")
+
+    def test_blank_lines_remain_acceptable(self):
+        """Strictness is about records, not whitespace: a trailing or interior
+        blank line is not a damaged record and must not refuse a good file."""
+        self.stage("luck-floor-1000")
+        text = self.path("luck-floor-1000").read_text(encoding="utf-8")
+        self.path("luck-floor-1000").write_text(
+            NL + text + NL + NL, encoding="utf-8"
+        )
+        proc = self.run_figure("luck-floor-1000")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_dropped_agent_rows_do_not_renormalize_onto_the_stated_field_size(self):
+        """The ECDF divided by however many rows survived while the axis kept
+        asserting 1,000 agents, so a file missing rows plotted as a complete
+        field."""
+        self.stage("luck-floor-1000")
+        rows = self.records("luck-floor-1000")
+        dropped = 0
+        kept = []
+        for row in rows:
+            if (
+                row["record"] == "agent"
+                and row["dataset"] == "us-indices-1d"
+                and dropped < 5
+            ):
+                dropped += 1
+                continue
+            kept.append(row)
+        self.assertEqual(dropped, 5)
+        self.rewrite("luck-floor-1000", kept)
+        self.assert_refused("luck-floor-1000", "agent records and its summary declares")
+
+    def test_summary_field_size_disagreeing_across_datasets_is_refused(self):
+        """One axis label describes both curves, so the two datasets must agree
+        on the field size before either is drawn."""
+        self.stage("luck-floor-1000")
+        rows = self.records("luck-floor-1000")
+        kept = []
+        removed = 0
+        for row in rows:
+            if row["record"] == "summary" and row["dataset"] == "crypto-majors-1d":
+                row["n_agents"] = row["n_agents"] - 1
+            if (
+                row["record"] == "agent"
+                and row["dataset"] == "crypto-majors-1d"
+                and removed < 1
+            ):
+                removed += 1
+                continue
+            kept.append(row)
+        self.assertEqual(removed, 1)
+        self.rewrite("luck-floor-1000", kept)
+        self.assert_refused("luck-floor-1000", "datasets disagree on field size")
 
 
 def agent(dataset, index, shipped, field):

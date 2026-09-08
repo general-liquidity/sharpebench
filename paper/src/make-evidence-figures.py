@@ -71,10 +71,24 @@ def load(name):
         raise EvidenceSupportError(f"missing evidence file: {path}")
     out = []
     with open(path, encoding="utf-8") as h:
-        for line in h:
+        for number, line in enumerate(h, start=1):
             line = line.strip()
-            if line.endswith("}"):
-                out.append(json.loads(line))
+            if not line:
+                continue
+            # Every nonempty line is a record. Skipping the ones that do not
+            # end in "}" silently discarded truncated records, so a damaged
+            # file rendered as a smaller but normal-looking figure.
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise EvidenceSupportError(
+                    f"{path}:{number}: not a JSON record: {exc}"
+                ) from exc
+            if not isinstance(record, dict):
+                raise EvidenceSupportError(
+                    f"{path}:{number}: record is {type(record).__name__}, not an object"
+                )
+            out.append(record)
     if not out:
         raise EvidenceSupportError(f"no records in {path}")
     return out
@@ -121,6 +135,34 @@ def eligible_union(agents, summaries):
                 )
             union |= cells
     return len(union)
+
+
+def luck_floor_field_size(agents, summaries):
+    """The random-agent field size, established from the records themselves.
+
+    The axis label used to assert 1,000 agents whatever the file held, so a
+    file missing rows was renormalized onto a label it no longer supported.
+    Each dataset's agent rows are counted and checked against the size the
+    producer stored independently, and the datasets must agree, because one
+    label describes both curves.
+    """
+    sizes = {}
+    for dataset, summary in summaries.items():
+        rows = [r for r in agents if r["dataset"] == dataset]
+        declared = summary["n_agents"]
+        if len(rows) != declared:
+            raise EvidenceSupportError(
+                f"luck-floor-1000: {dataset} has {len(rows)} agent records and its "
+                f"summary declares {declared}"
+            )
+        sizes[dataset] = declared
+    distinct = set(sizes.values())
+    if len(distinct) != 1:
+        raise EvidenceSupportError(
+            "luck-floor-1000: datasets disagree on field size: "
+            + ", ".join(f"{d}={n}" for d, n in sorted(sizes.items()))
+        )
+    return distinct.pop()
 
 
 def default_cell(recs, dataset=None):
@@ -309,6 +351,7 @@ def fig_luck_floor_1000():
             raise EvidenceSupportError(f"luck-floor-1000: no summary record for {ds}")
         require([r for r in agents if r["dataset"] == ds],
                 f"luck-floor-1000 agent records for {ds}")
+    n_random = luck_floor_field_size(agents, summaries)
     series = [
         ("us-indices-1d", "dsr_shipped_floor", "US eq 1d, shipped path", GRAY, "-"),
         ("us-indices-1d", "dsr_field", "US eq 1d, unfloored diagnostic", GRAY, DASH),
@@ -320,6 +363,11 @@ def fig_luck_floor_1000():
     for ds, field, label, color, ls in series:
         vals = require(sorted(r[field] for r in agents if r["dataset"] == ds),
                        f"luck-floor-1000 {field} values for {ds}")
+        if len(vals) != n_random:
+            raise EvidenceSupportError(
+                f"luck-floor-1000: {ds} {field} has {len(vals)} values for a field "
+                f"of {n_random}"
+            )
         ecdf = [(i + 1) / len(vals) for i in range(len(vals))]
         # Coincident near-zero paths are drawn at different widths so the lines
         # beneath remain visible.
@@ -339,7 +387,7 @@ def fig_luck_floor_1000():
     ax.set_xlim(-0.02, 1.02)
     ax.set_ylim(0, 1.04)
     ax.set_xlabel("deflated Sharpe, full axis", fontsize=10, color=INK)
-    ax.set_ylabel("fraction of the 1,000 random agents", fontsize=10, color=INK)
+    ax.set_ylabel(f"fraction of the {n_random:,} random agents", fontsize=10, color=INK)
     ax.text(0.62, 0.06, f"{eligible} of {len(agents):,} agent-dataset cells\n"
             "eligible on either path", ha="center", va="bottom", fontsize=9, color=INK)
     ax.legend(frameon=False, fontsize=9, loc="center", bbox_to_anchor=(0.62, 0.55))
@@ -360,7 +408,7 @@ def fig_luck_floor_1000():
     ax2.set_xlim(-0.004, zoom_hi)
     ax2.set_ylim(0, 1.04)
     ax2.set_xlabel("deflated Sharpe, diagnostic range", fontsize=10, color=INK)
-    ax2.set_ylabel("fraction of the 1,000 random agents", fontsize=10, color=INK)
+    ax2.set_ylabel(f"fraction of the {n_random:,} random agents", fontsize=10, color=INK)
     ax2.tick_params(labelsize=9)
     style(ax2)
     fig.subplots_adjust(top=0.96, bottom=0.08, left=0.13, right=0.97)
