@@ -173,11 +173,8 @@
       "n_contracts": 8,
       "n_settlement_blocks": 2,
       "mean_loss_difference": -0.20527500000000004,
-      "confidence_lower": -0.20634999999999998,
-      "confidence_upper": -0.2042,
-      "raw_p_value": 0.0024937655860349127,
-      "holm_adjusted_p_value": 0.0024937655860349127,
-      "familywise_significant": true
+      "familywise_significant": false,
+      "inference_error": "familywise level 0.05 is finer than a 2-block resampling law can resolve: single-block resamples hold 0.5 of its mass, and more bootstrap replications estimate that same law without adding blocks"
     }
   ]
 }
