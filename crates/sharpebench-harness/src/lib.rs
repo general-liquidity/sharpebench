@@ -15,8 +15,9 @@ pub use checkpoint::{
     TaskRecord, TaskState,
 };
 pub use failure::{
-    apply_oom_verdict, failing_sentinel_run, run_with_retries, FailureKind, FailureLog,
-    FailureRecord, RunOutcome,
+    apply_oom_verdict, failing_sentinel_run, run_with_retries, AttemptDuration, AttemptLedger,
+    AttemptOutcome, AttemptRecord, AttemptSummary, AttemptedRun, DurationSource, FailureKind,
+    FailureLog, FailureRecord, RunOutcome,
 };
 
 use std::cell::RefCell;
@@ -199,6 +200,10 @@ where
 pub struct ResilientSubmission {
     pub submission: AgentSubmission,
     pub failures: FailureLog,
+    /// Rank-neutral totals over every attempt the sweep spent, failed and
+    /// retried ones included. It sits beside the scored pool above rather than
+    /// inside it: the pool is the completed cells, this is what they cost.
+    pub attempts: AttemptSummary,
 }
 
 /// Like [`run_agent`], but resilient to container/runtime flakiness via the
@@ -245,10 +250,16 @@ where
 {
     let mut runs = Vec::new();
     let mut failures = FailureLog::default();
+    let mut ledger = AttemptLedger::default();
     for (w, &expected_run_len) in expected_run_lens.iter().enumerate() {
         for &seed in seeds {
-            let (outcome, _) = run_with_retries(max_retries, || attempt(w, seed));
-            match outcome {
+            let driven = run_with_retries(max_retries, || attempt(w, seed));
+            // Append before branching on the outcome: a cell that failed twice
+            // before completing spent that time, and the completion must not be
+            // the only thing the accounting sees.
+            let spent = driven.ledger.len();
+            ledger.extend(&driven.ledger);
+            match driven.outcome {
                 RunOutcome::Completed(run) => runs.push(run),
                 RunOutcome::Exhausted { last, attempts } => {
                     // Harness fault: excluded from the pass^k pool entirely.
@@ -266,7 +277,8 @@ where
                         window_index: w,
                         seed,
                         kind,
-                        attempts: 1,
+                        // Retries that preceded the fault are attempts too.
+                        attempts: u32::try_from(spent).unwrap_or(u32::MAX).max(1),
                         runtime: false,
                     });
                     runs.push(failing_sentinel_run(expected_run_len));
@@ -274,6 +286,7 @@ where
             }
         }
     }
+    let attempts = ledger.summary();
     ResilientSubmission {
         submission: AgentSubmission {
             agent_id: agent_id.to_string(),
@@ -282,6 +295,7 @@ where
             candidates: Vec::new(),
         },
         failures,
+        attempts,
     }
 }
 
