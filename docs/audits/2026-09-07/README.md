@@ -1,35 +1,48 @@
 # Sharpe suite audit checkpoint: 7 September 2026
 
 The complete suite checklist and supporting audit evidence are saved here in both
-repositories. Repairs remain paused and unfinished: **93 checklist rows across nine
-sections, with 29 closed and 64 open**. This checkpoint closes BM6 after its verified
-merge; the previous count was 28 closed and 65 open. An open row can contain a
-partial repair, a design decision or an unconfirmed probe, so these totals are not
-a count of independent confirmed bugs.
+repositories. Repairs are in progress and unfinished: **100 checklist rows, with
+39 closed and 61 open**, plus five explicitly deferred items. The plan was
+restructured on 2026-09-08 from nine descriptive sections into nine ordered
+batches; the previous checkpoint recorded 93 rows with 36 closed. The difference
+is three grab-bag rows split into single items, one updater row added, and two
+post-checkpoint fixes recorded as closed. An open row can contain a partial
+repair, a design decision or an unconfirmed probe, so these totals are not a
+count of independent confirmed bugs.
 
-Start with [IMPLEMENTATION.md](IMPLEMENTATION.md) for the full checklist, repair
-commits, validation history and current limitations. Its [checkpoint status](IMPLEMENTATION.md#status-at-this-checkpoint)
-records Bench main `e6f2ab1`, Arena main `a205289`, and the exact tested-head and
-post-merge CI evidence. No additional repair or experiment is claimed by saving
-these documents.
+Start with [IMPLEMENTATION.md](IMPLEMENTATION.md) for the checklist, the batch
+order, the 2026-09-08 review corrections and the closed rows with their repair
+commits. The chronological repair diary lives beside it in
+[VERIFICATION-LOG.md](VERIFICATION-LOG.md). Every commit cited on a closed row
+was verified on 2026-09-08 to be an ancestor of `origin/main` in the named
+repository. No additional repair or experiment is claimed by saving these
+documents.
 
-| Checklist section | Rows | Closed | Open |
-| --- | ---: | ---: | ---: |
-| [1. Shared evidence and mathematics](IMPLEMENTATION.md#1-shared-evidence-and-mathematics) | 9 | 0 | 9 |
-| [2. Bench ranking and verification](IMPLEMENTATION.md#2-bench-ranking-and-verification) | 6 | 1 | 5 |
-| [3. Bench simulation and diagnostics](IMPLEMENTATION.md#3-bench-simulation-and-diagnostics) | 15 | 5 | 10 |
-| [4. Bench transport/security](IMPLEMENTATION.md#4-bench-transportsecurity) | 6 | 6 | 0 |
-| [5. Arena state and execution](IMPLEMENTATION.md#5-arena-state-and-execution) | 11 | 9 | 2 |
-| [6. Arena metrics and telemetry](IMPLEMENTATION.md#6-arena-metrics-and-telemetry) | 11 | 8 | 3 |
-| [7. Evidence producers](IMPLEMENTATION.md#7-evidence-producers) | 16 | 0 | 16 |
-| [8. Verification and publication documents](IMPLEMENTATION.md#8-verification-and-publication-documents) | 10 | 0 | 10 |
-| [9. Optional architecture and unconfirmed probes](IMPLEMENTATION.md#9-optional-architecture-and-unconfirmed-probes) | 9 | 0 | 9 |
-| Total | 93 | 29 | 64 |
+## Open rows by batch
+
+Batches run in order. A and B change what the shipped products claim.
+
+| Batch | Rows | Scope |
+| --- | ---: | --- |
+| [A. Paper pass](IMPLEMENTATION.md#batch-a-paper-pass-both-products) | 9 | Historical-impact caveat, R11, R13, R14, shard-order and scope claims, rebuilt papers |
+| [B. Publication gating](IMPLEMENTATION.md#batch-b-publication-gating) | 4 | Publish graph depends on green CI, narrowed updater claim, package consumers, conformance fixtures |
+| [C. Run identity](IMPLEMENTATION.md#batch-c-run-identity-bi3-one-batch) | 4 | BI3 keyed run/window/seed identity, complete-grid validation, BR1 |
+| [D. Producer rows touching claims](IMPLEMENTATION.md#batch-d-producer-rows-that-touch-existing-claims) | 4 | BP6, BP8, AP5, AP3 |
+| [E. Shared mathematics and contracts](IMPLEMENTATION.md#batch-e-shared-mathematics-and-contracts) | 8 | R07/BM10, R06/AI1, R03 and R09 propagation, remaining R02, R05, R12, BR2/AR2 |
+| [F. Remaining Bench diagnostics](IMPLEMENTATION.md#batch-f-remaining-bench-diagnostics) | 16 | BM1, BM2/BS6, BM3, BM7, BI6 and the split supplementary rows |
+| [G. Remaining Arena telemetry](IMPLEMENTATION.md#batch-g-remaining-arena-telemetry) | 2 | AR1/AR3, AR4 |
+| [H. Producers for the next field run](IMPLEMENTATION.md#batch-h-producer-rows-for-the-next-field-run) | 10 | BP1 to BP7, AP1, AP2, AP4, AP6 |
+| [I. Bounded probes](IMPLEMENTATION.md#batch-i-bounded-probes-promote-or-delete) | 4 | HTTP deadline, token overflow, Docker ENTRYPOINT, child OOM |
+| Total open | 61 | |
+
+Closed rows are listed per product in
+[IMPLEMENTATION.md](IMPLEMENTATION.md#closed-rows): 19 for Bench and 20 for
+Arena.
 
 ## Snapshot contents and update rule
 
-The 12-file snapshot contains the full [implementation checklist](IMPLEMENTATION.md),
-the original audit report below, [coverage and limits](coverage.md),
+The 13-file snapshot contains the full [implementation checklist](IMPLEMENTATION.md),
+its [verification log](VERIFICATION-LOG.md), the original audit report below, [coverage and limits](coverage.md),
 the [757-file baseline inventory](inventory.md), six independent reports
 ([Bench reviewer](bench-reviewer.md), [Bench interfaces](bench-interfaces.md),
 [Bench producers](bench-producers.md), [Arena reviewer](arena-reviewer.md),

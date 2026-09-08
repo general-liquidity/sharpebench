@@ -30,6 +30,20 @@ architecture sketch.
   reconstruction. One superseded three-model engineering pilot is committed for
   lifecycle auditability, not as current model evidence.
 
+## Current engineering goal
+
+The active engineering work is the 2026-09-07 audit repair checklist at
+[`docs/audits/2026-09-07/IMPLEMENTATION.md`](audits/2026-09-07/IMPLEMENTATION.md),
+shared with SharpeArena and mirrored byte-for-byte there. It holds 100 rows, 39
+closed, ordered into batches A to I; batch A is a paper pass and batch B closes
+the publish graph so a release cannot be cut over a red CI run. That checklist,
+not this page, is what an agent should pick up. [`AGENTS.md`](../AGENTS.md)
+carries the goal rules: no release, tag or force push, no new experiments, and
+published numerical evidence stays frozen.
+
+The items below are separate: they need external infrastructure or a product
+decision, and none of them is part of the repair goal.
+
 ## Remaining product work
 
 These need external infrastructure or a product decision rather than another
