@@ -896,9 +896,11 @@ impl Agent for MeteredTeam {
 /// The team is charged for what its members spend: each member's self-reported
 /// [`DecisionCost`] is summed onto the consensus decision, so a team of paid
 /// agents reports its actual expenditure instead of the zero a bare `TeamAgent`
-/// produces. See [`MeteredTeam`] for the concurrency semantics that summation
-/// assumes. Members that bill in different denominations are refused rather than
-/// reduced to a number that drops one of them.
+/// produces. Members are polled once each, sequentially, in declaration order,
+/// against one shared observation, which is what makes a plain sum the right
+/// aggregation; latency is neither summed nor scored. Members that bill in
+/// different denominations are refused rather than reduced to a number that
+/// drops one of them.
 pub fn run_team(
     team_id: &str,
     data: &Dataset,
