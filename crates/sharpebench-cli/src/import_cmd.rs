@@ -13,7 +13,7 @@
 
 use std::path::Path;
 
-use sharpebench_core::{AgentSubmission, Run};
+use sharpebench_core::{AgentSubmission, Run, RunIdentity, RunKey};
 
 /// Embedded in every imported submission under `_import_note`. The scorer's
 /// serde deserialization ignores unknown fields (verified by the round-trip
@@ -61,9 +61,17 @@ fn usage() {
          directory mode: every <agent_id>.csv inside holds that agent's per-period\n\
          returns, one run per column (header row optional).\n\
          single-file mode with an `agent` column: long format, one row per period,\n\
-         columns `agent[,run],return`; rows group into runs per agent.\n\
+         columns `agent[,run][,seed][,period],return`; rows group into runs per agent.\n\
          single-file mode without an `agent` column: one agent named after the\n\
          file, one run per column.\n\
+         \n\
+         run identity: a header row names each run (wide format) and a `run`\n\
+         column names it (long format); an optional `seed` column and an optional\n\
+         `period` (or `date`) column carry the seed and the period identities.\n\
+         Those become `run_keys` in the output, which\n\
+         `sharpebench score --require-run-keys` validates. Without them the import\n\
+         is unkeyed and that scorer refuses it: no run identity is inferred from\n\
+         column position.\n\
          \n\
          sharpebench import stockbench <path> is documented but not importable\n\
          from public artifacts; run it for the explanation."
@@ -120,22 +128,24 @@ fn run_csv(args: &[String], json: bool) -> i32 {
         None => 0,
     };
 
-    let subs = match import_path(Path::new(path), trials) {
+    let agents = match import_path(Path::new(path)) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("error: {e}");
             return 1;
         }
     };
-    if subs.is_empty() {
+    if agents.is_empty() {
         eprintln!("error: no agents found under {path}");
         return 1;
     }
 
-    // Serialize through the real core types, then attach the caveat as an
-    // extra field the scorer ignores on read.
-    let mut docs = Vec::with_capacity(subs.len());
-    for s in &subs {
+    // Serialize through the real core types, then attach the caveat and the
+    // declared run identities as extra fields the plain scorer ignores on read.
+    let mut docs = Vec::with_capacity(agents.len());
+    let mut keyed_agents = 0usize;
+    let subs: Vec<AgentSubmission> = agents.iter().map(|a| a.submission(trials)).collect();
+    for (agent, s) in agents.iter().zip(&subs) {
         let mut v = match serde_json::to_value(s) {
             Ok(v) => v,
             Err(e) => {
@@ -144,6 +154,16 @@ fn run_csv(args: &[String], json: bool) -> i32 {
             }
         };
         v["_import_note"] = serde_json::Value::String(IMPORT_NOTE.to_string());
+        if let Some(keys) = agent.run_keys() {
+            v["run_keys"] = match serde_json::to_value(&keys) {
+                Ok(keys) => keys,
+                Err(e) => {
+                    eprintln!("error: serializing run keys: {e}");
+                    return 1;
+                }
+            };
+            keyed_agents += 1;
+        }
         docs.push(v);
     }
     let payload = match serde_json::to_string_pretty(&docs) {
@@ -159,11 +179,24 @@ fn run_csv(args: &[String], json: bool) -> i32 {
     }
 
     print_notice(trials);
+    let fully_keyed = keyed_agents == subs.len();
+    if !fully_keyed {
+        eprintln!(
+            "NOTICE: {} of {} agent(s) declared no run identity, so the output is\n\
+             unkeyed and `sharpebench score --require-run-keys` will refuse it. Add a\n\
+             header row (wide format) or a `run` column (long format); positional\n\
+             alignment across agents is never inferred.\n",
+            subs.len() - keyed_agents,
+            subs.len(),
+        );
+    }
     if json {
         let summary = serde_json::json!({
             "imported": true,
             "agents": subs.len(),
             "runs": subs.iter().map(|s| s.runs.len()).sum::<usize>(),
+            "keyed_agents": keyed_agents,
+            "run_keys_complete": fully_keyed,
             "in_sample_trials": trials,
             "path": out,
             "note": IMPORT_NOTE,
@@ -174,18 +207,67 @@ fn run_csv(args: &[String], json: bool) -> i32 {
         }
     } else {
         println!(
-            "imported {} agent(s), {} run(s) (in_sample_trials={trials}) -> {out}",
+            "imported {} agent(s), {} run(s), {keyed_agents} keyed (in_sample_trials={trials}) -> {out}",
             subs.len(),
             subs.iter().map(|s| s.runs.len()).sum::<usize>(),
         );
-        println!("re-score with: sharpebench score {out}");
+        if fully_keyed {
+            println!("re-score with: sharpebench score {out} --require-run-keys");
+        } else {
+            println!("re-score with: sharpebench score {out}");
+        }
     }
     0
 }
 
+/// One imported run: its returns plus whatever identity the CSV actually
+/// declared. `identity` is `None` when the file names no run, which keeps the
+/// import honest: a key is never manufactured from column order, so an unkeyed
+/// import is refused downstream instead of aligned by position.
+struct ImportedRun {
+    identity: Option<RunIdentity>,
+    returns: Vec<f64>,
+}
+
+/// One imported agent and its runs, before serialization.
+struct ImportedAgent {
+    agent_id: String,
+    runs: Vec<ImportedRun>,
+}
+
+impl ImportedAgent {
+    fn submission(&self, trials: u32) -> AgentSubmission {
+        AgentSubmission {
+            agent_id: self.agent_id.clone(),
+            runs: self
+                .runs
+                .iter()
+                .map(|r| Run {
+                    returns: r.returns.clone(),
+                    ..Run::default()
+                })
+                .collect(),
+            in_sample_trials: trials,
+            candidates: Vec::new(),
+        }
+    }
+
+    /// The `run_keys` sidecar, present only when every run of this agent
+    /// declared an identity. A partially keyed agent carries no keys at all:
+    /// mixing declared and inferred cells is exactly the alignment error the
+    /// key exists to prevent.
+    fn run_keys(&self) -> Option<Vec<RunIdentity>> {
+        self.runs
+            .iter()
+            .map(|r| r.identity.clone())
+            .collect::<Option<Vec<_>>>()
+            .filter(|keys| !keys.is_empty())
+    }
+}
+
 /// Import a directory of `<agent_id>.csv` files, or a single CSV (long format
 /// when it has an `agent` column, else wide format under the file's stem).
-fn import_path(path: &Path, trials: u32) -> Result<Vec<AgentSubmission>, String> {
+fn import_path(path: &Path) -> Result<Vec<ImportedAgent>, String> {
     if path.is_dir() {
         let mut entries: Vec<_> = std::fs::read_dir(path)
             .map_err(|e| format!("cannot read directory {}: {e}", path.display()))?
@@ -199,7 +281,7 @@ fn import_path(path: &Path, trials: u32) -> Result<Vec<AgentSubmission>, String>
             .collect();
         // Sort for a deterministic field regardless of filesystem order.
         entries.sort();
-        let mut subs = Vec::new();
+        let mut agents = Vec::new();
         for file in entries {
             let text = std::fs::read_to_string(&file)
                 .map_err(|e| format!("cannot read {}: {e}", file.display()))?;
@@ -207,68 +289,40 @@ fn import_path(path: &Path, trials: u32) -> Result<Vec<AgentSubmission>, String>
                 .file_stem()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            let runs = parse_wide(&text)
-                .map_err(|e| format!("{}: {e}", file.display()))?
-                .into_iter()
-                .map(|returns| Run {
-                    returns,
-                    ..Run::default()
-                })
-                .collect();
-            subs.push(AgentSubmission {
-                agent_id,
-                runs,
-                in_sample_trials: trials,
-                candidates: Vec::new(),
-            });
+            let runs = parse_wide(&text).map_err(|e| format!("{}: {e}", file.display()))?;
+            agents.push(ImportedAgent { agent_id, runs });
         }
-        Ok(subs)
+        Ok(agents)
     } else {
         let text = std::fs::read_to_string(path)
             .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
         if let Some(agents) = parse_long(&text)? {
-            Ok(agents
-                .into_iter()
-                .map(|(agent_id, runs)| AgentSubmission {
-                    agent_id,
-                    runs: runs
-                        .into_iter()
-                        .map(|returns| Run {
-                            returns,
-                            ..Run::default()
-                        })
-                        .collect(),
-                    in_sample_trials: trials,
-                    candidates: Vec::new(),
-                })
-                .collect())
+            Ok(agents)
         } else {
             let agent_id = path
                 .file_stem()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            let runs = parse_wide(&text)
-                .map_err(|e| format!("{}: {e}", path.display()))?
-                .into_iter()
-                .map(|returns| Run {
-                    returns,
-                    ..Run::default()
-                })
-                .collect();
-            Ok(vec![AgentSubmission {
-                agent_id,
-                runs,
-                in_sample_trials: trials,
-                candidates: Vec::new(),
-            }])
+            let runs = parse_wide(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+            Ok(vec![ImportedAgent { agent_id, runs }])
         }
     }
+}
+
+/// Column names accepted as the period axis, in either format.
+fn is_period_column(name: &str) -> bool {
+    matches!(name, "period" | "period_id" | "date" | "timestamp")
 }
 
 /// Wide format: one run per column, per-period returns down the rows. A first
 /// row with any non-numeric cell is treated as a header and skipped. Trailing
 /// empty cells mean "this column's series ended" (columns of unequal length).
-fn parse_wide(text: &str) -> Result<Vec<Vec<f64>>, String> {
+///
+/// A header row is also the run identity: each remaining column name becomes a
+/// window id at seed 0. A leading `period` or `date` column is the period axis
+/// rather than a run. Without a header the file declares no identity, so the
+/// runs come back unkeyed.
+fn parse_wide(text: &str) -> Result<Vec<ImportedRun>, String> {
     let mut lines = text.lines().filter(|l| !l.trim().is_empty());
     let Some(first) = lines.next() else {
         return Err("empty file".to_string());
@@ -278,7 +332,13 @@ fn parse_wide(text: &str) -> Result<Vec<Vec<f64>>, String> {
         .iter()
         .any(|c| !c.is_empty() && c.parse::<f64>().is_err());
     let n_cols = first_cells.len();
+    let period_col =
+        (is_header && n_cols > 1 && is_period_column(&first_cells[0].to_ascii_lowercase()))
+            .then_some(0usize);
+    let labels: Option<Vec<String>> =
+        is_header.then(|| first_cells.iter().map(|c| c.to_string()).collect());
     let mut runs: Vec<Vec<f64>> = vec![Vec::new(); n_cols];
+    let mut periods: Vec<String> = Vec::new();
     let body: Vec<&str> = if is_header {
         lines.collect()
     } else {
@@ -289,6 +349,13 @@ fn parse_wide(text: &str) -> Result<Vec<Vec<f64>>, String> {
     }
     for line in body {
         for (i, cell) in line.split(',').map(str::trim).enumerate() {
+            if period_col == Some(i) {
+                if cell.is_empty() {
+                    return Err("empty period identity in the period column".to_string());
+                }
+                periods.push(cell.to_string());
+                continue;
+            }
             if cell.is_empty() {
                 continue;
             }
@@ -301,26 +368,51 @@ fn parse_wide(text: &str) -> Result<Vec<Vec<f64>>, String> {
             run.push(v);
         }
     }
-    runs.retain(|r| !r.is_empty());
-    if runs.is_empty() {
+    // An empty column drops together with its label, so a surviving key still
+    // names the column it came from.
+    let mut imported = Vec::new();
+    for (index, returns) in runs.into_iter().enumerate() {
+        if period_col == Some(index) || returns.is_empty() {
+            continue;
+        }
+        let identity = match &labels {
+            None => None,
+            Some(labels) => {
+                let window = labels[index].clone();
+                if window.is_empty() {
+                    return Err(format!("column {index} has an empty header name"));
+                }
+                Some(RunIdentity {
+                    key: RunKey { window, seed: 0 },
+                    periods: if periods.len() == returns.len() {
+                        periods.clone()
+                    } else {
+                        Vec::new()
+                    },
+                })
+            }
+        };
+        imported.push(ImportedRun { identity, returns });
+    }
+    if imported.is_empty() {
         return Err("no numeric returns found".to_string());
     }
-    Ok(runs)
+    Ok(imported)
 }
 
 /// Long format: header row with an `agent` (or `agent_id`) column, an optional
-/// `run` column, and a returns column (`return`, `returns` or `ret`; else the
-/// first column that is neither agent nor run). One row per period; rows group
-/// into runs per agent, in first-appearance order for a deterministic field.
+/// `run` column, an optional `seed` column, an optional `period` (`date`,
+/// `timestamp`, `period_id`) column, and a returns column (`return`, `returns`
+/// or `ret`; else the first column that is none of those). One row per period;
+/// rows group into runs per agent, in first-appearance order.
+///
+/// The `run` label and the `seed` value are the run identity, preserved rather
+/// than discarded. A file without a `run` column declares no identity and its
+/// runs come back unkeyed.
 ///
 /// Returns `Ok(None)` when the file has no agent column (caller falls back to
 /// wide format).
-type LongAgents = Vec<(String, Vec<Vec<f64>>)>;
-
-/// Intermediate grouping: per agent, its runs still keyed by run label.
-type LabeledAgents = Vec<(String, Vec<(String, Vec<f64>)>)>;
-
-fn parse_long(text: &str) -> Result<Option<LongAgents>, String> {
+fn parse_long(text: &str) -> Result<Option<Vec<ImportedAgent>>, String> {
     let mut lines = text.lines().filter(|l| !l.trim().is_empty());
     let Some(first) = lines.next() else {
         return Err("empty file".to_string());
@@ -333,14 +425,21 @@ fn parse_long(text: &str) -> Result<Option<LongAgents>, String> {
         return Ok(None);
     };
     let run_col = header.iter().position(|h| h == "run");
+    let seed_col = header.iter().position(|h| h == "seed");
+    let period_col = header.iter().position(|h| is_period_column(h));
     let ret_col = header
         .iter()
         .position(|h| h == "return" || h == "returns" || h == "ret")
-        .or_else(|| (0..header.len()).find(|&i| i != agent_col && Some(i) != run_col))
+        .or_else(|| {
+            (0..header.len()).find(|&i| {
+                i != agent_col && Some(i) != run_col && Some(i) != seed_col && Some(i) != period_col
+            })
+        })
         .ok_or("no returns column beside the agent column")?;
 
-    // (agent, runs as (run_label, returns)) in first-appearance order.
-    let mut agents: LabeledAgents = Vec::new();
+    // (agent, runs as ((run label, seed), periods, returns)) in first-appearance order.
+    type LabeledRun = ((String, u64), Vec<String>, Vec<f64>);
+    let mut agents: Vec<(String, Vec<LabeledRun>)> = Vec::new();
     for (row_idx, line) in lines.enumerate() {
         let cells: Vec<&str> = line.split(',').map(str::trim).collect();
         let get = |i: usize| cells.get(i).copied().unwrap_or_default();
@@ -349,6 +448,20 @@ fn parse_long(text: &str) -> Result<Option<LongAgents>, String> {
             return Err(format!("row {}: empty agent cell", row_idx + 2));
         }
         let run_label = run_col.map(get).unwrap_or_default().to_string();
+        if run_col.is_some() && run_label.is_empty() {
+            return Err(format!("row {}: empty run identity", row_idx + 2));
+        }
+        let seed = match seed_col.map(get) {
+            None => 0u64,
+            Some(raw) => raw
+                .parse::<u64>()
+                .map_err(|_| format!("row {}: non-integer seed `{raw}`", row_idx + 2))?,
+        };
+        let period = match period_col.map(get) {
+            None => None,
+            Some("") => return Err(format!("row {}: empty period identity", row_idx + 2)),
+            Some(raw) => Some(raw.to_string()),
+        };
         let cell = get(ret_col);
         let v = cell
             .parse::<f64>()
@@ -360,22 +473,39 @@ fn parse_long(text: &str) -> Result<Option<LongAgents>, String> {
                 agents.last_mut().expect("just pushed")
             }
         };
-        let run = match entry.1.iter_mut().find(|(l, _)| *l == run_label) {
+        let label = (run_label, seed);
+        let run = match entry.1.iter_mut().find(|(l, _, _)| *l == label) {
             Some(r) => r,
             None => {
-                entry.1.push((run_label.clone(), Vec::new()));
+                entry.1.push((label, Vec::new(), Vec::new()));
                 entry.1.last_mut().expect("just pushed")
             }
         };
-        run.1.push(v);
+        if let Some(period) = period {
+            run.1.push(period);
+        }
+        run.2.push(v);
     }
     if agents.is_empty() {
         return Err("no data rows".to_string());
     }
+    let keyed = run_col.is_some();
     Ok(Some(
         agents
             .into_iter()
-            .map(|(a, runs)| (a, runs.into_iter().map(|(_, r)| r).collect()))
+            .map(|(agent_id, runs)| ImportedAgent {
+                agent_id,
+                runs: runs
+                    .into_iter()
+                    .map(|((window, seed), periods, returns)| ImportedRun {
+                        identity: keyed.then_some(RunIdentity {
+                            key: RunKey { window, seed },
+                            periods,
+                        }),
+                        returns,
+                    })
+                    .collect(),
+            })
             .collect(),
     ))
 }

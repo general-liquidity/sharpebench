@@ -30,12 +30,21 @@ use crate::failure::{
 };
 use crate::ResilientSubmission;
 
-/// Versioned identity of every condition that can change a resumable sweep's
-/// result. A checkpoint is reusable only when this record matches exactly.
+/// Versioned identity of the conditions a resumable sweep binds: dataset, cost
+/// model, score configuration, runner artifact, entrant artifact and
+/// invocation. A checkpoint is reusable only when this record matches exactly.
 ///
 /// The digests bind semantic inputs without copying a dataset, secrets, or a
 /// binary into the checkpoint. Exact windows and seeds stay visible because
 /// they are useful diagnostics rather than opaque implementation details.
+///
+/// What it deliberately does not bind: credential values. The CLI folds the
+/// effective *non-secret* environment handed to a `--cmd` entrant into
+/// `invocation_sha256` (see `sharpebench_sim::agent_env_identity`), so changing
+/// a policy variable invalidates the checkpoint, while rotating a token does
+/// not and never reaches the checkpoint file. Anything the harness cannot
+/// observe, such as state inside a remote endpoint behind `--http`, is outside
+/// this record too.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SweepIdentity {
     pub dataset_sha256: String,
