@@ -5,7 +5,7 @@ review of progress against both repositories. The overall goal remains
 unfinished. This file is mirrored byte-for-byte in the Bench and Arena
 repositories; edit both or neither.
 
-Status: 100 checklist rows, 68 closed and 32 open. The restructured plan
+Status: 100 checklist rows, 69 closed and 31 open. The restructured plan
 opened at 39 closed. Batch A and Batch B are now complete except for the final
 paper rebuild and provenance rebind, and Batch D's two Arena producer rows and
 Batch E's two propagation rows also close. Their work is on the
@@ -107,7 +107,7 @@ every row in it is closed under the rules above.
 - [x] The universal "no field evaluation" claim is narrowed: the four literature rules were scored on all nine frozen datasets under three cost profiles with no rank-eligible cell in 351 records, while the seven further primitives in `sharpebench_core::entrants` have no field evaluation. Note that the four rules are implemented in the harness example, not in `entrants`.
 - [x] `clone_state` copies a book holding shares, cash, RNG, an accumulating trace and pending orders, so it is not constant time; what it saves is the replay. Corrected in the mdBook page, both changelogs, four Bench rustdoc sites and one Arena comment. Bench `2c7356d`, Arena `a40b6a3`. No optimization implemented: shared immutable trace prefixes would need a measurement, and none was run.
 - [x] No README in either repository contains an em dash or a smolvm section; the two changelog mentions of smolvm are accurate historical entries and were kept. 34 em dashes were removed from user-facing documentation across 11 files. Bench `f2dfdf7`, Arena `ac54362`. Archived review records under `paper/review/` and the internal assessment documents were deliberately left alone: rewriting a historical record is out of scope.
-- [ ] Rebuilt papers with checked references and layout, fresh provenance, granular verified commits pushed; no release tags.
+- [x] Both papers rebuilt from the corrected sections with no undefined reference and no layout warning, and both PDFs are committed. Bench `6108306`, Arena `7b13ae2`. Provenance is rebound and clean in both, 181 sources for Bench and 146 for Arena, and the CI provenance gate passes on both branches. Commits are granular and pushed. No release tag was created; the newest tags remain `v0.18.4` and `v0.24.1`.
 
 ### Batch B: publication gating
 

@@ -2,7 +2,7 @@
 
 The complete suite checklist and supporting audit evidence are saved here in both
 repositories. Repairs are in progress and unfinished: **100 checklist rows, with
-68 closed and 32 open**, plus five explicitly deferred items. Batches A, B, C, D, G and I are
+69 closed and 31 open**, plus five explicitly deferred items. Batches A, B, C, D, G and I are
 complete, and rows close in E, F and H as well. That work sits on the
 `fix/audit-batch-a-b-2026-09-08` branch in each repository, Bench PR #25 and
 Arena PR #26, and is not merged. The plan was
@@ -36,7 +36,7 @@ Batches run in order. A and B change what the shipped products claim.
 | [G. Remaining Arena telemetry](IMPLEMENTATION.md#batch-g-remaining-arena-telemetry) | 0 | AR1/AR3, AR4 |
 | [H. Producers for the next field run](IMPLEMENTATION.md#batch-h-producer-rows-for-the-next-field-run) | 9 | BP1 to BP7, AP1, AP2, AP4, AP6 |
 | [I. Bounded probes](IMPLEMENTATION.md#batch-i-bounded-probes-promote-or-delete) | 2 | HTTP deadline, token overflow, Docker ENTRYPOINT, child OOM |
-| Total open | 32 | |
+| Total open | 31 | |
 
 Closed rows are listed per product in
 [IMPLEMENTATION.md](IMPLEMENTATION.md#closed-rows).
