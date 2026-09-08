@@ -102,10 +102,16 @@ RSI, a bounce counter, a signal gate, a max-exposure timeout, an ATR
 breakout, a distribution-day count and a follow-through day. Each names its
 source and its parameters in its docstring.
 
-They are **entrants to be scored, not infrastructure to score with**. They are
-unit-tested; no field evaluation has been run on any of them, and no result
-for any of them is claimed anywhere in this repository. Treat them as a
-starting point for your own submission, not as a published baseline.
+They are **entrants to be scored, not infrastructure to score with**, and all
+eleven are unit-tested. Only the four literature rules have been run as a
+field: the paper scores `donchian-20-10`, `bll-vma-1-50`, `faber-10m` and
+`rsi-14-wilder` on all nine frozen datasets under three cost profiles, from the
+same published specifications but a separate implementation inside the harness
+example, and no cell there is rank-eligible or passes pass^k. No field
+evaluation has been run on the seven further primitives in
+`sharpebench_core::entrants`, and no result for any of them is claimed anywhere
+in this repository. Treat all of them as a starting point for your own
+submission, not as a published baseline.
 
 ## Teams
 
