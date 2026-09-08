@@ -47,7 +47,7 @@ pub(crate) fn nav(
 /// [`crate::env::TradingEnv`] so the two stepping surfaces cannot drift.
 ///
 /// `Clone + Serialize + Deserialize + PartialEq` make it the serializable payload
-/// of [`crate::env::EnvState`] — an O(1) snapshot/restore of the whole mutable sim
+/// of [`crate::env::EnvState`], a replay-free snapshot/restore of the whole mutable sim
 /// state (holdings, cash, RNG cursor, trace, prior NAV).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Book {
