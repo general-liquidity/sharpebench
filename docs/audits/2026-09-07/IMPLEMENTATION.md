@@ -5,13 +5,22 @@ review of progress against both repositories. The overall goal remains
 unfinished. This file is mirrored byte-for-byte in the Bench and Arena
 repositories; edit both or neither.
 
-Status: 100 checklist rows, 39 closed and 61 open. The previous checkpoint
-had 93 rows (36 closed); the difference is three grab-bag rows split into
-single items, one updater row added, and two post-checkpoint fixes recorded as
-closed. Every commit cited on a closed row was verified on 2026-09-08 to be an
-ancestor of `origin/main` in the named repository. Open rows are ordered into
-batches below; the count is a checklist disposition, not a count of confirmed
-defects. Five deferred items are listed without checkboxes.
+Status: 100 checklist rows, 47 closed and 53 open. The restructured plan
+opened at 39 closed; the eight rows closed since are Batch A's R11, R13, R14,
+the shard-order and baseline-scope claims and the historical-impact caveat,
+plus Batch B's publish gate and updater claim. Their work is on the
+`fix/audit-batch-a-b-2026-09-08` branch in each repository and is not merged.
+Every commit cited on a closed row was verified to be reachable in the named
+repository. Open rows are ordered into batches below; the count is a checklist
+disposition, not a count of confirmed defects. Five deferred items are listed
+without checkboxes.
+
+Two defects were found while repairing, neither in the original audit. The
+release workflow's `verify` job runs with `if: always()` and did not inspect
+the new publish gate, so a blocked release would have reported success. The
+paper's description of the endogenous market as single-price was wrong in its
+own right: each agent pays a size-dependent execution price, so that model is
+not uniform-price either. Both are fixed in the commits cited on their rows.
 
 Source baselines: [Bench `933e0c1` (0.18.4)](https://github.com/general-liquidity/sharpebench/tree/933e0c1056a2e4707b28762c294323bf05bdab65)
 and [Arena `1be915f` (0.24.1)](https://github.com/general-liquidity/sharpearena/tree/1be915f330acabacd171cc350bec0def58d9e134).
@@ -90,20 +99,20 @@ every row in it is closed under the rules above.
 
 ### Batch A: paper pass (both products)
 
-- [ ] Historical impact caveat in both papers (section 8 row). List affected tables and the responsible repairs (R03, R09, BI7, BM8 where it changed fixtures).
-- [ ] R11: reconcile `03-environment.tex` line 106 with line 104 and the LOB implementation; keep the batch-auction scope statement for the endogenous market only.
-- [ ] R13: retain per-run/pooled drawdown caps in the text; remove the seed-averaging inequality claim.
-- [ ] R14: correct the episode-count denominator; remove the unverified wall-time promise.
-- [ ] Bench `paper/sections/A-commands.tex` line 55: shard assembly preserves records but the fixed grid-key order differs from the serial producer's score-rank order. Say so.
-- [ ] Bench `docs/book/src/submitting.md`: reconcile the "no field evaluation" claim with the paper's external-rules evidence.
+- [x] Both papers now record the repairs that landed after their evidence was frozen. Bench `1edcec6` names the moment estimators behind every PSR and DSR value, the zero-target cross through flat, the momentum lookback, and the unresolved commodities dispersion divergence; Arena `2d0a804` names the moment estimators, the episode-metric and failure-disposition changes, the reward floor and the refused infeasible market parameter. BM8 is excluded: its log records no fixture or historical artifact change. Nothing was regenerated.
+- [x] R11: each market model's clearing is now described separately. Arena `320cfb4`. The book matches under price-time priority across levels and its uncross is a separate query; the endogenous market shares one reference mid but charges each agent a size-dependent execution price, so neither model is uniform-price. Discrete time, not single-price clearing, is what rules out latency races, and that scope statement is kept on that ground.
+- [x] R13: the containment claim is corrected in the paper (Bench `e1db324`) and in the two API doc comments that repeated it, with the anti-correlated-seed case pinned as a regression (Bench `7eaa285`). Both caps are retained and applied; the mutation check confirms the test fails when the per-run fold is replaced by the pooled figure.
+- [x] R14: a single agent on one tier is 256 of 4,608 episodes, one eighteenth; one sixth is a single agent across all three tiers. Stated as count ratios without a wall-clock promise. Arena `7492135`.
+- [x] Shard assembly is now described as identical record for record rather than byte for byte, because the fixed grid-key order differs from the serial producer's score-rank order. Verified against `assemble_sweep.py` and `test_sweep_grid.py`, not only the log. Bench `02ccbbe`.
+- [x] The universal "no field evaluation" claim is narrowed: the four literature rules were scored on all nine frozen datasets under three cost profiles with no rank-eligible cell in 351 records, while the seven further primitives in `sharpebench_core::entrants` have no field evaluation. Note that the four rules are implemented in the harness example, not in `entrants`.
 - [ ] Snapshot complexity claim: correct or delete; no optimization unless a measurement justifies it.
 - [ ] Readmes, API docs and changelogs reflect the merged repairs; no README em dashes or smolvm sections.
 - [ ] Rebuilt papers with checked references and layout, fresh provenance, granular verified commits pushed; no release tags.
 
 ### Batch B: publication gating
 
-- [ ] Bench: single checked publish graph. `release.yml` jobs depend on a successful `ci.yml` run for the exact tagged commit; the manual recovery route obeys the same gate; the memory crate is in the graph.
-- [ ] Updater claim narrowed in the CLI README and `update.rs` doc comment (integrity via published SHA-256, not authenticity).
+- [x] `require_green_ci` polls the `ci.yml` runs at the exact release commit and passes only on a completed success, and every publishing job plus the final aggregation depends on it. Bench `59d985c`. It waits rather than failing fast because the driver pushes the version commit and its tag together, and fails as soon as every run at that commit is terminal without success. The `workflow_dispatch` recovery route resolves the same commit, so there is no bypass. A second defect was found and fixed in the same pass: `verify` runs with `if: always()` and its result loop did not inspect the gate, so a blocked release would have reported success. Both publish lists carry all 12 crates including `sharpebench-memory`.
+- [x] The updater's checksum is described as an integrity check against corruption and mismatched assets, not authenticity: the digest ships in the same release over the same connection. The SLSA attestation is named as the out-of-band route. Bench `d624ef4`. No signature verification was implemented.
 - [ ] Fresh Rust/Python/npm/WASM package consumers exercised in CI for both products (the R04 closure deferred the broader surface here).
 - [ ] Cross-language conformance fixtures for the shared wire contract, versioned, without a cyclic whole-package dependency.
 

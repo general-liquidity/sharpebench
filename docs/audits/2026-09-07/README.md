@@ -2,7 +2,11 @@
 
 The complete suite checklist and supporting audit evidence are saved here in both
 repositories. Repairs are in progress and unfinished: **100 checklist rows, with
-39 closed and 61 open**, plus five explicitly deferred items. The plan was
+47 closed and 53 open**, plus five explicitly deferred items. The eight rows
+closed on 2026-09-08 are Batch A's R11, R13, R14, the shard-order and
+baseline-scope claims and the historical-impact caveat, plus Batch B's publish
+gate and updater claim; that work sits on the `fix/audit-batch-a-b-2026-09-08`
+branch in each repository and is not merged. The plan was
 restructured on 2026-09-08 from nine descriptive sections into nine ordered
 batches; the previous checkpoint recorded 93 rows with 36 closed. The difference
 is three grab-bag rows split into single items, one updater row added, and two
@@ -33,11 +37,10 @@ Batches run in order. A and B change what the shipped products claim.
 | [G. Remaining Arena telemetry](IMPLEMENTATION.md#batch-g-remaining-arena-telemetry) | 2 | AR1/AR3, AR4 |
 | [H. Producers for the next field run](IMPLEMENTATION.md#batch-h-producer-rows-for-the-next-field-run) | 10 | BP1 to BP7, AP1, AP2, AP4, AP6 |
 | [I. Bounded probes](IMPLEMENTATION.md#batch-i-bounded-probes-promote-or-delete) | 4 | HTTP deadline, token overflow, Docker ENTRYPOINT, child OOM |
-| Total open | 61 | |
+| Total open | 53 | |
 
 Closed rows are listed per product in
-[IMPLEMENTATION.md](IMPLEMENTATION.md#closed-rows): 19 for Bench and 20 for
-Arena.
+[IMPLEMENTATION.md](IMPLEMENTATION.md#closed-rows).
 
 ## Snapshot contents and update rule
 
