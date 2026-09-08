@@ -47,7 +47,7 @@
 //! eligibility or rank. Wiring any of this into a rank key would silently recreate
 //! the in-sample scaling-law anti-thesis the module is written to refute.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::deflated_sharpe::{deflated_sharpe_ratio, sharpe_ratio};
 use crate::significance::bootstrap_pvalue;
@@ -89,7 +89,7 @@ impl Default for BudgetCurveOpts {
 }
 
 /// One budget point's out-of-sample readout.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BudgetPoint {
     /// The budget (training windows, history quantity, or $compute/token spend).
     pub budget: f64,
@@ -114,7 +114,7 @@ pub struct BudgetPoint {
 }
 
 /// The full curve-level report.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BudgetCurveReport {
     /// Per-point readouts, in input (increasing-budget) order.
     pub points: Vec<BudgetPoint>,
@@ -140,7 +140,11 @@ pub struct BudgetCurveReport {
     /// made the agent worse. Read it beside that point's
     /// [`BudgetPoint::marginal_dsr_per_budget`] and [`BudgetPoint::oos_p_value`]
     /// before calling anything overfitting.
-    pub overfit_onset: Option<f64>,
+    ///
+    /// Serialized as `non_improvement_onset`. The pre-rename key `overfit_onset`
+    /// is still accepted on input and is deprecated for removal in a later major.
+    #[serde(alias = "overfit_onset")]
+    pub non_improvement_onset: Option<f64>,
     /// Whether `oos_dsr` strictly increases across *every* consecutive point: a
     /// genuinely monotone-improving curve, which is rare and honest in trading.
     pub is_monotone_improving: bool,
@@ -238,7 +242,7 @@ pub fn budget_curve(
 
     // First budget where more compute did not raise held-out edge. Non-strict, so a
     // plateau counts as non-improvement; it is not a claim of deterioration.
-    let overfit_onset = curve
+    let non_improvement_onset = curve
         .iter()
         .skip(1)
         .find(|p| matches!(p.marginal_dsr_per_budget, Some(m) if m <= 0.0))
@@ -256,7 +260,7 @@ pub fn budget_curve(
         peak_budget,
         peak_dsr,
         peak_dsr_deflated_for_selection,
-        overfit_onset,
+        non_improvement_onset,
         is_monotone_improving,
     })
 }
@@ -300,7 +304,7 @@ mod tests {
             "peak must precede the max budget (the EdgeBench differentiator)"
         );
         assert_eq!(
-            r.overfit_onset,
+            r.non_improvement_onset,
             Some(4.0),
             "onset is the first budget where held-out edge stopped rising"
         );
@@ -322,12 +326,12 @@ mod tests {
         let r = budget_curve(&c, &BudgetCurveOpts::default()).unwrap();
 
         assert_eq!(r.peak_budget, 3.0, "peak sits at the plateau start: {r:?}");
-        // `overfit_onset` is a non-improvement marker, not a deterioration one: the
+        // `non_improvement_onset` is a non-improvement marker, not a deterioration one: the
         // flat tail (identical windows ⇒ marginal exactly 0) sets it even though no
         // step ever declined. Pinning both halves keeps the field's name from being
         // read as evidence that more budget made the agent worse.
         assert_eq!(
-            r.overfit_onset,
+            r.non_improvement_onset,
             Some(4.0),
             "the plateau start sets the non-improvement onset: {r:?}"
         );
@@ -407,7 +411,10 @@ mod tests {
         let rising = curve_of(&rising_pts);
         let r = budget_curve(&rising, &BudgetCurveOpts::default()).unwrap();
         assert!(r.is_monotone_improving, "strictly rising DSR ⇒ true: {r:?}");
-        assert!(r.overfit_onset.is_none(), "a rising curve never turns down");
+        assert!(
+            r.non_improvement_onset.is_none(),
+            "a rising curve never turns down"
+        );
 
         // Insert a dip ⇒ no longer monotone.
         let dipped_pts = [
@@ -462,5 +469,36 @@ mod tests {
             (p0.oos_sharpe_annualized - p0.oos_sharpe * 252.0_f64.sqrt()).abs() < 1e-12,
             "annualized = raw * sqrt(periods_per_year)"
         );
+    }
+
+    #[test]
+    fn non_improvement_onset_serializes_under_the_new_key_and_reads_the_old_one() {
+        let pts = vec![
+            (1.0, window(0.0007, 0.02, 40)),
+            (2.0, window(0.0020, 0.02, 40)),
+            (3.0, window(0.0013, 0.02, 40)),
+        ];
+        let c = curve_of(&pts);
+        let r = budget_curve(&c, &BudgetCurveOpts::default()).unwrap();
+        assert_eq!(r.non_improvement_onset, Some(3.0), "{r:?}");
+
+        let json = serde_json::to_string(&r).unwrap();
+        assert!(json.contains("\"non_improvement_onset\":3.0"), "{json}");
+        assert!(
+            !json.contains("\"overfit_onset\":"),
+            "old key must not serialize"
+        );
+
+        let round_trip: BudgetCurveReport = serde_json::from_str(&json).unwrap();
+        assert_eq!(round_trip.non_improvement_onset, Some(3.0));
+        assert_eq!(round_trip.peak_budget, r.peak_budget);
+        assert_eq!(round_trip.points.len(), r.points.len());
+
+        // A report saved before the rename still parses: `overfit_onset` is
+        // accepted as an alias of the new key.
+        let legacy = json.replace("\"non_improvement_onset\":", "\"overfit_onset\":");
+        assert!(legacy.contains("\"overfit_onset\":3.0") && !legacy.contains("non_improvement"));
+        let from_legacy: BudgetCurveReport = serde_json::from_str(&legacy).unwrap();
+        assert_eq!(from_legacy.non_improvement_onset, Some(3.0));
     }
 }
