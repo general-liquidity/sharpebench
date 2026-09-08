@@ -5,7 +5,7 @@ review of progress against both repositories. The overall goal remains
 unfinished. This file is mirrored byte-for-byte in the Bench and Arena
 repositories; edit both or neither.
 
-Status: 100 checklist rows, 63 closed and 37 open. The restructured plan
+Status: 100 checklist rows, 69 closed and 31 open. The restructured plan
 opened at 39 closed. Batch A and Batch B are now complete except for the final
 paper rebuild and provenance rebind, and Batch D's two Arena producer rows and
 Batch E's two propagation rows also close. Their work is on the
@@ -118,14 +118,14 @@ every row in it is closed under the rules above.
 
 ### Batch C: run identity (BI3, one batch)
 
-- [ ] Typed run/window/seed/configuration/outcome identity and complete-grid validation.
-- [ ] R15, BI3: keyed support in the CSV and ranking paths rather than positional alignment. Assembler portion closed in Bench `c9dc85f`.
-- [ ] BI3, BI4: the import command carries period IDs; legacy JSON `Run` arrays are keyed or refused. BI4's strict readers closed in Bench `7f80fee`.
-- [ ] BR1: effective nonsecret configuration identity on resume; credential handling separate.
+- [x] `run_identity` gives a run a typed `RunKey` of window and seed plus optional period identities, and `parse_keyed_field` requires the complete window by seed product exactly once across every agent. Bench `14150a6`. Completeness is enforced as a safety property, not a convenience: restricting to shared support lets a partial peer rescope every other entrant's evidence and can drop the cell carrying another entrant's process violation, which is R01.
+- [x] R15, BI3: the Rust ranking path takes keyed support through `score --require-run-keys`, and accepted fields are reordered into one canonical cell order so the positional reads in `composite` become keyed reads without touching that module. Bench `14150a6`; the assembler portion was closed in `c9dc85f`. Two residuals are deliberate: scoring without the flag keeps the legacy positional path, because making refusal the default would break the committed goldens and frozen evidence, and the WASM, npm and Python surfaces still rank without identity validation, which needs new surface and rebuilt artifacts.
+- [x] BI3, BI4: wide import reads header cells as window identities and a leading period column as the period axis; long import reads optional run, seed and period columns. Identity is never manufactured from column position, so a file declaring none produces an unkeyed import that says so and is refused by the keyed scorer. An unkeyed legacy `Run` array is refused rather than aligned. Bench `14150a6`; BI4's strict readers were closed in `7f80fee`.
+- [x] BR1: the checkpoint bound the passed-through variable names but not their values, so keeping `SHARPEBENCH_AGENT_ENV=AGENT_MODE` and changing `AGENT_MODE` from conservative to aggressive left `invocation_sha256` unchanged, and completed cells of one policy could be resumed into the other and pooled as one result. Each name now contributes its value, with a credential-shaped or declared-secret name contributing a placeholder so rotating a token does not invalidate a checkpoint and no secret reaches the digest. Bench `14150a6` and `4809747`. The `SweepIdentity` doc no longer claims to bind every condition that can change a sweep's result.
 
 ### Batch D: producer rows that touch existing claims
 
-- [ ] BP6: invalid selections or missing datasets cannot publish empty-complete outputs.
+- [x] BP6: closed on both sides. In the Rust producers an optional dataset selector was never validated against the table, so a misspelled one skipped every dataset and reached the normal publication path with zero records under the ordinary filename and a zero exit, and a dataset that failed to load was a warning plus a continue. Selectors are now resolved before any output is opened, each run stages through a `.partial` name, and publication requires the planned support to have been evaluated, with the sweep also checking the full declared grid. Bench `df078c3`. The figure producer's three publish-on-absent-support paths are in `69e9caa`. Failure was chosen over an incompleteness manifest because every consumer keys on file presence and record content.
 - [x] BP8: the annotation summed two path marginals, double counting any cell eligible on both and able to exceed its own denominator. It now unions over `(dataset, agent_id)` and cross-checks each marginal against the independently stored summary. Bench `69e9caa`. On the frozen records both marginals are zero, so regenerating all four figures under a fixed `SOURCE_DATE_EPOCH` gives byte-identical PDFs.
 - [x] AP5: the reveal compared only each symbol's opening close in a two-day calm environment against a declared evaluation of 120 days at the hard tier. It now regenerates the complete tape for both seeds of every slot and requires equality on every bar and symbol. Arena `dc86f76`. The full check was measured at 0.14 s before choosing it over weakening the claim. The frozen count of 16 was measured under the old check and is not evidence for the new one; the paper says so in `ff057b0`.
 - [x] AP3: F6's gate between two current code paths was reported as agreement with the committed vectors. The gate now carries its real name and a separate frozen-reference comparison reads the committed artifact before it is overwritten, reporting rather than raising so parity is neither assumed nor silently enforced. Arena `dc86f76`.
@@ -177,7 +177,7 @@ papers.
 - [ ] BP5: collision-resistant model artifact identifiers.
 - [ ] BP7: strict JSONL and complete figure/summary support.
 - [ ] AP1: oracle/causal equal bars, warmup and costs.
-- [ ] AP2: provenance includes the actual JS producer and manifest dependencies.
+- [x] AP2: `make-throughput.py` runs `node bench/throughput.js` and folds its JSON into the evidence, but the source scope covered only Rust, Python, TeX and selected root configuration, so the WebAssembly throughput producer could change without moving `source_snapshot_sha256`. That is exactly the not-yet-committed working-tree case the snapshot claims to bind. The script and the package manifest that pins what it runs against are now in scope, taking the manifest from 144 sources to 146. Arena `a42c47c`.
 - [ ] AP4: persist pre-execution commitment separately from reveal; witness limits explicit.
 - [ ] AP6: complete frozen-input figure renderer registry.
 
