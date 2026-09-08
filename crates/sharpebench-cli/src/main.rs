@@ -657,7 +657,10 @@ fn run_sign(args: &[String], json: bool) -> ExitCode {
     };
     let pb = sharpebench_leaderboard::publish(&rank(&subs, &ScoreConfig::default()), &key);
 
-    // Without --ed25519 the output is byte-identical to the pre-Ed25519 CLI.
+    // Without --ed25519 the output carries the HMAC chain exactly as before, plus
+    // the terminal receipt that anchors its length. That receipt is new, so the
+    // bytes are no longer identical to the pre-Ed25519 CLI; a reader that ignores
+    // unknown fields is unaffected.
     let Some(secret_spec) = flag_value(args, "--ed25519") else {
         return match sharpebench_leaderboard::save(&pb, &args[4]) {
             Ok(()) => {
@@ -826,13 +829,30 @@ fn run_verify(args: &[String], json: bool) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let ok = sharpebench_leaderboard::verify_board(&pb.chain, &key);
+    // The whole board, not just its chain. `verify_board` recomputes the chain and
+    // never reads `pb.scores`, so a board whose displayed scores were rewritten,
+    // reordered or truncated printed the same OK as an honest one, which is the
+    // opposite of what an operator runs this command to learn.
+    let ok = sharpebench_leaderboard::verify_published(&pb, &key);
     if json {
-        emit_json(&serde_json::json!({ "ok": ok, "entries": pb.chain.len() }));
+        emit_json(&serde_json::json!({
+            "ok": ok,
+            "entries": pb.chain.len(),
+            "scores": pb.scores.len(),
+            "anchored": pb.receipt.is_some(),
+        }));
     } else if ok {
-        println!("OK — {} entries, signature chain valid", pb.chain.len());
+        println!(
+            "OK - {} entries, {} displayed scores bound to the anchored chain",
+            pb.chain.len(),
+            pb.scores.len()
+        );
+    } else if pb.receipt.is_none() {
+        eprintln!(
+            "FAIL - the document carries no terminal receipt, so its length is unanchored and              records may have been removed from the end"
+        );
     } else {
-        eprintln!("FAIL — signature chain invalid (tampered or wrong key)");
+        eprintln!("FAIL - chain, displayed scores or terminal anchor did not verify");
     }
     if ok {
         ExitCode::SUCCESS
