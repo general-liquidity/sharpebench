@@ -714,6 +714,31 @@ fn verify_record_lineage(
                     "does not match the declared source digests",
                 ));
             }
+            // The declaration must come from the bytes that were hashed. Everything
+            // above checks the declaration against itself and against earlier
+            // records; none of it reads `raw_candidate`, so a record could hash one
+            // candidate and display a lineage belonging to another. The two sibling
+            // arms below already cross-check presence or absence of this field, and
+            // this arm was the one that did not.
+            let raw = record.raw_candidate.get("lineage").ok_or_else(|| {
+                CandidateLineageError::at(
+                    format!("{path}.lineage_status"),
+                    "claims a declared lineage, but raw_candidate contains no lineage field",
+                )
+            })?;
+            let raw_declared: DeclaredCandidateLineage = serde_json::from_value(raw.clone())
+                .map_err(|error| {
+                    CandidateLineageError::at(
+                        format!("{path}.raw_candidate.lineage"),
+                        format!("is not a declared lineage: {error}"),
+                    )
+                })?;
+            if &raw_declared != declared {
+                return Err(CandidateLineageError::at(
+                    format!("{path}.declared_lineage"),
+                    "does not match the lineage in the hashed raw candidate",
+                ));
+            }
             verify_unique_declaration(declared, &path)?;
         }
         (Some(declared), "invalid") => {
@@ -1055,7 +1080,15 @@ mod tests {
         parents: Vec<String>,
         sources: Vec<IdeaProvenance>,
     ) -> CandidateLineageRecord {
-        let raw_candidate = candidate(id, threshold);
+        // The raw candidate carries the lineage the record declares, because that
+        // is what a real generator emits and what the hash is taken over. The
+        // fixture previously hashed a candidate with no lineage field at all while
+        // the record displayed one, and the verification passed: it demonstrated
+        // the very gap it was supposed to guard.
+        let mut raw_candidate = candidate(id, threshold);
+        if let Some(declared) = &declared_lineage {
+            raw_candidate["lineage"] = serde_json::to_value(declared).expect("lineage is JSON");
+        }
         let raw_candidate_sha256 = digest(&raw_candidate);
         let family_digest = digest(&family_preimage);
         let generator_identity = serde_json::json!({
@@ -1206,6 +1239,44 @@ mod tests {
         assert_eq!(
             canonical_sha256(&value).unwrap(),
             "1053610ec9fb321fa75f14724bec545af1d2f566e36d86148fb1e26de38edb69"
+        );
+    }
+
+    #[test]
+    fn a_declaration_absent_from_the_hashed_candidate_is_refused() {
+        // Everything else about a declared record checks the declaration against
+        // itself and against earlier records. Without this, a generator could hash
+        // one candidate and display the lineage of another, and the raw-candidate
+        // digest would still verify.
+        let source = IdeaProvenance {
+            source_type: "paper".to_owned(),
+            source_digest: format!("sha256:{}", "a".repeat(64)),
+            url_or_doi: None,
+            commit: None,
+            authors: vec!["A. Researcher".to_owned()],
+            license: None,
+        };
+        let mut rec = record(
+            0,
+            "c0",
+            0.5,
+            serde_json::json!({"family": "f"}),
+            Some(DeclaredCandidateLineage {
+                parent_candidate_ids: vec![],
+                idea_source_digests: vec![source.source_digest.clone()],
+            }),
+            vec![],
+            vec![source],
+        );
+        rec.raw_candidate
+            .as_object_mut()
+            .expect("candidate is an object")
+            .remove("lineage");
+        let error = verify_record_lineage(&rec, 0, &Default::default(), &Default::default())
+            .expect_err("a declaration the hashed bytes do not carry must be refused");
+        assert!(
+            format!("{error}").contains("lineage"),
+            "the refusal must name the lineage: {error}"
         );
     }
 
