@@ -163,7 +163,17 @@ def verify_source(source: Path) -> tuple[Path, str, str, list[str]]:
         raise ProspectiveImportError("field plan has an unsupported schema")
     models = plan.get("models")
     contracts = plan.get("contracts")
-    if not isinstance(models, list) or not models or not isinstance(contracts, list):
+    # Both inventories must be non-empty. An empty contract list satisfied every
+    # downstream check trivially, because each agent's claim list is compared
+    # against the derived contract set: with no contracts there is nothing to
+    # disagree with, so a plan declaring zero forecasts imported as a closed
+    # field with zero claims verified. The message already said this was refused.
+    if (
+        not isinstance(models, list)
+        or not models
+        or not isinstance(contracts, list)
+        or not contracts
+    ):
         raise ProspectiveImportError("field plan has no model or contract inventory")
     if any(not isinstance(record, dict) for record in models):
         raise ProspectiveImportError("field plan model inventory must contain objects")

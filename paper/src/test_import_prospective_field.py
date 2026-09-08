@@ -140,6 +140,32 @@ class ProspectiveFieldImportTests(unittest.TestCase):
             )
             self.assertTrue((output / "source-manifest.json").is_file())
 
+    def test_a_plan_declaring_no_contracts_is_refused(self) -> None:
+        # Aimed at the inventory check specifically. A whole-import fixture
+        # never reaches it: the closed-file-set comparison refuses first, so a
+        # test driving import_field would pass with this check deleted and
+        # prove nothing about it.
+        #
+        # The check matters because every downstream verification compares an
+        # agent's claim list against the contract set derived from the plan.
+        # With no contracts that comparison is trivially satisfied, so a plan
+        # declaring zero forecasts would verify as a closed field having
+        # checked nothing. The message always said both inventories were
+        # required; only the model list was checked.
+        with TemporaryDirectory() as directory:
+            source = Path(directory) / "prospective-forecast-field"
+            source.mkdir()
+            plan = {
+                "schema_version": importer.PLAN_SCHEMA,
+                "models": [{"agent_id": "fixture-agent"}],
+                "contracts": [],
+            }
+            _write_json(source / "field-plan.json", plan)
+
+            with self.assertRaises(importer.ProspectiveImportError) as caught:
+                importer.verify_source(source)
+            self.assertIn("inventory", str(caught.exception))
+
     def test_changed_or_incomplete_source_is_refused_without_output(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory) / "arena"

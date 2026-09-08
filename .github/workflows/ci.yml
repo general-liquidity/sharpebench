@@ -329,5 +329,9 @@ jobs:
         run: python -m unittest paper/src/test_provenance.py
       - name: Sweep coverage requires the declared grid, not row count
         run: python -m unittest paper/src/test_sweep_grid.py
+      - name: A prospective field plan must declare the contracts it verifies
+        run: python -m unittest paper/src/test_import_prospective_field.py
+      - name: The forecast report recomputes independently in Python
+        run: python -m unittest paper/src/test_check_prospective_forecast_report.py
       - name: Every recorded source and artifact matches the committed scope
         run: python paper/src/check-provenance.py
