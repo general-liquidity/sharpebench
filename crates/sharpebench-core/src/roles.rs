@@ -58,8 +58,15 @@ use crate::stats::mean;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RoleContribution {
     pub role: String,
-    /// Regression beta of the team return on this role — how much the team moves
-    /// per unit of this role's signal. Near 0 ⇒ the role isn't load-bearing.
+    /// Regression beta of the team return on this role: how much the team moves
+    /// per unit of this role's signal. Near 0 means the role is not load-bearing
+    /// on this sample.
+    ///
+    /// A marginal association from one univariate fit against a regressor that
+    /// is not orthogonal to the others, so these loadings do NOT decompose the
+    /// team return into additive parts and do not identify what the role caused.
+    /// The type and function names read as attribution; the arithmetic delivers
+    /// association. Read it beside `periods`, which is the sample it came from.
     pub beta_to_team: f64,
     pub mean_return: f64,
     /// Observations the loading was estimated on. Roles are not required to
@@ -192,7 +199,20 @@ pub fn attribute_behavior_roles(runs: &[Run], seeds_per_window: usize) -> Vec<Ro
     elicit_behavior_roles(runs, seeds_per_window)
         .into_iter()
         .map(|stream| {
-            let (_, beta) = alpha_beta(&stream.team, &stream.returns);
+            // Exact alignment, asserted rather than assumed. `alpha_beta` pairs
+            // by index and silently truncates to the shorter series, so a role
+            // stream one period short would be regressed against a mismatched
+            // team prefix with no signal at all. `elicit_behavior_roles` builds
+            // both from the same retained windows, so a mismatch here is a bug
+            // in this module, not bad input.
+            debug_assert_eq!(
+                stream.team.len(),
+                stream.returns.len(),
+                "role {} and its team stream must cover the same retained sample",
+                stream.role
+            );
+            let paired = stream.team.len().min(stream.returns.len());
+            let (_, beta) = alpha_beta(&stream.team[..paired], &stream.returns[..paired]);
             RoleContribution {
                 role: stream.role,
                 beta_to_team: beta,
