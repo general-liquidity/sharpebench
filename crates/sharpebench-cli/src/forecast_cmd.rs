@@ -1,8 +1,8 @@
 use std::fs;
 
 use sharpebench_core::{
-    analyze_forecast_quality, parse_forecast_evidence, ForecastAnalysisConfig,
-    ForecastQualityReport,
+    analyze_forecast_quality, parse_forecast_evidence, ContractDigestVersion,
+    ForecastAnalysisConfig, ForecastQualityReport,
 };
 
 pub(crate) fn run(args: &[String], json: bool) -> i32 {
@@ -151,6 +151,17 @@ fn print_report(report: &ForecastQualityReport) {
     println!(
         "common support: {} exact contract(s); dependence unit: {}",
         report.common_support.n_contracts, report.dependence_unit
+    );
+    let legacy_digests = report
+        .contract_digest_versions
+        .values()
+        .filter(|version| **version == ContractDigestVersion::Legacy)
+        .count();
+    println!(
+        "contract digests: {} under {}, {} legacy",
+        report.contract_digest_versions.len() - legacy_digests,
+        ContractDigestVersion::CanonicalJsonV1.as_str(),
+        legacy_digests
     );
     for agent in &report.agents {
         println!(
