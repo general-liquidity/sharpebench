@@ -2,8 +2,9 @@
 
 The complete suite checklist and supporting audit evidence are saved here in both
 repositories. Repairs are in progress and unfinished: **100 checklist rows, with
-69 closed and 31 open**, plus five explicitly deferred items. Batches A, B, C, D, G and I are
-complete, and rows close in E, F and H as well. That work sits on the
+69 closed and 31 open**, plus five explicitly deferred items. Batches A, B, C, D
+and G are complete, and rows close in E, F, H and I as well. Two batch I rows
+stay open because both need a Docker-enabled runner. That work sits on the
 `fix/audit-batch-a-b-2026-09-08` branch in each repository, Bench PR #25 and
 Arena PR #26, and is not merged. The plan was
 restructured on 2026-09-08 from nine descriptive sections into nine ordered

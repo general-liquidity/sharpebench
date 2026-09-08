@@ -6,9 +6,10 @@ unfinished. This file is mirrored byte-for-byte in the Bench and Arena
 repositories; edit both or neither.
 
 Status: 100 checklist rows, 69 closed and 31 open. The restructured plan
-opened at 39 closed. Batch A and Batch B are now complete except for the final
-paper rebuild and provenance rebind, and Batch D's two Arena producer rows and
-Batch E's two propagation rows also close. Their work is on the
+opened at 39 closed. Batches A, B, C, D and G are complete. Batch I resolved
+three of its four probes, one of which was then reverted after failing on a
+Docker-enabled runner, so two of its rows remain open and both need a live
+daemon. Rows also close in E, F and H. All of it is on the
 `fix/audit-batch-a-b-2026-09-08` branch in each repository and is not merged.
 Every commit cited on a closed row was verified to be reachable in the named
 repository. Open rows are ordered into batches below; the count is a checklist

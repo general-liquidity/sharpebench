@@ -34,10 +34,12 @@ architecture sketch.
 
 The active engineering work is the 2026-09-07 audit repair checklist at
 [`docs/audits/2026-09-07/IMPLEMENTATION.md`](audits/2026-09-07/IMPLEMENTATION.md),
-shared with SharpeArena and mirrored byte-for-byte there. It holds 100 rows, 39
-closed, ordered into batches A to I; batch A is a paper pass and batch B closes
-the publish graph so a release cannot be cut over a red CI run. That checklist,
-not this page, is what an agent should pick up. [`AGENTS.md`](../AGENTS.md)
+shared with SharpeArena and mirrored byte-for-byte there. It holds 100 rows in
+batches A to I, 69 of them closed as of 2026-09-08. Batches A, B, C, D and G are
+complete: the paper claims are corrected, the publish graph now refuses a
+release over a red CI run, runs are identified by key rather than by array
+position, and the producer and telemetry rows in D and G are closed. That
+checklist, not this page, is what an agent should pick up. [`AGENTS.md`](../AGENTS.md)
 carries the goal rules: no release, tag or force push, no new experiments, and
 published numerical evidence stays frozen.
 
