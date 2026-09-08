@@ -12,7 +12,7 @@
 //! [`framed_preimage`] is the shape every digest in this crate that hashes more
 //! than one field should be built from. It carries a domain string as well, so
 //! a pre-image for one purpose can never be read as a pre-image for another
-//! under the same key, the way [`crate::RECEIPT_DOMAIN`] separates a chain
+//! under the same key, the way the chain receipt domain separates a chain
 //! receipt from a chain link.
 
 /// Version of the framing layout below. A change to the layout mints a new
