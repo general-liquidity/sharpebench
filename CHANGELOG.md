@@ -12,6 +12,9 @@ and links the commits it was built from.
 
 ## [Unreleased]
 
+### Known limitation
+- The corrected standardized moments and the corrected inventory/cash arithmetic are in this tree but not in any published release. SharpeArena pins `sharpebench-core` and `sharpebench-sim` at `=0.15.0`, which still carries the superseded versions, so the repairs reach that product only through a release and a pin bump there. Downstream diagnostics stay separately named until then. No committed evidence artifact in either repository was rescored.
+
 ### Breaking
 - memory: single-chain `MultiSessionReport` removes `pooled_lift_pvalue` and `significant`, replacing unsupported inference with `IndependentReplicatesRequired` and descriptive raw/conditioned means. The old bootstrap concatenated dependent tasks and tested raw rather than credited lift. Use `replicated_multi_session_report` only for independent complete-chain repeats with matching geometry and justified whole-arm exchangeability. It reports raw and conditioned tests separately and reevaluates credit gates after arm swaps. See the [memory migration guide](docs/book/src/memory.md#migration-from-the-flat-pooled-test).
 - core/options: `bs_price`, `bs_greeks`, `portfolio_greeks` and `classify_greeks_risk` return `Result<_, OptionsError>`. Inputs are checked, including negative volatility and nonfinite values; undefined Greek vectors at payoff kinks are refused. Rename `GreeksRisk.naked_short_gamma` to `net_short_gamma`; remove `unbounded_tail`, which incorrectly inferred loss boundedness from local gamma. Use the separate `classify_payoff_tail` with a complete same-underlying, same-expiry portfolio and its underlying hedge. npm/CLI risk objects carry the new fields. See [pricing boundaries and migration](docs/book/src/options-risk.md).
