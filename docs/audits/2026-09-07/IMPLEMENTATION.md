@@ -5,10 +5,10 @@ review of progress against both repositories. The overall goal remains
 unfinished. This file is mirrored byte-for-byte in the Bench and Arena
 repositories; edit both or neither.
 
-Status: 100 checklist rows, 47 closed and 53 open. The restructured plan
-opened at 39 closed; the eight rows closed since are Batch A's R11, R13, R14,
-the shard-order and baseline-scope claims and the historical-impact caveat,
-plus Batch B's publish gate and updater claim. Their work is on the
+Status: 100 checklist rows, 55 closed and 45 open. The restructured plan
+opened at 39 closed. Batch A and Batch B are now complete except for the final
+paper rebuild and provenance rebind, and Batch D's two Arena producer rows and
+Batch E's two propagation rows also close. Their work is on the
 `fix/audit-batch-a-b-2026-09-08` branch in each repository and is not merged.
 Every commit cited on a closed row was verified to be reachable in the named
 repository. Open rows are ordered into batches below; the count is a checklist
@@ -105,16 +105,16 @@ every row in it is closed under the rules above.
 - [x] R14: a single agent on one tier is 256 of 4,608 episodes, one eighteenth; one sixth is a single agent across all three tiers. Stated as count ratios without a wall-clock promise. Arena `7492135`.
 - [x] Shard assembly is now described as identical record for record rather than byte for byte, because the fixed grid-key order differs from the serial producer's score-rank order. Verified against `assemble_sweep.py` and `test_sweep_grid.py`, not only the log. Bench `02ccbbe`.
 - [x] The universal "no field evaluation" claim is narrowed: the four literature rules were scored on all nine frozen datasets under three cost profiles with no rank-eligible cell in 351 records, while the seven further primitives in `sharpebench_core::entrants` have no field evaluation. Note that the four rules are implemented in the harness example, not in `entrants`.
-- [ ] Snapshot complexity claim: correct or delete; no optimization unless a measurement justifies it.
-- [ ] Readmes, API docs and changelogs reflect the merged repairs; no README em dashes or smolvm sections.
+- [x] `clone_state` copies a book holding shares, cash, RNG, an accumulating trace and pending orders, so it is not constant time; what it saves is the replay. Corrected in the mdBook page, both changelogs, four Bench rustdoc sites and one Arena comment. Bench `2c7356d`, Arena `a40b6a3`. No optimization implemented: shared immutable trace prefixes would need a measurement, and none was run.
+- [x] No README in either repository contains an em dash or a smolvm section; the two changelog mentions of smolvm are accurate historical entries and were kept. 34 em dashes were removed from user-facing documentation across 11 files. Bench `f2dfdf7`, Arena `ac54362`. Archived review records under `paper/review/` and the internal assessment documents were deliberately left alone: rewriting a historical record is out of scope.
 - [ ] Rebuilt papers with checked references and layout, fresh provenance, granular verified commits pushed; no release tags.
 
 ### Batch B: publication gating
 
 - [x] `require_green_ci` polls the `ci.yml` runs at the exact release commit and passes only on a completed success, and every publishing job plus the final aggregation depends on it. Bench `59d985c`. It waits rather than failing fast because the driver pushes the version commit and its tag together, and fails as soon as every run at that commit is terminal without success. The `workflow_dispatch` recovery route resolves the same commit, so there is no bypass. A second defect was found and fixed in the same pass: `verify` runs with `if: always()` and its result loop did not inspect the gate, so a blocked release would have reported success. Both publish lists carry all 12 crates including `sharpebench-memory`.
 - [x] The updater's checksum is described as an integrity check against corruption and mismatched assets, not authenticity: the digest ships in the same release over the same connection. The SLSA attestation is named as the out-of-band route. Bench `d624ef4`. No signature verification was implemented.
-- [ ] Fresh Rust/Python/npm/WASM package consumers exercised in CI for both products (the R04 closure deferred the broader surface here).
-- [ ] Cross-language conformance fixtures for the shared wire contract, versioned, without a cyclic whole-package dependency.
+- [x] Audited per surface before adding anything. Already covered: the npm tarball offline install and the WASM execution in both products, and Arena's wheel install. Genuinely absent and now added: a packaged-crate consumer in both products, and a wheel-install-import job in Bench. Bench `dfcc163`, Arena `bf1670c`. The Arena consumer replays the conformance kit out of the archive, which also proves the contract fixtures ship. Both consumer scripts were mutation-probed and fail when the expected value or the kit version is perturbed.
+- [x] `contract/conformance-kit.v1.json` is the versioned index, naming the fixtures, the schemas and the contract version, and Rust, Python and npm each check it. Arena `fcd5400`. Every surface reads the same files by repository path, so no package depends on another. Before this, only Rust read the fixtures and the set carried no version at all.
 
 ### Batch C: run identity (BI3, one batch)
 
@@ -127,15 +127,15 @@ every row in it is closed under the rules above.
 
 - [ ] BP6: invalid selections or missing datasets cannot publish empty-complete outputs.
 - [ ] BP8: eligibility union by identity, not overlapping-count sum.
-- [ ] AP5: full actual scenario/trajectory replay, not a different first-bar proxy.
-- [ ] AP3: frozen historical references versus fresh-path parity named and tested accurately.
+- [x] AP5: the reveal compared only each symbol's opening close in a two-day calm environment against a declared evaluation of 120 days at the hard tier. It now regenerates the complete tape for both seeds of every slot and requires equality on every bar and symbol. Arena `dc86f76`. The full check was measured at 0.14 s before choosing it over weakening the claim. The frozen count of 16 was measured under the old check and is not evidence for the new one; the paper says so in `ff057b0`.
+- [x] AP3: F6's gate between two current code paths was reported as agreement with the committed vectors. The gate now carries its real name and a separate frozen-reference comparison reads the committed artifact before it is overwritten, reporting rather than raising so parity is neither assumed nor silently enforced. Arena `dc86f76`.
 
 ### Batch E: shared mathematics and contracts
 
 - [ ] R07, BM10: versioned canonical numeric JSON and unambiguous digest framing. `float_roundtrip` is now explicit in both products; the remaining work is the versioned spec and digest framing.
 - [ ] R06, AI1: exact frozen contracts and canonical settlements across producers and consumers.
-- [ ] R03: dependency propagation. Arena consumes exact-pinned registry Bench; the corrected moments reach Arena only through a Bench release, which this goal does not authorize. Record the pin and the pending propagation in both changelogs.
-- [ ] R09: propagation of the inventory/cash fix to Arena, same dependency path as R03.
+- [x] R03 propagation recorded rather than performed. Verified by ancestry: `0cd7d37` is an ancestor of neither `v0.15.0` nor `v0.18.4`, so the corrected moments are unreleased, and Arena's pin of `=0.15.0` cannot carry them. Both changelogs state this and that no artifact was rescored. Bench `a81c5ed`, Arena `6823c60`.
+- [x] R09 propagation recorded on the same evidence: `4378ad4` is an ancestor of neither `v0.15.0` nor `v0.18.4`. Same changelog entries as R03.
 - [ ] R02: checked finite/domain statistical boundaries and typed availability across the remaining statistical family; bootstrap/BH/FDR closed in Bench `895a623`.
 - [ ] R05: independent-block requirements; insufficient-support status for forecast inference.
 - [ ] R12: directional compatibility and versioned extension policy.

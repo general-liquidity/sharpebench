@@ -2,11 +2,10 @@
 
 The complete suite checklist and supporting audit evidence are saved here in both
 repositories. Repairs are in progress and unfinished: **100 checklist rows, with
-47 closed and 53 open**, plus five explicitly deferred items. The eight rows
-closed on 2026-09-08 are Batch A's R11, R13, R14, the shard-order and
-baseline-scope claims and the historical-impact caveat, plus Batch B's publish
-gate and updater claim; that work sits on the `fix/audit-batch-a-b-2026-09-08`
-branch in each repository and is not merged. The plan was
+55 closed and 45 open**, plus five explicitly deferred items. Batches A and B are complete
+apart from the final paper rebuild and provenance rebind, and four further rows
+close in batches D and E. That work sits on the `fix/audit-batch-a-b-2026-09-08`
+branch in each repository, Bench PR #25 and Arena PR #26, and is not merged. The plan was
 restructured on 2026-09-08 from nine descriptive sections into nine ordered
 batches; the previous checkpoint recorded 93 rows with 36 closed. The difference
 is three grab-bag rows split into single items, one updater row added, and two
@@ -28,16 +27,16 @@ Batches run in order. A and B change what the shipped products claim.
 
 | Batch | Rows | Scope |
 | --- | ---: | --- |
-| [A. Paper pass](IMPLEMENTATION.md#batch-a-paper-pass-both-products) | 9 | Historical-impact caveat, R11, R13, R14, shard-order and scope claims, rebuilt papers |
-| [B. Publication gating](IMPLEMENTATION.md#batch-b-publication-gating) | 4 | Publish graph depends on green CI, narrowed updater claim, package consumers, conformance fixtures |
+| [A. Paper pass](IMPLEMENTATION.md#batch-a-paper-pass-both-products) | 1 | Historical-impact caveat, R11, R13, R14, shard-order and scope claims, rebuilt papers |
+| [B. Publication gating](IMPLEMENTATION.md#batch-b-publication-gating) | 0 | Publish graph depends on green CI, narrowed updater claim, package consumers, conformance fixtures |
 | [C. Run identity](IMPLEMENTATION.md#batch-c-run-identity-bi3-one-batch) | 4 | BI3 keyed run/window/seed identity, complete-grid validation, BR1 |
-| [D. Producer rows touching claims](IMPLEMENTATION.md#batch-d-producer-rows-that-touch-existing-claims) | 4 | BP6, BP8, AP5, AP3 |
-| [E. Shared mathematics and contracts](IMPLEMENTATION.md#batch-e-shared-mathematics-and-contracts) | 8 | R07/BM10, R06/AI1, R03 and R09 propagation, remaining R02, R05, R12, BR2/AR2 |
+| [D. Producer rows touching claims](IMPLEMENTATION.md#batch-d-producer-rows-that-touch-existing-claims) | 2 | BP6, BP8, AP5, AP3 |
+| [E. Shared mathematics and contracts](IMPLEMENTATION.md#batch-e-shared-mathematics-and-contracts) | 6 | R07/BM10, R06/AI1, R03 and R09 propagation, remaining R02, R05, R12, BR2/AR2 |
 | [F. Remaining Bench diagnostics](IMPLEMENTATION.md#batch-f-remaining-bench-diagnostics) | 16 | BM1, BM2/BS6, BM3, BM7, BI6 and the split supplementary rows |
 | [G. Remaining Arena telemetry](IMPLEMENTATION.md#batch-g-remaining-arena-telemetry) | 2 | AR1/AR3, AR4 |
 | [H. Producers for the next field run](IMPLEMENTATION.md#batch-h-producer-rows-for-the-next-field-run) | 10 | BP1 to BP7, AP1, AP2, AP4, AP6 |
 | [I. Bounded probes](IMPLEMENTATION.md#batch-i-bounded-probes-promote-or-delete) | 4 | HTTP deadline, token overflow, Docker ENTRYPOINT, child OOM |
-| Total open | 53 | |
+| Total open | 45 | |
 
 Closed rows are listed per product in
 [IMPLEMENTATION.md](IMPLEMENTATION.md#closed-rows).
