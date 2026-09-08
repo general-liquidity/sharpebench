@@ -5,7 +5,7 @@ review of progress against both repositories. The overall goal remains
 unfinished. This file is mirrored byte-for-byte in the Bench and Arena
 repositories; edit both or neither.
 
-Status: 100 checklist rows, 55 closed and 45 open. The restructured plan
+Status: 100 checklist rows, 63 closed and 37 open. The restructured plan
 opened at 39 closed. Batch A and Batch B are now complete except for the final
 paper rebuild and provenance rebind, and Batch D's two Arena producer rows and
 Batch E's two propagation rows also close. Their work is on the
@@ -126,7 +126,7 @@ every row in it is closed under the rules above.
 ### Batch D: producer rows that touch existing claims
 
 - [ ] BP6: invalid selections or missing datasets cannot publish empty-complete outputs.
-- [ ] BP8: eligibility union by identity, not overlapping-count sum.
+- [x] BP8: the annotation summed two path marginals, double counting any cell eligible on both and able to exceed its own denominator. It now unions over `(dataset, agent_id)` and cross-checks each marginal against the independently stored summary. Bench `69e9caa`. On the frozen records both marginals are zero, so regenerating all four figures under a fixed `SOURCE_DATE_EPOCH` gives byte-identical PDFs.
 - [x] AP5: the reveal compared only each symbol's opening close in a two-day calm environment against a declared evaluation of 120 days at the hard tier. It now regenerates the complete tape for both seeds of every slot and requires equality on every bar and symbol. Arena `dc86f76`. The full check was measured at 0.14 s before choosing it over weakening the claim. The frozen count of 16 was measured under the old check and is not evidence for the new one; the paper says so in `ff057b0`.
 - [x] AP3: F6's gate between two current code paths was reported as agreement with the committed vectors. The gate now carries its real name and a separate frozen-reference comparison reads the committed artifact before it is overwritten, reporting rather than raising so parity is neither assumed nor silently enforced. Arena `dc86f76`.
 
@@ -136,9 +136,9 @@ every row in it is closed under the rules above.
 - [ ] R06, AI1: exact frozen contracts and canonical settlements across producers and consumers.
 - [x] R03 propagation recorded rather than performed. Verified by ancestry: `0cd7d37` is an ancestor of neither `v0.15.0` nor `v0.18.4`, so the corrected moments are unreleased, and Arena's pin of `=0.15.0` cannot carry them. Both changelogs state this and that no artifact was rescored. Bench `a81c5ed`, Arena `6823c60`.
 - [x] R09 propagation recorded on the same evidence: `4378ad4` is an ancestor of neither `v0.15.0` nor `v0.18.4`. Same changelog entries as R03.
-- [ ] R02: checked finite/domain statistical boundaries and typed availability across the remaining statistical family; bootstrap/BH/FDR closed in Bench `895a623`.
+- [ ] R02 partially closed, and the open part is worse than the row implied. Closed here: `spearman_rho` returned 0.9999999999999998 for a NaN severity series and `gate_vs_human` reported a kappa beside it, `kendall_tau_b` returned 0.0 for infinite scores and `dissent` published a rank dissent from them, and `sortino_ratio` returned a value for negative infinity and never checked its target. Bench `70229a1`, with paired tests pinning that valid inputs are unchanged. Still open and reproduced: a field of 20 NaN returns **p = 0.001996** from `reality_check_pvalue`, `spa_pvalue` and `spa_consistent_pvalue`, because the observed statistic is NaN so the early exit is skipped and no draw exceeds it, leaving the smallest attainable p. `step_down_significant` rejects every hypothesis for a NaN or out-of-range alpha, the `benjamini_hochberg` defect one module over. `expected_max_sharpe` folds a negative dispersion into the no-trials branch, so a deflated Sharpe of 1.0 comes back for `trials_sr_std = -1.0`. `bootstrap_dsr_ci` turns a NaN confidence level into a zero-width interval, reading invalid input as perfect precision. `percentile_selection` and `selection_robustness` propagate NaN. Closing these widens eight return types across `sharpebench-core`, `sharpebench-edge`, `sharpebench-cli` and `sharpebench-py`; the callers are enumerated in the verification log.
 - [ ] R05: independent-block requirements; insufficient-support status for forecast inference.
-- [ ] R12: directional compatibility and versioned extension policy.
+- [x] R12: an optional default lets a reader accept an older message, not a newer one, because the published schemas set `additionalProperties: false`. Compatibility is now stated by direction: decisions travel to the harness, always the newer reader, so an added decision field needs no coordination, while an added observation field reaches an older reader and needs version negotiation, a parallel namespace or a declared-unvalidated envelope. The minor-bump rule is split the same way. Arena `118ddc4`.
 - [ ] BR2, AR2: append-only attempt ledger preserving failed/retried cost and timing.
 
 ### Batch F: remaining Bench diagnostics
@@ -148,7 +148,7 @@ every row in it is closed under the rules above.
 - [ ] BM3: dated role/durability support; correct IC versus return-trend descriptions.
 - [ ] BM7: raw-candidate lineage/rediscovery validation and identity binding.
 - [ ] BI6: team-member resource accounting and concurrency semantics.
-- [ ] Memory: matching oracle/task populations, finite parameters, oracle floor.
+- [x] Memory: the oracle series was never length-checked against the paired arms, so `fraction_of_ceiling` could divide a lift from one task mix by a ceiling gap from another. The documented zero floor was implemented as a near-zero guard on the absolute gap, so an oracle below baseline kept the ratio's sign and a retrieval arm that also lost ground reported a favourable positive fraction. Scores, costs and alpha are now finite-checked at the boundary on the poisoning leg too. Bench `50e147b`. Equal length cannot establish identical task identities; that stays an explicit caller contract.
 - [ ] Budget support and search population semantics.
 - [ ] Plateau terminology.
 - [ ] Zero-return versus no-trade distinction.
@@ -162,8 +162,8 @@ every row in it is closed under the rules above.
 
 ### Batch G: remaining Arena telemetry
 
-- [ ] AR1, AR3: strict optional telemetry and reconciled counts/reasoning/steps/cadence.
-- [ ] AR4: ordered per-measurement duration value/unit/source provenance.
+- [x] AR1, AR3: missing and null provider fields were coerced to zero before validation, so an absent count and a real zero were indistinguishable and a negative fraction truncated to zero; a null reasoning count read as provider-reported because availability tested key presence. Strict readers now return not-reported, refuse a present non-integer, and derive availability. Validation reconciles what it claims to: steps must equal the realized return count, and reasoning observations must be one per request and sum to the reported total. Arena `8fa7a54`. No committed artifact carries these fields, so no frozen number changes.
+- [x] AR4: durations are recorded per measurement in order with value, unit and source, the `unspecified` default is gone and the source is validated against a closed set. Percentiles are reported per observing clock, so a p95 in a mixed cell is attributable to backend compute time or host elapsed time instead of pooled across both. Arena `8fa7a54`.
 
 ### Batch H: producer rows for the next field run
 
@@ -186,10 +186,10 @@ papers.
 Each probe is one test attempt. A reproduced failure becomes a defect row in
 the matching batch; a non-reproduction deletes the row with a one-line note.
 
-- [ ] Probe HTTP connect/slow-trickle against the absolute request deadline before classification.
-- [ ] Probe checked token accounting overflow.
-- [ ] Probe Docker ENTRYPOINT versus effective readiness command.
-- [ ] Probe child OOM versus surviving wrapper classification.
+- [x] Confirmed and fixed. `HttpAgent` connected with no connect timeout and used fixed per-operation read timeouts, so an endpoint answering one byte just inside every read timeout extended the exchange to the 8 MiB cap, multiplied by the retry budget, and nothing was classified as a timeout because no single read timed out. One absolute deadline now bounds connect, write and every read, as BS2 did for stdio. Bench `4809747`. The pre-fix run took 6.03 seconds against a 200 ms budget.
+- [x] Confirmed and fixed. `billable_units` summed two `u64` token counts before the float conversion and `validate_for` bounds only `cost_usd`, so a decision declaring the maximum `u64` is a valid wire message from an untrusted entrant: it panics with overflow checks on and wraps to a near-zero cost with them off, the favourable direction for the per-cost statistics. The sum now saturates. Bench `2fa068c`.
+- [x] Confirmed from source and fixed. An appended `/bin/sh` command replaces `CMD`, not `ENTRYPOINT`, so against an image declaring one the hostile readiness probe, every egress probe and the live OOM fixture were reporting on what that entrypoint did with the script as its argv. The executable now goes to `--entrypoint`. Bench `f422a45`. The production entrant launch is unchanged and a test pins that. No daemon was started and no image pulled.
+- [ ] Blocked on a Docker-enabled runner, not unexamined. Source shows the hazard is already reasoned about: `new_with_memory` omits `--init` because docker-init can survive long enough for Docker to record `OOMKilled=false`, and a false negative falls through to a retryable transport classification, so the harness respawns an agent certain to breach the same budget. What source cannot settle is an entrant whose own entrypoint forks the real agent, reinstating the surviving-PID-1 shape. The CI step is an ignored live test under `--memory 32m` with a shell that survives its OOM-killed child, asserting what `DockerCli.oom_killed` returns and recording the runner's `docker version` and cgroup driver.
 
 ### Deferred (not scheduled)
 

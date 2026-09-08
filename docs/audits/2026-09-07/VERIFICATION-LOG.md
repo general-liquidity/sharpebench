@@ -4,6 +4,29 @@ Chronological repair diary moved out of [IMPLEMENTATION.md](IMPLEMENTATION.md) o
 
 ## Verification log
 
+- R02 blocked work, 2026-09-08. Closing the open half widens eight return types.
+  Recording the callers here so the next pass does not have to rediscover them.
+  `reality_check_pvalue`, `spa_pvalue` and `spa_consistent_pvalue` are called
+  from `sharpebench-core/src/composite.rs` around lines 1813 to 1825, from
+  `sharpebench-edge/src/verdict.rs` lines 213 to 215, and from
+  `sharpebench-py/src/lib.rs` lines 319 to 326 plus the `core_spa_consistent`
+  import. `step_down_significant` from `composite.rs:1836`,
+  `edge/verdict.rs:216`, `py/src/lib.rs:356`. `expected_max_sharpe` is the
+  largest: `composite.rs:1195` and `:2967`, `core/percentile.rs:110`,
+  `edge/verdict.rs:159`, `py/src/lib.rs:135`, and it cascades into
+  `deflated_sharpe_ratio` and `probabilistic_sharpe_ratio` at
+  `composite.rs:606`, `:618`, `:1183`, `:1188`, `budget_curve.rs:174` and
+  `:212`, `edge/verdict.rs:160` and `:161`, and `edge/mintrl.rs:52`.
+  `bootstrap_dsr_ci_against_null` from `composite.rs:1355` and the `core_dsr_ci`
+  import. `percentile_selection` from `sharpebench-cli/src/analysis_cmd.rs:206`,
+  which already has an error-exit path and is the cheapest of the set.
+  `selection_robustness` from `composite.rs:1322`.
+
+  One documentation consequence is already outstanding: the `moments` docstring
+  at `sharpebench-py/src/lib.rs:467` says `sortino` is `None` only when downside
+  deviation is zero. After the stats repair it is also `None` for a non-finite
+  input, so that docstring is one clause short of the behaviour.
+
 - Batch A and B, 2026-09-08. Work is on `fix/audit-batch-a-b-2026-09-08` in
   each repository, Bench PR #25 and Arena PR #26, both opened as drafts. Eight
   checklist rows close. At the time of writing every CI check on both pull
