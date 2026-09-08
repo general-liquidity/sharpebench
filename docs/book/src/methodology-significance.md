@@ -1,6 +1,6 @@
 # Significance & multiple testing
 
-Three complementary tests guard against an edge that is really noise — and against
+Three complementary tests guard against an edge that is really noise, and against
 the leader being merely the luckiest of a large field. All are deterministic given
 a seed (a seeded SplitMix64 drives a stationary bootstrap), so the p-values are
 reproducible.
@@ -33,8 +33,8 @@ Reality Check nor SPA gates rank.
 error rate across the whole field, but is more powerful than the single-step
 Reality Check: after confirming the strongest winners, it re-tests the survivors
 against the maximum statistic over the *remaining* agents only. The result is a
-boolean per agent — "this agent's outperformance survives correction for every
-agent tested" — reported as `step_down_significant`.
+boolean per agent: "this agent's outperformance survives correction for every
+agent tested", reported as `step_down_significant`.
 
 Together: the bootstrap is the per-agent rank gate; the Reality Check, SPA, and
 step-down procedures are field-wide reported diagnostics. They answer related

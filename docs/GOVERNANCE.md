@@ -42,12 +42,12 @@ should include parties that do not compete on the board.
 The natural home already exists. The **[Open FinLLM Leaderboard
 (OFLL)](https://huggingface.co/spaces/finosfoundation/Open-Financial-LLM-Leaderboard)**
 is governed by **FINOS** (the Fintech Open Source Foundation, part of the Linux
-Foundation) with Columbia — a credible, neutral, community-backed home for
+Foundation) with Columbia, a credible, neutral, community-backed home for
 financial-LLM evaluation.
 
 But OFLL evaluates the **knowledge axis**: financial NLP, sentiment, headline
 classification, QA, document analysis, compliance. It has **no trading-performance
-axis** — no Sharpe, no risk-adjusted returns, no deflation, no skill-vs-luck. Its
+axis**: no Sharpe, no risk-adjusted returns, no deflation, no skill-vs-luck. Its
 own charter says "Financial LLMs **and Agents**," yet the agent-trading track does
 not exist.
 

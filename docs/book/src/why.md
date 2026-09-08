@@ -16,23 +16,23 @@ candidates were tried.
 
 ## What SharpeBench adds
 
-- **Deflated Sharpe / PSR** — deflate the observed Sharpe by the number of
+- **Deflated Sharpe / PSR**: deflate the observed Sharpe by the number of
   leaderboard agents, the track length, and the return distribution's skew and
   kurtosis. A high Sharpe found after many tries is discounted to what it is
   worth.
-- **pass^k reliability (mode "all")** — skill must show up on *every* seed ×
+- **pass^k reliability (mode "all")**: skill must show up on *every* seed ×
   window, not on average. One lucky seed cannot carry a submission.
-- **Multiple-testing significance** — a stationary bootstrap p-value per agent,
+- **Multiple-testing significance**: a stationary bootstrap p-value per agent,
   White's Reality Check across the field, and Romano–Wolf step-down for
   family-wise-error-controlled per-agent verdicts.
-- **Process discipline** — block-severity gates over the audit trace: an order
+- **Process discipline**: block-severity gates over the audit trace: an order
   that skipped the risk gate, or a manipulative/absurd-size order, is
   disqualifying regardless of return.
-- **Point-in-time rigor** — the simulator never hands an agent a future bar, so
+- **Point-in-time rigor**: the simulator never hands an agent a future bar, so
   look-ahead is unrepresentable by construction.
-- **Costs in** — fees, seeded slippage, and own-order market impact, so size and
+- **Costs in**: fees, seeded slippage, and own-order market impact, so size and
   turnover are paid for.
-- **A luck floor** — a random-agent baseline that shows the luck distribution the
+- **A luck floor**: a random-agent baseline that shows the luck distribution the
   leaders must clear.
 
 These are not knobs a contestant can tune around: they are deterministic

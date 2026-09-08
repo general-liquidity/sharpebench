@@ -8,9 +8,9 @@ not run an agent, retrieve documents, or own a store.
 
 The required arms are:
 
-1. **baseline** — no memory, the performance floor;
-2. **retrieval** — the system under test; and
-3. **oracle** — gold records only, the attainable ceiling.
+1. **baseline**: no memory, the performance floor;
+2. **retrieval**: the system under test; and
+3. **oracle**: gold records only, the attainable ceiling.
 
 The report includes retrieval lift, stationary-bootstrap significance through
 `sharpebench-stats`, fraction of the oracle ceiling, and cost-normalized lift per

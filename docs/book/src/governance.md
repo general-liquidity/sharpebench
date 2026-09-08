@@ -32,7 +32,7 @@ properties of the hash chain.
 ## Relationship to other efforts
 
 The **Open FinLLM Leaderboard** (FINOS + Columbia) measures the financial
-*knowledge* axis — NLP, sentiment, QA, compliance — and has no
+*knowledge* axis (NLP, sentiment, QA, compliance) and has no
 trading-performance / Sharpe / deflation track. SharpeBench is complementary: the
 skill-vs-luck *trading* track that knowledge leaderboards lack. The intended path
 is neutral governance via partnership rather than a rival leaderboard, with
