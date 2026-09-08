@@ -32,7 +32,8 @@ pub mod sealed;
 
 pub use canary::{detect_leak, embed_canary, make_canary, verify_canary, Canary};
 pub use public::{
-    publish_public_chain, sign_result_public, verify_chain_public, verify_public_chain,
+    publish_public_chain, sign_chain_receipt_public, sign_result_public, verify_chain_public,
+    verify_chain_public_anchored, verify_chain_receipt_public, verify_public_chain,
     verify_public_chain_with, PublicChain, SigningKey, VerifyingKey, ED25519_SCHEME,
 };
 pub use sealed::{
@@ -190,6 +191,83 @@ pub fn verify_chain(results: &[SignedResult], key: &[u8]) -> bool {
         prev = r.signature.clone();
     }
     true
+}
+
+/// Domain-separation prefix for a [`ChainReceipt`] message. Keeps a receipt
+/// signature from ever being readable as a link signature under the same key.
+pub(crate) const RECEIPT_DOMAIN: &str = "sharpebench-attest/chain-receipt/v1";
+
+/// A signed statement of where a chain ends: how many links the signer
+/// published and what the last one's signature was.
+///
+/// A genesis-anchored chain proves that the links a document contains are the
+/// ones that were signed, in the order they were signed. It cannot prove that
+/// they are *all* of them, because every prefix of a valid chain is itself a
+/// valid chain: dropping the final records leaves a document that verifies.
+/// Interior deletion breaks the `prev_signature` link, terminal deletion does
+/// not. The receipt closes that asymmetry, since restating a count and a
+/// terminal signature for a shortened chain requires the signing key.
+///
+/// The receipt binds completeness, not chronology. It says nothing about when
+/// the chain was signed or whether the signer withheld records before signing.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChainReceipt {
+    /// Number of links the signer published.
+    pub records: usize,
+    /// Signature of the last link, or [`GENESIS`] for an empty chain.
+    pub terminal_signature: String,
+    /// Hex signature over the domain-separated `records | terminal_signature`:
+    /// HMAC-SHA256 in a [`sign_chain_receipt`] receipt, Ed25519 in a
+    /// [`public::sign_chain_receipt_public`] one, matching its chain's scheme.
+    pub signature: String,
+}
+
+/// The bytes a receipt signs. Signer and verifier must agree byte for byte.
+pub(crate) fn receipt_message(records: usize, terminal_signature: &str) -> Vec<u8> {
+    format!("{RECEIPT_DOMAIN}|{records}|{terminal_signature}").into_bytes()
+}
+
+/// The signature a complete chain ends on: the last link's, or [`GENESIS`] when
+/// the chain is empty, so an empty chain still has an unforgeable receipt.
+pub(crate) fn terminal_signature(results: &[SignedResult]) -> &str {
+    results.last().map_or(GENESIS, |r| r.signature.as_str())
+}
+
+/// Sign a terminal receipt for an HMAC chain. Same key as [`sign_result`].
+pub fn sign_chain_receipt(results: &[SignedResult], key: &[u8]) -> ChainReceipt {
+    let terminal = terminal_signature(results);
+    let mut mac = HmacSha256::new_from_slice(key).expect("HMAC accepts any key length");
+    mac.update(&receipt_message(results.len(), terminal));
+    ChainReceipt {
+        records: results.len(),
+        terminal_signature: terminal.to_string(),
+        signature: to_hex(&mac.finalize().into_bytes()),
+    }
+}
+
+/// Check a terminal receipt against the chain actually supplied: the signature
+/// must recompute under `key`, and the count and terminal signature it commits
+/// to must be the ones observed. A truncated chain fails on both counts.
+pub fn verify_chain_receipt(results: &[SignedResult], receipt: &ChainReceipt, key: &[u8]) -> bool {
+    let Some(expected) = from_hex(&receipt.signature) else {
+        return false;
+    };
+    let mut mac = HmacSha256::new_from_slice(key).expect("HMAC accepts any key length");
+    mac.update(&receipt_message(
+        receipt.records,
+        &receipt.terminal_signature,
+    ));
+    mac.verify_slice(&expected).is_ok()
+        && receipt.records == results.len()
+        && receipt.terminal_signature == terminal_signature(results)
+}
+
+/// Verify an HMAC chain **and** its terminal receipt: the complete check.
+///
+/// [`verify_chain`] alone accepts any valid prefix, so use this wherever the
+/// question is "is this the whole chain" rather than "are these links genuine".
+pub fn verify_chain_anchored(results: &[SignedResult], receipt: &ChainReceipt, key: &[u8]) -> bool {
+    verify_chain(results, key) && verify_chain_receipt(results, receipt, key)
 }
 
 pub(crate) fn to_hex(bytes: &[u8]) -> String {

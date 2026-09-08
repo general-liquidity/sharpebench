@@ -10,7 +10,10 @@ use std::fmt::Write as _;
 
 use serde::{Deserialize, Serialize};
 
-use sharpebench_attest::{sign_result, verify_chain, SignedResult, GENESIS};
+use sharpebench_attest::{
+    sign_chain_receipt, sign_result, verify_chain, verify_chain_anchored, ChainReceipt,
+    SignedResult, GENESIS,
+};
 use sharpebench_core::{CompositeScore, ScoreConfig};
 
 /// The transaction-cost profile a board was scored under — a self-contained mirror
@@ -95,14 +98,30 @@ pub fn render(board: &[CompositeScore]) -> String {
     out
 }
 
+/// Canonical JSON of one ranked entry — the payload of that entry's chain link.
+/// Signing and verification must agree byte for byte, so both go through this.
+fn score_payload(s: &CompositeScore) -> String {
+    serde_json::to_string(s).unwrap_or_default()
+}
+
+/// Compare a displayed score array against the chain links that are supposed to
+/// carry it: same count, same content, same order. `links` is the score section
+/// of a chain, with any header link already stripped by the caller.
+fn scores_match_links(scores: &[CompositeScore], links: &[SignedResult]) -> bool {
+    scores.len() == links.len()
+        && scores
+            .iter()
+            .zip(links)
+            .all(|(s, link)| link.payload == score_payload(s))
+}
+
 /// Build a tamper-evident signed chain over the ranked field — each entry signed
 /// against the previous, so the published board is independently verifiable.
 pub fn sign_board(board: &[CompositeScore], key: &[u8]) -> Vec<SignedResult> {
     let mut chain = Vec::with_capacity(board.len());
     let mut prev = GENESIS.to_string();
     for s in board {
-        let payload = serde_json::to_string(s).unwrap_or_default();
-        let signed = sign_result(&payload, &prev, key);
+        let signed = sign_result(&score_payload(s), &prev, key);
         prev = signed.signature.clone();
         chain.push(signed);
     }
@@ -110,23 +129,50 @@ pub fn sign_board(board: &[CompositeScore], key: &[u8]) -> Vec<SignedResult> {
 }
 
 /// Verify a signed board chain.
+///
+/// This checks the chain in isolation. It says nothing about a score array
+/// displayed beside it: use [`verify_published`] when the caller holds both.
 pub fn verify_board(chain: &[SignedResult], key: &[u8]) -> bool {
     verify_chain(chain, key)
 }
 
-/// A published board: the ranked scores plus their tamper-evident signature chain.
+/// A published board: the ranked scores, their tamper-evident signature chain,
+/// and the signed anchor for the end of that chain.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PublishedBoard {
     pub scores: Vec<CompositeScore>,
     pub chain: Vec<SignedResult>,
+    /// Terminal anchor for `chain`. `None` only in a board written before the
+    /// anchor existed; [`verify_published`] refuses those, because dropping the
+    /// last rows of an unanchored board leaves a document that still verifies.
+    #[serde(default)]
+    pub receipt: Option<ChainReceipt>,
 }
 
-/// Build a published board (scores + signed chain).
+/// Build a published board (scores + signed chain + terminal receipt).
 pub fn publish(board: &[CompositeScore], key: &[u8]) -> PublishedBoard {
+    let chain = sign_board(board, key);
+    let receipt = sign_chain_receipt(&chain, key);
     PublishedBoard {
         scores: board.to_vec(),
-        chain: sign_board(board, key),
+        chain,
+        receipt: Some(receipt),
     }
+}
+
+/// Verify a published board: the chain must recompute, the displayed `scores`
+/// must be exactly the entries the chain signed in the signed order, **and** the
+/// signed receipt must agree that this is the whole chain.
+///
+/// [`verify_board`] alone cannot establish any of that. It never sees the score
+/// array a reader is shown, so a board whose rows were edited, reordered or
+/// padded passes it; and it accepts any prefix, so a board with its last rows
+/// removed together with their links passes it too. Both fail here.
+pub fn verify_published(b: &PublishedBoard, key: &[u8]) -> bool {
+    let Some(receipt) = &b.receipt else {
+        return false;
+    };
+    verify_chain_anchored(&b.chain, receipt, key) && scores_match_links(&b.scores, &b.chain)
 }
 
 /// A *self-describing* published board: the run-spec, the ranked scores, and a
@@ -134,14 +180,20 @@ pub fn publish(board: &[CompositeScore], key: &[u8]) -> PublishedBoard {
 /// the spec is the chain's first link, altering the dataset hash, costs, scoring
 /// config, seeds, or windows after the fact breaks the signature.
 ///
-/// Verification proves integrity of the published condition and scores. It does
-/// not independently recompute them because this document does not contain the
-/// raw submissions or trajectories.
+/// Verification proves integrity of the published condition and of the score
+/// array as displayed: content, count and order are all bound to the chain, and
+/// the chain's own length is bound by a signed terminal receipt. It does not
+/// independently recompute the scores, because this document does not contain
+/// the raw submissions or trajectories.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SelfDescribingBoard {
     pub spec: RunSpec,
     pub scores: Vec<CompositeScore>,
     pub chain: Vec<SignedResult>,
+    /// Terminal anchor for `chain`. `None` only in a board written before the
+    /// anchor existed; [`verify_self_describing`] refuses those.
+    #[serde(default)]
+    pub receipt: Option<ChainReceipt>,
 }
 
 /// Canonical JSON of the run-spec — the payload of the chain's spec link.
@@ -161,29 +213,40 @@ pub fn publish_self_describing(
     let mut prev = spec_link.signature.clone();
     chain.push(spec_link);
     for s in board {
-        let payload = serde_json::to_string(s).unwrap_or_default();
-        let signed = sign_result(&payload, &prev, key);
+        let signed = sign_result(&score_payload(s), &prev, key);
         prev = signed.signature.clone();
         chain.push(signed);
     }
+    let receipt = sign_chain_receipt(&chain, key);
     SelfDescribingBoard {
         spec,
         scores: board.to_vec(),
         chain,
+        receipt: Some(receipt),
     }
 }
 
-/// Verify a self-describing board: the HMAC chain must recompute end-to-end *and*
-/// the chain's spec link must still equal the inlined spec (so the spec can't be
-/// swapped without re-signing the whole chain).
+/// Verify a self-describing board: the HMAC chain must recompute end-to-end and
+/// end where its signed receipt says it ends, the chain's spec link must still
+/// equal the inlined spec, **and** the displayed `scores` must be exactly the
+/// entries the chain signed, in the signed order.
+///
+/// The score check is the part a reader depends on. Chain recomputation alone
+/// says nothing about `b.scores`, which is the array that gets rendered,
+/// exported and cited, so without it an edited, reordered, truncated or padded
+/// score array verified as published. The receipt covers the case the chain
+/// cannot see either way: dropping trailing entries from both arrays at once.
 pub fn verify_self_describing(b: &SelfDescribingBoard, key: &[u8]) -> bool {
-    if !verify_chain(&b.chain, key) {
+    let Some(receipt) = &b.receipt else {
+        return false;
+    };
+    if !verify_chain_anchored(&b.chain, receipt, key) {
         return false;
     }
-    match b.chain.first() {
-        Some(first) => first.payload == spec_payload(&b.spec),
-        None => false,
-    }
+    let Some((first, score_links)) = b.chain.split_first() else {
+        return false;
+    };
+    first.payload == spec_payload(&b.spec) && scores_match_links(&b.scores, score_links)
 }
 
 /// Persist a self-describing board to a JSON file.

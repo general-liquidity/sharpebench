@@ -10,26 +10,124 @@
 //! Deterministic: enumerates C(s, s/2) splits with no RNG. Ported from the
 //! published procedure, not from any GPL/proprietary library.
 
+use std::fmt;
+
 use sharpebench_stats::sharpe_ratio;
 
-/// Probability of backtest overfitting for a performance matrix.
+/// Why CSCV could not produce a probability of backtest overfitting.
 ///
-/// `perf_matrix` is **T rows (time) × N cols (strategies)** of per-period
-/// returns: `perf_matrix[t][n]` is strategy `n`'s return in period `t`. `s` is
-/// the (even) number of contiguous time blocks to split into. Returns a
-/// probability in `[0, 1]`; near 0 ⇒ the IS-winner generalizes, near 0.5 ⇒ the
-/// IS-winner is no better than chance OOS, near 1 ⇒ systematic overfitting.
-///
-/// Returns 0.0 for degenerate inputs (fewer than 2 strategies, `s < 2`, odd
-/// `s`, or too few rows to fill the blocks) — there is nothing to overfit.
-pub fn probability_of_backtest_overfitting(perf_matrix: &[Vec<f64>], s: usize) -> f64 {
-    let t = perf_matrix.len();
-    if t < s || s < 2 || !s.is_multiple_of(2) {
-        return 0.0;
+/// A test that cannot be estimated is unavailable, not a zero probability of
+/// overfitting. Each variant names the observed quantity that made the estimate
+/// impossible so a caller can report the reason instead of a fabricated number.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PboUnavailable {
+    /// Fewer than two strategy columns: there is no selection to price.
+    TooFewStrategies { strategies: usize },
+    /// `s` must be an even count of at least two contiguous blocks.
+    InvalidBlockCount { blocks: usize },
+    /// Fewer time rows than blocks, so at least one block would be empty.
+    TooFewPeriods { periods: usize, blocks: usize },
+    /// Row `row` is not the width of row 0, so the matrix is not a field.
+    RaggedMatrix {
+        row: usize,
+        expected: usize,
+        actual: usize,
+    },
+    /// A non-finite cell. Sharpe ratios over it are not defined, and the
+    /// split comparisons below silently treat NaN as "worse than everything".
+    NonFiniteObservation { row: usize, column: usize },
+    /// Every enumerated split was rejected, so no fraction exists.
+    NoEvaluableSplit,
+}
+
+impl fmt::Display for PboUnavailable {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TooFewStrategies { strategies } => write!(
+                f,
+                "CSCV needs at least 2 strategy columns, observed {strategies}"
+            ),
+            Self::InvalidBlockCount { blocks } => {
+                write!(f, "block count must be even and at least 2, got {blocks}")
+            }
+            Self::TooFewPeriods { periods, blocks } => write!(
+                f,
+                "{blocks} blocks need at least {blocks} periods, observed {periods}"
+            ),
+            Self::RaggedMatrix {
+                row,
+                expected,
+                actual,
+            } => write!(f, "row {row} has {actual} strategies, expected {expected}"),
+            Self::NonFiniteObservation { row, column } => {
+                write!(f, "observation at row {row}, column {column} is not finite")
+            }
+            Self::NoEvaluableSplit => write!(f, "no CSCV split could be evaluated"),
+        }
     }
+}
+
+impl std::error::Error for PboUnavailable {}
+
+impl PboUnavailable {
+    /// The value the legacy scalar entry point reports for this reason.
+    ///
+    /// The shape degeneracies ("nothing to overfit") historically reported
+    /// `0.0` and keep doing so, because callers and published surfaces depend
+    /// on it. A matrix that could not be validated at all never had a
+    /// defensible scalar, so it reports NaN rather than a confident zero.
+    fn legacy_scalar(self) -> f64 {
+        match self {
+            Self::TooFewStrategies { .. }
+            | Self::InvalidBlockCount { .. }
+            | Self::TooFewPeriods { .. }
+            | Self::RaggedMatrix { .. } => 0.0,
+            Self::NonFiniteObservation { .. } | Self::NoEvaluableSplit => f64::NAN,
+        }
+    }
+}
+
+/// Probability of backtest overfitting, with an explicit unavailable status.
+///
+/// `perf_matrix` is **T rows (time) x N cols (strategies)** of per-period
+/// returns: `perf_matrix[t][n]` is strategy `n`'s return in period `t`. `s` is
+/// the (even) number of contiguous time blocks to split into.
+///
+/// # Errors
+///
+/// Returns [`PboUnavailable`] when the estimate cannot be made: an invalid
+/// block count, fewer periods than blocks, fewer than two strategies, a ragged
+/// matrix, or a non-finite observation. The caller reports the reason; it must
+/// not substitute a probability for it.
+pub fn pbo_status(perf_matrix: &[Vec<f64>], s: usize) -> Result<f64, PboUnavailable> {
+    if s < 2 || !s.is_multiple_of(2) {
+        return Err(PboUnavailable::InvalidBlockCount { blocks: s });
+    }
+    let t = perf_matrix.len();
+    if t < s {
+        return Err(PboUnavailable::TooFewPeriods {
+            periods: t,
+            blocks: s,
+        });
+    }
+    // `t >= s >= 2`, so row 0 exists.
     let n_strats = perf_matrix[0].len();
-    if n_strats < 2 || perf_matrix.iter().any(|row| row.len() != n_strats) {
-        return 0.0;
+    for (row, cells) in perf_matrix.iter().enumerate() {
+        if cells.len() != n_strats {
+            return Err(PboUnavailable::RaggedMatrix {
+                row,
+                expected: n_strats,
+                actual: cells.len(),
+            });
+        }
+        if let Some(column) = cells.iter().position(|x| !x.is_finite()) {
+            return Err(PboUnavailable::NonFiniteObservation { row, column });
+        }
+    }
+    if n_strats < 2 {
+        return Err(PboUnavailable::TooFewStrategies {
+            strategies: n_strats,
+        });
     }
 
     // Contiguous, near-equal block boundaries over the T rows (a short remainder
@@ -44,13 +142,13 @@ pub fn probability_of_backtest_overfitting(perf_matrix: &[Vec<f64>], s: usize) -
         let is_sharpes = column_sharpes(perf_matrix, &block_ranges, &is_mask, true);
         let oos_sharpes = column_sharpes(perf_matrix, &block_ranges, &is_mask, false);
 
-        // IS-best strategy (ties → lowest index, deterministic).
+        // IS-best strategy (ties -> lowest index, deterministic).
         let n_star = argmax(&is_sharpes);
 
         // OOS rank of n*, ascending so the OOS-best gets the highest rank:
         // r = 1 + (number of strategies strictly worse OOS). The IS-winner
-        // landing OOS-best ⇒ r = N ⇒ ω → 1 ⇒ λ > 0 (generalizes, not overfit);
-        // landing OOS-worst ⇒ r = 1 ⇒ ω → 0 ⇒ λ < 0 (overfit).
+        // landing OOS-best => r = N => omega -> 1 => lambda > 0 (generalizes,
+        // not overfit); landing OOS-worst => r = 1 => lambda < 0 (overfit).
         let r = 1 + oos_sharpes
             .iter()
             .filter(|&&v| v < oos_sharpes[n_star])
@@ -64,9 +162,27 @@ pub fn probability_of_backtest_overfitting(perf_matrix: &[Vec<f64>], s: usize) -
     }
 
     if total == 0 {
-        0.0
-    } else {
-        overfit as f64 / total as f64
+        return Err(PboUnavailable::NoEvaluableSplit);
+    }
+    Ok(overfit as f64 / total as f64)
+}
+
+/// Probability of backtest overfitting for a performance matrix, as a scalar.
+///
+/// Prefer [`pbo_status`]: this entry point cannot distinguish an estimated
+/// probability from an estimate that could not be made. It is retained because
+/// the published Python and WASM surfaces return a number. Shape degeneracies
+/// (fewer than 2 strategies, `s < 2`, odd `s`, too few rows, a ragged matrix)
+/// report `0.0` as they always have; a matrix carrying a non-finite observation
+/// reports NaN rather than a confident zero.
+///
+/// Returns a probability in `[0, 1]`; near 0 => the IS-winner generalizes, near
+/// 0.5 => the IS-winner is no better than chance OOS, near 1 => systematic
+/// overfitting.
+pub fn probability_of_backtest_overfitting(perf_matrix: &[Vec<f64>], s: usize) -> f64 {
+    match pbo_status(perf_matrix, s) {
+        Ok(p) => p,
+        Err(reason) => reason.legacy_scalar(),
     }
 }
 
@@ -220,5 +336,108 @@ mod tests {
         // Odd s.
         let m: Vec<Vec<f64>> = (0..20).map(|_| vec![0.01, 0.02]).collect();
         assert_eq!(probability_of_backtest_overfitting(&m, 5), 0.0);
+    }
+
+    /// Every shape the estimate cannot be made on names *which* quantity made it
+    /// impossible, instead of being flattened into one number.
+    #[test]
+    fn unavailable_reasons_are_distinguished_not_collapsed() {
+        let ok: Vec<Vec<f64>> = (0..20)
+            .map(|i| vec![0.01 + 0.001 * (i as f64).sin(), 0.002 * (i as f64).cos()])
+            .collect();
+        assert!(pbo_status(&ok, 4).is_ok());
+
+        assert_eq!(
+            pbo_status(&ok, 5),
+            Err(PboUnavailable::InvalidBlockCount { blocks: 5 })
+        );
+        assert_eq!(
+            pbo_status(&ok, 0),
+            Err(PboUnavailable::InvalidBlockCount { blocks: 0 })
+        );
+        assert_eq!(
+            pbo_status(&ok, 40),
+            Err(PboUnavailable::TooFewPeriods {
+                periods: 20,
+                blocks: 40
+            })
+        );
+        let one_col: Vec<Vec<f64>> = (0..20).map(|_| vec![0.01]).collect();
+        assert_eq!(
+            pbo_status(&one_col, 4),
+            Err(PboUnavailable::TooFewStrategies { strategies: 1 })
+        );
+
+        let mut ragged = ok.clone();
+        ragged[7].push(0.5);
+        assert_eq!(
+            pbo_status(&ragged, 4),
+            Err(PboUnavailable::RaggedMatrix {
+                row: 7,
+                expected: 2,
+                actual: 3
+            })
+        );
+    }
+
+    /// The reported regression: a matrix carrying a non-finite cell used to be
+    /// scored anyway. Every Sharpe over the affected column is NaN, and NaN
+    /// loses every `>` comparison in `argmax`, so the winner and its OOS rank
+    /// were decided by column order. The result was a confident-looking
+    /// probability computed from an input the test is not defined on.
+    #[test]
+    fn a_non_finite_observation_is_unavailable_not_a_scored_probability() {
+        let with_nan = |row: usize, column: usize, bad: f64| {
+            let mut m: Vec<Vec<f64>> = (0..20)
+                .map(|i| {
+                    (0..3)
+                        .map(|j| 0.001 * ((i + j) as f64).sin() + 0.002 * (j as f64))
+                        .collect::<Vec<f64>>()
+                })
+                .collect();
+            m[row][column] = bad;
+            m
+        };
+
+        for (row, column, bad) in [
+            (0, 0, f64::NAN),
+            (11, 2, f64::INFINITY),
+            (19, 1, f64::NEG_INFINITY),
+        ] {
+            let m = with_nan(row, column, bad);
+            assert_eq!(
+                pbo_status(&m, 4),
+                Err(PboUnavailable::NonFiniteObservation { row, column })
+            );
+            // The scalar surface cannot report a reason, so it reports NaN. It
+            // must not report 0.0, which reads as "no overfitting detected".
+            let scalar = probability_of_backtest_overfitting(&m, 4);
+            assert!(
+                scalar.is_nan(),
+                "expected NaN for a non-finite cell, got {scalar}"
+            );
+        }
+    }
+
+    /// The repair must not move any number a valid matrix already produced.
+    #[test]
+    fn valid_matrices_are_unchanged_by_the_status_api() {
+        let t = 60;
+        let n = 5;
+        let perf: Vec<Vec<f64>> = (0..t)
+            .map(|i| {
+                (0..n)
+                    .map(|j| {
+                        let edge = if j == 0 { 0.01 } else { 0.0 };
+                        edge + 0.002 * (((i + j) % 5) as f64 - 2.0)
+                    })
+                    .collect()
+            })
+            .collect();
+        for s in [2, 4, 10] {
+            let status = pbo_status(&perf, s).expect("a rectangular finite matrix is estimable");
+            assert_eq!(status, probability_of_backtest_overfitting(&perf, s));
+            assert!((0.0..=1.0).contains(&status));
+        }
     }
 }

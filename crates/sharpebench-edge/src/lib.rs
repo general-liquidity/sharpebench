@@ -33,7 +33,7 @@ pub mod verdict;
 
 pub use hlz::{HarveyLiuZhu, HlzGate, HLZ_DEFAULT_T_THRESHOLD};
 pub use mintrl::min_track_record_length;
-pub use pbo::probability_of_backtest_overfitting;
+pub use pbo::{pbo_status, probability_of_backtest_overfitting, PboUnavailable};
 pub use verdict::{
     is_my_sharpe_real, is_my_sharpe_real_full, FullVerdict, HonestyConfig, HonestyVerdict, Verdict,
     METHODOLOGY_VERSION,
