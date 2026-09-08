@@ -52,15 +52,75 @@ DATASETS = [
 ]
 
 
+class EvidenceSupportError(ValueError):
+    """The committed records do not support the requested figure."""
+
+
+# The two eligibility paths of the thousand-agent floor, as the per-agent record
+# field and the summary block that stores the same count independently.
+LUCK_FLOOR_PATHS = (
+    ("shipped_floor", "rank_eligible_shipped_floor"),
+    ("field_measured", "rank_eligible_field"),
+)
+LUCK_FLOOR_DATASETS = ("us-indices-1d", "crypto-majors-1d")
+
+
 def load(name):
     path = os.path.join(EV, f"{name}.jsonl")
+    if not os.path.exists(path):
+        raise EvidenceSupportError(f"missing evidence file: {path}")
     out = []
     with open(path, encoding="utf-8") as h:
         for line in h:
             line = line.strip()
             if line.endswith("}"):
                 out.append(json.loads(line))
+    if not out:
+        raise EvidenceSupportError(f"no records in {path}")
     return out
+
+
+def require(rows, what):
+    """Refuse an empty selection instead of rendering it as a complete result."""
+    if not rows:
+        raise EvidenceSupportError(f"no records select {what}")
+    return rows
+
+
+def only(rows, what):
+    """One record per identity, rather than a first match or a blank placeholder."""
+    require(rows, what)
+    if len(rows) != 1:
+        raise EvidenceSupportError(f"{len(rows)} records select {what}; expected one")
+    return rows[0]
+
+
+def eligible_union(agents, summaries):
+    """Distinct (dataset, agent_id) cells eligible on either path.
+
+    The paths overlap, so adding their counts double counts every cell eligible
+    on both. Each marginal is checked against the summary record the producer
+    stored independently, and identities must be unique for the union to mean
+    anything.
+    """
+    union = set()
+    for dataset, summary in summaries.items():
+        rows = [r for r in agents if r["dataset"] == dataset]
+        identities = {(r["dataset"], r["agent_id"]) for r in rows}
+        if len(identities) != len(rows):
+            raise EvidenceSupportError(
+                f"luck-floor-1000: repeated agent identity in {dataset}"
+            )
+        for path, field in LUCK_FLOOR_PATHS:
+            cells = {(r["dataset"], r["agent_id"]) for r in rows if r[field]}
+            stored = summary[path]["n_rank_eligible"]
+            if len(cells) != stored:
+                raise EvidenceSupportError(
+                    f"luck-floor-1000: {dataset} {path} eligibility is {len(cells)} "
+                    f"in the records and {stored} in the summary"
+                )
+            union |= cells
+    return len(union)
 
 
 def default_cell(recs, dataset=None):
@@ -99,11 +159,17 @@ def fig_drawdowns():
     labels, bh, mo, rmv = [], [], [], []
     for ds, short in DATASETS:
         sweep = default_cell(load(ds))
-        cell_rm = [r for r in default_cell(rm, ds) if r["agent_id"] == "risk-managed"]
         labels.append(short)
-        bh.append(next(r["worst_run_drawdown"] for r in sweep if r["agent_id"] == "buy-and-hold"))
-        mo.append(next(r["worst_run_drawdown"] for r in sweep if r["agent_id"] == "momentum"))
-        rmv.append(cell_rm[0]["worst_run_drawdown"] if cell_rm else float("nan"))
+        for agent, values, recs in (
+            ("buy-and-hold", bh, sweep),
+            ("momentum", mo, sweep),
+            ("risk-managed", rmv, default_cell(rm, ds)),
+        ):
+            row = only(
+                [r for r in recs if r["agent_id"] == agent],
+                f"the {ds} {agent} default cell",
+            )
+            values.append(row["worst_run_drawdown"])
     x = range(len(labels))
     w = 0.27
     ax.bar([i - w for i in x], bh, w, color=GRAY, label="buy-and-hold", zorder=3)
@@ -130,11 +196,16 @@ def fig_luck_deflation():
         ("rates-1d", "rates 1d", BLUE),
         ("us-indices-1w", "US eq 1w", GRAY),
     ]:
-        recs = [r for r in load(ds) if r["sr_std_pinned"] is None and r["dsr_bar"] == DSR_BAR]
+        recs = require(
+            [r for r in load(ds) if r["sr_std_pinned"] is None and r["dsr_bar"] == DSR_BAR],
+            f"{ds} at the {DSR_BAR} bar with no pinned dispersion",
+        )
         ns = sorted({r.get("effective_n_trials", r["n_trials"]) for r in recs})
-        ys = [max(r["deflated_sharpe"] for r in recs
-                  if r.get("effective_n_trials", r["n_trials"]) == n
-                  and r["agent_id"].startswith("luck")) for n in ns]
+        ys = [max(require([r["deflated_sharpe"] for r in recs
+                           if r.get("effective_n_trials", r["n_trials"]) == n
+                           and r["agent_id"].startswith("luck")],
+                          f"{ds} luck-floor agents at {n} effective trials"))
+              for n in ns]
         ax.plot(ns, ys, color=color, linewidth=2.2, marker="o", markersize=4.5,
                 label=f"best random agent, {short}", zorder=3)
     ax.axhline(DSR_BAR, color=INK, linewidth=1.1, linestyle=DASH)
@@ -166,15 +237,19 @@ def fig_pass_witness():
 
     rows = []  # (y position, label, color, xs where the gate passes)
     for i, (shape, label, color) in enumerate(shapes):
-        rs = sorted((r for r in recs if r["shape"] == shape),
-                    key=lambda r: r["injected_sharpe_per_period"])
+        rs = require(sorted((r for r in recs if r["shape"] == shape),
+                            key=lambda r: r["injected_sharpe_per_period"]),
+                     f"witness records of shape {shape}")
         xs = [r["injected_sharpe_per_period"] for r in rs]
         ys = [r["deflated_sharpe"] for r in rs]
         ax.plot(xs, ys, color=color, linewidth=2.2, marker="o", markersize=4.5,
                 label=label, zorder=3)
-        onset = min(r["injected_sharpe_per_period"] for r in rs if r["rank_eligible"])
-        dsr_clear = min(r["injected_sharpe_per_period"] for r in rs
-                        if r["deflated_sharpe"] >= DSR_BAR)
+        onset = min(require([r["injected_sharpe_per_period"] for r in rs
+                             if r["rank_eligible"]],
+                            f"rank-eligible {shape} witness records"))
+        dsr_clear = min(require([r["injected_sharpe_per_period"] for r in rs
+                                 if r["deflated_sharpe"] >= DSR_BAR],
+                                f"{shape} witness records at or above the {DSR_BAR} bar"))
         for a in (ax, ax2):
             a.axvline(onset, color=color, linewidth=1.0, linestyle=(0, (2, 3)), zorder=1)
         ax.annotate(f"eligible from {onset:.2f}", (onset, 0.02), xytext=(4, 0),
@@ -229,6 +304,11 @@ def fig_luck_floor_1000():
     recs = load("luck-floor-1000")
     agents = [r for r in recs if r["record"] == "agent"]
     summaries = {r["dataset"]: r for r in recs if r["record"] == "summary"}
+    for ds in LUCK_FLOOR_DATASETS:
+        if ds not in summaries:
+            raise EvidenceSupportError(f"luck-floor-1000: no summary record for {ds}")
+        require([r for r in agents if r["dataset"] == ds],
+                f"luck-floor-1000 agent records for {ds}")
     series = [
         ("us-indices-1d", "dsr_shipped_floor", "US eq 1d, shipped path", GRAY, "-"),
         ("us-indices-1d", "dsr_field", "US eq 1d, unfloored diagnostic", GRAY, DASH),
@@ -238,7 +318,8 @@ def fig_luck_floor_1000():
     fig, (ax, ax2) = plt.subplots(2, 1, figsize=(5.5, 6.4),
                                   gridspec_kw={"hspace": 0.34})
     for ds, field, label, color, ls in series:
-        vals = sorted(r[field] for r in agents if r["dataset"] == ds)
+        vals = require(sorted(r[field] for r in agents if r["dataset"] == ds),
+                       f"luck-floor-1000 {field} values for {ds}")
         ecdf = [(i + 1) / len(vals) for i in range(len(vals))]
         # Coincident near-zero paths are drawn at different widths so the lines
         # beneath remain visible.
@@ -250,8 +331,7 @@ def fig_luck_floor_1000():
     crypto = summaries["crypto-majors-1d"]["field_measured"]
     five = crypto["max_first_5"]
     top = crypto["max"]
-    eligible = sum(s["shipped_floor"]["n_rank_eligible"] + s["field_measured"]["n_rank_eligible"]
-                   for s in summaries.values())
+    eligible = eligible_union(agents, summaries)
 
     ax.axvline(DSR_BAR, color=INK, linewidth=1.1, linestyle=DASH)
     ax.text(DSR_BAR - 0.02, 1.0, "eligibility\nbar (0.95)", ha="right", va="top",
@@ -301,5 +381,8 @@ if __name__ == "__main__":
     unknown = [w for w in wanted if w not in FIGURES]
     if unknown:
         sys.exit(f"unknown figure(s) {unknown}; choose from {list(FIGURES)} or all")
-    for name in wanted:
-        FIGURES[name]()
+    try:
+        for name in wanted:
+            FIGURES[name]()
+    except EvidenceSupportError as exc:
+        sys.exit(str(exc))
