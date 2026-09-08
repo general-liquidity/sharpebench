@@ -16,7 +16,7 @@
 //! longer mistakes it for a deliberate one.
 
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::TcpStream;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::time::{Duration, Instant};
@@ -125,6 +125,31 @@ const DEFAULT_HTTP_RETRIES: u32 = 2;
 /// forever without this bound.
 const STDIO_DECIDE_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Wall-clock budget for one HTTP decision attempt, matching
+/// [`STDIO_DECIDE_TIMEOUT`]. Socket options bound one syscall each, not the
+/// exchange: a connect that never completes, or an endpoint that trickles a byte
+/// just inside every read timeout, stays under the per-operation bound forever
+/// while the advertised per-decision budget goes past. The budget is therefore
+/// an absolute instant that connect, write and every read are measured against.
+const HTTP_DECIDE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Floor for a socket timeout derived from the remaining budget. Windows carries
+/// `SO_RCVTIMEO` in whole milliseconds and reads zero as "block forever", so a
+/// sub-millisecond remainder must not be handed to the socket verbatim. The
+/// deadline check at the top of each iteration, not the socket option, is what
+/// ends the exchange.
+const SOCKET_TIMEOUT_FLOOR: Duration = Duration::from_millis(1);
+
+/// Time left before `deadline`, or [`DecideError::Timeout`] once it has passed.
+fn budget_left(deadline: Instant) -> Result<Duration, DecideError> {
+    let left = deadline.saturating_duration_since(Instant::now());
+    if left.is_zero() {
+        Err(DecideError::Timeout)
+    } else {
+        Ok(left.max(SOCKET_TIMEOUT_FLOOR))
+    }
+}
+
 /// An empty-orders hold emitted when a decision could not be produced. The health
 /// (not this value) carries whether it was a masked fault vs. a deliberate hold.
 fn error_hold(reason: &str) -> Decision {
@@ -222,6 +247,99 @@ const HERMETIC_ENV_ALLOWLIST: &[&str] = &["PATH", "HOME", "TMPDIR", "LANG", "LC_
 /// harness environment (e.g. `SHARPEBENCH_AGENT_ENV=MY_DATA_DIR,MY_TOKEN`).
 /// An explicit, visible opt-in per variable — never the whole environment.
 pub const AGENT_ENV_PASSTHROUGH: &str = "SHARPEBENCH_AGENT_ENV";
+
+/// Names whose *values* are deliberately excluded from the resume identity:
+/// a comma-separated list, in addition to the credential-shaped names matched
+/// by [`is_credential_name`]. Rotating a token must not invalidate a
+/// checkpoint, and a checkpoint file must not become a place secrets leak
+/// from.
+pub const AGENT_ENV_SECRET: &str = "SHARPEBENCH_AGENT_ENV_SECRET";
+
+/// Whether a variable name is treated as a credential, so only its presence
+/// and not its value enters the resume identity.
+///
+/// Deliberately fail-safe toward secrecy: an ambiguous name is a credential.
+/// The cost of a false positive is that changing that variable does not
+/// invalidate a checkpoint, which is the documented behavior for credentials;
+/// the cost of a false negative is a secret value bound into an identity
+/// digest.
+pub fn is_credential_name(name: &str) -> bool {
+    const MARKERS: &[&str] = &[
+        "KEY",
+        "TOKEN",
+        "SECRET",
+        "PASSWORD",
+        "PASSWD",
+        "CREDENTIAL",
+        "AUTH",
+        "SESSION",
+        "COOKIE",
+        "PRIVATE",
+        "SIGNATURE",
+    ];
+    let upper = name.to_ascii_uppercase();
+    MARKERS.iter().any(|marker| upper.contains(marker))
+}
+
+/// The effective non-secret configuration handed to a `--cmd` entrant, in a
+/// canonical form suitable for a resume-identity digest.
+///
+/// [`AGENT_ENV_PASSTHROUGH`] lists variable *names*; the values reaching the
+/// agent come from the harness environment at spawn time. Binding only the
+/// names lets `AGENT_MODE=conservative` and `AGENT_MODE=aggressive` share one
+/// checkpoint identity, so completed cells from one policy can be combined
+/// with the remaining cells of another. This binds `NAME=value` for every
+/// passed-through non-secret variable instead.
+///
+/// Credentials are a separate concern and stay out of the identity: a name
+/// listed in [`AGENT_ENV_SECRET`], or one [`is_credential_name`] matches, is
+/// bound as `NAME=<secret>` so its presence still counts while its value never
+/// does. An unset name is bound as `NAME=<unset>`, which is distinct from any
+/// value it could hold.
+///
+/// Pure in its inputs: `lookup` supplies the environment.
+pub fn agent_env_identity(
+    passthrough: &str,
+    declared_secret: &str,
+    lookup: impl Fn(&str) -> Option<String>,
+) -> String {
+    let secrets: Vec<&str> = declared_secret
+        .split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .collect();
+    let mut names: Vec<&str> = passthrough
+        .split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    names
+        .into_iter()
+        .map(|name| {
+            let secret = is_credential_name(name) || secrets.contains(&name);
+            if secret {
+                format!("{name}=<secret>")
+            } else {
+                match lookup(name) {
+                    Some(value) => format!("{name}={value}"),
+                    None => format!("{name}=<unset>"),
+                }
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\0")
+}
+
+/// [`agent_env_identity`] resolved against this process's environment.
+pub fn effective_agent_env_identity() -> String {
+    agent_env_identity(
+        &std::env::var(AGENT_ENV_PASSTHROUGH).unwrap_or_default(),
+        &std::env::var(AGENT_ENV_SECRET).unwrap_or_default(),
+        |name| std::env::var(name).ok(),
+    )
+}
 
 /// The environment a hermetic spawn hands the agent: the platform allowlist,
 /// plus `extra` names, plus names listed in [`AGENT_ENV_PASSTHROUGH`] — each
@@ -600,6 +718,7 @@ pub struct HttpAgent {
     host: String,
     port: u16,
     retries: u32,
+    timeout: Duration,
     breaker: CircuitBreaker,
     health: TransportHealth,
 }
@@ -624,9 +743,17 @@ impl HttpAgent {
             host,
             port,
             retries,
+            timeout: HTTP_DECIDE_TIMEOUT,
             breaker: CircuitBreaker::new(breaker_threshold),
             health: TransportHealth::default(),
         }
+    }
+
+    /// Override the per-decision wall-clock budget (default 30s), the same knob
+    /// [`ExternalAgent::with_decide_timeout`] gives the stdio transport.
+    pub fn with_decide_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
     }
 
     /// One decision attempt over a fresh connection, returning a typed
@@ -634,15 +761,14 @@ impl HttpAgent {
     /// transport fault; a non-JSON body is the agent's protocol fault.
     fn decide_once(&self, obs: &MarketObservation) -> Result<Decision, DecideError> {
         let body = serde_json::to_string(obs).map_err(|_| DecideError::Transport)?;
-        let mut stream =
-            TcpStream::connect((self.host.as_str(), self.port)).map_err(|e| classify_io(&e))?;
-        // Bound time so a slow/stalled agent endpoint can't hang the harness.
-        let timeout = std::time::Duration::from_secs(30);
+        // One absolute instant covers connect, write and every read, so no
+        // sequence of individually prompt operations can outlast the budget.
+        let deadline = Instant::now()
+            .checked_add(self.timeout)
+            .ok_or(DecideError::Transport)?;
+        let mut stream = self.connect_by(deadline)?;
         stream
-            .set_read_timeout(Some(timeout))
-            .map_err(|e| classify_io(&e))?;
-        stream
-            .set_write_timeout(Some(timeout))
+            .set_write_timeout(Some(budget_left(deadline)?))
             .map_err(|e| classify_io(&e))?;
         // `Connection: close` lets us read the whole response to EOF - no need to
         // parse Content-Length / chunked encoding for a one-shot request.
@@ -657,18 +783,54 @@ impl HttpAgent {
             .write_all(req.as_bytes())
             .map_err(|e| classify_io(&e))?;
         stream.flush().map_err(|e| classify_io(&e))?;
-        // Cap the response size so a hostile endpoint can't exhaust memory.
-        let mut raw = String::new();
-        (&stream)
-            .take(MAX_AGENT_RESPONSE)
-            .read_to_string(&mut raw)
-            .map_err(|e| classify_io(&e))?;
+        let raw = read_to_deadline(&mut stream, deadline)?;
         let json = raw
             .split_once("\r\n\r\n")
             .map(|(_, b)| b)
             .ok_or(DecideError::Transport)?;
         parse_decision(json, obs)
     }
+
+    /// Connect within the remaining budget. A plain `TcpStream::connect` blocks
+    /// on the OS connect timeout, which is minutes on a dropped SYN and is not
+    /// the budget this transport advertises.
+    fn connect_by(&self, deadline: Instant) -> Result<TcpStream, DecideError> {
+        let addrs = (self.host.as_str(), self.port)
+            .to_socket_addrs()
+            .map_err(|e| classify_io(&e))?;
+        let mut last = DecideError::Transport;
+        for addr in addrs {
+            match TcpStream::connect_timeout(&addr, budget_left(deadline)?) {
+                Ok(stream) => return Ok(stream),
+                Err(error) => last = classify_io(&error),
+            }
+        }
+        Err(last)
+    }
+}
+
+/// Read the response, capped at [`MAX_AGENT_RESPONSE`] bytes and at `deadline`.
+///
+/// The socket timeout is re-armed from the remaining budget before every read,
+/// so an endpoint that answers just inside each individual timeout still ends at
+/// the absolute deadline instead of extending the decision one chunk at a time.
+fn read_to_deadline(stream: &mut TcpStream, deadline: Instant) -> Result<String, DecideError> {
+    let mut raw: Vec<u8> = Vec::new();
+    let mut chunk = [0u8; 8192];
+    while (raw.len() as u64) < MAX_AGENT_RESPONSE {
+        let left = budget_left(deadline)?;
+        stream
+            .set_read_timeout(Some(left))
+            .map_err(|e| classify_io(&e))?;
+        let room = (MAX_AGENT_RESPONSE - raw.len() as u64).min(chunk.len() as u64) as usize;
+        match stream.read(&mut chunk[..room]) {
+            Ok(0) => break,
+            Ok(read) => raw.extend_from_slice(&chunk[..read]),
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(classify_io(&error)),
+        }
+    }
+    String::from_utf8(raw).map_err(|_| DecideError::Transport)
 }
 
 impl Agent for HttpAgent {
@@ -1073,6 +1235,77 @@ mod tests {
         );
     }
 
+    /// The resume identity must distinguish two policies that differ only in a
+    /// passed-through variable's *value*. Binding names alone let completed
+    /// cells of one policy resume into another.
+    #[test]
+    fn effective_nonsecret_values_change_the_environment_identity() {
+        let names = "AGENT_MODE,MY_DATA_DIR";
+        let conservative = agent_env_identity(names, "", |name| match name {
+            "AGENT_MODE" => Some("conservative".to_string()),
+            "MY_DATA_DIR" => Some("/data".to_string()),
+            _ => None,
+        });
+        let aggressive = agent_env_identity(names, "", |name| match name {
+            "AGENT_MODE" => Some("aggressive".to_string()),
+            "MY_DATA_DIR" => Some("/data".to_string()),
+            _ => None,
+        });
+        assert_ne!(conservative, aggressive);
+        assert!(conservative.contains("AGENT_MODE=conservative"));
+
+        // Order and repetition of the declared names are not configuration.
+        assert_eq!(
+            conservative,
+            agent_env_identity(" MY_DATA_DIR , AGENT_MODE ,AGENT_MODE", "", |name| {
+                match name {
+                    "AGENT_MODE" => Some("conservative".to_string()),
+                    "MY_DATA_DIR" => Some("/data".to_string()),
+                    _ => None,
+                }
+            })
+        );
+
+        // An unset variable is its own state, distinct from any value.
+        let unset = agent_env_identity("AGENT_MODE", "", |_| None);
+        assert!(unset.contains("AGENT_MODE=<unset>"));
+        assert_ne!(
+            unset,
+            agent_env_identity("AGENT_MODE", "", |_| Some(String::new()))
+        );
+    }
+
+    /// Credentials are a separate concern: their presence counts, their value
+    /// never enters the identity, so rotating a token does not invalidate a
+    /// checkpoint and the digest carries no secret material.
+    #[test]
+    fn credential_values_stay_out_of_the_environment_identity() {
+        for name in ["OPENAI_API_KEY", "MY_TOKEN", "db_password", "X_AUTH"] {
+            assert!(is_credential_name(name), "{name} must read as a credential");
+        }
+        assert!(!is_credential_name("AGENT_MODE"));
+
+        let first = agent_env_identity("AGENT_MODE,MY_TOKEN", "", |name| match name {
+            "AGENT_MODE" => Some("conservative".to_string()),
+            "MY_TOKEN" => Some("sk-first".to_string()),
+            _ => None,
+        });
+        let rotated = agent_env_identity("AGENT_MODE,MY_TOKEN", "", |name| match name {
+            "AGENT_MODE" => Some("conservative".to_string()),
+            "MY_TOKEN" => Some("sk-second".to_string()),
+            _ => None,
+        });
+        assert_eq!(first, rotated);
+        assert!(!first.contains("sk-first"), "no secret material in {first}");
+        assert!(first.contains("MY_TOKEN=<secret>"));
+
+        // A plainly named secret is excluded on explicit declaration.
+        let declared = agent_env_identity("SEAT_ALLOCATION", "SEAT_ALLOCATION", |_| {
+            Some("private".to_string())
+        });
+        assert_eq!(declared, "SEAT_ALLOCATION=<secret>");
+    }
+
     /// Spawn a subprocess that consumes its stdin but never writes a line to
     /// stdout - the shape of a wedged agent (or a shell entrypoint that talks
     /// only to stderr).
@@ -1248,5 +1481,60 @@ mod tests {
             "the stall is recorded as a timeout fault, not mistaken for a deliberate hold"
         );
         assert!(health.degraded());
+    }
+
+    /// The HTTP transport advertises a per-decision wall-clock budget, but socket
+    /// options bound one syscall each. An endpoint that answers just inside every
+    /// individual read timeout keeps the exchange alive indefinitely, so the
+    /// budget has to be an absolute instant the whole attempt is measured
+    /// against, the way the stdio path measures its own.
+    #[test]
+    fn an_http_endpoint_trickling_bytes_cannot_outlast_the_decision_budget() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener");
+        let port = listener
+            .local_addr()
+            .expect("the bound listener has an address")
+            .port();
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let server_stop = std::sync::Arc::clone(&stop);
+        let server = std::thread::spawn(move || {
+            let Ok((mut socket, _)) = listener.accept() else {
+                return;
+            };
+            // A well-formed header, one byte at a time, and never the blank line
+            // that ends it. Every byte is prompt; the response never is.
+            let header = b"HTTP/1.1 200 OK
+Content-Type: application/json
+";
+            for byte in header.iter().cycle().take(60) {
+                if server_stop.load(std::sync::atomic::Ordering::Relaxed)
+                    || socket.write_all(&[*byte]).is_err()
+                    || socket.flush().is_err()
+                {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        });
+
+        let agent = HttpAgent::new(format!("127.0.0.1:{port}"))
+            .with_decide_timeout(Duration::from_millis(200));
+        let started = Instant::now();
+        let error = agent
+            .decide_once(&one_symbol_observation())
+            .expect_err("a response that never completes is not a decision");
+        let elapsed = started.elapsed();
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        let _ = server.join();
+
+        assert_eq!(
+            error,
+            DecideError::Timeout,
+            "an unfinished response past the budget is a timeout, not some other fault"
+        );
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "the trickle extended the 200ms budget to {elapsed:?}"
+        );
     }
 }
