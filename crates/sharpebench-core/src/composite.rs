@@ -266,11 +266,15 @@ pub struct Mandate {
     /// more than this. It is the safety half of the "never catastrophic in any
     /// regime" verdict (see [`ScoreConfig::reliability_never_catastrophic`]).
     ///
-    /// Drawdown is multiplicative, so a run's own drawdown is never above the
-    /// pooled track's (every within-run peak-to-trough pair is also a pooled
-    /// pair). The bound therefore only bites when set below `max_drawdown`,
-    /// which is how it is meant to be used: a loose whole-track budget and a
-    /// tight per-regime one.
+    /// This bound is not implied by `max_drawdown`. Under plain concatenation a
+    /// run's own drawdown could not exceed the pooled track's, but execution
+    /// seeds are averaged within a window before the pooled track is formed
+    /// (see [`pooled_returns`]), and averaging can cancel a within-run trough
+    /// against the opposite move in a sibling seed. Two aligned runs
+    /// `[0.1, -0.2]` and `[-0.1, 0.2]` scored as two seeds of one window pool to
+    /// `[0.0, 0.0]`: pooled drawdown 0.0, worst-run drawdown 0.20. The two caps
+    /// are independent, and both are applied. The typical configuration is
+    /// still a loose whole-track budget with a tight per-regime one.
     #[serde(default = "default_max_run_drawdown")]
     pub max_run_drawdown: f64,
 }
@@ -811,8 +815,10 @@ pub struct CompositeScore {
     pub mandate_ok: bool,
     /// The largest maximum drawdown of any single run, in [0, 1], each run
     /// measured from its own starting equity: the number the per-run mandate
-    /// bound is checked against. Never above `max_drawdown`, the pooled figure,
-    /// which also counts losing streaks that span runs. 0.0 with no runs.
+    /// bound is checked against. Not bounded by `max_drawdown`: the pooled
+    /// figure counts losing streaks that span runs, but it is also formed by
+    /// averaging execution seeds within a window, which can cancel a within-run
+    /// trough and leave this value above the pooled one. 0.0 with no runs.
     #[serde(default)]
     pub worst_run_drawdown: f64,
     /// Turnover proxy: average orders placed per run (trading frequency / capacity).
@@ -3590,6 +3596,70 @@ mod tests {
 
         let empty = score_agent(&agent("none", Vec::new()), &ScoreConfig::default());
         assert_eq!(empty.worst_run_drawdown, 0.0);
+    }
+
+    /// The pooled cap does not imply the per-run cap. Execution seeds are
+    /// averaged within a window before the pooled track is formed, so a trough
+    /// inside one seed can be cancelled by the opposite move in its sibling and
+    /// never appear as a pooled peak-to-trough pair at all.
+    #[test]
+    fn worst_run_drawdown_can_exceed_pooled_under_seed_averaging() {
+        // One window, two anti-correlated execution seeds.
+        let sub = agent(
+            "anticorrelated",
+            vec![
+                Run {
+                    returns: vec![0.1, -0.2],
+                    ..Run::default()
+                },
+                Run {
+                    returns: vec![-0.1, 0.2],
+                    ..Run::default()
+                },
+            ],
+        );
+        let cfg = ScoreConfig {
+            execution_seeds_per_window: 2,
+            ..ScoreConfig::default()
+        };
+        assert_eq!(pooled_returns(&sub, 2), vec![0.0, 0.0]);
+
+        let s = score_agent(&sub, &cfg);
+        assert_eq!(s.max_drawdown, 0.0, "pooled track is flat: {s:?}");
+        assert!(
+            (s.worst_run_drawdown - 0.20).abs() < 1e-12,
+            "seed one falls from 1.10 to 0.88: {}",
+            s.worst_run_drawdown
+        );
+        assert!(
+            s.worst_run_drawdown > s.max_drawdown,
+            "the per-run bound is not implied by the pooled bound: {s:?}"
+        );
+
+        // And the gate acts on it: a 10% per-run cap refuses a track the pooled
+        // cap of the same size admits.
+        let bounded = score_agent(
+            &sub,
+            &ScoreConfig {
+                mandate: Mandate {
+                    max_drawdown: 0.10,
+                    max_run_drawdown: 0.10,
+                },
+                ..cfg.clone()
+            },
+        );
+        assert!(!bounded.mandate_ok);
+        let pooled_only = score_agent(
+            &sub,
+            &ScoreConfig {
+                mandate: Mandate {
+                    max_drawdown: 0.10,
+                    max_run_drawdown: 1.0,
+                },
+                ..cfg
+            },
+        );
+        assert!(pooled_only.mandate_ok);
     }
 
     // ---- declared mandates -------------------------------------------------
