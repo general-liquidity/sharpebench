@@ -139,14 +139,22 @@ pub fn classify_disqualification(
 
 /// Suite-level rollup: how many agents in a scored field tripped each reason.
 ///
-/// Uses [`DisqualThresholds::default`] and no out-of-band evidence, so it covers the
-/// signals intrinsic to a [`CompositeScore`] (the five hard gates plus the reported
-/// selection gap). A [`BTreeMap`] keeps the output ordering deterministic.
-pub fn rollup(scores: &[CompositeScore]) -> BTreeMap<FailReason, usize> {
-    let thresholds = DisqualThresholds::default();
+/// `thresholds` must be the bars the field was actually scored under, which for the
+/// gate reasons means [`DisqualThresholds::from_score_config`] of the same
+/// [`ScoreConfig`] that produced these scores. A rollup is a legibility layer over a
+/// board, and one taken at default bars against a board scored at other bars
+/// explains it wrongly: it can count `DsrBelowBar` against agents the board ranked,
+/// or count none against agents the board demoted. Takes no out-of-band evidence, so
+/// it covers the signals intrinsic to a [`CompositeScore`] (the five hard gates plus
+/// the reported selection gap). A [`BTreeMap`] keeps the output ordering
+/// deterministic.
+pub fn rollup(
+    scores: &[CompositeScore],
+    thresholds: &DisqualThresholds,
+) -> BTreeMap<FailReason, usize> {
     let mut counts: BTreeMap<FailReason, usize> = BTreeMap::new();
     for s in scores {
-        for reason in classify_disqualification(s, &thresholds, None, None) {
+        for reason in classify_disqualification(s, thresholds, None, None) {
             *counts.entry(reason).or_insert(0) += 1;
         }
     }
@@ -284,10 +292,50 @@ mod tests {
             &agent("noise2", (0..5).map(|_| run(0.0, 0.02, 60)).collect()),
             &ScoreConfig::default(),
         );
-        let counts = rollup(&[skilled, noise1, noise2]);
+        let counts = rollup(
+            &[skilled, noise1, noise2],
+            &DisqualThresholds::from_score_config(&ScoreConfig::default()),
+        );
         assert_eq!(counts.get(&FailReason::DsrBelowBar), Some(&2));
         assert_eq!(counts.get(&FailReason::BootstrapInsignificant), Some(&2));
         // The skilled agent contributes no reasons, so no key counts all three.
         assert!(counts.values().all(|&c| c <= 2));
+    }
+
+    #[test]
+    fn rollup_uses_the_board_s_own_bars_not_the_default_ones() {
+        // A board scored with a lowered DSR bar ranks an agent the default bar would
+        // demote. The rollup explaining that board has to agree with it.
+        let cfg = ScoreConfig {
+            dsr_bar: 0.10,
+            ..ScoreConfig::default()
+        };
+        let scored = score_agent(
+            &agent("modest", (0..5).map(|_| run(0.0012, 0.02, 60)).collect()),
+            &cfg,
+        );
+        assert!(
+            scored.deflated_sharpe >= cfg.dsr_bar
+                && scored.deflated_sharpe < DisqualThresholds::default().dsr_bar,
+            "fixture must sit between the two bars: dsr={}",
+            scored.deflated_sharpe
+        );
+
+        let configured = rollup(
+            std::slice::from_ref(&scored),
+            &DisqualThresholds::from_score_config(&cfg),
+        );
+        assert_eq!(
+            configured.get(&FailReason::DsrBelowBar),
+            None,
+            "the board cleared this agent, so its explanation must not demote it"
+        );
+
+        let defaulted = rollup(&[scored], &DisqualThresholds::default());
+        assert_eq!(
+            defaulted.get(&FailReason::DsrBelowBar),
+            Some(&1),
+            "at the default bar the same score does trip the reason"
+        );
     }
 }

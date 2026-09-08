@@ -9,10 +9,21 @@
 //! - **Weight validity** — a vector that over-leverages (gross > cap) or goes short
 //!   when shorts are disallowed is the allocation-analogue of a deny-list breach,
 //!   i.e. a discipline-zeroing violation.
-//! - **Turnover** — the L1 churn `Σ|wₜ − wₜ₋₁|` across rebalances, a first-class
-//!   cost an agent that "wins" by frantic reallocation should be charged for.
+//! - **Turnover** — the L1 churn `Σ|wₜ − wₜ₋₁|` across the *target* vectors the
+//!   agent asked for, a first-class cost an agent that "wins" by frantic
+//!   reallocation should be charged for.
 //!
-//! Pure and deterministic: the caller supplies the realized allocation trajectory.
+//! **Turnover here is target-weight churn, not realized trading turnover.** The
+//! input is a sequence of target vectors and nothing else: no prices, no fills and
+//! no elapsed time reach this module. Between two rebalances the held weights drift
+//! with returns, so the trade actually required to move from the drifted holding to
+//! the next target is not `|wₜ − wₜ₋₁|`. Two targets that repeat exactly score zero
+//! turnover here while a real account rebalancing back to them traded; a target that
+//! changed may need no trade at all if drift already took the holding there. Read
+//! these figures as churn in stated intent, and compute executed turnover from fills
+//! if the quantity wanted is traded notional.
+//!
+//! Pure and deterministic: the caller supplies the target-allocation trajectory.
 
 use serde::{Deserialize, Serialize};
 
@@ -22,7 +33,8 @@ pub struct AllocationStep {
     pub weights: Vec<f64>,
 }
 
-/// The realized sequence of target allocations the account rebalanced to.
+/// The sequence of target allocations the agent asked to rebalance to. These are
+/// stated targets, not realized post-drift holdings: see the module header.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct AllocationTrajectory {
     pub steps: Vec<AllocationStep>,
@@ -46,6 +58,36 @@ impl Default for AllocationPolicy {
             max_gross: 1.0,
             epsilon: 1e-9,
         }
+    }
+}
+
+impl AllocationPolicy {
+    /// Check that the policy can actually decide anything.
+    ///
+    /// A non-finite `max_gross` or `epsilon` makes `gross > max_gross + epsilon`
+    /// false for every input, so every vector passes the leverage cap and the check
+    /// reports a clean pass it never performed. A negative cap or tolerance is the
+    /// mirror image. Callers that accept a policy from outside the process (a JSON
+    /// surface, a config file) validate here before scoring.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` naming the offending field when `max_gross` or `epsilon` is
+    /// not finite or is negative.
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.max_gross.is_finite() || self.max_gross < 0.0 {
+            return Err(format!(
+                "max_gross must be finite and non-negative, got {}",
+                self.max_gross
+            ));
+        }
+        if !self.epsilon.is_finite() || self.epsilon < 0.0 {
+            return Err(format!(
+                "epsilon must be finite and non-negative, got {}",
+                self.epsilon
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -94,9 +136,12 @@ pub fn check_weights(weights: &[f64], policy: &AllocationPolicy) -> WeightValidi
     }
 }
 
-/// Total L1 turnover `Σₜ Σᵢ |wₜ,ᵢ − wₜ₋₁,ᵢ|`. The first step is measured against an
-/// all-cash (all-zero) prior, so initial deployment counts as turnover. Vectors of
-/// differing lengths are compared element-wise with the shorter side zero-padded.
+/// Total L1 churn in the target weights, `Σₜ Σᵢ |wₜ,ᵢ − wₜ₋₁,ᵢ|`. The first step is
+/// measured against an all-cash (all-zero) prior, so initial deployment counts. Vectors
+/// of differing lengths are compared element-wise with the shorter side zero-padded.
+///
+/// This is target churn, not executed trading turnover: no price drift between
+/// rebalances is modelled, because no prices are supplied. See the module header.
 pub fn turnover(trajectory: &AllocationTrajectory) -> f64 {
     let mut total = 0.0;
     let mut prev: Vec<f64> = Vec::new();
@@ -113,9 +158,10 @@ pub fn turnover(trajectory: &AllocationTrajectory) -> f64 {
 }
 
 /// The full allocation score: aggregate weight validity across every step plus the
-/// trajectory's turnover.
+/// trajectory's target-weight churn.
 #[derive(Clone, Debug, Serialize)]
 pub struct AllocationReport {
+    /// Total L1 churn in target weights. Not executed trading turnover.
     pub total_turnover: f64,
     /// `total_turnover / steps`, or 0 for an empty trajectory.
     pub mean_turnover: f64,
@@ -125,7 +171,13 @@ pub struct AllocationReport {
 }
 
 /// Score an allocation trajectory: validity (any breach across any step zeroes
-/// `valid`, mirroring the order-level deny-list semantics) and turnover churn.
+/// `valid`, mirroring the order-level deny-list semantics) and target-weight churn.
+///
+/// The policy is assumed already validated. A non-finite cap or tolerance makes the
+/// gross-exposure comparison silently unfalsifiable, so a Rust caller that builds a
+/// policy from its own inputs runs [`AllocationPolicy::validate`] first. The JSON
+/// surfaces cannot reach that state: JSON has no NaN or infinity literal and the
+/// parser refuses an out-of-range magnitude.
 pub fn score_allocation(
     trajectory: &AllocationTrajectory,
     policy: &AllocationPolicy,
@@ -219,6 +271,37 @@ mod tests {
             .weight_violations
             .iter()
             .any(|v| matches!(v, WeightViolation::NonFiniteWeight { index: 0 })));
+    }
+
+    #[test]
+    fn non_finite_policy_bounds_are_refused_rather_than_passing_everything() {
+        // An infinite tolerance makes `gross > cap + epsilon` false for every input,
+        // so an over-leveraged vector would report a clean pass that was never
+        // actually tested. The policy has to be refused at the boundary instead.
+        let unfalsifiable = AllocationPolicy {
+            epsilon: f64::INFINITY,
+            ..Default::default()
+        };
+        assert!(check_weights(&[5.0, 5.0], &unfalsifiable).valid);
+        assert!(unfalsifiable.validate().is_err());
+
+        for bad in [
+            AllocationPolicy {
+                max_gross: f64::NAN,
+                ..Default::default()
+            },
+            AllocationPolicy {
+                max_gross: -1.0,
+                ..Default::default()
+            },
+            AllocationPolicy {
+                epsilon: -1e-9,
+                ..Default::default()
+            },
+        ] {
+            assert!(bad.validate().is_err(), "{bad:?}");
+        }
+        assert!(AllocationPolicy::default().validate().is_ok());
     }
 
     #[test]

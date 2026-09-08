@@ -429,7 +429,7 @@ fn run_regime(args: &[String], json: bool) -> ExitCode {
         );
         println!(
             "{:<14} {:>5} {:>9} {:>9} {:>10} {:>10} {:>7} {:>5} counted",
-            "regime", "n", "zero_a", "zero_b", "mean_gap", "cont_gap", "ks", "edge"
+            "regime", "n", "nearzr_a", "nearzr_b", "mean_gap", "cont_gap", "ks", "edge"
         );
         for r in &report.regimes {
             println!(
@@ -450,10 +450,12 @@ fn run_regime(args: &[String], json: bool) -> ExitCode {
             report.edge_dispersion
         );
         if report.pooled_hides_reversal {
-            println!(
-                "REVERSAL: the pooled sign is contradicted in {}",
-                report.reversal_regimes.join(", ")
-            );
+            let what = if report.pooled_edge_sign == 0 {
+                "the pooled gap is a tie and counted regimes disagree in"
+            } else {
+                "the pooled sign is contradicted in"
+            };
+            println!("REVERSAL: {what} {}", report.reversal_regimes.join(", "));
         } else {
             println!("No sign reversal among counted regimes.");
         }

@@ -23,12 +23,22 @@
 //! series is a **mixture**: a point mass at (or near) zero for the periods with
 //! no position and no trade, plus a continuous part for the periods that
 //! actually traded. Smoothing that mixture into one continuous density is the
-//! modelling error the ZAGA (zero-adjusted gamma) form exists to avoid: the zero
-//! mass drags the fitted mean and variance toward zero and makes an aggressive,
-//! selective strategy look like a timid one.
+//! modelling error the ZAGA (zero-adjusted gamma) form exists to avoid: the
+//! near-zero mass drags the fitted mean and variance toward zero and makes an
+//! aggressive, selective strategy look like a timid one.
 //!
 //! **Implemented here:** the mixture split itself. Per regime, per strategy, the
-//! zero/no-trade mass is separated from the continuous part; both are compared.
+//! near-zero-return mass is separated from the continuous part; both are compared.
+//!
+//! **It is a return mass, not a no-trade mass.** The input is returns and
+//! nothing else: no position, order or trade flag reaches this module. A period
+//! whose return is within `zero_tol` may be a period the strategy sat out, or a
+//! period it held a position that went nowhere, or one whose gain was eaten by
+//! fees. Those are different behaviours with the same observable here, so the
+//! split is reported as a near-zero-return mass and reading it as inactivity is
+//! the caller's inference, not this module's measurement. Supply trade or
+//! position flags elsewhere if participation itself is the quantity of
+//! interest.
 //! The continuous part is summarised by its mean, standard deviation and median,
 //! by the sign split of its non-zero returns, and by a method-of-moments gamma
 //! (shape, rate) fitted to the *magnitudes* of those returns. The two continuous
@@ -57,10 +67,11 @@ use crate::stats::{mean, std_dev, variance};
 /// Knobs for [`compare_by_regime`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RegimeCompareOpts {
-    /// A return whose absolute value is at or below this counts as "no trade"
-    /// and lands in the zero mass rather than the continuous part. Exact zeros
-    /// are the common case, but a fee-only or rounding-dust period is the same
-    /// economic event and should not be modelled as a tiny continuous return.
+    /// A return whose absolute value is at or below this lands in the near-zero
+    /// mass rather than the continuous part. Exact zeros are the common case,
+    /// but a fee-only or rounding-dust period belongs with them rather than
+    /// being modelled as a tiny continuous return. This is a threshold on the
+    /// **return**, not a detection of inactivity: see the module header.
     pub zero_tol: f64,
     /// Regimes with fewer than this many periods are still reported but are
     /// excluded from the reversal verdict: a two-period "regime" flipping sign
@@ -88,8 +99,10 @@ impl Default for RegimeCompareOpts {
 pub struct ZagaSplit {
     /// Periods observed in this regime.
     pub n: usize,
-    /// Fraction of periods in the zero / no-trade mass, in [0, 1]. This is the
-    /// `nu` role in a ZAGA: how often the strategy simply did not play.
+    /// Fraction of periods whose return is within `zero_tol`, in [0, 1]. This is
+    /// the `nu` role in a ZAGA. It is a near-zero-**return** mass: with no trade
+    /// or position flag in the input it cannot separate sitting out from holding
+    /// a position that went nowhere, so it is not a participation rate.
     pub zero_mass: f64,
     /// Periods in the continuous part.
     pub n_nonzero: usize,
@@ -125,14 +138,15 @@ pub struct RegimeComparison {
     pub a: ZagaSplit,
     /// Strategy B's mixture split in this regime.
     pub b: ZagaSplit,
-    /// `a.zero_mass - b.zero_mass`. Positive means A sat out more often here,
-    /// which is a genuine behavioural difference even when the means agree.
+    /// `a.zero_mass - b.zero_mass`. Positive means A had more near-zero-return
+    /// periods here, which is a genuine behavioural difference even when the
+    /// means agree. It is not by itself a difference in how often each traded.
     pub zero_mass_gap: f64,
     /// `a.pooled_mean - b.pooled_mean` inside this regime.
     pub mean_gap: f64,
-    /// `a.cont_mean - b.cont_mean`: the gap once the no-trade periods are taken
-    /// out. Diverging from `mean_gap` means the pooled comparison was mostly
-    /// measuring participation rate, not per-trade skill.
+    /// `a.cont_mean - b.cont_mean`: the gap once the near-zero-return periods are
+    /// taken out. Diverging from `mean_gap` means the pooled comparison was mostly
+    /// measuring how often each strategy moved at all, not how well it moved.
     pub cont_mean_gap: f64,
     /// Two-sample Kolmogorov-Smirnov statistic between the two continuous parts,
     /// in [0, 1]. Non-parametric, so a pure shape difference (same mean, fatter
@@ -156,12 +170,21 @@ pub struct RegimeDistributionReport {
     pub pooled_mean_gap: f64,
     /// `+1` / `-1` / `0` for `pooled_mean_gap` under `tie_tol`.
     pub pooled_edge_sign: i8,
-    /// Counted regimes whose `edge_sign` is non-zero and opposite to
-    /// `pooled_edge_sign`.
+    /// The counted regimes the pooled verdict does not represent.
+    ///
+    /// When `pooled_edge_sign` is non-zero these are the counted regimes whose
+    /// own `edge_sign` is non-zero and opposite to it. When the pooled gap is a
+    /// tie, a pooled sign cannot be contradicted, yet the sharpest reversal of
+    /// all lands there: a regime where A leads and one where B leads, cancelling
+    /// exactly. So a tied pooled verdict lists every counted regime with a sign
+    /// whenever both signs are present, and lists none otherwise (one regime
+    /// carrying the whole edge is concentration, reported by `edge_dispersion`,
+    /// not a reversal).
     pub reversal_regimes: Vec<String>,
-    /// True when the pooled verdict has a sign and at least one counted regime
-    /// contradicts it. The pooled number is then not so much wrong as unusable:
-    /// it is averaging over a sign change.
+    /// True when `reversal_regimes` is non-empty: counted regimes disagree with
+    /// each other or with the pooled sign. The pooled number is then not so much
+    /// wrong as unusable, since it is averaging over a sign change. A tie in
+    /// `pooled_mean_gap` does not suppress this.
     pub pooled_hides_reversal: bool,
     /// Spread between the best and worst counted regime `mean_gap`. A large
     /// spread with no reversal still says the edge is concentrated, not general.
@@ -231,8 +254,8 @@ fn ks_two_sample(a: &[f64], b: &[f64]) -> f64 {
     d
 }
 
-/// Split one strategy's returns inside one regime into zero mass plus continuous
-/// part, and summarise both.
+/// Split one strategy's returns inside one regime into the near-zero-return mass
+/// plus the continuous part, and summarise both.
 fn zaga_split(xs: &[f64], zero_tol: f64) -> ZagaSplit {
     let n = xs.len();
     let cont: Vec<f64> = xs.iter().copied().filter(|r| r.abs() > zero_tol).collect();
@@ -341,13 +364,25 @@ pub fn compare_by_regime(
         });
     }
 
+    // A tied pooled gap is the case where a reversal hides best: equal and
+    // opposite regime edges average to nothing, so there is no pooled sign left
+    // to contradict. Report the disagreement on its own terms there.
+    let counted_signs: Vec<i8> = out
+        .iter()
+        .filter(|r| r.counted)
+        .map(|r| r.edge_sign)
+        .collect();
+    let cross_regime_reversal = counted_signs.contains(&1) && counted_signs.contains(&-1);
     let reversal_regimes: Vec<String> = out
         .iter()
         .filter(|r| {
             r.counted
                 && r.edge_sign != 0
-                && pooled_edge_sign != 0
-                && r.edge_sign != pooled_edge_sign
+                && if pooled_edge_sign == 0 {
+                    cross_regime_reversal
+                } else {
+                    r.edge_sign != pooled_edge_sign
+                }
         })
         .map(|r| r.regime.clone())
         .collect();
@@ -413,6 +448,60 @@ mod tests {
         assert_eq!(bull.edge_sign, 1);
         assert_eq!(bear.edge_sign, -1);
         assert!(rep.edge_dispersion > 0.03, "{}", rep.edge_dispersion);
+    }
+
+    #[test]
+    fn tied_pooled_gap_still_reports_the_regime_reversal() {
+        // The exact-cancellation case: A wins in bull by what it loses in bear,
+        // so the pooled gap is 0 and there is no pooled sign to contradict. That
+        // is the sharpest reversal there is, and it has to be reported as one.
+        let n = 120;
+        let lab = labels(n);
+        let a: Vec<f64> = (0..n)
+            .map(|i| if i % 2 == 0 { 0.010 } else { -0.010 })
+            .collect();
+        let b: Vec<f64> = (0..n)
+            .map(|i| if i % 2 == 0 { -0.010 } else { 0.010 })
+            .collect();
+        let rep = compare_by_regime(&a, &b, &lab, RegimeCompareOpts::default());
+        assert_eq!(rep.pooled_edge_sign, 0, "the pooled gap is a tie");
+        assert!(
+            rep.pooled_hides_reversal,
+            "a tie must not suppress the reversal: {rep:?}"
+        );
+        assert_eq!(
+            rep.reversal_regimes,
+            vec!["bear".to_string(), "bull".to_string()]
+        );
+    }
+
+    #[test]
+    fn tied_pooled_gap_without_opposing_regimes_reports_no_reversal() {
+        // The pooled gap is a tie because a four-period "shock" regime cancels a
+        // forty-period "calm" one, but only "calm" clears `min_periods`. A single
+        // signed counted regime is concentration, not reversal.
+        let mut a = Vec::new();
+        let mut b = Vec::new();
+        let mut lab: Vec<&'static str> = Vec::new();
+        for _ in 0..40 {
+            a.push(0.010);
+            b.push(0.000);
+            lab.push("calm");
+        }
+        for _ in 0..4 {
+            a.push(-0.100);
+            b.push(0.000);
+            lab.push("shock");
+        }
+        let rep = compare_by_regime(&a, &b, &lab, RegimeCompareOpts::default());
+        assert_eq!(rep.pooled_edge_sign, 0, "the pooled gap cancels: {rep:?}");
+        let shock = rep.regimes.iter().find(|r| r.regime == "shock").unwrap();
+        assert!(!shock.counted, "the four-period regime must not count");
+        assert!(
+            !rep.pooled_hides_reversal,
+            "only one counted regime has a sign: {rep:?}"
+        );
+        assert!(rep.reversal_regimes.is_empty());
     }
 
     #[test]
