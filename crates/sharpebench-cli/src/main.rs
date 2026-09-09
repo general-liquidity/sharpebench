@@ -1110,6 +1110,7 @@ fn report_transport_failures(
     failures: &sharpebench_harness::FailureLog,
     expected_cells: usize,
     completed_cells: usize,
+    attempts: sharpebench_harness::AttemptSummary,
     json: bool,
 ) -> bool {
     let status = external_sweep_completeness(failures, expected_cells, completed_cells);
@@ -1120,6 +1121,7 @@ fn report_transport_failures(
                 "error": "incomplete_external_sweep",
                 "agent": label,
                 "completeness": status,
+                "attempt_accounting": attempt_accounting(attempts),
             }));
         } else {
             eprintln!(
@@ -1128,6 +1130,9 @@ fn report_transport_failures(
                 status.completed_cells,
                 status.runtime_failed_cells,
             );
+        }
+        if !json {
+            print_attempt_accounting(label, attempts);
         }
         return false;
     }
@@ -1144,6 +1149,42 @@ fn report_transport_failures(
         );
     }
     true
+}
+
+/// Operational observations do not enter the scoring kernel. In particular,
+/// elapsed host time is not a measurement of provider billing or token usage.
+fn attempt_accounting(attempts: sharpebench_harness::AttemptSummary) -> serde_json::Value {
+    serde_json::json!({
+        "schema_version": "sharpebench.attempt-accounting.v1",
+        "attempts": attempts,
+        "monetary_cost": {"status": "unavailable", "reason": "attempt_ledger_has_no_usage_evidence"},
+        "rank_neutral": true,
+    })
+}
+
+fn print_attempt_accounting(label: &str, attempts: sharpebench_harness::AttemptSummary) {
+    eprintln!(
+        "attempt accounting for {label}: {} attempts, {} completed, {} failed; observed host duration {} ns ({:?}); monetary cost unavailable",
+        attempts.attempts, attempts.completed, attempts.failed,
+        attempts.duration_ns_total, attempts.duration_source,
+    );
+}
+
+/// Keep the existing JSON board array and scoring fields. Only the externally
+/// executed row gains operational metadata; reference rows have no such ledger.
+fn run_board_json(
+    board: &[CompositeScore],
+    accounting: Option<(&str, sharpebench_harness::AttemptSummary)>,
+) -> serde_json::Value {
+    let mut value = serde_json::to_value(board).expect("composite scores serialize");
+    if let Some((agent, attempts)) = accounting {
+        for row in value.as_array_mut().expect("a board is an array") {
+            if row["agent_id"].as_str() == Some(agent) {
+                row["attempt_accounting"] = attempt_accounting(attempts);
+            }
+        }
+    }
+    value
 }
 
 fn digest_json<T: Serialize>(label: &str, value: &T) -> Result<String, String> {
@@ -1315,6 +1356,7 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
     });
     // The luck floor: random monkeys that show the zero-skill distribution.
     let mut field = vec![bh, mo];
+    let mut external_accounting = None;
     field.extend(sharpebench_harness::luck_floor(
         &data, &windows, &seeds, costs, 3,
     ));
@@ -1399,10 +1441,12 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
             &res.failures,
             windows.len() * seeds.len(),
             res.submission.runs.len(),
+            res.attempts,
             json,
         ) {
             return ExitCode::FAILURE;
         }
+        external_accounting = Some((label, res.attempts));
         field.insert(0, res.submission);
     } else if let Some(image) = flag_value(args, "--image") {
         let image = image.to_string();
@@ -1507,10 +1551,12 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
             &res.failures,
             windows.len() * seeds.len(),
             res.submission.runs.len(),
+            res.attempts,
             json,
         ) {
             return ExitCode::FAILURE;
         }
+        external_accounting = Some((label, res.attempts));
         field.insert(0, res.submission);
     } else if let Some(cmd) = flag_value(args, "--cmd") {
         let parts: Vec<String> = cmd.split_whitespace().map(String::from).collect();
@@ -1611,10 +1657,12 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
             &res.failures,
             windows.len() * seeds.len(),
             res.submission.runs.len(),
+            res.attempts,
             json,
         ) {
             return ExitCode::FAILURE;
         }
+        external_accounting = Some((label, res.attempts));
         field.insert(0, res.submission);
     }
 
@@ -1633,7 +1681,20 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
             );
         }
     }
-    emit_board(&rank(&field, &cfg), json);
+    let board = rank(&field, &cfg);
+    if json {
+        emit_json(&run_board_json(
+            &board,
+            external_accounting
+                .as_ref()
+                .map(|(label, attempts)| (label.as_str(), *attempts)),
+        ));
+    } else {
+        if let Some((label, attempts)) = external_accounting {
+            print_attempt_accounting(&label, attempts);
+        }
+        print_board(&board);
+    }
     ExitCode::SUCCESS
 }
 
@@ -2060,6 +2121,69 @@ fn truncate(s: &str, n: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn attempt_metadata_preserves_failed_work_without_changing_the_board() {
+        let mut calls = 0;
+        let res = sharpebench_harness::run_agent_resilient("external", 1, &[7], 2, 40, |_, _| {
+            calls += 1;
+            if calls < 3 {
+                Err(sharpebench_harness::FailureKind::TransportError)
+            } else {
+                Ok(sharpebench_harness::failing_sentinel_run(40))
+            }
+        });
+        let reference = AgentSubmission {
+            agent_id: "reference".into(),
+            ..res.submission.clone()
+        };
+        let board = rank(&[res.submission, reference], &ScoreConfig::default());
+        let plain = run_board_json(&board, None);
+        assert_eq!(plain, serde_json::to_value(&board).unwrap());
+        let mut observed = run_board_json(&board, Some(("external", res.attempts)));
+        let rows = observed.as_array_mut().unwrap();
+        let external = rows
+            .iter_mut()
+            .find(|row| row["agent_id"] == "external")
+            .unwrap();
+        let accounting = external
+            .as_object_mut()
+            .unwrap()
+            .remove("attempt_accounting")
+            .unwrap();
+        assert_eq!(
+            accounting["schema_version"],
+            "sharpebench.attempt-accounting.v1"
+        );
+        assert_eq!(accounting["attempts"]["attempts"], 3);
+        assert_eq!(accounting["attempts"]["completed"], 1);
+        assert_eq!(accounting["attempts"]["failed"], 2);
+        assert_eq!(accounting["attempts"]["duration_source"], "host_clock");
+        assert_eq!(accounting["monetary_cost"]["status"], "unavailable");
+        assert_eq!(
+            accounting["monetary_cost"]["reason"],
+            "attempt_ledger_has_no_usage_evidence"
+        );
+        assert_eq!(accounting["rank_neutral"], true);
+        assert_eq!(
+            observed, plain,
+            "metadata must not change scores, order or reference rows"
+        );
+    }
+
+    #[test]
+    fn attempt_metadata_does_not_label_unobserved_time_or_money_as_measured() {
+        let mut ledger = sharpebench_harness::AttemptLedger::default();
+        ledger.push(sharpebench_harness::AttemptRecord::failed(
+            sharpebench_harness::FailureKind::Timeout,
+            sharpebench_harness::AttemptDuration::Unavailable,
+        ));
+        let value = attempt_accounting(ledger.summary());
+        assert_eq!(value["attempts"]["failed"], 1);
+        assert_eq!(value["attempts"]["duration_source"], "unavailable");
+        assert_eq!(value["monetary_cost"]["status"], "unavailable");
+        assert!(value["monetary_cost"].get("value").is_none());
+    }
 
     #[test]
     fn truncation_preserves_utf8_and_respects_the_character_budget() {
