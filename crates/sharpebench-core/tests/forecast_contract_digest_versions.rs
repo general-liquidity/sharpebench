@@ -268,6 +268,119 @@ fn one_contract_under_both_digests_is_still_one_contract_per_agent() {
     );
 }
 
+/// The same document as `document`, as a `sharpe.forecast-evidence.v2` envelope
+/// declaring `encoding` on its one revision.
+fn v2_document(neutral_threshold: f64, digest: impl Fn(&Value) -> String, encoding: &str) -> Value {
+    let mut value = document(neutral_threshold, digest);
+    value["schema_version"] = Value::String("sharpe.forecast-evidence.v2".to_string());
+    value["revisions"][0]["contract_digest_encoding"] = Value::String(encoding.to_string());
+    value
+}
+
+#[test]
+fn v2_with_a_correct_declaration_verifies_under_the_declared_encoding() {
+    let under_v1 = v2_document(1e-5, v1_digest, "sharpebench/canonical-json/v1");
+    assert_eq!(
+        digest_versions(under_v1.clone()),
+        vec![(
+            v1_digest(&under_v1["contracts"][0]),
+            ContractDigestVersion::CanonicalJsonV1
+        )]
+    );
+    let under_legacy = v2_document(0.001, legacy_digest, "legacy");
+    assert_eq!(
+        digest_versions(under_legacy.clone()),
+        vec![(
+            legacy_digest(&under_legacy["contracts"][0]),
+            ContractDigestVersion::Legacy
+        )]
+    );
+}
+
+#[test]
+fn v2_with_the_wrong_declaration_is_refused_naming_both_encodings() {
+    // A legacy digest labelled v1: v1 documents would accept it by inference,
+    // v2 verifies under the declaration only and says what the digest is.
+    let document = v2_document(0.001, legacy_digest, "sharpebench/canonical-json/v1");
+    let legacy = legacy_digest(&document["contracts"][0]);
+    let error = parse_forecast_evidence(&document.to_string())
+        .expect_err("a mislabelled digest is refused");
+    assert_eq!(
+        error.0,
+        format!(
+            "revision claim-0:r0 declares contract digest {legacy} under \
+             sharpebench/canonical-json/v1, but it recomputes under legacy"
+        )
+    );
+
+    let document = v2_document(1e-5, v1_digest, "legacy");
+    let v1 = v1_digest(&document["contracts"][0]);
+    let error = parse_forecast_evidence(&document.to_string())
+        .expect_err("a mislabelled digest is refused");
+    assert_eq!(
+        error.0,
+        format!(
+            "revision claim-0:r0 declares contract digest {v1} under legacy, \
+             but it recomputes under sharpebench/canonical-json/v1"
+        )
+    );
+}
+
+#[test]
+fn v2_with_a_digest_matching_no_contract_names_neither_encoding() {
+    let document = v2_document(0.001, |_| "f".repeat(64), "legacy");
+    let error =
+        parse_forecast_evidence(&document.to_string()).expect_err("an unknown digest is refused");
+    assert_eq!(
+        error.0,
+        format!(
+            "revision claim-0:r0 declares contract digest {} under legacy, but it \
+             recomputes under neither sharpebench/canonical-json/v1 nor the legacy \
+             encoding of any contract",
+            "f".repeat(64)
+        )
+    );
+}
+
+#[test]
+fn v2_with_an_unknown_encoding_label_is_refused() {
+    let document = v2_document(0.001, legacy_digest, "sharpebench/canonical-json/v2");
+    let error = parse_forecast_evidence(&document.to_string())
+        .expect_err("an unknown encoding label is refused");
+    assert_eq!(
+        error.0,
+        "unknown contract_digest_encoding \"sharpebench/canonical-json/v2\"; expected \
+         sharpebench/canonical-json/v1 or legacy"
+    );
+}
+
+#[test]
+fn v2_without_the_declaration_is_refused() {
+    let mut document = document(0.001, legacy_digest);
+    document["schema_version"] = Value::String("sharpe.forecast-evidence.v2".to_string());
+    let error =
+        parse_forecast_evidence(&document.to_string()).expect_err("v2 must declare the encoding");
+    assert_eq!(
+        error.0,
+        "sharpe.forecast-evidence.v2 requires contract_digest_encoding on every revision"
+    );
+}
+
+#[test]
+fn v1_with_the_declaration_present_is_refused() {
+    // The v1 field set is exact: the declaration exists only under the v2 envelope,
+    // even when it is correct.
+    let mut document = document(0.001, legacy_digest);
+    document["revisions"][0]["contract_digest_encoding"] = Value::String("legacy".to_string());
+    let error = parse_forecast_evidence(&document.to_string())
+        .expect_err("v1 does not carry the declaration");
+    assert_eq!(
+        error.0,
+        "contract_digest_encoding is not a field of sharpe.forecast-evidence.v1; \
+         a document that declares it must be sharpe.forecast-evidence.v2"
+    );
+}
+
 /// The frozen field keeps verifying: all 24 pinned digests are accepted, every one
 /// of them under the legacy encoding, and they are exactly the published support.
 #[test]
