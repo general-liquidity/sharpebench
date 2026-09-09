@@ -94,11 +94,63 @@ output prints the totals on stderr.
 The summary counts completed and failed attempts, including retries, and
 reports observed host duration with `host_clock`, `mixed`, or `unavailable`
 provenance. Duration totals saturate at `u64::MAX`; they are not billing data.
-`monetary_cost.status` is `unavailable` because this ledger does not yet contain
-provider usage evidence. A failed attempt is not free, and a missing cost is
-not zero. These observations never enter ranking or the pass^k denominator.
+Without a rate card, `monetary_cost.status` is `unavailable`: the legacy scalar
+does not establish a monetary unit. A failed attempt is not free, and a missing
+cost is not zero. These observations never enter ranking or the pass^k denominator.
 Checkpoint totals cover persisted records only; a process killed before saving
 can leave unrecorded work.
+
+### Frozen token rates
+
+Add `--rate-card <json>` to an external `run` to quote token usage under one
+operator-declared provider, model and revision. The example at
+`examples/reference-agent/rate-card.example.json` contains synthetic rates,
+not current provider prices:
+
+```json
+{
+  "schema_version": "sharpebench.token-rate-card.v1",
+  "provider": "example",
+  "model": "example-model",
+  "revision": "example-1",
+  "input_usd_nanos_per_token": 125,
+  "output_usd_nanos_per_token": 500
+}
+```
+
+Rates are nonnegative integer nanodollars per token (one USD is 1,000,000,000
+nanodollars). The quote is input tokens times the input rate, plus output
+tokens times the output rate. Reasoning tokens are a subset of output, not an
+additional charge. Arithmetic is checked integer arithmetic; exact output
+amounts are decimal strings to avoid JavaScript number rounding.
+
+The card is read once, capped at 64 KiB, rejects unknown or missing fields,
+and binds its validated model/rate identity into the checkpoint invocation.
+Changing its rates, model or revision refuses an existing checkpoint before
+executing cells. Reformatting the same JSON does not change the identity.
+
+The separate `attempt_accounting.monetary_cost` has status `estimated` only
+when every recorded attempt has usable usage. It carries `usage_source:
+"entrant_reported"`, the full card, its SHA-256 identity and `usd_nanos`.
+Any missing or failed-attempt usage produces `unavailable`, with a separately
+named `known_subtotal_usd_nanos` when possible. Failed attempts retain their
+known tokens through retries and resume; a later success cannot erase them.
+Mixed cards and overflowing arithmetic cannot produce a total.
+
+These are estimates from the legacy decision protocol, not host-observed
+provider receipts. That protocol defaults omitted individual token counts to
+zero, so their completeness is not independently established. Entirely absent,
+dollar-only or all-zero usage is unpriced rather than assumed free. Invalid
+reasoning counts also withhold the estimate. The model identity is an operator
+declaration; this mechanism does not verify which model an entrant called.
+Version 1 excludes caching, batch discounts, tool fees and taxes. Explicitly
+zero rates can price a nonzero reported count as zero.
+
+The old `cost`, `return_per_cost` and `dsr_per_cost` columns are unchanged.
+Their legacy entrant-selected scalar can mean USD or tokens; the accounting
+record labels it `entrant_selected_usd_or_tokens_not_rate_card_priced`. Do not
+interpret those columns as the new USD quote. Token pricing does not change
+decisions, returns, scores, eligibility or ordering.
 
 See [The arena](arena.md#sandboxed-entrants) for the boundary and acceptance
 evidence.

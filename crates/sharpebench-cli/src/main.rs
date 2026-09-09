@@ -11,6 +11,7 @@ use std::process::ExitCode;
 
 use serde::Serialize;
 use sharpebench_core::{rank, AgentSubmission, CompositeScore, ScoreConfig};
+use sharpebench_harness::accounting::{MonetarySummary, RateCard};
 
 use csv_columns::read_returns_column;
 
@@ -542,6 +543,7 @@ fn help() {
     println!("                       --checkpoint <path>: resumable external-agent sweep (crash-tolerant)");
     println!("                       --retry-runtime-failures: recover exhausted checkpoint cells (3 additional rounds maximum)");
     println!("                       --entrant-sha256 <digest>: exact entrant identity; required with --checkpoint plus --http or --cmd");
+    println!("                       --rate-card <json>: frozen token rates; emits a separate self-reported estimate, never a rank input");
     println!("                       --periods-per-year N: bars per year of the dataset (default 252; 1h crypto 8760, 4h 2190, 1d crypto 365, 1w 52)");
     println!("                       --pass-mode all|any|at-least:N|relative-to-benchmark: reliability verdict (default all)");
     println!("                       --benchmark-agent <id>: benchmark for relative-to-benchmark (default buy-and-hold)");
@@ -1111,9 +1113,10 @@ fn report_transport_failures(
     failures: &sharpebench_harness::FailureLog,
     expected_cells: usize,
     completed_cells: usize,
-    attempts: sharpebench_harness::AttemptSummary,
+    accounting: (sharpebench_harness::AttemptSummary, &MonetarySummary),
     json: bool,
 ) -> bool {
+    let (attempts, monetary_cost) = accounting;
     let status = external_sweep_completeness(failures, expected_cells, completed_cells);
     if !status.complete {
         if json {
@@ -1122,7 +1125,7 @@ fn report_transport_failures(
                 "error": "incomplete_external_sweep",
                 "agent": label,
                 "completeness": status,
-                "attempt_accounting": attempt_accounting(attempts),
+                "attempt_accounting": attempt_accounting_with_cost(attempts, monetary_cost),
             }));
         } else {
             eprintln!(
@@ -1133,7 +1136,7 @@ fn report_transport_failures(
             );
         }
         if !json {
-            print_attempt_accounting(label, attempts);
+            print_attempt_accounting(label, attempts, monetary_cost);
         }
         return false;
     }
@@ -1154,20 +1157,40 @@ fn report_transport_failures(
 
 /// Operational observations do not enter the scoring kernel. In particular,
 /// elapsed host time is not a measurement of provider billing or token usage.
+#[cfg(test)]
 fn attempt_accounting(attempts: sharpebench_harness::AttemptSummary) -> serde_json::Value {
+    attempt_accounting_with_cost(
+        attempts,
+        &sharpebench_harness::accounting::summarize_usage([]),
+    )
+}
+
+fn attempt_accounting_with_cost(
+    attempts: sharpebench_harness::AttemptSummary,
+    monetary_cost: &MonetarySummary,
+) -> serde_json::Value {
     serde_json::json!({
         "schema_version": "sharpebench.attempt-accounting.v1",
         "attempts": attempts,
-        "monetary_cost": {"status": "unavailable", "reason": "attempt_ledger_has_no_usage_evidence"},
+        "monetary_cost": monetary_cost,
+        "legacy_cost_columns_unit": "entrant_selected_usd_or_tokens_not_rate_card_priced",
         "rank_neutral": true,
     })
 }
 
-fn print_attempt_accounting(label: &str, attempts: sharpebench_harness::AttemptSummary) {
+fn print_attempt_accounting(
+    label: &str,
+    attempts: sharpebench_harness::AttemptSummary,
+    monetary_cost: &MonetarySummary,
+) {
     eprintln!(
-        "attempt accounting for {label}: {} attempts, {} completed, {} failed; observed host duration {} ns ({:?}); monetary cost unavailable",
+        "attempt accounting for {label}: {} attempts, {} completed, {} failed; observed host duration {} ns ({:?})",
         attempts.attempts, attempts.completed, attempts.failed,
         attempts.duration_ns_total, attempts.duration_source,
+    );
+    eprintln!(
+        "rank-neutral token pricing: {}",
+        serde_json::to_string(monetary_cost).expect("integer accounting serializes")
     );
 }
 
@@ -1175,13 +1198,13 @@ fn print_attempt_accounting(label: &str, attempts: sharpebench_harness::AttemptS
 /// executed row gains operational metadata; reference rows have no such ledger.
 fn run_board_json(
     board: &[CompositeScore],
-    accounting: Option<(&str, sharpebench_harness::AttemptSummary)>,
+    accounting: Option<(&str, sharpebench_harness::AttemptSummary, &MonetarySummary)>,
 ) -> serde_json::Value {
     let mut value = serde_json::to_value(board).expect("composite scores serialize");
-    if let Some((agent, attempts)) = accounting {
+    if let Some((agent, attempts, monetary_cost)) = accounting {
         for row in value.as_array_mut().expect("a board is an array") {
             if row["agent_id"].as_str() == Some(agent) {
-                row["attempt_accounting"] = attempt_accounting(attempts);
+                row["attempt_accounting"] = attempt_accounting_with_cost(attempts, monetary_cost);
             }
         }
     }
@@ -1229,6 +1252,7 @@ struct CheckpointExecution<'a> {
     costs: sharpebench_sim::CostModel,
     score_config: &'a ScoreConfig,
     max_retries: u32,
+    rate_card: Option<&'a RateCard>,
 }
 
 fn checkpoint_contract(
@@ -1270,7 +1294,7 @@ fn checkpoint_contract(
             // A caller-supplied artifact digest must not make a changed command,
             // endpoint, image reference, or environment pass-through list look
             // like the same resumable experiment.
-            invocation_sha256: sharpebench_attest::content_digest(entrant_material),
+            invocation_sha256: invocation_with_rates(entrant_material, execution.rate_card)?,
         },
         execution.windows,
         execution.seeds,
@@ -1278,9 +1302,50 @@ fn checkpoint_contract(
     ))
 }
 
+fn invocation_with_rates(material: &[u8], card: Option<&RateCard>) -> Result<String, String> {
+    match card {
+        None => Ok(sharpebench_attest::content_digest(material)),
+        Some(card) => digest_json(
+            "priced invocation",
+            &("sharpebench.priced-invocation.v1", material, card.digest()),
+        ),
+    }
+}
+
+fn load_rate_card(args: &[String]) -> Result<Option<RateCard>, String> {
+    use std::io::Read;
+    if !args.iter().any(|arg| arg == "--rate-card") {
+        return Ok(None);
+    }
+    if !["--cmd", "--image", "--http"]
+        .iter()
+        .any(|flag| flag_value(args, flag).is_some())
+    {
+        return Err("--rate-card requires an external-agent transport".into());
+    }
+    let path = flag_value(args, "--rate-card")
+        .filter(|path| !path.starts_with("--"))
+        .ok_or("--rate-card requires a JSON file path")?;
+    let file =
+        std::fs::File::open(path).map_err(|error| format!("cannot open rate card: {error}"))?;
+    let mut bytes = Vec::new();
+    file.take(sharpebench_harness::accounting::MAX_RATE_CARD_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("cannot read rate card: {error}"))?;
+    RateCard::from_json(&bytes).map(Some)
+}
+
 fn run_demo(args: &[String], json: bool) -> ExitCode {
     use sharpebench_sim::{
         Agent, BuyAndHold, CostModel, Dataset, ExternalAgent, HttpAgent, Momentum, Window,
+    };
+
+    let rate_card = match load_rate_card(args) {
+        Ok(card) => card,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::from(2);
+        }
     };
 
     let resume_policy = if args.iter().any(|arg| arg == "--retry-runtime-failures") {
@@ -1406,6 +1471,7 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                     costs,
                     score_config: &cfg,
                     max_retries: EXTERNAL_MAX_RETRIES,
+                    rate_card: rate_card.as_ref(),
                 },
                 label.as_bytes(),
                 true,
@@ -1416,7 +1482,7 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
-            match sharpebench_harness::run_resumable_sweep_bound_with_policy(
+            match sharpebench_harness::run_resumable_sweep_observed(
                 ckpt,
                 &label,
                 &contract,
@@ -1424,12 +1490,13 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                 resume_policy,
                 |wi, seed| {
                     let mut agent = HttpAgent::new(addr.clone());
-                    sharpebench_harness::run_external_backtest(
+                    sharpebench_harness::run_external_backtest_observed(
                         &data,
                         &mut agent,
                         windows[wi],
                         seed,
                         costs,
+                        rate_card.as_ref(),
                     )
                 },
             ) {
@@ -1440,7 +1507,7 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                 }
             }
         } else {
-            sharpebench_harness::run_external_agent(
+            sharpebench_harness::run_external_agent_observed(
                 &label,
                 &data,
                 &windows,
@@ -1448,6 +1515,7 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                 costs,
                 EXTERNAL_MAX_RETRIES,
                 || Some(HttpAgent::new(addr.clone())),
+                rate_card.as_ref(),
             )
         };
         if !report_transport_failures(
@@ -1455,12 +1523,12 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
             &res.failures,
             windows.len() * seeds.len(),
             res.submission.runs.len(),
-            res.attempts,
+            (res.attempts, &res.monetary_cost),
             json,
         ) {
             return ExitCode::FAILURE;
         }
-        external_accounting = Some((label, res.attempts));
+        external_accounting = Some((label, res.attempts, res.monetary_cost));
         field.insert(0, res.submission);
     } else if let Some(image) = flag_value(args, "--image") {
         let image = image.to_string();
@@ -1487,16 +1555,17 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
         let sandbox_attempt =
             |wi: usize, seed: u64| match sharpebench_arena::run_external_sandboxed(&image, &opts) {
                 Ok(mut a) => {
-                    let result = sharpebench_harness::run_external_backtest(
+                    let mut observed = sharpebench_harness::run_external_backtest_observed(
                         &data,
                         &mut a,
                         windows[wi],
                         seed,
                         costs,
+                        rate_card.as_ref(),
                     );
-                    match a.finish() {
+                    observed.result = match a.finish() {
                         Ok(oom_killed) => {
-                            sharpebench_harness::apply_oom_verdict(result, oom_killed)
+                            sharpebench_harness::apply_oom_verdict(observed.result, oom_killed)
                         }
                         Err(error) => {
                             // Post-exit inspection and named-container cleanup are
@@ -1508,9 +1577,10 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                             );
                             Err(sharpebench_harness::FailureKind::TransportError)
                         }
-                    }
+                    };
+                    observed
                 }
-                Err(_) => Err(sharpebench_harness::FailureKind::SpawnError),
+                Err(_) => Err(sharpebench_harness::FailureKind::SpawnError).into(),
             };
         let res = if let Some(ckpt) = &checkpoint {
             let contract = match checkpoint_contract(
@@ -1522,6 +1592,7 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                     costs,
                     score_config: &cfg,
                     max_retries: EXTERNAL_MAX_RETRIES,
+                    rate_card: rate_card.as_ref(),
                 },
                 label.as_bytes(),
                 false,
@@ -1532,7 +1603,7 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
-            match sharpebench_harness::run_resumable_sweep_bound_with_policy(
+            match sharpebench_harness::run_resumable_sweep_observed(
                 ckpt,
                 &label,
                 &contract,
@@ -1551,7 +1622,7 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                 .iter()
                 .map(|window| window.end.saturating_sub(window.start))
                 .collect();
-            sharpebench_harness::run_agent_resilient_by_window(
+            sharpebench_harness::run_agent_resilient_observed(
                 &label,
                 &expected_lens,
                 &seeds,
@@ -1564,12 +1635,12 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
             &res.failures,
             windows.len() * seeds.len(),
             res.submission.runs.len(),
-            res.attempts,
+            (res.attempts, &res.monetary_cost),
             json,
         ) {
             return ExitCode::FAILURE;
         }
-        external_accounting = Some((label, res.attempts));
+        external_accounting = Some((label, res.attempts, res.monetary_cost));
         field.insert(0, res.submission);
     } else if let Some(cmd) = flag_value(args, "--cmd") {
         let parts: Vec<String> = cmd.split_whitespace().map(String::from).collect();
@@ -1614,6 +1685,7 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                     costs,
                     score_config: &cfg,
                     max_retries: EXTERNAL_MAX_RETRIES,
+                    rate_card: rate_card.as_ref(),
                 },
                 entrant_material.as_bytes(),
                 true,
@@ -1624,7 +1696,7 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
-            match sharpebench_harness::run_resumable_sweep_bound_with_policy(
+            match sharpebench_harness::run_resumable_sweep_observed(
                 ckpt,
                 &label,
                 &contract,
@@ -1633,14 +1705,15 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                 |wi, seed| {
                     let rest_refs: Vec<&str> = rest.iter().map(String::as_str).collect();
                     match ExternalAgent::spawn(&prog, &rest_refs) {
-                        Ok(mut a) => sharpebench_harness::run_external_backtest(
+                        Ok(mut a) => sharpebench_harness::run_external_backtest_observed(
                             &data,
                             &mut a,
                             windows[wi],
                             seed,
                             costs,
+                            rate_card.as_ref(),
                         ),
-                        Err(_) => Err(sharpebench_harness::FailureKind::SpawnError),
+                        Err(_) => Err(sharpebench_harness::FailureKind::SpawnError).into(),
                     }
                 },
             ) {
@@ -1651,7 +1724,7 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                 }
             }
         } else {
-            sharpebench_harness::run_external_agent(
+            sharpebench_harness::run_external_agent_observed(
                 &label,
                 &data,
                 &windows,
@@ -1662,6 +1735,7 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                     let rest_refs: Vec<&str> = rest.iter().map(String::as_str).collect();
                     ExternalAgent::spawn(&prog, &rest_refs).ok()
                 },
+                rate_card.as_ref(),
             )
         };
         if !report_transport_failures(
@@ -1669,12 +1743,12 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
             &res.failures,
             windows.len() * seeds.len(),
             res.submission.runs.len(),
-            res.attempts,
+            (res.attempts, &res.monetary_cost),
             json,
         ) {
             return ExitCode::FAILURE;
         }
-        external_accounting = Some((label, res.attempts));
+        external_accounting = Some((label, res.attempts, res.monetary_cost));
         field.insert(0, res.submission);
     }
 
@@ -1699,11 +1773,11 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
             &board,
             external_accounting
                 .as_ref()
-                .map(|(label, attempts)| (label.as_str(), *attempts)),
+                .map(|(label, attempts, cost)| (label.as_str(), *attempts, cost)),
         ));
     } else {
-        if let Some((label, attempts)) = external_accounting {
-            print_attempt_accounting(&label, attempts);
+        if let Some((label, attempts, cost)) = external_accounting {
+            print_attempt_accounting(&label, attempts, &cost);
         }
         print_board(&board);
     }
@@ -2152,7 +2226,8 @@ mod tests {
         let board = rank(&[res.submission, reference], &ScoreConfig::default());
         let plain = run_board_json(&board, None);
         assert_eq!(plain, serde_json::to_value(&board).unwrap());
-        let mut observed = run_board_json(&board, Some(("external", res.attempts)));
+        let mut observed =
+            run_board_json(&board, Some(("external", res.attempts, &res.monetary_cost)));
         let rows = observed.as_array_mut().unwrap();
         let external = rows
             .iter_mut()
@@ -2277,6 +2352,7 @@ mod tests {
                 costs: sharpebench_sim::CostModel::default(),
                 score_config: &ScoreConfig::default(),
                 max_retries: 2,
+                rate_card: None,
             },
             b"http:127.0.0.1:9000",
             true,
@@ -2307,6 +2383,7 @@ mod tests {
                 costs: sharpebench_sim::CostModel::default(),
                 score_config: &ScoreConfig::default(),
                 max_retries: 2,
+                rate_card: None,
             },
             b"http:127.0.0.1:9000",
             true,
@@ -2342,6 +2419,7 @@ mod tests {
                     costs: sharpebench_sim::CostModel::default(),
                     score_config: &ScoreConfig::default(),
                     max_retries: 2,
+                    rate_card: None,
                 },
                 invocation,
                 true,
@@ -2409,6 +2487,7 @@ mod tests {
                     costs: sharpebench_sim::CostModel::default(),
                     score_config: &ScoreConfig::default(),
                     max_retries: 2,
+                    rate_card: None,
                 },
                 b"entrant",
                 true,
