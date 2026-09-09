@@ -48,7 +48,7 @@
     },
     {
       "path": "paper/evidence/final/pass-witness.jsonl",
-      "sha256": "c60f0eb671380bbde5c789e1ba866abc24643dae9cc523c69248b0436e96d144"
+      "sha256": "8922c9125aed8c75e9d7f2734a0756e57dbfa73da4e333e15882aeca040c295f"
     },
     {
       "path": "paper/evidence/final/rates-1d.jsonl",
@@ -160,7 +160,7 @@
     },
     {
       "path": "paper/figures/evidence-pass-witness.pdf",
-      "sha256": "f257f893053155d911d32a84e510d46a610600e5f803876aa1777471c24fd91a"
+      "sha256": "c85cec3a3d2c04c41d9ceb70ed8087814129c0521758a76e720db994ec579d2f"
     },
     {
       "path": "paper/figures/sharpebench-deflation-curve.pdf",
@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "6346872c195d1ce4023d9dda56eff35173774817",
+  "generated_at_head": "428a770dcde600748602dfb2adc7b95869861161",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -291,7 +291,7 @@
     },
     {
       "path": "crates/sharpebench-cli/src/main.rs",
-      "sha256": "bb0f5a4e7629ebd01b92d4cc6758f12b048a3c26fd15cc95c990523561038a3f"
+      "sha256": "aa4aea382fcf7524f6167f94cacbd763063fae4e88adefb2371cf811e22e85e2"
     },
     {
       "path": "crates/sharpebench-cli/src/update.rs",
@@ -331,7 +331,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/budget_curve.rs",
-      "sha256": "79e058168e663f1df8426c737a2752998f9194fef2c414a94f898b4a70ad45a8"
+      "sha256": "06f9700feb56c640d02da42f24a26f42ea54989362f0e2f0d285ae45534a77f4"
     },
     {
       "path": "crates/sharpebench-core/src/calibration.rs",
@@ -407,7 +407,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/regime_compare.rs",
-      "sha256": "d3dfb1eecea79fe5c11ed0793c0fafa2f7cb7e47e646a1d41d5a895dd2fdafcc"
+      "sha256": "c0a11f831733278042217e5b180c40108b24d859117aa3d17123cbe1f751e2ca"
     },
     {
       "path": "crates/sharpebench-core/src/roles.rs",
@@ -531,7 +531,7 @@
     },
     {
       "path": "crates/sharpebench-harness/tests/evidence_fields_no_clone_merges.rs",
-      "sha256": "4b04db8d340dd032da90eb47b6864ce9a91760bd1cb6f4c88138ae7cc27510a4"
+      "sha256": "936c72cac32bc55bc678e269d947f1b8f14e102bad7dac3755381985824ae715"
     },
     {
       "path": "crates/sharpebench-harness/tests/producer_declared_support.rs",
@@ -631,7 +631,7 @@
     },
     {
       "path": "crates/sharpebench-py/src/lib.rs",
-      "sha256": "475fc3db006b34cb00108a7fde72c0c5442b3e6dde47506fbdc47fd08392417f"
+      "sha256": "52e57dfdf8dd1aa07e86e707f7e5b5645fc8c7335db4d03e50699e62d694f76a"
     },
     {
       "path": "crates/sharpebench-sim/Cargo.toml",
@@ -739,7 +739,7 @@
     },
     {
       "path": "crates/sharpebench-wasm/src/lib.rs",
-      "sha256": "f1a2cb82326c94ea3f6887a5e738431e1b9513f97987b7592ed5e9d1b4fb793a"
+      "sha256": "0deaf8d4cc32996935d73ec531c5dd5a0a887b51478b73183b13101c25a568bd"
     },
     {
       "path": "crates/sharpebench-wasm/tests/board_context.rs",
@@ -819,7 +819,7 @@
     },
     {
       "path": "paper/sections/01-introduction.tex",
-      "sha256": "8645f5652b9b3be199322286013f23d2fae41b7535c832cb2ddb5c63346a080f"
+      "sha256": "cf928c34fd3f0f7911fdeb0813b4a6f337d2f20192f9800a82ba6ed3784c600c"
     },
     {
       "path": "paper/sections/02-principles.tex",
@@ -835,7 +835,7 @@
     },
     {
       "path": "paper/sections/05-experiments.tex",
-      "sha256": "32d35547cd659ecbcb20affbe20f60c648ae5562b4b43d908bbb99847d0a53ea"
+      "sha256": "ddd81194af6aaaaf3e44a4434b568a746f5f708a41f389cfbc64f892661549b3"
     },
     {
       "path": "paper/sections/06-related.tex",
@@ -843,7 +843,7 @@
     },
     {
       "path": "paper/sections/07-limitations.tex",
-      "sha256": "c3d77e0a96bd71957f9f37b45ef682e34c03ba4102f445f748525af5b95897df"
+      "sha256": "918ea61591609dee39c20d10c4e455d2ce01a3dba6429dfbe3a65ddfb025984b"
     },
     {
       "path": "paper/sections/08-reproducibility.tex",
@@ -903,7 +903,7 @@
     },
     {
       "path": "paper/src/make-evidence-figures.py",
-      "sha256": "1bf0fe267f749e692df467d24f05b005cfde5abdfd0bbbff43be98fcec5fceb7"
+      "sha256": "ebfa0dc55dcc051b6b473197ac874c2a7654cd950af59d959fc92c7b345da89b"
     },
     {
       "path": "paper/src/make-figures.py",
@@ -967,5 +967,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "fe34815f9c3f5fbb59d1f127d13578399d62caf5e6a8b69d30a8e6f95893aec3"
+  "source_snapshot_sha256": "2cf12002a96b376adee6bc5e82b0375b1b7905b62aa752faa088d37403253f3b"
 }
