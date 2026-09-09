@@ -11,8 +11,9 @@
   Existing main checkouts, unrelated branches and historical evidence are preserved.
 - The old Linux Bench binary and Windows Arena extension were stale.
   Tests below use fresh Linux builds. The current Python extension was rebuilt
-  with maturin in an isolated virtual environment. That is editable-package
-  validation, not yet a fresh installed-wheel or cross-platform proof.
+  with maturin in an isolated virtual environment, then separately built as a
+  wheel and installed into a fresh consumer environment. The 91 affected Python
+  tests passed there, with imports verified to come from site-packages.
 - PR #39's history was merged into the Bench repair branch without cherry-picking.
   Its four special-function test functions pass; no statrs dependency or
   replacement has been added. Its universal claim about other libraries'
@@ -32,6 +33,8 @@
 | F08, v2 import | Both supported v2 labels were rejected; v1-with-label was accepted. | Both supported labels accept under v2; missing, unknown and v1 labels refuse. |
 | F09, numeric settlement identity | Comparing `1` with `1.0` failed as unequal settlement. | Integer/float and signed-zero pairs compare; opposite realized outcomes still refuse. |
 | F10, unexplained rejection | A real invalid-CI configuration rejected a strong field without the expected statistical reason. | Deflation, bootstrap and selection errors have stable serialized labels and appear in rollups. |
+| F11/F12, installed npm behavior | The new regression first failed on the old WASM's missing statistical disqualification, then on the rebuilt WASM's error discarded by the old wrapper. | Repaired wrapper and rebuilt WASM pass all 20 npm tests and the offline installed-tarball probe. Final rebuilding remains required after further numerical edits. |
+| G09, discarded attempt summary | The real-CLI loopback regression failed on an isolated copy of the pre-change tree because incomplete-sweep JSON omitted accounting. | The repaired CLI reports 48 failed attempts for 16 exhausted cells, monetary cost unavailable, and no board. Two unit tests also pin unknown duration and unchanged score/order/reference rows. |
 
 These regressions use synthetic inputs and existing artifacts. No model was
 downloaded or called, no API credits were spent, and no market data was acquired.
@@ -41,13 +44,16 @@ downloaded or called, no API credits were spent, and no market data was acquired
 Bench:
 
 - `cargo test -p sharpebench --locked`: 63 tests passed for the initial
-  seed/date repairs. Later full-workspace validation is still required.
+  seed/date repairs. A subsequent full workspace run (excluding xtask) passed,
+  with 14 ignored tests recorded rather than counted as executed.
 - `cargo test -p sharpebench-stats -p sharpebench-edge --locked`:
   102 stats unit tests, 10 statistical-boundary tests, 4 compatibility test
   functions, 31 edge unit tests and both doc tests passed.
 - `cargo test -p sharpebench-core --locked --quiet`: 330 unit tests,
   37 integration tests and one doc test passed.
 - Affected-package clippy with warnings denied passed.
+- npm build, 20 tests, offline tarball installation, and the MCP build plus
+  nine tests passed against the rebuilt sibling package.
 - `python3 -m unittest paper/src/test_import_prospective_field.py`: 6 tests passed.
 - `python3 scripts/check-paired-boundaries.py`: passes with its existing
   24-entry allowlist. A green result is not complete boundary coverage.
@@ -65,16 +71,28 @@ Arena:
 
 ## Delivery and remaining limits
 
-The repairs are granular local commits. Final package rebuilding, installed
-consumer tests, pushed-head CI, normal merges and post-merge verification remain
-delivery gates. Do not treat a local pass as a released behavior change.
+The repairs are granular commits. Arena PR #35 merged as `f7614dc`; its tree
+matches tested head `f5939a9` and post-merge CI passed. Its first CI run caught
+formatting in the separately excluded PyO3 crate, which was fixed and rebound.
+
+Bench PR #40 remains open. At pushed head `5618a46`, the ordinary workflow,
+package checks, live Docker probe and three-platform matrix passed. Mutation
+testing reported 73 mutants: 60 caught, three unviable, ten missed. The missed
+SPA arithmetic mutations require stronger tests; the check is not bypassed or
+explained away as a runner flake. Subsequent local changes need a new pushed
+head and fresh CI. CodeRabbit skipped review while the PRs were drafts.
+
+Final package rebuilding, installed consumers, normal merging and post-merge
+verification remain Bench delivery gates. None of this is a release.
 
 Arena still consumes published Bench `=0.19.0`; the new Bench arithmetic and
 diagnostic repairs do not reach that dependency until a subsequent authorized
 release and pin update. Arena's own sealed-evidence and confidence repairs are
 local to Arena. Historical numerical evidence has not been regenerated.
 
-Hyper-Tau coverage and its proposed ports remain open. In particular, the
+Hyper-Tau coverage and its proposed ports remain open; the detailed
+[assessment](HYPER-TAU-REVIEW.md) records source reads and corrections.
+In particular, the
 artifact scan must not be described as proof of no contamination, rate cards
 must not accept nonfinite rates or silently treat missing usage as zero, and
 gateway accounting must not imply provider billing was independently verified.

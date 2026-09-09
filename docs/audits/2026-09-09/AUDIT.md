@@ -103,6 +103,24 @@ product behavior is correct. Repair progress belongs in IMPLEMENTATION.md.
     but the committed WASM classifier emits `rank_eligible:false,reasons:[]`.
     Rollups cannot explain or count this rejection.
 
+## Integration findings after the independent reports
+
+11. **F11: npm discarded typed statistical unavailability.**
+    In the baseline npm/src/index.ts, toHonestyVerdict omitted statistics_error,
+    and the full verdict mapper omitted snooping_error and pbo_error. Type
+    declarations advertised numeric values where the kernel serializes null.
+    A rebuilt WASM module alone therefore did not repair the public consumer.
+    The wrapper now preserves error fields, nullable diagnostics and the HLZ
+    result. The new installed-tarball regression fails with the old mapper.
+
+12. **F12: the committed WASM did not match the package's numerical version.**
+    Bench package metadata at v0.19.0 accompanied a committed WASM module that
+    reported sharpebench-stats/0.18.4. It still selected an empty candidate and
+    emitted unexplained statistical disqualifications. Building current Rust
+    changed those observable behaviors. The tarball check now asserts the
+    methodology version against installed package metadata and exercises
+    repaired refusal paths. A version string alone is not binary provenance.
+
 ## Reviewer coverage and limits
 
 The following coverage statements are reproduced verbatim.

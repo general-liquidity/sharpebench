@@ -27,18 +27,18 @@ it; do not overwrite the historical audit diary.
 | ID | Work | Status | Acceptance / limits |
 |---|---|---|---|
 | G01 | Review Claude's changes against committed code, tests, artifacts and CI | In progress | Independent analysis findings plus implementation/security review; distinguish current source from stale local binaries. |
-| G02 | Inventory and study Hyper-Tau-Bench end to end | In progress | Coverage ledger for source, tests, data, runtime, UI and docs; evidence for every port or rejection. |
+| G02 | Inventory and study Hyper-Tau-Bench end to end | In progress | [Coverage and assessment](HYPER-TAU-REVIEW.md) records complete reads separately from the 8,484-file inventory. |
 | G03 | Reconcile original porting recommendations | Open | Trace candidate mechanisms through both products before declaring a gap; no unsupported completeness claims. |
 | G04 | Finish PR #39 compatibility pins | Open | Review assertions and measurement claims, test exact head, resolve or merge without losing history. |
 | G05 | Repair verified analysis and evidence defects | In progress | Reproduce each defect and add a regression that fails without its fix; record individual rows below. |
 | G06 | Resume runtime-exhausted cells explicitly | Open | Opt-in, infrastructure-only retry; preserve cumulative attempt/cost history and contract identity; no result shopping. |
 | G07 | Entrant artifact contamination preflight | Open | Bounded known-content detection with explicit scan scope and incomplete-scan refusal; never claim arbitrary contamination is excluded. |
 | G08 | Frozen token rate card | Open | Versioned model/rate identity, validated units and missing-usage handling; cost stays rank-neutral. |
-| G09 | Publish attempt summaries | Open | Report terminal and nonterminal attempts, failures and spent cost without changing ranking. |
+| G09 | Publish attempt summaries | Partially implemented | CLI successes and incomplete-sweep errors expose observed attempts and host time without changing scoring. Monetary usage remains unavailable, pending G08/G11. |
 | G10 | statrs special-function migration | Open | Independent numerical comparison, dependency/target review, explicit compatibility treatment and evidence impact ledger before replacement. |
 | G11 | Host-observed model gateway accounting | Open | Credential isolation, bounded requests and responses, allowlisted destinations, usage provenance, budgets and hermetic adapter tests; no mandatory third-party arena. |
 | G12 | Empirical field execution readiness | Open | Test runner preflight and refusal paths. Paid model calls and new empirical results require explicit setup and spending authorization. |
-| G13 | Cross-product API and artifact parity | Open | Test rebuilt installed packages; pin migration only through published dependencies; identify release requirements honestly. |
+| G13 | Cross-product API and artifact parity | In progress | Fresh Arena wheel: 91 affected tests pass. Bench wrapper and tarball regression pass after rebuilding stale WASM; final rebuild and CI remain required after further numerical edits. |
 | G14 | Update product docs and onboarding | Open | Describe implemented behavior and limitations; retain quantitative-trading positioning and Arena sandbox terminology; no em dashes. |
 | G15 | Update paper claims affected by these repairs | Open | Keep historical evidence identified; no invented results, no silent regeneration or personal operational context. |
 | G16 | Finish delivery | Open | Granular commits, pushed branches, relevant CI green on exact heads, normal merges to main, post-merge verification; preserve unrelated branches/worktrees. |
@@ -61,6 +61,13 @@ not a completed delivery: package and CI checks still apply to every row.
 | F08 | Support v2 prospective imports with strict digest labels | Local tests pass |
 | F09 | Canonicalize internal numeric settlement identity | Local tests pass |
 | F10 | Add statistical disqualification reasons and rollup labels | Local tests pass |
+| F11 | Preserve statistical error fields and nullable diagnostics in npm | Wrapper and installed-tarball tests pass |
+| F12 | Rebuild stale committed WASM and pin methodology through the installed package | Rebuilt locally; final artifact and CI pending numerical follow-ups |
+
+Arena repairs F02/F05/F06 merged through PR #35 as main `f7614dc`.
+The merge tree equals tested head `f5939a9`; post-merge CI passed. Bench PR #40
+is still open: ten SPA arithmetic mutants survived its first mutation run.
+Additional numerical checks are in progress, not waived.
 
 ## Execution policy
 
