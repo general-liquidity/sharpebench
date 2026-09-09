@@ -13,6 +13,7 @@ and links the commits it was built from.
 ## [Unreleased]
 
 ### Fixed
+- Disqualification reports and rollups name `deflation_unavailable`, `bootstrap_unavailable` and `selection_unavailable`. New statistical gates can no longer reject an otherwise strong submission without an explanation. The npm reason union includes the new labels.
 - Forecast comparisons canonicalize realized-outcome numbers with the versioned contract encoding. Integer-valued floats and signed zero no longer create false settlement disputes; genuinely different outcomes remain refused. This internal comparison identity is not a field in published reports.
 - Percentile selection refuses candidates with fewer than two finite observations, a zero bootstrap budget, or overflowing point, resample or optimism utilities. Failure withholds the whole selection rather than letting an empty series win as zero return.
 - Field-wide significance tests refuse nonfinite intermediate statistics and studentizing scales. A failed family member withholds all three snooping p-values and every step-down rejection; failed arithmetic cannot establish significance.

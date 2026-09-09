@@ -316,7 +316,8 @@ export interface CrowdingDecayPrior {
 
 /**
  * A reason an agent was (or should be) demoted. The first five mirror the hard
- * eligibility gates in the scorer; the last three are advisory quality flags
+ * eligibility gates in the scorer; three more name statistical unavailability.
+ * The last three are advisory quality flags
  * that never gate.
  */
 export type FailReason =
@@ -325,6 +326,9 @@ export type FailReason =
   | "process_violation"
   | "bootstrap_insignificant"
   | "mandate_breached"
+  | "deflation_unavailable"
+  | "bootstrap_unavailable"
+  | "selection_unavailable"
   | "high_selection_gap"
   | "is_rediscovery"
   | "oos_decay";
