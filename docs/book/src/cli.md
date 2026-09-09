@@ -61,6 +61,25 @@ ordered windows, ordered seeds, and retry policy. A checkpointed `--cmd` or
 endpoint address does not identify the artifact that served it. A mismatched or
 legacy checkpoint is refused rather than overwritten.
 
+Default resume skips all terminal cells, including exhausted runtime failures.
+Add `--retry-runtime-failures` to explicitly recover every runtime-failed cell
+under the same contract. Completed results, protocol violations and resource-
+limit failures are never requeued. Each invocation authorizes one additional
+round, with at most three recovery rounds per cell over the checkpoint's
+lifetime. The per-round retry limit is unchanged. Exhausting that ceiling
+refuses before executing any cell, rather than resetting the budget.
+
+Claims, per-round attempt counts and recovery counts are persisted. Every
+observed attempt and any terminal outcome are saved together before a later
+attempt starts. An interrupted claim retains its consumed per-round budget;
+its in-flight, unobserved work can still be absent from the ledger. Earlier
+attempts stay in the accounting even after recovery succeeds. The checkpoint
+is an operator-controlled record, not tamper-proof evidence, and a transport
+failure label alone does not prove that infrastructure caused the failure.
+Do not use recovery to select among completed outcomes. The running binary is
+part of the contract, so this flag does not authorize resuming an old binary's
+checkpoint under a new binary.
+
 Exhausted runtime failures make the external sweep noncertifying: the CLI emits
 expected, completed, runtime-failed, and agent-failed cell counts, then exits
 without a board. Agent-caused protocol faults remain in the pass^k denominator
