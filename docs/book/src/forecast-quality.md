@@ -6,7 +6,8 @@ replace any trading-rank gate.
 
 ## Input boundary
 
-The command accepts one `sharpe.forecast-evidence.v1` file per agent:
+The command accepts one `sharpe.forecast-evidence.v1` or
+`sharpe.forecast-evidence.v2` file per agent:
 
 ```bash
 sharpebench forecast-quality agent-a.json agent-b.json
@@ -53,6 +54,37 @@ digest. The report records the encoding each scored digest verified under in
 `sharpebench/canonical-json/v1` or `legacy`, and the human table prints the
 two counts. A legacy field is therefore visible as one; it is not silently
 promoted.
+
+### Declaring the encoding: `sharpe.forecast-evidence.v2`
+
+A v1 document cannot say which encoding it hashed under; SharpeBench infers it
+by recomputing both. `sharpe.forecast-evidence.v2` is the v1 envelope plus one
+field on every revision, beside the digest it describes:
+
+```json
+"contract_sha256": "0eb3250f...",
+"contract_digest_encoding": "legacy"
+```
+
+`contract_digest_encoding` is a string and must be exactly
+`sharpebench/canonical-json/v1` or `legacy`. It lives on the revision because
+that is where `contract_sha256` lives: a contract record carries no digest of
+itself, and on the producer side one contract answers to both digests, so the
+declaration belongs next to the one digest a revision actually names.
+
+A v2 revision is verified under the declared encoding only. There is no
+inference: a digest that recomputes under the other encoding is refused, and
+the error names the digest, the declared encoding and the encoding the digest
+does recompute under (`revision <id> declares contract digest <sha256> under
+sharpebench/canonical-json/v1, but it recomputes under legacy`); a digest that
+matches no contract says so in the same shape. Any other label is refused as an
+unknown encoding, and a v2 revision without the field is refused. The field set
+stays exact in both directions: a v1 document carrying
+`contract_digest_encoding` is refused rather than read as v2.
+
+`contract_digest_versions` in the report has the same shape for both envelopes.
+For v2 it records the declared encoding, which is also the verified one. A v1
+document and its v2 restatement produce the same report byte for byte.
 
 Migration notes for producers:
 

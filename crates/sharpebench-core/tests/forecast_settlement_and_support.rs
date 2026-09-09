@@ -72,6 +72,7 @@ fn document(agent: &str, probabilities: &[f64], outcomes: &[f64]) -> ForecastEvi
                 ordinal: 0,
                 supersedes: None,
                 contract_sha256: String::new(),
+                contract_digest_encoding: None,
                 prediction: vec![*probability],
                 confidence: *probability,
                 rationale: "evidence".to_string(),
