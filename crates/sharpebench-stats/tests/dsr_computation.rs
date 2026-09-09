@@ -48,6 +48,10 @@ fn finite_checked_deflation_keeps_existing_operation_order_and_fallbacks() {
         vec![0.01; 8],
         vec![0.0; 8],
         vec![-0.01, 0.02, 0.03, -0.04],
+        // Nonzero mean and asymmetric moments exercise the variance terms;
+        // centered or constant fixtures cannot distinguish those operations.
+        vec![-0.01, 0.02],
+        vec![0.01, 0.02, 0.03, -0.01],
     ] {
         for (trials, dispersion) in [(1, 0.0), (2, 0.5), (500, 0.5)] {
             let benchmark = expected_max_sharpe(dispersion, trials).unwrap();
