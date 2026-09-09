@@ -8,9 +8,11 @@ are the twelve listed in [RELEASING.md](RELEASING.md), and `xtask` and
 `examples/reference-agent` are `publish = false`. Each section is one `v*` tag
 and links the commits it was built from.
 
-[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.18.4...HEAD
+[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.19.0...HEAD
 
 ## [Unreleased]
+
+## [0.19.0] - 2026-09-09
 
 ### Known limitation
 - The corrected standardized moments and the corrected inventory/cash arithmetic ship in this release. SharpeArena pins `sharpebench-core` and `sharpebench-sim` at `=0.15.0`, which still carries the superseded versions, so the repairs reach that product only through its pin bump. Downstream diagnostics stay separately named until then. No committed evidence artifact in either repository was rescored; the one artifact regenerated after the freeze is the synthetic pass witness, rerun under the corrected seeds as a declared new experiment (see Fixed).
@@ -493,6 +495,7 @@ First published release.
 ### Fixed
 - Constant-time HMAC verification and bounded, timed agent HTTP reads ([6c3d174](https://github.com/general-liquidity/sharpebench/commit/6c3d174)).
 
+[0.19.0]: https://github.com/general-liquidity/sharpebench/compare/v0.18.4...v0.19.0
 [0.18.4]: https://github.com/general-liquidity/sharpebench/compare/v0.18.3...v0.18.4
 [0.18.3]: https://github.com/general-liquidity/sharpebench/compare/v0.18.2...v0.18.3
 [0.18.2]: https://github.com/general-liquidity/sharpebench/compare/v0.18.1...v0.18.2
