@@ -1,0 +1,37 @@
+# cargo-mutants configuration for the standing mutation leg in
+# .github/workflows/mutation.yml (cargo-mutants 27.1.0 reads this path by
+# default). The leg already narrows the run to the pull request's own diff and
+# to the four pure crates, so this file only records what is never worth
+# mutating and how long a mutant may run.
+
+# Integration-test targets are never mutated by cargo-mutants, and it skips
+# `#[cfg(test)]` modules and `#[test]` functions on its own. Naming the test
+# directories here makes the intent visible and still holds if a crate ever
+# puts helpers under `tests/` without a `#[cfg(test)]` guard.
+exclude_globs = ["**/tests/**"]
+
+# Generated code: there is none in sharpebench-core, -stats, -protocol or
+# -attest. No build.rs, no include!, no bindgen or prost output. The protocol
+# crate's `schema/*.json` is data that tests compare against, not Rust, so it
+# is not a mutation target. Nothing to exclude on that ground; this comment
+# records that the question was asked, so a future generator gets a glob here.
+
+# Mutations no test should be able to observe. The pattern is matched against
+# the mutant's name, e.g. `<impl Display for StatisticalError>::fmt`.
+exclude_re = [
+    # Display and Debug bodies render error and identity text. The suites
+    # assert on typed error variants and on values, not on prose, so replacing
+    # `fmt` with `Ok(())` changes nothing a test should pin; a missed mutant
+    # here would only push tests to freeze wording.
+    "<impl (std::)?(fmt::)?(Display|Debug) for ",
+]
+
+# Timeouts. The default is 1.5x the baseline test time with a 20 second floor,
+# tuned for suites that finish in a second or two. The core unit suite alone
+# takes several seconds and the bootstrap tests scale with the loop bounds a
+# mutant may lengthen, so a slow-but-correct mutant must not be reported as a
+# timeout while a hung one stays bounded. 3x the baseline with a 60 second
+# floor does both. The workflow passes the same multiplier on the command line
+# so the CI invocation is self-describing.
+timeout_multiplier = 3.0
+minimum_test_timeout = 60
