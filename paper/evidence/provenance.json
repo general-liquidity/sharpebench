@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "fe5745fc734c4e791158dc9efe25212a03496c1f",
+  "generated_at_head": "9f5d707e295ff40bb1a0521ab1aef7034cfeddbc",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -179,7 +179,7 @@
   "source_files": [
     {
       "path": "Cargo.lock",
-      "sha256": "697f854cee841b587500d8f7c801441f680e117417e5605d2d606929baed6511"
+      "sha256": "6fc750609c03009f1c4c6fc53280064ed4d42c23651e15527f2e3690d0fdc1fd"
     },
     {
       "path": "Cargo.toml",
@@ -483,7 +483,7 @@
     },
     {
       "path": "crates/sharpebench-harness/Cargo.toml",
-      "sha256": "1e0d47f88779b3491b2de7cf7ec164b3dda8d6ae00afd9aa1db2718aa4b41843"
+      "sha256": "671b670014f19452ffd08384278873e405fa6218ad8f34594cea0e55533a61af"
     },
     {
       "path": "crates/sharpebench-harness/examples/evidence_sweep.rs",
@@ -535,7 +535,11 @@
     },
     {
       "path": "crates/sharpebench-harness/src/artifact_scan.rs",
-      "sha256": "81806532bfbc4974aa498d5d33f35c2c78bf6c295d0bd945c33bb87b38c89ae7"
+      "sha256": "b89755bf19021c318e6e608c3e523fab6e735d48eeab6be1dc8caf4df7eed1f0"
+    },
+    {
+      "path": "crates/sharpebench-harness/src/artifact_tar.rs",
+      "sha256": "3bc78fa5c87e9133b44d1ff0f5f581e8d5f3287ab01ea08c3f76fbb3c80c0e3c"
     },
     {
       "path": "crates/sharpebench-harness/src/checkpoint.rs",
@@ -547,7 +551,7 @@
     },
     {
       "path": "crates/sharpebench-harness/src/lib.rs",
-      "sha256": "3ca2e5875ffcb81a1d4b6fa61218cc3bbde252e09e81b96ef4b9efcda068408e"
+      "sha256": "6b283d01243c122c1f28a00bc66f7af5b4b2bd5dead4a0f7befff5eb9635d8ef"
     },
     {
       "path": "crates/sharpebench-harness/src/perturb.rs",
@@ -556,6 +560,10 @@
     {
       "path": "crates/sharpebench-harness/tests/artifact_scan.rs",
       "sha256": "82cb7352ec3a624f0d2b5731c2d186de1679fb5b2001e2c0cfeac71addf4a435"
+    },
+    {
+      "path": "crates/sharpebench-harness/tests/artifact_tar.rs",
+      "sha256": "98b652ac55b197b4a8685fd1976b383e80af1067ed7289e3c3b93dd192e257ea"
     },
     {
       "path": "crates/sharpebench-harness/tests/attempt_ledger_preserves_failed_cost.rs",
@@ -1019,5 +1027,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "e4798c3a9424af418e755fece2cdb795022fc0e4e4395410f3355927270d356b"
+  "source_snapshot_sha256": "33eabbc713d8137e2eac2361bea0e359f66038789b153447a44fb7a39c2bd0aa"
 }
