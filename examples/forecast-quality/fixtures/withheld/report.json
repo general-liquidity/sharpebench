@@ -26,6 +26,16 @@
       "agent-beta": 0
     }
   },
+  "contract_digest_versions": {
+    "3aae818a553a69f509bbcca4c02c9d7ccfb73c26f57ed64102a9317c3c7951fe": "legacy",
+    "616a29f17861e3a0e96cf80138bde2ddfb8dedbed2fb3ece3f420ad565cc1927": "legacy",
+    "6d9abc47926ff6a5d408f2209c6b73d8eab86e89216683a3cac0630675fb0c4f": "legacy",
+    "9dfb54637b823966590993de454372d759943ab20e09f5552e32b11192318a42": "legacy",
+    "ac0ee07f6ee9895db258c9a35fffacb93900117ed91b24970cb3baf61ac748d6": "legacy",
+    "ba9ffd33be0166a0269aa5a510c76b70d6f3bfb21e605df7238dd98ba02fa87a": "legacy",
+    "c6e4e6a17b123ff3c75a26077b2e5f04227d08fd0be29c8fe0bf81e53c752c06": "legacy",
+    "d7a11c3b398eb0aff4fe41349343fe2048bb15faa8d3dfd8b828489cc6d8fee4": "legacy"
+  },
   "agents": [
     {
       "agent_id": "agent-alpha",
