@@ -16,7 +16,7 @@ Complete reads in this review include:
 - hyper/runtime_contract.py, performance.py, agent_context.py and _inner.py.
 - hyper/sandbox/model_gateway.py, native_runtime.py, builder.py,
   callback_broker.py, callback_mcp.py, starting_workspace.py and
-  result_serialization.py, orchestrator.py and sealed_runner.py.
+  result_serialization.py, orchestrator.py, sealed_runner.py and candidate_server.py.
 - tests/plus_support/leakage.py.
 
 Kit construction, provider adapters, client API, domain tools,
