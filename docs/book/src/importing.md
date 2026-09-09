@@ -57,10 +57,11 @@ Deliberately not a parser; see the StockBench section below.
 
 ## Run identities and missing observations
 
-For a keyed import, pass its identity file to the scorer:
+Keyed imports embed `run_keys` in each submission. Require those identities
+when scoring:
 
 ```bash
-sharpebench score subs.json --keys run-keys.json
+sharpebench score subs.json --require-run-keys
 ```
 
 The scorer derives the execution-seed count from the validated key grid.
