@@ -38,6 +38,7 @@ pub mod briefing;
 pub mod budget_curve;
 pub mod calibration;
 pub mod candidate_lineage;
+pub mod certification;
 pub mod comparison_sets;
 pub mod composite;
 pub mod correlation;
@@ -70,6 +71,10 @@ pub use budget_curve::{budget_curve, BudgetCurveOpts, BudgetCurveReport, BudgetP
 pub use candidate_lineage::{
     verify_candidate_lineage, CandidateAncestry, CandidateFamilyRobustness, CandidateLineageError,
     CandidateLineageLedger, CandidateLineageReport, CandidateLineageScore,
+};
+pub use certification::{
+    certify_lifecycle_v1, rank_certified, Certification, CertificationGap, RankMode, RankModeError,
+    LIFECYCLE_CERTIFIED_V1,
 };
 pub use comparison_sets::{
     comparison_set, qualifies, restrict_field, restrict_to_shared, ComparisonSet, TaggedRun,

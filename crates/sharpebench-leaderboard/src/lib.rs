@@ -63,9 +63,13 @@ pub fn render(board: &[CompositeScore]) -> String {
     // applied and how it went; a board with no declarations is unchanged.
     let declared = board.iter().any(|s| s.verdict_applied.is_some());
     let mandate_header = if declared { " mandate" } else { "" };
+    // Likewise a certification column, present only when the board was ranked
+    // under an opt-in rank mode; the legacy board is unchanged.
+    let certified = board.iter().any(|s| s.certification.is_some());
+    let certified_header = if certified { " certified" } else { "" };
     let _ = writeln!(
         out,
-        "{:<4} {:<18} {:>9} {:>19} {:>4} {:>7} {:>9}{mandate_header}",
+        "{:<4} {:<18} {:>9} {:>19} {:>4} {:>7} {:>9}{mandate_header}{certified_header}",
         "#", "agent", "DSR", "DSR CI", "tie", "elig", "raw_ret"
     );
     for s in board.iter() {
@@ -89,9 +93,19 @@ pub fn render(board: &[CompositeScore]) -> String {
         } else {
             String::new()
         };
+        let certification = if certified {
+            format!(
+                " {}",
+                s.certification
+                    .as_ref()
+                    .map_or_else(|| "uncertified".to_string(), |c| c.describe())
+            )
+        } else {
+            String::new()
+        };
         let _ = writeln!(
             out,
-            "{:<4} {:<18} {:>9.4} {:>19} {:>4} {:>7} {:>9.5}{mandate}",
+            "{:<4} {:<18} {:>9.4} {:>19} {:>4} {:>7} {:>9.5}{mandate}{certification}",
             pos, s.agent_id, s.deflated_sharpe, ci, tie, s.rank_eligible, s.raw_mean_return
         );
     }
@@ -296,6 +310,29 @@ mod tests {
         let chain = sign_board(&board, b"key");
         assert!(verify_board(&chain, b"key"));
         assert!(!verify_board(&chain, b"wrong-key"));
+    }
+
+    #[test]
+    fn render_adds_a_certification_column_only_under_a_rank_mode() {
+        use sharpebench_core::{rank_certified, MandateDeclarations, RankMode};
+        let subs = [sub("a", 0.002), sub("b", 0.0)];
+        let cfg = ScoreConfig::default();
+        let legacy = render(&rank(&subs, &cfg));
+        assert!(!legacy.contains("certified"));
+        let certified = render(&rank_certified(
+            &subs,
+            &MandateDeclarations::new(),
+            &cfg,
+            RankMode::LifecycleCertifiedV1,
+        ));
+        assert!(certified.lines().next().unwrap().ends_with(" certified"));
+        // Neither fixture carries lifecycle evidence, so both rows are
+        // withheld with the property named; the host columns are unchanged.
+        assert!(certified.contains("withheld (lifecycle-certified/v1): "));
+        assert!(certified.contains("lifecycle_evidence_absent[run 0]"));
+        for (l, c) in legacy.lines().zip(certified.lines()) {
+            assert!(c.starts_with(l), "host columns unchanged: {l:?} vs {c:?}");
+        }
     }
 
     #[test]
