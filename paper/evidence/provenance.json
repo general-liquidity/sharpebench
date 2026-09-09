@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "428a770dcde600748602dfb2adc7b95869861161",
+  "generated_at_head": "e367c9844cbb3a2a02e49d0c30c2dffb38e950d9",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -291,7 +291,7 @@
     },
     {
       "path": "crates/sharpebench-cli/src/main.rs",
-      "sha256": "aa4aea382fcf7524f6167f94cacbd763063fae4e88adefb2371cf811e22e85e2"
+      "sha256": "bb0f5a4e7629ebd01b92d4cc6758f12b048a3c26fd15cc95c990523561038a3f"
     },
     {
       "path": "crates/sharpebench-cli/src/update.rs",
@@ -331,7 +331,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/budget_curve.rs",
-      "sha256": "06f9700feb56c640d02da42f24a26f42ea54989362f0e2f0d285ae45534a77f4"
+      "sha256": "79e058168e663f1df8426c737a2752998f9194fef2c414a94f898b4a70ad45a8"
     },
     {
       "path": "crates/sharpebench-core/src/calibration.rs",
@@ -407,7 +407,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/regime_compare.rs",
-      "sha256": "c0a11f831733278042217e5b180c40108b24d859117aa3d17123cbe1f751e2ca"
+      "sha256": "d3dfb1eecea79fe5c11ed0793c0fafa2f7cb7e47e646a1d41d5a895dd2fdafcc"
     },
     {
       "path": "crates/sharpebench-core/src/roles.rs",
@@ -631,7 +631,7 @@
     },
     {
       "path": "crates/sharpebench-py/src/lib.rs",
-      "sha256": "52e57dfdf8dd1aa07e86e707f7e5b5645fc8c7335db4d03e50699e62d694f76a"
+      "sha256": "475fc3db006b34cb00108a7fde72c0c5442b3e6dde47506fbdc47fd08392417f"
     },
     {
       "path": "crates/sharpebench-sim/Cargo.toml",
@@ -739,7 +739,7 @@
     },
     {
       "path": "crates/sharpebench-wasm/src/lib.rs",
-      "sha256": "0deaf8d4cc32996935d73ec531c5dd5a0a887b51478b73183b13101c25a568bd"
+      "sha256": "f1a2cb82326c94ea3f6887a5e738431e1b9513f97987b7592ed5e9d1b4fb793a"
     },
     {
       "path": "crates/sharpebench-wasm/tests/board_context.rs",
@@ -967,5 +967,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "2cf12002a96b376adee6bc5e82b0375b1b7905b62aa752faa088d37403253f3b"
+  "source_snapshot_sha256": "4aa2b6f76a95542c66ed8a090cd3a3692b9e7b1737d4b4f3a176042ecaa253fb"
 }

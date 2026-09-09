@@ -18,7 +18,8 @@ rank.
 Per regime, per strategy, a **ZAGA split** (zero-adjusted gamma, after the
 "Regime-Conditional Distributional Comparison of Trading Strategies" paper):
 
-- the near-zero-return mass `zero_mass` (periods with `|r| <= zero_tol`). No
+- the near-zero-return mass `near_zero_return_mass` (periods with
+  `|r| <= zero_tol`). No
   trade or position flag reaches this module, so it cannot separate sitting out
   from holding a position that went nowhere or from a period whose gain went to
   fees: it is a return mass, not a participation rate;
@@ -32,8 +33,8 @@ Per regime, head to head:
 - `mean_gap` (pooled within the regime) and `cont_mean_gap` (near-zero-return
   periods removed). When the two diverge, the pooled comparison was mostly
   measuring how often each strategy moved at all, not how well it moved;
-- `zero_mass_gap`, a behavioural difference that survives even when the means
-  agree;
+- `near_zero_return_mass_gap`, a behavioural difference that survives even
+  when the means agree;
 - a two-sample Kolmogorov-Smirnov statistic between the two continuous parts,
   so a pure shape difference (same mean, fatter left tail) still registers;
 - `edge_sign` and whether the regime cleared `min_periods` and therefore

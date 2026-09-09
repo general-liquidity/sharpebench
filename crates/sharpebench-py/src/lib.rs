@@ -500,12 +500,14 @@ fn moments<'py>(py: Python<'py>, returns: Vec<f64>, target: f64) -> PyResult<Bou
 /// training set (you enforce the split).
 ///
 /// Returns a dict `{"n_budget_points", "peak_budget", "peak_dsr",
-/// "peak_dsr_deflated_for_selection", "overfit_onset", "is_monotone_improving",
+/// "peak_dsr_deflated_for_selection", "non_improvement_onset", "is_monotone_improving",
 /// "points"}` where each point is `{"budget", "n_returns", "oos_dsr", "oos_sharpe",
 /// "oos_sharpe_annualized", "oos_p_value", "marginal_dsr_per_budget"}`.
 /// `peak_dsr_deflated_for_selection` pays for the search over budgets and is `<=`
-/// the naive `peak_dsr`; `overfit_onset` / `marginal_dsr_per_budget` are `None` where
+/// the naive `peak_dsr`; `non_improvement_onset` / `marginal_dsr_per_budget` are `None` where
 /// they do not apply. No monotone law is fitted: the curve is reported, not gated.
+/// `non_improvement_onset` was previously emitted as `overfit_onset`; this surface
+/// only produces dicts, so the old key is gone rather than aliased.
 #[pyfunction]
 #[pyo3(signature = (
     points,
@@ -559,7 +561,7 @@ fn budget_curve<'py>(
         "peak_dsr_deflated_for_selection",
         report.peak_dsr_deflated_for_selection,
     )?;
-    d.set_item("overfit_onset", report.overfit_onset)?;
+    d.set_item("non_improvement_onset", report.non_improvement_onset)?;
     d.set_item("is_monotone_improving", report.is_monotone_improving)?;
     d.set_item("points", pts)?;
     Ok(d)

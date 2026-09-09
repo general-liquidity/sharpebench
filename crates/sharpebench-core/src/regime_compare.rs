@@ -60,7 +60,7 @@
 //! burying a classifier here would let a regime definition quietly become part
 //! of the scoring kernel.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::stats::{mean, std_dev, variance};
 
@@ -95,7 +95,7 @@ impl Default for RegimeCompareOpts {
 ///
 /// This is the ZAGA decomposition and nothing more: see the module header for
 /// what is and is not fitted.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ZagaSplit {
     /// Periods observed in this regime.
     pub n: usize,
@@ -103,7 +103,11 @@ pub struct ZagaSplit {
     /// the `nu` role in a ZAGA. It is a near-zero-**return** mass: with no trade
     /// or position flag in the input it cannot separate sitting out from holding
     /// a position that went nowhere, so it is not a participation rate.
-    pub zero_mass: f64,
+    ///
+    /// Serialized as `near_zero_return_mass`. The pre-rename key `zero_mass` is
+    /// still accepted on input and is deprecated for removal in a later major.
+    #[serde(alias = "zero_mass")]
+    pub near_zero_return_mass: f64,
     /// Periods in the continuous part.
     pub n_nonzero: usize,
     /// Fraction of the continuous part that is positive, in [0, 1]. A gamma is
@@ -128,7 +132,7 @@ pub struct ZagaSplit {
 }
 
 /// Head-to-head comparison of two strategies inside one regime.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RegimeComparison {
     /// The caller's regime label.
     pub regime: String,
@@ -138,10 +142,16 @@ pub struct RegimeComparison {
     pub a: ZagaSplit,
     /// Strategy B's mixture split in this regime.
     pub b: ZagaSplit,
-    /// `a.zero_mass - b.zero_mass`. Positive means A had more near-zero-return
-    /// periods here, which is a genuine behavioural difference even when the
-    /// means agree. It is not by itself a difference in how often each traded.
-    pub zero_mass_gap: f64,
+    /// `a.near_zero_return_mass - b.near_zero_return_mass`. Positive means A had
+    /// more near-zero-return periods here, which is a genuine behavioural
+    /// difference even when the means agree. It is not by itself a difference in
+    /// how often each traded.
+    ///
+    /// Serialized as `near_zero_return_mass_gap`. The pre-rename key
+    /// `zero_mass_gap` is still accepted on input and is deprecated for removal in
+    /// a later major.
+    #[serde(alias = "zero_mass_gap")]
+    pub near_zero_return_mass_gap: f64,
     /// `a.pooled_mean - b.pooled_mean` inside this regime.
     pub mean_gap: f64,
     /// `a.cont_mean - b.cont_mean`: the gap once the near-zero-return periods are
@@ -160,7 +170,7 @@ pub struct RegimeComparison {
 }
 
 /// Full regime-conditional comparison of two strategies.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RegimeDistributionReport {
     /// One entry per distinct regime label, ordered lexicographically by label so
     /// the report is byte-identical on every recompute.
@@ -260,7 +270,7 @@ fn zaga_split(xs: &[f64], zero_tol: f64) -> ZagaSplit {
     let n = xs.len();
     let cont: Vec<f64> = xs.iter().copied().filter(|r| r.abs() > zero_tol).collect();
     let n_nonzero = cont.len();
-    let zero_mass = if n == 0 {
+    let near_zero_return_mass = if n == 0 {
         0.0
     } else {
         (n - n_nonzero) as f64 / n as f64
@@ -285,7 +295,7 @@ fn zaga_split(xs: &[f64], zero_tol: f64) -> ZagaSplit {
 
     ZagaSplit {
         n,
-        zero_mass,
+        near_zero_return_mass,
         n_nonzero,
         positive_share,
         cont_mean: mean(&cont),
@@ -353,7 +363,7 @@ pub fn compare_by_regime(
         out.push(RegimeComparison {
             regime: label,
             n_periods: idx.len(),
-            zero_mass_gap: sa.zero_mass - sb.zero_mass,
+            near_zero_return_mass_gap: sa.near_zero_return_mass - sb.near_zero_return_mass,
             mean_gap,
             cont_mean_gap: sa.cont_mean - sb.cont_mean,
             ks_statistic: ks_two_sample(&cont_a, &cont_b),
@@ -557,15 +567,15 @@ mod tests {
             r.mean_gap
         );
         assert!(
-            (r.a.zero_mass - 0.75).abs() < 1e-12,
+            (r.a.near_zero_return_mass - 0.75).abs() < 1e-12,
             "A sits out 3 of 4: {}",
-            r.a.zero_mass
+            r.a.near_zero_return_mass
         );
-        assert!(r.b.zero_mass.abs() < 1e-12, "B always trades");
+        assert!(r.b.near_zero_return_mass.abs() < 1e-12, "B always trades");
         assert!(
-            r.zero_mass_gap > 0.7,
+            r.near_zero_return_mass_gap > 0.7,
             "the split should shout: {}",
-            r.zero_mass_gap
+            r.near_zero_return_mass_gap
         );
         assert!(
             (r.cont_mean_gap - 0.03).abs() < 1e-12,
@@ -658,5 +668,37 @@ mod tests {
         assert_eq!(first, second, "recompute must be identical");
         let order: Vec<&str> = first.regimes.iter().map(|r| r.regime.as_str()).collect();
         assert_eq!(order, vec!["alpha", "mike", "zulu"]);
+    }
+
+    #[test]
+    fn near_zero_return_mass_serializes_under_the_new_key_and_reads_the_old_one() {
+        let lab = vec!["all"; 8];
+        let a = vec![0.04, 0.0, 0.0, 0.0, 0.04, 0.0, 0.0, 0.0];
+        let b = vec![0.01; 8];
+        let report = compare_by_regime(&a, &b, &lab, RegimeCompareOpts::default());
+
+        let json = serde_json::to_string(&report).unwrap();
+        assert!(json.contains("\"near_zero_return_mass\":"), "{json}");
+        assert!(json.contains("\"near_zero_return_mass_gap\":"), "{json}");
+        assert!(
+            !json.contains("\"zero_mass\":"),
+            "old key must not serialize"
+        );
+        assert!(
+            !json.contains("\"zero_mass_gap\":"),
+            "old key must not serialize"
+        );
+
+        let round_trip: RegimeDistributionReport = serde_json::from_str(&json).unwrap();
+        assert_eq!(round_trip, report);
+
+        // A report saved before the rename still parses: `zero_mass` and
+        // `zero_mass_gap` are accepted as aliases of the new keys.
+        let legacy = json
+            .replace("\"near_zero_return_mass_gap\":", "\"zero_mass_gap\":")
+            .replace("\"near_zero_return_mass\":", "\"zero_mass\":");
+        assert!(legacy.contains("\"zero_mass\":") && !legacy.contains("near_zero"));
+        let from_legacy: RegimeDistributionReport = serde_json::from_str(&legacy).unwrap();
+        assert_eq!(from_legacy, report);
     }
 }

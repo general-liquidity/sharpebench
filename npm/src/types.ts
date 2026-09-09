@@ -363,7 +363,7 @@ export interface RegimeCompareOpts {
 
 export interface ZagaSplit {
   n: number;
-  zero_mass: number;
+  near_zero_return_mass: number;
   n_nonzero: number;
   positive_share: number;
   cont_mean: number;
@@ -379,7 +379,7 @@ export interface RegimeComparison {
   n_periods: number;
   a: ZagaSplit;
   b: ZagaSplit;
-  zero_mass_gap: number;
+  near_zero_return_mass_gap: number;
   mean_gap: number;
   cont_mean_gap: number;
   ks_statistic: number;

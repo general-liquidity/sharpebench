@@ -174,6 +174,22 @@ test("regimeCompare reports a pooled sign reversal", () => {
   assert.deepEqual(report.reversal_regimes, ["calm"]);
 });
 
+test("regimeCompare emits the renamed near-zero-return mass keys from the shipped wasm", () => {
+  const report = sb.regimeCompare(
+    [0.02, 0.03, -0.01, -0.02],
+    [0.0, 0.01, 0.01, 0.02],
+    ["calm", "calm", "stress", "stress"],
+    { minPeriods: 2 },
+  );
+  const calm = report.regimes.find((r) => r.regime === "calm");
+  assert.equal(typeof calm.near_zero_return_mass_gap, "number");
+  assert.equal(typeof calm.a.near_zero_return_mass, "number");
+  assert.equal(calm.b.near_zero_return_mass, 0.5, "B has one exact zero of two calm periods");
+  // The pre-rename keys must not reach the wire from a rebuilt kernel.
+  assert.equal(Object.hasOwn(calm, "zero_mass_gap"), false);
+  assert.equal(Object.hasOwn(calm.a, "zero_mass"), false);
+});
+
 test("regimeCompare refuses misaligned arrays", () => {
   assert.throws(
     () => sb.regimeCompare([0.1], [0.1, 0.2], ["calm"]),
