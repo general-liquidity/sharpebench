@@ -3,6 +3,22 @@
 //! Everything here is plain `f64` with a fixed summation order so results are
 //! reproducible across platforms. Approximations (erf, inverse-normal) are the
 //! standard published closed forms and are unit-tested against known values.
+//!
+//! The bodies of [`erf`], [`norm_cdf`] and [`norm_ppf`] are frozen bit for bit
+//! by `tests/special_function_bits.rs`: every published score that prints a
+//! PSR, a deflation bar or a DSR interval at full precision was produced by
+//! these exact polynomials, and a more accurate replacement (measured against
+//! `statrs` 0.19.1 in 2026-09, see the deflated-Sharpe chapter of the book)
+//! changes those bytes. Swapping the bodies is a golden-fixture regeneration,
+//! not a refactor.
+//!
+//! The moment estimators ([`mean`], [`variance`], [`std_dev`], [`skewness`],
+//! [`kurtosis`]) stay hand-rolled on purpose: the standardized moments use the
+//! population normalisation (`m2 = sum((x - mean)^2) / n`) that the 2026-09-07
+//! audit (R03) fixed, and no library exposes a sample skewness or kurtosis
+//! under that convention (`statrs` has none over data at all; its skewness and
+//! kurtosis traits describe distributions). A wrapper would have to
+//! re-implement the normalisation and would obscure the one the audit pinned.
 
 /// Arithmetic mean. Returns 0.0 for an empty slice.
 pub fn mean(xs: &[f64]) -> f64 {
