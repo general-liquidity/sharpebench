@@ -121,6 +121,16 @@ product behavior is correct. Repair progress belongs in IMPLEMENTATION.md.
     methodology version against installed package metadata and exercises
     repaired refusal paths. A version string alone is not binary provenance.
 
+13. **F13: finite inputs can overflow inside Result-returning deflation.**
+    Bench deflated_sharpe.rs checked input finiteness but returned the raw scalar
+    PSR. Three maximum-float returns produced Ok(NaN); maximum-float trial
+    dispersion produced Ok(infinity); overflowing the combined null and
+    deflation benchmark could saturate the CDF and return Ok(0.0).
+    The repaired Result APIs validate computed moments, the expected maximum,
+    combined benchmark, variance and z statistic before a floor or saturation
+    can hide failure. Valid-input operation order remains unchanged. The legacy
+    raw scalar PSR API is not converted into a checked Result API by this change.
+
 ## Reviewer coverage and limits
 
 The following coverage statements are reproduced verbatim.

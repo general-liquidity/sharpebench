@@ -35,6 +35,7 @@
 | F10, unexplained rejection | A real invalid-CI configuration rejected a strong field without the expected statistical reason. | Deflation, bootstrap and selection errors have stable serialized labels and appear in rollups. |
 | F11/F12, installed npm behavior | The new regression first failed on the old WASM's missing statistical disqualification, then on the rebuilt WASM's error discarded by the old wrapper. | Repaired wrapper and rebuilt WASM pass all 20 npm tests and the offline installed-tarball probe. Final rebuilding remains required after further numerical edits. |
 | G09, discarded attempt summary | The real-CLI loopback regression failed on an isolated copy of the pre-change tree because incomplete-sweep JSON omitted accounting. | The repaired CLI reports 48 failed attempts for 16 exhausted cells, monetary cost unavailable, and no board. Two unit tests also pin unknown duration and unchanged score/order/reference rows. |
+| F13, hidden deflation overflow | Three new regression functions failed against an isolated pre-fix tree: finite returns or parameters produced Ok(NaN), Ok(infinity), or a saturated numeric fallback. | Four regression functions pass, including finite valid-input bit comparisons against the previous scalar PSR and existing short/constant-series behavior. |
 
 These regressions use synthetic inputs and existing artifacts. No model was
 downloaded or called, no API credits were spent, and no market data was acquired.
@@ -53,7 +54,9 @@ Bench:
   37 integration tests and one doc test passed.
 - Affected-package clippy with warnings denied passed.
 - npm build, 20 tests, offline tarball installation, and the MCP build plus
-  nine tests passed against the rebuilt sibling package.
+  nine tests passed against the rebuilt sibling package. All were repeated
+  successfully after F13 and the final WASM rebuild with wasm-bindgen 0.2.126,
+  matching Cargo.lock.
 - `python3 -m unittest paper/src/test_import_prospective_field.py`: 6 tests passed.
 - `python3 scripts/check-paired-boundaries.py`: passes with its existing
   24-entry allowlist. A green result is not complete boundary coverage.
@@ -81,6 +84,15 @@ testing reported 73 mutants: 60 caught, three unviable, ten missed. The missed
 SPA arithmetic mutations require stronger tests; the check is not bypassed or
 explained away as a runner flake. Subsequent local changes need a new pushed
 head and fresh CI. CodeRabbit skipped review while the PRs were drafts.
+
+The three new tests in stats/tests/spa_studentization.rs are independently
+checked by spa_reference.py. That reference uses rational means, variances and
+squared positive-statistic comparisons; only consistent-SPA exclusion uses
+floating log/sqrt. All three fixtures have no ties at the observed statistic.
+The reference is a numerical cross-check, not evidence of nominal test coverage.
+Replaying the ten exact CI-missed arithmetic mutations in an isolated source
+copy now produces ten failing test runs. Restoring the source passes all three
+tests. This local replay does not replace the next complete CI mutation run.
 
 Final package rebuilding, installed consumers, normal merging and post-merge
 verification remain Bench delivery gates. None of this is a release.

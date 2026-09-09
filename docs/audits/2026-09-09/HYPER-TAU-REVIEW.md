@@ -16,10 +16,10 @@ Complete reads in this review include:
 - hyper/runtime_contract.py, performance.py, agent_context.py and _inner.py.
 - hyper/sandbox/model_gateway.py, native_runtime.py, builder.py,
   callback_broker.py, callback_mcp.py, starting_workspace.py and
-  result_serialization.py and orchestrator.py.
+  result_serialization.py, orchestrator.py and sealed_runner.py.
 - tests/plus_support/leakage.py.
 
-Kit construction, sealed runner, provider adapters, client API, domain tools,
+Kit construction, provider adapters, client API, domain tools,
 task corpus, test coverage,
 web UI and remaining configuration are still open. No model calls or repository
 test suites that require provider access have been run.
@@ -28,6 +28,16 @@ Paths below are relative to src/tau2 unless stated otherwise. The review concern
 the downloaded source, not a claim about a deployed service.
 
 ## Corrections to the earlier assessment
+
+The code has two separate gateway arrangements. Native construction uses an
+HTTP sidecar. The scored candidate in sealed_runner.py instead keeps Docker
+networking disabled and multiplexes model requests over stdout to a host
+provider caller. That host-mediated arrangement is a more direct candidate for
+Bench's existing network-disabled boundary. Neither implementation should be
+copied unchanged: the sealed runner's queue bounds line count rather than line
+bytes, its outer request deadline does not interrupt a blocking provider call,
+and model-call limits are per request rather than per sweep. These are source
+observations, not demonstrated attacks on the deployed service.
 
 | Mechanism | What the source actually does | Sharpe suite decision |
 |---|---|---|
