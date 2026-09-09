@@ -76,6 +76,35 @@ separate uncertainty API's documented binary-input format.
 These checks bind agent identity, not run timing. Legacy `Run` arrays still
 require the caller to align window, seed and period order across entrants.
 
+## Statistical unavailability and migration
+
+The npm wrapper preserves the kernel's error fields rather than dropping them
+while converting names to camel case:
+
+| API | Field | Meaning |
+|---|---|---|
+| `isMySharpeReal` and `full.honesty` | `statisticsError` | Deflation was not estimated. Do not interpret its numeric fallback as measured no-skill performance. |
+| `isMySharpeRealFull` | `snoopingError` | The whole fieldwise family was withheld; p-values of 1 and all-false `stepDown` are conservative sentinels. |
+| `isMySharpeRealFull` | `pboError` | PBO is unavailable and serializes as `null`. |
+| `percentileSelection` | `input_error` | At least one candidate or parameter is unsupported. Both winner indices are null. |
+
+Absent optional error fields mean only that the corresponding kernel computation
+accepted its inputs, not that the statistical assumptions hold. Nonfinite
+floating-point diagnostics serialize as JSON null. The honesty and PBO types now
+represent those nulls explicitly; callers that previously assumed every field
+was numeric need a null check. An infinite minimum track record length, for
+example, is not zero required observations.
+
+The full verdict also exposes its existing kernel `hlz` diagnostic as
+`{tStat, tThreshold, passed, explanation}`. It is separate from the headline
+honesty verdict. Board explanations include `deflation_unavailable`,
+`bootstrap_unavailable` and `selection_unavailable`.
+
+The same refusal regressions execute through the committed WASM wrapper and
+through an offline-installed npm tarball. A source-only fix is not sufficient:
+rebuild `npm/pkg/` when the kernel changes and run both `npm test` and
+`npm run smoke-install` from `npm/`.
+
 ## The MCP server
 
 [`@general-liquidity/sharpebench-mcp`](https://www.npmjs.com/package/@general-liquidity/sharpebench-mcp)

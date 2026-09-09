@@ -12,7 +12,11 @@ and links the commits it was built from.
 
 ## [Unreleased]
 
+### Breaking
+- npm: honesty diagnostics and PBO now have explicit nullable TypeScript types matching their JSON output. Handle null before numeric operations; it does not mean zero. Statistical refusal reasons survive camel-case conversion as `statisticsError`, `snoopingError` and `pboError`. Full verdicts also expose the kernel's HLZ diagnostic. See the [migration guide](docs/book/src/wasm.md#statistical-unavailability-and-migration).
+
 ### Fixed
+- The committed npm WASM kernel is rebuilt from current source. A shared regression runs against both the wrapper and an offline-installed tarball, checking the methodology version, unavailable-score explanations, unsupported candidate selection and fieldwise overflow refusal.
 - The prospective-field importer accepts v1 and v2 evidence with envelope-appropriate digest labels and verifies that resolved identities, contracts and revisions match sealed submissions. It still leaves full contract-digest and score validation to the forecast-analysis kernel.
 - Disqualification reports and rollups name `deflation_unavailable`, `bootstrap_unavailable` and `selection_unavailable`. New statistical gates can no longer reject an otherwise strong submission without an explanation. The npm reason union includes the new labels.
 - Forecast comparisons canonicalize realized-outcome numbers with the versioned contract encoding. Integer-valued floats and signed zero no longer create false settlement disputes; genuinely different outcomes remain refused. This internal comparison identity is not a field in published reports.
