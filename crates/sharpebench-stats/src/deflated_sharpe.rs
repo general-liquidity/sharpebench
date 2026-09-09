@@ -5,7 +5,9 @@
 //! short track inflates the noise these statistics exist to expose).
 
 use crate::stats::{kurtosis, mean, norm_cdf, norm_ppf, skewness, std_dev};
-use crate::validation::{dispersion, finite_observations, finite_parameter, StatisticalError};
+use crate::validation::{
+    dispersion, finite_computation, finite_observations, finite_parameter, StatisticalError,
+};
 
 /// Per-period Sharpe ratio (excess assumed; pass excess returns if you have a
 /// non-zero risk-free rate). 0.0 if volatility is 0.
@@ -36,6 +38,33 @@ pub fn probabilistic_sharpe_ratio(returns: &[f64], sr_benchmark: f64) -> f64 {
     norm_cdf(z)
 }
 
+/// Checked counterpart for Result-returning deflation. Validate before a
+/// numerical floor or CDF saturation can conceal an overflowing computation.
+/// The legacy scalar PSR above retains its API and operation order.
+fn checked_psr(returns: &[f64], sr_benchmark: f64) -> Result<f64, StatisticalError> {
+    let n = returns.len();
+    if n < 2 {
+        return Ok(0.0);
+    }
+    let center = finite_computation(mean(returns), "return mean")?;
+    let scale = finite_computation(std_dev(returns), "return standard deviation")?;
+    let sr = finite_computation(
+        if scale == 0.0 { 0.0 } else { center / scale },
+        "Sharpe ratio",
+    )?;
+    let g3 = finite_computation(skewness(returns), "return skewness")?;
+    let g4 = finite_computation(kurtosis(returns), "return kurtosis")?;
+    let variance =
+        finite_computation(1.0 - g3 * sr + ((g4 - 1.0) / 4.0) * sr * sr, "PSR variance")?;
+    let denom = variance.max(1e-12).sqrt();
+    let numerator = finite_computation(
+        (sr - sr_benchmark) * (n as f64 - 1.0).sqrt(),
+        "PSR numerator",
+    )?;
+    let z = finite_computation(numerator / denom, "PSR z statistic")?;
+    finite_computation(norm_cdf(z), "PSR probability")
+}
+
 /// Expected maximum Sharpe ratio under `n_trials` independent strategy trials,
 /// given the cross-trial dispersion of Sharpe ratios `trials_sr_std`
 /// (Bailey & López de Prado, eq. for E[max SR_N]).
@@ -55,7 +84,10 @@ pub fn expected_max_sharpe(trials_sr_std: f64, n_trials: u32) -> Result<f64, Sta
     let e = std::f64::consts::E;
     let z1 = norm_ppf(1.0 - 1.0 / n);
     let z2 = norm_ppf(1.0 - 1.0 / (n * e));
-    Ok(trials_sr_std * ((1.0 - GAMMA) * z1 + GAMMA * z2))
+    finite_computation(
+        trials_sr_std * ((1.0 - GAMMA) * z1 + GAMMA * z2),
+        "expected maximum Sharpe",
+    )
 }
 
 /// Deflated Sharpe Ratio: the PSR computed against the *expected maximum* Sharpe
@@ -85,8 +117,11 @@ pub fn deflated_sharpe_ratio_against_null(
 ) -> Result<f64, StatisticalError> {
     finite_observations(returns)?;
     finite_parameter(null_mean_sharpe, "null_mean_sharpe")?;
-    let sr_star = null_mean_sharpe + expected_max_sharpe(trials_sr_std, n_trials)?;
-    Ok(probabilistic_sharpe_ratio(returns, sr_star))
+    let sr_star = finite_computation(
+        null_mean_sharpe + expected_max_sharpe(trials_sr_std, n_trials)?,
+        "deflation benchmark",
+    )?;
+    checked_psr(returns, sr_star)
 }
 
 #[cfg(test)]
