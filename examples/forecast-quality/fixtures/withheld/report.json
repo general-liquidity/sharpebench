@@ -12,14 +12,14 @@
   "common_support": {
     "n_contracts": 8,
     "contract_sha256": [
-      "3aae818a553a69f509bbcca4c02c9d7ccfb73c26f57ed64102a9317c3c7951fe",
-      "616a29f17861e3a0e96cf80138bde2ddfb8dedbed2fb3ece3f420ad565cc1927",
-      "6d9abc47926ff6a5d408f2209c6b73d8eab86e89216683a3cac0630675fb0c4f",
-      "9dfb54637b823966590993de454372d759943ab20e09f5552e32b11192318a42",
-      "ac0ee07f6ee9895db258c9a35fffacb93900117ed91b24970cb3baf61ac748d6",
-      "ba9ffd33be0166a0269aa5a510c76b70d6f3bfb21e605df7238dd98ba02fa87a",
-      "c6e4e6a17b123ff3c75a26077b2e5f04227d08fd0be29c8fe0bf81e53c752c06",
-      "d7a11c3b398eb0aff4fe41349343fe2048bb15faa8d3dfd8b828489cc6d8fee4"
+      "0b84b1487feb7eb58b9d781c44e19c174ad870c6c1ab97d8631d090590aade40",
+      "2614553c8c88026945f8f3c124f86e0cd8209dd2f381ea3e047cfd66fad350a3",
+      "3aa5b402c340ed6bd09126345f5e8edda8390112055c04ad33c77b50f2e94603",
+      "4663a264ea71a081e6b5f9c254914718a4494081a8b83b61a46a5afb18f03496",
+      "62f3516ca813cd30ae3653c6b9882782a8fd042c012d483038a8843c908c305e",
+      "b8dfb42e384bcc1d5b4931667eb518e3c7742b03a1de0ee1e25e2a04c79d48a8",
+      "d4c6375d8480ce5bdc247d9901338f6d20e4a26443a1a6b29a66f5ba3c0b7017",
+      "fa3030d5883958b4317073aea89e32d6aea74e694db431743458482d2086eb44"
     ],
     "excluded_resolved_by_agent": {
       "agent-alpha": 0,
@@ -27,14 +27,14 @@
     }
   },
   "contract_digest_versions": {
-    "3aae818a553a69f509bbcca4c02c9d7ccfb73c26f57ed64102a9317c3c7951fe": "legacy",
-    "616a29f17861e3a0e96cf80138bde2ddfb8dedbed2fb3ece3f420ad565cc1927": "legacy",
-    "6d9abc47926ff6a5d408f2209c6b73d8eab86e89216683a3cac0630675fb0c4f": "legacy",
-    "9dfb54637b823966590993de454372d759943ab20e09f5552e32b11192318a42": "legacy",
-    "ac0ee07f6ee9895db258c9a35fffacb93900117ed91b24970cb3baf61ac748d6": "legacy",
-    "ba9ffd33be0166a0269aa5a510c76b70d6f3bfb21e605df7238dd98ba02fa87a": "legacy",
-    "c6e4e6a17b123ff3c75a26077b2e5f04227d08fd0be29c8fe0bf81e53c752c06": "legacy",
-    "d7a11c3b398eb0aff4fe41349343fe2048bb15faa8d3dfd8b828489cc6d8fee4": "legacy"
+    "0b84b1487feb7eb58b9d781c44e19c174ad870c6c1ab97d8631d090590aade40": "sharpebench/canonical-json/v1",
+    "2614553c8c88026945f8f3c124f86e0cd8209dd2f381ea3e047cfd66fad350a3": "sharpebench/canonical-json/v1",
+    "3aa5b402c340ed6bd09126345f5e8edda8390112055c04ad33c77b50f2e94603": "sharpebench/canonical-json/v1",
+    "4663a264ea71a081e6b5f9c254914718a4494081a8b83b61a46a5afb18f03496": "sharpebench/canonical-json/v1",
+    "62f3516ca813cd30ae3653c6b9882782a8fd042c012d483038a8843c908c305e": "sharpebench/canonical-json/v1",
+    "b8dfb42e384bcc1d5b4931667eb518e3c7742b03a1de0ee1e25e2a04c79d48a8": "sharpebench/canonical-json/v1",
+    "d4c6375d8480ce5bdc247d9901338f6d20e4a26443a1a6b29a66f5ba3c0b7017": "sharpebench/canonical-json/v1",
+    "fa3030d5883958b4317073aea89e32d6aea74e694db431743458482d2086eb44": "sharpebench/canonical-json/v1"
   },
   "agents": [
     {
@@ -182,7 +182,7 @@
       "agent_b": "agent-beta",
       "n_contracts": 8,
       "n_settlement_blocks": 2,
-      "mean_loss_difference": -0.20527500000000004,
+      "mean_loss_difference": -0.20527499999999999,
       "familywise_significant": false,
       "inference_error": "familywise level 0.05 is finer than a 2-block resampling law can resolve: single-block resamples hold 0.5 of its mass, and more bootstrap replications estimate that same law without adding blocks"
     }
