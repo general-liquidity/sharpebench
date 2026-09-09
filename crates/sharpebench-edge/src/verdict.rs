@@ -297,10 +297,26 @@ pub fn is_my_sharpe_real_full(
 
     FullVerdict {
         honesty,
-        reality_check_p: reality_check_p.unwrap_or(1.0),
-        spa_p: spa_p.unwrap_or(1.0),
-        spa_consistent_p: spa_consistent_p.unwrap_or(1.0),
-        step_down: step_down.unwrap_or_else(|_| vec![false; field.len()]),
+        reality_check_p: if snooping_error.is_some() {
+            1.0
+        } else {
+            reality_check_p.unwrap_or(1.0)
+        },
+        spa_p: if snooping_error.is_some() {
+            1.0
+        } else {
+            spa_p.unwrap_or(1.0)
+        },
+        spa_consistent_p: if snooping_error.is_some() {
+            1.0
+        } else {
+            spa_consistent_p.unwrap_or(1.0)
+        },
+        step_down: if snooping_error.is_some() {
+            vec![false; field.len()]
+        } else {
+            step_down.unwrap_or_else(|_| vec![false; field.len()])
+        },
         pbo,
         hlz,
         snooping_error,
@@ -530,6 +546,21 @@ mod tests {
         assert_eq!(full.spa_p, 1.0);
         assert_eq!(full.spa_consistent_p, 1.0);
         assert_eq!(full.step_down, vec![false; field.len()]);
+    }
+
+    #[test]
+    fn overflowing_family_member_withholds_every_snooping_verdict() {
+        for field in [
+            vec![vec![1e308, 1e308]; 2],
+            vec![vec![1e160, -1e160], vec![0.01, 0.02]],
+        ] {
+            let full = is_my_sharpe_real_full(&field, 1, &HonestyConfig::default());
+            assert!(full.snooping_error.is_some());
+            assert_eq!(full.reality_check_p, 1.0);
+            assert_eq!(full.spa_p, 1.0);
+            assert_eq!(full.spa_consistent_p, 1.0);
+            assert_eq!(full.step_down, vec![false; field.len()]);
+        }
     }
 
     /// R02 guard: a valid verdict is byte-for-byte what it always was.
