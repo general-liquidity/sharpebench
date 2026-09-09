@@ -122,11 +122,43 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # Pinned release binary rather than `cargo install`: the runner downloads
+      # one archive instead of compiling the runner on every OS.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nextest@0.9.143
+
       - name: Build
         run: cargo build --workspace --locked || cargo build --workspace
 
+      # nextest runs every test binary's tests in one process-per-test pool, so
+      # the crate-by-crate serialisation of `cargo test` no longer floors the
+      # leg on its slowest binary. `#[ignore]`d tests stay skipped here; the one
+      # long harness reconstruction runs in `slow-harness` below.
       - name: Test
-        run: cargo test --workspace
+        run: cargo nextest run --workspace
+
+      # nextest does not run doctests; keep them on every OS as before.
+      - name: Doctests
+        run: cargo test --workspace --doc
+
+  slow-harness:
+    name: slow harness (clone-merge regression)
+    # `mandate_field_changes_dispersion_source_on_three_panels` reconstructs two
+    # nine-dataset fields with the current engine and takes about 6.5 minutes on
+    # its own, which used to floor all three OS legs of `test`. It is `#[ignore]`d
+    # there and runs here, on one OS, in parallel with the matrix. `--ignored`
+    # runs only that test so this job fails for one reason only.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96.0"
+      - uses: Swatinem/rust-cache@v2
+      - name: Run the ignored clone-merge regression
+        run: cargo test -p sharpebench-harness --test evidence_fields_no_clone_merges -- --ignored
 
   python:
     name: sharpebench-py (fmt, clippy, maturin, pytest)
