@@ -1662,14 +1662,15 @@ mod tests {
         assert!((report.agents[0].metrics[0].mean_loss - 0.09).abs() < 1e-12);
     }
 
-    #[test]
-    fn cross_product_tutorial_is_content_addressed_and_recomputes_exactly() {
-        let alpha = include_str!("../../../examples/forecast-quality/fixtures/agent-alpha.json");
-        let beta = include_str!("../../../examples/forecast-quality/fixtures/agent-beta.json");
-        let manifest: Value = serde_json::from_str(include_str!(
-            "../../../examples/forecast-quality/fixtures/manifest.json"
-        ))
-        .unwrap();
+    /// Verify one tutorial field against its manifest and recompute its frozen report
+    /// byte for byte with the tutorial's analysis settings.
+    fn recompute_tutorial_field(
+        alpha: &str,
+        beta: &str,
+        manifest: &str,
+        expected_report: &str,
+    ) -> ForecastQualityReport {
+        let manifest: Value = serde_json::from_str(manifest).unwrap();
         for (name, payload) in [("agent-alpha.json", alpha), ("agent-beta.json", beta)] {
             let digest = format!("{:x}", Sha256::digest(payload.as_bytes()));
             assert_eq!(manifest["files"][name].as_str(), Some(digest.as_str()));
@@ -1691,11 +1692,41 @@ mod tests {
         )
         .unwrap();
         let actual = serde_json::to_string_pretty(&report).unwrap() + "\n";
-        let expected = include_str!("../../../examples/forecast-quality/fixtures/report.json");
-        assert_eq!(actual, expected);
-        assert_eq!(report.common_support.n_contracts, 8);
-        assert_eq!(report.comparisons[0].n_settlement_blocks, 2);
+        assert_eq!(actual, expected_report);
         assert_eq!(report.rank_effect, "reported_only_never_trading_rank");
+        report
+    }
+
+    #[test]
+    fn cross_product_tutorial_is_content_addressed_and_recomputes_exactly() {
+        let report = recompute_tutorial_field(
+            include_str!("../../../examples/forecast-quality/fixtures/agent-alpha.json"),
+            include_str!("../../../examples/forecast-quality/fixtures/agent-beta.json"),
+            include_str!("../../../examples/forecast-quality/fixtures/manifest.json"),
+            include_str!("../../../examples/forecast-quality/fixtures/report.json"),
+        );
+        assert_eq!(report.common_support.n_contracts, 12);
+        let comparison = &report.comparisons[0];
+        assert_eq!(comparison.n_settlement_blocks, 6);
+        assert_eq!(comparison.inference_error, None);
+        assert!(comparison.confidence_lower.unwrap() < comparison.confidence_upper.unwrap());
+        assert!(comparison.familywise_significant);
+    }
+
+    #[test]
+    fn cross_product_tutorial_withheld_field_records_the_reason_and_recomputes_exactly() {
+        let report = recompute_tutorial_field(
+            include_str!("../../../examples/forecast-quality/fixtures/withheld/agent-alpha.json"),
+            include_str!("../../../examples/forecast-quality/fixtures/withheld/agent-beta.json"),
+            include_str!("../../../examples/forecast-quality/fixtures/withheld/manifest.json"),
+            include_str!("../../../examples/forecast-quality/fixtures/withheld/report.json"),
+        );
+        assert_eq!(report.common_support.n_contracts, 8);
+        let comparison = &report.comparisons[0];
+        assert_eq!(comparison.n_settlement_blocks, 2);
+        assert!(comparison.inference_error.is_some());
+        assert_eq!(comparison.raw_p_value, None);
+        assert!(!comparison.familywise_significant);
     }
 
     #[test]

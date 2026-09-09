@@ -307,7 +307,7 @@ mod tests {
         .expect("--output contains JSON");
         fs::remove_file(&output).expect("remove temporary forecast report");
 
-        assert_eq!(report["common_support"]["n_contracts"], 8);
+        assert_eq!(report["common_support"]["n_contracts"], 12);
         assert_eq!(report["agents"].as_array().map(Vec::len), Some(2));
     }
 
