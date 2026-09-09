@@ -48,7 +48,7 @@
     },
     {
       "path": "paper/evidence/final/pass-witness.jsonl",
-      "sha256": "8922c9125aed8c75e9d7f2734a0756e57dbfa73da4e333e15882aeca040c295f"
+      "sha256": "c60f0eb671380bbde5c789e1ba866abc24643dae9cc523c69248b0436e96d144"
     },
     {
       "path": "paper/evidence/final/rates-1d.jsonl",
@@ -160,7 +160,7 @@
     },
     {
       "path": "paper/figures/evidence-pass-witness.pdf",
-      "sha256": "c85cec3a3d2c04c41d9ceb70ed8087814129c0521758a76e720db994ec579d2f"
+      "sha256": "f257f893053155d911d32a84e510d46a610600e5f803876aa1777471c24fd91a"
     },
     {
       "path": "paper/figures/sharpebench-deflation-curve.pdf",
@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "d0d785a7d8b2a211b6594aff87d907d04cf3a93b",
+  "generated_at_head": "0f3a843583cfea146a7ff1d3cc0e2b156991fbef",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -279,7 +279,7 @@
     },
     {
       "path": "crates/sharpebench-cli/src/forecast_cmd.rs",
-      "sha256": "3c8ea373fc3b793265524e176ad77cf8194c3bab6713f7c5d977d38b6668efc9"
+      "sha256": "3551ce418d92301b667ca80ae3ec4077afe8b06b1cfb1a5f57fcc4b9201b8531"
     },
     {
       "path": "crates/sharpebench-cli/src/import_cmd.rs",
@@ -375,7 +375,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/forecast.rs",
-      "sha256": "4e8c78bc676260f6d56013a17401a6ccdb4cb374a12087f46634262de9ea5323"
+      "sha256": "333623b0b7fabd17f4ee8dc8567254bb57f36647d1a45a04aea688be11f6367a"
     },
     {
       "path": "crates/sharpebench-core/src/greeks.rs",
@@ -531,7 +531,7 @@
     },
     {
       "path": "crates/sharpebench-harness/tests/evidence_fields_no_clone_merges.rs",
-      "sha256": "936c72cac32bc55bc678e269d947f1b8f14e102bad7dac3755381985824ae715"
+      "sha256": "4b04db8d340dd032da90eb47b6864ce9a91760bd1cb6f4c88138ae7cc27510a4"
     },
     {
       "path": "crates/sharpebench-harness/tests/producer_declared_support.rs",
@@ -819,7 +819,7 @@
     },
     {
       "path": "paper/sections/01-introduction.tex",
-      "sha256": "cf928c34fd3f0f7911fdeb0813b4a6f337d2f20192f9800a82ba6ed3784c600c"
+      "sha256": "8645f5652b9b3be199322286013f23d2fae41b7535c832cb2ddb5c63346a080f"
     },
     {
       "path": "paper/sections/02-principles.tex",
@@ -827,7 +827,7 @@
     },
     {
       "path": "paper/sections/03-benchmark.tex",
-      "sha256": "6ff163cae3d9a33110d259df709486238e2a0182428bf0dc964ff57480d10238"
+      "sha256": "0c8df62f7fde276176dad00d6c9c42a86b9497678bedcc34bffd0fe2c8b073f8"
     },
     {
       "path": "paper/sections/04-integrity.tex",
@@ -835,7 +835,7 @@
     },
     {
       "path": "paper/sections/05-experiments.tex",
-      "sha256": "ddd81194af6aaaaf3e44a4434b568a746f5f708a41f389cfbc64f892661549b3"
+      "sha256": "32d35547cd659ecbcb20affbe20f60c648ae5562b4b43d908bbb99847d0a53ea"
     },
     {
       "path": "paper/sections/06-related.tex",
@@ -843,7 +843,7 @@
     },
     {
       "path": "paper/sections/07-limitations.tex",
-      "sha256": "918ea61591609dee39c20d10c4e455d2ce01a3dba6429dfbe3a65ddfb025984b"
+      "sha256": "c3d77e0a96bd71957f9f37b45ef682e34c03ba4102f445f748525af5b95897df"
     },
     {
       "path": "paper/sections/08-reproducibility.tex",
@@ -855,7 +855,7 @@
     },
     {
       "path": "paper/sections/A-commands.tex",
-      "sha256": "4d4af147816ef39d919f6d6984ec05fad5b134a9ea6511888eee55b5737d8587"
+      "sha256": "3b28561eac17cdc29f00872fbc24a314d7ce2ae0b4b8630fa68861e14671177f"
     },
     {
       "path": "paper/sections/B-checklist.tex",
@@ -903,7 +903,7 @@
     },
     {
       "path": "paper/src/make-evidence-figures.py",
-      "sha256": "ebfa0dc55dcc051b6b473197ac874c2a7654cd950af59d959fc92c7b345da89b"
+      "sha256": "1bf0fe267f749e692df467d24f05b005cfde5abdfd0bbbff43be98fcec5fceb7"
     },
     {
       "path": "paper/src/make-figures.py",
@@ -967,5 +967,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "578dce61a93d0fcf1a472f7acce9546d0a5b34f353bf1439dd60084a7e4d9299"
+  "source_snapshot_sha256": "cff07324f7bc97b5c3cee35c6335fffb10eaa75fb18706bf113cf560ec24c6f4"
 }
