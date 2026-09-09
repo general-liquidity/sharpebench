@@ -43,3 +43,6 @@ paper/evidence/final/llm-stats/
 paper/evidence/final/llm-field-run.log
 paper/evidence/final/llm-field-records-*.jsonl
 paper/evidence/final/*.partial
+
+# Claude Code agent worktrees
+.claude/worktrees/
