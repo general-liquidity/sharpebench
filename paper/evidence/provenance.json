@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "8cd8d8821ea157b7d9863921c891c76f57703be3",
+  "generated_at_head": "dbbb7df73b8455b5c01d18753285dd362b666fc1",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -375,7 +375,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/forecast.rs",
-      "sha256": "dd1f9580c60b3ba0c2ac049f3db7d806d72a8d679d061b66a48b6707a19a6361"
+      "sha256": "41eba420b1898c0d0c5f3389533f6f3252a517f9480ea0ed0479ffdbca379cb7"
     },
     {
       "path": "crates/sharpebench-core/src/greeks.rs",
@@ -383,7 +383,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/lib.rs",
-      "sha256": "3767099d4aced0153c09e9f62c4d703649f4da366e674aa8bc346c10b81a2448"
+      "sha256": "870199930f2c8296439175e592b8db1e7c55e662b8ea70e24de7fe3aa0cc27d0"
     },
     {
       "path": "crates/sharpebench-core/src/oos.rs",
@@ -427,11 +427,11 @@
     },
     {
       "path": "crates/sharpebench-core/tests/forecast_contract_digest_versions.rs",
-      "sha256": "cefbe8967e27091fc39eab50713ccb9818c62140cd913ecd39282d804406034c"
+      "sha256": "e89aaf60eff19329d8d8f3082a6200e1e344c868a579f752bb380228dbcc7b5b"
     },
     {
       "path": "crates/sharpebench-core/tests/forecast_settlement_and_support.rs",
-      "sha256": "b0e7a025539048aa7657ad64659f444e7f9bac79ef2645ad3e253b8cde1602e2"
+      "sha256": "bb87b94b6c1f7b2f644d8ede92c5fbd82d6caa69f76fd5679f1eec43222c385d"
     },
     {
       "path": "crates/sharpebench-core/tests/golden_scores.rs",
@@ -971,5 +971,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "f3115b3f4f350be8c8bb822f8c791f1c5d29721bc198cb159f339a1e150ab08d"
+  "source_snapshot_sha256": "1e032037baae39c6e83eada1c521cd2e3232924ded2768cd45893da86455004b"
 }
