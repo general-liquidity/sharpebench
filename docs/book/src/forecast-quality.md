@@ -189,6 +189,15 @@ python paper/src/check-prospective-forecast-report.py \
 - Calibration and proper scores describe forecast quality. Trading eligibility
   still requires the Deflated Sharpe, pass^k, significance, process, and mandate
   gates.
+- The pairwise `mean_loss_difference` pools every common contract regardless
+  of scoring rule or target unit, so a field that mixes a dimensionless Brier
+  loss with a point squared error in a currency averages incompatible units and
+  its sign can change under a unit rescale (audit finding R08, deferred).
+  Every committed field is one stratum: binary Brier, one target, one unit.
+  The core test
+  `mixed_scoring_rules_are_silently_pooled_into_one_mean_loss_difference_r08`
+  pins the pooling; the deferral reopens when a committed comparison mixes
+  strata and a stratified analysis would change its reported verdict.
 - A normalized next-token logit over labels `0` and `1` is an operational
   probability under that scaffold, not an unconstrained subjective probability
   from the model.
