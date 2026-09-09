@@ -1,7 +1,7 @@
 //! Strict ingestion and independent analysis of prospective forecast evidence.
 //!
 //! SharpeArena owns the commit-time ledger. SharpeBench accepts only the closed
-//! `sharpe.forecast-evidence.v1` file contract, reconstructs every score locally,
+//! `sharpe.forecast-evidence.v1` and `.v2` file contracts, reconstructs every score locally,
 //! and compares agents only on the exact contracts resolved for the whole field,
 //! settled to the exact same outcome. Bench takes documents from any producer, so
 //! contract identity alone does not license differencing two losses; the realized
@@ -21,6 +21,9 @@ use sharpebench_protocol::canonical::{versioned_preimage, CANONICAL_JSON_VERSION
 use crate::stats::norm_cdf;
 
 pub const FORECAST_EVIDENCE_SCHEMA: &str = "sharpe.forecast-evidence.v1";
+/// The v1 envelope plus `contract_digest_encoding` on every revision. A v2
+/// revision is verified under the encoding it declares and under nothing else.
+pub const FORECAST_EVIDENCE_SCHEMA_V2: &str = "sharpe.forecast-evidence.v2";
 pub const FORECAST_QUALITY_SCHEMA: &str = "sharpebench.forecast-quality.v1";
 const CONTRACT_SCHEMA: &str = "sharpearena.forecast-contract.v1";
 
@@ -51,6 +54,52 @@ impl ContractDigestVersion {
             Self::CanonicalJsonV1 => CANONICAL_JSON_VERSION,
             Self::Legacy => "legacy",
         }
+    }
+
+    /// The inverse of [`Self::as_str`]: the encoding a v2 revision declares in
+    /// `contract_digest_encoding`. Any other label is not an encoding.
+    pub fn from_label(label: &str) -> Option<Self> {
+        [Self::CanonicalJsonV1, Self::Legacy]
+            .into_iter()
+            .find(|version| version.as_str() == label)
+    }
+}
+
+/// A v2 revision whose `contract_sha256` does not recompute under the encoding
+/// it declares. Carries the digest, the declared encoding and the encoding the
+/// digest does recompute under, or `None` when it matches no contract at all.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContractDigestEncodingMismatch {
+    pub revision_id: String,
+    pub contract_sha256: String,
+    pub declared: ContractDigestVersion,
+    pub recomputed: Option<ContractDigestVersion>,
+}
+
+impl Display for ContractDigestEncodingMismatch {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "revision {} declares contract digest {} under {}, but it recomputes under ",
+            self.revision_id,
+            self.contract_sha256,
+            self.declared.as_str()
+        )?;
+        match self.recomputed {
+            Some(recomputed) => write!(formatter, "{}", recomputed.as_str()),
+            None => write!(
+                formatter,
+                "neither {CANONICAL_JSON_VERSION} nor the legacy encoding of any contract"
+            ),
+        }
+    }
+}
+
+impl Error for ContractDigestEncodingMismatch {}
+
+impl From<ContractDigestEncodingMismatch> for ForecastError {
+    fn from(mismatch: ContractDigestEncodingMismatch) -> Self {
+        ForecastError(mismatch.to_string())
     }
 }
 
@@ -173,6 +222,12 @@ pub struct ForecastRevision {
     pub ordinal: u64,
     pub supersedes: Option<String>,
     pub contract_sha256: String,
+    /// Present on every revision of a `sharpe.forecast-evidence.v2` document and
+    /// on none of a v1 one; the parser refuses either envelope with the other
+    /// shape. Absent rather than `null` on the wire, so a v1 document round-trips
+    /// byte for byte.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contract_digest_encoding: Option<String>,
     pub prediction: Vec<f64>,
     pub confidence: f64,
     pub rationale: String,
@@ -379,10 +434,58 @@ fn validate_prediction(
     Ok(())
 }
 
-fn validate_evidence(evidence: &ForecastEvidence) -> Result<(), ForecastError> {
-    if evidence.schema_version != FORECAST_EVIDENCE_SCHEMA {
-        return Err(reject("unsupported forecast evidence schema_version"));
+/// Resolve one revision's contract under the rules of its envelope.
+///
+/// A v1 revision names a digest and Bench infers the encoding by recomputation
+/// under both. A v2 revision declares the encoding beside the digest and is
+/// verified under that encoding only: a digest that recomputes under the other
+/// encoding, or under neither, is refused with the declared and the recomputed
+/// encoding named, so a producer that mislabels its field learns which label
+/// its digests actually answer to.
+fn resolve_revision_contract<'a>(
+    declares_encoding: bool,
+    revision: &ForecastRevision,
+    contracts: &ContractIndex<'a>,
+) -> Result<&'a ForecastContract, ForecastError> {
+    let recomputed = contracts.get(&revision.contract_sha256).copied();
+    match (declares_encoding, &revision.contract_digest_encoding) {
+        (false, None) => recomputed
+            .map(|(contract, _)| contract)
+            .ok_or_else(unknown_contract_digest),
+        (false, Some(_)) => Err(reject(format!(
+            "contract_digest_encoding is not a field of {FORECAST_EVIDENCE_SCHEMA}; \
+             a document that declares it must be {FORECAST_EVIDENCE_SCHEMA_V2}"
+        ))),
+        (true, None) => Err(reject(format!(
+            "{FORECAST_EVIDENCE_SCHEMA_V2} requires contract_digest_encoding on every revision"
+        ))),
+        (true, Some(label)) => {
+            let declared = ContractDigestVersion::from_label(label).ok_or_else(|| {
+                reject(format!(
+                    "unknown contract_digest_encoding {label:?}; expected \
+                     {CANONICAL_JSON_VERSION} or legacy"
+                ))
+            })?;
+            match recomputed {
+                Some((contract, version)) if version == declared => Ok(contract),
+                other => Err(ContractDigestEncodingMismatch {
+                    revision_id: revision.revision_id.clone(),
+                    contract_sha256: revision.contract_sha256.clone(),
+                    declared,
+                    recomputed: other.map(|(_, version)| version),
+                }
+                .into()),
+            }
+        }
     }
+}
+
+fn validate_evidence(evidence: &ForecastEvidence) -> Result<(), ForecastError> {
+    let declares_encoding = match evidence.schema_version.as_str() {
+        FORECAST_EVIDENCE_SCHEMA => false,
+        FORECAST_EVIDENCE_SCHEMA_V2 => true,
+        _ => return Err(reject("unsupported forecast evidence schema_version")),
+    };
     if evidence.producer.name != "sharpearena" || evidence.producer.contract != "native" {
         return Err(reject("producer must be the native SharpeArena contract"));
     }
@@ -448,9 +551,7 @@ fn validate_evidence(evidence: &ForecastEvidence) -> Result<(), ForecastError> {
             )));
         }
         digest(&revision.contract_sha256, "contract_sha256")?;
-        let (contract, _) = contracts
-            .get(&revision.contract_sha256)
-            .ok_or_else(unknown_contract_digest)?;
+        let contract = resolve_revision_contract(declares_encoding, revision, &contracts)?;
         match claim_contracts.insert(&revision.claim_id, &revision.contract_sha256) {
             Some(prior) if prior != revision.contract_sha256 => {
                 return Err(reject("a claim changes contract across revisions"));
@@ -1603,6 +1704,7 @@ mod tests {
                     ordinal: 0,
                     supersedes: None,
                     contract_sha256: hashes[index].clone(),
+                    contract_digest_encoding: None,
                     prediction: vec![*probability],
                     confidence: *probability,
                     rationale: "evidence".to_string(),
@@ -1660,6 +1762,40 @@ mod tests {
         assert_eq!(report.agents[0].agent_id, "arena-reference");
         assert_eq!(report.agents[0].metrics[0].scoring_rule, "binary_brier");
         assert!((report.agents[0].metrics[0].mean_loss - 0.09).abs() < 1e-12);
+    }
+
+    /// The v2 golden is the v1 golden with the envelope bumped and the encoding
+    /// its digest recomputes under declared; the report is the same report plus the
+    /// declared label under `contract_digest_versions`.
+    #[test]
+    fn sharpearena_v2_golden_file_crosses_the_artifact_boundary_exactly() {
+        let v1 = include_str!("../tests/fixtures/sharpearena-forecast-evidence-v1.json");
+        let v2 = include_str!("../tests/fixtures/sharpearena-forecast-evidence-v2.json");
+        let config = ForecastAnalysisConfig::default();
+        let baseline =
+            analyze_forecast_quality(&[parse_forecast_evidence(v1).unwrap()], config).unwrap();
+
+        let document = parse_forecast_evidence(v2).unwrap();
+        assert_eq!(document.schema_version, FORECAST_EVIDENCE_SCHEMA_V2);
+        assert_eq!(
+            document.revisions[0].contract_digest_encoding.as_deref(),
+            Some("legacy")
+        );
+        let report = analyze_forecast_quality(&[document], config).unwrap();
+        assert_eq!(report.agents[0].agent_id, "arena-reference");
+        assert_eq!(report.agents[0].metrics[0].scoring_rule, "binary_brier");
+        assert!((report.agents[0].metrics[0].mean_loss - 0.09).abs() < 1e-12);
+        assert_eq!(
+            report.contract_digest_versions,
+            BTreeMap::from([(
+                "0eb3250fcb87a5e225f476e8a6e18ccdf65ac458919ad0b150594eb5761ecd2d".to_string(),
+                ContractDigestVersion::Legacy
+            )])
+        );
+        assert_eq!(
+            serde_json::to_string_pretty(&report).unwrap(),
+            serde_json::to_string_pretty(&baseline).unwrap()
+        );
     }
 
     /// Verify one tutorial field against its manifest and recompute its frozen report
