@@ -45,9 +45,22 @@ it; do not overwrite the historical audit diary.
 
 ## Newly identified defects
 
-Auditor findings will be recorded with file/line evidence and reproductions
-before they are promoted to implementation rows. An interim report is not a
-completed audit.
+The independent reports and their limitations are in [AUDIT.md](AUDIT.md).
+Red-to-green evidence is in [VERIFICATION.md](VERIFICATION.md). A local pass is
+not a completed delivery: package and CI checks still apply to every row.
+
+| Finding | Repair | Status |
+|---|---|---|
+| F01 | Check computed field statistics and withhold the whole snooping family on error | Local tests pass |
+| F02 | Join resolved identities, contracts and revisions to sealed forecasts in both verifiers | Local tests pass |
+| F03 | Derive effective seed width from validated keys; reject contradictory flags | Local tests pass |
+| F04 | Retain each CSV column's observed date axis | Local tests pass |
+| F05 | Refuse unsupported seed-bootstrap intervals at Rust and Python boundaries | Local tests pass |
+| F06 | Preserve baseline score and pass-rate unavailability without numeric ranking | Local tests pass |
+| F07 | Refuse unobserved or overflowing candidate utilities | Local tests pass |
+| F08 | Support v2 prospective imports with strict digest labels | Local tests pass |
+| F09 | Canonicalize internal numeric settlement identity | Local tests pass |
+| F10 | Add statistical disqualification reasons and rollup labels | Local tests pass |
 
 ## Execution policy
 
@@ -62,4 +75,3 @@ completed audit.
 - No force pushes, destructive cleanup, or credential disclosure.
 - A proposed improvement may close on a justified rejection; an accepted
   implementation task cannot close merely on documentation.
-

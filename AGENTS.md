@@ -6,31 +6,18 @@ agents: a pure Rust scoring kernel, a point-in-time simulator, forward
 attestation and a chained board, distributed as CLI, crates, WASM/npm, MCP and
 Python over one implementation.
 
-## Current goal: 2026-09-07 audit repair
+## Current goal: verification and completion
 
-**The active engineering goal for this repository is the audit repair
-checklist at [`docs/audits/2026-09-07/IMPLEMENTATION.md`](docs/audits/2026-09-07/IMPLEMENTATION.md).**
-It is shared with SharpeArena and mirrored byte-for-byte there; edit both
-copies together or neither. The chronological repair diary is
-[`VERIFICATION-LOG.md`](docs/audits/2026-09-07/VERIFICATION-LOG.md) beside it.
+The active goal is [the 2026-09-09 checklist](docs/audits/2026-09-09/IMPLEMENTATION.md),
+mirrored across both repositories. It covers independent review of Claude's
+changes, the Hyper-Tau assessment, recoverable pending implementations, verified
+repairs, documentation and delivery. [Findings](docs/audits/2026-09-09/AUDIT.md)
+and [verification](docs/audits/2026-09-09/VERIFICATION.md) are recorded separately.
 
-Work the batches in the order the checklist gives:
-
-| Batch | Scope |
-|---|---|
-| A | Paper pass. Historical-impact caveat, R11/R13/R14 text, shard-order claim, submitting.md scope. |
-| B | Publication gating. `release.yml` depends on a green `ci.yml` for the tagged commit; narrow the updater claim; package consumers; conformance fixtures. |
-| C | Run identity (BI3): keyed run/window/seed identity through CSV import and legacy `Run` arrays. |
-| D | Producer rows that touch existing claims: BP6, BP8, AP5, AP3. |
-| E | Shared mathematics and contracts: R07/BM10, R06/AI1, R03 and R09 propagation, remaining R02, R05, R12, BR2/AR2. |
-| F | Remaining Bench diagnostics: BM1, BM2/BS6, BM3, BM7, BI6 and the split supplementary rows. |
-| G | Remaining Arena telemetry (Arena repository). |
-| H | Producer rows for the next field run. Not required for the current papers. |
-| I | Bounded probes. One attempt each, then promote to a defect row or delete. |
-
-Batches A and B change what the shipped product claims and come first. Five
-items are explicitly deferred and listed at the end of the checklist; do not
-start them without reopening the decision.
+The [2026-09-07 audit](docs/audits/2026-09-07/IMPLEMENTATION.md) is a completed
+historical checkpoint. Its old progress counts and deferred-work list are not
+the active schedule. Follow the new ledger; do not silently reopen or rewrite
+historical evidence.
 
 ## Goal rules
 
@@ -102,5 +89,5 @@ diff in the four pure crates, and the paired-boundary gate
 | Paper, producers, frozen evidence | `paper/` |
 | Forward arena records | `arena/` |
 | Product roadmap | `docs/PLAN.md` |
-| Audit goal | `docs/audits/2026-09-07/` |
+| Audit goal | `docs/audits/2026-09-09/` (active), `docs/audits/2026-09-07/` (archive) |
 | Release operations | `RELEASING.md`, `scripts/release.py` |

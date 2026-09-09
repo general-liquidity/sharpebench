@@ -7,10 +7,10 @@ nothing critical is lost if only this file is loaded.
 
 ## Active goal
 
-The 2026-09-07 audit repair checklist at
-[`docs/audits/2026-09-07/IMPLEMENTATION.md`](docs/audits/2026-09-07/IMPLEMENTATION.md),
-shared with the sibling product and mirrored byte-for-byte there. Work batches
-A to I in order; A (paper pass) and B (publication gating) come first.
+The [verification and completion checklist](docs/audits/2026-09-09/IMPLEMENTATION.md)
+is shared with the sibling product and mirrored there. Follow its current tasks
+and verification record. The 2026-09-07 audit is completed historical work, not
+the active schedule.
 
 ## Non-negotiables
 
