@@ -16,10 +16,12 @@ Complete reads in this review include:
 - hyper/runtime_contract.py, performance.py, agent_context.py and _inner.py.
 - hyper/sandbox/model_gateway.py, native_runtime.py, builder.py,
   callback_broker.py, callback_mcp.py, starting_workspace.py and
-  result_serialization.py, orchestrator.py, sealed_runner.py and candidate_server.py.
+  result_serialization.py, orchestrator.py, sealed_runner.py, candidate_server.py,
+  kit.py and native_builder.py.
+- hyper/client_api/defects.py.
 - tests/plus_support/leakage.py.
 
-Kit construction, provider adapters, client API, domain tools,
+Remaining kit/development paths, provider adapters, client API runtime, domain tools,
 task corpus, test coverage,
 web UI and remaining configuration are still open. No model calls or repository
 test suites that require provider access have been run.
@@ -50,6 +52,8 @@ observations, not demonstrated attacks on the deployed service.
 | Process supervision | native_runtime.py streams lines into an unbounded event list. Group termination returns early if the parent has already exited. | Retain Bench's bounded transport and descendant-lifecycle protections. The reference implementation is not a replacement for them. |
 | Developer feedback | callback_broker.py exposes token-bound, quota-limited host callbacks through a narrow filesystem request protocol. | Useful pattern for a future build/evaluate workflow, not a reason to add one now. Agent-writable request/response paths need a separate race/symlink review before reuse. |
 | Task support | orchestrator.py's domain-task loader warns about missing requested IDs and returns the IDs it found; final reward uses the resulting list. | Keep explicit expected-cell/support checks. An absent requested task must not silently change the evaluation denominator. |
+| Kit separation | kit.py keeps host coverage reports outside the developer kit, uses generic artifact names, and emits public API documentation with synthetic development data. Some missing framework documentation is only warned about. | The separation is useful. A frozen kit should expose its declared public contract without leaking task identities; warnings alone do not establish complete developer documentation. |
+| Keyed fault plans | client_api/defects.py separates frozen profiles from per-trial mutable state. It can delay visibility, simulate post-commit timeouts, change pagination and test idempotency. | These mechanisms are meaningful robustness diagnostics, not merely cosmetic. Do not transfer customer-service fault semantics directly to a trading simulator or use a diagnostic as an unvalidated ranking axis. |
 
 These are source-level observations and design decisions, not claims of a
 reproduced exploit against Hyper-Tau.

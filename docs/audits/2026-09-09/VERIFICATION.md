@@ -99,12 +99,12 @@ The repairs are granular commits. Arena PR #35 merged as `f7614dc`; its tree
 matches tested head `f5939a9` and post-merge CI passed. Its first CI run caught
 formatting in the separately excluded PyO3 crate, which was fixed and rebound.
 
-Bench PR #40 remains open. At pushed head `5618a46`, the ordinary workflow,
+Bench PR #40 is now merged. At its earlier pushed head `5618a46`, the ordinary workflow,
 package checks, live Docker probe and three-platform matrix passed. Mutation
 testing reported 73 mutants: 60 caught, three unviable, ten missed. The missed
 SPA arithmetic mutations require stronger tests; the check is not bypassed or
 explained away as a runner flake. Subsequent local changes need a new pushed
-head and fresh CI. CodeRabbit skipped review while the PRs were drafts.
+head and fresh CI, which are recorded below. CodeRabbit skipped review while the PRs were drafts.
 
 The three new tests in stats/tests/spa_studentization.rs are independently
 checked by spa_reference.py. That reference uses rational means, variances and
@@ -121,10 +121,44 @@ unviable, ten missed). The valid-input compatibility fixtures were centered or
 constant, so several moment terms vanished. Adding a two-observation case and
 an asymmetric nonzero-mean case catches all ten exact mutations locally; the
 unmodified four-test target passes. Only tests changed in this follow-up, not
-the numerical implementation or WASM artifact. Fresh CI is still required.
+the numerical implementation or WASM artifact. The subsequent complete CI run passed.
 
-Final package rebuilding, installed consumers, normal merging and post-merge
-verification remain Bench delivery gates. None of this is a release.
+Final package rebuilding and installed consumers passed. Bench PR #40 merged
+as `4b3cc0d`, tree-identical to tested head `ecdcea2`. Its complete mutation
+run reported 125 caught, three unviable, zero missed and zero timed out.
+Post-main CI and npm runs 34403159826 and 34403159785 succeeded. PR #39 was
+closed as merged by the retained ancestry, not by discarding its changes.
+
+Bench PR #41 merged as `4a453d0`, tree-identical to tested head `eb8d1a4`.
+All 23 checks passed; post-main CI 34404055056 and npm 34404054949 succeeded.
+Arena documentation PR #37 merged as `1ec75cb`, tree-identical to `110188a`;
+post-main CI 34403517298 succeeded. None of this is a release.
+
+### Frozen token-rate accounting
+
+Seven harness regressions cover the strict card schema, exact integer quotes,
+identity changes, overflow, missing and mixed usage, observer transparency,
+failed-attempt retention and checkpoint recovery. Two new CLI tests use a
+loopback fixture, not a model provider. A 240-decision run produces exactly
+690000 USD nanodollars under the synthetic card; resume makes no further
+calls and reproduces its accounting. Changing the card refuses before another
+request and leaves the checkpoint unchanged. After removing accounting, the
+priced and unpriced boards are identical. Missing usage emits no total.
+
+Seven isolated mutations are caught: substituting the input rate for output,
+accepting mixed cards, treating absent attempt usage as free, treating failed
+usage as complete, accepting invalid reasoning counts, dropping failed usage,
+and removing the card from the CLI checkpoint identity. Restored controls pass.
+The 45 harness unit tests, eight existing ledger tests, four recovery tests,
+48 CLI unit tests and both existing CLI recovery tests also pass. Affected
+clippy passes with warnings denied. CI and merging of this new card work
+remain pending.
+
+Rates use the legacy entrant-reported token fields. Individual omitted counts
+default to zero in that protocol; neither count completeness nor the declared
+model is independently verified. Partial usage, failed requests and absent
+records remain explicit limitations. Quotes are not provider invoices and do
+not replace the legacy cost-normalized score columns.
 
 Arena still consumes published Bench `=0.19.0`; the new Bench arithmetic and
 diagnostic repairs do not reach that dependency until a subsequent authorized
