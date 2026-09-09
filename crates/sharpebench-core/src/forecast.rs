@@ -16,12 +16,84 @@ use std::fmt::{Display, Formatter};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use sharpebench_protocol::canonical::{versioned_preimage, CANONICAL_JSON_VERSION};
 
 use crate::stats::norm_cdf;
 
 pub const FORECAST_EVIDENCE_SCHEMA: &str = "sharpe.forecast-evidence.v1";
 pub const FORECAST_QUALITY_SCHEMA: &str = "sharpebench.forecast-quality.v1";
 const CONTRACT_SCHEMA: &str = "sharpearena.forecast-contract.v1";
+
+/// The encoding a revision's `contract_sha256` was verified under.
+///
+/// A contract has two accepted digests. The current one hashes the
+/// [`versioned_preimage`] of `sharpebench/canonical-json/v1`, so it carries its
+/// version and cannot collide with a digest taken under another form. The legacy
+/// one hashes the unframed pre-migration text (`serde_json` number rendering with
+/// Python exponent padding) and is accepted only because published evidence pins
+/// it: `paper/evidence/prospective-forecast-field/` carries 24 such digests. A
+/// revision digest that recomputes under neither is refused, and the version each
+/// scored contract verified under is reported, so a legacy field is never mistaken
+/// for a current one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ContractDigestVersion {
+    /// SHA-256 over `versioned_preimage` under `sharpebench/canonical-json/v1`.
+    CanonicalJsonV1,
+    /// SHA-256 over the unframed pre-migration canonical text.
+    Legacy,
+}
+
+impl ContractDigestVersion {
+    /// The label written into the report: the canonical-form version string for a
+    /// current digest, `legacy` for a pre-migration one.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::CanonicalJsonV1 => CANONICAL_JSON_VERSION,
+            Self::Legacy => "legacy",
+        }
+    }
+}
+
+impl Serialize for ContractDigestVersion {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+/// Both digests one contract answers to.
+struct ContractDigests {
+    canonical_json_v1: String,
+    legacy: String,
+}
+
+/// Contracts keyed by every digest they answer to, with the version each key is.
+type ContractIndex<'a> = BTreeMap<String, (&'a ForecastContract, ContractDigestVersion)>;
+
+fn index_contracts<'a>(
+    contracts: impl IntoIterator<Item = (ContractDigests, &'a ForecastContract)>,
+) -> ContractIndex<'a> {
+    let mut index = BTreeMap::new();
+    for (digests, contract) in contracts {
+        index.insert(
+            digests.canonical_json_v1,
+            (contract, ContractDigestVersion::CanonicalJsonV1),
+        );
+        // The v1 digest is over the versioned frame and the legacy digest over
+        // the bare text, so the two keys never coincide and this never
+        // displaces the entry above.
+        index
+            .entry(digests.legacy)
+            .or_insert((contract, ContractDigestVersion::Legacy));
+    }
+    index
+}
+
+fn unknown_contract_digest() -> ForecastError {
+    reject(format!(
+        "revision names an unknown contract digest: it recomputes under neither \
+         {CANONICAL_JSON_VERSION} nor the legacy encoding of any contract"
+    ))
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ForecastError(pub String);
@@ -173,7 +245,7 @@ fn finite(value: f64, field: &str) -> Result<(), ForecastError> {
     }
 }
 
-fn validate_contract(contract: &ForecastContract) -> Result<String, ForecastError> {
+fn validate_contract(contract: &ForecastContract) -> Result<ContractDigests, ForecastError> {
     if contract.schema_version != CONTRACT_SCHEMA {
         return Err(reject(format!(
             "contract {} has unsupported schema_version",
@@ -245,7 +317,7 @@ fn validate_contract(contract: &ForecastContract) -> Result<String, ForecastErro
             "interval_alpha is valid only for interval contracts",
         ));
     }
-    contract_sha256(contract)
+    contract_digests(contract)
 }
 
 fn validate_prediction(
@@ -342,7 +414,7 @@ fn validate_evidence(evidence: &ForecastEvidence) -> Result<(), ForecastError> {
         ));
     }
 
-    let mut contracts = BTreeMap::new();
+    let mut validated = Vec::with_capacity(evidence.contracts.len());
     let mut contract_ids = BTreeSet::new();
     for contract in &evidence.contracts {
         if !contract_ids.insert(contract.contract_id.as_str()) {
@@ -351,9 +423,9 @@ fn validate_evidence(evidence: &ForecastEvidence) -> Result<(), ForecastError> {
                 contract.contract_id
             )));
         }
-        let contract_digest = validate_contract(contract)?;
-        contracts.insert(contract_digest, contract);
+        validated.push((validate_contract(contract)?, contract));
     }
+    let contracts = index_contracts(validated);
 
     let mut revision_ids = BTreeSet::new();
     let mut idempotency_keys = BTreeSet::new();
@@ -376,9 +448,9 @@ fn validate_evidence(evidence: &ForecastEvidence) -> Result<(), ForecastError> {
             )));
         }
         digest(&revision.contract_sha256, "contract_sha256")?;
-        let contract = contracts
+        let (contract, _) = contracts
             .get(&revision.contract_sha256)
-            .ok_or_else(|| reject("revision names an unknown contract digest"))?;
+            .ok_or_else(unknown_contract_digest)?;
         match claim_contracts.insert(&revision.claim_id, &revision.contract_sha256) {
             Some(prior) if prior != revision.contract_sha256 => {
                 return Err(reject("a claim changes contract across revisions"));
@@ -469,8 +541,13 @@ fn validate_evidence(evidence: &ForecastEvidence) -> Result<(), ForecastError> {
         }
         chain.push(revision);
     }
-    let referenced: BTreeSet<&str> = claim_contracts.values().copied().collect();
-    if referenced.len() != contracts.len() {
+    // Count contracts, not digests: a contract answers to two digests, and every
+    // referenced digest was resolved to its contract above.
+    let referenced: BTreeSet<&str> = claim_contracts
+        .values()
+        .map(|digest| contracts[*digest].0.contract_id.as_str())
+        .collect();
+    if referenced.len() != evidence.contracts.len() {
         return Err(reject(
             "every exported contract must be referenced by a claim",
         ));
@@ -507,7 +584,7 @@ fn validate_evidence(evidence: &ForecastEvidence) -> Result<(), ForecastError> {
                 if resolution.reason.is_some() {
                     return Err(reject("resolved record cannot carry a reason"));
                 }
-                let contract = contracts
+                let (contract, _) = contracts
                     .get(&revision.contract_sha256)
                     .ok_or_else(|| reject("resolved revision lost its contract"))?;
                 if available_at <= revision.submitted_at || available_at < contract.resolves_at {
@@ -557,7 +634,11 @@ fn validate_evidence(evidence: &ForecastEvidence) -> Result<(), ForecastError> {
     Ok(())
 }
 
-fn canonical_json(value: &Value, output: &mut String) -> Result<(), ForecastError> {
+/// The pre-migration canonical text: sorted keys, no whitespace, `serde_json`
+/// number rendering with the exponent padded to two digits the way Python's
+/// `repr` pads it. Kept verbatim because the digests it produced are pinned in
+/// published evidence; new digests come from [`versioned_preimage`].
+fn legacy_canonical_json(value: &Value, output: &mut String) -> Result<(), ForecastError> {
     match value {
         Value::Null => output.push_str("null"),
         Value::Bool(value) => output.push_str(if *value { "true" } else { "false" }),
@@ -572,7 +653,7 @@ fn canonical_json(value: &Value, output: &mut String) -> Result<(), ForecastErro
                 if index > 0 {
                     output.push(',');
                 }
-                canonical_json(value, output)?;
+                legacy_canonical_json(value, output)?;
             }
             output.push(']');
         }
@@ -589,7 +670,7 @@ fn canonical_json(value: &Value, output: &mut String) -> Result<(), ForecastErro
                         .map_err(|error| reject(format!("cannot encode contract key: {error}")))?,
                 );
                 output.push(':');
-                canonical_json(value, output)?;
+                legacy_canonical_json(value, output)?;
             }
             output.push('}');
         }
@@ -612,12 +693,17 @@ fn python_number(number: &serde_json::Number) -> String {
     format!("{mantissa}e{sign}{digits:0>2}")
 }
 
-fn contract_sha256(contract: &ForecastContract) -> Result<String, ForecastError> {
+fn contract_digests(contract: &ForecastContract) -> Result<ContractDigests, ForecastError> {
     let value = serde_json::to_value(contract)
         .map_err(|error| reject(format!("cannot serialize forecast contract: {error}")))?;
-    let mut preimage = String::new();
-    canonical_json(&value, &mut preimage)?;
-    Ok(format!("{:x}", Sha256::digest(preimage.as_bytes())))
+    let framed = versioned_preimage(&value)
+        .map_err(|error| reject(format!("cannot encode forecast contract: {error}")))?;
+    let mut legacy = String::new();
+    legacy_canonical_json(&value, &mut legacy)?;
+    Ok(ContractDigests {
+        canonical_json_v1: format!("{:x}", Sha256::digest(&framed)),
+        legacy: format!("{:x}", Sha256::digest(legacy.as_bytes())),
+    })
 }
 
 /// Content address of a realized outcome, over the same canonical encoding as the
@@ -629,7 +715,7 @@ fn contract_sha256(contract: &ForecastContract) -> Result<String, ForecastError>
 /// scoring rather than be discarded once a loss has been computed from it.
 fn outcome_sha256(outcome: &Value) -> Result<String, ForecastError> {
     let mut preimage = String::new();
-    canonical_json(outcome, &mut preimage)?;
+    legacy_canonical_json(outcome, &mut preimage)?;
     Ok(format!("{:x}", Sha256::digest(preimage.as_bytes())))
 }
 
@@ -644,6 +730,7 @@ fn number_outcome(outcome: &Value) -> Result<f64, ForecastError> {
 #[derive(Clone, Debug)]
 struct ScoredForecast {
     contract_sha256: String,
+    contract_digest_version: ContractDigestVersion,
     instrument: String,
     resolves_at: u64,
     scoring_rule: String,
@@ -757,10 +844,11 @@ fn score_prediction(
 }
 
 fn scored_forecasts(evidence: &ForecastEvidence) -> Result<Vec<ScoredForecast>, ForecastError> {
-    let mut contracts = BTreeMap::new();
+    let mut digests = Vec::with_capacity(evidence.contracts.len());
     for contract in &evidence.contracts {
-        contracts.insert(contract_sha256(contract)?, contract);
+        digests.push((contract_digests(contract)?, contract));
     }
+    let contracts = index_contracts(digests);
     let mut effective: BTreeMap<&str, &ForecastRevision> = BTreeMap::new();
     for revision in &evidence.revisions {
         if revision.status == "eligible" {
@@ -781,14 +869,16 @@ fn scored_forecasts(evidence: &ForecastEvidence) -> Result<Vec<ScoredForecast>, 
         if resolution.status != "resolved" {
             continue;
         }
-        if !used_contracts.insert(revision.contract_sha256.as_str()) {
+        let (contract, contract_digest_version) = *contracts
+            .get(&revision.contract_sha256)
+            .ok_or_else(|| reject("effective revision names an unknown contract"))?;
+        // By contract, not by digest: the same contract under its v1 and its
+        // legacy digest is still one contract.
+        if !used_contracts.insert(contract.contract_id.as_str()) {
             return Err(reject(
                 "one agent has multiple effective claims for the same contract",
             ));
         }
-        let contract = contracts
-            .get(&revision.contract_sha256)
-            .ok_or_else(|| reject("effective revision names an unknown contract"))?;
         let outcome = resolution
             .outcome
             .as_ref()
@@ -797,6 +887,7 @@ fn scored_forecasts(evidence: &ForecastEvidence) -> Result<Vec<ScoredForecast>, 
             score_prediction(contract, &revision.prediction, outcome)?;
         scored.push(ScoredForecast {
             contract_sha256: revision.contract_sha256.clone(),
+            contract_digest_version,
             instrument: contract.instrument.clone(),
             resolves_at: contract.resolves_at,
             scoring_rule: contract.scoring_rule.clone(),
@@ -1016,6 +1107,11 @@ pub struct ForecastQualityReport {
     pub dependence_unit: &'static str,
     pub config: ForecastAnalysisConfig,
     pub common_support: CommonSupport,
+    /// The encoding each scored contract digest verified under, for every digest
+    /// an effective resolved revision in the field names. Support is exact by
+    /// digest, so a contract presented under `legacy` by one agent and under
+    /// `sharpebench/canonical-json/v1` by another is two digests and not common.
+    pub contract_digest_versions: BTreeMap<String, ContractDigestVersion>,
     pub agents: Vec<AgentForecastSummary>,
     pub comparisons: Vec<PairwiseForecastComparison>,
 }
@@ -1089,6 +1185,11 @@ pub fn analyze_forecast_quality(
         }
     }
     holm_adjust(&mut comparisons, config.familywise_alpha);
+    let contract_digest_versions = rows
+        .iter()
+        .flatten()
+        .map(|row| (row.contract_sha256.clone(), row.contract_digest_version))
+        .collect();
     Ok(ForecastQualityReport {
         schema_version: FORECAST_QUALITY_SCHEMA,
         rank_effect: "reported_only_never_trading_rank",
@@ -1099,6 +1200,7 @@ pub fn analyze_forecast_quality(
             contract_sha256: common.into_iter().collect(),
             excluded_resolved_by_agent,
         },
+        contract_digest_versions,
         agents,
         comparisons,
     })
@@ -1473,7 +1575,7 @@ mod tests {
             .collect();
         let hashes: Vec<_> = contracts
             .iter()
-            .map(|contract| contract_sha256(contract).unwrap())
+            .map(|contract| contract_digests(contract).unwrap().canonical_json_v1)
             .collect();
         let evidence = ForecastEvidence {
             schema_version: FORECAST_EVIDENCE_SCHEMA.to_string(),
@@ -1808,7 +1910,9 @@ mod tests {
         normal.contracts[0].scoring_rule = "normal_crps".to_string();
         normal.contracts[0].unit = "USD".to_string();
         normal.revisions[0].prediction = vec![1.0, 2.0];
-        normal.revisions[0].contract_sha256 = contract_sha256(&normal.contracts[0]).unwrap();
+        normal.revisions[0].contract_sha256 = contract_digests(&normal.contracts[0])
+            .unwrap()
+            .canonical_json_v1;
         let score = score_prediction(
             &normal.contracts[0],
             &normal.revisions[0].prediction,

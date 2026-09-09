@@ -25,6 +25,50 @@ name or SHA-256. Each revision records whether consensus was visible and, when i
 was, the consensus snapshot digest. A late revision remains auditable but never
 becomes the scored forecast.
 
+## Contract digests: canonical JSON v1 and the legacy encoding
+
+A revision names its contract by `contract_sha256`, and SharpeBench recomputes
+that digest from the contract it was given. Two encodings are accepted.
+
+- **`sharpebench/canonical-json/v1`** is the current one. The digest is
+  SHA-256 over the versioned pre-image of the contract's canonical text
+  (`sharpebench_protocol::canonical::versioned_preimage`): one specified
+  numeric form (fixed point while the decimal exponent is inside `-6 < n <= 21`,
+  unpadded exponent outside it, integer-valued floats as integers, signed zero
+  as `0`), RFC 8785 string escaping, members in code-point order. The version
+  tag is part of the hashed bytes, so a v1 digest can never equal a digest of
+  the same document under another form.
+- **`legacy`** is the pre-migration encoding: the unframed text with
+  `serde_json` number rendering and a two-digit padded exponent. It is
+  accepted only when the revision digest equals the legacy recomputation of
+  the contract. It exists because published evidence pins it:
+  `paper/evidence/prospective-forecast-field/` carries 24 legacy digests, and
+  none of them recomputes under v1 (`neutral_threshold: 0.0` is `0.0` under
+  legacy and `0` under v1), so replacing the encoding would have invalidated
+  frozen evidence.
+
+A digest that recomputes under neither is refused as an unknown contract
+digest. The report records the encoding each scored digest verified under in
+`contract_digest_versions`, keyed by digest with the value
+`sharpebench/canonical-json/v1` or `legacy`, and the human table prints the
+two counts. A legacy field is therefore visible as one; it is not silently
+promoted.
+
+Migration notes for producers:
+
+- New evidence should hash contracts under v1. The contract rendered under
+  `1e-5` (the reported R07 case) is `0.00001` under v1 and is accepted.
+- Python's `json.dumps(sort_keys=True, separators=(",", ":"))` is **not** v1:
+  it renders `1e-05` where v1 renders `0.00001`, `1e-07` where v1 renders
+  `1e-7`, `1e+16` where v1 renders `10000000000000000`, and `0.0`, `1.0` and
+  `-0.0` where v1 renders `0`, `1` and `0`. String escaping and key order do
+  agree. A producer that keeps hashing with `json.dumps` produces digests that
+  match the legacy encoding only where its number text happens to coincide
+  with `serde_json`'s, and match nothing where it does not.
+- Support is exact by digest. A contract presented under its legacy digest by
+  one agent and under its v1 digest by another is two digests and is not
+  common support. A field should be produced under one encoding.
+
 ## Scores and calibration
 
 SharpeBench ignores any producer-side calculation and recomputes the declared
