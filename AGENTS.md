@@ -84,7 +84,10 @@ python paper/src/check-provenance.py
 
 The full workspace, `cargo deny`, live Docker, mdBook, the three OS matrices
 and the packaged consumers run in CI; a local pass is necessary, not
-sufficient.
+sufficient. Pull requests also run `mutation.yml`: cargo-mutants over the PR
+diff in the four pure crates, and the paired-boundary gate
+(`python scripts/check-paired-boundaries.py`). See "Standing CI legs" in
+`CONTRIBUTING.md`.
 
 ## Where things live
 

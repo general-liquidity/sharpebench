@@ -44,5 +44,7 @@ paper/evidence/final/llm-field-run.log
 paper/evidence/final/llm-field-records-*.jsonl
 paper/evidence/final/*.partial
 
+# cargo-mutants report from a local .github/workflows/mutation.yml reproduction
+/mutants.out*
 # Claude Code agent worktrees
 .claude/worktrees/

@@ -1,0 +1,103 @@
+name: Mutation
+
+# Deferred item 5 of the 2026-09-07 audit checklist, "full mutation and
+# paired-boundary gates as a standing CI leg", in its bounded form. Mutation:
+# cargo-mutants runs only the mutants the pull request's own diff introduces,
+# only in the four pure crates, under a hard 30 minute budget. Paired-boundary:
+# a static scan that every public kernel function documenting a numeric domain
+# is named by a boundary test. Both run on every pull request; ci.yml is
+# untouched and stays the release gate.
+
+on:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: mutation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mutants-in-diff:
+    name: cargo-mutants (PR diff · pure crates)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # Full history so the merge base with the target branch is present.
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust (matching rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96.0"
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants@27.1.0
+
+      # HEAD is the PR merge commit, so the diff from the merge base is exactly
+      # what the pull request adds and its `+` side matches the checked-out tree,
+      # which `--in-diff` requires.
+      - name: Diff the pull request against its merge base
+        run: |
+          git diff --merge-base "origin/${{ github.base_ref }}" HEAD > "$RUNNER_TEMP/pr.diff"
+          echo "$(wc -l < "$RUNNER_TEMP/pr.diff") diff lines"
+
+      # Exit codes (cargo-mutants 27): 0 every mutant caught or nothing to mutate,
+      # 2 missed mutants, 3 timeouts, 4 baseline failed, 5/6 diff problems. Missed
+      # mutants fail the job. A timeout is a mutant the suite did not pass either;
+      # it is surfaced as a warning rather than a failure because it is runner
+      # dependent, and the report artifact names it.
+      - name: Every mutant this diff introduces must be caught
+        run: |
+          set +e
+          cargo mutants \
+            --in-diff "$RUNNER_TEMP/pr.diff" \
+            --package sharpebench-core \
+            --package sharpebench-stats \
+            --package sharpebench-protocol \
+            --package sharpebench-attest \
+            --timeout-multiplier 3 \
+            --jobs 2 \
+            --output "$RUNNER_TEMP/mutants"
+          code=$?
+          set -e
+          out="$RUNNER_TEMP/mutants/mutants.out"
+          for kind in caught missed unviable timeout; do
+            if [ -f "$out/$kind.txt" ]; then
+              echo "$kind: $(grep -c . "$out/$kind.txt" || true)"
+            fi
+          done
+          case "$code" in
+            0) ;;
+            2) echo "::error::missed mutants; see missed.txt in the mutants-out artifact"; exit 2 ;;
+            3) echo "::warning::some mutants timed out; see timeout.txt in the mutants-out artifact" ;;
+            *) echo "::error::cargo-mutants exited $code"; exit "$code" ;;
+          esac
+
+      - name: Keep the mutants report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants-out
+          path: ${{ runner.temp }}/mutants/mutants.out
+          if-no-files-found: ignore
+
+  paired-boundaries:
+    name: paired-boundary gate (documented numeric domains)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: The scanner itself is tested
+        run: python -m unittest scripts/test_check_paired_boundaries.py
+      - name: Every documented numeric domain has a boundary test or an allowlist row
+        run: python scripts/check-paired-boundaries.py
