@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "66b74736a451a5c049b2fab1ebe05b8c61ee55a1",
+  "generated_at_head": "c3e2016d2b146f8aec1ad2cf4ee8e29e3d206177",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -311,7 +311,7 @@
     },
     {
       "path": "crates/sharpebench-cli/tests/frozen_rate_card_cli.rs",
-      "sha256": "09aff76086a2ed802d6c11333b01dc33ef44cc7b608b6dd30407fdc40a1f8b6d"
+      "sha256": "65e23d4d71cd9c4e36a468340e3dcd1bb34fbeeab5bf280f23dcb64e7fc79d3e"
     },
     {
       "path": "crates/sharpebench-cli/tests/options_boundaries.rs",
@@ -1011,5 +1011,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "1848ebe45ce8c26f9757faabf3ebcb85c95eb146ab3918b29f530ec1cad51f01"
+  "source_snapshot_sha256": "4cf89ebd8c9a016cf5d6c7b6e4fe42b1842d46238bab1f5dd1e1071117cdc172"
 }
