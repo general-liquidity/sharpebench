@@ -26,6 +26,7 @@ and links the commits it was built from.
 - Keyed scoring derives execution-seed width from the validated run keys and refuses a contradictory explicit width. Wide CSV imports retain the period IDs of nonmissing returns, so equal-length series with different missing dates cannot silently pair by position.
 
 ### Added
+- Checkpointed external sweeps support `--retry-runtime-failures`. Recovery preserves the execution contract and all recorded attempts, never reruns completed or agent-fault cells, and allows at most three extra rounds per cell. Per-round budgets survive interruption; observed attempts are persisted before another attempt starts. This does not recover an old binary's checkpoint under a changed binary or prove that every transport error was caused by infrastructure.
 - External-agent `run --json` rows and incomplete-sweep errors include rank-neutral attempt counts and observed duration. The board remains an array, reference rows and scoring are unchanged, and unobserved monetary usage is explicitly unavailable rather than zero.
 
 ### Documentation

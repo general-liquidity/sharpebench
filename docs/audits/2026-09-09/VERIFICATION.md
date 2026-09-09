@@ -74,6 +74,27 @@ Arena:
 
 ## Delivery and remaining limits
 
+### Explicit runtime recovery
+
+The bound checkpoint driver now saves each observed attempt before a later
+attempt can start. Four integration tests cover recovery eligibility, retained
+history, lifetime and per-round retry budgets, interrupted claims, changed
+contracts and malformed runtime states. A unit test distinguishes identical
+fresh executions from a replayed ledger batch. The real CLI loopback test
+reports 48 attempts initially, 48 on default resume, and 96 after explicit
+recovery; all cells remain runtime-failed, with no board. Invalid recovery
+flag combinations refuse before launch.
+
+All four integration tests and the eight existing ledger tests pass, as do
+45 harness unit tests and affected-package clippy. Six isolated mutations
+fail: disabled recovery, bypassed lifetime ceiling, deduplicated fresh
+executions, reset per-round budget, omitted attempt persistence and erased
+prior history. The restored integration target passes. A process killed in
+an unobserved attempt can still leave incomplete accounting; no monetary
+measurement or immutable-checkpoint claim is made.
+
+### Delivery history
+
 The repairs are granular commits. Arena PR #35 merged as `f7614dc`; its tree
 matches tested head `f5939a9` and post-merge CI passed. Its first CI run caught
 formatting in the separately excluded PyO3 crate, which was fixed and rebound.

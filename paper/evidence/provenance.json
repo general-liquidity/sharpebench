@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "e5d3b0671b26b23f738474dbaf4ac198a432ae43",
+  "generated_at_head": "a851faf07672c2d40db1dd2e84edc0a61b283b00",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -291,7 +291,7 @@
     },
     {
       "path": "crates/sharpebench-cli/src/main.rs",
-      "sha256": "ab09c70768ee5d432d53f3b975cd3c1168642916f29839f4421754fe9a4f0b5f"
+      "sha256": "b2d1e584cfe63c437f122900ad1e871ae3e41a0cdc0c565b4ca18982815a11af"
     },
     {
       "path": "crates/sharpebench-cli/src/update.rs",
@@ -303,7 +303,7 @@
     },
     {
       "path": "crates/sharpebench-cli/tests/attempt_accounting_cli.rs",
-      "sha256": "28d27bfd92255e2b78edd6e68bd0b5f6edf3a1592d234f5f86f52082a55b7d59"
+      "sha256": "198443b51afaea7575625cf5e81fcb8b270a573e579d97ed6920949e1e8be64b"
     },
     {
       "path": "crates/sharpebench-cli/tests/external_entrant_sandbox.rs",
@@ -527,7 +527,7 @@
     },
     {
       "path": "crates/sharpebench-harness/src/checkpoint.rs",
-      "sha256": "5bf7db43e30ed7682fcee987d098c686d6a1c3576236cd008b0427d772d51f5c"
+      "sha256": "c9203d4b065c07e93d0d21646479c44650f43a375d4edf6d7516a81d0a5bccaf"
     },
     {
       "path": "crates/sharpebench-harness/src/failure.rs",
@@ -535,7 +535,7 @@
     },
     {
       "path": "crates/sharpebench-harness/src/lib.rs",
-      "sha256": "e2fc6bba890b58c4059937f002bc33cab11c0d9ece6dc5b9d9d7fc6b02c970f2"
+      "sha256": "158dc828316db037ccc2a620491a0bc867d2ef0ef81bd1fa3a986c6dcd184244"
     },
     {
       "path": "crates/sharpebench-harness/src/perturb.rs",
@@ -552,6 +552,10 @@
     {
       "path": "crates/sharpebench-harness/tests/producer_declared_support.rs",
       "sha256": "e2de3103ce17d9824294cde7187e0a1bb7913870b8c04aa1d05eb1de3f5d5214"
+    },
+    {
+      "path": "crates/sharpebench-harness/tests/runtime_recovery.rs",
+      "sha256": "3e605e5a4752f6b26defd3db88e2653dc9e71bcf7c47b4056e4ad9252929fe29"
     },
     {
       "path": "crates/sharpebench-harness/tests/team_concurrency_semantics.rs",
@@ -995,5 +999,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "a6de32ac68b7aca3b93b28a9652ee5c44424d87636cc11a3276d0b11a053abe1"
+  "source_snapshot_sha256": "d67305e095df3e39181c08fcc48e9796366b923187ba4e60b49a8e25604ee8a0"
 }

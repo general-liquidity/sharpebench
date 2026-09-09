@@ -540,6 +540,7 @@ fn help() {
     println!("                       --image <repository@sha256:...>: run the agent in the hardened container sandbox (no daemon = refusal)");
     println!("                       --cmd: UNSANDBOXED host execution, for agents you trust; prints a warning on every run");
     println!("                       --checkpoint <path>: resumable external-agent sweep (crash-tolerant)");
+    println!("                       --retry-runtime-failures: recover exhausted checkpoint cells (3 additional rounds maximum)");
     println!("                       --entrant-sha256 <digest>: exact entrant identity; required with --checkpoint plus --http or --cmd");
     println!("                       --periods-per-year N: bars per year of the dataset (default 252; 1h crypto 8760, 4h 2190, 1d crypto 365, 1w 52)");
     println!("                       --pass-mode all|any|at-least:N|relative-to-benchmark: reliability verdict (default all)");
@@ -1282,6 +1283,20 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
         Agent, BuyAndHold, CostModel, Dataset, ExternalAgent, HttpAgent, Momentum, Window,
     };
 
+    let resume_policy = if args.iter().any(|arg| arg == "--retry-runtime-failures") {
+        if flag_value(args, "--checkpoint").is_none()
+            || !["--cmd", "--image", "--http"]
+                .iter()
+                .any(|flag| flag_value(args, flag).is_some())
+        {
+            eprintln!("error: --retry-runtime-failures requires --checkpoint and an external-agent transport");
+            return ExitCode::from(2);
+        }
+        sharpebench_harness::ResumePolicy::RetryRuntimeFailures
+    } else {
+        sharpebench_harness::ResumePolicy::UnfinishedOnly
+    };
+
     let (data, windows) = match flag_value(args, "--data") {
         Some(path) => match Dataset::from_csv_file(path) {
             Ok(d) => {
@@ -1401,13 +1416,12 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
-            match sharpebench_harness::run_resumable_sweep_bound(
+            match sharpebench_harness::run_resumable_sweep_bound_with_policy(
                 ckpt,
                 &label,
                 &contract,
                 &windows,
-                &seeds,
-                EXTERNAL_MAX_RETRIES,
+                resume_policy,
                 |wi, seed| {
                     let mut agent = HttpAgent::new(addr.clone());
                     sharpebench_harness::run_external_backtest(
@@ -1518,13 +1532,12 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
-            match sharpebench_harness::run_resumable_sweep_bound(
+            match sharpebench_harness::run_resumable_sweep_bound_with_policy(
                 ckpt,
                 &label,
                 &contract,
                 &windows,
-                &seeds,
-                EXTERNAL_MAX_RETRIES,
+                resume_policy,
                 sandbox_attempt,
             ) {
                 Ok(r) => r,
@@ -1611,13 +1624,12 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
-            match sharpebench_harness::run_resumable_sweep_bound(
+            match sharpebench_harness::run_resumable_sweep_bound_with_policy(
                 ckpt,
                 &label,
                 &contract,
                 &windows,
-                &seeds,
-                EXTERNAL_MAX_RETRIES,
+                resume_policy,
                 |wi, seed| {
                     let rest_refs: Vec<&str> = rest.iter().map(String::as_str).collect();
                     match ExternalAgent::spawn(&prog, &rest_refs) {

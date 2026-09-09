@@ -144,6 +144,18 @@ pub enum TaskState {
     AgentFailed { kind: FailureKind },
 }
 
+/// Explicit recovery of infrastructure failures, never a completed or agent-fault
+/// result. Three additional rounds per cell is a lifetime checkpoint ceiling,
+/// not a budget that resets each time the process starts.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ResumePolicy {
+    #[default]
+    UnfinishedOnly,
+    RetryRuntimeFailures,
+}
+
+pub const MAX_RUNTIME_RECOVERY_ROUNDS: u32 = 3;
+
 /// One task in the sweep matrix: its (window index, seed) coordinates, its lifecycle
 /// state, and - once terminal - the run it produced (a real run for `Done`, a failing
 /// sentinel for `AgentFailed`).
@@ -162,6 +174,14 @@ pub struct TaskRecord {
     /// it. Rank-neutral, and never part of the assembled run pool.
     #[serde(default)]
     pub attempts: AttemptLedger,
+    /// Recovery rounds already authorized for this cell, including a round
+    /// interrupted after its claim was saved. Missing in older v3 checkpoints.
+    #[serde(default)]
+    pub runtime_recovery_rounds: u32,
+    /// Completed attempt observations in the current round. Persisting this
+    /// prevents an interrupted claim from resetting its per-round retry budget.
+    #[serde(default)]
+    pub attempts_in_round: u32,
 }
 
 impl TaskRecord {
@@ -200,6 +220,8 @@ impl SweepCheckpoint {
                     state: TaskState::Pending,
                     run: None,
                     attempts: AttemptLedger::default(),
+                    runtime_recovery_rounds: 0,
+                    attempts_in_round: 0,
                 });
             }
         }
@@ -362,6 +384,21 @@ impl SweepCheckpoint {
         self.tasks
             .iter_mut()
             .find(|t| t.window == window && t.seed == seed)
+    }
+
+    fn append_executed_attempts(
+        &mut self,
+        window: usize,
+        seed: u64,
+        ledger: &AttemptLedger,
+    ) -> u32 {
+        let cell = self
+            .task_mut(window, seed)
+            .expect("the claimed task exists");
+        // Distinct executions are not replayed ledger batches. Identical records
+        // still count separately, unlike the legacy record_attempts merge API.
+        cell.attempts.extend(ledger);
+        u32::try_from(cell.attempts.len()).unwrap_or(u32::MAX)
     }
 
     /// Record what a cell has spent so far without settling its state. A worker
@@ -612,7 +649,7 @@ pub fn run_resumable_sweep_bound<F>(
     windows: &[Window],
     seeds: &[u64],
     max_retries: u32,
-    mut attempt: F,
+    attempt: F,
 ) -> std::io::Result<ResilientSubmission>
 where
     F: FnMut(usize, u64) -> Result<Run, FailureKind>,
@@ -624,10 +661,89 @@ where
         ));
     }
 
+    run_resumable_sweep_bound_with_policy(
+        path,
+        agent_id,
+        contract,
+        windows,
+        ResumePolicy::UnfinishedOnly,
+        attempt,
+    )
+}
+
+/// Bound sweep with opt-in recovery of exhausted runtime cells. Execution seeds
+/// and per-round retries come from the unchanged contract. Every newly observed
+/// attempt is appended and saved before another is made; completed and agent-
+/// fault outcomes are saved with that attempt, not in a later checkpoint write.
+/// A crash during an attempt can still leave its duration/outcome unobserved.
+pub fn run_resumable_sweep_bound_with_policy<F>(
+    path: &Path,
+    agent_id: &str,
+    contract: &SweepContract,
+    windows: &[Window],
+    policy: ResumePolicy,
+    mut attempt: F,
+) -> std::io::Result<ResilientSubmission>
+where
+    F: FnMut(usize, u64) -> Result<Run, FailureKind>,
+{
+    if !contract.matches_execution(windows, &contract.seeds, contract.max_retries) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "sweep contract does not describe the supplied windows and execution policy",
+        ));
+    }
+
     let mut cp =
         match SweepCheckpoint::load(path) {
             Ok(existing) if existing.matches_bound(agent_id, contract) => {
                 let mut existing = existing;
+                // Validate every proposed recovery before modifying any cell.
+                for task in &existing.tasks {
+                    if matches!(task.state, TaskState::Pending | TaskState::Claimed { .. })
+                        && task.attempts_in_round > contract.max_retries
+                    {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "unfinished checkpoint cell has exhausted its per-round budget",
+                        ));
+                    }
+                    if task.runtime_recovery_rounds > MAX_RUNTIME_RECOVERY_ROUNDS {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "checkpoint exceeds the runtime recovery ceiling",
+                        ));
+                    }
+                    if let TaskState::RuntimeFailed { kind, attempts } = &task.state {
+                        if !kind.is_runtime()
+                            || *attempts == 0
+                            || task.run.is_some()
+                            || task.attempts.is_empty()
+                        {
+                            return Err(std::io::Error::new(
+                                std::io::ErrorKind::InvalidData,
+                                "checkpoint contains an invalid runtime failure",
+                            ));
+                        }
+                        if policy == ResumePolicy::RetryRuntimeFailures
+                            && task.runtime_recovery_rounds == MAX_RUNTIME_RECOVERY_ROUNDS
+                        {
+                            return Err(std::io::Error::new(
+                                std::io::ErrorKind::InvalidInput,
+                                "checkpoint runtime recovery budget is exhausted",
+                            ));
+                        }
+                    }
+                }
+                if policy == ResumePolicy::RetryRuntimeFailures {
+                    for task in &mut existing.tasks {
+                        if matches!(task.state, TaskState::RuntimeFailed { .. }) {
+                            task.runtime_recovery_rounds += 1;
+                            task.attempts_in_round = 0;
+                            task.state = TaskState::Pending;
+                        }
+                    }
+                }
                 existing.requeue_claimed();
                 existing
             }
@@ -642,22 +758,45 @@ where
         };
 
     while let Some((w, seed)) = cp.claim_next(0, 0) {
-        let driven = run_with_retries(max_retries, || attempt(w, seed));
-        let ledger = driven.ledger;
-        match driven.outcome {
-            RunOutcome::Completed(run) => cp.complete(w, seed, run, &ledger),
-            RunOutcome::Exhausted { last, attempts } => {
-                cp.fail_runtime(w, seed, last, attempts, &ledger)
-            }
-            RunOutcome::AgentFault(kind) => {
-                let expected_len = windows
-                    .get(w)
-                    .map(|window| window.end.saturating_sub(window.start))
-                    .unwrap_or(0);
-                cp.fail_agent(w, seed, kind, failing_sentinel_run(expected_len), &ledger)
+        cp.save(path)?;
+        let mut tries = cp
+            .task_mut(w, seed)
+            .expect("the claimed task exists")
+            .attempts_in_round;
+        loop {
+            // The checkpoint driver owns the retry loop so that each observation
+            // is durable before a later attempt can start.
+            let driven = run_with_retries(0, || attempt(w, seed));
+            tries += 1;
+            cp.task_mut(w, seed)
+                .expect("the claimed task exists")
+                .attempts_in_round = tries;
+            let total = cp.append_executed_attempts(w, seed, &driven.ledger);
+            let recorded = AttemptLedger::default();
+            let terminal = match driven.outcome {
+                RunOutcome::Completed(run) => {
+                    cp.complete(w, seed, run, &recorded);
+                    true
+                }
+                RunOutcome::Exhausted { last, .. } => {
+                    if tries > contract.max_retries || tries == u32::MAX {
+                        cp.fail_runtime(w, seed, last, total, &recorded);
+                        true
+                    } else {
+                        false
+                    }
+                }
+                RunOutcome::AgentFault(kind) => {
+                    let expected_len = windows[w].end.saturating_sub(windows[w].start);
+                    cp.fail_agent(w, seed, kind, failing_sentinel_run(expected_len), &recorded);
+                    true
+                }
+            };
+            cp.save(path)?;
+            if terminal {
+                break;
             }
         }
-        cp.save(path)?;
     }
     cp.validate_terminal(windows)?;
     Ok(cp.assemble())
@@ -691,6 +830,15 @@ mod tests {
             crate::failure::AttemptDuration::Unavailable,
         ));
         ledger
+    }
+
+    #[test]
+    fn distinct_executions_with_identical_records_are_not_deduplicated() {
+        let mut checkpoint = SweepCheckpoint::new("entrant", 1, &[7]);
+        let batch = untimed_completion();
+        assert_eq!(checkpoint.append_executed_attempts(0, 7, &batch), 1);
+        assert_eq!(checkpoint.append_executed_attempts(0, 7, &batch), 2);
+        assert_eq!(checkpoint.attempt_ledger().summary().completed, 2);
     }
 
     fn tmp_path(tag: &str) -> std::path::PathBuf {
