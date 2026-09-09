@@ -5,29 +5,67 @@ review of progress against both repositories. This file is mirrored
 byte-for-byte in the Bench and Arena repositories; edit both or neither.
 
 Status: 100 checklist rows, all 100 closed. The restructured plan opened at 39.
-All of it is on the `fix/audit-batch-a-b-2026-09-08` branch in each repository,
-Bench PR #25 and Arena PR #26, and is **not merged**. Every commit cited on a
-closed row was verified to be reachable in the named repository, and every new
-regression was mutation-checked in an isolated copy before its row was closed.
-Five deferred items are listed at the end without checkboxes; they were never
-part of the 100.
+All of it landed on the `fix/audit-batch-a-b-2026-09-08` branch in each
+repository, Bench PR #25 and Arena PR #26, both merged into main: Bench
+`f694e1b`, Arena `fb2835d`, post-merge CI green, 28 stale remote branches
+deleted. Every commit cited on a closed row was verified to be reachable in the
+named repository, and every new regression was mutation-checked in an isolated
+copy before its row was closed. Five deferred items are listed at the end
+without checkboxes; they were never part of the 100.
 
 **Closed is not the same as finished.** Each row records what its repair does
 and does not establish, and several close on a disposition rather than a code
 change: a finding shown to be already repaired, a description corrected where
 the arithmetic was right, or a probe run on a real Docker daemon and found not
 to reproduce. Reading a row's own text matters more than reading this count.
-Three consequences are deliberately left as decisions rather than folded into a
-fix: migrating contract digests to the versioned canonical form, which would
+Three consequences were deliberately left as decisions rather than folded into
+a fix: migrating contract digests to the versioned canonical form, which would
 invalidate 24 committed digests; renaming the serialized zero-mass and
 budget-onset keys, which moves a published Python key and needs rebuilt npm and
 WebAssembly artifacts; and merging these branches at all.
 
-Published numerical evidence stays frozen. Where a repair changes what a
-producer would now compute, both papers say so rather than regenerating the
-number. Two committed artifacts will not reproduce and are recorded in the
-papers: the synthetic witness, whose seed expression collided, and the
-forecast-quality tutorial fixture, which was itself an instance of R05.
+All three decisions were taken, authorized by the operator on 2026-09-08, and
+implemented as follow-ups in their own PRs. Contract digests: Bench PR #28,
+branch `fix/contract-digest-v1-2026-09-08`. New contracts digest under
+`sharpebench/canonical-json/v1`; verification dual-accepts the legacy encoding,
+so the 24 committed digests still verify; regressions cover both encodings and
+a migration note documents the cutover. Arena's `forecast_contract.py` still
+serializes under the Python `json.dumps` convention, which is not v1, so
+cross-product digest parity is an open Arena-side R07 item. Key renames: Bench
+PR #29, branch `fix/diagnostic-key-renames-2026-09-08`. `zero_mass` and
+`zero_mass_gap` became `near_zero_return_mass` and `near_zero_return_mass_gap`;
+`overfit_onset` became `non_improvement_onset`. The report types gained
+`Deserialize` with serde aliases for the old keys, so saved reports parse while
+new output carries only the new names; the Python `budget_curve` dict emits
+only the new key. WASM and npm were rebuilt with wasm-pack 0.15.0 on the pinned
+toolchain and smoke-tested as an installed tarball, the wheel was built and
+tested in a fresh venv, and alias removal was mutation-checked in an isolated
+copy. No artifact under `paper/evidence` carried the keys. Arena pins core
+`=0.15.0` and sees the rename only on a pin bump. Merging: done, as recorded
+above.
+
+Published numerical evidence stayed frozen through the repairs. Where a repair
+changes what a producer would now compute, both papers say so rather than
+regenerating the number. Two committed artifacts would not have reproduced
+under the repaired code, the synthetic witness, whose seed expression collided,
+and the forecast-quality tutorial fixture, which was itself an instance of R05.
+Both were regenerated as declared experiments under operator authorization.
+The witness was rerun under the corrected seeds (Bench PR #27, branch
+`exp/witness-rerun-2026-09-08`): the crossing moved one grid step on both
+geometries, weekly 0.35 to 0.40 per period (annualized 2.52 to 2.88), daily
+0.20 to 0.25 (3.17 to 3.97); the calibration bar did not move, because the 0.5
+annualized floor binds in both draws, and the per-run pass^k leg did. Every
+population now has 40 distinct streams per window, against 13 under the old
+expression. The rerun executed the current kernel, so the shift is the joint
+effect of the seed fix and the corrected moment estimators, and the paper says
+so. The tutorial fixture was redesigned so the producer ships two fields: a
+supported 12-contract field over six resolution clocks on which the block
+bootstrap states a level (mean Brier 0.1054 against 0.2474, difference -0.1420,
+90% interval [-0.2095, -0.0282], p = 4/401, Holm-significant at 0.05), and the
+original 8-contract field moved to `fixtures/withheld/`, byte-identical to
+before, recording why its level is withheld. Bench PR #26 merged as main
+`7998cc2`; Arena PR #27 merged as main `b6c97c0`. The artifacts are
+byte-identical across the two products.
 
 Defects found while repairing that the original audit did not report: the
 release workflow's `verify` job ran with `if: always()` and did not inspect the
@@ -41,9 +79,10 @@ fixed in the commits cited on its row.
 
 Source baselines: [Bench `933e0c1` (0.18.4)](https://github.com/general-liquidity/sharpebench/tree/933e0c1056a2e4707b28762c294323bf05bdab65)
 and [Arena `1be915f` (0.24.1)](https://github.com/general-liquidity/sharpearena/tree/1be915f330acabacd171cc350bec0def58d9e134).
-Current verified checkpoints: Bench `7cfc954` (PR #22) plus PR #24 and the
-contract-inventory fix `c5fe201`; Arena `2130fdc` (PR #22) plus PRs #23 to #25
-and the logit-validator test `3cc00e5`. The archived
+Current verified checkpoints: Bench main `455c9ac` (PRs #22 to #29
+merged, the earlier checkpoint being `7cfc954` plus `c5fe201`); Arena main
+`b6c97c0` (PRs #22 to #27 merged, the earlier checkpoint being `2130fdc` plus
+`3cc00e5`). The archived
 [audit report](README.md#original-audit-report-historical) describes the
 baselines; its findings are not a current defect list. The chronological
 repair diary that used to live at the bottom of this file is preserved
@@ -149,12 +188,12 @@ every row in it is closed under the rules above.
 
 ### Batch E: shared mathematics and contracts
 
-- [x] R07, BM10: `sharpebench/canonical-json/v1` specifies the numeric form once, with fixtures at the exponent boundaries, signed zero, integer-looking floats and Unicode. Python rendered `1e-05` where Rust rendered `0.00001`, a fixed-point versus exponential difference that exponent padding could never reconcile. A preimage carries its version, so a digest under one form is never silently comparable to one under another. BM10's commitment preimage pasted four fields between literal separators, so a separator could move from one into the next; the shift between the artifact digest and the salt is exploitable because neither is carried in the clear, letting an entrant reveal a different frozen artifact against the same published hash. Fields are now length-prefixed under a versioned domain. Bench `1ff5a32`. Contract digests are deliberately NOT migrated: the committed forecast field pins 24 of them, and that is a declared migration needing its own decision.
+- [x] R07, BM10: `sharpebench/canonical-json/v1` specifies the numeric form once, with fixtures at the exponent boundaries, signed zero, integer-looking floats and Unicode. Python rendered `1e-05` where Rust rendered `0.00001`, a fixed-point versus exponential difference that exponent padding could never reconcile. A preimage carries its version, so a digest under one form is never silently comparable to one under another. BM10's commitment preimage pasted four fields between literal separators, so a separator could move from one into the next; the shift between the artifact digest and the salt is exploitable because neither is carried in the clear, letting an entrant reveal a different frozen artifact against the same published hash. Fields are now length-prefixed under a versioned domain. Bench `1ff5a32`. Contract digests were deliberately NOT migrated in this batch: the committed forecast field pins 24 of them, and that was a declared migration needing its own decision. The decision was taken and the migration landed as a follow-up, Bench PR #28 (`fix/contract-digest-v1-2026-09-08`): new contracts digest under v1, verification dual-accepts the legacy encoding so the 24 committed digests still verify. Arena's `forecast_contract.py` still serializes under the Python `json.dumps` convention, so cross-product digest parity is an open Arena-side item.
 - [x] R06, AI1: both halves closed. Arena binds each document to the frozen contract bytes and settles every agent from one canonical record per contract (Arena `1848f82`). Bench, which accepts documents from any producer, now content-addresses the realized outcome and its availability time, retains them past scoring, and refuses to difference losses when an identical contract digest carries different outcomes. Bench `b66f942`.
 - [x] R03 propagation recorded rather than performed. Verified by ancestry: `0cd7d37` is an ancestor of neither `v0.15.0` nor `v0.18.4`, so the corrected moments are unreleased, and Arena's pin of `=0.15.0` cannot carry them. Both changelogs state this and that no artifact was rescored. Bench `a81c5ed`, Arena `6823c60`.
 - [x] R09 propagation recorded on the same evidence: `4378ad4` is an ancestor of neither `v0.15.0` nor `v0.18.4`. Same changelog entries as R03.
 - [x] R02 closed. The first half landed in `895a623` and the agreement and downside legs in `70229a1`; the data-snooping family closes in Bench `1aa8a14`.
-- [x] R05: two one-contract documents produced one settlement block, a zero-width interval and familywise significance at p = 1/401, and raising the replication count only made that look smaller without adding evidence. Resampling B blocks with replacement lands on a single repeated block with probability B^(1-B), so a level finer than that mass is finer than the law can resolve; at the default alpha the bar is met from four blocks. The interval and p-values are withheld with the reason recorded rather than coerced, and Holm keeps a withheld comparison in the family size so it cannot inflate its neighbours. Bench `b66f942`. This is a necessary condition on the reported level, not a certificate of calibration. The shipped tutorial fixture was itself an instance of the defect and is regenerated; the frozen field has six blocks and is unchanged.
+- [x] R05: two one-contract documents produced one settlement block, a zero-width interval and familywise significance at p = 1/401, and raising the replication count only made that look smaller without adding evidence. Resampling B blocks with replacement lands on a single repeated block with probability B^(1-B), so a level finer than that mass is finer than the law can resolve; at the default alpha the bar is met from four blocks. The interval and p-values are withheld with the reason recorded rather than coerced, and Holm keeps a withheld comparison in the family size so it cannot inflate its neighbours. Bench `b66f942`. This is a necessary condition on the reported level, not a certificate of calibration. The shipped tutorial fixture was itself an instance of the defect and was regenerated as a follow-up, Bench PR #26 (`7998cc2`) and Arena PR #27 (`b6c97c0`): the producer now ships a supported 12-contract field on which a level is stated, and the original 8-contract field sits byte-identical under `fixtures/withheld/` with its withholding reason. The frozen field has six blocks and is unchanged.
 - [x] R12: an optional default lets a reader accept an older message, not a newer one, because the published schemas set `additionalProperties: false`. Compatibility is now stated by direction: decisions travel to the harness, always the newer reader, so an added decision field needs no coordination, while an added observation field reaches an older reader and needs version negotiation, a parallel namespace or a declared-unvalidated envelope. The minor-bump rule is split the same way. Arena `118ddc4`.
 - [x] BR2, AR2: both halves closed. Arena in `88d054a`, where a failed request reached `continue` before accounting and a resumed completion replaced its failed attempt. Bench in `a2dc1bf`: the retry path returned the completed run and dropped everything before it, the checkpoint had no attempt field at all, and an eventual agent fault was logged as one attempt however many transport failures preceded it, so a cell that failed twice before completing reported the cost of the completion alone. The in-memory driver had the same hardcoded single attempt, which the finding did not name. Every attempt is now timed and recorded, an unobserved duration is typed rather than summed as zero, a completion is appended after the attempts it superseded, and a terminal cell with no attempt evidence is refused. The checkpoint schema goes to 3 so a pre-ledger file is refused rather than resumed with its spend read as zero. Totals sit beside the scored pool and never enter a score, a rank or a pass^k pool. The architecture audit's claim that retries already preserved prior evidence is corrected in `c86267f`.
 
@@ -167,8 +206,8 @@ every row in it is closed under the rules above.
 - [x] BI6: a team kept only its members' orders and reported no cost, so a team of paid agents showed zero compute spend even when every member supplied one, and its cost-normalized columns went unavailable rather than reflecting real expenditure. Member costs are now summed onto the consensus decision with the unit recorded, and mixed denominations are refused rather than reduced to a dollar total that would silently drop a token reporter's entire spend. Bench `de7ef82`. The concurrency semantics the sum assumes are documented and pinned; latency is neither summed nor scored.
 - [x] Memory: the oracle series was never length-checked against the paired arms, so `fraction_of_ceiling` could divide a lift from one task mix by a ceiling gap from another. The documented zero floor was implemented as a near-zero guard on the absolute gap, so an oracle below baseline kept the ratio's sign and a retrieval arm that also lost ground reported a favourable positive fraction. Scores, costs and alpha are now finite-checked at the boundary on the poisoning leg too. Bench `50e147b`. Equal length cannot establish identical task identities; that stays an explicit caller contract.
 - [x] Budget support and search population: the selection footprint was already sound, re-deflating the peak at base trials plus budget points, which only ever raises the bar. Comparable support across budgets was never stated and the module cannot check it, since it receives returns and not dates, so the caller contract and the per-point sample size are now written down. Bench `637852e`. Documentation only.
-- [x] Plateau terminology: the onset predicate is non-strict, so an honest plateau set the overfit marker while the field claimed more compute had lowered held-out edge. The pre-existing test hedged on exactly that case, which was the tree admitting its own uncertainty. It is documented as a non-improvement marker that is not uncertainty-tested, and the test now pins the plateau setting it with no point declining. Bench `637852e`. Renaming the published key is a separate decision.
-- [x] Zero-return versus no-trade: the split filters on magnitude alone, so it cannot separate sitting out from a position that went nowhere or a period whose gain went to fees. No trade or position flag reaches the module, yet the documentation said it identified inactivity. Core, CLI columns and the book now say near-zero-return mass. Bench `637852e`. The wire field name is unchanged pending the npm and WASM surface decision.
+- [x] Plateau terminology: the onset predicate is non-strict, so an honest plateau set the overfit marker while the field claimed more compute had lowered held-out edge. The pre-existing test hedged on exactly that case, which was the tree admitting its own uncertainty. It is documented as a non-improvement marker that is not uncertainty-tested, and the test now pins the plateau setting it with no point declining. Bench `637852e`. Renaming the published key was a separate decision, since taken: `overfit_onset` became `non_improvement_onset` in Bench PR #29 (`fix/diagnostic-key-renames-2026-09-08`), with a serde alias so saved reports still parse.
+- [x] Zero-return versus no-trade: the split filters on magnitude alone, so it cannot separate sitting out from a position that went nowhere or a period whose gain went to fees. No trade or position flag reaches the module, yet the documentation said it identified inactivity. Core, CLI columns and the book now say near-zero-return mass. Bench `637852e`. The wire field name was left unchanged pending the npm and WASM surface decision, since taken: `zero_mass` and `zero_mass_gap` became `near_zero_return_mass` and `near_zero_return_mass_gap` in Bench PR #29, with serde aliases for the old keys and rebuilt WASM, npm and wheel artifacts.
 - [x] Regime reversals: a reversal was reported only when the pooled gap had a sign to contradict, so exact cancellation, the case pooling hides best, reported none. The module's own motivating fixture proved it by asserting the two opposite regime signs and pointedly never asserting the verdict. A tied pooled gap now lists every counted regime when both signs are present. Bench `26a7b42`.
 - [x] Aligned noncausal attribution: the regression pairs by index and silently truncates, and its two callers differed, with the composite path trimming to a common prefix and the role path not. The pairing is now explicit at the call site and asserted in debug, and the loading is documented as a marginal association from a univariate fit against a non-orthogonal regressor, which does not decompose the return additively and does not identify cause. Bench `637852e` and `14a4729`.
 - [x] Unknown process checks: a point-in-time arm that made no recalls scored perfect compliance and counted as fully compliant, indistinguishable from an audited clean arm, and the suite rollup could not see it. A non-finite allocation cap made the leverage comparison false for every input, reporting a check that never ran. Both fail closed now. Bench `26a7b42`. Confabulation already separated unresolved from resolved and needed no change.
@@ -188,7 +227,7 @@ Do these before any field is scheduled; they are not required for the current
 papers.
 
 - [x] BP1: the shim fell back to an unversioned alias when the requested model was unavailable, changing the evaluated policy without changing the published identity. It now fails the run, accepts only the requested id or a versioned expansion, and stamps both identities on every cached decision. Bench `f1ac409`.
-- [x] BP2: the seed expression overlapped the calibration-member and execution-seed indices, so the five zero-edge calibrators that fix the dispersion bar shared draws, giving 13 distinct streams per window where the design calls for 40. Seeds now come from an unambiguous domain, member, window and execution-seed tuple, with common random numbers across the edge sweep deliberately preserved. Bench `f1ac409`. The committed witness evidence will not reproduce; the paper records that in `b993016`.
+- [x] BP2: the seed expression overlapped the calibration-member and execution-seed indices, so the five zero-edge calibrators that fix the dispersion bar shared draws, giving 13 distinct streams per window where the design calls for 40. Seeds now come from an unambiguous domain, member, window and execution-seed tuple, with common random numbers across the edge sweep deliberately preserved. Bench `f1ac409`. The committed witness evidence would not reproduce under the corrected seeds; the paper recorded that in `b993016`. The witness was then rerun as a declared experiment, Bench PR #27 (`exp/witness-rerun-2026-09-08`): the crossing moved one grid step on both geometries, weekly 0.35 to 0.40 per period (annualized 2.52 to 2.88), daily 0.20 to 0.25 (3.17 to 3.97), with the calibration bar unchanged and 40 distinct streams per window in every population. The rerun executed the current kernel, so the shift is the joint effect of the seed fix and the corrected moment estimators, and the paper says so.
 - [x] BP3: cache identity hashed only model and prompt, so a decision taken under a different system prompt, temperature, token budget or scaffold version was replayed as the same request. It is now the digest of the whole effective request plus an explicit scaffold version, and a disagreeing record is dropped and counted. Bench `f1ac409`.
 - [x] BP4: the example stripped the four cost controls its own instructions tell operators to export. They now pass through the hermetic spawn and their effective values are recorded, with the credential bound by presence and never by value, following the same secret shape as `14150a6`. Bench `f1ac409`.
 - [x] BP5: sanitized tags folded non-injectively, so `a:b` and `a-b` shared one agent id, one identity artifact and one first-match metadata join. The encoding is injective and a colliding or repeated tag is refused before any model starts. Bench `f1ac409`.

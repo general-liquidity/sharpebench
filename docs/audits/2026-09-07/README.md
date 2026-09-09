@@ -9,15 +9,19 @@ carries more than this count. Batches A, B, C, D
 G, H and I are complete, and rows close in E and F as well. The two Docker rows
 were resolved on the Docker-enabled CI runner: the surviving-wrapper OOM hazard
 does not reproduce there, and the entrypoint defect is not observable with the
-pinned fixture, which is why an earlier fix for it failed. That work sits on the
-`fix/audit-batch-a-b-2026-09-08` branch in each repository, Bench PR #25 and
-Arena PR #26, and is not merged. The plan was
-restructured on 2026-09-08 from nine descriptive sections into nine ordered
-batches; the previous checkpoint recorded 93 rows with 36 closed. The difference
-is three grab-bag rows split into single items, one updater row added, and two
-post-checkpoint fixes recorded as closed. An open row can contain a partial
-repair, a design decision or an unconfirmed probe, so these totals are not a
-count of independent confirmed bugs.
+pinned fixture, which is why an earlier fix for it failed. That work landed on
+the `fix/audit-batch-a-b-2026-09-08` branch in each repository, Bench PR #25
+and Arena PR #26, both merged into main: Bench `f694e1b`, Arena `fb2835d`,
+post-merge CI green. The three decisions the checklist left open (contract
+digest migration, diagnostic key renames, merging) and the two artifacts it
+recorded as not reproducing were taken up as follow-ups in their own PRs,
+authorized by the operator on 2026-09-08; IMPLEMENTATION.md records each. The
+plan was restructured on 2026-09-08 from nine descriptive sections into nine
+ordered batches; the previous checkpoint recorded 93 rows with 36 closed. The
+difference is three grab-bag rows split into single items, one updater row
+added, and two post-checkpoint fixes recorded as closed. An open row can
+contain a partial repair, a design decision or an unconfirmed probe, so these
+totals are not a count of independent confirmed bugs.
 
 Start with [IMPLEMENTATION.md](IMPLEMENTATION.md) for the checklist, the batch
 order, the 2026-09-08 review corrections and the closed rows with their repair

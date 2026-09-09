@@ -4,6 +4,49 @@ Chronological repair diary moved out of [IMPLEMENTATION.md](IMPLEMENTATION.md) o
 
 ## Verification log
 
+- Follow-ups, 2026-09-09. The three decisions the checklist left open and the
+  two artifacts it recorded as not reproducing were all taken up, authorized by
+  the operator on 2026-09-08, each in its own PR.
+
+  Merge. Bench PR #25 merged as main `f694e1b`, Arena PR #26 as `fb2835d`;
+  post-merge CI green on both; 28 stale remote branches deleted.
+
+  Contract digests. Bench PR #28, branch `fix/contract-digest-v1-2026-09-08`,
+  main `455c9ac`. New contracts digest under
+  `sharpebench/canonical-json/v1`; verification dual-accepts the legacy
+  encoding, so the 24 committed digests still verify; regressions cover both
+  encodings; a migration note documents the cutover. Arena's
+  `forecast_contract.py` still serializes under the Python `json.dumps`
+  convention, which is not v1, so cross-product digest parity stays open as an
+  Arena-side R07 item.
+
+  Key renames. Bench PR #29, branch `fix/diagnostic-key-renames-2026-09-08`,
+  main `f69d8a6`. `zero_mass` and `zero_mass_gap` became
+  `near_zero_return_mass` and `near_zero_return_mass_gap`; `overfit_onset`
+  became `non_improvement_onset`. The report types gained `Deserialize` with
+  serde aliases for the old keys, so saved reports parse while new output
+  carries only the new names; the Python `budget_curve` dict emits only the
+  new key. WASM and npm rebuilt with wasm-pack 0.15.0 on the pinned toolchain
+  and smoke-tested as an installed tarball; wheel built and tested in a fresh
+  venv; alias removal mutation-checked in an isolated copy. No artifact under
+  `paper/evidence` carried the keys. Arena pins core `=0.15.0` and sees the
+  rename only on a pin bump.
+
+  Witness rerun. Bench PR #27, branch `exp/witness-rerun-2026-09-08`, main
+  `117de5e`. The BP2 witness was rerun under the corrected seeds; the
+  crossing moved one grid step on both geometries, weekly 0.35 to 0.40, daily
+  0.20 to 0.25, with the calibration bar unchanged. The rerun used the current
+  kernel, so the seed fix and the corrected moment estimators are confounded.
+  The full record is the 2026-09-08 entry at the end of this log.
+
+  Tutorial fixture. Bench PR #26 merged as main `7998cc2`, Arena PR #27 as
+  `b6c97c0`. The producer ships two fields: a supported 12-contract field over
+  six resolution clocks on which the block bootstrap states a level (mean Brier
+  0.1054 against 0.2474, difference -0.1420, 90% interval [-0.2095, -0.0282],
+  p = 4/401, Holm-significant at 0.05), and the original 8-contract field
+  moved to `fixtures/withheld/`, byte-identical to before, recording why its
+  level is withheld. Artifacts are byte-identical across the two products.
+
 - R02 blocked work, 2026-09-08. Closing the open half widens eight return types.
   Recording the callers here so the next pass does not have to rediscover them.
   `reality_check_pvalue`, `spa_pvalue` and `spa_consistent_pvalue` are called
