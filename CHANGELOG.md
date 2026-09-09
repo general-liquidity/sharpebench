@@ -13,6 +13,7 @@ and links the commits it was built from.
 ## [Unreleased]
 
 ### Fixed
+- Percentile selection refuses candidates with fewer than two finite observations, a zero bootstrap budget, or overflowing point, resample or optimism utilities. Failure withholds the whole selection rather than letting an empty series win as zero return.
 - Field-wide significance tests refuse nonfinite intermediate statistics and studentizing scales. A failed family member withholds all three snooping p-values and every step-down rejection; failed arithmetic cannot establish significance.
 - Keyed scoring derives execution-seed width from the validated run keys and refuses a contradictory explicit width. Wide CSV imports retain the period IDs of nonmissing returns, so equal-length series with different missing dates cannot silently pair by position.
 
