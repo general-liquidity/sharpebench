@@ -160,7 +160,30 @@ The fixture now explicitly resets accepted sockets to blocking mode while
 retaining its read timeout. A third CLI test forces the initial nonblocking
 state; removing the reset in an isolated copy reproduces `WouldBlock`, and
 restoring it passes. All three pricing CLI tests and targeted clippy pass
-locally. The corrected head still requires cross-platform CI.
+locally. The corrected head `d957fe5` passed all PR checks, including macOS
+and Windows. PR #42 merged as `630183a` with an identical tree; post-main
+CI/npm runs 34407524104 and 34407524144 succeeded.
+
+### Raw artifact scan engine: partial G07 implementation
+
+The feature branch adds a streaming byte engine with a validated policy and
+explicit raw-file scope. Nine integration tests and one deadline unit test
+pass. Thirteen isolated mutations are caught: dropping sequence matching,
+dropping whole-file digest matches, bypassing the file-byte limit, accepting an
+empty scope, swallowing read errors, accepting truncated files, ignoring prior
+incompleteness, omitting names from inventory identity, overflowing the match
+list, accepting duplicate entries, resetting match state at chunk boundaries,
+accepting an empty policy, and omitting the final deadline check.
+Restored controls pass; targeted clippy passes with warnings denied.
+The full harness package suite passes 98 tests with two explicitly ignored
+tests (the slow CI leg and the installed sibling shim). Rustdoc with warnings
+denied and workspace formatting also pass.
+
+This does not yet establish pre-launch protection. No artifact enumerator,
+Docker export capture or CLI refusal path is wired to this engine at this
+checkpoint. Its caller must impose blocking-I/O deadlines and report
+enumeration failures. Negative raw-byte matching cannot exclude compressed,
+encoded, transformed or previously memorized content.
 
 Rates use the legacy entrant-reported token fields. Individual omitted counts
 default to zero in that protocol; neither count completeness nor the declared
