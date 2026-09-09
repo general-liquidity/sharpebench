@@ -42,6 +42,30 @@ streams supplied by its caller, not an independently authenticated deployment.
   must never be described as proving an agent has not memorized held-out data.
 - [ ] Verify packaging, CI, normal merge and post-main checks.
 
+## Implemented TAR reader
+
+`artifact_tar::scan_tar_snapshot` inspects uncompressed snapshots without
+extracting them. It uses the `tar` crate's
+[raw entry iterator](https://docs.rs/tar/0.4.46/tar/struct.Entries.html#method.raw)
+so extended headers cannot trigger unbounded preprocessing or sparse expansion.
+Headers and entry bodies are scanned separately, including long-name metadata
+and link targets. Neither paths nor links become host filesystem operations.
+Repeated paths are all scanned. Iteration continues past zero blocks so a
+concatenated archive is not silently omitted.
+
+The policy's stream count includes headers and bodies; the total-byte bound
+also covers archive padding. A separate SHA-256 binds all consumed archive
+bytes and is withheld on incomplete enumeration. Metadata bodies are capped
+at 64 KiB before allocation. Sparse formats, global PAX headers, PAX size
+overrides, malformed records and dangling or duplicate extensions are refused.
+This is a raw TAR scope, not a general archive decoder or a reconstructed
+filesystem certificate. Nine integration tests, a deadline unit test and
+thirteen isolated mutations cover this reader.
+
+Docker capture still needs implementation. In particular, Docker documents
+that [container export omits volume contents](https://docs.docker.com/reference/cli/docker/container/export/).
+A successful TAR scan alone therefore cannot establish complete image scope.
+
 Host-command and remote-HTTP execution do not prove deployed artifact identity
 from an operator-supplied path alone. Any such audit must state this limitation
 instead of presenting a local file scan as verification of a remote process.

@@ -185,6 +185,31 @@ checkpoint. Its caller must impose blocking-I/O deadlines and report
 enumeration failures. Negative raw-byte matching cannot exclude compressed,
 encoded, transformed or previously memorized content.
 
+### Non-extracting TAR reader: G07 integration in progress
+
+Nine synthetic archive tests and one deadline unit test pass. They cover
+repeated paths, concatenated archives, complete archive hashing, link/header
+content, GNU long names, PAX metadata, unsupported sparse/size forms, malformed
+records, bounded metadata allocation, padding/count limits, truncation, read
+errors, dangling extensions and duplicate pending extensions. No archive is
+extracted and no Docker container is started by these tests.
+
+Thirteen isolated mutations are caught: stopping at zero blocks, removing
+header matching, removing body matching, accepting PAX size overrides,
+ignoring blank PAX records, removing the metadata cap, excluding padding from
+the byte bound, swallowing enumeration errors, replacing the archive digest,
+hiding extension entries, accepting dangling extensions, accepting duplicate
+extensions and ignoring the reader deadline. Restored controls pass and the
+restored source is byte-identical to the feature worktree after formatting.
+The final harness suite passes 108 tests with two explicit ignores. Targeted
+clippy, rustdoc with warnings denied and formatting pass.
+
+The existing byte-engine head `c4d1c29` passed all PR #44 checks. That result
+does not cover this subsequent reader addition; its new dependency and package
+checks must run on the updated head. The dependency is `tar` 0.4.46 with
+default features disabled, adding `filetime` transitively. Docker capture,
+image configuration/volume handling and real launch refusal remain open.
+
 Rates use the legacy entrant-reported token fields. Individual omitted counts
 default to zero in that protocol; neither count completeness nor the declared
 model is independently verified. Partial usage, failed requests and absent
