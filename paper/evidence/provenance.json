@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "e367c9844cbb3a2a02e49d0c30c2dffb38e950d9",
+  "generated_at_head": "81bd2359581736c3313c4c61ea6364f8f60d35b0",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -279,7 +279,7 @@
     },
     {
       "path": "crates/sharpebench-cli/src/forecast_cmd.rs",
-      "sha256": "3551ce418d92301b667ca80ae3ec4077afe8b06b1cfb1a5f57fcc4b9201b8531"
+      "sha256": "18ce241fadcacea1a25a639f4ded53c8bed47f291dd0461af754ee8f4c12a855"
     },
     {
       "path": "crates/sharpebench-cli/src/import_cmd.rs",
@@ -375,7 +375,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/forecast.rs",
-      "sha256": "333623b0b7fabd17f4ee8dc8567254bb57f36647d1a45a04aea688be11f6367a"
+      "sha256": "41eba420b1898c0d0c5f3389533f6f3252a517f9480ea0ed0479ffdbca379cb7"
     },
     {
       "path": "crates/sharpebench-core/src/greeks.rs",
@@ -383,7 +383,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/lib.rs",
-      "sha256": "500dc633df2e7c9de458d5777a8b7f630a79c4067a37fcda69ede03dcc10ee7b"
+      "sha256": "870199930f2c8296439175e592b8db1e7c55e662b8ea70e24de7fe3aa0cc27d0"
     },
     {
       "path": "crates/sharpebench-core/src/oos.rs",
@@ -424,6 +424,10 @@
     {
       "path": "crates/sharpebench-core/src/selfaudit.rs",
       "sha256": "a9f7a49923e13b38da27b4c9529220cf7b4c013edffdf18aa49526140275893d"
+    },
+    {
+      "path": "crates/sharpebench-core/tests/forecast_contract_digest_versions.rs",
+      "sha256": "e89aaf60eff19329d8d8f3082a6200e1e344c868a579f752bb380228dbcc7b5b"
     },
     {
       "path": "crates/sharpebench-core/tests/forecast_settlement_and_support.rs",
@@ -967,5 +971,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "4aa2b6f76a95542c66ed8a090cd3a3692b9e7b1737d4b4f3a176042ecaa253fb"
+  "source_snapshot_sha256": "22bc57d890c334b414506aebe3175244877c809716766b7cbc76b2250ea5c2b2"
 }
