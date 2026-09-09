@@ -18,6 +18,7 @@ serde = { version = "1", features = ["derive"] }
 # parse the exact inverse of serialize.
 serde_json = { version = "1", features = ["float_roundtrip"] }
 sha2 = "0.10"
+tar = { version = "0.4.46", default-features = false }
 
 # Examples are not test targets by default, so a `#[test]` inside one is compiled
 # and never run. This example is the bridge to the sibling SharpeArena repository

@@ -117,6 +117,10 @@ impl RawScanPolicy {
             &serde_json::to_vec(self).expect("validated scan policy serializes"),
         )
     }
+
+    pub fn limits(&self) -> &ScanLimits {
+        &self.limits
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
