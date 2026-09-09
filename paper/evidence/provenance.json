@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "c3e2016d2b146f8aec1ad2cf4ee8e29e3d206177",
+  "generated_at_head": "fe5745fc734c4e791158dc9efe25212a03496c1f",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -179,7 +179,7 @@
   "source_files": [
     {
       "path": "Cargo.lock",
-      "sha256": "c0f6913ad4d18f2e40f1d682ff8342525b3af93a16e2e7c0fcf2f45a69defc8e"
+      "sha256": "697f854cee841b587500d8f7c801441f680e117417e5605d2d606929baed6511"
     },
     {
       "path": "Cargo.toml",
@@ -483,7 +483,7 @@
     },
     {
       "path": "crates/sharpebench-harness/Cargo.toml",
-      "sha256": "ae669b493a4da26730d67ba7facc45c9e5bb6f88119f0912a7f245d93aa7616c"
+      "sha256": "1e0d47f88779b3491b2de7cf7ec164b3dda8d6ae00afd9aa1db2718aa4b41843"
     },
     {
       "path": "crates/sharpebench-harness/examples/evidence_sweep.rs",
@@ -534,6 +534,10 @@
       "sha256": "54b5e0addae3fe8a9b4a705c15a9cce0184adcc839228bdd32e8ec4cb770e343"
     },
     {
+      "path": "crates/sharpebench-harness/src/artifact_scan.rs",
+      "sha256": "81806532bfbc4974aa498d5d33f35c2c78bf6c295d0bd945c33bb87b38c89ae7"
+    },
+    {
       "path": "crates/sharpebench-harness/src/checkpoint.rs",
       "sha256": "f1f5b0b17d6d9bb1bcbb84306e94ce2f49018a61a9aeb88944720645143c9d83"
     },
@@ -543,11 +547,15 @@
     },
     {
       "path": "crates/sharpebench-harness/src/lib.rs",
-      "sha256": "0bf0e01003e026bdcc0df9028f2b687239a13fb527667be4f1c6dd9afe65c58a"
+      "sha256": "3ca2e5875ffcb81a1d4b6fa61218cc3bbde252e09e81b96ef4b9efcda068408e"
     },
     {
       "path": "crates/sharpebench-harness/src/perturb.rs",
       "sha256": "4a0a02a9e6ca88fb3ba31c8b3ceebc155cf043afee698d61a90e3b9f4bc406e7"
+    },
+    {
+      "path": "crates/sharpebench-harness/tests/artifact_scan.rs",
+      "sha256": "82cb7352ec3a624f0d2b5731c2d186de1679fb5b2001e2c0cfeac71addf4a435"
     },
     {
       "path": "crates/sharpebench-harness/tests/attempt_ledger_preserves_failed_cost.rs",
@@ -1011,5 +1019,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "4cf89ebd8c9a016cf5d6c7b6e4fe42b1842d46238bab1f5dd1e1071117cdc172"
+  "source_snapshot_sha256": "e4798c3a9424af418e755fece2cdb795022fc0e4e4395410f3355927270d356b"
 }
