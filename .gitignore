@@ -46,3 +46,5 @@ paper/evidence/final/*.partial
 
 # cargo-mutants report from a local .github/workflows/mutation.yml reproduction
 /mutants.out*
+# Claude Code agent worktrees
+.claude/worktrees/

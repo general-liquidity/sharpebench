@@ -347,7 +347,14 @@ const PERIODS_PER_YEAR: &[(&str, f64)] = &[
 /// DSR falls to zero. On crypto-majors-1w it is below the floor, so the floor
 /// applies, the bar is the same 1.1382 the configured prior gives, and both
 /// tables print the same DSR. Everywhere else the two fields agree outright.
+///
+/// Ignored by default: reconstructing both fields on all nine datasets takes
+/// about six and a half minutes, and the workspace test binaries run crate by
+/// crate, so this one test floored every OS leg of CI. It runs unchanged, with
+/// `-- --ignored`, in the Ubuntu-only `slow harness (clone-merge regression)`
+/// job of `.github/workflows/ci.yml`, in parallel with the OS matrix.
 #[test]
+#[ignore = "about 6.5 minutes; runs in the ubuntu-only slow-harness CI job"]
 fn mandate_field_changes_dispersion_source_on_three_panels() {
     use sharpebench_core::{rank, ScoreConfig, TrialsSrStdSource};
 
