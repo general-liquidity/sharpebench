@@ -24,6 +24,10 @@ module.exports = function assertKernelRepairContract(sb, version) {
   assert.equal(typeof lite.statisticsError, "string");
   assert.equal(lite.methodologyVersion, `sharpebench-stats/${version}`);
 
+  const overflow = sb.isMySharpeReal([Number.MAX_VALUE, Number.MAX_VALUE, Number.MAX_VALUE], { nTrials: 2 });
+  assert.equal(overflow.verdict, "Fail");
+  assert.equal(typeof overflow.statisticsError, "string");
+
   const full = sb.isMySharpeRealFull([[1e308, 1e308], [1e308, 1e308]], 0, { nTrials: 2 });
   assert.deepEqual(full.stepDown, [false, false]);
   assert.deepEqual([full.realityCheckP, full.spaP, full.spaConsistentP], [1, 1, 1]);
