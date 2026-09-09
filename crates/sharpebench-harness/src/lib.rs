@@ -6,19 +6,21 @@
 //! `Run` per (window, seed) is what makes pass^k and multi-window OOS meaningful.
 #![forbid(unsafe_code)]
 
+pub mod accounting;
 pub mod checkpoint;
 pub mod failure;
 pub mod perturb;
 
 pub use checkpoint::{
     run_resumable_sweep, run_resumable_sweep_bound, run_resumable_sweep_bound_with_policy,
-    ResumePolicy, SweepCheckpoint, SweepContract, SweepIdentity, TaskRecord, TaskState,
-    MAX_RUNTIME_RECOVERY_ROUNDS,
+    run_resumable_sweep_observed, ResumePolicy, SweepCheckpoint, SweepContract, SweepIdentity,
+    TaskRecord, TaskState, MAX_RUNTIME_RECOVERY_ROUNDS,
 };
 pub use failure::{
-    apply_oom_verdict, failing_sentinel_run, run_with_retries, AttemptDuration, AttemptLedger,
-    AttemptOutcome, AttemptRecord, AttemptSummary, AttemptedRun, DurationSource, FailureKind,
-    FailureLog, FailureRecord, RunOutcome,
+    apply_oom_verdict, failing_sentinel_run, run_with_observed_retries, run_with_retries,
+    AttemptDuration, AttemptLedger, AttemptObservation, AttemptOutcome, AttemptRecord,
+    AttemptSummary, AttemptedRun, DurationSource, FailureKind, FailureLog, FailureRecord,
+    RunOutcome,
 };
 
 use std::cell::RefCell;
@@ -205,6 +207,8 @@ pub struct ResilientSubmission {
     /// retried ones included. It sits beside the scored pool above rather than
     /// inside it: the pool is the completed cells, this is what they cost.
     pub attempts: AttemptSummary,
+    /// Separate fixed-rate estimate from observed usage, never a scoring input.
+    pub monetary_cost: accounting::MonetarySummary,
 }
 
 /// Like [`run_agent`], but resilient to container/runtime flakiness via the
@@ -249,12 +253,33 @@ pub fn run_agent_resilient_by_window<F>(
 where
     F: FnMut(usize, u64) -> Result<sharpebench_core::Run, FailureKind>,
 {
+    run_agent_resilient_observed(
+        agent_id,
+        expected_run_lens,
+        seeds,
+        max_retries,
+        |window, seed| attempt(window, seed).into(),
+    )
+}
+
+/// Resilient sweep retaining optional per-attempt usage alongside failures.
+/// The observation is persisted even when its attempt does not produce a run.
+pub fn run_agent_resilient_observed<F>(
+    agent_id: &str,
+    expected_run_lens: &[usize],
+    seeds: &[u64],
+    max_retries: u32,
+    mut attempt: F,
+) -> ResilientSubmission
+where
+    F: FnMut(usize, u64) -> AttemptObservation,
+{
     let mut runs = Vec::new();
     let mut failures = FailureLog::default();
     let mut ledger = AttemptLedger::default();
     for (w, &expected_run_len) in expected_run_lens.iter().enumerate() {
         for &seed in seeds {
-            let driven = run_with_retries(max_retries, || attempt(w, seed));
+            let driven = run_with_observed_retries(max_retries, || attempt(w, seed));
             // Append before branching on the outcome: a cell that failed twice
             // before completing spent that time, and the completion must not be
             // the only thing the accounting sees.
@@ -297,6 +322,7 @@ where
         },
         failures,
         attempts,
+        monetary_cost: ledger.monetary_summary(),
     }
 }
 
@@ -337,6 +363,32 @@ where
     }
 }
 
+/// Observe token counts under a frozen operator-declared rate card. The default
+/// path is unchanged; self-reported usage is never labelled provider-verified.
+pub fn run_external_backtest_observed<A>(
+    data: &Dataset,
+    agent: &mut A,
+    window: Window,
+    seed: u64,
+    costs: CostModel,
+    card: Option<&accounting::RateCard>,
+) -> AttemptObservation
+where
+    A: Agent + TransportDiagnostics,
+{
+    match card {
+        None => run_external_backtest(data, agent, window, seed, costs).into(),
+        Some(card) => {
+            let mut observed = accounting::UsageObservedAgent::new(agent, card);
+            let result = run_external_backtest(data, &mut observed, window, seed, costs);
+            AttemptObservation {
+                result,
+                usage: Some(observed.into_usage()),
+            }
+        }
+    }
+}
+
 /// Run an external agent across every `window` × `seed` under the resilient failure
 /// taxonomy, spawning a **fresh** agent per attempt via `spawn` (which returns `None`
 /// when the process/endpoint can't be created - a [`FailureKind::SpawnError`]). A
@@ -351,7 +403,36 @@ pub fn run_external_agent<A, F>(
     seeds: &[u64],
     costs: CostModel,
     max_retries: u32,
+    spawn: F,
+) -> ResilientSubmission
+where
+    A: Agent + TransportDiagnostics,
+    F: FnMut() -> Option<A>,
+{
+    run_external_agent_observed(
+        agent_id,
+        data,
+        windows,
+        seeds,
+        costs,
+        max_retries,
+        spawn,
+        None,
+    )
+}
+
+/// External sweep with an optional frozen token rate card. See
+/// [`run_external_backtest_observed`] for the self-reporting trust boundary.
+#[allow(clippy::too_many_arguments)]
+pub fn run_external_agent_observed<A, F>(
+    agent_id: &str,
+    data: &Dataset,
+    windows: &[Window],
+    seeds: &[u64],
+    costs: CostModel,
+    max_retries: u32,
     mut spawn: F,
+    card: Option<&accounting::RateCard>,
 ) -> ResilientSubmission
 where
     A: Agent + TransportDiagnostics,
@@ -361,10 +442,12 @@ where
         .iter()
         .map(|window| window.end.saturating_sub(window.start))
         .collect();
-    run_agent_resilient_by_window(agent_id, &expected_lens, seeds, max_retries, |wi, seed| {
+    run_agent_resilient_observed(agent_id, &expected_lens, seeds, max_retries, |wi, seed| {
         match spawn() {
-            Some(mut agent) => run_external_backtest(data, &mut agent, windows[wi], seed, costs),
-            None => Err(FailureKind::SpawnError),
+            Some(mut agent) => {
+                run_external_backtest_observed(data, &mut agent, windows[wi], seed, costs, card)
+            }
+            None => Err(FailureKind::SpawnError).into(),
         }
     })
 }

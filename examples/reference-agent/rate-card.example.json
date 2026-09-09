@@ -1,0 +1,8 @@
+{
+  "schema_version": "sharpebench.token-rate-card.v1",
+  "provider": "synthetic-example-not-a-provider-price",
+  "model": "example-model",
+  "revision": "example-1",
+  "input_usd_nanos_per_token": 125,
+  "output_usd_nanos_per_token": 500
+}

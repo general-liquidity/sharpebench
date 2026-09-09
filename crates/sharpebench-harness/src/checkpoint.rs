@@ -514,6 +514,7 @@ impl SweepCheckpoint {
             },
             failures,
             attempts: self.attempt_ledger().summary(),
+            monetary_cost: self.attempt_ledger().monetary_summary(),
         }
     }
 
@@ -687,6 +688,25 @@ pub fn run_resumable_sweep_bound_with_policy<F>(
 where
     F: FnMut(usize, u64) -> Result<Run, FailureKind>,
 {
+    run_resumable_sweep_observed(path, agent_id, contract, windows, policy, |window, seed| {
+        attempt(window, seed).into()
+    })
+}
+
+/// Bound recovery with per-attempt usage persisted in the same atomic checkpoint
+/// write as the outcome. Include the frozen rate-card identity in the invocation
+/// digest; otherwise a caller could resume the same sweep under different rates.
+pub fn run_resumable_sweep_observed<F>(
+    path: &Path,
+    agent_id: &str,
+    contract: &SweepContract,
+    windows: &[Window],
+    policy: ResumePolicy,
+    mut attempt: F,
+) -> std::io::Result<ResilientSubmission>
+where
+    F: FnMut(usize, u64) -> crate::AttemptObservation,
+{
     if !contract.matches_execution(windows, &contract.seeds, contract.max_retries) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -766,7 +786,7 @@ where
         loop {
             // The checkpoint driver owns the retry loop so that each observation
             // is durable before a later attempt can start.
-            let driven = run_with_retries(0, || attempt(w, seed));
+            let driven = crate::run_with_observed_retries(0, || attempt(w, seed));
             tries += 1;
             cp.task_mut(w, seed)
                 .expect("the claimed task exists")

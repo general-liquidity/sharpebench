@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "a851faf07672c2d40db1dd2e84edc0a61b283b00",
+  "generated_at_head": "c3e2016d2b146f8aec1ad2cf4ee8e29e3d206177",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -291,7 +291,7 @@
     },
     {
       "path": "crates/sharpebench-cli/src/main.rs",
-      "sha256": "b2d1e584cfe63c437f122900ad1e871ae3e41a0cdc0c565b4ca18982815a11af"
+      "sha256": "3fadad43f710865e475907e4cbec1afb11234f7c33899db3da849975f655a013"
     },
     {
       "path": "crates/sharpebench-cli/src/update.rs",
@@ -308,6 +308,10 @@
     {
       "path": "crates/sharpebench-cli/tests/external_entrant_sandbox.rs",
       "sha256": "20c3e9eb15919c50f94615f5d2b2846b338df51f0d0fa6d35f5bd0fc965dfbae"
+    },
+    {
+      "path": "crates/sharpebench-cli/tests/frozen_rate_card_cli.rs",
+      "sha256": "65e23d4d71cd9c4e36a468340e3dcd1bb34fbeeab5bf280f23dcb64e7fc79d3e"
     },
     {
       "path": "crates/sharpebench-cli/tests/options_boundaries.rs",
@@ -526,16 +530,20 @@
       "sha256": "1ac8fc620698d1474ead9186f2740155ddb49809f2e6489876ed4f3859d1b22f"
     },
     {
+      "path": "crates/sharpebench-harness/src/accounting.rs",
+      "sha256": "54b5e0addae3fe8a9b4a705c15a9cce0184adcc839228bdd32e8ec4cb770e343"
+    },
+    {
       "path": "crates/sharpebench-harness/src/checkpoint.rs",
-      "sha256": "c9203d4b065c07e93d0d21646479c44650f43a375d4edf6d7516a81d0a5bccaf"
+      "sha256": "f1f5b0b17d6d9bb1bcbb84306e94ce2f49018a61a9aeb88944720645143c9d83"
     },
     {
       "path": "crates/sharpebench-harness/src/failure.rs",
-      "sha256": "72c9475be8088c8765e3b562d1167743da1d8a519bd9102ef373c7d1ac507ba7"
+      "sha256": "b92c206e71c62b9697eb2124e3b531c4c70afbfa8975cf70c392c72105768769"
     },
     {
       "path": "crates/sharpebench-harness/src/lib.rs",
-      "sha256": "158dc828316db037ccc2a620491a0bc867d2ef0ef81bd1fa3a986c6dcd184244"
+      "sha256": "0bf0e01003e026bdcc0df9028f2b687239a13fb527667be4f1c6dd9afe65c58a"
     },
     {
       "path": "crates/sharpebench-harness/src/perturb.rs",
@@ -548,6 +556,10 @@
     {
       "path": "crates/sharpebench-harness/tests/evidence_fields_no_clone_merges.rs",
       "sha256": "4f474b6a2e32b46b4a27c9489d61cb25bc853aacac75a417f0985a91b7a6691e"
+    },
+    {
+      "path": "crates/sharpebench-harness/tests/frozen_rate_card.rs",
+      "sha256": "075968706f7e0bd6caa807f520ab2c01127bb64c019aaf44ab93b4855f2659a4"
     },
     {
       "path": "crates/sharpebench-harness/tests/producer_declared_support.rs",
@@ -999,5 +1011,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "d67305e095df3e39181c08fcc48e9796366b923187ba4e60b49a8e25604ee8a0"
+  "source_snapshot_sha256": "4cf89ebd8c9a016cf5d6c7b6e4fe42b1842d46238bab1f5dd1e1071117cdc172"
 }
