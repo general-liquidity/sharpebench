@@ -94,6 +94,14 @@ Replaying the ten exact CI-missed arithmetic mutations in an isolated source
 copy now produces ten failing test runs. Restoring the source passes all three
 tests. This local replay does not replace the next complete CI mutation run.
 
+At head 1f286db the complete mutation run caught the prior SPA gaps, but ten
+mutations in the newly added checked-PSR helper survived (115 caught, three
+unviable, ten missed). The valid-input compatibility fixtures were centered or
+constant, so several moment terms vanished. Adding a two-observation case and
+an asymmetric nonzero-mean case catches all ten exact mutations locally; the
+unmodified four-test target passes. Only tests changed in this follow-up, not
+the numerical implementation or WASM artifact. Fresh CI is still required.
+
 Final package rebuilding, installed consumers, normal merging and post-merge
 verification remain Bench delivery gates. None of this is a release.
 
