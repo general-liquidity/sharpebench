@@ -385,6 +385,11 @@ mod tests {
             RankMode::parse(LIFECYCLE_CERTIFIED_V1),
             Ok(RankMode::LifecycleCertifiedV1)
         );
+        // The identifier a mode reports is the one that selects it, so a
+        // report naming a mode can be fed back to `parse` unchanged.
+        let mode = RankMode::LifecycleCertifiedV1;
+        assert_eq!(mode.identifier(), "lifecycle-certified/v1");
+        assert_eq!(RankMode::parse(mode.identifier()), Ok(mode));
         for id in [
             "lifecycle-certified/v2",
             "lifecycle-certified",
