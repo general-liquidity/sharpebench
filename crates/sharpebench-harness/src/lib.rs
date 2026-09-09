@@ -11,8 +11,9 @@ pub mod failure;
 pub mod perturb;
 
 pub use checkpoint::{
-    run_resumable_sweep, run_resumable_sweep_bound, SweepCheckpoint, SweepContract, SweepIdentity,
-    TaskRecord, TaskState,
+    run_resumable_sweep, run_resumable_sweep_bound, run_resumable_sweep_bound_with_policy,
+    ResumePolicy, SweepCheckpoint, SweepContract, SweepIdentity, TaskRecord, TaskState,
+    MAX_RUNTIME_RECOVERY_ROUNDS,
 };
 pub use failure::{
     apply_oom_verdict, failing_sentinel_run, run_with_retries, AttemptDuration, AttemptLedger,
