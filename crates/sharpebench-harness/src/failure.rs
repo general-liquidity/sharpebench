@@ -112,6 +112,8 @@ pub enum AttemptOutcome {
 pub struct AttemptRecord {
     pub outcome: AttemptOutcome,
     pub duration: AttemptDuration,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<crate::accounting::AttemptUsage>,
 }
 
 impl AttemptRecord {
@@ -119,6 +121,7 @@ impl AttemptRecord {
         Self {
             outcome: AttemptOutcome::Completed,
             duration,
+            usage: None,
         }
     }
 
@@ -126,6 +129,7 @@ impl AttemptRecord {
         Self {
             outcome: AttemptOutcome::Failed { kind },
             duration,
+            usage: None,
         }
     }
 
@@ -146,6 +150,10 @@ pub struct AttemptLedger {
 }
 
 impl AttemptLedger {
+    pub fn monetary_summary(&self) -> crate::accounting::MonetarySummary {
+        crate::accounting::summarize_usage(self.attempts.iter().map(|record| record.usage.as_ref()))
+    }
+
     pub fn push(&mut self, record: AttemptRecord) {
         self.attempts.push(record);
     }
@@ -299,6 +307,21 @@ pub struct AttemptedRun {
     pub ledger: AttemptLedger,
 }
 
+/// Optional usage accompanies both successful and failed attempt outcomes.
+pub struct AttemptObservation {
+    pub result: Result<Run, FailureKind>,
+    pub usage: Option<crate::accounting::AttemptUsage>,
+}
+
+impl From<Result<Run, FailureKind>> for AttemptObservation {
+    fn from(result: Result<Run, FailureKind>) -> Self {
+        Self {
+            result,
+            usage: None,
+        }
+    }
+}
+
 /// Drive one (window, seed) run with bounded retries on runtime errors.
 ///
 /// `attempt` produces either a scorable [`Run`] (`Ok`) or a typed [`FailureKind`]
@@ -312,18 +335,35 @@ pub fn run_with_retries<F>(max_retries: u32, mut attempt: F) -> AttemptedRun
 where
     F: FnMut() -> Result<Run, FailureKind>,
 {
+    run_with_observed_retries(max_retries, || attempt().into())
+}
+
+/// Retry while preserving usage from every observation, including failures.
+/// Failed attempts never establish complete billing, even if some decisions
+/// carried counts: the failed request itself may have consumed unobserved work.
+pub fn run_with_observed_retries<F>(max_retries: u32, mut attempt: F) -> AttemptedRun
+where
+    F: FnMut() -> AttemptObservation,
+{
     let mut tries: u32 = 0;
     let mut ledger = AttemptLedger::default();
     loop {
         tries += 1;
         let started = std::time::Instant::now();
-        let result = attempt();
+        let AttemptObservation { result, mut usage } = attempt();
+        if result.is_err() {
+            if let Some(usage) = &mut usage {
+                usage.complete = false;
+            }
+        }
         let duration = AttemptDuration::HostClock {
             nanos: u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX),
         };
         match result {
             Ok(run) => {
-                ledger.push(AttemptRecord::completed(duration));
+                let mut record = AttemptRecord::completed(duration);
+                record.usage = usage;
+                ledger.push(record);
                 return AttemptedRun {
                     outcome: RunOutcome::Completed(run),
                     last_failure: None,
@@ -331,7 +371,9 @@ where
                 };
             }
             Err(kind) => {
-                ledger.push(AttemptRecord::failed(kind.clone(), duration));
+                let mut record = AttemptRecord::failed(kind.clone(), duration);
+                record.usage = usage;
+                ledger.push(record);
                 if !kind.is_runtime() {
                     return AttemptedRun {
                         outcome: RunOutcome::AgentFault(kind.clone()),
@@ -339,7 +381,7 @@ where
                         ledger,
                     };
                 }
-                if tries > max_retries {
+                if tries > max_retries || tries == u32::MAX {
                     return AttemptedRun {
                         outcome: RunOutcome::Exhausted {
                             last: kind.clone(),
