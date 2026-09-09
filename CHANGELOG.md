@@ -85,7 +85,6 @@ and links the commits it was built from.
 ## [0.18.1] - 2026-09-04
 
 ### Changed
-
 - positioning: keep SharpeBench's product and paper identity as the luck-robust benchmark for trading agents while standardizing the CLI, core, Python, WebAssembly, npm, and MCP descriptions around luck-robust quantitative evaluation. Generated-package descriptions no longer name a particular downstream consumer.
 
 ## [0.18.0] - 2026-09-04
