@@ -15,10 +15,9 @@
 //! The moment estimators ([`mean`], [`variance`], [`std_dev`], [`skewness`],
 //! [`kurtosis`]) stay hand-rolled on purpose: the standardized moments use the
 //! population normalisation (`m2 = sum((x - mean)^2) / n`) that the 2026-09-07
-//! audit (R03) fixed, and no library exposes a sample skewness or kurtosis
-//! under that convention (`statrs` has none over data at all; its skewness and
-//! kurtosis traits describe distributions). A wrapper would have to
-//! re-implement the normalisation and would obscure the one the audit pinned.
+//! audit (R03) fixed. The proposed special-function substitution does not
+//! replace these empirical-moment definitions; retaining them keeps their
+//! normalization explicit at the call site.
 
 /// Arithmetic mean. Returns 0.0 for an empty slice.
 pub fn mean(xs: &[f64]) -> f64 {

@@ -152,7 +152,9 @@ the three functions return, so a silent change fails there before it reaches
 the golden fixtures. The moment estimators (`mean`, `variance`, `std_dev`,
 `skewness`, `kurtosis`) stay hand-rolled in either case: the standardized
 moments use the population normalisation fixed by the 2026-09-07 audit (R03),
-and no library exposes sample skewness or kurtosis under that convention.
+and the proposed special-function substitution does not replace those empirical
+moment definitions. This is a scoped implementation choice, not a claim that
+no numerical library can compute population-normalized moments.
 > The implementation lives in `sharpebench-stats/src/deflated_sharpe.rs` (the
 > per-period kernel) and `sharpebench-core/src/composite.rs` (the unit conversion
 > and the gates), and is unit-tested for the "deflation penalizes many trials"
