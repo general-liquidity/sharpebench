@@ -55,6 +55,23 @@ named after the file, one run per column.
 
 Deliberately not a parser; see the StockBench section below.
 
+## Run identities and missing observations
+
+For a keyed import, pass its identity file to the scorer:
+
+```bash
+sharpebench score subs.json --keys run-keys.json
+```
+
+The scorer derives the execution-seed count from the validated key grid.
+An explicit `--execution-seeds-per-window` must agree with that count.
+Replicate seeds do not multiply the number of independent market periods.
+
+In a wide CSV with a period column, each return retains its own period ID.
+A missing return does not erase the column's date axis. Keyed scoring refuses
+columns whose retained periods differ, even if their lengths happen to match.
+Without period IDs, positional alignment remains the caller's responsibility.
+
 ## What the re-score can and cannot claim
 
 An imported submission carries returns and nothing else, so two of

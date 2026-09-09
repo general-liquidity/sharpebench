@@ -1849,9 +1849,13 @@ fn run_score(path: &str, args: &[String], json: bool) -> ExitCode {
     // field is refused unless the cells are complete, unique and shared, and the
     // runs are reordered into one canonical cell order before scoring.
     let require_run_keys = args.iter().any(|a| a == "--require-run-keys");
-    let (subs, declarations) = if require_run_keys {
+    let (subs, declarations, keyed_seed_count) = if require_run_keys {
         match sharpebench_core::parse_keyed_field(&data) {
-            Ok(field) => (field.submissions, field.declarations),
+            Ok(field) => (
+                field.submissions,
+                field.declarations,
+                Some(field.seeds.len()),
+            ),
             Err(e) => {
                 eprintln!("error: {e}");
                 return ExitCode::FAILURE;
@@ -1859,20 +1863,34 @@ fn run_score(path: &str, args: &[String], json: bool) -> ExitCode {
         }
     } else {
         match sharpebench_core::parse_declared_field(&data) {
-            Ok(s) => s,
+            Ok((subs, declarations)) => (subs, declarations, None),
             Err(e) => {
                 eprintln!("error: {e}");
                 return ExitCode::FAILURE;
             }
         }
     };
-    let cfg = match score_config_from_args(args) {
+    let mut cfg = match score_config_from_args(args) {
         Ok(cfg) => cfg,
         Err(error) => {
             eprintln!("error: {error}");
             return ExitCode::from(2);
         }
     };
+    if let Some(width) = keyed_seed_count {
+        // Canonical keys are window-major and contain the complete seed grid.
+        // Preserve that replicate geometry when the scorer pools observations.
+        if args.iter().any(|arg| arg == "--execution-seeds-per-window")
+            && cfg.execution_seeds_per_window != width
+        {
+            eprintln!(
+                "error: validated run keys require {width} execution seeds per window, but --execution-seeds-per-window is {}",
+                cfg.execution_seeds_per_window
+            );
+            return ExitCode::from(2);
+        }
+        cfg.execution_seeds_per_window = width;
+    }
     // `--rank-mode` is opt-in by versioned identifier. Absent, the board is
     // `rank_declared` byte for byte; an identifier the kernel does not
     // implement is refused rather than silently ranked under the legacy

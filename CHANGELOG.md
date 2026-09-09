@@ -12,6 +12,9 @@ and links the commits it was built from.
 
 ## [Unreleased]
 
+### Fixed
+- Keyed scoring derives execution-seed width from the validated run keys and refuses a contradictory explicit width. Wide CSV imports retain the period IDs of nonmissing returns, so equal-length series with different missing dates cannot silently pair by position.
+
 ### Documentation
 - stats: the hand-rolled `erf`, `norm_cdf` and `norm_ppf` are now pinned bit for bit by `crates/sharpebench-stats/tests/special_function_bits.rs` at branch boundaries, subnormal and zero arguments, saturated tails and the arguments the kernel passes while scoring the committed golden fields. The pin exists because a measured replacement by `statrs` 0.19.1 (max absolute difference 1.4e-7 for `erf`, 7.0e-8 for `norm_cdf`, 6.8e-8 for `norm_ppf`; `erf(0)` is `1e-9` in the shipped kernel) changes both golden score fixtures and every `paper/evidence/final` producer artifact (in `psr`, `deflated_sharpe` and the deflation bar) while leaving the tutorial and prospective forecast reports byte-identical. The migration cannot ship as a drop-in and is deferred to the next evidence regeneration; the measurement and the artifact list are recorded in the deflated-Sharpe chapter of the book. The moment estimators stay hand-rolled under the population normalisation the 2026-09-07 audit (R03) fixed, and the module doc says so.
 
