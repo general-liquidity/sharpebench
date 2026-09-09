@@ -1,10 +1,42 @@
 //! Hermetic CLI pricing tests. No provider endpoint or model is used.
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::TcpListener;
+use std::net::{TcpListener, TcpStream};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+
+fn prepare_fixture_stream(stream: &TcpStream) {
+    // Accepted sockets can inherit the listener's nonblocking mode. The
+    // listener polls for shutdown, but request parsing must wait for bytes.
+    stream.set_nonblocking(false).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+}
+
+#[test]
+fn fixture_reader_waits_for_bytes_on_an_initially_nonblocking_socket() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let (mut server, _) = listener.accept().unwrap();
+    // Force the platform-dependent inherited state even on Linux.
+    server.set_nonblocking(true).unwrap();
+    let mut byte = [0];
+    assert_eq!(
+        server.read(&mut byte).unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    prepare_fixture_stream(&server);
+    let writer = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(100));
+        client.write_all(b"x").unwrap();
+    });
+    let read = server.read_exact(&mut byte);
+    writer.join().unwrap();
+    read.unwrap();
+    assert_eq!(byte, *b"x");
+}
 
 #[test]
 fn frozen_rates_reach_real_http_sweeps_and_checkpoint_identity_without_changing_rank() {
@@ -42,9 +74,7 @@ fn frozen_rates_reach_real_http_sweeps_and_checkpoint_identity_without_changing_
                 }
                 Err(error) => panic!("fixture accept: {error}"),
             };
-            stream
-                .set_read_timeout(Some(Duration::from_secs(3)))
-                .unwrap();
+            prepare_fixture_stream(&stream);
             let mut reader = BufReader::new(stream.try_clone().unwrap());
             let mut length = None;
             loop {

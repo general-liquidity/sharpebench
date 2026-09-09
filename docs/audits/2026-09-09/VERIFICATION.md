@@ -154,6 +154,14 @@ The 45 harness unit tests, eight existing ledger tests, four recovery tests,
 clippy passes with warnings denied. CI and merging of this new card work
 remain pending.
 
+The first PR #42 macOS run failed in the loopback fixture, not a score
+assertion: the accepted socket returned `WouldBlock` during header parsing.
+The fixture now explicitly resets accepted sockets to blocking mode while
+retaining its read timeout. A third CLI test forces the initial nonblocking
+state; removing the reset in an isolated copy reproduces `WouldBlock`, and
+restoring it passes. All three pricing CLI tests and targeted clippy pass
+locally. The corrected head still requires cross-platform CI.
+
 Rates use the legacy entrant-reported token fields. Individual omitted counts
 default to zero in that protocol; neither count completeness nor the declared
 model is independently verified. Partial usage, failed requests and absent
