@@ -814,8 +814,14 @@ mod tests {
         assert_eq!(calm["regime"], "calm");
         assert_eq!(calm["b"]["near_zero_return_mass"], 0.5, "{calm}");
         assert!(calm["near_zero_return_mass_gap"].is_number(), "{calm}");
-        assert!(calm.get("zero_mass_gap").is_none(), "pre-rename key on the wire");
-        assert!(calm["a"].get("zero_mass").is_none(), "pre-rename key on the wire");
+        assert!(
+            calm.get("zero_mass_gap").is_none(),
+            "pre-rename key on the wire"
+        );
+        assert!(
+            calm["a"].get("zero_mass").is_none(),
+            "pre-rename key on the wire"
+        );
 
         let error = regime_compare_json("[0.1]", "[0.1,0.2]", r#"["calm"]"#, "")
             .expect_err("misaligned arrays must not be silently truncated at the wrapper");
