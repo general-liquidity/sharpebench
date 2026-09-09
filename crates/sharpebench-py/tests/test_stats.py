@@ -403,9 +403,9 @@ def wiggle(mean: float, amp: float, n: int = 40) -> list:
     return [mean + amp * math.sin(i * 0.7) for i in range(n)]
 
 
-def test_budget_curve_flags_the_overfit_turn_down():
+def test_budget_curve_flags_the_non_improvement_onset():
     # Held-out edge rises to budget 3 then falls: peak precedes the max budget and
-    # the overfit onset is the first budget where more compute stopped helping.
+    # the non-improvement onset is the first budget where more compute stopped helping.
     points = [
         (1.0, wiggle(0.0007, 0.02)),
         (2.0, wiggle(0.0014, 0.02)),
@@ -417,7 +417,8 @@ def test_budget_curve_flags_the_overfit_turn_down():
     assert r["n_budget_points"] == 5
     assert r["peak_budget"] == 3.0
     assert r["peak_budget"] < 5.0  # the differentiator vs a monotone scaling law
-    assert r["overfit_onset"] == 4.0
+    assert r["non_improvement_onset"] == 4.0
+    assert "overfit_onset" not in r  # pre-rename key, removed from the dict
     assert r["is_monotone_improving"] is False
     # Selecting the best of N budgets is a search over N: the honest peak is lower.
     assert r["peak_dsr_deflated_for_selection"] < r["peak_dsr"]
@@ -435,7 +436,7 @@ def test_budget_curve_monotone_improving_curve():
     ]
     r = budget_curve(points)
     assert r["is_monotone_improving"] is True
-    assert r["overfit_onset"] is None
+    assert r["non_improvement_onset"] is None
 
 
 def test_budget_curve_rejects_degenerate_input():

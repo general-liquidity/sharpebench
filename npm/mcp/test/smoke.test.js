@@ -122,5 +122,9 @@ test("regime_compare tool executes the WASM kernel", async () => {
   const parsed = JSON.parse(res.content[0].text);
   assert.equal(parsed.pooled_hides_reversal, true);
   assert.deepEqual(parsed.reversal_regimes, ["calm"]);
+  const calm = parsed.regimes.find((r) => r.regime === "calm");
+  assert.equal(typeof calm.near_zero_return_mass_gap, "number");
+  assert.equal(calm.b.near_zero_return_mass, 0.5);
+  assert.equal(Object.hasOwn(calm, "zero_mass_gap"), false, "pre-rename key must not reach the wire");
   await client.close();
 });

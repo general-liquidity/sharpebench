@@ -45,7 +45,7 @@ print(ci["lower"], ci["point"], ci["upper"])
 | `selection_robustness(candidates, n_trials, ...)` | best vs median DSR: is the headline a lucky pick? |
 | `runs_for_power(effect, alpha, power)` | how many runs to detect an effect |
 | `pass_k(passed_per_run, mode="all", n=None)` | pass^k reliability: won on **every** run, not on average |
-| `budget_curve(...)` | DSR by search budget, marginal DSR, and overfit-onset diagnostics |
+| `budget_curve(...)` | DSR by search budget, marginal DSR, and the non-improvement onset |
 | `rank_board(submissions, config_json="")` / `score_one(...)` | Full composite scoring over the CLI-compatible JSON contract |
 | `rank_returns(field, config_json="")` | Build and rank a board from agent IDs and per-run return arrays |
 | `default_score_config()` | Serialize the default scoring configuration |
