@@ -95,6 +95,13 @@ the host verdict; it does not change host eligibility, rank order or ordinal.
 Unknown declaration kinds, duplicate agent IDs and whitespace-only IDs are
 refused. IDs are compared exactly, without trimming or case normalization.
 
+`--rank-mode <id>` opts into a versioned rank mode; the only one is
+`lifecycle-certified/v1`, described under
+[lifecycle-certified rank mode](lifecycle-certified.md). It adds a
+`certification` verdict to every row and never changes host eligibility, rank
+order or ordinal. An identifier the kernel does not implement is refused with
+exit code 2. Without the flag the board is unchanged.
+
 These identity checks do not verify temporal alignment of legacy JSON `runs`.
 The caller still supplies consistent window, seed and period order across the
 field; use [captured trajectory contracts](evidence-contracts.md#captured-trajectories)

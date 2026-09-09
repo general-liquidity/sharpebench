@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 pub use sharpebench_protocol::DeclaredMandate;
 
 use crate::calibration::brier_score;
+use crate::certification::Certification;
 use crate::comparison_sets::{comparison_set, restrict_to_shared, TaggedRun, TaggedSubmission};
 use crate::decay::return_drift_half_life;
 use crate::deflated_sharpe::{
@@ -1060,6 +1061,13 @@ pub struct CompositeScore {
     /// board's ordinal. `None` when undeclared or not declared-eligible.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub declared_mandate_ordinal: Option<usize>,
+    /// The verdict of an opt-in rank mode (see [`crate::certification`]),
+    /// filled by [`crate::certification::rank_certified`] only. **Reported,
+    /// never rank**: the host board is unchanged under every mode. `None` under
+    /// the legacy protocol, and then absent from the serialized score, so a
+    /// board ranked without a mode is byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub certification: Option<Certification>,
 }
 
 impl CompositeScore {
@@ -1564,6 +1572,7 @@ fn score_agent_with(
         declared_passed_k,
         declared_mandate_eligible,
         declared_mandate_ordinal: None,
+        certification: None,
     }
 }
 

@@ -8,6 +8,7 @@
   - [pass^k reliability](methodology-pass-k.md)
   - [Significance & multiple testing](methodology-significance.md)
   - [Process discipline](methodology-process.md)
+  - [Lifecycle-certified rank mode](lifecycle-certified.md)
   - [Regime-conditional comparison](methodology-regime.md)
   - [Candidate lineage diagnostics](candidate-lineage.md)
 - [Prospective forecast quality](forecast-quality.md)

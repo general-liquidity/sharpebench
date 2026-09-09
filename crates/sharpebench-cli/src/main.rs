@@ -39,7 +39,7 @@ fn main() -> ExitCode {
         Some("score") => match args.get(2) {
             Some(path) => run_score(path, &args, json),
             None => {
-                eprintln!("usage: sharpebench score <submissions.json> [--require-run-keys] [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode <mode>] [--benchmark-agent <id>] [--json]");
+                eprintln!("usage: sharpebench score <submissions.json> [--require-run-keys] [--rank-mode <id>] [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode <mode>] [--benchmark-agent <id>] [--json]");
                 ExitCode::from(2)
             }
         },
@@ -555,6 +555,12 @@ fn help() {
         "                         per run; refuse an unkeyed, partial or duplicated cell grid"
     );
     println!("                         instead of aligning runs across agents by position");
+    println!(
+        "                       --rank-mode <id>: opt into a versioned rank mode (lifecycle-certified/v1);"
+    );
+    println!(
+        "                         adds a certification verdict per row, never changes the host rank"
+    );
     println!(
         "  sharpebench commit <agent> <window> <digest> <salt>  forward-attestation pre-registration"
     );
@@ -1867,10 +1873,30 @@ fn run_score(path: &str, args: &[String], json: bool) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    emit_board(
-        &sharpebench_core::rank_declared(&subs, &declarations, &cfg),
-        json,
-    );
+    // `--rank-mode` is opt-in by versioned identifier. Absent, the board is
+    // `rank_declared` byte for byte; an identifier the kernel does not
+    // implement is refused rather than silently ranked under the legacy
+    // protocol.
+    let rank_mode = if args.iter().any(|a| a == "--rank-mode") {
+        let Some(id) = flag_value(args, "--rank-mode").filter(|v| !v.starts_with("--")) else {
+            eprintln!("error: --rank-mode requires a value");
+            return ExitCode::from(2);
+        };
+        match sharpebench_core::RankMode::parse(id) {
+            Ok(mode) => Some(mode),
+            Err(error) => {
+                eprintln!("error: {error}");
+                return ExitCode::from(2);
+            }
+        }
+    } else {
+        None
+    };
+    let board = match rank_mode {
+        Some(mode) => sharpebench_core::rank_certified(&subs, &declarations, &cfg, mode),
+        None => sharpebench_core::rank_declared(&subs, &declarations, &cfg),
+    };
+    emit_board(&board, json);
     ExitCode::SUCCESS
 }
 
@@ -1936,8 +1962,11 @@ fn print_board(board: &[CompositeScore]) {
     // with no declarations prints exactly as before.
     let declared = board.iter().any(|s| s.verdict_applied.is_some());
     let mandate_header = if declared { " mandate" } else { "" };
+    // Likewise the certification column: present only under a rank mode.
+    let certified = board.iter().any(|s| s.certification.is_some());
+    let certified_header = if certified { " certified" } else { "" };
     println!(
-        "{:<4} {:<18} {:>9} {:>8} {:>7} {:>6} {:>9} {:>10}{mandate_header}",
+        "{:<4} {:<18} {:>9} {:>8} {:>7} {:>6} {:>9} {:>10}{mandate_header}{certified_header}",
         "#", "agent", "DSR", "PSR", "pass^k", "proc", "boot_p", "raw_ret"
     );
     println!("{}", "-".repeat(80));
@@ -1956,8 +1985,18 @@ fn print_board(board: &[CompositeScore]) {
         } else {
             String::new()
         };
+        let certification = if certified {
+            format!(
+                " {}",
+                s.certification
+                    .as_ref()
+                    .map_or_else(|| "uncertified".to_string(), |c| c.describe())
+            )
+        } else {
+            String::new()
+        };
         println!(
-            "{:<4} {:<18} {:>9.4} {:>8.4} {:>7} {:>6} {:>9.4} {:>10.5}{mandate}",
+            "{:<4} {:<18} {:>9.4} {:>8.4} {:>7} {:>6} {:>9.4} {:>10.5}{mandate}{certification}",
             pos,
             truncate(&s.agent_id, 18),
             s.deflated_sharpe,
