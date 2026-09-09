@@ -4,6 +4,26 @@ Chronological repair diary moved out of [IMPLEMENTATION.md](IMPLEMENTATION.md) o
 
 ## Verification log
 
+- Arena-side R07, 2026-09-09. Arena `72ab3e8` on branch
+  `fix/contract-digest-v1-2026-09-09`, mirrored into Bench on a branch of the
+  same name. `forecast_contract.py` digests contracts under
+  `sharpebench/canonical-json/v1` through a Python restatement of the Rust form
+  (`canonical_json.py`), pinned to Bench `955d7f8` by cross-language vectors at
+  the exponent boundaries, signed zero, integer-valued floats and Unicode; the
+  R07 contract with `neutral_threshold = 1e-5` digests to the same value on both
+  sides. Readers dual-accept the legacy digest. The frozen prospective field is
+  untouched and still verifies with an unchanged settlement digest. The
+  tutorial fixtures were regenerated in both repositories: only their
+  `contract_sha256` strings moved, and Bench's two reports now label every
+  contract `sharpebench/canonical-json/v1`. One withheld-field leaf moved by
+  one ulp, `mean_loss_difference` from -0.20527500000000004 to
+  -0.20527499999999999, because Bench sums per-block differences in digest
+  order and the digests changed; the multiset of differences is identical.
+  Mutation check: float formatting reverted to `json.dumps` in an isolated
+  copy, 22 vector tests fail. Arena pytest 1488 passed, 2 skipped; no Rust
+  touched. Recording the encoding version inside the evidence envelope would
+  need a schema version bump and was not done.
+
 - Follow-ups, 2026-09-09. The three decisions the checklist left open and the
   two artifacts it recorded as not reproducing were all taken up, authorized by
   the operator on 2026-09-08, each in its own PR.

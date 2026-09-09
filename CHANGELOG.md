@@ -84,6 +84,8 @@ and links the commits it was built from.
 ## [0.18.1] - 2026-09-04
 
 ### Changed
+
+- examples/forecast-quality: the tutorial fixtures now carry `sharpebench/canonical-json/v1` contract digests, produced by the SharpeArena tutorial after its Arena-side R07 migration, and both committed reports label every contract under v1. Only the `contract_sha256` strings moved in the evidence files; in the withheld report `mean_loss_difference` moved by one ulp because per-block differences are summed in digest order.
 - positioning: keep SharpeBench's product and paper identity as the luck-robust benchmark for trading agents while standardizing the CLI, core, Python, WebAssembly, npm, and MCP descriptions around luck-robust quantitative evaluation. Generated-package descriptions no longer name a particular downstream consumer.
 
 ## [0.18.0] - 2026-09-04

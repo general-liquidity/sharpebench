@@ -1,7 +1,7 @@
 {
   "files": {
-    "agent-alpha.json": "9e18dce375f193784bc3815f7d902710679d3b696237617be9532f15aea4fa1a",
-    "agent-beta.json": "e1d3f436de146a59053ce054d7fa222baf10e7ea0f8310504c642b006e9255ea"
+    "agent-alpha.json": "3150d311560e6cf84188c787a05449965499e26e2425d4b29593b66629f0b093",
+    "agent-beta.json": "774360bbe85bf7f094c1fe58e6aab944ec0c0b1d9f0ddbb37f9883a0d2a7035c"
   },
   "purpose": "deterministic interface fixture, not empirical agent evidence",
   "schema_version": "sharpe-suite.forecast-quality-tutorial.v1"
