@@ -10,20 +10,16 @@
     "calibration_bins": 5
   },
   "common_support": {
-    "n_contracts": 12,
+    "n_contracts": 8,
     "contract_sha256": [
-      "0285feccef6939d09e3029b7f461a07953f42761bd06e246fe155266cc72097f",
-      "07d61f24b83abe6cd6dd2c5b142e7207e677043c96dc14680c3de267dc88f97f",
-      "2fa6f6ed8e53566d51e01b32fa03a81e2cb682dc81630c298063936e35984826",
       "3aae818a553a69f509bbcca4c02c9d7ccfb73c26f57ed64102a9317c3c7951fe",
-      "5158c8d9ed04eecb7e281fa1a89c6c5f6e3f0c970b32b634d735b45c83facdeb",
+      "616a29f17861e3a0e96cf80138bde2ddfb8dedbed2fb3ece3f420ad565cc1927",
+      "6d9abc47926ff6a5d408f2209c6b73d8eab86e89216683a3cac0630675fb0c4f",
       "9dfb54637b823966590993de454372d759943ab20e09f5552e32b11192318a42",
-      "ad2065abdd5ba130047381e5f3327b06ffb2224cd78413137c36d0c0a7c99668",
-      "add31cdbbdbcef572861c3c0d64b7345918f235d385a1a13f0f866bacfa08354",
-      "c6b325ab5eb3f3232febcc2d466088e8a65acfbda9e463e3d80334c28f84cede",
-      "e4041d665d2775bf3162cc39f1f2d35a772e1cf1b7fb5a5ce70850efd5556b53",
-      "f036df4d5899f75124847a0d704243629089537b9542173653681da3ef46edb5",
-      "f86af16bdebcd1b9ed1483eb05c8d473079f03a30c6251fab7eb1669083ca7c5"
+      "ac0ee07f6ee9895db258c9a35fffacb93900117ed91b24970cb3baf61ac748d6",
+      "ba9ffd33be0166a0269aa5a510c76b70d6f3bfb21e605df7238dd98ba02fa87a",
+      "c6e4e6a17b123ff3c75a26077b2e5f04227d08fd0be29c8fe0bf81e53c752c06",
+      "d7a11c3b398eb0aff4fe41349343fe2048bb15faa8d3dfd8b828489cc6d8fee4"
     ],
     "excluded_resolved_by_agent": {
       "agent-alpha": 0,
@@ -34,31 +30,31 @@
     {
       "agent_id": "agent-alpha",
       "model_id": "tutorial-model-agent-alpha",
-      "n_claims": 12,
-      "n_revisions": 14,
-      "n_eligible_claims": 12,
-      "n_resolved": 12,
+      "n_claims": 8,
+      "n_revisions": 10,
+      "n_eligible_claims": 8,
+      "n_resolved": 8,
       "n_pending": 0,
       "n_cancelled": 0,
       "n_rejected": 0,
       "resolution_rate": 1.0,
-      "blind_resolved": 12,
+      "blind_resolved": 8,
       "consensus_exposed_resolved": 0,
       "metrics": [
         {
           "scoring_rule": "binary_brier",
-          "n": 12,
-          "mean_loss": 0.10543333333333334
+          "n": 8,
+          "mean_loss": 0.0669375
         }
       ],
       "binary_calibration": {
-        "n": 12,
-        "brier": 0.10543333333333334,
+        "n": 8,
+        "brier": 0.0669375,
         "base_rate": 0.5,
-        "reliability": 0.061387500000000005,
-        "resolution": 0.20833333333333334,
+        "reliability": 0.06622083333333334,
+        "resolution": 0.25,
         "uncertainty": 0.25,
-        "brier_skill": 0.5782666666666667,
+        "brier_skill": 0.7322500000000001,
         "bins": [
           {
             "lower": 0.0,
@@ -70,22 +66,22 @@
           {
             "lower": 0.2,
             "upper": 0.4,
-            "n": 4,
-            "mean_forecast": 0.2775,
+            "n": 3,
+            "mean_forecast": 0.2733333333333334,
             "event_rate": 0.0
           },
           {
             "lower": 0.4,
             "upper": 0.6,
-            "n": 2,
-            "mean_forecast": 0.43,
-            "event_rate": 0.5
+            "n": 0,
+            "mean_forecast": null,
+            "event_rate": null
           },
           {
             "lower": 0.6,
             "upper": 0.8,
-            "n": 4,
-            "mean_forecast": 0.7025,
+            "n": 3,
+            "mean_forecast": 0.7166666666666667,
             "event_rate": 1.0
           },
           {
@@ -103,31 +99,31 @@
     {
       "agent_id": "agent-beta",
       "model_id": "tutorial-model-agent-beta",
-      "n_claims": 12,
-      "n_revisions": 13,
-      "n_eligible_claims": 12,
-      "n_resolved": 12,
+      "n_claims": 8,
+      "n_revisions": 9,
+      "n_eligible_claims": 8,
+      "n_resolved": 8,
       "n_pending": 0,
       "n_cancelled": 0,
       "n_rejected": 0,
       "resolution_rate": 1.0,
-      "blind_resolved": 11,
+      "blind_resolved": 7,
       "consensus_exposed_resolved": 1,
       "metrics": [
         {
           "scoring_rule": "binary_brier",
-          "n": 12,
-          "mean_loss": 0.24742499999999998
+          "n": 8,
+          "mean_loss": 0.27221249999999997
         }
       ],
       "binary_calibration": {
-        "n": 12,
-        "brier": 0.24742499999999998,
+        "n": 8,
+        "brier": 0.27221249999999997,
         "base_rate": 0.5,
-        "reliability": 0.044651041666666655,
-        "resolution": 0.03819444444444445,
+        "reliability": 0.11186875000000002,
+        "resolution": 0.08333333333333333,
         "uncertainty": 0.25,
-        "brier_skill": 0.010300000000000087,
+        "brier_skill": -0.08884999999999987,
         "bins": [
           {
             "lower": 0.0,
@@ -139,23 +135,23 @@
           {
             "lower": 0.2,
             "upper": 0.4,
-            "n": 1,
-            "mean_forecast": 0.36,
-            "event_rate": 0.0
+            "n": 0,
+            "mean_forecast": null,
+            "event_rate": null
           },
           {
             "lower": 0.4,
             "upper": 0.6,
-            "n": 8,
-            "mean_forecast": 0.51375,
-            "event_rate": 0.625
+            "n": 6,
+            "mean_forecast": 0.5216666666666666,
+            "event_rate": 0.6666666666666666
           },
           {
             "lower": 0.6,
             "upper": 0.8,
-            "n": 3,
-            "mean_forecast": 0.6533333333333333,
-            "event_rate": 0.3333333333333333
+            "n": 2,
+            "mean_forecast": 0.62,
+            "event_rate": 0.0
           },
           {
             "lower": 0.8,
@@ -174,14 +170,11 @@
     {
       "agent_a": "agent-alpha",
       "agent_b": "agent-beta",
-      "n_contracts": 12,
-      "n_settlement_blocks": 6,
-      "mean_loss_difference": -0.14199166666666668,
-      "confidence_lower": -0.20954166666666665,
-      "confidence_upper": -0.028183333333333335,
-      "raw_p_value": 0.00997506234413965,
-      "holm_adjusted_p_value": 0.00997506234413965,
-      "familywise_significant": true
+      "n_contracts": 8,
+      "n_settlement_blocks": 2,
+      "mean_loss_difference": -0.20527500000000004,
+      "familywise_significant": false,
+      "inference_error": "familywise level 0.05 is finer than a 2-block resampling law can resolve: single-block resamples hold 0.5 of its mass, and more bootstrap replications estimate that same law without adding blocks"
     }
   ]
 }
