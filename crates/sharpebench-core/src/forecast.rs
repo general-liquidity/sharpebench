@@ -815,9 +815,9 @@ fn contract_digests(contract: &ForecastContract) -> Result<ContractDigests, Fore
 /// realized outcomes. Comparing agents requires both, and the outcome must survive
 /// scoring rather than be discarded once a loss has been computed from it.
 fn outcome_sha256(outcome: &Value) -> Result<String, ForecastError> {
-    let mut preimage = String::new();
-    legacy_canonical_json(outcome, &mut preimage)?;
-    Ok(format!("{:x}", Sha256::digest(preimage.as_bytes())))
+    let preimage = versioned_preimage(outcome)
+        .map_err(|error| reject(format!("cannot encode forecast outcome: {error}")))?;
+    Ok(format!("{:x}", Sha256::digest(&preimage)))
 }
 
 fn number_outcome(outcome: &Value) -> Result<f64, ForecastError> {
@@ -1988,6 +1988,32 @@ mod tests {
         assert_eq!(report.common_support.n_contracts, 4);
         assert_eq!(report.comparisons[0].n_settlement_blocks, 2);
         assert!(report.comparisons[0].mean_loss_difference < 0.0);
+    }
+
+    #[test]
+    fn equivalent_numeric_settlements_compare_but_distinct_outcomes_refuse() {
+        for (left, right) in [
+            (serde_json::json!(1), serde_json::json!(1.0)),
+            (serde_json::json!(0.0), serde_json::json!(-0.0)),
+        ] {
+            let a = parse_forecast_evidence(&fixture("a", &[0.8], &[1.0])).unwrap();
+            let b = parse_forecast_evidence(&fixture("b", &[0.6], &[1.0])).unwrap();
+            let mut docs = [a, b];
+            docs[0].resolutions[0].outcome = Some(left);
+            docs[1].resolutions[0].outcome = Some(right);
+            let report =
+                analyze_forecast_quality(&docs, ForecastAnalysisConfig::default()).unwrap();
+            assert_eq!(report.comparisons[0].n_contracts, 1);
+            docs[1].resolutions[0].outcome = Some(serde_json::json!(
+                1.0 - number_outcome(docs[0].resolutions[0].outcome.as_ref().unwrap()).unwrap()
+            ));
+            assert!(
+                analyze_forecast_quality(&docs, ForecastAnalysisConfig::default())
+                    .unwrap_err()
+                    .to_string()
+                    .contains("unequal realized outcomes")
+            );
+        }
     }
 
     #[test]

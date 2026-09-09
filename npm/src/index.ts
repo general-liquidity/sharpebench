@@ -127,20 +127,21 @@ function honestyConfigJson(opts: HonestyOpts): string {
 /** Map the kernel's snake_case HonestyVerdict JSON → the camelCase {@link HonestyVerdict}. */
 function toHonestyVerdict(raw: Record<string, unknown>): HonestyVerdict {
   return {
-    sharpe: raw.sharpe as number,
+    sharpe: raw.sharpe as number | null,
     nObs: raw.n_obs as number,
-    skew: raw.skew as number,
-    kurtosis: raw.kurtosis as number,
+    skew: raw.skew as number | null,
+    kurtosis: raw.kurtosis as number | null,
     nTrials: raw.n_trials as number,
-    expectedMaxSharpe: raw.expected_max_sharpe as number,
-    deflatedSharpe: raw.deflated_sharpe as number,
-    probabilisticSharpe: raw.probabilistic_sharpe as number,
-    haircut: raw.haircut as number,
-    haircutSharpe: raw.haircut_sharpe as number,
-    minTrackRecordLen: raw.min_track_record_len as number,
+    expectedMaxSharpe: raw.expected_max_sharpe as number | null,
+    deflatedSharpe: raw.deflated_sharpe as number | null,
+    probabilisticSharpe: raw.probabilistic_sharpe as number | null,
+    haircut: raw.haircut as number | null,
+    haircutSharpe: raw.haircut_sharpe as number | null,
+    minTrackRecordLen: raw.min_track_record_len as number | null,
     verdict: raw.verdict as HonestyVerdict["verdict"],
     explanation: raw.explanation as string,
     methodologyVersion: raw.methodology_version as string,
+    ...(raw.statistics_error === undefined ? {} : { statisticsError: raw.statistics_error as string }),
   };
 }
 
@@ -180,13 +181,22 @@ export function isMySharpeRealFull(
       honestyConfigJson(opts),
     ),
   );
+  const hlz = raw.hlz as Record<string, unknown>;
   return {
     honesty: toHonestyVerdict(raw.honesty as Record<string, unknown>),
     realityCheckP: raw.reality_check_p as number,
     spaP: raw.spa_p as number,
     spaConsistentP: raw.spa_consistent_p as number,
     stepDown: raw.step_down as boolean[],
-    pbo: raw.pbo as number,
+    pbo: raw.pbo as number | null,
+    hlz: {
+      tStat: hlz.t_stat as number | null,
+      tThreshold: hlz.t_threshold as number,
+      passed: hlz.passed as boolean,
+      explanation: hlz.explanation as string,
+    },
+    ...(raw.snooping_error === undefined ? {} : { snoopingError: raw.snooping_error as string }),
+    ...(raw.pbo_error === undefined ? {} : { pboError: raw.pbo_error as string }),
   };
 }
 

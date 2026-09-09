@@ -12,8 +12,8 @@
 use crate::deflated_sharpe::deflated_sharpe_ratio_against_null;
 use crate::stats::{mean, norm_ppf};
 use crate::validation::{
-    block_probability, bootstrap_inputs, dispersion, field_inputs, finite_observations,
-    finite_parameter, probability, StatisticalError,
+    block_probability, bootstrap_inputs, dispersion, field_inputs, finite_computation,
+    finite_observations, finite_parameter, probability, StatisticalError,
 };
 
 /// Minimal deterministic PRNG (SplitMix64). Not cryptographic — used only for a
@@ -260,7 +260,10 @@ pub fn reality_check_pvalue(
 ) -> Result<f64, StatisticalError> {
     let n = field_inputs(field, n_boot, block_prob)?;
     let sqrt_n = (n as f64).sqrt();
-    let means: Vec<f64> = field.iter().map(|f| mean(&f[..n])).collect();
+    let means: Vec<f64> = field
+        .iter()
+        .map(|f| finite_computation(mean(&f[..n]), "observed field maximum"))
+        .collect::<Result<_, _>>()?;
     let observed = means.iter().copied().fold(f64::NEG_INFINITY, f64::max) * sqrt_n;
     if !observed.is_finite() {
         return Err(StatisticalError::NonFiniteComputation {
@@ -287,7 +290,7 @@ pub fn reality_check_pvalue(
         let mut v_star = f64::NEG_INFINITY;
         for (ki, f) in field.iter().enumerate() {
             let bmean = idxs.iter().map(|&j| f[j]).sum::<f64>() / n as f64;
-            let v = sqrt_n * (bmean - means[ki]); // centered under the null
+            let v = finite_computation(sqrt_n * (bmean - means[ki]), "bootstrap field statistic")?;
             if v > v_star {
                 v_star = v;
             }
@@ -317,7 +320,10 @@ pub fn spa_pvalue(
     let n = field_inputs(field, n_boot, block_prob)?;
     let k = field.len();
     let sqrt_n = (n as f64).sqrt();
-    let means: Vec<f64> = field.iter().map(|f| mean(&f[..n])).collect();
+    let means: Vec<f64> = field
+        .iter()
+        .map(|f| finite_computation(mean(&f[..n]), "observed field maximum"))
+        .collect::<Result<_, _>>()?;
 
     // Bootstrap rows of the centered statistic sqrt(n)*(bmean_k - mean_k), reused
     // both to estimate each agent's scale (omega_k) and for the null max.
@@ -339,9 +345,9 @@ pub fn spa_pvalue(
             .enumerate()
             .map(|(ki, f)| {
                 let bmean = idxs.iter().map(|&j| f[j]).sum::<f64>() / n as f64;
-                sqrt_n * (bmean - means[ki])
+                finite_computation(sqrt_n * (bmean - means[ki]), "bootstrap field statistic")
             })
-            .collect();
+            .collect::<Result<_, _>>()?;
         rows.push(row);
     }
 
@@ -350,13 +356,19 @@ pub fn spa_pvalue(
         .map(|ki| {
             let col_mean = rows.iter().map(|r| r[ki]).sum::<f64>() / n_boot as f64;
             let var = rows.iter().map(|r| (r[ki] - col_mean).powi(2)).sum::<f64>() / n_boot as f64;
-            var.sqrt().max(1e-8)
+            Ok(finite_computation(var.sqrt(), "bootstrap studentizing scale")?.max(1e-8))
         })
-        .collect();
+        .collect::<Result<_, StatisticalError>>()?;
 
-    let t_obs = (0..k)
-        .map(|ki| (sqrt_n * means[ki] / omega[ki]).max(0.0))
-        .fold(0.0_f64, f64::max);
+    let z: Vec<f64> = (0..k)
+        .map(|ki| {
+            finite_computation(
+                sqrt_n * means[ki] / omega[ki],
+                "studentized field statistic",
+            )
+        })
+        .collect::<Result<_, _>>()?;
+    let t_obs = z.iter().map(|v| v.max(0.0)).fold(0.0_f64, f64::max);
     if !t_obs.is_finite() {
         return Err(StatisticalError::NonFiniteComputation {
             quantity: "studentized field maximum",
@@ -366,8 +378,8 @@ pub fn spa_pvalue(
     let mut at_least_as_large = 0usize;
     for row in &rows {
         let t_star = (0..k)
-            .map(|ki| (row[ki] / omega[ki]).max(0.0))
-            .fold(0.0_f64, f64::max);
+            .map(|ki| finite_computation(row[ki] / omega[ki], "studentized bootstrap statistic"))
+            .try_fold(0.0_f64, |maximum, value| value.map(|v| maximum.max(v)))?;
         if t_star >= t_obs {
             at_least_as_large += 1;
         }
@@ -393,7 +405,10 @@ pub fn spa_consistent_pvalue(
     let n = field_inputs(field, n_boot, block_prob)?;
     let k = field.len();
     let sqrt_n = (n as f64).sqrt();
-    let means: Vec<f64> = field.iter().map(|f| mean(&f[..n])).collect();
+    let means: Vec<f64> = field
+        .iter()
+        .map(|f| finite_computation(mean(&f[..n]), "observed field maximum"))
+        .collect::<Result<_, _>>()?;
 
     // Same bootstrap path + scale as `spa_pvalue` (shared seed constant), so the
     // only difference is the exclusion of bad models — guaranteeing SPA_c ≤ SPA_l.
@@ -415,9 +430,9 @@ pub fn spa_consistent_pvalue(
             .enumerate()
             .map(|(ki, f)| {
                 let bmean = idxs.iter().map(|&j| f[j]).sum::<f64>() / n as f64;
-                sqrt_n * (bmean - means[ki])
+                finite_computation(sqrt_n * (bmean - means[ki]), "bootstrap field statistic")
             })
-            .collect();
+            .collect::<Result<_, _>>()?;
         rows.push(row);
     }
 
@@ -425,11 +440,18 @@ pub fn spa_consistent_pvalue(
         .map(|ki| {
             let col_mean = rows.iter().map(|r| r[ki]).sum::<f64>() / n_boot as f64;
             let var = rows.iter().map(|r| (r[ki] - col_mean).powi(2)).sum::<f64>() / n_boot as f64;
-            var.sqrt().max(1e-8)
+            Ok(finite_computation(var.sqrt(), "bootstrap studentizing scale")?.max(1e-8))
         })
-        .collect();
+        .collect::<Result<_, StatisticalError>>()?;
 
-    let z: Vec<f64> = (0..k).map(|ki| sqrt_n * means[ki] / omega[ki]).collect();
+    let z: Vec<f64> = (0..k)
+        .map(|ki| {
+            finite_computation(
+                sqrt_n * means[ki] / omega[ki],
+                "studentized field statistic",
+            )
+        })
+        .collect::<Result<_, _>>()?;
     let t_obs = z.iter().map(|&v| v.max(0.0)).fold(0.0_f64, f64::max);
     if !t_obs.is_finite() {
         return Err(StatisticalError::NonFiniteComputation {
@@ -453,12 +475,12 @@ pub fn spa_consistent_pvalue(
         let t_star = (0..k)
             .map(|ki| {
                 if bad[ki] {
-                    0.0
+                    Ok(0.0)
                 } else {
-                    (row[ki] / omega[ki]).max(0.0)
+                    finite_computation(row[ki] / omega[ki], "studentized bootstrap statistic")
                 }
             })
-            .fold(0.0_f64, f64::max);
+            .try_fold(0.0_f64, |maximum, value| value.map(|v| maximum.max(v)))?;
         if t_star >= t_obs {
             at_least_as_large += 1;
         }
@@ -491,8 +513,14 @@ pub fn step_down_significant(
     probability(alpha, "alpha")?;
     let k = field.len();
     let sqrt_n = (n as f64).sqrt();
-    let means: Vec<f64> = field.iter().map(|f| mean(&f[..n])).collect();
-    let t: Vec<f64> = means.iter().map(|m| sqrt_n * m).collect();
+    let means: Vec<f64> = field
+        .iter()
+        .map(|f| finite_computation(mean(&f[..n]), "observed field maximum"))
+        .collect::<Result<_, _>>()?;
+    let t: Vec<f64> = means
+        .iter()
+        .map(|m| finite_computation(sqrt_n * m, "observed step-down statistic"))
+        .collect::<Result<_, _>>()?;
 
     // Bootstrap centered statistics: boot[b][agent].
     let mut rng = SplitMix64(seed ^ 0x57ED_0247_2026_5BA7);
@@ -513,9 +541,9 @@ pub fn step_down_significant(
             .enumerate()
             .map(|(ki, f)| {
                 let bmean = idxs.iter().map(|&j| f[j]).sum::<f64>() / n as f64;
-                sqrt_n * (bmean - means[ki])
+                finite_computation(sqrt_n * (bmean - means[ki]), "bootstrap field statistic")
             })
-            .collect();
+            .collect::<Result<_, _>>()?;
         boot.push(row);
     }
 
@@ -553,6 +581,29 @@ pub fn step_down_significant(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn overflowing_step_down_statistics_are_unavailable() {
+        for series in [vec![1e308, 1e308], vec![1e308, -1e308]] {
+            assert!(matches!(
+                step_down_significant(&[series], 1, 100, 1.0, 0.05),
+                Err(StatisticalError::NonFiniteComputation { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn overflowing_studentization_is_unavailable() {
+        let field = vec![vec![1e160, -1e160], vec![0.01, 0.02]];
+        assert!(matches!(
+            spa_pvalue(&field, 1, 100, 1.0),
+            Err(StatisticalError::NonFiniteComputation { .. })
+        ));
+        assert!(matches!(
+            spa_consistent_pvalue(&field, 1, 100, 1.0),
+            Err(StatisticalError::NonFiniteComputation { .. })
+        ));
+    }
 
     #[test]
     fn bootstrap_rejects_nonfinite_data_and_invalid_parameters() {

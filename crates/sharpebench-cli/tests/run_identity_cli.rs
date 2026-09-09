@@ -114,6 +114,70 @@ fn import_carries_run_window_seed_and_period_identity_into_the_scored_field() {
     );
     let board: serde_json::Value = serde_json::from_slice(&scored.stdout).unwrap();
     assert_eq!(board.as_array().map(Vec::len), Some(2));
+    for row in board.as_array().unwrap() {
+        // Two 40-period windows, not four independent 40-period runs.
+        assert_eq!(row["pooled_observations"], 80);
+    }
+    let explicit = fixture.cli(&[
+        "score",
+        "subs.json",
+        "--require-run-keys",
+        "--execution-seeds-per-window",
+        "2",
+    ]);
+    assert!(explicit.status.success());
+    assert_eq!(scored.stdout, explicit.stdout);
+
+    for width in ["1", "3"] {
+        let output = fixture.cli(&[
+            "score",
+            "subs.json",
+            "--require-run-keys",
+            "--execution-seeds-per-window",
+            width,
+        ]);
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stdout.is_empty());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("validated run keys require 2"));
+    }
+}
+
+#[test]
+fn missing_wide_returns_keep_their_dates_and_cannot_pair_different_periods() {
+    let fixture = Fixture::new();
+    std::fs::create_dir(fixture.0.join("inputs")).unwrap();
+    fixture.write("inputs/alpha.csv", "date,w0\nd1,0.01\nd2,\nd3,0.03\n");
+    fixture.write("inputs/beta.csv", "date,w0\nd1,0.01\nd2,0.02\nd3,\n");
+    let imported = fixture.cli(&["import", "csv", "inputs", "--out", "subs.json"]);
+    assert!(
+        imported.status.success(),
+        "{}",
+        String::from_utf8_lossy(&imported.stderr)
+    );
+    let doc: serde_json::Value = serde_json::from_str(&fixture.read("subs.json")).unwrap();
+    assert_eq!(
+        doc[0]["run_keys"][0]["periods"],
+        serde_json::json!(["d1", "d3"])
+    );
+    assert_eq!(
+        doc[1]["run_keys"][0]["periods"],
+        serde_json::json!(["d1", "d2"])
+    );
+    let scored = fixture.cli(&["score", "subs.json", "--require-run-keys"]);
+    assert_eq!(scored.status.code(), Some(1));
+    assert!(scored.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&scored.stderr).contains("period"));
+
+    // The same missing dates are still valid shared support, explicitly named.
+    fixture.write("inputs/beta.csv", "date,w0\nd1,0.02\nd2,\nd3,0.04\n");
+    assert!(fixture
+        .cli(&["import", "csv", "inputs", "--out", "subs.json"])
+        .status
+        .success());
+    assert!(fixture
+        .cli(&["score", "subs.json", "--require-run-keys"])
+        .status
+        .success());
 }
 
 #[test]

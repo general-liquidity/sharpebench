@@ -66,6 +66,21 @@ expected, completed, runtime-failed, and agent-failed cell counts, then exits
 without a board. Agent-caused protocol faults remain in the pass^k denominator
 as failing sentinels.
 
+External sweeps publish rank-neutral `attempt_accounting` using schema
+`sharpebench.attempt-accounting.v1`. On success it is an additional field on
+the external agent's JSON board row; the board remains an array and reference
+rows are unchanged. An incomplete-sweep error carries the same field. Human
+output prints the totals on stderr.
+
+The summary counts completed and failed attempts, including retries, and
+reports observed host duration with `host_clock`, `mixed`, or `unavailable`
+provenance. Duration totals saturate at `u64::MAX`; they are not billing data.
+`monetary_cost.status` is `unavailable` because this ledger does not yet contain
+provider usage evidence. A failed attempt is not free, and a missing cost is
+not zero. These observations never enter ranking or the pass^k denominator.
+Checkpoint totals cover persisted records only; a process killed before saving
+can leave unrecorded work.
+
 See [The arena](arena.md#sandboxed-entrants) for the boundary and acceptance
 evidence.
 

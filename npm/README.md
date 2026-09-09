@@ -37,13 +37,13 @@ console.log(greeks({ spot: 100, strike: 100, t_years: 1, rate: 0.05, vol: 0.2, i
 |---|---|
 | `score(submissions, config?)` | ranked `CompositeScore[]` |
 | `scoreAgent(submission, config?)` | one `CompositeScore` (deflated Sharpe, pass^k, process, rolling worst-case Sharpe) |
-| `selfAudit()` | `SelfAuditReport`, the benchmark's anti-gaming proof |
+| `selfAudit()` | `SelfAuditReport`, results of the named anti-gaming regressions |
 | `auditBriefing(briefing, policy?)` | `BriefingAudit`, an input-side salience-bias audit |
 | `scoreAllocation(trajectory, policy?)` | `AllocationReport`, weight-vector validity plus L1 turnover |
 | `greeks(params)` | `GreeksResult`, Black-Scholes price, Greeks, and local exposure flags |
 | `canary(seed)` | `Canary`, a do-not-train contamination tripwire |
 | `isMySharpeReal(returns, opts)` | One-series deflation, PSR, haircut, MinTRL, and verdict |
-| `isMySharpeRealFull(field, winner, opts)` | Fieldwise Reality Check, SPA, step-down, and PBO alongside the one-series verdict |
+| `isMySharpeRealFull(field, winner, opts)` | Fieldwise Reality Check, SPA, step-down, PBO and HLZ diagnostics alongside the one-series verdict |
 | `percentileSelection(candidates, opts?)` | Point winner versus bootstrap-percentile winner and optimism gaps |
 | `decomposeUncertainty(input)` | Aleatoric, epistemic, and distributional diagnostic legs |
 | `crowdingHalfLife(adoption, params)` | Caller-calibrated crowding-decay prior, reported but never gating |
@@ -55,6 +55,18 @@ package). The npm tests compare the WASM package with the native kernel and
 committed golden on the Ubuntu CI host. The Rust CI separately pins the two
 committed golden fields on Linux, macOS, and Windows; this is not a claim about
 every possible input or platform.
+
+## Unavailable results
+
+Check error fields before interpreting numeric diagnostics. `statisticsError`
+marks withheld deflation; `snoopingError` marks withheld fieldwise tests, whose
+compatibility sentinels are p-values of 1 and all-false `stepDown`. These are
+not measured results. Unavailable PBO is `null` with `pboError`.
+
+Nonfinite numeric diagnostics serialize as `null`, including a minimum track
+record length with no finite solution. TypeScript callers must handle nulls.
+`percentileSelection` reports `input_error` and null winner indices when any
+candidate is unsupported. See the [error and migration guide](https://github.com/general-liquidity/sharpebench/blob/main/docs/book/src/wasm.md#statistical-unavailability-and-migration).
 
 ## Why luck-robust?
 

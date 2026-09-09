@@ -122,6 +122,8 @@ try {
     const regime = bench.regimeCompare([0.02, 0.03, -0.01, -0.02], [0.0, 0.01, 0.01, 0.02], ["calm", "calm", "stress", "stress"], { minPeriods: 2 });
     const calm = regime.regimes.find((r) => r.regime === "calm");
     if (calm.b.near_zero_return_mass !== 0.5 || Object.hasOwn(calm, "zero_mass_gap")) throw new Error("packed regime report still carries the pre-rename zero_mass keys");
+    const assertKernelRepairContract = require(${JSON.stringify(path.join(packageDir, "test", "kernel-repair-contract.cjs"))});
+    assertKernelRepairContract(bench, require("@general-liquidity/sharpebench/package.json").version);
     console.log("smoke-install ok: packed tarball installs offline and the wasm kernel answers");
   `;
   const output = execFileSync(process.execPath, ["-e", probe], {

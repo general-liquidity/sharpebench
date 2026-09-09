@@ -338,7 +338,7 @@ fn parse_wide(text: &str) -> Result<Vec<ImportedRun>, String> {
     let labels: Option<Vec<String>> =
         is_header.then(|| first_cells.iter().map(|c| c.to_string()).collect());
     let mut runs: Vec<Vec<f64>> = vec![Vec::new(); n_cols];
-    let mut periods: Vec<String> = Vec::new();
+    let mut periods: Vec<Vec<String>> = vec![Vec::new(); n_cols];
     let body: Vec<&str> = if is_header {
         lines.collect()
     } else {
@@ -348,12 +348,16 @@ fn parse_wide(text: &str) -> Result<Vec<ImportedRun>, String> {
         return Err("no data rows".to_string());
     }
     for line in body {
-        for (i, cell) in line.split(',').map(str::trim).enumerate() {
+        let cells: Vec<_> = line.split(',').map(str::trim).collect();
+        if cells.len() > n_cols {
+            return Err(format!("row has more cells than the first row ({n_cols})"));
+        }
+        let period = period_col.map(|index| cells[index]);
+        if period == Some("") {
+            return Err("empty period identity in the period column".to_string());
+        }
+        for (i, cell) in cells.into_iter().enumerate() {
             if period_col == Some(i) {
-                if cell.is_empty() {
-                    return Err("empty period identity in the period column".to_string());
-                }
-                periods.push(cell.to_string());
                 continue;
             }
             if cell.is_empty() {
@@ -366,6 +370,11 @@ fn parse_wide(text: &str) -> Result<Vec<ImportedRun>, String> {
                 .parse::<f64>()
                 .map_err(|_| format!("non-numeric return `{cell}`"))?;
             run.push(v);
+            if let Some(period) = period {
+                // A blank return removes that observation, never its neighbours'
+                // identities. Different missing dates must remain distinguishable.
+                periods[i].push(period.to_string());
+            }
         }
     }
     // An empty column drops together with its label, so a surviving key still
@@ -384,11 +393,7 @@ fn parse_wide(text: &str) -> Result<Vec<ImportedRun>, String> {
                 }
                 Some(RunIdentity {
                     key: RunKey { window, seed: 0 },
-                    periods: if periods.len() == returns.len() {
-                        periods.clone()
-                    } else {
-                        Vec::new()
-                    },
+                    periods: std::mem::take(&mut periods[index]),
                 })
             }
         };

@@ -21,7 +21,9 @@ use crate::deflated_sharpe::deflated_sharpe_ratio;
 // `significance` owns it and this module draws from the same definition.
 use crate::significance::SplitMix64;
 use crate::stats::{mean, std_dev};
-use crate::validation::{block_probability, probability, StatisticalError};
+use crate::validation::{
+    block_probability, field_inputs, finite_computation, probability, StatisticalError,
+};
 
 /// Deflated-Sharpe summary across a set of candidate return streams.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -114,18 +116,19 @@ pub enum Utility {
     Sharpe,
 }
 
-fn utility_of(xs: &[f64], utility: Utility) -> f64 {
-    match utility {
+fn utility_of(xs: &[f64], utility: Utility) -> Result<f64, StatisticalError> {
+    let value = match utility {
         Utility::MeanReturn => mean(xs),
         Utility::Sharpe => {
-            let sd = std_dev(xs);
+            let sd = finite_computation(std_dev(xs), "candidate standard deviation")?;
             if sd == 0.0 {
                 0.0
             } else {
                 mean(xs) / sd
             }
         }
-    }
+    };
+    finite_computation(value, "candidate utility")
 }
 
 /// One stationary-bootstrap (Politis & Romano) index path over `0..n`: start at a
@@ -212,8 +215,9 @@ pub struct PercentileSelection {
 /// `seed`, and a candidate's resample stream depends only on its own position, so
 /// appending a candidate does not perturb the ones before it.
 ///
-/// Empty input, `n_boot == 0`, or an empty candidate series all degrade quietly:
-/// a candidate with no returns scores 0.0 on both legs.
+/// Empty input selects nothing. A candidate needs at least two finite returns
+/// and a positive bootstrap count; unavailable or overflowing utilities withhold
+/// the entire selection rather than removing candidates from the search field.
 ///
 /// An `alpha` that is not a percentile, or a `block_prob` the stationary
 /// bootstrap never accepted, is reported through
@@ -226,8 +230,8 @@ pub fn percentile_selection(
     n_boot: usize,
     block_prob: f64,
 ) -> PercentileSelection {
-    if let Err(error) = probability(alpha, "alpha").and_then(|()| block_probability(block_prob)) {
-        return PercentileSelection {
+    percentile_selection_checked(candidates, utility, alpha, seed, n_boot, block_prob)
+        .unwrap_or_else(|error| PercentileSelection {
             alpha,
             alpha_warning: true,
             candidates: Vec::new(),
@@ -236,13 +240,27 @@ pub fn percentile_selection(
             agrees_with_point_argmax: false,
             point_winner_optimism: 0.0,
             input_error: Some(error),
-        };
+        })
+}
+
+fn percentile_selection_checked(
+    candidates: &[Vec<f64>],
+    utility: Utility,
+    alpha: f64,
+    seed: u64,
+    n_boot: usize,
+    block_prob: f64,
+) -> Result<PercentileSelection, StatisticalError> {
+    probability(alpha, "alpha")?;
+    block_probability(block_prob)?;
+    if !candidates.is_empty() {
+        field_inputs(candidates, n_boot, block_prob)?;
     }
     let alpha_warning = alpha < MIN_RECOMMENDED_SELECTION_ALPHA;
 
     let mut out: Vec<CandidateUtility> = Vec::with_capacity(candidates.len());
     for (ki, c) in candidates.iter().enumerate() {
-        let point_utility = utility_of(c, utility);
+        let point_utility = utility_of(c, utility)?;
         let n = c.len();
         let percentile_utility = if n < 2 || n_boot == 0 {
             point_utility
@@ -259,7 +277,7 @@ pub fn percentile_selection(
                 for (slot, &j) in resample.iter_mut().zip(idxs.iter()) {
                     *slot = c[j];
                 }
-                boots.push(utility_of(&resample, utility));
+                boots.push(utility_of(&resample, utility)?);
             }
             boots.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
             let q = ((alpha * n_boot as f64).floor() as usize).min(n_boot - 1);
@@ -269,7 +287,10 @@ pub fn percentile_selection(
             index: ki,
             point_utility,
             percentile_utility,
-            optimism_gap: point_utility - percentile_utility,
+            optimism_gap: finite_computation(
+                point_utility - percentile_utility,
+                "candidate optimism gap",
+            )?,
         });
     }
 
@@ -284,7 +305,7 @@ pub fn percentile_selection(
     let point_argmax = best_by(|c| c.point_utility);
     let point_winner_optimism = point_argmax.map_or(0.0, |i| out[i].optimism_gap);
 
-    PercentileSelection {
+    Ok(PercentileSelection {
         alpha,
         alpha_warning,
         candidates: out,
@@ -293,12 +314,40 @@ pub fn percentile_selection(
         agrees_with_point_argmax: selected == point_argmax,
         point_winner_optimism,
         input_error: None,
-    }
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unavailable_candidates_never_win_percentile_selection() {
+        for utility in [Utility::MeanReturn, Utility::Sharpe] {
+            for invalid in [vec![], vec![0.01], vec![1e308; 2], vec![f64::NAN; 2]] {
+                let selected =
+                    percentile_selection(&[vec![-0.01, -0.02], invalid], utility, 0.5, 1, 100, 1.0);
+                assert!(selected.input_error.is_some(), "{selected:?}");
+                assert!(selected.selected.is_none());
+                assert!(selected.point_argmax.is_none());
+                assert!(selected.candidates.is_empty());
+            }
+        }
+        let selected =
+            percentile_selection(&[vec![1e160, -1e160]], Utility::Sharpe, 0.5, 1, 100, 1.0);
+        assert!(selected.input_error.is_some());
+        assert!(selected.selected.is_none());
+        let resample_overflow = percentile_selection(
+            &[vec![1e308, -1e308]],
+            Utility::MeanReturn,
+            0.5,
+            1,
+            100,
+            1.0,
+        );
+        assert!(resample_overflow.input_error.is_some());
+        assert!(resample_overflow.selected.is_none());
+    }
 
     /// Deterministic return stream: constant drift + sinusoidal wiggle.
     fn stream(mean_ret: f64, amp: f64, n: usize) -> Vec<f64> {
@@ -540,12 +589,26 @@ mod tests {
         assert!(empty.agrees_with_point_argmax, "nothing to disagree about");
         assert_eq!(empty.point_winner_optimism, 0.0);
 
-        // A one-point track and a zero-bootstrap budget both fall back to the
-        // point estimate rather than inventing a distribution.
+        // Neither a one-point track nor an absent resampling distribution is
+        // enough evidence for a bootstrap-percentile selection.
         let single = percentile_selection(&[vec![0.01]], Utility::MeanReturn, 0.5, 1, 100, 0.1);
-        assert_eq!(single.candidates[0].optimism_gap, 0.0);
+        assert_eq!(
+            single.input_error,
+            Some(StatisticalError::InsufficientObservations {
+                required: 2,
+                actual: 1,
+            })
+        );
+        assert!(single.selected.is_none());
         let no_boot = percentile_selection(&[steady(50)], Utility::MeanReturn, 0.5, 1, 0, 0.1);
-        assert_eq!(no_boot.candidates[0].optimism_gap, 0.0);
+        assert_eq!(
+            no_boot.input_error,
+            Some(StatisticalError::InvalidParameter {
+                name: "n_boot",
+                requirement: "must be positive",
+            })
+        );
+        assert!(no_boot.selected.is_none());
     }
 
     /// The resampler in this module is a copy of `significance`'s private one.

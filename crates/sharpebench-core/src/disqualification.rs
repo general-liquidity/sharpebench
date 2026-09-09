@@ -21,7 +21,8 @@ use crate::oos::OosDecayReport;
 use crate::rediscovery::RediscoveryVerdict;
 
 /// A single reason an agent was (or should be) demoted. The first five mirror the
-/// hard eligibility gates in [`crate::composite::score_agent`]; the last three are
+/// original eligibility gates in [`crate::composite::score_agent`]; three more
+/// name statistical unavailability. The last three are
 /// advisory quality flags the scorer reports but does not gate on, surfaced here so
 /// they are legible alongside the hard failures.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -40,6 +41,12 @@ pub enum FailReason {
     BootstrapInsignificant,
     /// The agent breached its trading mandate (e.g. the drawdown cap).
     MandateBreached,
+    /// Deflation or its confidence interval could not be computed.
+    DeflationUnavailable,
+    /// The bootstrap significance test could not be computed.
+    BootstrapUnavailable,
+    /// Candidate-selection statistics could not be computed.
+    SelectionUnavailable,
     /// Advisory: a large best-minus-median candidate gap — the headline result
     /// looks like a lucky pick from a family of tried strategies, not a robust edge.
     HighSelectionGap,
@@ -119,6 +126,15 @@ pub fn classify_disqualification(
     if !score.mandate_ok {
         reasons.push(FailReason::MandateBreached);
     }
+    if score.deflation_error.is_some() {
+        reasons.push(FailReason::DeflationUnavailable);
+    }
+    if score.bootstrap_error.is_some() {
+        reasons.push(FailReason::BootstrapUnavailable);
+    }
+    if score.selection_error.is_some() {
+        reasons.push(FailReason::SelectionUnavailable);
+    }
 
     // Advisory quality flags (reported by the scorer / supplied out of band).
     if score
@@ -145,7 +161,7 @@ pub fn classify_disqualification(
 /// board, and one taken at default bars against a board scored at other bars
 /// explains it wrongly: it can count `DsrBelowBar` against agents the board ranked,
 /// or count none against agents the board demoted. Takes no out-of-band evidence, so
-/// it covers the signals intrinsic to a [`CompositeScore`] (the five hard gates plus
+/// it covers the signals intrinsic to a [`CompositeScore`] (the hard gates plus
 /// the reported selection gap). A [`BTreeMap`] keeps the output ordering
 /// deterministic.
 pub fn rollup(
@@ -200,6 +216,52 @@ mod tests {
         );
         assert!(s.rank_eligible);
         assert!(classify_disqualification(&s, &thresholds(), None, None).is_empty());
+    }
+
+    #[test]
+    fn statistical_unavailability_has_named_disqualification_reasons() {
+        let cfg = ScoreConfig {
+            dsr_ci_level: 1.5,
+            ..ScoreConfig::default()
+        };
+        let score = score_agent(&agent("strong", vec![run(0.002, 0.0005, 60)]), &cfg);
+        assert!(score.deflation_error.is_some());
+        assert!(!score.rank_eligible);
+        let reasons = classify_disqualification(
+            &score,
+            &DisqualThresholds::from_score_config(&cfg),
+            None,
+            None,
+        );
+        assert!(serde_json::to_string(&reasons)
+            .unwrap()
+            .contains("deflation_unavailable"));
+
+        for (error, label) in [
+            ("deflation", "deflation_unavailable"),
+            ("bootstrap", "bootstrap_unavailable"),
+            ("selection", "selection_unavailable"),
+        ] {
+            let mut score = score_agent(
+                &agent("strong", vec![run(0.002, 0.0005, 60)]),
+                &ScoreConfig::default(),
+            );
+            assert!(score.rank_eligible);
+            match error {
+                "deflation" => score.deflation_error = Some("test unavailable".into()),
+                "bootstrap" => score.bootstrap_error = Some("test unavailable".into()),
+                _ => score.selection_error = Some("test unavailable".into()),
+            }
+            let reasons = classify_disqualification(&score, &thresholds(), None, None);
+            assert_eq!(
+                serde_json::to_value(reasons).unwrap(),
+                serde_json::json!([label])
+            );
+            assert_eq!(
+                serde_json::to_value(rollup(&[score], &thresholds())).unwrap(),
+                serde_json::json!({label: 1})
+            );
+        }
     }
 
     #[test]

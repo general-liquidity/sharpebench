@@ -227,7 +227,7 @@ pub enum DurationSource {
 
 /// Rank-neutral totals published beside the scored pool. Never an input to a
 /// score, a rank, or a pass^k pool.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttemptSummary {
     pub attempts: usize,
     pub completed: usize,

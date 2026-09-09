@@ -108,6 +108,53 @@ The shipped datasets: `us-indices-1d`, `fx-majors-1d`, `commodities-1d`,
 `crypto-majors-1h` 8760; `us-indices-1w` and `crypto-majors-1w` 52.
 
 > Bailey & López de Prado, *The Deflated Sharpe Ratio* (2014), is the reference.
+
+## Numerical implementation of the normal functions
+
+PSR, the deflation bar and the DSR interval evaluate the standard normal CDF
+and its inverse through `sharpebench_stats::stats`: `erf` is Abramowitz and
+Stegun 7.1.26 (absolute error up to about 1.5e-7), `norm_cdf` is
+`0.5 * (1 + erf(x / sqrt 2))`, and `norm_ppf` is Acklam's rational
+approximation (relative error about 1.2e-9). These are published closed forms,
+not correctly rounded values; in particular `erf(0)` evaluates to `1e-9` rather
+than `0`, which is why the committed synthetic golden fixture prints
+`"psr": 0.5000000005` for a zero-Sharpe stream.
+
+A measured replacement by `statrs` 0.19.1 (2026-09, `default-features =
+false`, so only its `erf`, `Normal::cdf` and `Normal::inverse_cdf`) was
+compared with the shipped bodies on 1.3 million grid points per function
+(plus subnormals, exact zero, saturated tails and infinities) and on the 10,033
+distinct arguments the kernel passes while scoring the two golden fields and
+the tutorial fixtures:
+
+| Function | Max absolute difference | Grid points differing in any bit | Kernel-passed arguments differing |
+|---|---|---|---|
+| `erf` | 1.4e-7 (near x = 0.045) | 81.6 percent | 4,432 of 10,033 |
+| `norm_cdf` | 7.0e-8 (near x = 0.064) | 90.5 percent | 6,434 of 10,033 |
+| `norm_ppf` | 6.8e-8 (at p = 5e-324; 2.0e-9 on the kernel's arguments) | 99.9 percent | 2 of 2 |
+
+The kernel-passed arguments that agree are the saturated ones, where both
+implementations return exactly 0 or 1. Under the replacement,
+`crates/sharpebench-core/golden/example_submissions.scores.json` moves in
+eight printed values (`deflation_bar_per_period`,
+`deflation_bar_annualized_equivalent`, `dsr_ci_low`, `dsr_se`),
+`synthetic_field.scores.json` moves (`psr` and `deflated_sharpe`), and every
+producer under `paper/evidence/final/` rerun with its documented command
+writes different `psr`, `deflated_sharpe` and deflation-bar values. The
+tutorial reports under `examples/forecast-quality/`, the prospective forecast
+report, the text board and the `arena` records are byte-identical, because
+none of their printed numbers passes through these functions at printed
+precision. The migration therefore cannot ship as a drop-in and is deferred to
+the next evidence regeneration, when the golden fixtures and the frozen
+records are rescored together. Until then
+`crates/sharpebench-stats/tests/special_function_bits.rs` pins the exact bits
+the three functions return, so a silent change fails there before it reaches
+the golden fixtures. The moment estimators (`mean`, `variance`, `std_dev`,
+`skewness`, `kurtosis`) stay hand-rolled in either case: the standardized
+moments use the population normalisation fixed by the 2026-09-07 audit (R03),
+and the proposed special-function substitution does not replace those empirical
+moment definitions. This is a scoped implementation choice, not a claim that
+no numerical library can compute population-normalized moments.
 > The implementation lives in `sharpebench-stats/src/deflated_sharpe.rs` (the
 > per-period kernel) and `sharpebench-core/src/composite.rs` (the unit conversion
 > and the gates), and is unit-tested for the "deflation penalizes many trials"

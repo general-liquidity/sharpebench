@@ -55,7 +55,7 @@ def _git(root: Path, *arguments: str) -> str:
     return process.stdout.strip()
 
 
-def _closed_field(root: Path) -> Path:
+def _closed_field(root: Path, schema="sharpe.forecast-evidence.v1", encoding=None) -> Path:
     source = root / "paper/evidence/prospective-forecast-field"
     plan = {
         "schema_version": importer.PLAN_SCHEMA,
@@ -67,7 +67,16 @@ def _closed_field(root: Path) -> Path:
         importer._canonical_sha256(plan) + "\n", encoding="utf-8", newline="\n"
     )
     _write_json(source / "observation.json", {"frozen": True})
-    _write_json(source / "pending/fixture-agent.json", {"pending": True})
+    revision = {"claim_id": "fixture-contract", "status": "eligible", "prediction": [0.5]}
+    if encoding is not None:
+        revision["contract_digest_encoding"] = encoding
+    ledger = {
+        "schema_version": schema,
+        "identity": {"agent_id": "fixture-agent", "model_id": "fixture-model"},
+        "contracts": plan["contracts"],
+        "revisions": [revision],
+    }
+    _write_json(source / "pending/fixture-agent.json", ledger)
     _write_json(source / "inference/fixture-agent.json", {"inference": True})
     sealed, resolution_files, _ = importer._expected_paths(["fixture-agent"])
     forecast_commit = {
@@ -82,9 +91,7 @@ def _closed_field(root: Path) -> Path:
     _write_json(
         source / "resolved/fixture-agent.json",
         {
-            "schema_version": "sharpe.forecast-evidence.v1",
-            "identity": {"agent_id": "fixture-agent"},
-            "revisions": [{"claim_id": "fixture-contract", "status": "eligible"}],
+            **ledger,
             "resolutions": [
                 {
                     "claim_id": "fixture-contract",
@@ -120,6 +127,49 @@ def _closed_field(root: Path) -> Path:
 
 
 class ProspectiveFieldImportTests(unittest.TestCase):
+    def test_v2_import_accepts_both_supported_digest_labels(self):
+        for label in ("sharpebench/canonical-json/v1", "legacy"):
+            with self.subTest(label=label), TemporaryDirectory() as directory:
+                root = Path(directory) / "arena"
+                root.mkdir()
+                source = _closed_field(root, "sharpe.forecast-evidence.v2", label)
+                importer.import_field(source, Path(directory) / "imported")
+
+    def test_wrong_envelope_digest_labels_are_refused(self):
+        for schema, label in [("sharpe.forecast-evidence.v2", None),
+                              ("sharpe.forecast-evidence.v2", "invented"),
+                              ("sharpe.forecast-evidence.v1", "legacy")]:
+            with self.subTest(schema=schema, label=label), TemporaryDirectory() as directory:
+                root = Path(directory) / "arena"
+                root.mkdir()
+                source = _closed_field(root, schema, label)
+                with self.assertRaisesRegex(importer.ProspectiveImportError, "digest encoding"):
+                    importer.import_field(source, Path(directory) / "imported")
+
+    def test_rehashing_resolved_rewrites_cannot_replace_sealed_fields(self):
+        for field in ("identity", "contracts", "revisions"):
+            with self.subTest(field=field), TemporaryDirectory() as directory:
+                root = Path(directory) / "arena"
+                root.mkdir()
+                source = _closed_field(root)
+                path = source / "resolved/fixture-agent.json"
+                document = json.loads(path.read_text())
+                if field == "identity":
+                    document[field]["model_id"] = "different-model"
+                elif field == "contracts":
+                    document[field][0]["question"] = "different-question"
+                else:
+                    document[field][0]["prediction"] = [1.0]
+                _write_json(path, document)
+                manifest_path = source / "resolution-manifest.json"
+                manifest = json.loads(manifest_path.read_text())
+                manifest["files"]["resolved/fixture-agent.json"] = importer._sha256(path.read_bytes())
+                _write_json(manifest_path, manifest)
+                _git(root, "add", "paper/evidence/prospective-forecast-field")
+                _git(root, "commit", "--quiet", "-m", "rewritten resolved ledger")
+                with self.assertRaisesRegex(importer.ProspectiveImportError, "sealed forecast"):
+                    importer.import_field(source, Path(directory) / "imported")
+
     def test_closed_committed_field_imports_with_a_source_receipt(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory) / "arena"

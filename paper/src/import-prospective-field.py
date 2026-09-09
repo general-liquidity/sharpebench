@@ -125,7 +125,9 @@ def _verify_resolved_ledgers(
         resolutions = document.get("resolutions")
         revisions = document.get("revisions")
         if (
-            document.get("schema_version") != "sharpe.forecast-evidence.v1"
+            document.get("schema_version") not in (
+                "sharpe.forecast-evidence.v1", "sharpe.forecast-evidence.v2"
+            )
             or identity.get("agent_id") != agent_id
             or not isinstance(resolutions, list)
             or not isinstance(revisions, list)
@@ -133,6 +135,24 @@ def _verify_resolved_ledgers(
             raise ProspectiveImportError(
                 f"resolved ledger has the wrong envelope: {agent_id}"
             )
+        for revision in revisions:
+            revision = _mapping(revision, f"{agent_id}.revision")
+            encoding = revision.get("contract_digest_encoding")
+            if (document["schema_version"] == "sharpe.forecast-evidence.v2"
+                    and encoding not in ("sharpebench/canonical-json/v1", "legacy")):
+                raise ProspectiveImportError(f"unsupported or missing digest encoding: {agent_id}")
+            if (document["schema_version"] == "sharpe.forecast-evidence.v1"
+                    and "contract_digest_encoding" in revision):
+                raise ProspectiveImportError(f"v1 cannot declare a digest encoding: {agent_id}")
+        pending = _mapping(_read_json(source / "pending" / f"{agent_id}.json"),
+                           f"pending ledger {agent_id}")
+        for immutable in ("identity", "contracts", "revisions"):
+            if immutable not in document or document[immutable] != pending.get(immutable):
+                raise ProspectiveImportError(
+                    f"{agent_id} resolved {immutable} differs from the sealed forecast"
+                )
+        for resolution in resolutions:
+            _mapping(resolution, f"{agent_id}.resolution")
         if [record.get("claim_id") for record in resolutions] != contract_ids or any(
             record.get("status") != "resolved" for record in resolutions
         ):

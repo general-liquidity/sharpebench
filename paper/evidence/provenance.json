@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "9f1f7b97c69d2106547615e89faf414aa9ada05a",
+  "generated_at_head": "e5d3b0671b26b23f738474dbaf4ac198a432ae43",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -283,7 +283,7 @@
     },
     {
       "path": "crates/sharpebench-cli/src/import_cmd.rs",
-      "sha256": "3eb9bc4a1a7f355f47c692ca118498366e6ad2adf0e20cab44c66c864155abf6"
+      "sha256": "c8cd12c3d6a6fc777751f563d648b23596966881660c4dad660c7f94a5568877"
     },
     {
       "path": "crates/sharpebench-cli/src/lineage_cmd.rs",
@@ -291,7 +291,7 @@
     },
     {
       "path": "crates/sharpebench-cli/src/main.rs",
-      "sha256": "26050c6ad7bfe0e93dcac8a14879ad483202a3b7d189dbc72973e005a8f73011"
+      "sha256": "ab09c70768ee5d432d53f3b975cd3c1168642916f29839f4421754fe9a4f0b5f"
     },
     {
       "path": "crates/sharpebench-cli/src/update.rs",
@@ -300,6 +300,10 @@
     {
       "path": "crates/sharpebench-cli/tests/analysis_support.rs",
       "sha256": "240f404846d22f4adaecc15bde10919d247ed31930325393149c98c151a7663a"
+    },
+    {
+      "path": "crates/sharpebench-cli/tests/attempt_accounting_cli.rs",
+      "sha256": "28d27bfd92255e2b78edd6e68bd0b5f6edf3a1592d234f5f86f52082a55b7d59"
     },
     {
       "path": "crates/sharpebench-cli/tests/external_entrant_sandbox.rs",
@@ -315,7 +319,7 @@
     },
     {
       "path": "crates/sharpebench-cli/tests/run_identity_cli.rs",
-      "sha256": "f99a1b61dd1d48179620c5c14073149ab1fe62628eb61b8b2608cfd703b6c82b"
+      "sha256": "51cb2dc65fcee33234cebd6692234bf14bd408769617ab73738788f86527d68a"
     },
     {
       "path": "crates/sharpebench-core/Cargo.toml",
@@ -367,7 +371,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/disqualification.rs",
-      "sha256": "b1f4a79b19168e704121db99986677a9306ecc0299cf47b7bcec10d0cf1682b8"
+      "sha256": "b0f2d4efe59037825310455499e458640aad88179e5c1bb6b2d8cb3b16fa4aad"
     },
     {
       "path": "crates/sharpebench-core/src/econrationality.rs",
@@ -383,7 +387,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/forecast.rs",
-      "sha256": "7f0442ca86cd8ed576108a40545cd6959b8d09a3b291b8be71a8816fcb099c95"
+      "sha256": "a37e751d98abc7c05d8b2b84ae81b52ef3e013a39d7a2a0840e1826321c4e032"
     },
     {
       "path": "crates/sharpebench-core/src/greeks.rs",
@@ -471,7 +475,7 @@
     },
     {
       "path": "crates/sharpebench-edge/src/verdict.rs",
-      "sha256": "c6f8aad764005969565b498d4805e8e76e2b7c32da513ab1be0f4fd54c7a3289"
+      "sha256": "ab5f1166c684011f6df4c4a74b9a4fd0b94abba518d252b615f151eca2131ef0"
     },
     {
       "path": "crates/sharpebench-harness/Cargo.toml",
@@ -527,7 +531,7 @@
     },
     {
       "path": "crates/sharpebench-harness/src/failure.rs",
-      "sha256": "c78cd499ba262d2df50bbb833c79298d71cb45b7f43a61b3fad06571f14c934e"
+      "sha256": "72c9475be8088c8765e3b562d1167743da1d8a519bd9102ef373c7d1ac507ba7"
     },
     {
       "path": "crates/sharpebench-harness/src/lib.rs",
@@ -703,7 +707,7 @@
     },
     {
       "path": "crates/sharpebench-stats/src/deflated_sharpe.rs",
-      "sha256": "8b7dd74adf5dceb14ff61d2384be9fe33232054d5cdddff61d17934aea35cf49"
+      "sha256": "3e4d837be9deaa57ba2143d15c6c441036d086e7d03dced7a11711437d194fa2"
     },
     {
       "path": "crates/sharpebench-stats/src/dissent.rs",
@@ -723,15 +727,15 @@
     },
     {
       "path": "crates/sharpebench-stats/src/selection.rs",
-      "sha256": "6c8c1d3f1bc249e0ccb785b6cc9eef5958d6932c95fab0500dc7e7ba9e839e89"
+      "sha256": "0f64f3f38db5ca628a11b73f3453f4f3dbecd4a283844aff2dfe76e556b9adac"
     },
     {
       "path": "crates/sharpebench-stats/src/significance.rs",
-      "sha256": "35ccd499b838f98e1d8dbf97f842a1a6ad3bbbdfc83845fa3ba2b3710382d617"
+      "sha256": "1b8c7d715251e4b9381e168fc42ae993ef6087e0906f18ff32f59bbd6994433a"
     },
     {
       "path": "crates/sharpebench-stats/src/stats.rs",
-      "sha256": "73ac4b1022aa79d9f2d824415e78327ed1d1d528df907e79602abb2fd8fb3882"
+      "sha256": "04214748194bc5f2c1e01b97a2d8c5817bca93182e9044f431c707ffc08e6a20"
     },
     {
       "path": "crates/sharpebench-stats/src/stylized_facts.rs",
@@ -739,11 +743,23 @@
     },
     {
       "path": "crates/sharpebench-stats/src/validation.rs",
-      "sha256": "d66eb5e2f60d22cb48d385ce6b8373434553caeaeccd9c8eec0ecc70de7c5716"
+      "sha256": "e4615b3d177fb153482d06355f1cef925d9a2eadaf8a860bff8aa73546582306"
+    },
+    {
+      "path": "crates/sharpebench-stats/tests/dsr_computation.rs",
+      "sha256": "97889d80dbf5cf18750ffb708d3e55254e7bc8cd4b11edc6deebc65dfc76e7b5"
     },
     {
       "path": "crates/sharpebench-stats/tests/r02_statistical_boundaries.rs",
       "sha256": "41320983d7fde20cbacbeca33ad91021e34a4f23c5b55150c578caa70d40d540"
+    },
+    {
+      "path": "crates/sharpebench-stats/tests/spa_studentization.rs",
+      "sha256": "180e72caab49d8b7b53d40f8f9602756bfd2f5bcd702fcd85d70f79ccd005e42"
+    },
+    {
+      "path": "crates/sharpebench-stats/tests/special_function_bits.rs",
+      "sha256": "3e30205941f5f8d6fa3ed305938c53bde38f0e24f89e89a45a68a49e9adaac29"
     },
     {
       "path": "crates/sharpebench-wasm/Cargo.toml",
@@ -911,7 +927,7 @@
     },
     {
       "path": "paper/src/import-prospective-field.py",
-      "sha256": "fa36786be6d58af330145dea3a83e95c4f5efe1664dc944775af03aba3abcbba"
+      "sha256": "cc23fdc34ec07561a6c71664d5e4be028d42beab6f926e7739dade7d09c39956"
     },
     {
       "path": "paper/src/make-evidence-figures.py",
@@ -943,7 +959,7 @@
     },
     {
       "path": "paper/src/test_import_prospective_field.py",
-      "sha256": "03ce108863c2cc6889b24a603a010ccebdf6e5cb57ff04d087c4423e7cbfb3a8"
+      "sha256": "0b723acee79c08ce2db2ee0696da17d01ee6895c3f4e6de6f3caeaed12ae9084"
     },
     {
       "path": "paper/src/test_llm_agent_identity.py",
@@ -979,5 +995,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "10a5a80b67b3006458a3c0d8dba5f079b06c358e7664a555b217c8825ab9e128"
+  "source_snapshot_sha256": "a6de32ac68b7aca3b93b28a9652ee5c44424d87636cc11a3276d0b11a053abe1"
 }

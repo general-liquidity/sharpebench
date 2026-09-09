@@ -212,6 +212,18 @@ python paper/src/check-prospective-forecast-report.py \
 
 ## Interpretation limits
 
+The prospective-field importer accepts v1 and v2 envelopes, checks the closed
+file inventory and recorded hashes, and joins resolved identities, contracts
+and revisions to sealed pending submissions. Rehashing a changed prediction in
+the resolution manifest is not sufficient. It validates digest-encoding labels;
+the forecast-analysis kernel still verifies the contract digests themselves and
+reconstructs scores. A Git commit or local clock is not independent evidence
+that sealing happened before the forecast deadline.
+
+Within comparison, realized outcomes use the versioned canonical encoding, so
+`1` and `1.0`, or positive and negative zero, do not create false disputes.
+Different realized values remain incompatible even when the contract matches.
+
 - The ledger clock establishes logical order, not independently verified wall
   time.
 - Exact common support removes question mismatch. It does not make agents,

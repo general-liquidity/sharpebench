@@ -49,6 +49,17 @@ impl fmt::Display for StatisticalError {
 
 impl std::error::Error for StatisticalError {}
 
+pub(crate) fn finite_computation(
+    value: f64,
+    quantity: &'static str,
+) -> Result<f64, StatisticalError> {
+    if value.is_finite() {
+        Ok(value)
+    } else {
+        Err(StatisticalError::NonFiniteComputation { quantity })
+    }
+}
+
 pub fn finite_observations(values: &[f64]) -> Result<(), StatisticalError> {
     match values.iter().position(|x| !x.is_finite()) {
         Some(index) => Err(StatisticalError::NonFiniteObservation { index }),

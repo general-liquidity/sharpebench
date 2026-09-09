@@ -168,24 +168,27 @@ export interface HonestyOpts {
   srBenchmark?: number;
 }
 
-/** The LITE verdict: everything derivable from one return series. */
+/** The LITE verdict. Nonfinite numeric diagnostics serialize as null, not zero. */
 export interface HonestyVerdict {
-  sharpe: number;
+  sharpe: number | null;
   nObs: number;
-  skew: number;
-  kurtosis: number;
+  skew: number | null;
+  kurtosis: number | null;
   nTrials: number;
-  expectedMaxSharpe: number;
-  deflatedSharpe: number;
-  probabilisticSharpe: number;
+  expectedMaxSharpe: number | null;
+  deflatedSharpe: number | null;
+  probabilisticSharpe: number | null;
   /** `1 - deflatedSharpe`: probability the edge is a search artifact. */
-  haircut: number;
+  haircut: number | null;
   /** `sharpe * deflatedSharpe`: Sharpe discounted by survival probability. */
-  haircutSharpe: number;
-  minTrackRecordLen: number;
+  haircutSharpe: number | null;
+  /** Null when no finite track length is returned by the kernel. */
+  minTrackRecordLen: number | null;
   verdict: Verdict;
   explanation: string;
   methodologyVersion: string;
+  /** When present, deflation was withheld; its numeric sentinels are not estimates. */
+  statisticsError?: string;
   [k: string]: unknown;
 }
 
@@ -234,10 +237,12 @@ export interface PercentileSelectionResult {
   alpha_warning: boolean;
   /** Every candidate, in input order. */
   candidates: CandidateUtility[];
-  /** Index of the candidate with the best percentile utility (the robust pick), or null for empty input. */
+  /** Index of the robust pick, or null for empty or refused input. */
   selected: number | null;
-  /** Index of the candidate with the best point utility (the naive pick), or null for empty input. */
+  /** Index of the point winner, or null for empty or refused input. */
   point_argmax: number | null;
+  /** Null on accepted input; a refusal withholds the entire candidate field. */
+  input_error: string | null;
   /** Whether the two picks agree. Disagreement is the interesting case. */
   agrees_with_point_argmax: boolean;
   /** Optimism gap of the point winner: report this next to any headline utility. */
@@ -316,7 +321,8 @@ export interface CrowdingDecayPrior {
 
 /**
  * A reason an agent was (or should be) demoted. The first five mirror the hard
- * eligibility gates in the scorer; the last three are advisory quality flags
+ * eligibility gates in the scorer; three more name statistical unavailability.
+ * The last three are advisory quality flags
  * that never gate.
  */
 export type FailReason =
@@ -325,6 +331,9 @@ export type FailReason =
   | "process_violation"
   | "bootstrap_insignificant"
   | "mandate_breached"
+  | "deflation_unavailable"
+  | "bootstrap_unavailable"
+  | "selection_unavailable"
   | "high_selection_gap"
   | "is_rediscovery"
   | "oos_decay";
@@ -338,7 +347,15 @@ export interface DisqualificationReport {
   [k: string]: unknown;
 }
 
-/** The FULL verdict: LITE on the winner plus the multiple-testing family + PBO. */
+/** Harvey-Liu-Zhu hurdle and its interpretation from the kernel. */
+export interface HlzGate {
+  tStat: number | null;
+  tThreshold: number;
+  passed: boolean;
+  explanation: string;
+}
+
+/** The FULL verdict: LITE on the winner plus multiple testing, PBO and HLZ. */
 export interface FullVerdict {
   honesty: HonestyVerdict;
   /** White's Reality Check p-value over the field. */
@@ -349,8 +366,12 @@ export interface FullVerdict {
   spaConsistentP: number;
   /** Romano-Wolf step-down: which field members are significant at α. */
   stepDown: boolean[];
-  /** CSCV Probability of Backtest Overfitting over the field. */
-  pbo: number;
+  /** CSCV estimate; null when unavailable, with a reason in pboError. */
+  pbo: number | null;
+  hlz: HlzGate;
+  /** When present, p-values of 1 and all-false stepDown are refusal sentinels. */
+  snoopingError?: string;
+  pboError?: string;
   [k: string]: unknown;
 }
 
