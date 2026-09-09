@@ -267,8 +267,8 @@ def fig_luck_deflation():
 # ---- Figure C: the pass-witness boundary --------------------------------------
 # Top panel: the witness's deflated Sharpe against the injected per-period edge,
 # one curve per window geometry. Bottom panel: the two gate outcomes per edge,
-# filled where the gate passes. The daily geometry separates the two crossings;
-# on the sampled weekly grid they coincide.
+# filled where the gate passes. On both geometries DSR clears several grid
+# steps before pass^k does, so the two crossings are separated.
 def fig_pass_witness():
     recs = [r for r in load("pass-witness") if r["agent_id"] == "witness"]
     shapes = [("weekly-shaped", "weekly-shaped (six 77-bar windows)", BLUE),
