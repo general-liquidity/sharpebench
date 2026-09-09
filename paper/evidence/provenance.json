@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "9017e75946eda0312ad2611d707b356e7593eccd",
+  "generated_at_head": "90a7a4b886e43d4dbd63f554bb84d177ad1d98bd",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -291,7 +291,7 @@
     },
     {
       "path": "crates/sharpebench-cli/src/main.rs",
-      "sha256": "21f8bedfe9df75a1eb3e3eb5a58f096712790f97f91a7e33ef51fd48e56af922"
+      "sha256": "ab09c70768ee5d432d53f3b975cd3c1168642916f29839f4421754fe9a4f0b5f"
     },
     {
       "path": "crates/sharpebench-cli/src/update.rs",
@@ -300,6 +300,10 @@
     {
       "path": "crates/sharpebench-cli/tests/analysis_support.rs",
       "sha256": "240f404846d22f4adaecc15bde10919d247ed31930325393149c98c151a7663a"
+    },
+    {
+      "path": "crates/sharpebench-cli/tests/attempt_accounting_cli.rs",
+      "sha256": "28d27bfd92255e2b78edd6e68bd0b5f6edf3a1592d234f5f86f52082a55b7d59"
     },
     {
       "path": "crates/sharpebench-cli/tests/external_entrant_sandbox.rs",
@@ -527,7 +531,7 @@
     },
     {
       "path": "crates/sharpebench-harness/src/failure.rs",
-      "sha256": "c78cd499ba262d2df50bbb833c79298d71cb45b7f43a61b3fad06571f14c934e"
+      "sha256": "72c9475be8088c8765e3b562d1167743da1d8a519bd9102ef373c7d1ac507ba7"
     },
     {
       "path": "crates/sharpebench-harness/src/lib.rs",
@@ -703,7 +707,7 @@
     },
     {
       "path": "crates/sharpebench-stats/src/deflated_sharpe.rs",
-      "sha256": "8b7dd74adf5dceb14ff61d2384be9fe33232054d5cdddff61d17934aea35cf49"
+      "sha256": "3e4d837be9deaa57ba2143d15c6c441036d086e7d03dced7a11711437d194fa2"
     },
     {
       "path": "crates/sharpebench-stats/src/dissent.rs",
@@ -742,8 +746,16 @@
       "sha256": "e4615b3d177fb153482d06355f1cef925d9a2eadaf8a860bff8aa73546582306"
     },
     {
+      "path": "crates/sharpebench-stats/tests/dsr_computation.rs",
+      "sha256": "350050b014bd8dd312363726fe6512b99d966e0b06b2dd8793d1a967fb51f690"
+    },
+    {
       "path": "crates/sharpebench-stats/tests/r02_statistical_boundaries.rs",
       "sha256": "41320983d7fde20cbacbeca33ad91021e34a4f23c5b55150c578caa70d40d540"
+    },
+    {
+      "path": "crates/sharpebench-stats/tests/spa_studentization.rs",
+      "sha256": "180e72caab49d8b7b53d40f8f9602756bfd2f5bcd702fcd85d70f79ccd005e42"
     },
     {
       "path": "crates/sharpebench-stats/tests/special_function_bits.rs",
@@ -983,5 +995,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "af0949ae1305fca30525b326d487a55ce0cd672533b1477c7334d5590db33eac"
+  "source_snapshot_sha256": "0e7c86394e5e45f2b64c60786ca7f9268faa0c4bbfbc56dac19ded83dee1cf79"
 }
