@@ -2140,4 +2140,59 @@ mod tests {
         assert_eq!(before, after);
         assert_eq!(report.rank_effect, "reported_only_never_trading_rank");
     }
+    /// Audit finding R08 (deferred, not repaired): the pairwise comparison pools
+    /// every common contract into one `mean_loss_difference` regardless of
+    /// scoring rule or target unit. A binary Brier loss is dimensionless and a
+    /// point squared error carries the target unit squared, so rescaling the
+    /// point contract from dollars to cents changes the sign of the pooled
+    /// difference while the forecasts are unchanged. This test pins that the
+    /// analysis averages silently today. Every committed field is one stratum,
+    /// so no reported verdict depends on it; the deferral reopens when a
+    /// committed comparison mixes strata and stratifying changes its verdict.
+    #[test]
+    fn mixed_scoring_rules_are_silently_pooled_into_one_mean_loss_difference_r08() {
+        fn field(agent: &str, probability: f64, point: f64, unit: &str) -> ForecastEvidence {
+            let mut evidence = serde_json::from_str::<ForecastEvidence>(&fixture(
+                agent,
+                &[probability, 0.5],
+                &[1.0, 0.0],
+            ))
+            .unwrap();
+            let contract = &mut evidence.contracts[1];
+            contract.kind = "point".to_string();
+            contract.scoring_rule = "point_errors".to_string();
+            contract.target = "price".to_string();
+            contract.unit = unit.to_string();
+            let digest = contract_digests(contract).unwrap().canonical_json_v1;
+            evidence.revisions[1].prediction = vec![point];
+            evidence.revisions[1].contract_sha256 = digest;
+            evidence
+        }
+        let mut pooled = Vec::new();
+        for (scale, unit) in [(1.0, "USD"), (100.0, "US_cents")] {
+            let a = field("a", 0.9, 0.2 * scale, unit);
+            let b = field("b", 0.1, 0.1 * scale, unit);
+            let report =
+                analyze_forecast_quality(&[a, b], ForecastAnalysisConfig::default()).unwrap();
+            // Per-agent means are grouped by rule; the pairwise comparison is not.
+            assert_eq!(report.agents[0].metrics.len(), 2);
+            let comparison = &report.comparisons[0];
+            assert_eq!(comparison.n_contracts, 2);
+            let brier_difference = (0.9f64 - 1.0).powi(2) - (0.1f64 - 1.0).powi(2);
+            let point_difference = (0.2 * scale).powi(2) - (0.1 * scale).powi(2);
+            let expected = (brier_difference + point_difference) / 2.0;
+            assert!((comparison.mean_loss_difference - expected).abs() < 1e-9);
+            pooled.push(comparison.mean_loss_difference);
+        }
+        assert!(
+            pooled[0] < 0.0,
+            "in USD agent a looks better: {}",
+            pooled[0]
+        );
+        assert!(
+            pooled[1] > 0.0,
+            "in cents agent b looks better: {}",
+            pooled[1]
+        );
+    }
 }
