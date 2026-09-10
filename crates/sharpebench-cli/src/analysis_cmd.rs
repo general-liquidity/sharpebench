@@ -260,15 +260,6 @@ fn run_select(args: &[String], json: bool) -> i32 {
 
 // --- disqualify --------------------------------------------------------------
 
-/// The advisory (non-gating) reasons; everything else mirrors a hard
-/// eligibility gate in the scorer.
-fn is_advisory(reason: FailReason) -> bool {
-    matches!(
-        reason,
-        FailReason::HighSelectionGap | FailReason::IsRediscovery | FailReason::OosDecay
-    )
-}
-
 /// `disqualify <subs.json>`: score a field of submissions and name every
 /// disqualification/quality signal that fired for each agent. Pure legibility
 /// over the composite score: nothing here changes eligibility semantics.
@@ -333,7 +324,7 @@ fn run_disqualify(args: &[String], json: bool) -> i32 {
         let listed: Vec<String> = reasons
             .iter()
             .map(|r| {
-                if is_advisory(*r) {
+                if r.is_advisory() {
                     format!("{r:?} (advisory)")
                 } else {
                     format!("{r:?}")

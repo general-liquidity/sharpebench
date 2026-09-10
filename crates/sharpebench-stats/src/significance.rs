@@ -262,7 +262,7 @@ pub fn reality_check_pvalue(
     let sqrt_n = (n as f64).sqrt();
     let means: Vec<f64> = field
         .iter()
-        .map(|f| finite_computation(mean(&f[..n]), "observed field maximum"))
+        .map(|f| finite_computation(mean(&f[..n]), "observed agent mean"))
         .collect::<Result<_, _>>()?;
     let observed = means.iter().copied().fold(f64::NEG_INFINITY, f64::max) * sqrt_n;
     if !observed.is_finite() {
@@ -322,7 +322,7 @@ pub fn spa_pvalue(
     let sqrt_n = (n as f64).sqrt();
     let means: Vec<f64> = field
         .iter()
-        .map(|f| finite_computation(mean(&f[..n]), "observed field maximum"))
+        .map(|f| finite_computation(mean(&f[..n]), "observed agent mean"))
         .collect::<Result<_, _>>()?;
 
     // Bootstrap rows of the centered statistic sqrt(n)*(bmean_k - mean_k), reused
@@ -407,7 +407,7 @@ pub fn spa_consistent_pvalue(
     let sqrt_n = (n as f64).sqrt();
     let means: Vec<f64> = field
         .iter()
-        .map(|f| finite_computation(mean(&f[..n]), "observed field maximum"))
+        .map(|f| finite_computation(mean(&f[..n]), "observed agent mean"))
         .collect::<Result<_, _>>()?;
 
     // Same bootstrap path + scale as `spa_pvalue` (shared seed constant), so the
@@ -515,7 +515,7 @@ pub fn step_down_significant(
     let sqrt_n = (n as f64).sqrt();
     let means: Vec<f64> = field
         .iter()
-        .map(|f| finite_computation(mean(&f[..n]), "observed field maximum"))
+        .map(|f| finite_computation(mean(&f[..n]), "observed agent mean"))
         .collect::<Result<_, _>>()?;
     let t: Vec<f64> = means
         .iter()
@@ -872,14 +872,33 @@ mod tests {
 
     /// R02: an overflowing but finite field still cannot publish a p-value, so
     /// the guard is on the computed statistic and not only on the input.
+    ///
+    /// F-D: the rendered message travels to the npm surface as `snooping_error`,
+    /// so each stage has to name the quantity it actually validated. Every one of
+    /// these four rows overflows in the per-agent mean, before any maximum is
+    /// taken, and used to be reported as an "observed field maximum".
     #[test]
     fn a_non_finite_statistic_is_reported_as_such() {
         let field = vec![vec![f64::MAX; 20], vec![f64::MAX; 20]];
+        let mean_overflow = StatisticalError::NonFiniteComputation {
+            quantity: "observed agent mean",
+        };
         assert_eq!(
             reality_check_pvalue(&field, 1, 500, 0.1),
-            Err(StatisticalError::NonFiniteComputation {
-                quantity: "observed field maximum"
-            })
+            Err(mean_overflow)
+        );
+        assert_eq!(spa_pvalue(&field, 1, 500, 0.1), Err(mean_overflow));
+        assert_eq!(
+            spa_consistent_pvalue(&field, 1, 500, 0.1),
+            Err(mean_overflow)
+        );
+        assert_eq!(
+            step_down_significant(&field, 1, 500, 0.1, 0.05),
+            Err(mean_overflow)
+        );
+        assert_eq!(
+            mean_overflow.to_string(),
+            "observed agent mean is not finite"
         );
     }
 

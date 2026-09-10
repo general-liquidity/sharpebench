@@ -233,7 +233,9 @@ export interface CandidateUtility {
 export interface PercentileSelectionResult {
   /** The percentile actually used, clamped to [0, 1]. */
   alpha: number;
-  /** True when alpha sits below the recommended floor of 0.3. */
+  /** True when alpha sits below the recommended floor of 0.3. Computed from
+   * `alpha` alone, so a refusal that had nothing to do with alpha (too few
+   * observations, a rejected block probability) does not raise it. */
   alpha_warning: boolean;
   /** Every candidate, in input order. */
   candidates: CandidateUtility[];
@@ -321,9 +323,11 @@ export interface CrowdingDecayPrior {
 
 /**
  * A reason an agent was (or should be) demoted. The first five mirror the hard
- * eligibility gates in the scorer; three more name statistical unavailability.
- * The last three are advisory quality flags
- * that never gate.
+ * eligibility gates in the scorer; two more name the unavailability of a
+ * statistic the scorer does gate on. The last four are advisory quality flags
+ * that never gate. `selection_unavailable` is advisory because the scorer
+ * reports the selection axis and never consults it in `rank_eligible`, so an
+ * agent carrying it alone is still ranked.
  */
 export type FailReason =
   | "failed_pass_k"
