@@ -37,6 +37,11 @@ struct RouteEntry {
     destination: String,
     credential_env: String,
     max_output_tokens: u32,
+    /// Input tokens the provider bills for framing this route's requests, on
+    /// top of the entrant's content. Required: the reservation is a ceiling on
+    /// the whole billed request, and a manifest that omits this would reserve
+    /// against content alone.
+    input_token_overhead: u64,
     rate_card: serde_json::Value,
 }
 
@@ -96,6 +101,7 @@ fn load_routes(
             Secret::new(value),
             card,
             entry.max_output_tokens,
+            entry.input_token_overhead,
         )?);
     }
     Ok((RouteTable::new(routes)?, bindings))
@@ -166,6 +172,9 @@ fn report(
             "unknown_usd_nanos": state.unknown_usd_nanos.to_string(),
             "outstanding_usd_nanos": state.outstanding_usd_nanos.to_string(),
             "available_usd_nanos": journal.available_usd_nanos().to_string(),
+            "overspent_usd_nanos": state.overspent_usd_nanos.to_string(),
+            "overspent_calls": state.overspent_calls,
+            "ceiling_breached": journal.ceiling_breached(),
             "partial": state.is_partial(),
         })
     });
@@ -238,7 +247,7 @@ mod tests {
 
     fn manifest(alias: &str, revision: &str, credential_env: &str) -> String {
         format!(
-            r#"{{"schema_version":"{ROUTES_SCHEMA_VERSION}","routes":[{{"alias":"{alias}","destination":"https://provider.invalid/v1","credential_env":"{credential_env}","max_output_tokens":4096,"rate_card":{{"schema_version":"sharpebench.token-rate-card.v1","provider":"fake","model":"fake-1","revision":"{revision}","input_usd_nanos_per_token":1,"output_usd_nanos_per_token":2}}}}]}}"#
+            r#"{{"schema_version":"{ROUTES_SCHEMA_VERSION}","routes":[{{"alias":"{alias}","destination":"https://provider.invalid/v1","credential_env":"{credential_env}","max_output_tokens":4096,"input_token_overhead":8,"rate_card":{{"schema_version":"sharpebench.token-rate-card.v1","provider":"fake","model":"fake-1","revision":"{revision}","input_usd_nanos_per_token":1,"output_usd_nanos_per_token":2}}}}]}}"#
         )
     }
 

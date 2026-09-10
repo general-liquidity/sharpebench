@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "6909b5e4512ff33cb9466652b82c3cd210b90c3c",
+  "generated_at_head": "d04fd2deca977fea77f6ad8a84bcb2125a1d8f36",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -287,7 +287,7 @@
     },
     {
       "path": "crates/sharpebench-cli/src/gateway_cli.rs",
-      "sha256": "55137506a2f323a90231342513f55d5adc6ca1de03196a2ea1e3dece9ec8487c"
+      "sha256": "6fa11da76d4ecdeed2babcef880f2e980ad3dd7d9f7399ea627284a35f395fdf"
     },
     {
       "path": "crates/sharpebench-cli/src/import_cmd.rs",
@@ -375,7 +375,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/composite.rs",
-      "sha256": "50b1b028b6ae70a462da05caad39f650f21529ace416e5fca0244de0a4c70fdf"
+      "sha256": "4033f9a99048836ca74771bd93f3dbdd36a7c8402578d0947f451b257e0038ba"
     },
     {
       "path": "crates/sharpebench-core/src/correlation.rs",
@@ -399,7 +399,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/evidence_coverage.rs",
-      "sha256": "5f774db40e52071c145bb991260b4272db3d791e7aa909ec40d1b2854b5be394"
+      "sha256": "ce6d12c03007d231469d2f8aed0e9aaf86266c32ad0972f3bcf4f6575977b6bb"
     },
     {
       "path": "crates/sharpebench-core/src/forecast.rs",
@@ -427,7 +427,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/process.rs",
-      "sha256": "edb5c8819f37bb7666813f683e795786285ee7aacb97836f40f1e77f50705fad"
+      "sha256": "583df3b657aa78715580616bfd15b22ae9db57aee865f565ab201d11b0d2d1c8"
     },
     {
       "path": "crates/sharpebench-core/src/rediscovery.rs",
@@ -511,7 +511,7 @@
     },
     {
       "path": "crates/sharpebench-harness/examples/local_open_weight_field_eval.rs",
-      "sha256": "81e97f07c3d6f98c7c424b824e90ffe6243646d425023a95e1c4506cac4767c0"
+      "sha256": "419bb61a14b88a484af48570b186b4bae279763dd1bd9f03d8e308a1d859151a"
     },
     {
       "path": "crates/sharpebench-harness/examples/luck_floor_1000.rs",
@@ -563,11 +563,11 @@
     },
     {
       "path": "crates/sharpebench-harness/src/gateway.rs",
-      "sha256": "6c452cc9fc6ea66036445cf2c3966f076116a9493589873b3ef35b9ed20264fe"
+      "sha256": "19bb7feceb478a2a2c1a658044602114f28974398b86bcea545e658e0ce94785"
     },
     {
       "path": "crates/sharpebench-harness/src/gateway_journal.rs",
-      "sha256": "817d4995a207dd918eb4bb4f8706e39e96cd19543109833cbcc13c2d3bd233d8"
+      "sha256": "245bc10455ceb07386d0bec084d19329ec3a5924f9795fa249715cec4b830915"
     },
     {
       "path": "crates/sharpebench-harness/src/lib.rs",
@@ -619,7 +619,7 @@
     },
     {
       "path": "crates/sharpebench-leaderboard/src/lib.rs",
-      "sha256": "b42de9c9ed98e394e7c06b04f999128d3f33c25c8e5dd92e3aa829aa1c381431"
+      "sha256": "f0bfff2b34d769d3db16616f00a6b30c431a956c1f4111a9305451874908175f"
     },
     {
       "path": "crates/sharpebench-leaderboard/tests/board_binding.rs",
@@ -783,7 +783,7 @@
     },
     {
       "path": "crates/sharpebench-stats/src/significance.rs",
-      "sha256": "c297b217a1ac40ca06053cb69e6fea5c1dd275e7fded38863219f3dbdec057a7"
+      "sha256": "c38b7dd28bb6906cae7b950d86769ec4748e08a33fa2995b8b88b50445589fc6"
     },
     {
       "path": "crates/sharpebench-stats/src/stats.rs",
@@ -1014,10 +1014,6 @@
       "sha256": "0b723acee79c08ce2db2ee0696da17d01ee6895c3f4e6de6f3caeaed12ae9084"
     },
     {
-      "path": "paper/src/test_llm_agent_budget.py",
-      "sha256": "e05de9987323fa26f6494397e91b261c06711f75877b0de8ca1e0f1466fec5b9"
-    },
-    {
       "path": "paper/src/test_llm_agent_identity.py",
       "sha256": "664a3622033772cd3c5cd24297c3b1a505e20ccf3007e95c9c6de1488528880f"
     },
@@ -1051,5 +1047,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "bf94d4a5ac895ced52b316a035af8fca53f78593cfbf93c4d54e810c484d312d"
+  "source_snapshot_sha256": "112ac7e269536cc7f67732154478c9b2cbc6ce530fbcc66343aa66fe54543a81"
 }
