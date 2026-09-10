@@ -69,9 +69,11 @@ holds. It says nothing about the bytes under an admitted path, which remain the
 scan policy's business, and it does not make the image reproducible. A passing
 probe says the admitted image answered one synthetic observation validly; it is
 not a behavioural test of the entrant. The export of a created container also
-holds entries the daemon itself adds, and an allowlist must name those too;
-which ones a given daemon adds was not measured against a live daemon in this
-work, so the first live use should expect to read the refused indices once.
+holds entries the daemon itself adds. This paragraph first said those were not
+measured; they now are, and the measurement showed a real defect (no allowlist
+of an image's own paths could admit a real export), fixed by admitting the
+daemon's init-layer entries in their exact shape. See
+[Live verification](#live-verification-2026-09-10).
 
 **Tests.** Eight new unit tests in `artifact_preflight::tests` against the
 injected Docker transport:
@@ -84,7 +86,8 @@ injected Docker transport:
 `host_named_artifacts_carry_no_evaluation_identity` (row 40) and
 `an_allowlist_without_a_scan_policy_issues_no_docker_command`. The live leg
 `live_docker_image_preflight` is unchanged and does not exercise the allowlist
-or the probe; neither has run against a real daemon.
+or the probe; two later live legs do (see
+[Live verification](#live-verification-2026-09-10)).
 
 **Mutations** (in place on a clean committed tree, restored with
 `git show HEAD:<path>`, verified with `cmp`):
@@ -226,6 +229,115 @@ returns nothing.
 is already frozen at construction with duplicate rejection; a separate catalog
 would duplicate it.
 
+## Live verification (2026-09-10)
+
+The gateway launch and the runtime allowlist with its functional probe had only
+injected-transport or unit coverage. Three ignored live tests now run them
+against a real daemon, by exact name, in the CI job "live container boundary
+(hostile probe)". The gateway test is skipped by name in the job's wholesale
+arena step so it runs once.
+
+**Environment.** GitHub-hosted `ubuntu-24.04` runner (image 20260907.300.1);
+Docker Engine 28.0.4 (API 1.48), containerd v2.3.4, runc 1.5.1, storage driver
+overlay2 on extfs, cgroup v2 with the systemd driver. Fixture
+`alpine@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce`
+(configuration ID `sha256:b66e0ce6...`), digest-pinned by the job. Evidence
+run: [job 102991855984](https://github.com/general-liquidity/sharpebench/actions/runs/34513112007/job/102991855984)
+on head `6527049`; every later head re-runs the same three tests.
+
+**Gateway launch.**
+`sandbox::tests::live_gateway_launch_serves_model_calls_over_stdio_with_no_network`
+runs `run_gateway_sweep` with a journal on disk over one cell of three
+decisions. The cell spawns the argv `gateway_launch` returns through
+`EntrantLaunch::isolating_launcher`, with an explicit `/bin/sh -c <entrant>`
+appended after the image positional because the fixture's own entrypoint is a
+bare shell, and awaits `wait_until_running`. The provider cannot open a socket.
+Log lines:
+
+```text
+gateway container sharpebench-agent-5907-0: state=Ok(ContainerExitState { status: "exited", oom_killed: false, exit_code: 0 }) verdict=Ok(WithinBudget) removed=Ok(()) remnant=false
+model requests seen by the provider: ["ifaces=lo, egress_exit=1", "ifaces=lo, egress_exit=1", "ifaces=lo, egress_exit=1"]
+test sandbox::tests::live_gateway_launch_serves_model_calls_over_stdio_with_no_network ... ok
+```
+
+Each request was written by the entrant inside the container after it listed
+`/sys/class/net` (loopback only) and tried `wget` to `1.1.1.1:80` (exit 1).
+Each decision is a valid hold only when the gateway's answer arrived on the
+entrant's stdin, and the run finished with no failure record. The journal on
+disk holds three reservations and three settlements, all priced. The container
+was classified before removal and `docker inspect` found no remnant. No product
+defect: the launch reached the entrant and the serving loop answered over the
+container's stdio unchanged.
+
+**What the daemon adds to an export.**
+`artifact_preflight::tests::live_runtime_allowlist_admits_the_fixture_and_its_probe_passes`
+compares an export taken with the preflight's own create arguments against the
+fixture's layers from `docker save` (one layer, 519 entries). The export held
+524 entries:
+
+```text
+docker-added export entry: .dockerenv Regular size=0 (image holds: nothing)
+docker-added export entry: dev/console Regular size=0 (image holds: nothing)
+docker-added export entry: dev/pts Directory size=0 (image holds: nothing)
+docker-added export entry: dev/shm Directory size=0 (image holds: nothing)
+docker-added export entry: etc/hostname Regular size=0 (image holds: etc/hostname Regular size=10)
+docker-added export entry: etc/hosts Regular size=0 (image holds: etc/hosts Regular size=79)
+docker-added export entry: etc/mtab Symlink size=0 -> /proc/mounts (image holds: etc/mtab Symlink size=0 -> ../proc/mounts)
+docker-added export entry: etc/resolv.conf Regular size=0 (image holds: nothing)
+```
+
+Five paths are new and three of the image's own are replaced: the daemon's init
+layer unlinks and recreates them, so the image's bytes at `etc/hostname` and
+`etc/hosts` are not in the export (and a started container sees the daemon's
+bind mounts there). No mount point beyond these appears; the preflight creates
+its snapshot container with no tmpfs or volume.
+
+**Product defect found and fixed.** An allowlist naming exactly the image's
+own paths refused every real export: the five new entries are always there, and
+an operator cannot list what they did not know the daemon adds. The init-layer
+table is the daemon's, not the image's, so `check_allowlist` now admits those
+entries without an allowlist line, and only in the daemon's shape
+(`DOCKER_INIT_ENTRIES` in `artifact_preflight.rs`: empty regular files at
+`.dockerenv`, `dev/console`, `etc/hostname`, `etc/hosts` and `etc/resolv.conf`;
+directories at `dev`, `dev/pts`, `dev/shm`, `etc`, `proc` and `sys`; `etc/mtab`
+linking to `/proc/mounts`). Refusal for real content is not weakened: an entry
+at one of those paths with bytes, another type or another link target refuses
+by index, and nothing below a directory is admitted by the rule. The report's
+`runtime_allowlist` gains `docker_init_entries`. The live test asserts every
+measured daemon-added entry satisfies the rule, so a daemon that adds something
+else fails the job instead of widening the rule silently.
+
+Unit test: `docker_init_entries_are_admitted_only_in_the_shape_docker_gives_them`
+(the twelve entries admitted with an allowlist of `app/` alone; eight
+wrong-shape cases and a file below `proc/` refused by index, never probed).
+Mutations, each in an isolated `git archive` copy of the committed tree:
+
+| Invariant | Mutation | Result |
+|---|---|---|
+| A daemon file must be empty | `EmptyFile` accepts any regular file | killed: case 0 (`.dockerenv` with one byte) admitted |
+| `etc/mtab` must link to `/proc/mounts` | the link target check always passes | killed: case 3 (link to another path) admitted |
+
+**Allowlist and probe results.** With an allowlist of the fixture's 519 own
+paths (11040 bytes), each admitted exactly:
+
+| Image | `entries` | `docker_init_entries` | `outside_allowlist` | Probe | Authorizes |
+|---|---|---|---|---|---|
+| pinned fixture (entrypoint `/bin/sh`) | 524 | 5 | 0 | `no_decision`, cleanup verified | no |
+| same filesystem, committed with an answering entrypoint | 524 | 5 | 0 | passed, cleanup verified | yes |
+
+The pinned fixture's shell reads the probe observation as a script and writes
+nothing to stdout, so the refusal shows the probe runs the image's own
+entrypoint under the hardened launch rather than assuming it works. The
+answering image is committed by the test from a created, never-started
+container of the fixture and removed afterwards; it is reached by its
+configuration ID, as a launch after a passing preflight is.
+
+`artifact_preflight::tests::live_runtime_allowlist_refuses_an_omitted_path_by_index`
+drops `etc/alpine-release` from the same allowlist: `outside_allowlist: 1`,
+`outside_indices: [89]`, the index of that entry in an independent export of
+the same image; no probe ran, cleanup was verified, and the published report
+does not contain the entry name.
+
 ## Byte identity
 
 With `--runtime-allowlist` absent and no gateway sweep run, every existing
@@ -249,3 +361,8 @@ output is unchanged:
   bound the gateway now enforces and the report exists to list the enforced
   bounds. Its `spend` object gains `sweep_sha256` only for a sweep-bound
   journal.
+- The live-verification fix (2026-09-10) changes only a preflight run with an
+  allowlist: `runtime_allowlist` gains `docker_init_entries`, and the
+  daemon's init-layer entries admit in their exact shape. `policy_sha256` and
+  the allowlist digest are unchanged, and no entry that an allowlist admitted
+  before now refuses. Without `--runtime-allowlist` the report is unchanged.
