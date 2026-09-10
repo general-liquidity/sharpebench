@@ -388,4 +388,30 @@ mod tests {
                 && d.null_se_psr.is_none()
                 && d.mppm.is_none()));
     }
+
+    /// The track is the board's: with the shared-cell restriction on, an agent
+    /// that completed an extra run is scored on the shared cells only, and so
+    /// are its diagnostics; with it off, both see every run.
+    #[test]
+    fn diagnostics_follow_the_shared_cell_restriction() {
+        let mut subs = field();
+        let extra: Vec<f64> = (0..50).map(|i| 0.002 * ((i % 3) as f64 - 1.0)).collect();
+        subs[0].runs.push(Run {
+            returns: extra,
+            ..Run::default()
+        });
+        for shared in [true, false] {
+            let cfg = ScoreConfig {
+                shared_run_set: shared,
+                ..ScoreConfig::default()
+            };
+            let board = rank(&subs, &cfg);
+            let diags = sharpe_diagnostics(&subs, &board, &cfg, &SharpeDiagnostic::ALL);
+            for (row, d) in board.iter().zip(&diags) {
+                assert_eq!(d.pooled_observations, row.pooled_observations, "{shared}");
+            }
+            let wave = diags.iter().find(|d| d.agent_id == "wave").unwrap();
+            assert_eq!(wave.pooled_observations, if shared { 200 } else { 250 });
+        }
+    }
 }
