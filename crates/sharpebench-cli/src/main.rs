@@ -44,7 +44,7 @@ fn main() -> ExitCode {
         Some("score") => match args.get(2) {
             Some(path) => run_score(path, &args, json),
             None => {
-                eprintln!("usage: sharpebench score <submissions.json> [--require-run-keys] [--rank-mode <id>] [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode <mode>] [--benchmark-agent <id>] [--json]");
+                eprintln!("usage: sharpebench score <submissions.json> [--require-run-keys] [--rank-mode <id>] [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode <mode>] [--benchmark-agent <id>] [--diagnostics <list>] [--json]");
                 ExitCode::from(2)
             }
         },
@@ -581,6 +581,12 @@ fn help() {
     );
     println!(
         "                         adds a certification verdict per row, never changes the host rank"
+    );
+    println!(
+        "                       --diagnostics <list>: also report opt-in Sharpe diagnostics the gate"
+    );
+    println!(
+        "                         does not use: autocorrelated-psr,null-se-psr,mppm (comma-separated)"
     );
     println!(
         "  sharpebench commit <agent> <window> <digest> <salt>  forward-attestation pre-registration"
@@ -2651,12 +2657,114 @@ fn run_score(path: &str, args: &[String], json: bool) -> ExitCode {
     } else {
         None
     };
+    // `--diagnostics` is opt-in. Absent, nothing below this point differs
+    // from the board-only output; present, the diagnostics are computed from
+    // the finished board and printed beside it, never written into a row.
+    let diagnostics = if args.iter().any(|a| a == "--diagnostics") {
+        let Some(list) = flag_value(args, "--diagnostics").filter(|v| !v.starts_with("--")) else {
+            eprintln!("error: --diagnostics requires a value");
+            return ExitCode::from(2);
+        };
+        match sharpebench_core::SharpeDiagnostic::parse_list(list) {
+            Ok(requested) => Some(requested),
+            Err(error) => {
+                eprintln!("error: {error}");
+                return ExitCode::from(2);
+            }
+        }
+    } else {
+        None
+    };
     let board = match rank_mode {
         Some(mode) => sharpebench_core::rank_certified(&subs, &declarations, &cfg, mode),
         None => sharpebench_core::rank_declared(&subs, &declarations, &cfg),
     };
-    emit_board(&board, json);
+    match diagnostics {
+        None => emit_board(&board, json),
+        Some(requested) => {
+            let report = sharpebench_core::sharpe_diagnostics(&subs, &board, &cfg, &requested);
+            if json {
+                emit_json(&serde_json::json!({
+                    "board": sharpebench_core::seal_board(&board),
+                    "sharpe_diagnostics": report,
+                }));
+            } else {
+                print_board(&board);
+                print_sharpe_diagnostics(&report, &requested);
+            }
+        }
+    }
     ExitCode::SUCCESS
+}
+
+/// The opt-in diagnostics as a table after the board. A value that could not
+/// be computed prints as `n/a`; the JSON form carries the reason.
+fn print_sharpe_diagnostics(
+    report: &[sharpebench_core::SharpeDiagnostics],
+    requested: &[sharpebench_core::SharpeDiagnostic],
+) {
+    use sharpebench_core::SharpeDiagnostic;
+    let cell = |v: Option<f64>| v.map_or_else(|| "n/a".to_string(), |v| format!("{v:.4}"));
+    let mut header = format!("{:<18} {:>6}", "agent", "obs");
+    for d in requested {
+        header.push_str(match d {
+            SharpeDiagnostic::AutocorrelatedPsr => "     rho  ac_PSR  ac_DSR",
+            SharpeDiagnostic::NullSePsr => " null_PSR null_DSR",
+            SharpeDiagnostic::Mppm => "   MPPM(3)/yr",
+        });
+    }
+    println!("\nOpt-in Sharpe diagnostics. Not used by the gate, eligibility or the rank.");
+    println!("{header}");
+    println!("{}", "-".repeat(header.chars().count()));
+    for row in report {
+        let mut line = format!(
+            "{:<18} {:>6}",
+            truncate(&row.agent_id, 18),
+            row.pooled_observations
+        );
+        for d in requested {
+            let text = match d {
+                SharpeDiagnostic::AutocorrelatedPsr => {
+                    let p = row.autocorrelated_psr.as_ref();
+                    format!(
+                        " {:>7} {:>7} {:>7}",
+                        cell(p.and_then(|p| p.rho)),
+                        cell(p.and_then(|p| p.psr)),
+                        cell(p.and_then(|p| p.psr_at_deflation_bar))
+                    )
+                }
+                SharpeDiagnostic::NullSePsr => {
+                    let p = row.null_se_psr.as_ref();
+                    format!(
+                        " {:>8} {:>8}",
+                        cell(p.and_then(|p| p.psr)),
+                        cell(p.and_then(|p| p.psr_at_deflation_bar))
+                    )
+                }
+                SharpeDiagnostic::Mppm => {
+                    format!(
+                        " {:>12}",
+                        cell(row.mppm.as_ref().and_then(|m| m.annualized))
+                    )
+                }
+            };
+            line.push_str(&text);
+        }
+        println!("{line}");
+    }
+    for d in requested {
+        println!(
+            "{}",
+            match d {
+                SharpeDiagnostic::AutocorrelatedPsr =>
+                    "ac_*: PSR against 0 and against the row's deflation bar with the pooled track's lag-one autocorrelation (López de Prado, Lipton and Zoonekynd 2026, eqs. 2-3).",
+                SharpeDiagnostic::NullSePsr =>
+                    "null_*: the same two statistics with the standard error evaluated at the benchmark, serial independence kept (ibid., eqs. 4-5).",
+                SharpeDiagnostic::Mppm =>
+                    "MPPM(3)/yr: manipulation-proof performance, risk aversion 3, zero risk-free rate, annualized (Goetzmann, Ingersoll, Spiegel and Welch 2007, eq. 18).",
+            }
+        );
+    }
 }
 
 /// Shared by `score` and `disqualify`: explanations use the same host verdict,

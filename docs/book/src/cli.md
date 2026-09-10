@@ -304,6 +304,15 @@ refused. IDs are compared exactly, without trimming or case normalization.
 order or ordinal. An identifier the kernel does not implement is refused with
 exit code 2. Without the flag the board is unchanged.
 
+`--diagnostics <list>` also reports opt-in Sharpe diagnostics that the gate,
+eligibility and the rank do not use: `autocorrelated-psr`, `null-se-psr` and
+`mppm`, comma-separated, described under
+[opt-in diagnostics](methodology-deflated-sharpe.md#opt-in-diagnostics-the-gate-does-not-use).
+The human table gains a separate block after the unchanged board; `--json`
+prints `{"board": ..., "sharpe_diagnostics": [...]}`, where `board` is the
+board-only output. An unknown identifier or a missing value exits 2 before any
+output. Without the flag the output is byte-identical to a build without it.
+
 These identity checks do not verify temporal alignment of legacy JSON `runs`.
 The caller still supplies consistent window, seed and period order across the
 field; use [captured trajectory contracts](evidence-contracts.md#captured-trajectories)

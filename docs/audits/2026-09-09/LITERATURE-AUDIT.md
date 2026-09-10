@@ -463,6 +463,148 @@ it at the observed Sharpe. The two coincide when the benchmark is zero and the
 returns are Normal, and differ otherwise. It is recorded here and not changed,
 because changing it would move published values.
 
+## Deferred items: implementation note
+
+Three changes were deferred because moving the gate to them would move
+published values: a serial-correlation term in the PSR variance (F2), the
+standard error evaluated under the null (the observation above), and a
+manipulation-proof measure (F3; `IMPLEMENTATION.md` G19). All three are now
+built as **opt-in diagnostics**. The gate, eligibility, the rank predicate and
+every default output are unchanged; nothing in the scoring path calls them.
+
+**Where.** `crates/sharpebench-stats/src/opt_in_diagnostics.rs` (the
+estimators), `crates/sharpebench-core/src/sharpe_diagnostics.rs` (the same
+pooled track and the same two benchmarks as a board row, returned as a
+separate record marked `used_by_gate: false`), and `sharpebench score
+--diagnostics autocorrelated-psr,null-se-psr,mppm` in
+`crates/sharpebench-cli/src/main.rs`. Documented in
+[the deflated-Sharpe chapter](../../book/src/methodology-deflated-sharpe.md#opt-in-diagnostics-the-gate-does-not-use)
+and the CLI reference. WASM, npm, MCP and Python were left unchanged: exposing
+the diagnostics there would mean rebuilding the committed WASM module, which
+the parity files pin, for a diagnostic nobody has asked for on those surfaces.
+
+**Sources, read from the local PDFs** (LLZ 2026 pp. 9, 10, 11 and 35 to 41 and
+GISW printed pp. 2, 17 and 18 were rendered to images, because the extracted
+text drops the mathematics):
+
+| Diagnostic | Formula taken from | Function |
+|---|---|---|
+| Autocorrelation-aware variance | LLZ 2026 eq. 2, p. 9; derivation Appendix A.1, eqs. 34 to 58, pp. 35 to 39, for an AR(1) series (eq. 44, p. 37) with `rho = Cor[x_t, x_{t+1}]` (eq. 34, p. 35) | `sharpe_variance_factor`, `first_order_autocorrelation` |
+| PSR, standard error at the observed Sharpe | LLZ 2026 eq. 3, p. 9; PSR as `Z[z*] = 1 - p`, eq. 9, p. 11 | `probabilistic_sharpe_ratio_autocorrelated(.., StandardErrorAt::Observed)` |
+| PSR, standard error at the benchmark | LLZ 2026 eqs. 4 and 5, p. 10 | `probabilistic_sharpe_ratio_autocorrelated(.., StandardErrorAt::Benchmark)`, `sharpe_standard_error_autocorrelated` |
+| MPPM | GISW working paper eq. 18, printed p. 18 (PDF p. 20), also eq. 1, printed p. 2; risk aversion 3, printed p. 18; concavity and the geometric average as the `rho = 1` case, printed p. 17 | `manipulation_proof_performance`, `DEFAULT_MPPM_RISK_AVERSION` |
+
+Two conventions were chosen and are stated in the rustdoc. The PSR's z
+statistic keeps the kernel's `sqrt(T - 1)` (Bailey and López de Prado 2012)
+where LLZ 2026 writes `1/T` inside the variance, so that at `rho = 0` the
+diagnostic is the kernel's PSR bit for bit; the two differ by
+`sqrt(T / (T - 1))`. A negative variance bracket, reachable only with a
+strongly negative `rho` and skewed returns or with moments that violate the
+Pearson inequality, is refused rather than floored.
+
+**Correction to the observation above.** It says the two evaluations
+"coincide when the benchmark is zero and the returns are Normal". They do not.
+With Normal returns the bracket at the observed Sharpe is `1 + SR^2 / 2` and at
+a zero benchmark it is `1`, so they coincide only at `SR = 0`; in general they
+coincide exactly when the observed Sharpe equals the benchmark, where both
+evaluations put the same Sharpe into the same variance.
+`a_zero_benchmark_does_not_make_the_evaluations_coincide` and
+`null_and_observed_standard_errors_coincide_at_the_benchmark` pin both
+statements. The conclusion of the observation, that switching would move
+published values, stands.
+
+**Numerical checks.**
+
+| Check | Source value | Implementation |
+|---|---|---|
+| LLZ worked example, `sigma[SR*]` with `(0.036%, 0.079%, -2.448, 10.164, 0.2, 24)` | 0.379 (p. 9) | 0.3794899975 |
+| Same, i.i.d. Normal | 0.214, "approximately 43% smaller" (p. 9) | 0.2144595450, 43.5% smaller |
+| PSR at `SR_0 = 0` (standard error 0.25) | 0.966 (p. 11) | 0.9658320054 |
+| PSR at `SR_0 = 0.1` (standard error 0.2769641348) | 0.900 (p. 11) | 0.9004759174 |
+| `rho = 0`, observed Sharpe, against the kernel's PSR on seven series and five benchmarks, and against its DSR | identical | bit for bit |
+| Lag-one autocorrelation, bracket and eight PSRs on a 300-point autocorrelated series, against an independent Python implementation | rho 0.3671387205, bracket 2.1614557840 | all within 1e-12 |
+| Normal AR(1) bracket at `SR = 0`, `rho = 0.5` | `(1 + rho)/(1 - rho) = 3` (eq. 60, p. 40) | 3 exactly |
+| MPPM of a riskless stream earning `c` | `ln(1 + c) / dt` at every risk aversion | within 1e-12 for four streams, six risk aversions |
+| MPPM of log returns `m +/- s` | `m + ln(cosh((1 - rho) s)) / (1 - rho)` | within 1e-14 |
+| MPPM on the 300-point series, risk aversion 3, 1 and 2, against Python | 0.1055143057, 0.0004765888, 0.0053717808 | within 1e-12 |
+| Short-volatility stream: 1.5% in 99 periods, -50% in one, against +5.8% / -4.2% | Sharpe 0.191 against 0.159, higher mean | MPPM lower at risk aversion 2, 3 and 4 (per period -0.00048 against 0.00428 at 3) |
+
+The Python reference was written from the papers with the `math` module
+(moments with the kernel's normalization, eq. 2 and eq. 18 summed directly);
+the PSR comparison uses the kernel's frozen Abramowitz-Stegun CDF on both sides,
+and the worked-example PSRs use the exact Normal CDF the paper uses.
+
+**Byte identity of default outputs.** The `sharpebench` binary built from
+`origin/main` (`ce2691b`, extracted with `git archive`) and the branch binary
+were run on the same inputs, comparing exit code, stdout and stderr byte for
+byte: `score` on `suites/example_submissions.json`,
+`crates/sharpebench-core/golden/synthetic_field.input.json` and a three-agent
+autocorrelated field, each plain, `--json`, `--rank-mode
+lifecycle-certified/v1 --json`, `--periods-per-year 52 --json`, `--pass-mode
+any` and `--execution-seeds-per-window 1 --json`, plus `run`, `run --json`,
+`audit --json`, `stress --json` and a missing input file. All 23 are identical.
+The only differences are `--help` and the `score` usage line, which name the new
+flag. No golden, example, snapshot, WASM parity file or `paper/evidence/` file
+is in the diff, and the full workspace suite passes against them unchanged.
+
+**Tests.** `crates/sharpebench-stats/tests/opt_in_diagnostics.rs` (17, five
+of them paired-boundary tests, one per new function with a documented domain,
+so `scripts/check-paired-boundaries.py` stays green without an allowlist
+change: 37 candidates, 13 covered), four in
+`sharpebench_core::sharpe_diagnostics::tests`, and five in
+`crates/sharpebench-cli/tests/sharpe_diagnostics_cli.rs`.
+
+**Mutation check.** Each mutant was applied in place to the committed file,
+the named suite was run, and the file was restored from `git show HEAD:<path>`
+and confirmed identical with `cmp` and `git diff --quiet`.
+
+| Mutant | Result |
+|---|---|
+| Eq. 2 first weight `(1+rho)/(1-rho)` to 1 | killed: worked example, Python cross-check, eq. 2 weights |
+| Eq. 2 second weight drops its `rho` term | killed: same three |
+| Eq. 2 third weight `(1+rho^2)` to 1 | killed: same three |
+| Skewness term sign flipped | killed: worked example, Python cross-check, two boundary tests |
+| Autocorrelation estimate scaled by `T/(T-1)` | killed: Python cross-check, boundary test |
+| `rho` domain admits -1 and 1 | killed: two boundary tests |
+| Negative bracket floored instead of refused | killed: two boundary tests |
+| z statistic scaled by `sqrt(T)` | killed: Python cross-check, bit-identity reduction |
+| Benchmark evaluation uses the observed Sharpe | killed: four tests |
+| Observed evaluation uses the benchmark | killed: four tests, including the bit-identity reduction |
+| Standard error drops `1/(T-1)` | killed: two tests |
+| MPPM drops `1/(1 - rho)` | killed: four tests |
+| MPPM uses periods per year as `dt` | killed: three tests |
+| MPPM exponent `rho - 1` | killed: four tests, including the short-volatility test |
+| MPPM log-sum-exp shift dropped | killed: four tests |
+| MPPM `rho = 1` branch not annualized | killed: two tests |
+| MPPM admits a gross return of zero | killed: boundary test |
+| MPPM admits a risk aversion of zero | killed: boundary test |
+| MPPM returns -0.0 on a flat track | killed: riskless-stream test |
+| Core skips the shared-cell restriction | killed: `diagnostics_follow_the_shared_cell_restriction` |
+| Core tests the deflation-bar counterpart against zero | killed |
+| Core evaluates `autocorrelated-psr` under the null | killed |
+| Core evaluates `null-se-psr` at the observed Sharpe | killed |
+| CLI prints diagnostics without the flag | killed: three CLI tests |
+| CLI ignores an unknown identifier | killed |
+
+**Commands**, run in the worktree:
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all --check` | exit 0 |
+| `cargo clippy --all-targets --all-features -- -D warnings` | exit 0 |
+| `RUSTDOCFLAGS=-Dwarnings cargo doc --workspace --exclude xtask --no-deps` | exit 0 |
+| `cargo nextest run --workspace --exclude xtask` | exit 0, 1277 passed, 15 skipped |
+| `python scripts/check-paired-boundaries.py` | exit 0 |
+
+**What would make them gating.** Each would move published values and belongs
+with the next evidence regeneration, not a code change: positive
+autocorrelation widens the variance unless strong positive skewness offsets
+it, so it lowers the PSR and DSR of a Sharpe above its benchmark on
+momentum-like tracks, the simulator's synthetic returns among them; the null
+evaluation moves the PSR of every track whose Sharpe differs from the
+benchmark; and the MPPM is a different statistic whose use as a gate would need
+its own threshold.
+
 ## Paper build
 
 `paper/main.pdf` was rebuilt with TeX Live 2026 (`pdflatex`, `bibtex`,

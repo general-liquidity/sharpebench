@@ -21,8 +21,10 @@ the point estimate the gate reads. The frozen datasets show volatility
 clustering, and the simulator's synthetic generator adds an AR(1) momentum
 component, so its returns are autocorrelated by construction. The 2026 paper's
 generalized variance (its eqs. 2, 3 and 5), which adds a first-order
-autocorrelation term, is the form that would relax the assumption; it is not
-implemented.
+autocorrelation term, is the form that would relax the assumption. It is
+available as an opt-in diagnostic (see
+[below](#opt-in-diagnostics-the-gate-does-not-use)); the gate keeps the 2014
+variance.
 
 The **Deflated Sharpe Ratio (DSR)** goes further: it is the PSR evaluated against
 a benchmark Sharpe that accounts for **how many strategies were tried**. Search
@@ -170,6 +172,93 @@ The shipped datasets: `us-indices-1d`, `fx-majors-1d`, `commodities-1d`,
 `crypto-majors-1h` 8760; `us-indices-1w` and `crypto-majors-1w` 52.
 
 > Bailey & López de Prado, *The Deflated Sharpe Ratio* (2014), is the reference.
+
+## Opt-in diagnostics the gate does not use
+
+Three estimators from the literature audit are implemented as diagnostics a
+caller has to ask for. **None of them is read by the gate, by eligibility or by
+the rank**, and none is a field of `CompositeScore`: switching the gate to any
+of them would move published values, so they sit beside the board instead.
+They are library functions in `sharpebench_stats::opt_in_diagnostics` and a
+flag on the command line:
+
+```text
+sharpebench score field.json --diagnostics autocorrelated-psr,null-se-psr,mppm [--json]
+```
+
+Without `--diagnostics` the output is the board and nothing else, byte for byte
+as before the flag existed. With it, the human table gains a separate block
+after the board, and `--json` prints an object whose `board` member is the
+board-only output and whose `sharpe_diagnostics` array carries one record per
+row, each marked `"used_by_gate": false`. The diagnostics are computed by
+`sharpebench_core::sharpe_diagnostics` on the same pooled track the row's PSR
+and DSR read (shared cells, execution seeds averaged), against the same two
+benchmarks: zero, the counterpart of `psr`, and the row's
+`deflation_bar_per_period`, the counterpart of `deflated_sharpe`. An
+input a diagnostic cannot score is reported with its reason and no number.
+
+| Identifier | What it is | Source | What differs from the board |
+|---|---|---|---|
+| `autocorrelated-psr` | PSR with the pooled track's lag-one autocorrelation `rho` in the Sharpe variance, standard error at the observed Sharpe | López de Prado, Lipton and Zoonekynd (2026), eq. 2 and eq. 3, p. 9; `rho = Cor[x_t, x_{t+1}]`, eq. 34, p. 35 | only the autocorrelation weights |
+| `null-se-psr` | PSR with the standard error evaluated at the benchmark, serial independence kept | the same paper, eqs. 4 and 5, p. 10 | only the Sharpe at which the variance is evaluated |
+| `mppm` | Manipulation-proof performance measure, risk aversion 3, zero risk-free rate, annualized | Goetzmann, Ingersoll, Spiegel and Welch (2007), working paper eq. 18, printed p. 18 | a different statistic, a certainty equivalent rather than a test |
+
+**Autocorrelation-aware PSR.** The variance bracket is
+
+```text
+(1+rho)/(1-rho) - (1+rho+rho^2)/(1-rho^2) g3 SR + (1+rho^2)/(1-rho^2) (g4-1)/4 SR^2
+```
+
+which is the kernel's `1 - g3 SR + (g4-1)/4 SR^2` at `rho = 0`. The paper
+derives it for a stationary AR(1) series (Appendix A.1). Positive
+autocorrelation raises every weight; unless strong positive skewness offsets
+the first and third terms it widens the variance, so for a Sharpe above its
+benchmark on momentum-like returns, such as the simulator's, the diagnostic is
+below the board's PSR. The z
+statistic keeps the kernel's `sqrt(T - 1)` where the paper writes `1/T` inside
+the variance, so that at `rho = 0` the function returns the kernel's PSR, and
+at the deflation bar its DSR, bit for bit (a test pins both). The paper's
+worked example (p. 9, two years of monthly returns with skewness -2.448,
+kurtosis 10.164 and `rho = 0.2`) is reproduced from the same bracket: standard
+error 0.3795 against the printed 0.379, 0.2145 for i.i.d. Normal returns
+against 0.214, and PSR 0.9658 and 0.9005 at benchmarks 0 and 0.1 against the
+printed 0.966 and 0.900 (p. 11). A strongly negative `rho` with skewed returns
+can drive the bracket below zero; that is refused, not floored, because a
+floored variance would turn a failed approximation into a PSR of 0 or 1. `rho`
+is estimated on the pooled track, so the few pairs that straddle a window
+boundary enter it.
+
+**Standard error under the null.** The kernel, following Bailey and López de
+Prado (2012), evaluates the variance at the observed Sharpe; the 2026 paper
+evaluates it at the benchmark, the least favorable point of the null. The two
+coincide exactly when the observed Sharpe equals the benchmark. They do **not**
+coincide at a zero benchmark with Normal returns: there the null bracket is 1
+and the observed one `1 + SR^2 / 2`, so for a positive Sharpe the null-evaluated
+PSR is the higher of the two. Both facts are pinned by tests.
+
+**Manipulation-proof performance measure.**
+
+```text
+Theta = 1 / ((1 - rho) dt) * ln( (1/T) sum_t (1 + x_t)^(1 - rho) ),   dt = 1 / periods_per_year
+```
+
+with the per-period risk-free rate at zero, the benchmark's cash convention,
+and `rho = 3`, the risk aversion the authors use and describe as consistent
+with the market portfolio (they report 2 to 4 as the plausible range). `Theta`
+is the annualized continuously compounded certainty equivalent: a riskless
+stream earning `c` a period scores `ln(1 + c) * periods_per_year` at every risk
+aversion. Unlike the Sharpe ratio it cannot be raised by selling tail risk. A
+test builds a stream that collects 1.5% in 99 periods and loses 50% in one: its
+Sharpe (0.191) and mean beat a symmetric +5.8% / -4.2% stream (Sharpe 0.159),
+and its MPPM is lower at risk aversion 2, 3 and 4 (per period -0.00048 against
+0.00428 at 3). The measure is the one defense against option-like payoffs that
+an imported return series has: the simulator only executes linear exposures,
+but nothing checks an imported series. It is reported, not gated. A return at
+or below -1 is outside its domain and refused.
+
+Exposure on the other surfaces: the WASM module, the npm package, the MCP tools
+and the Python binding are unchanged and do not expose these diagnostics; the
+committed WASM was not rebuilt.
 
 ## Numerical implementation of the normal functions
 

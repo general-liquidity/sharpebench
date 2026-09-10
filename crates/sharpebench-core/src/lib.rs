@@ -60,6 +60,7 @@ pub mod roles;
 pub mod rolling;
 pub mod run_identity;
 pub mod selfaudit;
+pub mod sharpe_diagnostics;
 
 pub use allocation::{
     check_weights, score_allocation, turnover, AllocationPolicy, AllocationReport, AllocationStep,
@@ -139,3 +140,6 @@ pub use rolling::{rolling_sharpe, RollingSharpe};
 pub use run_identity::{parse_keyed_field, KeyedField, RunIdentity, RunIdentityError, RunKey};
 pub use selection::{selection_robustness, SelectionRobustness};
 pub use selfaudit::{run_self_audit, SelfAuditReport};
+pub use sharpe_diagnostics::{
+    sharpe_diagnostics, MppmDiagnostic, PsrDiagnostic, SharpeDiagnostic, SharpeDiagnostics,
+};
