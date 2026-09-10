@@ -27,5 +27,12 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 name = "local_open_weight_field_eval"
 test = true
 
+# Same reason: the readiness preflight is the part that has to hold, and a
+# `#[test]` inside an example is compiled and never run unless the target opts
+# into the test harness.
+[[example]]
+name = "llm_field_eval"
+test = true
+
 [lints]
 workspace = true
