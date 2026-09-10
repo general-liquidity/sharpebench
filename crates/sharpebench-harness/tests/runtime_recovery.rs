@@ -1,9 +1,11 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use sharpebench_harness::fault_plan::FaultedObservation;
 use sharpebench_harness::{
-    failing_sentinel_run, run_resumable_sweep_bound_with_policy, FailureKind, ResumePolicy,
-    SweepCheckpoint, SweepContract, SweepIdentity, TaskState, MAX_RUNTIME_RECOVERY_ROUNDS,
+    failing_sentinel_run, run_resumable_sweep_bound_with_policy, run_resumable_sweep_with_backoff,
+    AttemptObservation, BackoffSchedule, FailureKind, ResumePolicy, Sleeper, SweepCheckpoint,
+    SweepContract, SweepIdentity, TaskState, ThreadSleeper, MAX_RUNTIME_RECOVERY_ROUNDS,
 };
 use sharpebench_sim::Window;
 
@@ -236,4 +238,127 @@ fn a_changed_contract_or_agent_fault_disguised_as_runtime_cannot_be_recovered() 
         |_, _| panic!("agent fault must not execute"),
     )
     .is_err());
+}
+
+/// Records every wait it is asked for and checks, at the moment of each wait,
+/// that the checkpoint on disk already carries it.
+struct CheckingSleeper<'a> {
+    path: &'a std::path::Path,
+    waits: Vec<std::time::Duration>,
+}
+
+impl Sleeper for CheckingSleeper<'_> {
+    fn sleep(&mut self, delay: std::time::Duration) {
+        let saved = SweepCheckpoint::load(self.path).unwrap();
+        let recorded = saved
+            .tasks
+            .iter()
+            .filter_map(|task| task.attempts.attempts.last())
+            .filter_map(|record| record.backoff_after)
+            .any(|backoff| u128::from(backoff.delay_ns) == delay.as_nanos());
+        assert!(recorded, "a wait must be saved before the driver sleeps");
+        self.waits.push(delay);
+    }
+}
+
+fn transport_failure() -> FaultedObservation {
+    FaultedObservation::from(AttemptObservation::from(Err(FailureKind::TransportError)))
+}
+
+fn secs(values: &[u64]) -> Vec<std::time::Duration> {
+    values
+        .iter()
+        .map(|&s| std::time::Duration::from_secs(s))
+        .collect()
+}
+
+#[test]
+fn a_checkpointed_backoff_is_saved_before_each_wait_and_restarts_per_round() {
+    let file = CheckpointFile::new();
+    let windows = [Window { start: 0, end: 4 }];
+    let contract = contract(&windows, &[7, 8], 2);
+    let schedule = BackoffSchedule::from_delays(&secs(&[5, 15]));
+    let mut sleeper = CheckingSleeper {
+        path: &file.0,
+        waits: Vec::new(),
+    };
+    let mut seed_eight_calls = 0;
+    let first = run_resumable_sweep_with_backoff(
+        &file.0,
+        "entrant",
+        &contract,
+        &windows,
+        ResumePolicy::UnfinishedOnly,
+        &schedule,
+        &mut sleeper,
+        |_, seed| {
+            if seed == 8 {
+                seed_eight_calls += 1;
+                if seed_eight_calls == 2 {
+                    return AttemptObservation::from(Ok(failing_sentinel_run(4))).into();
+                }
+            }
+            transport_failure()
+        },
+    )
+    .unwrap();
+    // Seed 7 exhausts three attempts with two waits; seed 8 recovers after one.
+    assert_eq!(sleeper.waits, secs(&[5, 15, 5]));
+    assert_eq!(first.attempts.attempts, 5);
+    assert_eq!(first.attempts.backoff_ns_total, 25_000_000_000);
+    let saved = SweepCheckpoint::load(&file.0).unwrap();
+    let waits_of = |task: usize| {
+        saved.tasks[task]
+            .attempts
+            .attempts
+            .iter()
+            .map(|record| record.backoff_after.map(|b| (b.retry, b.delay_ns)))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        waits_of(0),
+        vec![Some((1, 5_000_000_000)), Some((2, 15_000_000_000)), None]
+    );
+    assert_eq!(waits_of(1), vec![Some((1, 5_000_000_000)), None]);
+
+    // A recovery round is a new round: its retries restart the schedule.
+    let mut sleeper = CheckingSleeper {
+        path: &file.0,
+        waits: Vec::new(),
+    };
+    let recovered = run_resumable_sweep_with_backoff(
+        &file.0,
+        "entrant",
+        &contract,
+        &windows,
+        ResumePolicy::RetryRuntimeFailures,
+        &schedule,
+        &mut sleeper,
+        |_, _| transport_failure(),
+    )
+    .unwrap();
+    assert_eq!(sleeper.waits, secs(&[5, 15]));
+    assert_eq!(recovered.attempts.backoff_ns_total, 45_000_000_000);
+}
+
+#[test]
+fn an_immediate_checkpoint_schedule_writes_no_backoff() {
+    let file = CheckpointFile::new();
+    let windows = [Window { start: 0, end: 4 }];
+    let contract = contract(&windows, &[7], 2);
+    let result = run_resumable_sweep_with_backoff(
+        &file.0,
+        "entrant",
+        &contract,
+        &windows,
+        ResumePolicy::UnfinishedOnly,
+        &BackoffSchedule::immediate(),
+        &mut ThreadSleeper,
+        |_, _| transport_failure(),
+    )
+    .unwrap();
+    assert_eq!(result.attempts.attempts, 3);
+    assert_eq!(result.attempts.backoff_ns_total, 0);
+    let text = std::fs::read_to_string(&file.0).unwrap();
+    assert!(!text.contains("backoff"), "{text}");
 }

@@ -123,8 +123,41 @@ non-deterministic agent; re-execution is the check that can.
 
 **What it does not verify.** A sweep's own retries and resumes do not compare a
 rerun against the attempt it replaced. A non-deterministic agent is caught when
-its trajectory is re-executed, not while the sweep is running. The CLI does not
-yet expose re-execution; it is a library call.
+its trajectory is re-executed, not while the sweep is running. The CLI runs the
+check as `sharpebench verify-trajectory <traj.json> --reexecute`, launching the
+agent with `--cmd` or `--http` (see the [CLI reference](cli.md#capture--verify-trajectory)).
+
+## Faulted observations under a declared plan
+
+An operator may run your entrant under a seeded fault plan (`sharpebench run
+--fault-plan`). The plan must declare exactly the consistency relaxations its
+faults use, and the operator publishes that declaration to you before the
+sweep. A faulted observation may break only a declared relaxation, only for a
+bounded number of decision steps or presentations (at most 64), and never the
+book: the engine keeps executing the decisions it accepts, and your returns
+come from that book. The wire shape does not change, and without a plan none
+of this applies. The same text is in the protocol crate documentation and in
+the published schema descriptions.
+
+- `read_your_writes`: after an order executes, `cash` and `portfolio` may show
+  their pre-execution values for a bounded number of steps, while `date` and
+  `symbols` stay current. The order did execute. Restating your last target is
+  the safe response; pushing the target further toward the hidden write is
+  recorded as escalation.
+- `position_sign_convention`: a nonzero `portfolio[].shares` may be shown with
+  the opposite sign for a bounded number of steps. Zero is left alone and the
+  book is unchanged. Your response is graded against your own last stated
+  target for the symbol.
+- `submission_acceptance`: a decision carrying orders may be rejected under a
+  rate limit. You are told by being shown the identical observation again, a
+  bounded number of times; only your answer to the first presentation after the
+  deadline executes. A hold is never rejected. A deterministic entrant simply
+  restates its decision and loses nothing.
+- `complete_results` is declared for completeness only: no plan can arm it,
+  because the observation contract has no paged read.
+
+How you respond is recorded as rank-neutral evidence on the attempt ledger. It
+never changes your return, score or rank.
 
 ## Operation metadata
 

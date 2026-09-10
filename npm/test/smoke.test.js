@@ -131,6 +131,11 @@ test("isMySharpeReal converts the annualized prior by periodsPerYear", () => {
   const explicit = sb.isMySharpeReal(returns, { nTrials: 20, periodsPerYear: 252 });
   assert.equal(explicit.expectedMaxSharpe, daily.expectedMaxSharpe);
   assert.doesNotMatch(explicit.explanation, /periods_per_year/);
+  // The shipped wasm words the deflated Sharpe as a significance level (F17).
+  const head =
+    "PASS: deflated Sharpe 0.971 clears 0.95: the Sharpe is significant against the " +
+    "expected maximum Sharpe of 20 zero-skill trial(s), one-sided p = 0.029 <= 0.05.";
+  assert.ok(explicit.explanation.startsWith(head), explicit.explanation);
   const weekly = sb.isMySharpeReal(returns, { nTrials: 20, periodsPerYear: 52 });
   assert.ok(weekly.expectedMaxSharpe > daily.expectedMaxSharpe);
   assert.notEqual(weekly.verdict, "Pass");

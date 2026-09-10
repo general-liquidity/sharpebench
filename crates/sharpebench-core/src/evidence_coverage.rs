@@ -260,7 +260,7 @@ const COVERED_FIELD: Coverage = Coverage::Covered {
 /// Split by what determines the value. `AgentScore` fields come out of the
 /// agent's own runs and the score configuration; `FieldContext` fields come out
 /// of the composition of the field it was scored against and change when another
-/// entrant is added. Three fields are bound by neither, each with its reason.
+/// entrant is added. Four fields are bound by neither, each with its reason.
 pub const COMPOSITE_SCORE_INVENTORY: EvidenceInventory = EvidenceInventory {
     document: "sharpebench_core::composite::CompositeScore",
     fields: &[
@@ -272,6 +272,7 @@ pub const COMPOSITE_SCORE_INVENTORY: EvidenceInventory = EvidenceInventory {
         ("bootstrap_p", COVERED_SCORE),
         ("bootstrap_error", COVERED_SCORE),
         ("deflation_error", COVERED_SCORE),
+        ("selection_error", COVERED_SCORE),
         ("raw_mean_return", COVERED_SCORE),
         ("rank_eligible", COVERED_SCORE),
         ("composite", COVERED_SCORE),
@@ -358,6 +359,18 @@ pub const COMPOSITE_SCORE_INVENTORY: EvidenceInventory = EvidenceInventory {
         ("declared_passed_k", COVERED_SCORE),
         ("declared_mandate_eligible", COVERED_FIELD),
         ("declared_mandate_ordinal", COVERED_FIELD),
+        (
+            "certification",
+            Coverage::Excluded {
+                reason: "a nested record whose withheld list is variable-length and whose \
+                         elements carry their own fields; binding it through this flat \
+                         inventory would go stale silently the moment Certification or \
+                         CertificationGap gains a field, the failure given on \
+                         role_contributions. It is a second, labeled verdict filled only under \
+                         an opt-in rank mode, and needs its own inventory before it can be \
+                         bound",
+            },
+        ),
     ],
 };
 
@@ -447,8 +460,10 @@ pub const RUN_PROVENANCE_INVENTORY: EvidenceInventory = EvidenceInventory {
 mod tests {
     use super::*;
     use crate::composite::{
-        rank_declared, AgentSubmission, DeclaredMandate, MandateDeclarations, Run, ScoreConfig,
+        rank_declared, AgentSubmission, CompositeScore, DeclaredMandate, MandateDeclarations, Run,
+        ScoreConfig,
     };
+    use crate::entrant_visibility::declared_struct_fields;
     use crate::process::Trace;
 
     /// Top-level field names of a serialized value.
@@ -483,8 +498,13 @@ mod tests {
 
     /// Every field name a `CompositeScore` can carry.
     ///
-    /// Conditional fields require declared, undeclared and unavailable-statistic
-    /// probes. A successful score alone cannot exercise the error field.
+    /// The authority is the declared field list serde hands to
+    /// `deserialize_struct`, which includes fields a `skip_serializing_if`
+    /// hides. The serialized keys of the probes are added on top, so a field
+    /// that serializes under a name the struct does not declare also fails. The
+    /// probes alone missed `selection_error` and `certification`: no probe
+    /// declared candidates or selected a rank mode, so both stayed `None` and
+    /// were never serialized.
     fn observed_composite_score_fields() -> Vec<String> {
         let subs = vec![
             probe_submission("declared-probe", 0.002),
@@ -505,7 +525,10 @@ mod tests {
             },
         ));
 
-        let mut names: BTreeSet<String> = BTreeSet::new();
+        let mut names: BTreeSet<String> = declared_struct_fields::<CompositeScore>()
+            .iter()
+            .map(|name| (*name).to_string())
+            .collect();
         for s in &scored {
             names.extend(field_names(s));
         }
@@ -558,6 +581,44 @@ mod tests {
         assert!(!audit.is_complete());
         assert_eq!(audit.undeclared, vec!["newly_added_metric".to_string()]);
         assert!(audit.stale.is_empty());
+    }
+
+    /// `selection_error` and `certification` are absent from every serialized
+    /// probe row, and the drift guard still classifies them.
+    #[test]
+    fn fields_a_skipped_none_hides_are_still_classified() {
+        let subs = vec![probe_submission("probe", 0.002)];
+        let serialized: BTreeSet<String> =
+            rank_declared(&subs, &MandateDeclarations::new(), &ScoreConfig::default())
+                .iter()
+                .flat_map(field_names)
+                .collect();
+        for hidden in ["selection_error", "certification"] {
+            assert!(!serialized.contains(hidden), "{hidden} was serialized");
+            assert!(observed_composite_score_fields().contains(&hidden.to_string()));
+        }
+        assert_eq!(
+            COMPOSITE_SCORE_INVENTORY.coverage("selection_error"),
+            Some(COVERED_SCORE),
+            "a diagnostic of the agent's own candidates, like bootstrap_error and \
+             deflation_error"
+        );
+        assert!(matches!(
+            COMPOSITE_SCORE_INVENTORY.coverage("certification"),
+            Some(Coverage::Excluded { .. })
+        ));
+
+        // Covered means the preimage builder really emits it.
+        let values: Vec<(&str, &str)> = COMPOSITE_SCORE_INVENTORY
+            .fields
+            .iter()
+            .map(|(n, _)| (*n, "0"))
+            .collect();
+        let bytes = COMPOSITE_SCORE_INVENTORY
+            .preimage(DigestId::AgentScore, &values)
+            .unwrap();
+        let record = b"selection_error\x1f0\x1e";
+        assert!(bytes.windows(record.len()).any(|w| w == record));
     }
 
     #[test]
@@ -615,7 +676,7 @@ mod tests {
         for f in &score {
             assert!(!context.contains(f), "{f} is claimed by both digests");
         }
-        assert_eq!(excluded.len(), 3, "exactly three deliberate exclusions");
+        assert_eq!(excluded.len(), 4, "exactly four deliberate exclusions");
     }
 
     #[test]

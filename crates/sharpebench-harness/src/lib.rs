@@ -18,8 +18,8 @@ pub mod perturb;
 
 pub use checkpoint::{
     run_resumable_sweep, run_resumable_sweep_bound, run_resumable_sweep_bound_with_policy,
-    run_resumable_sweep_observed, ResumePolicy, SweepCheckpoint, SweepContract, SweepIdentity,
-    TaskRecord, TaskState, MAX_RUNTIME_RECOVERY_ROUNDS,
+    run_resumable_sweep_observed, run_resumable_sweep_with_backoff, ResumePolicy, SweepCheckpoint,
+    SweepContract, SweepIdentity, TaskRecord, TaskState, MAX_RUNTIME_RECOVERY_ROUNDS,
 };
 pub use failure::{
     apply_oom_verdict, failing_sentinel_run, run_with_backoff, run_with_observed_retries,
@@ -317,12 +317,44 @@ pub fn run_agent_resilient_with_backoff<F>(
 where
     F: FnMut(usize, u64) -> AttemptObservation,
 {
+    run_agent_resilient_faulted(
+        agent_id,
+        expected_run_lens,
+        seeds,
+        max_retries,
+        schedule,
+        sleeper,
+        |window, seed| attempt(window, seed).into(),
+    )
+    .0
+}
+
+/// [`run_agent_resilient_with_backoff`] carrying each attempt's injected-fault
+/// evidence onto its ledger record, and returning that ledger beside the
+/// submission. An unpersisted sweep has no checkpoint to read the evidence
+/// back from, so the ledger is the only place it survives. With no plan every
+/// record's evidence is `None` and the submission is the one the unfaulted
+/// driver assembles.
+pub fn run_agent_resilient_faulted<F>(
+    agent_id: &str,
+    expected_run_lens: &[usize],
+    seeds: &[u64],
+    max_retries: u32,
+    schedule: &BackoffSchedule,
+    sleeper: &mut dyn Sleeper,
+    mut attempt: F,
+) -> (ResilientSubmission, AttemptLedger)
+where
+    F: FnMut(usize, u64) -> fault_plan::FaultedObservation,
+{
     let mut runs = Vec::new();
     let mut failures = FailureLog::default();
     let mut ledger = AttemptLedger::default();
     for (w, &expected_run_len) in expected_run_lens.iter().enumerate() {
         for &seed in seeds {
-            let driven = run_with_backoff(max_retries, schedule, sleeper, || attempt(w, seed));
+            let driven = failure::run_with_faulted_backoff(max_retries, schedule, sleeper, || {
+                attempt(w, seed)
+            });
             // Append before branching on the outcome: a cell that failed twice
             // before completing spent that time, and the completion must not be
             // the only thing the accounting sees.
@@ -356,17 +388,21 @@ where
         }
     }
     let attempts = ledger.summary();
-    ResilientSubmission {
-        submission: AgentSubmission {
-            agent_id: agent_id.to_string(),
-            runs,
-            in_sample_trials: 0,
-            candidates: Vec::new(),
+    let monetary_cost = ledger.monetary_summary();
+    (
+        ResilientSubmission {
+            submission: AgentSubmission {
+                agent_id: agent_id.to_string(),
+                runs,
+                in_sample_trials: 0,
+                candidates: Vec::new(),
+            },
+            failures,
+            attempts,
+            monetary_cost,
         },
-        failures,
-        attempts,
-        monetary_cost: ledger.monetary_summary(),
-    }
+        ledger,
+    )
 }
 
 /// Map an external agent's post-run [`TransportHealth`] to the failure taxonomy, so

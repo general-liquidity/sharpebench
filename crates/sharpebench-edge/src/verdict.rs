@@ -58,13 +58,22 @@ const SNOOP_BLOCK_PROB: f64 = 0.1;
 const SNOOP_ALPHA: f64 = 0.05;
 
 /// The headline call.
+///
+/// The deflated Sharpe is one minus the one-sided p-value of the null that
+/// this Sharpe is the best of `n_trials` zero-skill trials (López de Prado,
+/// Lipton and Zoonekynd 2026, eq. 9), so each tier is a significance level
+/// against the expected maximum Sharpe of the search, not a probability that
+/// skill exists.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Verdict {
-    /// Deflated Sharpe clears the Pass threshold — survives the search.
+    /// Deflated Sharpe at or above `confidence`: significant at one-sided
+    /// `p <= 1 - confidence`.
     Pass,
-    /// Between the Borderline and Pass thresholds — promising, underpowered.
+    /// Deflated Sharpe in `[borderline, confidence)`: significant at
+    /// `p <= 1 - borderline` but not at `1 - confidence`.
     Borderline,
-    /// Below Borderline — indistinguishable from luck once the search is priced in.
+    /// Deflated Sharpe below `borderline`: not significant at
+    /// `p <= 1 - borderline`.
     Fail,
 }
 
@@ -409,7 +418,10 @@ fn transpose(field: &[Vec<f64>]) -> Vec<Vec<f64>> {
     out
 }
 
-/// One honest plain-English sentence for the verdict.
+/// One honest plain-English sentence for the verdict. It states the deflated
+/// Sharpe as what it is, one minus a one-sided p-value against the expected
+/// maximum Sharpe of `n_trials` zero-skill trials, and never as a probability
+/// that the edge is real.
 fn explain(
     verdict: Verdict,
     deflated: f64,
@@ -417,18 +429,25 @@ fn explain(
     n_obs: usize,
     mintrl: f64,
 ) -> String {
+    let p_value = 1.0 - deflated;
+    let n = cfg.n_trials;
     let head = match verdict {
         Verdict::Pass => format!(
-            "PASS: deflated Sharpe {deflated:.3} clears {:.2} after pricing in {} trial(s) — the edge survives the search.",
-            cfg.confidence, cfg.n_trials
+            "PASS: deflated Sharpe {deflated:.3} clears {:.2}: the Sharpe is significant against the expected maximum Sharpe of {n} zero-skill trial(s), one-sided p = {p_value:.3} <= {:.2}.",
+            cfg.confidence,
+            1.0 - cfg.confidence
         ),
         Verdict::Borderline => format!(
-            "BORDERLINE: deflated Sharpe {deflated:.3} is between {:.2} and {:.2} over {} trial(s) — promising but underpowered.",
-            cfg.borderline, cfg.confidence, cfg.n_trials
+            "BORDERLINE: deflated Sharpe {deflated:.3} is between {:.2} and {:.2}: against the expected maximum Sharpe of {n} zero-skill trial(s), one-sided p = {p_value:.3} is at most {:.2} but above {:.2}.",
+            cfg.borderline,
+            cfg.confidence,
+            1.0 - cfg.borderline,
+            1.0 - cfg.confidence
         ),
         Verdict::Fail => format!(
-            "FAIL: deflated Sharpe {deflated:.3} is below {:.2} over {} trial(s) — indistinguishable from luck once the search is priced in.",
-            cfg.borderline, cfg.n_trials
+            "FAIL: deflated Sharpe {deflated:.3} is below {:.2}: the Sharpe is not significant against the expected maximum Sharpe of {n} zero-skill trial(s), one-sided p = {p_value:.3} > {:.2}.",
+            cfg.borderline,
+            1.0 - cfg.borderline
         ),
     };
 
@@ -756,6 +775,50 @@ mod tests {
         );
         assert!(weekly.expected_max_sharpe > v.expected_max_sharpe);
         assert_ne!(weekly.verdict, Verdict::Pass);
+    }
+
+    /// F17: each tier's sentence states the deflated Sharpe as one minus a
+    /// one-sided p-value against the expected maximum of the search, at the
+    /// configured thresholds, and none reads it as a probability of skill.
+    #[test]
+    fn explanations_state_a_significance_level_not_a_probability_of_skill() {
+        let cfg = HonestyConfig {
+            n_trials: 20,
+            trials_sr_std: Some(0.5),
+            periods_per_year: Some(252.0),
+            ..Default::default()
+        };
+        let pass = explain(Verdict::Pass, 0.971, &cfg, 1008, 10.0);
+        let borderline = explain(Verdict::Borderline, 0.92, &cfg, 1008, 10.0);
+        let fail = explain(Verdict::Fail, 0.5, &cfg, 1008, 10.0);
+        assert_eq!(
+            pass,
+            "PASS: deflated Sharpe 0.971 clears 0.95: the Sharpe is significant against the \
+             expected maximum Sharpe of 20 zero-skill trial(s), one-sided p = 0.029 <= 0.05."
+        );
+        assert_eq!(
+            borderline,
+            "BORDERLINE: deflated Sharpe 0.920 is between 0.90 and 0.95: against the expected \
+             maximum Sharpe of 20 zero-skill trial(s), one-sided p = 0.080 is at most 0.10 but \
+             above 0.05."
+        );
+        assert_eq!(
+            fail,
+            "FAIL: deflated Sharpe 0.500 is below 0.90: the Sharpe is not significant against \
+             the expected maximum Sharpe of 20 zero-skill trial(s), one-sided p = 0.500 > 0.10."
+        );
+        for sentence in [&pass, &borderline, &fail] {
+            for posterior in ["survives", "luck", "probability", "promising"] {
+                assert!(!sentence.contains(posterior), "{sentence}");
+            }
+        }
+
+        // The p-value quoted by a real verdict is its `haircut`.
+        let v = is_my_sharpe_real(&four_years_daily(), &cfg);
+        assert_eq!(v.verdict, Verdict::Pass);
+        assert!(v
+            .explanation
+            .contains(&format!("one-sided p = {:.3} <= 0.05", v.haircut)));
     }
 
     /// A frequency that is not a frequency fails closed, with or without a

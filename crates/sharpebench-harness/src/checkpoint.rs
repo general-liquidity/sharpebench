@@ -26,8 +26,8 @@ use sharpebench_core::{AgentSubmission, Run};
 use sharpebench_sim::Window;
 
 use crate::failure::{
-    failing_sentinel_run, run_with_retries, AttemptLedger, FailureKind, FailureLog, FailureRecord,
-    RunOutcome,
+    failing_sentinel_run, run_with_retries, AttemptLedger, Backoff, BackoffSchedule, FailureKind,
+    FailureLog, FailureRecord, RunOutcome, Sleeper, ThreadSleeper,
 };
 use crate::ResilientSubmission;
 
@@ -739,6 +739,43 @@ pub fn run_resumable_sweep_faulted<F>(
     contract: &SweepContract,
     windows: &[Window],
     policy: ResumePolicy,
+    attempt: F,
+) -> std::io::Result<ResilientSubmission>
+where
+    F: FnMut(usize, u64) -> crate::fault_plan::FaultedObservation,
+{
+    run_resumable_sweep_with_backoff(
+        path,
+        agent_id,
+        contract,
+        windows,
+        policy,
+        &BackoffSchedule::immediate(),
+        &mut ThreadSleeper,
+        attempt,
+    )
+}
+
+/// [`run_resumable_sweep_faulted`] under an explicit backoff schedule between
+/// runtime retries. This driver owns its retry loop, so that each observation
+/// is durable before the next attempt starts, and applies the schedule itself
+/// with the record [`crate::run_with_backoff`] makes: the scheduled wait is
+/// written on the failed attempt's `backoff_after` and saved before the driver
+/// sleeps, and it is never inside an attempt's duration. Retries are numbered
+/// within the cell's current round, so a resumed round continues the schedule
+/// where the interrupted process left it and a recovery round starts it again.
+/// The schedule must already be folded into `contract.invocation_sha256` with
+/// [`BackoffSchedule::bind_invocation`], so resuming under a different
+/// schedule is refused as a different contract.
+#[allow(clippy::too_many_arguments)]
+pub fn run_resumable_sweep_with_backoff<F>(
+    path: &Path,
+    agent_id: &str,
+    contract: &SweepContract,
+    windows: &[Window],
+    policy: ResumePolicy,
+    schedule: &BackoffSchedule,
+    sleeper: &mut dyn Sleeper,
     mut attempt: F,
 ) -> std::io::Result<ResilientSubmission>
 where
@@ -837,11 +874,22 @@ where
         loop {
             // The checkpoint driver owns the retry loop so that each observation
             // is durable before a later attempt can start.
-            let driven = crate::failure::run_with_faulted_retries(0, || attempt(w, seed));
+            let mut driven = crate::failure::run_with_faulted_retries(0, || attempt(w, seed));
             tries += 1;
             cp.task_mut(w, seed)
                 .expect("the claimed task exists")
                 .attempts_in_round = tries;
+            let budget_spent = tries > contract.max_retries || tries == u32::MAX;
+            let wait = match driven.outcome {
+                RunOutcome::Exhausted { .. } if !budget_spent => schedule.delay_before(tries),
+                _ => None,
+            };
+            if let (Some(delay), Some(record)) = (wait, driven.ledger.attempts.last_mut()) {
+                record.backoff_after = Some(Backoff {
+                    retry: tries,
+                    delay_ns: u64::try_from(delay.as_nanos()).unwrap_or(u64::MAX),
+                });
+            }
             let total = cp.append_executed_attempts(w, seed, &driven.ledger);
             let recorded = AttemptLedger::default();
             let terminal = match driven.outcome {
@@ -850,7 +898,7 @@ where
                     true
                 }
                 RunOutcome::Exhausted { last, .. } => {
-                    if tries > contract.max_retries || tries == u32::MAX {
+                    if budget_spent {
                         cp.fail_runtime(w, seed, last, total, &recorded);
                         true
                     } else {
@@ -866,6 +914,9 @@ where
             cp.save(path)?;
             if terminal {
                 break;
+            }
+            if let Some(delay) = wait {
+                sleeper.sleep(delay);
             }
         }
     }

@@ -283,10 +283,96 @@ confirmed byte-identical with `cmp` before the next mutation.
 
 ## Open follow-ups
 
-- The CLI does not yet expose a fault plan: a `--fault-plan <json>` flag that
-  loads `FaultPlan::from_json`, calls `bind_invocation` on the invocation
-  digest and drives `run_resumable_sweep_faulted` is CLI work.
+- Done, see "CLI and protocol follow-up" below: the CLI exposes a fault plan
+  (`run --fault-plan <json>`), bound with `bind_invocation` and driven through
+  the faulted sweep.
 - Window identity (`arena/windows/*/window.json`) should carry the plan digest
   alongside `score_config_sha256` for a faulted window, per row 32.
-- The protocol schema prose should state each declared relaxation, per row 27.
+- Done, see below: the protocol text states each declarable relaxation, per
+  row 27.
 - Row 29 becomes due when a paged read exists; the tripwire test says when.
+
+## CLI and protocol follow-up
+
+Built on `a136d14` in four commits: the harness driver (`7c019d6`), the CLI
+(`270fd71`), the protocol text (`bd4a86e`) and the book (`f6cdc7d`). The
+sections above describe the library as merged and are unchanged.
+
+**`run --fault-plan <plan.json>`** (`crates/sharpebench-cli/src/main.rs`).
+`load_fault_plan` runs before any dataset, preflight or launch work, next to
+the rate card: it requires an external transport, reads the file once capped at
+`MAX_FAULT_PLAN_BYTES + 1` and validates it with `FaultPlan::from_json`. Every
+refusal (no transport, no path, unreadable file, malformed JSON, unknown field,
+bounds, a declaration that differs from the armed relaxations, the unarmable
+`limit_before_sort`) exits 2 with nothing launched. Each transport's attempt
+closure (`--http`, `--image`, `--cmd`) now calls
+`fault_plan::modes::run_faulted_backtest_observed`, which is the unchanged
+observed call with no plan and wraps the entrant in `FaultInjectingAgent` with
+one; the sandbox path applies its OOM verdict to the faulted observation's
+result as before. `checkpoint_contract` folds the plan into
+`invocation_sha256` with `bind_invocation` after the rate card and before the
+backoff schedule. A checkpointed sweep runs `run_resumable_sweep_with_backoff`
+(the former body of `run_resumable_sweep_faulted`, which now delegates to it
+with the immediate schedule), so fault records land on each persisted attempt
+record; an unpersisted sweep runs the new `run_agent_resilient_faulted`, which
+returns its attempt ledger because no checkpoint holds it. The entrant row
+gains a rank-neutral `fault_injection` object built from that ledger (read back
+from the checkpoint when there is one): plan digest, declared relaxations,
+`entrant_declaration()`, `denominators_with_evidence` over the swept cells and
+every attempt's `InjectedFaults`. Human output prints the declaration before
+the sweep and the denominators after it. The incomplete-sweep error carries no
+fault report; its evidence is in the checkpoint when one was used.
+
+**Row 27 protocol text.** The protocol crate documentation
+(`crates/sharpebench-protocol/src/lib.rs`, "Consistency relaxations a fault
+plan may declare") states every `ContractRelaxation` by its wire name, what a
+faulted observation may violate under it, the bound, and that the book is never
+touched. The observation schema states `read_your_writes` on `cash` and
+`portfolio` and `position_sign_convention` on `PositionState.shares`; the
+decision schema states `submission_acceptance`. Only `description` strings
+changed, so the wire shape and `schema_drift.rs` are unchanged, and the text
+avoids the markers the row 29 tripwire reads. The new harness test
+`every_declarable_relaxation_is_stated_in_the_published_contract` fails if a
+relaxation is missing from the crate docs, or an armable one from the schema
+text; its `match` is exhaustive, so a new relaxation cannot be added silently.
+
+**Tests** (`crates/sharpebench-cli/tests/fault_backoff_reexecution_cli.rs`,
+hermetic loopback HTTP entrants):
+`a_fault_plan_is_injected_at_the_entrant_boundary_and_reported_rank_neutral`
+(the plan fires in every cell, the entrant is re-presented observations, and
+the board with operational metadata removed equals the unfaulted board),
+`a_changed_fault_plan_refuses_to_resume_its_checkpoint` (the checkpoint holds
+`injected_faults`; the reformatted plan resumes with no new entrant calls and
+identical output; a changed plan and no plan are refused with the checkpoint
+bytes unchanged and no entrant call),
+`a_malformed_or_unusable_fault_plan_refuses_before_launch` (seven refusals,
+exit 2, no spawn and no unsandboxed warning).
+
+**Byte identity without the flag.** The CLI built from `origin/main`
+(`a136d14`) and from this branch were run on the same commands in one
+directory, each baseline command twice: `run --json`, `run`,
+`run --data <csv> --json`, `audit --json`, `stress --json`,
+`run --http <fixture> --data <csv>` with and without `--json`, the same with
+`--entrant-sha256 <digest> --checkpoint <file>`, `run --http <failing fixture>
+--json` with and without a checkpoint (the incomplete-sweep path),
+`run --cmd <stdio agent> --data <csv> --json` with and without a checkpoint,
+and `capture momentum`; stdout, stderr, exit code and every written file were
+compared. All identical after masking only host-clock `nanos`,
+`duration_ns_total` and "observed host duration" and the runner's own
+`runner_artifact_sha256`, and two baseline runs differed in exactly the same
+places. `verify-trajectory` over each binary's own capture, JSON and text, was
+identical unmasked. `--help` changes by the three new flag lines.
+
+**Mutation checks**, broken in place on the committed tree, the named test run,
+the file restored from `git show HEAD:<path>` and confirmed with `cmp`:
+
+| Invariant | Mutation | Killed by |
+|---|---|---|
+| A changed plan refuses to resume | `checkpoint_contract` binds `None` instead of the plan | `a_changed_fault_plan_refuses_to_resume_its_checkpoint` (the changed plan resumed) |
+| A malformed plan refuses before launch | `load_fault_plan` returns `Ok(from_json(..).ok())` | `a_malformed_or_unusable_fault_plan_refuses_before_launch` |
+| The plan reaches the entrant | the `--http` attempt passes `None` as the plan | `a_fault_plan_is_injected_at_the_entrant_boundary_and_reported_rank_neutral`, `a_changed_fault_plan_refuses_to_resume_its_checkpoint` |
+| No plan: no field is added | the row always carries `fault_injection` (null) | `a_fault_plan_is_injected_at_the_entrant_boundary_and_reported_rank_neutral`, and the binary comparison (4 outputs differ) |
+| Row 27 is stated | `declares submission_acceptance` removed from the decision schema | `every_declarable_relaxation_is_stated_in_the_published_contract` (`schema_drift.rs` still passes, as it should for a description change) |
+
+The backoff and re-execution flags built in the same change are recorded in
+[CONTRACT-PORTS.md](CONTRACT-PORTS.md).

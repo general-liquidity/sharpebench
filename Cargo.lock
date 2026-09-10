@@ -682,7 +682,7 @@ dependencies = [
 
 [[package]]
 name = "reference-agent"
-version = "0.19.0"
+version = "0.20.0"
 dependencies = [
  "serde_json",
  "sharpebench-protocol",
@@ -810,7 +810,7 @@ dependencies = [
 
 [[package]]
 name = "sharpebench"
-version = "0.19.0"
+version = "0.20.0"
 dependencies = [
  "native-tls",
  "serde",
@@ -831,7 +831,7 @@ dependencies = [
 
 [[package]]
 name = "sharpebench-arena"
-version = "0.19.0"
+version = "0.20.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -844,7 +844,7 @@ dependencies = [
 
 [[package]]
 name = "sharpebench-attest"
-version = "0.19.0"
+version = "0.20.0"
 dependencies = [
  "aes-gcm-siv",
  "ed25519-dalek",
@@ -857,7 +857,7 @@ dependencies = [
 
 [[package]]
 name = "sharpebench-core"
-version = "0.19.0"
+version = "0.20.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -868,7 +868,7 @@ dependencies = [
 
 [[package]]
 name = "sharpebench-edge"
-version = "0.19.0"
+version = "0.20.0"
 dependencies = [
  "serde",
  "sharpebench-stats",
@@ -876,7 +876,7 @@ dependencies = [
 
 [[package]]
 name = "sharpebench-harness"
-version = "0.19.0"
+version = "0.20.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -890,7 +890,7 @@ dependencies = [
 
 [[package]]
 name = "sharpebench-leaderboard"
-version = "0.19.0"
+version = "0.20.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -900,14 +900,14 @@ dependencies = [
 
 [[package]]
 name = "sharpebench-memory"
-version = "0.19.0"
+version = "0.20.0"
 dependencies = [
  "sharpebench-stats",
 ]
 
 [[package]]
 name = "sharpebench-protocol"
-version = "0.19.0"
+version = "0.20.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -915,7 +915,7 @@ dependencies = [
 
 [[package]]
 name = "sharpebench-sim"
-version = "0.19.0"
+version = "0.20.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -925,11 +925,11 @@ dependencies = [
 
 [[package]]
 name = "sharpebench-stats"
-version = "0.19.0"
+version = "0.20.0"
 
 [[package]]
 name = "sharpebench-wasm"
-version = "0.19.0"
+version = "0.20.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1176,7 +1176,7 @@ checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
 
 [[package]]
 name = "xtask"
-version = "0.19.0"
+version = "0.20.0"
 dependencies = [
  "native-tls",
  "serde_json",
