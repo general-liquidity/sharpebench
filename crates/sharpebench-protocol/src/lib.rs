@@ -57,7 +57,46 @@
 //! and cannot see a non-deterministic agent; re-execution is the check that
 //! can. A sweep's own retries and resumes do not compare a rerun against the
 //! attempt it replaced, so a non-deterministic agent is caught when its
-//! trajectory is re-executed, not while the sweep runs.
+//! trajectory is re-executed, not while the sweep runs. The command line
+//! exposes the check as `sharpebench verify-trajectory --reexecute`.
+//!
+//! # Consistency relaxations a fault plan may declare
+//!
+//! An operator may run an entrant under a seeded fault plan (`sharpebench run
+//! --fault-plan`, `sharpebench_harness::fault_plan`). A plan must declare
+//! exactly the relaxations its faults use, or it is refused, and the operator
+//! publishes that declaration to the entrant before the sweep. A faulted
+//! observation may violate only a declared relaxation, only for a bounded
+//! number of decision steps or presentations (at most 64), and never in the
+//! book: every fault changes what the entrant is shown or which of its
+//! submissions is accepted, never the executed book or the returns the scorer
+//! reads. The wire shape is the same under every relaxation, and without a
+//! plan none of them applies. Each relaxation is named here by its wire name
+//! in the plan's `declared_relaxations`:
+//!
+//! - `read_your_writes`: after an order executes, `cash` and `portfolio` on
+//!   later observations may show their pre-execution values for a bounded
+//!   number of decision steps. The order has executed and the book is
+//!   authoritative; `date` and `symbols` stay current. The harness records
+//!   convergence when an observation is seen to carry the canonical holdings
+//!   again, not when a timer expires. Restating the last target is the
+//!   idempotent response; pushing the target further in the direction of the
+//!   hidden write is graded as escalation.
+//! - `position_sign_convention`: a nonzero `portfolio[].shares` may be shown
+//!   with the opposite sign for a bounded number of decision steps. Zero has
+//!   no sign and is left alone, and the book is unchanged. The response is
+//!   graded against the entrant's own last stated target for the symbol.
+//! - `submission_acceptance`: a decision that carries orders may be rejected
+//!   under a rate limit. Rejection is signalled by presenting the identical
+//!   observation again, a bounded number of times; only the decision
+//!   answering the first presentation after that deadline executes. A hold is
+//!   never rejected. A deterministic entrant restates its decision and loses
+//!   nothing.
+//! - `complete_results`: declared for completeness only. No plan can arm it,
+//!   because the observation contract has no paged read.
+//!
+//! The grades of the entrant's responses are rank-neutral evidence on the
+//! attempt ledger. They never enter a return, a score or a rank.
 //!
 //! The declared metadata of each wire operation (does it change state, is it
 //! safe to repeat, may the harness retry it) is published beside the schema;

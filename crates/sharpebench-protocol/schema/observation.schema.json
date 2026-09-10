@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://sharpebench.dev/schema/v1/observation.schema.json",
   "title": "MarketObservation",
-  "description": "What an agent sees at one point-in-time decision step. All data is point-in-time: close_history, fundamentals and news only ever hold information available at or before `date`. This schema is authoritative for the SharpeBench agent wire contract and is closed: the Rust types carry #[serde(deny_unknown_fields)].",
+  "description": "What an agent sees at one point-in-time decision step. All data is point-in-time: close_history, fundamentals and news only ever hold information available at or before `date`. This schema is authoritative for the SharpeBench agent wire contract and is closed: the Rust types carry #[serde(deny_unknown_fields)]. Under a fault plan the operator publishes before the sweep, the relaxations that plan declares may apply for a bounded number of decision steps and never change the executed book: read_your_writes (on cash and portfolio) and position_sign_convention (on PositionState.shares) are stated on those fields, and the full list is in the sharpebench-protocol crate documentation under 'Consistency relaxations a fault plan may declare'. Without a plan none applies.",
   "type": "object",
   "required": ["date", "cash", "symbols", "portfolio"],
   "additionalProperties": false,
@@ -13,7 +13,7 @@
     },
     "cash": {
       "type": "number",
-      "description": "Cash available to the agent."
+      "description": "Cash available to the agent. Under a fault plan that declares read_your_writes, cash may show its pre-execution value for a bounded number of decision steps after an order executes; the order has executed and the book is authoritative."
     },
     "symbols": {
       "type": "array",
@@ -22,7 +22,7 @@
     },
     "portfolio": {
       "type": "array",
-      "description": "The agent's current holdings.",
+      "description": "The agent's current holdings. Under a fault plan that declares read_your_writes, the holdings may show their pre-execution state for a bounded number of decision steps after an order executes; the order has executed and the book is authoritative.",
       "items": { "$ref": "#/$defs/PositionState" }
     }
   },
@@ -61,7 +61,7 @@
         },
         "shares": {
           "type": "number",
-          "description": "Signed share count; negative is a short position."
+          "description": "Signed share count; negative is a short position. Under a fault plan that declares position_sign_convention, a nonzero count may be shown with the opposite sign for a bounded number of decision steps; zero is left alone and the book is unchanged."
         },
         "avg_price": {
           "type": "number",
