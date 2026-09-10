@@ -28,6 +28,8 @@ open -> committed -> scoring -> published
    exists. The required scorer digest freezes the exact scoring artifact before
    entrants commit. Pass `--config <score_config.json>` to override the default
    and `--sealed-eval-salt-sha256 <hex>` when the window uses sealed evaluation.
+   Pass `--fault-plan <plan.json>` when the window's entrants run under a
+   seeded fault plan (see [faulted windows](#faulted-windows)).
 3. **`arena commit <dir> <window> <commitment.json>`** registers an entrant's
    commitment (the JSON that `sharpebench commit` prints). Late commitments,
    at or after the deadline epoch, are refused; so are duplicates. These are
@@ -87,6 +89,39 @@ N+1's recorded anchor exposes it. `arena verify` checks both.
 The header also binds the window's rules (`ScoreConfig`), the revealed
 dataset's SHA-256, and the list of refused entries, so none of those can be
 quietly rewritten after publication either.
+
+## Faulted windows
+
+A window can be scored under a frozen fault plan, the one `sharpebench run
+--fault-plan <plan.json>` injects at the entrant boundary. `arena open ...
+--fault-plan <plan.json>` reads the plan once, validates it exactly as `run`
+does (a plan `run` would refuse is refused here, before the window exists) and
+records its SHA-256 as `fault_plan_sha256` beside `score_config_sha256`. The
+digest is taken over the validated plan, so a reformatted copy of the same
+plan records the same digest.
+
+The digest is part of the window's identity from then on, so a faulted and an
+unfaulted run of the same window are never scored, published or superseded as
+the same thing:
+
+- A faulted window is written with schema 3; an unfaulted window keeps schema 2.
+  Loading refuses a window whose digest disagrees with its schema (present on
+  schema 2, absent on schema 3) or is not a lowercase SHA-256, so an edited
+  record, or a scorer that predates the field, cannot treat a faulted window as
+  unfaulted.
+- Each entry in `entries.json` declares the plan its submission ran under as
+  `fault_plan_sha256`, the `fault_injection.plan_sha256` of its `run` row. If
+  any entry's declaration differs from the window's, including a declaration
+  on an unfaulted window or none on a faulted one, `arena score` refuses the
+  whole call and records nothing: the window stays `committed`.
+- `arena link-supersession` records the replacement's plan digest as
+  `replacement_fault_plan_sha256`, and loading refuses a ledger whose recorded
+  digest disagrees with the replacement window.
+- The signed header carries `fault_plan_sha256`, and `board.md` names it.
+
+Without `--fault-plan` none of these fields is written: an unfaulted window,
+its entries, the supersession ledger and the signed header have the same bytes
+as before the field existed.
 
 ## Sandboxed entrants
 

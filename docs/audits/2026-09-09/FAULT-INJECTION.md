@@ -286,8 +286,9 @@ confirmed byte-identical with `cmp` before the next mutation.
 - Done, see "CLI and protocol follow-up" below: the CLI exposes a fault plan
   (`run --fault-plan <json>`), bound with `bind_invocation` and driven through
   the faulted sweep.
-- Window identity (`arena/windows/*/window.json`) should carry the plan digest
-  alongside `score_config_sha256` for a faulted window, per row 32.
+- Done, see "Arena window identity follow-up" below: window identity
+  (`arena/windows/*/window.json`) carries the plan digest alongside
+  `score_config_sha256` for a faulted window, per row 32.
 - Done, see below: the protocol text states each declarable relaxation, per
   row 27.
 - Row 29 becomes due when a paged read exists; the tripwire test says when.
@@ -376,3 +377,113 @@ the file restored from `git show HEAD:<path>` and confirmed with `cmp`:
 
 The backoff and re-execution flags built in the same change are recorded in
 [CONTRACT-PORTS.md](CONTRACT-PORTS.md).
+
+## Arena window identity follow-up
+
+Built on `fa9525c` in `3196ecc`, then merged with `origin/main` at `23276af`
+(PR #67, which touched only the `sandbox` re-export lines of the same
+`lib.rs`; the merge was clean). The sections above are unchanged.
+
+**Design.** The arena does not run entrants: `arena score` ranks submissions
+produced elsewhere. The plan therefore enters identity where the config does,
+at open, and is checked wherever the window binds its scored submissions.
+`WindowState`, `WindowHeader` and `RevealedEntry` gain `fault_plan_sha256`, and
+`WindowSupersession` gains `replacement_fault_plan_sha256` beside
+`replacement_score_config_sha256`, each `#[serde(default,
+skip_serializing_if = "Option::is_none")]`. The arena crate stores only the
+digest and checks its shape; `arena open ... --fault-plan <plan.json>`
+(`crates/sharpebench-cli/src/arena_cmd.rs`, `fault_plan_digest`) reads the
+file once capped at `MAX_FAULT_PLAN_BYTES + 1`, validates it with
+`FaultPlan::from_json` and passes `FaultPlan::digest` to the new
+`Arena::open_window_with_fault_plan`; `open_window_with_provenance` delegates
+with `None`. A faulted window is written with schema 3
+(`FAULTED_WINDOW_SCHEMA_VERSION`) and an unfaulted one keeps schema 2. The
+optional field alone would let a scorer that predates it load a faulted
+window as unfaulted and drop the digest on its next save; the version makes
+that scorer refuse the window. The arena crate's test that compiles
+`arena_cmd.rs` needs a dev-dependency on `sharpebench-harness`; harness does
+not depend on arena and publishes before it.
+
+**Checks that refuse a plan mismatch**, each the same kind of refusal the
+config digest gets at that point:
+
+| Where | Refusal |
+|---|---|
+| `Arena::load`, every active window (so every `arena` subcommand but `init`, `verify` and the two supersession commands) | schema 2 with a digest, schema 3 without one, or a digest that is not 64 lowercase hex |
+| `Arena::open_window_with_fault_plan` | a malformed digest; the CLI refuses a plan `run --fault-plan` would refuse before the arena is touched |
+| `Arena::reveal_and_score` | any entry whose declared `fault_plan_sha256` differs from the window's, absent versus present included; the whole call is an `Err` and nothing is written, as the window stays `committed` |
+| `Arena::link_supersession_replacement` | records the replacement's plan digest with its config digest |
+| `Arena::load`, each linked supersession | the recorded replacement plan digest differs from the replacement window's, absent versus present included |
+| `Arena::publish` | the signed header carries the digest, so a published faulted board cannot be read as unfaulted; `board.md` names it |
+
+`verify_arena` does not compare the header's config digest with the window
+file today and does not compare the plan digest either.
+`supersede_empty_window` binds the superseded window's whole bytes through
+`historical_window_sha256`, which already covers its plan digest.
+
+**Byte identity without a plan.**
+
+- `the_committed_arena_round_trips_byte_identically` deserializes and
+  re-serializes the committed `arena/windows/window-002` and `window-003`
+  (the schema 2 records) to their exact bytes, and loads a copy of the whole
+  committed `arena/` (supersession ledger, replacement link, active window)
+  and saves it through `advance` at its own epoch: `state.json` and all three
+  `window.json` files are unchanged.
+- `a_plan_less_window_entry_and_header_carry_no_fault_field`: an unfaulted
+  window, entry, signed header and `board.md` contain no fault key.
+- The CLI built from `origin/main` (`23276af`) and from this branch ran the
+  same session in two directories: `arena init`, `open` (text, `--json`,
+  with `--sealed-eval-salt-sha256`), `commit` for two entrants, `arena commit`,
+  `supersede-empty`, `link-supersession`, `advance`, `score` (one entry
+  refused for a wrong salt, and a `--json` score of a window with no
+  commitments), `publish`, `verify` (text and `--json`), `advance` over a copy
+  of the committed `arena/` and a `--json` `open` in another copy. All 19
+  commands had identical exit codes, stdout and stderr, and all 22 written
+  files, `board.json` and `board.md` included, were identical unmasked. The
+  copy of `arena/` advanced at its own epoch was identical to the committed
+  one.
+- `git diff origin/main -- arena/ paper/evidence/ examples/` is empty apart
+  from the provenance manifest rebind, and no golden or arena test fixture
+  changed.
+
+**Tests** (`crates/sharpebench-arena/tests/fault_plan_identity.rs`, and
+`open_records_the_digest_of_a_validated_fault_plan` in
+`crates/sharpebench-arena/tests/cli_arena_cmd.rs`):
+`a_faulted_window_binds_its_plan_through_to_the_signed_header`,
+`opening_refuses_a_malformed_plan_digest`,
+`loading_refuses_a_plan_digest_that_disagrees_with_the_schema` (added,
+removed, malformed),
+`scoring_refuses_an_entry_run_under_another_plan_and_records_nothing`
+(different, absent on a faulted window, present on an unfaulted one; the
+window file bytes are unchanged and it reloads `committed`),
+`a_supersession_records_the_replacement_plan_and_refuses_a_mismatch`
+(recorded and omitted; a different, dropped or invented ledger digest), and
+the CLI test (a reformatted plan records the same digest, schema 3 and 2 as
+expected, and no path, a missing file, malformed JSON and an unknown field
+exit 1 with no window created).
+
+**Mutation checks**, broken in place on the committed tree (`720d5a8`), the
+named tests run, the file restored from `git show HEAD:<path>` and confirmed
+with `cmp` before the next:
+
+| Invariant | Mutation | Killed by |
+|---|---|---|
+| Schema agrees with the plan on load | load accepts schema 3 or 2 whatever the digest | `loading_refuses_a_plan_digest_that_disagrees_with_the_schema` |
+| A loaded digest is well formed | the load shape check removed | `loading_refuses_a_plan_digest_that_disagrees_with_the_schema` |
+| An opened digest is well formed | the open shape check removed | `opening_refuses_a_malformed_plan_digest` |
+| A faulted window is schema 3 | open always writes schema 2 | `a_faulted_window_binds_its_plan_through_to_the_signed_header`, `open_records_the_digest_of_a_validated_fault_plan` |
+| Score refuses absent versus present | the entry check compares only when both sides have a digest | `scoring_refuses_an_entry_run_under_another_plan_and_records_nothing` |
+| The replacement's plan is checked | the supersession plan check removed | `a_supersession_records_the_replacement_plan_and_refuses_a_mismatch` |
+| The replacement's plan is recorded | link records `None` | `a_supersession_records_the_replacement_plan_and_refuses_a_mismatch` |
+| The header binds the plan | publish writes `None` | `a_faulted_window_binds_its_plan_through_to_the_signed_header` |
+| No plan: window bytes | `skip_serializing_if` removed on `WindowState` | `the_committed_arena_round_trips_byte_identically`, `a_plan_less_window_entry_and_header_carry_no_fault_field` |
+| No plan: header bytes | `skip_serializing_if` removed on `WindowHeader` | `a_plan_less_window_entry_and_header_carry_no_fault_field` |
+| No plan: ledger bytes | `skip_serializing_if` removed on `WindowSupersession` | `the_committed_arena_round_trips_byte_identically`, `a_supersession_records_the_replacement_plan_and_refuses_a_mismatch` |
+| No plan: entry bytes | `skip_serializing_if` removed on `RevealedEntry` | `a_plan_less_window_entry_and_header_carry_no_fault_field` |
+| The CLI refuses an unusable plan | an invalid plan becomes no plan | `open_records_the_digest_of_a_validated_fault_plan` |
+| The CLI records the plan | `arena open` passes `None` | `open_records_the_digest_of_a_validated_fault_plan` |
+
+What this does not do: the `Commitment` an entrant registers before the
+deadline does not bind a plan (the attest crate is unchanged), so the plan is
+fixed by the window at open and checked against each entry's declaration at
+score, not committed to by the entrant.

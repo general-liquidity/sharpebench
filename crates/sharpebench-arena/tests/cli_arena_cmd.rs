@@ -94,6 +94,7 @@ fn cli_drives_the_full_lifecycle_and_verify_walks_the_chain() {
         },
         artifact_digest: digest.clone(),
         salt: "salt-a".to_string(),
+        fault_plan_sha256: None,
     }];
     let entries_path = root.join("entries.json");
     std::fs::write(&entries_path, serde_json::to_string(&entries).unwrap()).unwrap();
@@ -147,4 +148,101 @@ fn usage_errors_exit_2() {
     assert_eq!(arena_cmd::run(&argv(&[]), false), 2);
     assert_eq!(arena_cmd::run(&argv(&["nonsense"]), false), 2);
     assert_eq!(arena_cmd::run(&argv(&["open", "somewhere"]), false), 2);
+}
+
+fn fault_plan_json(seed: u64) -> String {
+    serde_json::json!({
+        "schema_version": "sharpebench.fault-plan.v1",
+        "seed": seed,
+        "declared_relaxations": ["submission_acceptance"],
+        "faults": [
+            {"id": "limit", "cohort_ppm": 1_000_000,
+             "fault": {"mode": "rate_limit", "max_rejected_presentations": 2}},
+        ],
+    })
+    .to_string()
+}
+
+fn window_json(dir: &str, window: &str) -> serde_json::Value {
+    let path = std::path::Path::new(dir)
+        .join("windows")
+        .join(window)
+        .join("window.json");
+    serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+}
+
+#[test]
+fn open_records_the_digest_of_a_validated_fault_plan() {
+    use sharpebench_harness::fault_plan::FaultPlan;
+
+    let root = temp_dir("fault-plan");
+    let arena_dir = root.join("arena");
+    let dir = arena_dir.to_str().unwrap();
+    assert_eq!(arena_cmd::run(&argv(&["init", dir]), true), 0);
+    let scorer = content_digest(b"cli-scorer-artifact");
+    let open = |window: &str, extra: &[&str]| {
+        let mut parts = vec![
+            "open",
+            dir,
+            window,
+            "10",
+            "20",
+            "--scorer-artifact-sha256",
+            &scorer,
+        ];
+        parts.extend_from_slice(extra);
+        arena_cmd::run(&argv(&parts), true)
+    };
+
+    let plan = fault_plan_json(7);
+    let expected = FaultPlan::from_json(plan.as_bytes()).unwrap().digest();
+    let plan_path = root.join("plan.json");
+    std::fs::write(&plan_path, &plan).unwrap();
+    // The same plan reformatted is the same plan, so it records the same digest.
+    let pretty_path = root.join("plan-pretty.json");
+    let pretty: serde_json::Value = serde_json::from_str(&plan).unwrap();
+    std::fs::write(&pretty_path, serde_json::to_string_pretty(&pretty).unwrap()).unwrap();
+
+    assert_eq!(
+        open("faulted", &["--fault-plan", plan_path.to_str().unwrap()]),
+        0
+    );
+    assert_eq!(
+        open("pretty", &["--fault-plan", pretty_path.to_str().unwrap()]),
+        0
+    );
+    assert_eq!(open("plain", &[]), 0);
+    for window in ["faulted", "pretty"] {
+        let w = window_json(dir, window);
+        assert_eq!(w["fault_plan_sha256"], expected.as_str(), "{window}");
+        assert_eq!(w["schema_version"], 3, "{window}");
+    }
+    let plain = window_json(dir, "plain");
+    assert!(plain.get("fault_plan_sha256").is_none(), "{plain}");
+    assert_eq!(plain["schema_version"], 2);
+
+    // A plan `run --fault-plan` would refuse is refused here, before the window
+    // exists: no path, a missing file, malformed JSON, an unknown field.
+    std::fs::write(root.join("bad.json"), "{not json").unwrap();
+    std::fs::write(
+        root.join("unknown.json"),
+        plan.replacen("\"seed\"", "\"surprise\":1,\"seed\"", 1),
+    )
+    .unwrap();
+    let missing = root.join("missing.json");
+    let bad = root.join("bad.json");
+    let unknown = root.join("unknown.json");
+    for (window, extra) in [
+        ("no-path", vec!["--fault-plan"]),
+        ("missing", vec!["--fault-plan", missing.to_str().unwrap()]),
+        ("bad", vec!["--fault-plan", bad.to_str().unwrap()]),
+        ("unknown", vec!["--fault-plan", unknown.to_str().unwrap()]),
+    ] {
+        assert_eq!(open(window, &extra), 1, "{window}");
+        assert!(
+            !arena_dir.join("windows").join(window).exists(),
+            "{window} was opened"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&root);
 }

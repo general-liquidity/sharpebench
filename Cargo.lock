@@ -837,6 +837,7 @@ dependencies = [
  "serde_json",
  "sharpebench-attest",
  "sharpebench-core",
+ "sharpebench-harness",
  "sharpebench-leaderboard",
  "sharpebench-protocol",
  "sharpebench-sim",
