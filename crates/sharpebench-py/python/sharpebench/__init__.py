@@ -13,8 +13,11 @@ lists and dicts.
 
 The verdict's ``trials_sr_std`` is annualized, like the leaderboard's, and
 ``periods_per_year`` (default 252, daily bars, named in the explanation when
-assumed) converts it to the per-period unit the Sharpe is computed in.
-``budget_curve`` takes the same annualized ``trials_sr_std`` and converts it
+assumed) converts it to the per-period unit the Sharpe is computed in. The
+verdict's ``sr_benchmark`` (the PSR and MinTRL benchmark, default 0.0) is
+annualized too and converted the same way; the raw
+``probabilistic_sharpe_ratio`` and ``min_track_record_length`` take theirs per
+period. ``budget_curve`` takes the same annualized ``trials_sr_std`` and converts it
 with its own ``periods_per_year``.
 
 The raw primitives ``deflated_sharpe_ratio``, ``bootstrap_dsr_ci``,

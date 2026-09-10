@@ -29,13 +29,13 @@ print(ci["lower"], ci["point"], ci["upper"])
 |---|---|
 | `sharpe_ratio(returns)` | observed per-period Sharpe |
 | `moments(returns, target=0.0)` | mean / std / skew / kurtosis / downside deviation / Sortino |
-| `probabilistic_sharpe_ratio(returns, sr_benchmark=0.0)` | PSR: one minus the p-value of `H0: SR <= benchmark` (not the probability the true Sharpe exceeds it) |
+| `probabilistic_sharpe_ratio(returns, sr_benchmark=0.0)` | PSR: one minus the p-value of `H0: SR <= benchmark` (not the probability the true Sharpe exceeds it). `sr_benchmark` is per period |
 | `deflated_sharpe_ratio(returns, n_trials, trials_sr_std=None, periods_per_year=None)` | PSR against the best of `n_trials` zero-skill trials (DSR): one minus a p-value, not the probability of skill. `trials_sr_std` is per period; omitted, it is the annualized 0.5 prior over `sqrt(periods_per_year)` (default 252) |
 | `expected_max_sharpe(trials_sr_std, n_trials)` | the per-period Sharpe the best of `n_trials` shows with **zero** skill, from a per-period `trials_sr_std` |
-| `min_track_record_length(returns, ...)` | periods needed before the Sharpe is believable |
+| `min_track_record_length(returns, ...)` | periods needed before the Sharpe is believable; `sr_benchmark` is per period |
 | `bootstrap_dsr_ci(returns, n_trials, ...)` | `{point, se, lower, upper}` on the DSR itself; `trials_sr_std` / `periods_per_year` as in `deflated_sharpe_ratio` |
 | `bootstrap_pvalue(excess, ...)` | stationary-bootstrap p-value for one series |
-| `is_my_sharpe_real(returns, n_trials=1, ..., periods_per_year=None)` | LITE verdict dict: `pass \| borderline \| fail` + explanation. `trials_sr_std` is annualized and `periods_per_year` (default 252, flagged) converts it |
+| `is_my_sharpe_real(returns, n_trials=1, ..., periods_per_year=None)` | LITE verdict dict: `pass \| borderline \| fail` + explanation. `trials_sr_std` and `sr_benchmark` are annualized and `periods_per_year` (default 252, flagged) converts both |
 | `is_my_sharpe_real_full(field, ...)` | FULL verdict over a whole candidate field (LITE + snooping family + PBO + HLZ) |
 | `reality_check_pvalue(field, ...)` | White's Reality Check over the field |
 | `spa_pvalue` / `spa_consistent_pvalue(field, ...)` | Hansen's SPA (liberal / consistent) |
@@ -57,7 +57,10 @@ print(ci["lower"], ci["point"], ci["upper"])
 
 Every Sharpe here is per period. The verdicts (`is_my_sharpe_real*`) and
 `budget_curve` take `trials_sr_std` **annualized**, like the leaderboard's
-`ScoreConfig`, and divide it by `sqrt(periods_per_year)`. The raw primitives
+`ScoreConfig`, and divide it by `sqrt(periods_per_year)`. The verdicts take
+their PSR and MinTRL `sr_benchmark` annualized too and convert it the same way;
+through 0.21.0 they read it per period. The raw `probabilistic_sharpe_ratio`
+and `min_track_record_length` take `sr_benchmark` per period. The raw primitives
 (`deflated_sharpe_ratio`, `bootstrap_dsr_ci`, `selection_robustness`,
 `expected_max_sharpe`) take it **per period** and use an explicit value as
 given. Omitted, the first three use the annualized 0.5 prior at
