@@ -1656,7 +1656,7 @@ pub fn pooled_returns(sub: &AgentSubmission, seeds_per_window: usize) -> Vec<f64
 /// Restrict a field to the run positions every non-empty submission completed —
 /// the [`crate::comparison_sets`] intersection keyed by window-major position.
 /// Output order matches `subs`; empty submissions pass through untouched.
-fn restrict_to_shared_positions(subs: &[AgentSubmission]) -> Vec<AgentSubmission> {
+pub(crate) fn restrict_to_shared_positions(subs: &[AgentSubmission]) -> Vec<AgentSubmission> {
     // Zero-padded so the ids sort in position order; `restrict_to_shared` keeps
     // run order anyway, the padding only makes `shared_windows` legible.
     let tag = |i: usize| format!("{i:08}");
