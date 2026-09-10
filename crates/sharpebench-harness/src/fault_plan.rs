@@ -963,6 +963,50 @@ mod tests {
         }
     }
 
+    /// Row 27 requires the relaxed consistency to be declared in the contract
+    /// before a fault uses it. Every relaxation a plan can declare is named by
+    /// its wire name in the protocol crate documentation, and every armable one
+    /// also in the published schema text an entrant validates against.
+    #[test]
+    fn every_declarable_relaxation_is_stated_in_the_published_contract() {
+        let read = |path: &str| {
+            std::fs::read_to_string(format!(
+                "{}/../sharpebench-protocol/{path}",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .unwrap_or_else(|error| panic!("{path} is checked in: {error}"))
+        };
+        let docs = read("src/lib.rs");
+        let schemas = read("schema/observation.schema.json") + &read("schema/decision.schema.json");
+        let all = [
+            ContractRelaxation::ReadYourWrites,
+            ContractRelaxation::PositionSignConvention,
+            ContractRelaxation::SubmissionAcceptance,
+            ContractRelaxation::CompleteResults,
+        ];
+        for relaxation in all {
+            // Exhaustive on purpose: a new relaxation must be listed above.
+            let armable = match relaxation {
+                ContractRelaxation::ReadYourWrites
+                | ContractRelaxation::PositionSignConvention
+                | ContractRelaxation::SubmissionAcceptance => true,
+                ContractRelaxation::CompleteResults => false,
+            };
+            let name = serde_json::to_value(relaxation).unwrap();
+            let name = name.as_str().unwrap();
+            assert!(
+                docs.contains(&format!("//! - `{name}`: ")),
+                "the protocol docs do not state the `{name}` relaxation"
+            );
+            if armable {
+                assert!(
+                    schemas.contains(&format!("declares {name}")),
+                    "the published schema does not state the `{name}` relaxation"
+                );
+            }
+        }
+    }
+
     /// Row 33: the draw is a pure function of the digest, scope, seed and
     /// cell; two plans with one digest assign every cell identically.
     #[test]

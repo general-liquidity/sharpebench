@@ -12,6 +12,8 @@ use std::process::ExitCode;
 use serde::Serialize;
 use sharpebench_core::{rank, AgentSubmission, CompositeScore, ScoreConfig};
 use sharpebench_harness::accounting::{MonetarySummary, RateCard};
+use sharpebench_harness::fault_plan::FaultPlan;
+use sharpebench_harness::BackoffSchedule;
 
 use csv_columns::read_returns_column;
 
@@ -558,6 +560,8 @@ fn help() {
     println!("                       --retry-runtime-failures: recover exhausted checkpoint cells (3 additional rounds maximum)");
     println!("                       --entrant-sha256 <digest>: exact entrant identity; required with --checkpoint plus --http or --cmd");
     println!("                       --rate-card <json>: frozen token rates; emits a separate self-reported estimate, never a rank input");
+    println!("                       --fault-plan <json>: seeded fault injection at the entrant boundary; checkpoint-bound, rank-neutral evidence");
+    println!("                       --retry-backoff <ms,ms,...>: wait before each runtime retry (entry i precedes retry i); checkpoint-bound");
     println!("                       --periods-per-year N: bars per year of the dataset (default 252; 1h crypto 8760, 4h 2190, 1d crypto 365, 1w 52)");
     println!("                       --pass-mode all|any|at-least:N|relative-to-benchmark: reliability verdict (default all)");
     println!("                       --benchmark-agent <id>: benchmark for relative-to-benchmark (default buy-and-hold)");
@@ -598,6 +602,7 @@ fn help() {
         "  sharpebench verify-trajectory <traj.json> [--data <csv>]  strictly replay the complete data/cost/engine/runner/window/seed contract"
     );
     println!("                       --allow-unbound-trajectory: explicit legacy or cross-version regrade; never the default");
+    println!("                       --reexecute [--cmd \"<prog>\"|--http <addr>]: also re-run every captured run with a fresh agent and refuse the first divergent decision");
     println!("  sharpebench audit-briefing <briefing.json>  audit a shared briefing for input-side salience bias");
     println!("  sharpebench canary <seed>             derive a do-not-train contamination tripwire token");
     println!("  sharpebench sandbox-check <image@sha256:digest>  run live hostile field-readiness checks (never skips)");
@@ -1215,6 +1220,8 @@ struct ExternalRowMetadata<'a> {
     monetary_cost: &'a MonetarySummary,
     /// The opt-in image preflight report, when one authorized this launch.
     artifact_preflight: Option<serde_json::Value>,
+    /// The fault-injection report, when `--fault-plan` armed the sweep.
+    fault_injection: Option<serde_json::Value>,
 }
 
 /// Keep the existing JSON board array and scoring fields. Only the externally
@@ -1238,6 +1245,9 @@ fn run_board_json(
                     attempt_accounting_with_cost(external.attempts, external.monetary_cost);
                 if let Some(preflight) = &external.artifact_preflight {
                     row["artifact_preflight"] = preflight.clone();
+                }
+                if let Some(report) = &external.fault_injection {
+                    row["fault_injection"] = report.clone();
                 }
             }
         }
@@ -1287,6 +1297,8 @@ struct CheckpointExecution<'a> {
     score_config: &'a ScoreConfig,
     max_retries: u32,
     rate_card: Option<&'a RateCard>,
+    fault_plan: Option<&'a FaultPlan>,
+    backoff: &'a BackoffSchedule,
 }
 
 fn checkpoint_contract(
@@ -1327,8 +1339,15 @@ fn checkpoint_contract(
             // The artifact digest and its invocation answer different questions.
             // A caller-supplied artifact digest must not make a changed command,
             // endpoint, image reference, or environment pass-through list look
-            // like the same resumable experiment.
-            invocation_sha256: invocation_with_rates(entrant_material, execution.rate_card)?,
+            // like the same resumable experiment. A fault plan and a waiting
+            // retry schedule change what the sweep observes, so each is folded
+            // in; absent, each binding returns the digest unchanged.
+            invocation_sha256: execution.backoff.bind_invocation(
+                &sharpebench_harness::fault_plan::bind_invocation(
+                    &invocation_with_rates(entrant_material, execution.rate_card)?,
+                    execution.fault_plan,
+                ),
+            ),
         },
         execution.windows,
         execution.seeds,
@@ -1369,6 +1388,141 @@ fn load_rate_card(args: &[String]) -> Result<Option<RateCard>, String> {
     RateCard::from_json(&bytes).map(Some)
 }
 
+fn has_external_transport(args: &[String]) -> bool {
+    ["--cmd", "--image", "--http"]
+        .iter()
+        .any(|flag| flag_value(args, flag).is_some())
+}
+
+/// `--fault-plan <json>`: a frozen, validated fault plan for the external
+/// entrant, or `None` when the flag is absent. Read once and capped like the
+/// rate card; a malformed, unknown-field, out-of-bounds or unarmable plan is
+/// refused before anything launches.
+fn load_fault_plan(args: &[String]) -> Result<Option<FaultPlan>, String> {
+    use std::io::Read;
+    if !args.iter().any(|arg| arg == "--fault-plan") {
+        return Ok(None);
+    }
+    if !has_external_transport(args) {
+        return Err("--fault-plan requires an external-agent transport".into());
+    }
+    let path = flag_value(args, "--fault-plan")
+        .filter(|path| !path.starts_with("--"))
+        .ok_or("--fault-plan requires a JSON file path")?;
+    let file =
+        std::fs::File::open(path).map_err(|error| format!("cannot open fault plan: {error}"))?;
+    let mut bytes = Vec::new();
+    file.take(sharpebench_harness::fault_plan::MAX_FAULT_PLAN_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("cannot read fault plan: {error}"))?;
+    FaultPlan::from_json(&bytes).map(Some)
+}
+
+/// Upper bound on one `--retry-backoff` wait: ten minutes.
+const MAX_RETRY_BACKOFF_MS: u64 = 600_000;
+
+/// `--retry-backoff <ms,ms,...>`: the wait before each runtime retry of a cell,
+/// in whole milliseconds. Entry `i` precedes retry `i + 1` and the last entry
+/// holds. Absent, retries are immediate and nothing about the sweep changes.
+/// A list longer than the per-round retry budget is refused: its tail could
+/// never be used, yet it would still change the checkpoint identity.
+fn load_retry_backoff(args: &[String], max_retries: u32) -> Result<BackoffSchedule, String> {
+    if !args.iter().any(|arg| arg == "--retry-backoff") {
+        return Ok(BackoffSchedule::immediate());
+    }
+    if !has_external_transport(args) {
+        return Err("--retry-backoff requires an external-agent transport".into());
+    }
+    let raw = flag_value(args, "--retry-backoff")
+        .filter(|raw| !raw.starts_with("--"))
+        .ok_or(
+            "--retry-backoff requires a comma-separated list of milliseconds, such as 500,2000",
+        )?;
+    let mut delays = Vec::new();
+    for entry in raw.split(',') {
+        let millis = Some(entry)
+            .filter(|entry| !entry.is_empty() && entry.bytes().all(|b| b.is_ascii_digit()))
+            .and_then(|entry| entry.parse::<u64>().ok())
+            .filter(|millis| *millis <= MAX_RETRY_BACKOFF_MS)
+            .ok_or_else(|| {
+                format!(
+                    "--retry-backoff entries must be whole milliseconds in 0..={MAX_RETRY_BACKOFF_MS}, got `{entry}`"
+                )
+            })?;
+        delays.push(std::time::Duration::from_millis(millis));
+    }
+    if delays.len() > max_retries as usize {
+        return Err(format!(
+            "--retry-backoff lists {} waits, but a cell retries at most {max_retries} times per round",
+            delays.len()
+        ));
+    }
+    Ok(BackoffSchedule::from_delays(&delays))
+}
+
+/// Rank-neutral record of what a fault plan did to the sweep: the plan
+/// identity, the relaxations it declared to the entrant, per-fault
+/// denominators over the swept cells, and every attempt's evidence.
+fn fault_injection_report(
+    plan: &FaultPlan,
+    windows: &[sharpebench_sim::Window],
+    seeds: &[u64],
+    ledger: &sharpebench_harness::AttemptLedger,
+) -> serde_json::Value {
+    let cells: Vec<sharpebench_harness::fault_plan::CellId> = windows
+        .iter()
+        .flat_map(|window| {
+            seeds
+                .iter()
+                .map(move |&seed| sharpebench_harness::fault_plan::CellId::new(*window, seed))
+        })
+        .collect();
+    let evidence: Vec<&sharpebench_harness::fault_plan::InjectedFaults> = ledger
+        .attempts
+        .iter()
+        .filter_map(|record| record.injected_faults.as_ref())
+        .collect();
+    serde_json::json!({
+        "schema_version": "sharpebench.fault-injection-report.v1",
+        "plan_sha256": plan.digest(),
+        "declared_relaxations": plan.declared_relaxations(),
+        "entrant_declaration": plan.entrant_declaration(),
+        "denominators": plan.denominators_with_evidence(&cells, ledger),
+        "evidence": evidence,
+        "rank_neutral": true,
+    })
+}
+
+/// The attempt ledger a faulted checkpoint sweep persisted, read back for the
+/// report. Unfaulted sweeps report nothing and never read it.
+fn checkpoint_fault_ledger(
+    path: &std::path::Path,
+    plan: Option<&FaultPlan>,
+) -> Result<sharpebench_harness::AttemptLedger, String> {
+    match plan {
+        None => Ok(sharpebench_harness::AttemptLedger::default()),
+        Some(_) => sharpebench_harness::SweepCheckpoint::load(path)
+            .map(|checkpoint| checkpoint.attempt_ledger())
+            .map_err(|error| format!("cannot read the fault evidence back: {error}")),
+    }
+}
+
+fn print_fault_injection(label: &str, report: &serde_json::Value) {
+    eprintln!(
+        "fault injection for {label}: plan {} (rank-neutral)",
+        report["plan_sha256"].as_str().unwrap_or_default()
+    );
+    for row in report["denominators"].as_array().into_iter().flatten() {
+        eprintln!(
+            "  {}: assigned {} of {} cells, fired in {}",
+            row["fault_id"].as_str().unwrap_or_default(),
+            row["assigned"],
+            row["cells"],
+            row["fired"],
+        );
+    }
+}
+
 fn run_demo(args: &[String], json: bool) -> ExitCode {
     use sharpebench_sim::{
         Agent, BuyAndHold, CostModel, Dataset, ExternalAgent, HttpAgent, Momentum, Window,
@@ -1376,6 +1530,20 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
 
     let rate_card = match load_rate_card(args) {
         Ok(card) => card,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let fault_plan = match load_fault_plan(args) {
+        Ok(plan) => plan,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let backoff = match load_retry_backoff(args, EXTERNAL_MAX_RETRIES) {
+        Ok(schedule) => schedule,
         Err(error) => {
             eprintln!("error: {error}");
             return ExitCode::from(2);
@@ -1538,12 +1706,41 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
     // persists, surfaced as an explicit failure instead of a masked degrade-to-hold.
     // `--checkpoint <path>` (external agents only) makes the sweep resumable: a crash
     // mid-run resumes and finishes only the outstanding window × seed tasks.
+    //
+    // `--fault-plan` wraps every attempt in the seeded fault injector and
+    // `--retry-backoff` waits between runtime retries. Both are bound into the
+    // checkpoint invocation identity. Without them the faulted and backed-off
+    // drivers reduce to the unfaulted, immediate ones, byte for byte.
     const EXTERNAL_MAX_RETRIES: u32 = 2;
     let checkpoint = flag_value(args, "--checkpoint").map(std::path::PathBuf::from);
+    let expected_lens: Vec<usize> = windows
+        .iter()
+        .map(|window| window.end.saturating_sub(window.start))
+        .collect();
+    let mut fault_row: Option<serde_json::Value> = None;
+    if let (Some(plan), false) = (&fault_plan, json) {
+        eprintln!(
+            "fault plan {} armed; the entrant is told:\n{}",
+            plan.digest(),
+            plan.entrant_declaration()
+        );
+    }
     if let Some(addr) = flag_value(args, "--http") {
         let addr = addr.to_string();
         let label = format!("http:{addr}");
-        let res = if let Some(ckpt) = &checkpoint {
+        let http_attempt = |wi: usize, seed: u64| {
+            let mut agent = HttpAgent::new(addr.clone());
+            sharpebench_harness::fault_plan::modes::run_faulted_backtest_observed(
+                &data,
+                &mut agent,
+                windows[wi],
+                seed,
+                costs,
+                rate_card.as_ref(),
+                fault_plan.as_ref(),
+            )
+        };
+        let (res, ledger) = if let Some(ckpt) = &checkpoint {
             let contract = match checkpoint_contract(
                 args,
                 CheckpointExecution {
@@ -1554,6 +1751,8 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                     score_config: &cfg,
                     max_retries: EXTERNAL_MAX_RETRIES,
                     rate_card: rate_card.as_ref(),
+                    fault_plan: fault_plan.as_ref(),
+                    backoff: &backoff,
                 },
                 label.as_bytes(),
                 true,
@@ -1564,40 +1763,38 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
-            match sharpebench_harness::run_resumable_sweep_observed(
+            let res = match sharpebench_harness::run_resumable_sweep_with_backoff(
                 ckpt,
                 &label,
                 &contract,
                 &windows,
                 resume_policy,
-                |wi, seed| {
-                    let mut agent = HttpAgent::new(addr.clone());
-                    sharpebench_harness::run_external_backtest_observed(
-                        &data,
-                        &mut agent,
-                        windows[wi],
-                        seed,
-                        costs,
-                        rate_card.as_ref(),
-                    )
-                },
+                &backoff,
+                &mut sharpebench_harness::ThreadSleeper,
+                http_attempt,
             ) {
                 Ok(r) => r,
                 Err(e) => {
                     eprintln!("error: checkpoint sweep failed: {e}");
                     return ExitCode::FAILURE;
                 }
+            };
+            match checkpoint_fault_ledger(ckpt, fault_plan.as_ref()) {
+                Ok(ledger) => (res, ledger),
+                Err(error) => {
+                    eprintln!("error: {error}");
+                    return ExitCode::FAILURE;
+                }
             }
         } else {
-            sharpebench_harness::run_external_agent_observed(
+            sharpebench_harness::run_agent_resilient_faulted(
                 &label,
-                &data,
-                &windows,
+                &expected_lens,
                 &seeds,
-                costs,
                 EXTERNAL_MAX_RETRIES,
-                || Some(HttpAgent::new(addr.clone())),
-                rate_card.as_ref(),
+                &backoff,
+                &mut sharpebench_harness::ThreadSleeper,
+                http_attempt,
             )
         };
         if !report_transport_failures(
@@ -1610,6 +1807,9 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
         ) {
             return ExitCode::FAILURE;
         }
+        fault_row = fault_plan
+            .as_ref()
+            .map(|plan| fault_injection_report(plan, &windows, &seeds, &ledger));
         external_accounting = Some((label, res.attempts, res.monetary_cost));
         field.insert(0, res.submission);
     } else if let Some(image) = flag_value(args, "--image") {
@@ -1663,18 +1863,21 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
             &opts,
         ) {
             Ok(mut a) => {
-                let mut observed = sharpebench_harness::run_external_backtest_observed(
-                    &data,
-                    &mut a,
-                    windows[wi],
-                    seed,
-                    costs,
-                    rate_card.as_ref(),
-                );
-                observed.result = match a.finish() {
-                    Ok(oom_killed) => {
-                        sharpebench_harness::apply_oom_verdict(observed.result, oom_killed)
-                    }
+                let mut observed =
+                    sharpebench_harness::fault_plan::modes::run_faulted_backtest_observed(
+                        &data,
+                        &mut a,
+                        windows[wi],
+                        seed,
+                        costs,
+                        rate_card.as_ref(),
+                        fault_plan.as_ref(),
+                    );
+                observed.observation.result = match a.finish() {
+                    Ok(oom_killed) => sharpebench_harness::apply_oom_verdict(
+                        observed.observation.result,
+                        oom_killed,
+                    ),
                     Err(error) => {
                         // Post-exit inspection and named-container cleanup are
                         // part of the sandbox contract, not optional telemetry.
@@ -1688,7 +1891,10 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                 };
                 observed
             }
-            Err(_) => Err(sharpebench_harness::FailureKind::SpawnError).into(),
+            Err(_) => sharpebench_harness::AttemptObservation::from(Err(
+                sharpebench_harness::FailureKind::SpawnError,
+            ))
+            .into(),
         };
         // An unscanned run keeps its legacy material byte for byte. A scanned one
         // binds the policy digest, the configuration ID and the scanned scope, so
@@ -1709,7 +1915,7 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                 }
             }
         };
-        let res = if let Some(ckpt) = &checkpoint {
+        let (res, ledger) = if let Some(ckpt) = &checkpoint {
             let contract = match checkpoint_contract(
                 args,
                 CheckpointExecution {
@@ -1720,6 +1926,8 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                     score_config: &cfg,
                     max_retries: EXTERNAL_MAX_RETRIES,
                     rate_card: rate_card.as_ref(),
+                    fault_plan: fault_plan.as_ref(),
+                    backoff: &backoff,
                 },
                 &entrant_material,
                 false,
@@ -1738,12 +1946,14 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             }
-            match sharpebench_harness::run_resumable_sweep_observed(
+            let res = match sharpebench_harness::run_resumable_sweep_with_backoff(
                 ckpt,
                 &label,
                 &contract,
                 &windows,
                 resume_policy,
+                &backoff,
+                &mut sharpebench_harness::ThreadSleeper,
                 sandbox_attempt,
             ) {
                 Ok(r) => r,
@@ -1751,17 +1961,22 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                     eprintln!("error: checkpoint sweep failed: {e}");
                     return ExitCode::FAILURE;
                 }
+            };
+            match checkpoint_fault_ledger(ckpt, fault_plan.as_ref()) {
+                Ok(ledger) => (res, ledger),
+                Err(error) => {
+                    eprintln!("error: {error}");
+                    return ExitCode::FAILURE;
+                }
             }
         } else {
-            let expected_lens: Vec<usize> = windows
-                .iter()
-                .map(|window| window.end.saturating_sub(window.start))
-                .collect();
-            sharpebench_harness::run_agent_resilient_observed(
+            sharpebench_harness::run_agent_resilient_faulted(
                 &label,
                 &expected_lens,
                 &seeds,
                 EXTERNAL_MAX_RETRIES,
+                &backoff,
+                &mut sharpebench_harness::ThreadSleeper,
                 sandbox_attempt,
             )
         };
@@ -1775,6 +1990,9 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
         ) {
             return ExitCode::FAILURE;
         }
+        fault_row = fault_plan
+            .as_ref()
+            .map(|plan| fault_injection_report(plan, &windows, &seeds, &ledger));
         external_accounting = Some((label, res.attempts, res.monetary_cost));
         field.insert(0, res.submission);
     } else if let Some(cmd) = flag_value(args, "--cmd") {
@@ -1803,7 +2021,25 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
             return ExitCode::FAILURE;
         }
         let label = format!("cmd:{prog}");
-        let res = if let Some(ckpt) = &checkpoint {
+        let cmd_attempt = |wi: usize, seed: u64| {
+            let rest_refs: Vec<&str> = rest.iter().map(String::as_str).collect();
+            match ExternalAgent::spawn(&prog, &rest_refs) {
+                Ok(mut a) => sharpebench_harness::fault_plan::modes::run_faulted_backtest_observed(
+                    &data,
+                    &mut a,
+                    windows[wi],
+                    seed,
+                    costs,
+                    rate_card.as_ref(),
+                    fault_plan.as_ref(),
+                ),
+                Err(_) => sharpebench_harness::AttemptObservation::from(Err(
+                    sharpebench_harness::FailureKind::SpawnError,
+                ))
+                .into(),
+            }
+        };
+        let (res, ledger) = if let Some(ckpt) = &checkpoint {
             // The passed-through variable *names* are not the configuration:
             // the agent receives their current values. Binding names alone let
             // one checkpoint span AGENT_MODE=conservative and
@@ -1821,6 +2057,8 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                     score_config: &cfg,
                     max_retries: EXTERNAL_MAX_RETRIES,
                     rate_card: rate_card.as_ref(),
+                    fault_plan: fault_plan.as_ref(),
+                    backoff: &backoff,
                 },
                 entrant_material.as_bytes(),
                 true,
@@ -1831,46 +2069,38 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
-            match sharpebench_harness::run_resumable_sweep_observed(
+            let res = match sharpebench_harness::run_resumable_sweep_with_backoff(
                 ckpt,
                 &label,
                 &contract,
                 &windows,
                 resume_policy,
-                |wi, seed| {
-                    let rest_refs: Vec<&str> = rest.iter().map(String::as_str).collect();
-                    match ExternalAgent::spawn(&prog, &rest_refs) {
-                        Ok(mut a) => sharpebench_harness::run_external_backtest_observed(
-                            &data,
-                            &mut a,
-                            windows[wi],
-                            seed,
-                            costs,
-                            rate_card.as_ref(),
-                        ),
-                        Err(_) => Err(sharpebench_harness::FailureKind::SpawnError).into(),
-                    }
-                },
+                &backoff,
+                &mut sharpebench_harness::ThreadSleeper,
+                cmd_attempt,
             ) {
                 Ok(r) => r,
                 Err(e) => {
                     eprintln!("error: checkpoint sweep failed: {e}");
                     return ExitCode::FAILURE;
                 }
+            };
+            match checkpoint_fault_ledger(ckpt, fault_plan.as_ref()) {
+                Ok(ledger) => (res, ledger),
+                Err(error) => {
+                    eprintln!("error: {error}");
+                    return ExitCode::FAILURE;
+                }
             }
         } else {
-            sharpebench_harness::run_external_agent_observed(
+            sharpebench_harness::run_agent_resilient_faulted(
                 &label,
-                &data,
-                &windows,
+                &expected_lens,
                 &seeds,
-                costs,
                 EXTERNAL_MAX_RETRIES,
-                || {
-                    let rest_refs: Vec<&str> = rest.iter().map(String::as_str).collect();
-                    ExternalAgent::spawn(&prog, &rest_refs).ok()
-                },
-                rate_card.as_ref(),
+                &backoff,
+                &mut sharpebench_harness::ThreadSleeper,
+                cmd_attempt,
             )
         };
         if !report_transport_failures(
@@ -1883,6 +2113,9 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
         ) {
             return ExitCode::FAILURE;
         }
+        fault_row = fault_plan
+            .as_ref()
+            .map(|plan| fault_injection_report(plan, &windows, &seeds, &ledger));
         external_accounting = Some((label, res.attempts, res.monetary_cost));
         field.insert(0, res.submission);
     }
@@ -1913,11 +2146,15 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                     attempts: *attempts,
                     monetary_cost: cost,
                     artifact_preflight: preflight_row.clone(),
+                    fault_injection: fault_row.clone(),
                 }),
         ));
     } else {
         if let Some((label, attempts, cost)) = external_accounting {
             print_attempt_accounting(&label, attempts, &cost);
+            if let Some(report) = &fault_row {
+                print_fault_injection(&label, report);
+            }
         }
         print_board(&board);
     }
@@ -2045,7 +2282,22 @@ fn run_verify_trajectory(args: &[String], json: bool) -> ExitCode {
 
     if args.len() < 3 {
         eprintln!(
-            "usage: sharpebench verify-trajectory <trajectory.json> [--data <csv>] [--allow-unbound-trajectory] [--json]"
+            "usage: sharpebench verify-trajectory <trajectory.json> [--data <csv>] [--allow-unbound-trajectory] [--reexecute [--cmd \"<prog>\"|--http <addr>]] [--json]"
+        );
+        return ExitCode::from(2);
+    }
+    let reexecute = args.iter().any(|arg| arg == "--reexecute");
+    if !reexecute
+        && ["--cmd", "--http"]
+            .iter()
+            .any(|flag| args.iter().any(|arg| arg == flag))
+    {
+        eprintln!("error: --cmd and --http name the agent to re-execute; they require --reexecute");
+        return ExitCode::from(2);
+    }
+    if reexecute && args.iter().any(|arg| arg == "--allow-unbound-trajectory") {
+        eprintln!(
+            "error: --reexecute requires the strict trajectory contract and cannot be combined with --allow-unbound-trajectory"
         );
         return ExitCode::from(2);
     }
@@ -2072,6 +2324,9 @@ fn run_verify_trajectory(args: &[String], json: bool) -> ExitCode {
     };
     let costs = CostModel::default();
     let cfg = ScoreConfig::default();
+    if reexecute {
+        return run_reexecution(args, &data, &traj, costs, &cfg, json);
+    }
     let result = if args.iter().any(|arg| arg == "--allow-unbound-trajectory") {
         sharpebench_harness::verify_trajectory(&data, &traj, costs, &cfg)
     } else {
@@ -2098,14 +2353,42 @@ fn run_verify_trajectory(args: &[String], json: bool) -> ExitCode {
             }
         }
     };
+    emit_verification(&result, json, None);
+    ExitCode::SUCCESS
+}
+
+/// What a passed re-execution adds to the verification output.
+#[derive(Serialize)]
+struct ReexecutionSummary {
+    agent: String,
+    runs_reexecuted: usize,
+    decisions_compared: usize,
+}
+
+fn emit_verification(
+    result: &sharpebench_harness::VerificationResult,
+    json: bool,
+    reexecution: Option<&ReexecutionSummary>,
+) {
     if json {
-        emit_json(
-            &sharpebench_core::seal(
-                &result,
-                &sharpebench_harness::VERIFICATION_RESULT_VISIBILITY,
-            )
-            .expect("verification results serialize"),
-        );
+        let sealed =
+            sharpebench_core::seal(result, &sharpebench_harness::VERIFICATION_RESULT_VISIBILITY)
+                .expect("verification results serialize");
+        match reexecution {
+            None => emit_json(&sealed),
+            Some(reexecution) => {
+                #[derive(Serialize)]
+                struct Reexecuted<'a> {
+                    #[serde(flatten)]
+                    verification: &'a sharpebench_core::EntrantView,
+                    reexecution: &'a ReexecutionSummary,
+                }
+                emit_json(&Reexecuted {
+                    verification: &sealed,
+                    reexecution,
+                });
+            }
+        }
     } else {
         println!(
             "verified `{}` by replay — {} decisions across {} runs",
@@ -2121,8 +2404,173 @@ fn run_verify_trajectory(args: &[String], json: bool) -> ExitCode {
             other => println!("  declared mandate: {other:?}"),
         }
         println!("\n{}", result.verification_explanation);
+        if let Some(reexecution) = reexecution {
+            println!(
+                "\nRe-executed {} runs with a fresh `{}` agent on the same data, window and seed; all {} score-bearing decisions repeated.",
+                reexecution.runs_reexecuted, reexecution.agent, reexecution.decisions_compared
+            );
+        }
     }
-    ExitCode::SUCCESS
+}
+
+/// An external agent whose transport health is watched while it re-executes.
+/// A degrade-to-hold would otherwise surface as a divergence and be read as
+/// non-determinism; the first transport or protocol fault is recorded instead.
+struct WatchedAgent<A> {
+    inner: A,
+    fault: std::rc::Rc<std::cell::RefCell<Option<sharpebench_harness::FailureKind>>>,
+}
+
+impl<A: sharpebench_sim::Agent + sharpebench_sim::TransportDiagnostics> sharpebench_sim::Agent
+    for WatchedAgent<A>
+{
+    fn decide(
+        &mut self,
+        observation: &sharpebench_protocol::MarketObservation,
+    ) -> sharpebench_protocol::Decision {
+        let decision = self.inner.decide(observation);
+        if let Some(kind) = sharpebench_harness::transport_failure(self.inner.health()) {
+            self.fault.borrow_mut().get_or_insert(kind);
+        }
+        decision
+    }
+}
+
+/// `verify-trajectory --reexecute`: the strict checks, then every captured run
+/// re-executed with a fresh agent and compared decision by decision. The agent
+/// is `--cmd "<prog>"`, `--http <addr>`, or, with neither, the reference agent
+/// the trajectory names (`buy-and-hold` or `momentum`).
+fn run_reexecution(
+    args: &[String],
+    data: &sharpebench_sim::Dataset,
+    traj: &sharpebench_protocol::AgentTrajectory,
+    costs: sharpebench_sim::CostModel,
+    cfg: &ScoreConfig,
+    json: bool,
+) -> ExitCode {
+    use sharpebench_sim::{Agent, BuyAndHold, ExternalAgent, HoldAgent, HttpAgent, Momentum};
+
+    let fault = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let (label, mut make): (String, Box<dyn FnMut() -> Box<dyn Agent>>) = if let Some(cmd) =
+        flag_value(args, "--cmd")
+    {
+        let parts: Vec<String> = cmd.split_whitespace().map(String::from).collect();
+        let Some((prog, rest)) = parts.split_first() else {
+            eprintln!("error: --cmd needs a program to run");
+            return ExitCode::from(2);
+        };
+        let (prog, rest) = (prog.clone(), rest.to_vec());
+        eprintln!(
+                "warning: --reexecute --cmd runs `{prog}` directly on this host with NO sandbox, once per captured run. Only point it at an agent you trust."
+            );
+        let fault = fault.clone();
+        (
+            format!("cmd:{prog}"),
+            Box::new(move || {
+                let rest_refs: Vec<&str> = rest.iter().map(String::as_str).collect();
+                match ExternalAgent::spawn(&prog, &rest_refs) {
+                    Ok(agent) => Box::new(WatchedAgent {
+                        inner: agent,
+                        fault: fault.clone(),
+                    }) as Box<dyn Agent>,
+                    Err(_) => {
+                        fault
+                            .borrow_mut()
+                            .get_or_insert(sharpebench_harness::FailureKind::SpawnError);
+                        Box::new(HoldAgent)
+                    }
+                }
+            }),
+        )
+    } else if let Some(addr) = flag_value(args, "--http") {
+        let addr = addr.to_string();
+        let fault = fault.clone();
+        (
+            format!("http:{addr}"),
+            Box::new(move || {
+                Box::new(WatchedAgent {
+                    inner: HttpAgent::new(addr.clone()),
+                    fault: fault.clone(),
+                }) as Box<dyn Agent>
+            }),
+        )
+    } else {
+        match traj.agent_id.as_str() {
+            "buy-and-hold" => (
+                traj.agent_id.clone(),
+                Box::new(|| Box::new(BuyAndHold) as Box<dyn Agent>),
+            ),
+            "momentum" => (
+                traj.agent_id.clone(),
+                Box::new(|| Box::new(Momentum::default()) as Box<dyn Agent>),
+            ),
+            other => {
+                eprintln!(
+                        "error: --reexecute needs the agent to launch: `{other}` is not a reference agent, so pass --cmd \"<prog>\" or --http <addr>"
+                    );
+                return ExitCode::from(2);
+            }
+        }
+    };
+    let runner = match current_executable_sha256() {
+        Ok(digest) => digest,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let outcome = sharpebench_harness::verify_trajectory_reexecuted(
+        data,
+        traj,
+        costs,
+        cfg,
+        Some(&runner),
+        &mut make,
+    );
+    if let Some(kind) = fault.borrow().clone() {
+        let message = format!(
+            "re-execution of `{label}` hit a {kind:?} failure, so its decisions cannot be compared; no verdict on determinism was reached"
+        );
+        if json {
+            emit_json(&serde_json::json!({
+                "verified": false,
+                "error": "reexecution_transport_failure",
+                "failure": kind,
+                "agent": label,
+            }));
+        }
+        eprintln!("error: {message}");
+        return ExitCode::FAILURE;
+    }
+    match outcome {
+        Ok(result) => {
+            let summary = ReexecutionSummary {
+                agent: label,
+                runs_reexecuted: result.runs_replayed,
+                decisions_compared: result.decisions_replayed,
+            };
+            emit_verification(&result, json, Some(&summary));
+            ExitCode::SUCCESS
+        }
+        Err(sharpebench_harness::ReexecutionError::Refused(error)) => {
+            eprintln!("error: {error}");
+            ExitCode::FAILURE
+        }
+        Err(error @ sharpebench_harness::ReexecutionError::Diverged(_)) => {
+            if let sharpebench_harness::ReexecutionError::Diverged(divergence) = &error {
+                if json {
+                    emit_json(&serde_json::json!({
+                        "verified": false,
+                        "error": "reexecution_diverged",
+                        "agent": label,
+                        "divergence": divergence,
+                    }));
+                }
+            }
+            eprintln!("error: {error}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 fn run_score(path: &str, args: &[String], json: bool) -> ExitCode {
@@ -2379,6 +2827,7 @@ mod tests {
                 attempts: res.attempts,
                 monetary_cost: &res.monetary_cost,
                 artifact_preflight: None,
+                fault_injection: None,
             }),
         );
         let rows = observed.as_array_mut().unwrap();
@@ -2443,6 +2892,7 @@ mod tests {
                 attempts: res.attempts,
                 monetary_cost: &res.monetary_cost,
                 artifact_preflight: Some(preflight),
+                fault_injection: None,
             }),
         );
 
@@ -2581,6 +3031,8 @@ mod tests {
                 score_config: &ScoreConfig::default(),
                 max_retries: 2,
                 rate_card: None,
+                fault_plan: None,
+                backoff: &BackoffSchedule::immediate(),
             },
             b"http:127.0.0.1:9000",
             true,
@@ -2612,6 +3064,8 @@ mod tests {
                 score_config: &ScoreConfig::default(),
                 max_retries: 2,
                 rate_card: None,
+                fault_plan: None,
+                backoff: &BackoffSchedule::immediate(),
             },
             b"http:127.0.0.1:9000",
             true,
@@ -2648,6 +3102,8 @@ mod tests {
                     score_config: &ScoreConfig::default(),
                     max_retries: 2,
                     rate_card: None,
+                    fault_plan: None,
+                    backoff: &BackoffSchedule::immediate(),
                 },
                 invocation,
                 true,
@@ -2716,6 +3172,8 @@ mod tests {
                     score_config: &ScoreConfig::default(),
                     max_retries: 2,
                     rate_card: None,
+                    fault_plan: None,
+                    backoff: &BackoffSchedule::immediate(),
                 },
                 b"entrant",
                 true,

@@ -131,6 +131,18 @@ all outside raw-byte scope. The policy schema, the refusal order, the capture
 limits and the checkpoint identity are in
 [entrant image preflight](image-preflight.md).
 
+`--runtime-allowlist <allowlist.json>` adds the other polarity: a leg of the
+same preflight that refuses every entry of the container export whose path the
+allowlist (`sharpebench.runtime-allowlist.v1`, a list of relative `paths`) does
+not admit. It requires `--scan-policy` and `--image` and is refused without
+them. It runs only after the scan found the export clean, and an image it admits
+must then pass a one-observation functional probe, with its container removal
+verified, before the entrant launches. The allowlist digest is folded into the
+report's `policy_sha256`, so a changed allowlist is a different checkpoint
+identity. An allowlist result says which paths the export holds, not what the
+bytes under an admitted path are; see
+[entrant image preflight](image-preflight.md) for the path rules and the probe.
+
 ### Frozen token rates
 
 Add `--rate-card <json>` to an external `run` to quote token usage under one
@@ -188,6 +200,76 @@ decisions, returns, scores, eligibility or ordering.
 
 See [The arena](arena.md#sandboxed-entrants) for the boundary and acceptance
 evidence.
+
+### Seeded fault injection
+
+Add `--fault-plan <plan.json>` to an external `run` (`--http`, `--image` or
+`--cmd`, with or without `--checkpoint`) to run the entrant under a frozen,
+seeded fault plan. The injector sits at the entrant boundary: it changes what
+the entrant is shown and which of its submissions is accepted, never the book
+the engine executes or the returns the scorer reads.
+
+```json
+{
+  "schema_version": "sharpebench.fault-plan.v1",
+  "seed": 11,
+  "declared_relaxations": ["read_your_writes", "submission_acceptance"],
+  "faults": [
+    {"id": "lag", "cohort_ppm": 500000,
+     "fault": {"mode": "projection_lag", "max_lag_steps": 3}},
+    {"id": "limit", "cohort_ppm": 1000000,
+     "fault": {"mode": "rate_limit", "max_rejected_presentations": 4}}
+  ]
+}
+```
+
+The armable modes are `projection_lag`, `amount_sign` and `rate_limit`.
+`limit_before_sort` is recorded but refused, because the observation contract
+has no paged read. Each fault is assigned to a share of cells (`cohort_ppm`,
+parts per million) by a draw over the plan digest, and every per-mode parameter
+within its bound (at most 64) is drawn the same way, so the whole schedule is
+reproducible from the published plan. `declared_relaxations` must list exactly
+the relaxations the faults use; the text an entrant is owed for each one is in
+[Submitting an agent](submitting.md#faulted-observations-under-a-declared-plan).
+
+The plan is read once, capped at 64 KiB and validated before anything
+launches. Malformed JSON, an unknown field, a bound out of range, a relaxation
+declared but unused or used but undeclared, and an unarmable mode are refused
+with exit code 2. Its digest is bound into the checkpoint invocation identity,
+so a checkpoint written under one plan is refused under a changed plan, or
+under none, without being overwritten. Reformatting the same plan does not
+change the digest.
+
+On success the external row carries a rank-neutral `fault_injection` object
+beside `attempt_accounting`: the plan digest, the declared relaxations, the
+declaration text, per-fault denominators (`cells`, `assigned`, and `fired`,
+the distinct cells whose evidence shows the fault firing) and every attempt's
+evidence with its process grades. Under `--checkpoint` the same evidence is
+persisted on each attempt record of the ledger. Human output prints the
+declaration before the sweep and the denominators on stderr. No grade is an
+input to a return, score, rank or pass^k pool, and an entrant whose decisions
+do not depend on the perturbed fields scores exactly as it does unfaulted.
+Without the flag nothing changes: no field is added and every output is
+byte-identical.
+
+### Retry backoff
+
+Add `--retry-backoff <ms,ms,...>` to an external `run` to wait between runtime
+retries of a cell instead of retrying at once. Entry `i` is the wait in whole
+milliseconds before retry `i`, and the last entry holds. A cell retries at most
+twice per round, so at most two entries are accepted; each is at most 600000
+(ten minutes). An empty entry, a sign, a fraction or an out-of-range value is
+refused with exit code 2 before launch.
+
+Each scheduled wait is recorded on the failed attempt it follows
+(`backoff_after`), kept out of that attempt's duration, and totalled as
+`attempt_accounting.attempts.backoff_ns_total`. Under `--checkpoint` the wait
+is saved before the harness sleeps, retries are numbered within the cell's
+round (a `--retry-runtime-failures` round starts the schedule again), and the
+schedule is bound into the checkpoint invocation identity: a checkpoint is
+refused under a changed schedule or under none. Agent faults never wait.
+Without the flag, or with an all-zero schedule, retries are immediate, nothing
+is recorded and every output is byte-identical.
 
 ## `score`
 
@@ -273,6 +355,32 @@ reordered, shortened, or cross-environment evidence is refused.
 does not claim that the artifact reproduces its original execution conditions.
 See [Evidence contracts](evidence-contracts.md).
 
+Replaying recorded decisions cannot tell whether the agent that made them is
+deterministic. `--reexecute` adds that check: after the strict checks pass,
+every captured run is executed again with a fresh agent on the same data,
+window and seed, and each score-bearing decision (orders and cost; not
+`reasoning` or `rationale`) is compared with the recorded one. The agent is
+`--cmd "<prog>"` (host execution, with a warning), `--http <addr>`, or, with
+neither, the reference agent the trajectory names (`buy-and-hold` or
+`momentum`).
+
+```bash
+sharpebench verify-trajectory traj.json --data data.csv --reexecute --http 127.0.0.1:8080 --json
+```
+
+A pass prints the usual verification plus a `reexecution` object (`agent`,
+`runs_reexecuted`, `decisions_compared`). The first divergence exits 1 with
+`"error": "reexecution_diverged"` and the typed divergence (`run`, `step`,
+`observation_id`, and the `recorded` and `reexecuted` decisions). A transport,
+protocol or spawn failure during re-execution exits 1 as
+`reexecution_transport_failure`, not as a divergence, because a degraded
+transport says nothing about determinism. `--reexecute` refuses
+`--allow-unbound-trajectory` and a trajectory whose agent is not a reference
+agent unless `--cmd` or `--http` names it; `--cmd` and `--http` are refused
+without `--reexecute`. Each is exit code 2. `capture` records reference agents;
+a trajectory of an external entrant comes from
+`sharpebench_harness::run_agent_capture`.
+
 ## `regime`
 
 ```bash
@@ -343,9 +451,10 @@ anyone notices, and a zero ceiling would refuse every call. A missing
 credential, a malformed manifest, inline key material and a journal bound to
 another route table each refuse with a nonzero exit code.
 
-The report labels its own provenance: `usage_source` is `host_observed`, which
-is not verified billing, and the provider transport is operator supplied
-because none ships in this build. See
+The report labels its own provenance: `usage_provenance` is
+`host_observed_not_verified_billing`, and `provider_transport` is
+`operator_supplied_none_ships_in_this_build` because no provider transport
+ships in this build. See
 [the host-observed model gateway](model-gateway.md) for the protocol, the bound
 table and the reservation and settlement rules.
 
