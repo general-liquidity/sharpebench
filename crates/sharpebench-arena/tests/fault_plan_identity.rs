@@ -10,7 +10,9 @@ use sharpebench_arena::{
     BOARD_MD_FILE, FAULTED_WINDOW_SCHEMA_VERSION, STATE_FILE, WINDOWS_DIR, WINDOW_FILE,
     WINDOW_SCHEMA_VERSION,
 };
-use sharpebench_attest::{content_digest, make_commitment, PublicChain};
+use sharpebench_attest::{
+    content_digest, make_commitment, make_commitment_under_fault_plan, PublicChain,
+};
 use sharpebench_core::{AgentSubmission, Run, ScoreConfig};
 
 fn temp_dir(tag: &str) -> PathBuf {
@@ -65,13 +67,17 @@ fn entry(agent_id: &str, artifact: &str, plan: Option<String>) -> RevealedEntry 
     }
 }
 
-/// Open `id` under `plan`, commit one entrant and advance to the reveal epoch.
+/// Open `id` under `plan`, commit one entrant (binding the plan, as a faulted
+/// window's commitment must) and advance to the reveal epoch.
 fn committed_window(dir: &Path, id: &str, plan: Option<String>) -> (Arena, String) {
     let mut arena = Arena::init(dir).unwrap();
-    open(&mut arena, id, plan).unwrap();
+    open(&mut arena, id, plan.clone()).unwrap();
     let artifact = content_digest(b"fault-plan-entrant");
     arena
-        .register_entry(id, make_commitment("alpha", id, &artifact, "salt-alpha"))
+        .register_entry(
+            id,
+            make_commitment_under_fault_plan("alpha", id, &artifact, "salt-alpha", plan.as_deref()),
+        )
         .unwrap();
     let reveal = arena.window(id).unwrap().data_reveal_epoch;
     arena.advance(reveal).unwrap();
@@ -369,6 +375,76 @@ fn a_supersession_records_the_replacement_plan_and_refuses_a_mismatch() {
         assert!(
             error.contains("replacement `new` fault plan digest mismatch"),
             "{tag}: {error}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[test]
+fn a_commitment_for_another_plan_is_refused_at_reveal() {
+    // The entrant's pre-deadline commitment binds the plan, so an entry that
+    // declares the window's plan at score time but committed under another
+    // plan, or under none, is refused and recorded like any failed reveal. An
+    // honest entrant committed under the window's plan scores beside it.
+    let window_plan = plan_digest("window");
+    let cases = [
+        (
+            "different",
+            Some(window_plan.clone()),
+            Some(plan_digest("other")),
+        ),
+        ("none-on-faulted", Some(window_plan.clone()), None),
+        ("plan-on-unfaulted", None, Some(window_plan.clone())),
+    ];
+    for (tag, window, committed) in cases {
+        let dir = temp_dir(&format!("commit-{tag}"));
+        let mut arena = Arena::init(&dir).unwrap();
+        open(&mut arena, "w1", window.clone()).unwrap();
+        let artifact = content_digest(b"fault-plan-entrant");
+        let honest = make_commitment_under_fault_plan(
+            "alpha",
+            "w1",
+            &artifact,
+            "salt-alpha",
+            window.as_deref(),
+        );
+        let mismatched = make_commitment_under_fault_plan(
+            "beta",
+            "w1",
+            &artifact,
+            "salt-beta",
+            committed.as_deref(),
+        );
+        if committed.is_none() {
+            assert_eq!(
+                mismatched,
+                make_commitment("beta", "w1", &artifact, "salt-beta")
+            );
+        }
+        arena.register_entry("w1", honest).unwrap();
+        arena.register_entry("w1", mismatched).unwrap();
+        let reveal = arena.window("w1").unwrap().data_reveal_epoch;
+        arena.advance(reveal).unwrap();
+
+        let scores = arena
+            .reveal_and_score(
+                "w1",
+                &write_dataset(&dir),
+                &[
+                    entry("alpha", &artifact, window.clone()),
+                    entry("beta", &artifact, window.clone()),
+                ],
+            )
+            .unwrap();
+        assert_eq!(scores.len(), 1, "{tag}");
+        assert_eq!(scores[0].agent_id, "alpha", "{tag}");
+        let reloaded = Arena::load(&dir).unwrap();
+        let refusals = &reloaded.window("w1").unwrap().refusals;
+        assert_eq!(refusals.len(), 1, "{tag}");
+        assert_eq!(refusals[0].agent_id, "beta", "{tag}");
+        assert_eq!(
+            refusals[0].reason, "reveal does not match commitment",
+            "{tag}"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -60,7 +60,9 @@ pub struct Commitment {
     pub agent_id: String,
     pub target_window: String,
     /// Hex SHA-256 of [`framed_preimage`] over [`COMMITMENT_DOMAIN`] and
-    /// `agent_id`, `target_window`, `artifact_digest`, `salt`, in that order.
+    /// `agent_id`, `target_window`, `artifact_digest`, `salt`, in that order,
+    /// then the target window's fault plan digest when the window has one
+    /// (see [`make_commitment_under_fault_plan`]).
     pub commit_hash: String,
 }
 
@@ -82,11 +84,27 @@ pub fn make_commitment(
     artifact_digest: &str,
     salt: &str,
 ) -> Commitment {
+    make_commitment_under_fault_plan(agent_id, target_window, artifact_digest, salt, None)
+}
+
+/// Build a commitment for a window scored under a fault plan.
+///
+/// The plan digest is bound the way the target window is: as one more framed
+/// field, appended only when the window has a plan. `None` is
+/// [`make_commitment`] byte for byte. [`framed_preimage`] commits to the field
+/// count, so a commitment made under a plan never verifies under none, and a
+/// commitment made under none never verifies under a plan.
+pub fn make_commitment_under_fault_plan(
+    agent_id: &str,
+    target_window: &str,
+    artifact_digest: &str,
+    salt: &str,
+    fault_plan_sha256: Option<&str>,
+) -> Commitment {
+    let mut fields = vec![agent_id, target_window, artifact_digest, salt];
+    fields.extend(fault_plan_sha256);
     let mut h = Sha256::new();
-    h.update(framed_preimage(
-        COMMITMENT_DOMAIN,
-        &[agent_id, target_window, artifact_digest, salt],
-    ));
+    h.update(framed_preimage(COMMITMENT_DOMAIN, &fields));
     Commitment {
         agent_id: agent_id.to_string(),
         target_window: target_window.to_string(),
@@ -102,7 +120,26 @@ pub fn verify_commitment(
     artifact_digest: &str,
     salt: &str,
 ) -> bool {
-    make_commitment(agent_id, target_window, artifact_digest, salt) == *c
+    verify_commitment_under_fault_plan(c, agent_id, target_window, artifact_digest, salt, None)
+}
+
+/// [`verify_commitment`] for a window scored under `fault_plan_sha256`: the
+/// commitment must have bound exactly that plan, or no plan when it is `None`.
+pub fn verify_commitment_under_fault_plan(
+    c: &Commitment,
+    agent_id: &str,
+    target_window: &str,
+    artifact_digest: &str,
+    salt: &str,
+    fault_plan_sha256: Option<&str>,
+) -> bool {
+    make_commitment_under_fault_plan(
+        agent_id,
+        target_window,
+        artifact_digest,
+        salt,
+        fault_plan_sha256,
+    ) == *c
 }
 
 /// SHA-256 hex digest of arbitrary content — used to bind a leaderboard entry to
