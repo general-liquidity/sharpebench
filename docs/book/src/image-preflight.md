@@ -160,6 +160,35 @@ admits. Refused entries are reported by count and by archive-order index, at
 most 16 indices, never by name: the report can be published, and a name can be
 exactly what a policy protects.
 
+**What the daemon adds.** Every container export also holds entries Docker's
+init layer puts in each container it creates, whatever the image holds. The
+live CI job measured them on Docker 28.0.4 (overlay2, cgroup v2) against the
+pinned Alpine fixture, by comparing the export with the image's own layers from
+`docker save`:
+
+| Entry | In the export | What the image held |
+|---|---|---|
+| `.dockerenv` | empty file | nothing |
+| `dev/console` | empty file | nothing |
+| `dev/pts/`, `dev/shm/` | directories | nothing |
+| `etc/resolv.conf` | empty file | nothing |
+| `etc/hostname` | empty file | a 10-byte file |
+| `etc/hosts` | empty file | a 79-byte file |
+| `etc/mtab` | link to `/proc/mounts` | a link to `../proc/mounts` |
+
+The daemon's init-layer table also creates `dev/`, `etc/`, `proc/` and `sys/`
+when an image lacks them; the fixture has all four, so that part is read from
+the table rather than observed. These entries are admitted without
+being listed, and only in that shape: an empty regular file, a directory, or
+`etc/mtab` linking to `/proc/mounts`. The same path carrying bytes, of another
+type or linking elsewhere is image content and still refuses by index, and
+nothing below `proc/`, `sys/`, `dev/pts/` or `dev/shm/` is admitted by this
+rule. `runtime_allowlist.docker_init_entries` counts the entries admitted this
+way. An allowlist therefore names the image's own paths only. The image's own
+bytes at `etc/hostname` and `etc/hosts` are replaced in the export, so the scan
+does not read them; a started container sees the daemon's bind-mounted files at
+those paths, not the image's.
+
 **The functional probe.** An image that passes every scan leg and the
 allowlist, with its snapshot container removal verified, is then run once, from
 its configuration ID and under the hardened launch a
@@ -176,7 +205,8 @@ started.
 
 With an allowlist, the report gains three fields: `scan_policy_sha256` (the scan
 policy's own digest), `runtime_allowlist` (`allowlist_sha256`, `entries`,
-`outside_allowlist`, `outside_indices`, `complete`) and `functional_probe`
+`docker_init_entries`, `outside_allowlist`, `outside_indices`, `complete`) and
+`functional_probe`
 (`observation_sha256`, `passed`, `refusal`, `cleanup_verified`), and a launch
 additionally requires the allowlist to admit every entry and the probe to pass
 with its cleanup verified. `policy_sha256` becomes a digest over the scan policy
@@ -189,11 +219,21 @@ What this does not prove: an allowlist result says which paths the export
 holds. It says nothing about the bytes under an admitted path, which remain the
 scan policy's business, and it does not make the image reproducible. A passing
 probe says the admitted image answered one synthetic observation validly; it is
-not a behavioural test of the entrant. The export of a created container also
-holds entries the daemon itself adds, and an allowlist must name those too.
-Which ones a given daemon adds has not been measured against a live daemon, and
-neither the allowlist nor the probe has run against one, so the first live use
-should expect to read the refused indices once.
+not a behavioural test of the entrant. The daemon-added entries above were
+measured on one daemon version with one storage driver; a daemon that adds an
+entry outside that table refuses it by index rather than admitting it, and the
+live test fails, which is the signal to measure again.
+
+**Live verification.** Both legs ran against the CI daemon with the pinned
+fixture. An allowlist naming exactly the fixture's 519 own paths admitted all
+524 export entries (5 as daemon entries). The fixture's own entrypoint is
+`/bin/sh` reading the observation as a script, and its probe refused with
+`no_decision`, cleanup verified: the probe runs the image rather than assuming
+it works. The same filesystem committed with an entrypoint that answers one
+observation with a hold passed the probe and authorized the launch. An
+allowlist missing only `etc/alpine-release` refused with one entry outside at
+index 89, the position of that entry in an independent export of the same
+image, did not start the image and did not name the entry in the report.
 
 ## Checkpoint identity
 
@@ -259,13 +299,16 @@ bytes, under the limits the policy declared. It is not:
 Sixteen preflight unit tests cover the refusal, cleanup and capture paths
 against an injected transport. Eight CLI tests cover the shipped binary's
 argument surface, and one board regression proves that a successful scanned run
-emits an array with preflight metadata on the entrant row only. Eight further
-unit tests cover the runtime allowlist and the functional probe against the
-same injected transport; the live leg does not exercise either. Nine
-integration tests, a deadline unit test and thirteen isolated mutations cover
-the TAR reader. The live leg,
-`artifact_preflight::tests::live_docker_image_preflight`, runs by exact name in
-the live-container CI job against a digest-pinned Alpine fixture.
+emits an array with preflight metadata on the entrant row only. Nine further
+unit tests cover the runtime allowlist, the daemon's init-layer entries and the
+functional probe against the same injected transport. Nine integration tests, a
+deadline unit test and thirteen isolated mutations cover the TAR reader. Three
+live legs run by exact name in the live-container CI job against a
+digest-pinned Alpine fixture:
+`artifact_preflight::tests::live_docker_image_preflight` (scan only),
+`live_runtime_allowlist_admits_the_fixture_and_its_probe_passes` (the
+daemon-added measurement, the allowlist and the probe) and
+`live_runtime_allowlist_refuses_an_omitted_path_by_index`.
 
 That is evidence for the named paths on one runner and one benign fixture. It
 is not a general containment or contamination result.
