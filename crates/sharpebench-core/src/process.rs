@@ -1125,6 +1125,43 @@ mod tests {
         );
     }
 
+    /// The ambiguity marker only means something for a write still awaiting an
+    /// acknowledgment. An order that was already acknowledged has an observed
+    /// outcome, so a later marker is an out-of-order record rather than fresh
+    /// ambiguity, and it must not license a blind resubmission afterwards.
+    #[test]
+    fn an_ambiguity_marker_after_an_observed_acknowledgment_is_out_of_order() {
+        let mut events = authorized_prefix(btc());
+        events.push(step(btc(), Phase::Submission { order: oid("o1") }));
+        events.push(step(btc(), Phase::Acknowledgment { order: oid("o1") }));
+        events.push(step(
+            btc(),
+            Phase::AcknowledgmentUnobserved { order: oid("o1") },
+        ));
+        events.push(step(btc(), Phase::Submission { order: oid("o2") }));
+
+        let r = check_lifecycle(&Trace { events });
+        assert!(
+            r.violations.iter().any(|v| matches!(
+                v,
+                OrderingViolation::OutOfOrderTransition {
+                    order,
+                    attempted: PhaseKind::AcknowledgmentUnobserved,
+                    current: Some(PhaseKind::Acknowledgment),
+                } if *order == oid("o1")
+            )),
+            "an acknowledged order has an observed outcome and cannot become ambiguous: {:?}",
+            r.violations
+        );
+        assert!(
+            !r.violations
+                .iter()
+                .any(|v| matches!(v, OrderingViolation::AmbiguousWriteRetriedWithoutKey { .. })),
+            "ambiguity was never established, so the resubmission is not a blind retry: {:?}",
+            r.violations
+        );
+    }
+
     #[test]
     fn blind_retry_after_an_unobserved_acknowledgment_blocks() {
         let mut events = authorized_prefix(btc());
