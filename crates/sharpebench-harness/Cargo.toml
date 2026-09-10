@@ -17,6 +17,8 @@ serde = { version = "1", features = ["derive"] }
 # + attestation). serde_json's default parser can land 1 ULP off; this feature makes
 # parse the exact inverse of serialize.
 serde_json = { version = "1", features = ["float_roundtrip"] }
+sha2 = "0.10"
+tar = { version = "0.4.46", default-features = false }
 
 # Examples are not test targets by default, so a `#[test]` inside one is compiled
 # and never run. This example is the bridge to the sibling SharpeArena repository
@@ -25,6 +27,13 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 # example it belongs to.
 [[example]]
 name = "local_open_weight_field_eval"
+test = true
+
+# Same reason: the readiness preflight is the part that has to hold, and a
+# `#[test]` inside an example is compiled and never run unless the target opts
+# into the test harness.
+[[example]]
+name = "llm_field_eval"
 test = true
 
 [lints]

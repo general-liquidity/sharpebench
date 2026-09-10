@@ -7,8 +7,12 @@
 #![forbid(unsafe_code)]
 
 pub mod accounting;
+pub mod artifact_scan;
+pub mod artifact_tar;
 pub mod checkpoint;
 pub mod failure;
+pub mod gateway;
+pub mod gateway_journal;
 pub mod perturb;
 
 pub use checkpoint::{
