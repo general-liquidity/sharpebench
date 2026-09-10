@@ -49,6 +49,9 @@ use crate::gateway_journal::{
     UnknownCostReason,
 };
 
+#[path = "gateway_serve.rs"]
+pub mod serve;
+
 pub const GATEWAY_PROTOCOL: &str = "sharpebench.model-gateway.v1";
 
 /// Field names an entrant must never be able to set. They are refused by name
@@ -105,6 +108,10 @@ pub struct GatewayLimits {
     pub provider_read_timeout: Duration,
     /// Wall-clock ceiling for one dispatch, connect and every read included.
     pub provider_call_timeout: Duration,
+    /// Gateway requests an entrant may make while answering one observation. A
+    /// circuit breaker against a runaway loop, not a budget: it resets with
+    /// every observation, and the sweep-scoped budget is the journal's.
+    pub max_requests_per_decision: u32,
 }
 
 impl Default for GatewayLimits {
@@ -123,6 +130,7 @@ impl Default for GatewayLimits {
             max_concurrent_calls: 4,
             provider_read_timeout: Duration::from_secs(60),
             provider_call_timeout: Duration::from_secs(180),
+            max_requests_per_decision: 32,
         }
     }
 }
@@ -393,6 +401,7 @@ pub enum GatewayErrorKind {
     ProviderUnavailable,
     ProviderTimeout,
     ProviderResponseInvalid,
+    DecisionRequestLimit,
 }
 
 impl GatewayErrorKind {
@@ -420,6 +429,7 @@ impl GatewayErrorKind {
             Self::ProviderUnavailable => "the provider could not be reached",
             Self::ProviderTimeout => "the provider did not answer within the bound",
             Self::ProviderResponseInvalid => "the provider answer could not be read",
+            Self::DecisionRequestLimit => "the decision made too many gateway requests",
         }
     }
 }
