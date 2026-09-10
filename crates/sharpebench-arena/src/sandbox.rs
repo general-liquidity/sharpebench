@@ -1005,23 +1005,8 @@ fn run_external_sandboxed_with_command(
     opts: &SandboxOptions,
     container_command: Option<&[&str]>,
 ) -> Result<SandboxedAgent, SandboxError> {
-    // The refusal logic is shared with `resolve_launch`; the sandboxed branch
-    // then swaps `--rm` for a fresh name so post-exit state stays inspectable.
-    let launch = resolve_launch(docker_available(), image, opts)?;
-    let (program, args, container) = match launch {
-        Launch::Docker { program, .. } => {
-            let name = fresh_container_name();
-            let launch = HardenedLaunch::new(image, &Retention::Inspectable(name.clone()));
-            let args = match container_command {
-                Some(command) => {
-                    launch.into_args_with_command(command.iter().map(|arg| (*arg).to_string()))
-                }
-                None => launch.into_args(),
-            };
-            (program, args, Some(name))
-        }
-        Launch::Unsandboxed { program, args } => (program, args, None),
-    };
+    let (program, args, container) =
+        plan_launch(docker_available(), image, opts, container_command)?;
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
     // The Docker branch spawns `spawn_inheriting`, deliberately: the child is
     // the trusted `docker` client, which needs its `DOCKER_HOST` /
@@ -1047,6 +1032,76 @@ fn run_external_sandboxed_with_command(
         wait_for_container_running(name)?;
     }
     Ok(agent)
+}
+
+/// The program, argv and container name for one entrant launch.
+fn plan_launch(
+    docker_present: bool,
+    image: &str,
+    opts: &SandboxOptions,
+    container_command: Option<&[&str]>,
+) -> Result<(String, Vec<String>, Option<String>), SandboxError> {
+    // The refusal logic is shared with `resolve_launch`; the sandboxed branch
+    // then swaps `--rm` for a fresh name so post-exit state stays inspectable.
+    let launch = resolve_launch(docker_present, image, opts)?;
+    Ok(match launch {
+        Launch::Docker { program, .. } => {
+            let name = fresh_container_name();
+            let launch = HardenedLaunch::new(image, &Retention::Inspectable(name.clone()));
+            let args = match container_command {
+                Some(command) => {
+                    launch.into_args_with_command(command.iter().map(|arg| (*arg).to_string()))
+                }
+                None => launch.into_args(),
+            };
+            (program, args, Some(name))
+        }
+        Launch::Unsandboxed { program, args } => (program, args, None),
+    })
+}
+
+/// The launch for an entrant whose model calls go through the host's model
+/// gateway (`sharpebench_harness::gateway::serve`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GatewayLaunch {
+    pub program: String,
+    pub args: Vec<String>,
+    /// The container name when `program` is the Docker client. `None` only for
+    /// an opted-in unsandboxed local run, where `program` is the entrant itself
+    /// and must be started with a cleared environment.
+    pub container: Option<String>,
+}
+
+/// The hardened launch [`run_external_sandboxed`] uses, `--network none` and
+/// all, handed back instead of spawned so the host can own the entrant's stdio
+/// and serve its model calls on that pipe. The gateway adds no network: model
+/// traffic leaves the container the way decisions do. After spawning it, call
+/// [`wait_until_running`]; after the run, read the resource verdict and remove
+/// the container with [`DockerCli`], as [`SandboxedAgent::finish`] does.
+pub fn gateway_launch(image: &str, opts: &SandboxOptions) -> Result<GatewayLaunch, SandboxError> {
+    plan_gateway_launch(docker_available(), image, opts)
+}
+
+/// [`gateway_launch`] for a caller that has already established, through its
+/// own trusted Docker transport, whether a daemon is present. Pure: it spawns
+/// nothing and asks Docker nothing.
+pub fn plan_gateway_launch(
+    docker_present: bool,
+    image: &str,
+    opts: &SandboxOptions,
+) -> Result<GatewayLaunch, SandboxError> {
+    let (program, args, container) = plan_launch(docker_present, image, opts, None)?;
+    Ok(GatewayLaunch {
+        program,
+        args,
+        container,
+    })
+}
+
+/// Wait until Docker, not merely its client process, says the named entrant
+/// container is running.
+pub fn wait_until_running(name: &str) -> Result<(), SandboxError> {
+    wait_for_container_running(name)
 }
 
 #[cfg(test)]
@@ -1161,6 +1216,40 @@ mod tests {
                 image.as_str()
             ]
         );
+    }
+
+    /// The gateway attaches to the launch, not to the network: the entrant a
+    /// gateway serves gets the same hardened, network-disabled, inspectable
+    /// container as any other, and no flag that could forward host environment
+    /// into it. The refusals are the shared ones.
+    #[test]
+    fn a_gateway_launch_is_the_hardened_network_disabled_launch() {
+        let image = format!("fixture@sha256:{}", "a".repeat(64));
+        let launch = plan_gateway_launch(true, &image, &SandboxOptions::default())
+            .expect("a pinned image launches");
+        assert_eq!(launch.program, "docker");
+        let name = launch.container.clone().expect("a named container");
+        assert!(name.starts_with("sharpebench-agent-"));
+        let expected = HardenedLaunch::new(&image, &Retention::Inspectable(name)).into_args();
+        assert_eq!(launch.args, expected);
+        assert!(launch
+            .args
+            .windows(2)
+            .any(|pair| pair == ["--network", "none"]));
+        assert!(!launch
+            .args
+            .iter()
+            .any(|arg| arg == "-e" || arg.starts_with("--env") || arg == "--network=host"));
+        assert_eq!(launch.args.last(), Some(&image), "the image is last");
+
+        assert!(matches!(
+            plan_gateway_launch(true, "fixture:latest", &SandboxOptions::default()),
+            Err(SandboxError::InvalidConfig(_))
+        ));
+        assert!(matches!(
+            plan_gateway_launch(false, &image, &SandboxOptions::default()),
+            Err(SandboxError::DockerUnavailable(_))
+        ));
     }
 
     /// The agent launch must keep post-exit state: `--rm` would let the daemon

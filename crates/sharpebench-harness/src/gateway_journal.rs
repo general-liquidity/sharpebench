@@ -119,6 +119,11 @@ pub struct JournalIdentity {
     /// digests and destinations. Never credentials.
     pub route_table_sha256: String,
     pub budget: GatewayBudget,
+    /// The sweep this journal pays for, when a sweep owns it: a digest over the
+    /// entrant id and the checkpoint contract. Absent for a journal no sweep
+    /// is bound to, which keeps such a document byte for byte what it was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sweep_sha256: Option<String>,
 }
 
 impl JournalIdentity {
@@ -127,7 +132,16 @@ impl JournalIdentity {
             schema_version: JOURNAL_SCHEMA_VERSION.to_string(),
             route_table_sha256,
             budget,
+            sweep_sha256: None,
         }
+    }
+
+    /// Bind this identity to one sweep. A journal written under it then
+    /// refuses to resume under any other sweep, even one with the same routes
+    /// and budget, so one sweep's spend cannot be reported as another's.
+    pub fn for_sweep(mut self, sweep_sha256: String) -> Self {
+        self.sweep_sha256 = Some(sweep_sha256);
+        self
     }
 }
 
@@ -257,6 +271,28 @@ impl GatewayJournal {
     /// Load a journal and refuse one that is not bound to this experiment. A
     /// journal whose binding differs is never truncated, merged or reused.
     pub fn load_bound(path: &Path, identity: &JournalIdentity) -> std::io::Result<Self> {
+        Self::load_checked(path, |found| found == identity)
+    }
+
+    /// Load a journal bound to these routes and this budget, whichever sweep
+    /// it belongs to. For inspection only: a gateway that spends must use
+    /// [`GatewayJournal::load_bound`] with its full identity.
+    pub fn load_for_routes(
+        path: &Path,
+        route_table_sha256: &str,
+        budget: GatewayBudget,
+    ) -> std::io::Result<Self> {
+        Self::load_checked(path, |found| {
+            found.schema_version == JOURNAL_SCHEMA_VERSION
+                && found.route_table_sha256 == route_table_sha256
+                && found.budget == budget
+        })
+    }
+
+    fn load_checked(
+        path: &Path,
+        accepts: impl Fn(&JournalIdentity) -> bool,
+    ) -> std::io::Result<Self> {
         use std::io::Read as _;
         let mut bytes = Vec::new();
         std::fs::File::open(path)?
@@ -269,10 +305,10 @@ impl GatewayJournal {
             ));
         }
         let journal: Self = serde_json::from_slice(&bytes).map_err(std::io::Error::other)?;
-        if &journal.identity != identity {
+        if !accepts(&journal.identity) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                "gateway journal is bound to a different route table or budget",
+                "gateway journal is bound to a different route table, budget or sweep",
             ));
         }
         journal.validate()?;
@@ -673,6 +709,31 @@ mod tests {
         let other_budget = JournalIdentity::new("a".repeat(64), budget(2_000, 8));
         assert!(GatewayJournal::load_bound(&path, &other_budget).is_err());
         assert!(GatewayJournal::load_bound(&path, &mine).is_ok());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A sweep-bound journal resumes only under its own sweep, while the
+    /// inspection load reads it under the same routes and budget. A journal no
+    /// sweep owns serializes exactly as it did before the binding existed.
+    #[test]
+    fn a_sweep_bound_journal_resumes_only_under_its_sweep() {
+        let dir = std::env::temp_dir().join(format!("sb-journal-sweep-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = dir.join("journal.json");
+        let unbound = identity(budget(1_000, 8));
+        let legacy = serde_json::to_string(&GatewayJournal::new(unbound.clone())).expect("json");
+        assert!(!legacy.contains("sweep_sha256"), "{legacy}");
+
+        let bound = unbound.clone().for_sweep("1".repeat(64));
+        GatewayJournal::new(bound.clone())
+            .save(&path)
+            .expect("save");
+        assert!(GatewayJournal::load_bound(&path, &bound).is_ok());
+        assert!(GatewayJournal::load_bound(&path, &unbound).is_err());
+        let other = unbound.clone().for_sweep("2".repeat(64));
+        assert!(GatewayJournal::load_bound(&path, &other).is_err());
+        assert!(GatewayJournal::load_for_routes(&path, &"a".repeat(64), budget(1_000, 8)).is_ok());
+        assert!(GatewayJournal::load_for_routes(&path, &"a".repeat(64), budget(2_000, 8)).is_err());
         std::fs::remove_dir_all(&dir).ok();
     }
 
