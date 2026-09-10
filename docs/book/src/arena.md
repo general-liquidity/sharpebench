@@ -113,9 +113,15 @@ wrapped, not reimplemented), so an arena entrant is just an image whose
 entrypoint reads one observation per line and writes one decision per line.
 
 Entrant containers are named and retained only long enough to read Docker's
-post-exit `State.OOMKilled` fact. The harness then removes them explicitly on
-the normal finish path and in `Drop`; a memory-budget kill becomes the typed,
-non-retryable `ResourceLimitExceeded` agent fault. A harness itself killed with
+post-exit state: status, `State.OOMKilled` and exit code. The harness then
+removes them explicitly on the normal finish path and in `Drop`; a
+memory-budget kill becomes the typed, non-retryable `ResourceLimitExceeded`
+agent fault. Docker sets `State.OOMKilled` from an asynchronous containerd
+event that can arrive late or not at all, so an exited entrant with exit code
+137 (SIGKILL, which nothing inside the launch can send to namespace PID 1, and
+which the harness sends only after the read) is also a breach; see
+[OOM-VERDICT.md](../../audits/2026-09-09/OOM-VERDICT.md).
+A harness itself killed with
 SIGKILL between spawn and cleanup can still leave a stopped container, whose
 deterministic `sharpebench-agent-*` name makes it discoverable. Short-lived
 readiness probes continue to use `--rm` and `--init`. Entrant launches omit
@@ -151,8 +157,9 @@ fixture:
   policy denials rather than timeouts or missing-client false passes;
 - the production spawn reaches a live container rather than treating a failed
   start as a deliberate hold; and
-- an actual 32 MiB cgroup overrun produces `OOMKilled=true`, after which the
-  container is removed.
+- an actual 32 MiB cgroup overrun exits 137 and is classified as a budget
+  breach by the production classification, after which the container is
+  removed.
 
 The elapsed-time classification is load-bearing: a bare non-zero connection
 status would also pass when the runner's network is merely broken or the image
