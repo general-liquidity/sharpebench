@@ -1,23 +1,39 @@
-//! Small, dependency-free, deterministic statistics helpers.
+//! Small, deterministic statistics helpers.
 //!
 //! Everything here is plain `f64` with a fixed summation order so results are
-//! reproducible across platforms. Approximations (erf, inverse-normal) are the
-//! standard published closed forms and are unit-tested against known values.
+//! reproducible across platforms.
 //!
-//! The bodies of [`erf`], [`norm_cdf`] and [`norm_ppf`] are frozen bit for bit
-//! by `tests/special_function_bits.rs`: every published score that prints a
-//! PSR, a deflation bar or a DSR interval at full precision was produced by
-//! these exact polynomials, and a more accurate replacement (measured against
-//! `statrs` 0.19.1 in 2026-09, see the deflated-Sharpe chapter of the book)
-//! changes those bytes. Swapping the bodies is a golden-fixture regeneration,
-//! not a refactor.
+//! [`erf`], [`norm_cdf`] and [`norm_ppf`] are thin wrappers over `statrs`
+//! 0.19.1, which replaced the hand-rolled Abramowitz and Stegun 7.1.26 series
+//! and Acklam rational approximation in the 2026-09-10 numerics migration. The
+//! two implementations were measured against a 60-digit `mpmath` reference over
+//! about 1.9 million grid points and over the arguments the kernel actually
+//! passes; `statrs` is closer to the reference on essentially every one of
+//! them, by three to seven orders of magnitude. The evidence and the artifact
+//! impact are in `docs/audits/2026-09-09/NUMERICS-MIGRATION.md`.
+//!
+//! The wrappers preserve the previous total contract exactly: [`norm_ppf`]
+//! returns negative infinity at or below zero, positive infinity at or above
+//! one, and NaN for NaN, because `statrs`'s `Normal::inverse_cdf` panics on all
+//! three. [`norm_cdf`] and [`norm_ppf`] use the `erfc` and `erfc_inv` forms
+//! rather than `1 + erf`, matching what `Normal::cdf` and `Normal::inverse_cdf`
+//! themselves compute bit for bit while avoiding the left-tail cancellation the
+//! `erf` form suffers.
+//!
+//! `tests/special_function_bits.rs` pins the exact bits all three return. Those
+//! pins were regenerated for this migration and belong to the release that
+//! carries it; the pins v0.19.0 shipped are the pre-migration ones. Swapping
+//! these bodies again is a golden-fixture regeneration, not a refactor.
 //!
 //! The moment estimators ([`mean`], [`variance`], [`std_dev`], [`skewness`],
-//! [`kurtosis`]) stay hand-rolled on purpose: the standardized moments use the
-//! population normalisation (`m2 = sum((x - mean)^2) / n`) that the 2026-09-07
-//! audit (R03) fixed. The proposed special-function substitution does not
-//! replace these empirical-moment definitions; retaining them keeps their
-//! normalization explicit at the call site.
+//! [`kurtosis`]) stay hand-rolled on purpose and were deliberately left out of
+//! the migration: the standardized moments use the population normalisation
+//! (`m2 = sum((x - mean)^2) / n`) that the 2026-09-07 audit (R03) fixed, and a
+//! general-purpose crate's skewness or kurtosis carries its own
+//! bias-adjustment convention. Retaining them keeps the required normalization
+//! explicit at the call site instead of resting on a dependency's choice.
+
+use std::f64::consts::SQRT_2;
 
 /// Arithmetic mean. Returns 0.0 for an empty slice.
 pub fn mean(xs: &[f64]) -> f64 {
@@ -120,79 +136,49 @@ pub fn kurtosis(xs: &[f64]) -> f64 {
     sum / n as f64
 }
 
-/// Error function (Abramowitz & Stegun 7.1.26, max abs error ~1.5e-7).
+/// Error function, `statrs::function::erf::erf`.
+///
+/// Total already: NaN maps to NaN and the infinities map to plus or minus one,
+/// so no guard is needed. Maximum absolute error against a 60-digit reference
+/// is about 4.9e-11, against about 1.4e-7 for the Abramowitz and Stegun 7.1.26
+/// series this replaced.
 pub fn erf(x: f64) -> f64 {
-    let sign = if x < 0.0 { -1.0 } else { 1.0 };
-    let x = x.abs();
-    let t = 1.0 / (1.0 + 0.3275911 * x);
-    let y = 1.0
-        - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t
-            + 0.254829592)
-            * t
-            * (-x * x).exp();
-    sign * y
+    statrs::function::erf::erf(x)
 }
 
 /// Standard normal CDF.
+///
+/// The complementary form `erfc(-x / sqrt 2) / 2` is what `statrs`'s
+/// `Normal::cdf` computes, verified bit for bit on the measurement grid. It is
+/// used in preference to `(1 + erf(x / sqrt 2)) / 2` because the latter loses
+/// the left tail to cancellation.
 pub fn norm_cdf(x: f64) -> f64 {
-    0.5 * (1.0 + erf(x / std::f64::consts::SQRT_2))
+    if x.is_nan() {
+        return f64::NAN;
+    }
+    0.5 * statrs::function::erf::erfc(-x / SQRT_2)
 }
 
-/// Inverse standard normal CDF (Acklam's rational approximation).
-/// Returns ±∞ at the boundaries.
+/// Inverse standard normal CDF. Returns plus or minus infinity at and beyond
+/// the boundaries, and NaN for NaN.
+///
+/// The body is what `statrs`'s `Normal::inverse_cdf` computes for the standard
+/// normal, verified bit for bit on the measurement grid, but reached through
+/// `erfc_inv` directly: `Normal::inverse_cdf` panics on NaN and on any argument
+/// outside `[0, 1]`, where this function has always returned NaN and the signed
+/// infinities. Writing `0.0 -` rather than a leading minus reproduces the
+/// positive zero callers have always seen at `p = 0.5`.
 pub fn norm_ppf(p: f64) -> f64 {
+    if p.is_nan() {
+        return f64::NAN;
+    }
     if p <= 0.0 {
         return f64::NEG_INFINITY;
     }
     if p >= 1.0 {
         return f64::INFINITY;
     }
-    const A: [f64; 6] = [
-        -3.969683028665376e+01,
-        2.209460984245205e+02,
-        -2.759285104469687e+02,
-        1.38357751867269e+02,
-        -3.066479806614716e+01,
-        2.506628277459239e+00,
-    ];
-    const B: [f64; 5] = [
-        -5.447609879822406e+01,
-        1.615858368580409e+02,
-        -1.556989798598866e+02,
-        6.680131188771972e+01,
-        -1.328068155288572e+01,
-    ];
-    const C: [f64; 6] = [
-        -7.784894002430293e-03,
-        -3.223964580411365e-01,
-        -2.400758277161838e+00,
-        -2.549732539343734e+00,
-        4.374664141464968e+00,
-        2.938163982698783e+00,
-    ];
-    const D: [f64; 4] = [
-        7.784695709041462e-03,
-        3.224671290700398e-01,
-        2.445134137142996e+00,
-        3.754408661907416e+00,
-    ];
-    const P_LOW: f64 = 0.02425;
-    const P_HIGH: f64 = 1.0 - P_LOW;
-
-    if p < P_LOW {
-        let q = (-2.0 * p.ln()).sqrt();
-        (((((C[0] * q + C[1]) * q + C[2]) * q + C[3]) * q + C[4]) * q + C[5])
-            / ((((D[0] * q + D[1]) * q + D[2]) * q + D[3]) * q + 1.0)
-    } else if p <= P_HIGH {
-        let q = p - 0.5;
-        let r = q * q;
-        (((((A[0] * r + A[1]) * r + A[2]) * r + A[3]) * r + A[4]) * r + A[5]) * q
-            / (((((B[0] * r + B[1]) * r + B[2]) * r + B[3]) * r + B[4]) * r + 1.0)
-    } else {
-        let q = (-2.0 * (1.0 - p).ln()).sqrt();
-        -(((((C[0] * q + C[1]) * q + C[2]) * q + C[3]) * q + C[4]) * q + C[5])
-            / ((((D[0] * q + D[1]) * q + D[2]) * q + D[3]) * q + 1.0)
-    }
+    0.0 - SQRT_2 * statrs::function::erf::erfc_inv(2.0 * p)
 }
 
 #[cfg(test)]
@@ -285,6 +271,47 @@ mod tests {
         assert!(approx(norm_cdf(0.0), 0.5, 1e-6));
         assert!(approx(norm_cdf(1.96), 0.975, 1e-3));
         assert!(approx(norm_cdf(-1.96), 0.025, 1e-3));
+    }
+
+    // The three assertions below are the migration's regression: every one of
+    // them fails against the Abramowitz-Stegun / Acklam bodies that shipped
+    // through v0.19.0. The reference values are 60-digit `mpmath` evaluations
+    // rounded to f64, recorded in `docs/audits/2026-09-09/NUMERICS-MIGRATION.md`.
+
+    #[test]
+    fn special_functions_are_accurate_to_near_machine_precision() {
+        // A&S 7.1.26 gives erf(0) = 1e-9 and erf(0.5) to only 1.5e-7.
+        assert_eq!(erf(0.0), 0.0);
+        assert_eq!(norm_cdf(0.0), 0.5);
+        assert!(approx(erf(0.5), 0.5204998778130465, 1e-9));
+        assert!(approx(erf(1.0), 0.8427007929497149, 1e-9));
+        assert!(approx(norm_cdf(1.96), 0.9750021048517796, 1e-9));
+        assert!(approx(norm_cdf(-3.0), 0.001349898031630095, 1e-12));
+        // Acklam is good to about 1.2e-9 relative; this is good to about 1e-15.
+        assert!(approx(norm_ppf(0.975), 1.959963984540054, 1e-12));
+        assert!(approx(norm_ppf(0.995), 2.5758293035489004, 1e-12));
+        assert!(approx(norm_ppf(0.9), 1.2815515655446004, 1e-12));
+    }
+
+    #[test]
+    fn special_functions_stay_total_at_the_boundaries() {
+        // statrs's Normal::inverse_cdf panics on all four of these arguments.
+        assert!(norm_ppf(f64::NAN).is_nan());
+        assert_eq!(norm_ppf(-0.1), f64::NEG_INFINITY);
+        assert_eq!(norm_ppf(1.1), f64::INFINITY);
+        assert_eq!(norm_ppf(f64::INFINITY), f64::INFINITY);
+        assert_eq!(norm_ppf(f64::NEG_INFINITY), f64::NEG_INFINITY);
+        assert_eq!(norm_ppf(0.0), f64::NEG_INFINITY);
+        assert_eq!(norm_ppf(1.0), f64::INFINITY);
+        // p = 0.5 keeps the positive zero the pre-migration body returned.
+        assert!(norm_ppf(0.5).is_sign_positive());
+        assert_eq!(norm_ppf(0.5), 0.0);
+        assert!(erf(f64::NAN).is_nan());
+        assert!(norm_cdf(f64::NAN).is_nan());
+        assert_eq!(erf(f64::INFINITY), 1.0);
+        assert_eq!(erf(f64::NEG_INFINITY), -1.0);
+        assert_eq!(norm_cdf(f64::INFINITY), 1.0);
+        assert_eq!(norm_cdf(f64::NEG_INFINITY), 0.0);
     }
 
     #[test]

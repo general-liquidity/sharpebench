@@ -8,5 +8,13 @@ repository.workspace = true
 keywords = ["sharpe", "statistics", "backtest", "bootstrap", "finance"]
 categories = ["science", "mathematics"]
 
+[dependencies]
+# Special functions only (erf, erfc, erfc_inv). Default features off keeps
+# nalgebra, rand and the KDE surface out of the graph; `std` is the whole of
+# what the three wrappers in `stats.rs` need, and it builds for
+# wasm32-unknown-unknown. The moment estimators stay hand-rolled: see the
+# module doc in `src/stats.rs`.
+statrs = { version = "0.19.1", default-features = false, features = ["std"] }
+
 [lints]
 workspace = true
