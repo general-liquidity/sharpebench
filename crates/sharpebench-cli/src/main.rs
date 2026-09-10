@@ -1227,7 +1227,10 @@ fn run_board_json(
     board: &[CompositeScore],
     external: Option<ExternalRowMetadata<'_>>,
 ) -> serde_json::Value {
-    let mut value = serde_json::to_value(board).expect("composite scores serialize");
+    // The entrant's own operational metadata is attached by name after the
+    // seal; the evaluation rows themselves reach the reader only through it.
+    let mut value = serde_json::to_value(sharpebench_core::seal_board(board))
+        .expect("composite scores serialize");
     if let Some(external) = external {
         for row in value.as_array_mut().expect("a board is an array") {
             if row["agent_id"].as_str() == Some(external.agent) {
@@ -2096,7 +2099,13 @@ fn run_verify_trajectory(args: &[String], json: bool) -> ExitCode {
         }
     };
     if json {
-        emit_json(&result);
+        emit_json(
+            &sharpebench_core::seal(
+                &result,
+                &sharpebench_harness::VERIFICATION_RESULT_VISIBILITY,
+            )
+            .expect("verification results serialize"),
+        );
     } else {
         println!(
             "verified `{}` by replay — {} decisions across {} runs",
@@ -2253,7 +2262,7 @@ fn positive_usize_flag(args: &[String], flag: &str) -> Result<Option<usize>, Str
 /// Render a board as a human table, or as JSON when `json` is set.
 fn emit_board(board: &[CompositeScore], json: bool) {
     if json {
-        emit_json(&board);
+        emit_json(&sharpebench_core::seal_board(board));
     } else {
         print_board(board);
     }

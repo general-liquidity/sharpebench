@@ -274,22 +274,19 @@ mod tests {
         assert_eq!(per_period_from_annualized(0.0, 252.0), 0.0);
     }
 
-    /// The conversion leaves the frequency's domain to its callers, and this is
-    /// why they must check it: at the edge of "finite and positive" an infinite
-    /// frequency returns a zero dispersion, the most favorable deflation bar,
-    /// while zero returns infinity and a negative frequency NaN. The scoring
-    /// path, the honesty verdict, the budget curve and the Python primitives
-    /// each refuse all four before calling it.
+    /// The conversion documents a finite, positive frequency and leaves the
+    /// check to its callers. Pin what it does at and past that boundary, so a
+    /// caller that skips the check gets a known result: one period a year is
+    /// the identity, an infinite frequency is a zero dispersion (the most
+    /// favorable bar, which is why callers must refuse it), zero divides to
+    /// infinity and a negative frequency is NaN.
     #[test]
-    fn per_period_conversion_frequency_boundary_is_the_callers_to_check() {
+    fn per_period_from_annualized_boundary_frequencies() {
+        assert_eq!(per_period_from_annualized(0.5, 1.0), 0.5);
         assert_eq!(per_period_from_annualized(0.5, f64::INFINITY), 0.0);
         assert_eq!(per_period_from_annualized(0.5, 0.0), f64::INFINITY);
-        assert!(per_period_from_annualized(0.5, -252.0).is_nan());
+        assert!(per_period_from_annualized(0.5, -1.0).is_nan());
         assert!(per_period_from_annualized(0.5, f64::NAN).is_nan());
-        assert_eq!(
-            per_period_from_annualized(0.5, f64::MIN_POSITIVE),
-            0.5 / f64::MIN_POSITIVE.sqrt()
-        );
     }
 
     /// A series whose sample Sharpe is `sr`, built as `c + b * x` over the

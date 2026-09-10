@@ -278,7 +278,7 @@ fn cmd_score(args: &[String], json: bool) -> i32 {
                     "window": window,
                     "scored": scores.len(),
                     "refused": refusals,
-                    "board": scores,
+                    "board": sharpebench_core::seal_board(&scores),
                 }));
             } else {
                 println!(

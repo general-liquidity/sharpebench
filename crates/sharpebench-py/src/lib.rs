@@ -694,7 +694,9 @@ fn rank_board(submissions_json: &str, config_json: Option<&str>) -> PyResult<Str
     let (subs, declarations) =
         sharpebench_core::parse_declared_field(submissions_json).map_err(PyValueError::new_err)?;
     let cfg = parse_score_config(config_json)?;
-    to_json(&sharpebench_core::rank_declared(&subs, &declarations, &cfg))
+    to_json(&sharpebench_core::seal_board(
+        &sharpebench_core::rank_declared(&subs, &declarations, &cfg),
+    ))
 }
 
 /// Score a single `AgentSubmission` (JSON in, one `CompositeScore` as JSON out)
@@ -708,7 +710,7 @@ fn score_one(submission_json: &str, config_json: Option<&str>) -> PyResult<Strin
     let sub: AgentSubmission = serde_json::from_str(submission_json)
         .map_err(|e| PyValueError::new_err(format!("invalid AgentSubmission JSON: {e}")))?;
     let cfg = parse_score_config(config_json)?;
-    to_json(&core_score_agent(&sub, &cfg))
+    to_json(&sharpebench_core::seal_score(&core_score_agent(&sub, &cfg)))
 }
 
 /// The default `ScoreConfig`, serialized to JSON: the discoverable list of every
@@ -783,7 +785,7 @@ fn rank_returns(returns: &Bound<'_, PyDict>, config_json: Option<&str>) -> PyRes
             candidates: Vec::new(),
         });
     }
-    to_json(&core_rank(&subs, &cfg))
+    to_json(&sharpebench_core::seal_board(&core_rank(&subs, &cfg)))
 }
 
 /// The `sharpebench_py` native module (imported as `sharpebench.sharpebench_py`).
