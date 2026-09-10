@@ -1,5 +1,66 @@
 # Verification record
 
+## Port build and literature corrections, 2026-09-10
+
+Six pull requests merged into SharpeBench and one into SharpeArena. Each had
+every check green on its exact pushed head, main had not moved since that head
+was tested, and the merged tree was compared against the tested tree and found
+identical. A branch that was green on an older main was brought up to date and
+tested again before it merged, rather than merged on its earlier result.
+
+| PR | Row | Main after merge |
+|---|---|---|
+| Bench #58 | G18, fault injection | `c256adc` |
+| Bench #60 | G19, literature corrections | `afd0be4` |
+| Bench #61 | G11, G18, serving loop and image hygiene | `aba678e` |
+| Bench #59 | G18, contract ports | `23efd4c` |
+| Bench #62 | G19, LITE verdict units | `5eb826c` |
+| Bench #63 | G19, remaining unit defaults | `277f733` |
+| Arena #42 | G19, deflation input refusal | `21f9a6d` |
+
+What the gates caught that the authoring work missed.
+
+The mutation gate found nine surviving mutants in the contract ports: the
+visibility audit could return an empty report, the seal report's emptiness
+could ignore two of its three lists, an array that grew an object inside a
+visible field was never tested, and the operation preimage could be replaced by
+any constant because its only pin lived in another crate, which the protocol
+crate's own mutation run does not execute. Tests now kill all nine, confirmed by
+a targeted local run in which all thirteen mutants of those functions were
+caught.
+
+The paired-boundary gate rejected the shared annualized-to-per-period
+conversion, which documents a finite, positive frequency and had no boundary
+test. A test now pins it at one period a year, an infinite frequency (a zero
+dispersion, the most favourable bar, which is why callers must refuse it), zero
+and a negative value.
+
+The macOS build of the Arena correction failed a pin that had been recorded on
+Windows: the old estimator's deflated Sharpe differed by two units in the last
+place between the two platforms' math libraries. The recorded constants are now
+compared within sixteen units, while the comparison against the pinned
+SharpeBench kernel, which runs on the same platform as the code under test,
+stays exact.
+
+The fault injector and the contract ports both rewrote the same retry driver.
+The textual merge interleaved the two loops and was discarded; the driver was
+rebuilt from the backoff version with the fault record added, so each attempt
+carries both its injected faults and its scheduled backoff, and the full suite
+passed on the combined tree before it was pushed.
+
+One live-container run failed on the cgroup out-of-memory probe on a branch
+that does not touch the sandbox, as it did once in the completion round. The
+next run, on the same branch after main was merged in, passed. It is recorded
+again as an observed flake in a timing-sensitive live probe, not as an
+explained one.
+
+Not established by this round: the gateway sandbox launch and the image
+allowlist probe have not run against a live Docker daemon, and the allowlist
+will likely need the files Docker adds to a container once it does; the fault
+plan, backoff schedule and re-execution check are library calls with no CLI
+flag yet; and the paper evidence was not regenerated, so the corrected prior
+and the proposed serial-correlation term have no new measured result.
+
 ## Independent verification, 2026-09-10
 
 A separate verification of the completion round confirmed the repository state and

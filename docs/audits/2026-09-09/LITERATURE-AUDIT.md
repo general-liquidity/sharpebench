@@ -213,6 +213,27 @@ pooled returns straight to `bootstrap_pvalue`; nothing is subtracted.
 pooled per-period returns, measured against a zero-rate cash benchmark, not
 excess returns.
 
+### F14. The LITE honesty verdict applied the annualized prior per period
+
+**Found.** `is_my_sharpe_real` in `sharpebench-edge` computes a per-period
+Sharpe ratio and deflated it with the 0.5 prior passed unconverted into the
+per-period kernels. `HonestyConfig` had no frequency and did not state the unit
+of `trials_sr_std`, and no surface converted it. At 20 trials the bar was about
+an annualized Sharpe of 15 on daily bars, so almost every default verdict
+failed. It is the unit error that `FINDING-units.md` records and that the
+ranking path had already retired.
+
+**Changed.** Bench PR #62. `HonestyConfig` gains `periods_per_year`, 252 when
+omitted and flagged in the explanation; a non-finite or non-positive value is a
+Fail with a statistics error. The prior is documented as annualized and
+converted through `sharpebench_stats::per_period_from_annualized`, which the
+core ranking path now shares, so the two bars agree bit for bit. The field is
+exposed on the command line, WASM, npm, MCP and Python. On a four-year daily
+track with an annualized Sharpe of 1.9 at 20 trials, the deflated Sharpe moves
+from about 1e-153 (Fail) to 0.971 (Pass). This is a breaking change to the
+verdict and is stated in the changelog. No published value contains a LITE
+verdict.
+
 ### F15. The annualized prior reached per-period kernels outside the LITE verdict
 
 **Scope.** PR #62 fixed the LITE honesty verdict, which applied the annualized
@@ -329,6 +350,28 @@ install, npm mutants through `npm run build`), and the file was restored from
 | Python: `selection_robustness` ignores the converted default | killed |
 | npm: no `trialsSrStd` check | killed: no `RangeError` |
 | npm: type check only, NaN passes | killed: no `RangeError` |
+
+## SharpeArena findings
+
+The same read applied to SharpeArena found three defects of its own, repaired in
+Arena PR #42.
+
+**F6.** The leaderboard confidence code annualized at a hard-coded 252 periods
+a year. `deflated_sharpe`, `bootstrap_dsr_ci` and `paired_dsr_diff` now take an
+explicit `periods_per_year`; the Python bindings default it to 252, so existing
+callers are unchanged.
+
+**F7.** `expected_max_sharpe` returned a zero bar for a negative or
+negative-infinite dispersion, the most favourable bar available, reachable
+through the public `deflated_sharpe`. It now refuses negative, NaN and infinite
+dispersion and a zero trial count with a typed error; a zero dispersion or a
+single trial still means no deflation. On valid inputs the values are
+bit-identical to the old estimator and to the pinned SharpeBench kernel.
+Refusing a zero trial count is stricter than SharpeBench 0.19.0, which reads it
+as one trial.
+
+**F13.** The `deflated_sharpe_ci` docstring called `score_run` an older
+estimator; since the 0.19.0 pin they share the same moments.
 
 ## Additional observation, not acted on
 
