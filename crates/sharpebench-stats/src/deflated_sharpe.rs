@@ -9,7 +9,9 @@
 //! make it too small, and so the PSR and DSR point estimates too favorable.
 //! López de Prado, Lipton and Zoonekynd, *How to Use the Sharpe Ratio* (2026,
 //! eqs. 2, 3 and 5), give a generalized variance with a first-order
-//! autocorrelation term that relaxes the assumption; it is not implemented.
+//! autocorrelation term that relaxes the assumption. It is available as an
+//! opt-in diagnostic, [`crate::opt_in_diagnostics::probabilistic_sharpe_ratio_autocorrelated`];
+//! the gate and the rank keep this module's variance.
 
 use crate::stats::{kurtosis, mean, norm_cdf, norm_ppf, skewness, std_dev};
 use crate::validation::{

@@ -4,7 +4,10 @@
 //! primitives ([`stats`]), the deflated / probabilistic Sharpe family
 //! ([`deflated_sharpe`]), the data-snooping bootstrap family — White's Reality
 //! Check, Hansen's SPA, and Romano-Wolf step-down ([`significance`]) — and
-//! selection-axis luck control ([`selection`]).
+//! selection-axis luck control ([`selection`]). Three estimators the gate does
+//! not use, an autocorrelation-aware PSR, the PSR with its standard error
+//! evaluated under the null, and the manipulation-proof performance measure,
+//! are opt-in diagnostics in [`opt_in_diagnostics`].
 //!
 //! Design invariants carried over verbatim from the original modules:
 //! - **Pure.** No I/O, no system clock, no ambient randomness. Any randomness
@@ -52,6 +55,7 @@ pub mod agreement;
 pub mod deflated_sharpe;
 pub mod dissent;
 pub mod fdr;
+pub mod opt_in_diagnostics;
 pub mod paired_randomization;
 pub mod selection;
 pub mod significance;
@@ -73,6 +77,11 @@ pub use dissent::{
     DEFAULT_MAX_LEVEL_DISSENT, DEFAULT_MAX_RANK_DISSENT,
 };
 pub use fdr::{benjamini_hochberg, fdr_verdict, FdrVerdict};
+pub use opt_in_diagnostics::{
+    first_order_autocorrelation, manipulation_proof_performance,
+    probabilistic_sharpe_ratio_autocorrelated, sharpe_standard_error_autocorrelated,
+    sharpe_variance_factor, StandardErrorAt, DEFAULT_MPPM_RISK_AVERSION,
+};
 pub use selection::{
     percentile_selection, selection_robustness, CandidateUtility, PercentileSelection,
     SelectionRobustness, Utility, DEFAULT_SELECTION_ALPHA, MIN_RECOMMENDED_SELECTION_ALPHA,
