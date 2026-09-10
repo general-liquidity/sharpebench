@@ -279,6 +279,18 @@ jobs:
       - name: Run the ignored live-boundary tests
         run: cargo test -p sharpebench-arena -- --ignored --nocapture
 
+      # The image preflight's one leg that a daemon-free machine cannot prove:
+      # a clean pinned fixture authorizes, a known header needle refuses, both
+      # with verified cleanup and the same configuration ID. Named exactly, not
+      # `--ignored`: the CLI crate has other ignored tests whose fixtures need
+      # an environment this job does not set up, and this job should fail for
+      # one reason only.
+      - name: Run the live image preflight against the pinned fixture
+        run: >
+          cargo test -p sharpebench --bin sharpebench --
+          --ignored --exact --nocapture
+          artifact_preflight::tests::live_docker_image_preflight
+
   audit:
     name: benchmark self-audit
     runs-on: ubuntu-latest

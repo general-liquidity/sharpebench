@@ -17,6 +17,7 @@ use csv_columns::read_returns_column;
 
 mod analysis_cmd;
 mod arena_cmd;
+mod artifact_preflight;
 mod csv_columns;
 mod forecast_cmd;
 mod gateway_cli;
@@ -542,6 +543,7 @@ fn help() {
     println!("                       --data: a frozen CSV (else synthetic) · --http/--image/--cmd: add YOUR agent");
     println!("                       --image <repository@sha256:...>: run the agent in the hardened container sandbox (no daemon = refusal)");
     println!("                       --cmd: UNSANDBOXED host execution, for agents you trust; prints a warning on every run");
+    println!("                       --scan-policy <json>: opt-in preflight of the pinned image's configuration and filesystem before it launches (--image only)");
     println!("                       --checkpoint <path>: resumable external-agent sweep (crash-tolerant)");
     println!("                       --retry-runtime-failures: recover exhausted checkpoint cells (3 additional rounds maximum)");
     println!("                       --entrant-sha256 <digest>: exact entrant identity; required with --checkpoint plus --http or --cmd");
@@ -1196,17 +1198,34 @@ fn print_attempt_accounting(
     );
 }
 
+/// Everything the externally executed row carries beyond its scores.
+struct ExternalRowMetadata<'a> {
+    agent: &'a str,
+    attempts: sharpebench_harness::AttemptSummary,
+    monetary_cost: &'a MonetarySummary,
+    /// The opt-in image preflight report, when one authorized this launch.
+    artifact_preflight: Option<serde_json::Value>,
+}
+
 /// Keep the existing JSON board array and scoring fields. Only the externally
 /// executed row gains operational metadata; reference rows have no such ledger.
+///
+/// The board is and stays an ARRAY of rows. Metadata is attached by finding the
+/// entrant's row inside it, never by indexing the board itself with a key: that
+/// would panic on exactly the successful runs this path exists to produce.
 fn run_board_json(
     board: &[CompositeScore],
-    accounting: Option<(&str, sharpebench_harness::AttemptSummary, &MonetarySummary)>,
+    external: Option<ExternalRowMetadata<'_>>,
 ) -> serde_json::Value {
     let mut value = serde_json::to_value(board).expect("composite scores serialize");
-    if let Some((agent, attempts, monetary_cost)) = accounting {
+    if let Some(external) = external {
         for row in value.as_array_mut().expect("a board is an array") {
-            if row["agent_id"].as_str() == Some(agent) {
-                row["attempt_accounting"] = attempt_accounting_with_cost(attempts, monetary_cost);
+            if row["agent_id"].as_str() == Some(external.agent) {
+                row["attempt_accounting"] =
+                    attempt_accounting_with_cost(external.attempts, external.monetary_cost);
+                if let Some(preflight) = &external.artifact_preflight {
+                    row["artifact_preflight"] = preflight.clone();
+                }
             }
         }
     }
@@ -1349,6 +1368,54 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
             return ExitCode::from(2);
         }
     };
+
+    // Opt-in artifact preflight, before any dataset, sweep or launch work. It is
+    // inert without `--scan-policy`, and with it the arguments and the policy are
+    // validated before Docker is invoked at all.
+    let mut preflight_row: Option<serde_json::Value> = None;
+    // (configuration ID, policy digest) for a launch a preflight authorized.
+    let mut scanned_launch: Option<(String, String)> = None;
+    match artifact_preflight::preflight_from_args(args, &artifact_preflight::DockerProcess) {
+        Err(failure) => {
+            if json {
+                emit_json(&serde_json::json!({
+                    "ok": false,
+                    "error": "artifact_preflight_failed",
+                    "artifact_preflight_failure": failure,
+                }));
+            } else {
+                eprintln!("error: {failure}");
+            }
+            return if failure.stage == "arguments" {
+                ExitCode::from(2)
+            } else {
+                ExitCode::FAILURE
+            };
+        }
+        Ok(None) => {}
+        Ok(Some(report)) => {
+            let value = serde_json::to_value(&report).expect("the preflight report serializes");
+            // A refusal is the whole point of the path: no board, no entrant.
+            let Some(image_id) = report.authorized_image_id() else {
+                if json {
+                    emit_json(&serde_json::json!({
+                        "ok": false,
+                        "error": "artifact_preflight_refused",
+                        "artifact_preflight": value,
+                    }));
+                } else {
+                    eprintln!(
+                        "error: the image preflight refused `{}`; no entrant was launched and no \
+                         board was emitted",
+                        report.image_id
+                    );
+                }
+                return ExitCode::FAILURE;
+            };
+            scanned_launch = Some((image_id.as_str().to_string(), report.policy_sha256.clone()));
+            preflight_row = Some(value);
+        }
+    }
 
     let resume_policy = if args.iter().any(|arg| arg == "--retry-runtime-failures") {
         if flag_value(args, "--checkpoint").is_none()
@@ -1534,7 +1601,20 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
         field.insert(0, res.submission);
     } else if let Some(image) = flag_value(args, "--image") {
         let image = image.to_string();
-        let opts = sharpebench_arena::SandboxOptions::default();
+        let mut opts = sharpebench_arena::SandboxOptions::default();
+        // A preflight that completed clean hands back Docker's own immutable
+        // configuration ID. That, and only that, is what the entrant launches
+        // from: a repository digest names a manifest, the configuration ID names
+        // the artifact that was actually scanned. The launcher's unpinned option
+        // is enabled for this value alone, and the value cannot come from operator
+        // input: `ValidatedImageId` is only obtainable from an authorizing report.
+        let launch_image = match &scanned_launch {
+            Some((image_id, _)) => {
+                opts.allow_unpinned_image = true;
+                image_id.clone()
+            }
+            None => image.clone(),
+        };
         // Pre-flight: a refusal here (no daemon, unpinned tag, absent image) is the
         // point of this path. There is no fall-through to host execution.
         //
@@ -1542,10 +1622,21 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
         // `--pull never`, `docker run` against an image that is not there spawns
         // anyway and exits on its own, so an absent artifact would otherwise reach
         // the sweep as an agent that answers nothing rather than as a refusal.
-        if let Err(error) =
-            sharpebench_arena::resolve_launch(sharpebench_arena::docker_available(), &image, &opts)
-                .and_then(|_| sharpebench_arena::require_local_image(&image))
-        {
+        // The presence probe is redundant after a preflight: inspecting, creating
+        // and exporting the image already proved it is present locally, and it
+        // would reject a bare configuration ID as unpinned.
+        if let Err(error) = sharpebench_arena::resolve_launch(
+            sharpebench_arena::docker_available(),
+            &launch_image,
+            &opts,
+        )
+        .and_then(|_| {
+            if scanned_launch.is_some() {
+                Ok(())
+            } else {
+                sharpebench_arena::require_local_image(&image)
+            }
+        }) {
             eprintln!("error: cannot start the sandboxed agent `{image}`: {error}");
             return ExitCode::FAILURE;
         }
@@ -1554,36 +1645,57 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
         // verdict: a container the kernel OOM-killed for exceeding the published
         // `--memory` budget surfaces as `ResourceLimitExceeded` (an agent fault),
         // not as the retryable transport blip its dead pipe would look like.
-        let sandbox_attempt =
-            |wi: usize, seed: u64| match sharpebench_arena::run_external_sandboxed(&image, &opts) {
-                Ok(mut a) => {
-                    let mut observed = sharpebench_harness::run_external_backtest_observed(
-                        &data,
-                        &mut a,
-                        windows[wi],
-                        seed,
-                        costs,
-                        rate_card.as_ref(),
-                    );
-                    observed.result = match a.finish() {
-                        Ok(oom_killed) => {
-                            sharpebench_harness::apply_oom_verdict(observed.result, oom_killed)
-                        }
-                        Err(error) => {
-                            // Post-exit inspection and named-container cleanup are
-                            // part of the sandbox contract, not optional telemetry.
-                            // If either is indeterminate, do not score or retry the
-                            // entrant as though its resource verdict were known.
-                            eprintln!(
-                                "error: sandboxed agent `{image}` could not be finalized: {error}"
-                            );
-                            Err(sharpebench_harness::FailureKind::TransportError)
-                        }
-                    };
-                    observed
+        let sandbox_attempt = |wi: usize, seed: u64| match sharpebench_arena::run_external_sandboxed(
+            &launch_image,
+            &opts,
+        ) {
+            Ok(mut a) => {
+                let mut observed = sharpebench_harness::run_external_backtest_observed(
+                    &data,
+                    &mut a,
+                    windows[wi],
+                    seed,
+                    costs,
+                    rate_card.as_ref(),
+                );
+                observed.result = match a.finish() {
+                    Ok(oom_killed) => {
+                        sharpebench_harness::apply_oom_verdict(observed.result, oom_killed)
+                    }
+                    Err(error) => {
+                        // Post-exit inspection and named-container cleanup are
+                        // part of the sandbox contract, not optional telemetry.
+                        // If either is indeterminate, do not score or retry the
+                        // entrant as though its resource verdict were known.
+                        eprintln!(
+                            "error: sandboxed agent `{image}` could not be finalized: {error}"
+                        );
+                        Err(sharpebench_harness::FailureKind::TransportError)
+                    }
+                };
+                observed
+            }
+            Err(_) => Err(sharpebench_harness::FailureKind::SpawnError).into(),
+        };
+        // An unscanned run keeps its legacy material byte for byte. A scanned one
+        // binds the policy digest, the configuration ID and the scanned scope, so
+        // a changed policy is a different experiment rather than a silent resume.
+        let entrant_material = match &scanned_launch {
+            None => label.clone().into_bytes(),
+            Some((image_id, policy_sha256)) => {
+                match artifact_preflight::scanned_invocation_material(
+                    &label,
+                    image_id,
+                    policy_sha256,
+                ) {
+                    Ok(material) => material,
+                    Err(error) => {
+                        eprintln!("error: {error}");
+                        return ExitCode::FAILURE;
+                    }
                 }
-                Err(_) => Err(sharpebench_harness::FailureKind::SpawnError).into(),
-            };
+            }
+        };
         let res = if let Some(ckpt) = &checkpoint {
             let contract = match checkpoint_contract(
                 args,
@@ -1596,7 +1708,7 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                     max_retries: EXTERNAL_MAX_RETRIES,
                     rate_card: rate_card.as_ref(),
                 },
-                label.as_bytes(),
+                &entrant_material,
                 false,
             ) {
                 Ok(contract) => contract,
@@ -1605,6 +1717,14 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             };
+            // The sweep layer treats a contract mismatch as a fresh sweep, which
+            // would overwrite the file. A scanned run refuses first instead.
+            if scanned_launch.is_some() {
+                if let Err(error) = artifact_preflight::checkpoint_admits(ckpt, &label, &contract) {
+                    eprintln!("error: {error}");
+                    return ExitCode::FAILURE;
+                }
+            }
             match sharpebench_harness::run_resumable_sweep_observed(
                 ckpt,
                 &label,
@@ -1775,7 +1895,12 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
             &board,
             external_accounting
                 .as_ref()
-                .map(|(label, attempts, cost)| (label.as_str(), *attempts, cost)),
+                .map(|(label, attempts, cost)| ExternalRowMetadata {
+                    agent: label.as_str(),
+                    attempts: *attempts,
+                    monetary_cost: cost,
+                    artifact_preflight: preflight_row.clone(),
+                }),
         ));
     } else {
         if let Some((label, attempts, cost)) = external_accounting {
@@ -2228,8 +2353,15 @@ mod tests {
         let board = rank(&[res.submission, reference], &ScoreConfig::default());
         let plain = run_board_json(&board, None);
         assert_eq!(plain, serde_json::to_value(&board).unwrap());
-        let mut observed =
-            run_board_json(&board, Some(("external", res.attempts, &res.monetary_cost)));
+        let mut observed = run_board_json(
+            &board,
+            Some(ExternalRowMetadata {
+                agent: "external",
+                attempts: res.attempts,
+                monetary_cost: &res.monetary_cost,
+                artifact_preflight: None,
+            }),
+        );
         let rows = observed.as_array_mut().unwrap();
         let external = rows
             .iter_mut()
@@ -2258,6 +2390,81 @@ mod tests {
             observed, plain,
             "metadata must not change scores, order or reference rows"
         );
+    }
+
+    /// A successful scanned run emits a real board.
+    ///
+    /// The regression is deliberate: the board is a JSON ARRAY, and the lost
+    /// prototype attached its preflight metadata with `output["artifact_preflight"]`
+    /// on that array. `serde_json`'s mutable index panics on a non-object, so the
+    /// only run that ever reached that line, a clean scan followed by a completed
+    /// sweep, would have aborted the process. Nothing but a passing board catches
+    /// it, which is why the old failure-only fake-Docker tests did not.
+    #[test]
+    fn a_successful_scanned_run_emits_a_board_array_with_preflight_on_the_entrant_row() {
+        let res = sharpebench_harness::run_agent_resilient("external", 1, &[7], 2, 40, |_, _| {
+            Ok(sharpebench_harness::failing_sentinel_run(40))
+        });
+        let reference = AgentSubmission {
+            agent_id: "reference".into(),
+            ..res.submission.clone()
+        };
+        let board = rank(&[res.submission, reference], &ScoreConfig::default());
+        let image_id = format!("sha256:{}", "e".repeat(64));
+        let preflight = serde_json::json!({
+            "schema_version": artifact_preflight::REPORT_VERSION,
+            "scope": artifact_preflight::SCAN_SCOPE,
+            "image_id": image_id,
+            "cleanup_verified": true,
+        });
+        let observed = run_board_json(
+            &board,
+            Some(ExternalRowMetadata {
+                agent: "external",
+                attempts: res.attempts,
+                monetary_cost: &res.monetary_cost,
+                artifact_preflight: Some(preflight),
+            }),
+        );
+
+        let rows = observed
+            .as_array()
+            .expect("a board stays an array of rows, never an object");
+        assert_eq!(rows.len(), 2);
+        assert!(
+            observed.get("artifact_preflight").is_none(),
+            "the board itself must never carry the metadata key"
+        );
+        let entrant = rows
+            .iter()
+            .find(|row| row["agent_id"] == "external")
+            .expect("the entrant row is present");
+        assert_eq!(entrant["artifact_preflight"]["image_id"], image_id);
+        assert_eq!(
+            entrant["artifact_preflight"]["schema_version"],
+            artifact_preflight::REPORT_VERSION
+        );
+        assert_eq!(entrant["artifact_preflight"]["cleanup_verified"], true);
+        assert_eq!(
+            entrant["attempt_accounting"]["schema_version"],
+            "sharpebench.attempt-accounting.v1"
+        );
+
+        let plain = run_board_json(&board, None);
+        let reference_row = rows
+            .iter()
+            .find(|row| row["agent_id"] == "reference")
+            .expect("the reference row is present");
+        assert_eq!(
+            reference_row,
+            &plain.as_array().expect("a board is an array")[rows
+                .iter()
+                .position(|row| row["agent_id"] == "reference")
+                .expect("the reference row is present")],
+            "reference rows carry no operational ledger"
+        );
+        assert!(reference_row.get("artifact_preflight").is_none());
+        assert!(reference_row.get("attempt_accounting").is_none());
     }
 
     #[test]
