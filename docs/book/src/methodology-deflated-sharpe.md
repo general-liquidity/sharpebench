@@ -112,49 +112,67 @@ The shipped datasets: `us-indices-1d`, `fx-majors-1d`, `commodities-1d`,
 ## Numerical implementation of the normal functions
 
 PSR, the deflation bar and the DSR interval evaluate the standard normal CDF
-and its inverse through `sharpebench_stats::stats`: `erf` is Abramowitz and
-Stegun 7.1.26 (absolute error up to about 1.5e-7), `norm_cdf` is
-`0.5 * (1 + erf(x / sqrt 2))`, and `norm_ppf` is Acklam's rational
-approximation (relative error about 1.2e-9). These are published closed forms,
-not correctly rounded values; in particular `erf(0)` evaluates to `1e-9` rather
-than `0`, which is why the committed synthetic golden fixture prints
-`"psr": 0.5000000005` for a zero-Sharpe stream.
+and its inverse through `sharpebench_stats::stats`. Since 2026-09-10 those
+three functions are thin wrappers over `statrs` 0.19.1: `erf` is
+`statrs::function::erf::erf`, `norm_cdf` is `0.5 * erfc(-x / sqrt 2)`, and
+`norm_ppf` is `-sqrt(2) * erfc_inv(2p)` with explicit guards that keep NaN and
+the out-of-range arguments total where `statrs` would panic. The dependency is
+taken with `default-features = false, features = ["std"]`, so its `nalgebra`
+and `rand` surfaces are not compiled.
 
-A measured replacement by `statrs` 0.19.1 (2026-09, `default-features =
-false`, so only its `erf`, `Normal::cdf` and `Normal::inverse_cdf`) was
-compared with the shipped bodies on 1.3 million grid points per function
-(plus subnormals, exact zero, saturated tails and infinities) and on the 10,033
-distinct arguments the kernel passes while scoring the two golden fields and
-the tutorial fixtures:
+They replaced Abramowitz and Stegun 7.1.26 (`erf`, absolute error up to about
+1.5e-7) and Acklam's rational approximation (`norm_ppf`, relative error about
+1.2e-9), which every release through v0.19.0 shipped. Both implementations were
+measured against a 60-digit `mpmath` reference over about 1.9 million grid
+points and over the arguments the kernel actually passes:
 
-| Function | Max absolute difference | Grid points differing in any bit | Kernel-passed arguments differing |
+| Function | Pre-migration max abs error | Post-migration max abs error | Improvement |
 |---|---|---|---|
-| `erf` | 1.4e-7 (near x = 0.045) | 81.6 percent | 4,432 of 10,033 |
-| `norm_cdf` | 7.0e-8 (near x = 0.064) | 90.5 percent | 6,434 of 10,033 |
-| `norm_ppf` | 6.8e-8 (at p = 5e-324; 2.0e-9 on the kernel's arguments) | 99.9 percent | 2 of 2 |
+| `erf` | 1.394e-07 (near x = 0.045) | 4.939e-11 (near x = 0.5) | about 3.5 orders |
+| `norm_cdf` | 6.969e-08 (near x = 0.064) | 2.469e-11 | about 3.5 orders |
+| `norm_ppf` | 6.784e-08, 1.76e-09 relative | 1.198e-14, 4.72e-16 relative | about 7 orders |
 
-The kernel-passed arguments that agree are the saturated ones, where both
-implementations return exactly 0 or 1. Under the replacement,
-`crates/sharpebench-core/golden/example_submissions.scores.json` moves in
-eight printed values (`deflation_bar_per_period`,
-`deflation_bar_annualized_equivalent`, `dsr_ci_low`, `dsr_se`),
-`synthetic_field.scores.json` moves (`psr` and `deflated_sharpe`), and every
-producer under `paper/evidence/final/` rerun with its documented command
-writes different `psr`, `deflated_sharpe` and deflation-bar values. The
-tutorial reports under `examples/forecast-quality/`, the prospective forecast
-report, the text board and the `arena` records are byte-identical, because
-none of their printed numbers passes through these functions at printed
-precision. The migration therefore cannot ship as a drop-in and is deferred to
-the next evidence regeneration, when the golden fixtures and the frozen
-records are rescored together. Until then
-`crates/sharpebench-stats/tests/special_function_bits.rs` pins the exact bits
-the three functions return, so a silent change fails there before it reaches
-the golden fixtures. The moment estimators (`mean`, `variance`, `std_dev`,
-`skewness`, `kurtosis`) stay hand-rolled in either case: the standardized
-moments use the population normalisation fixed by the 2026-09-07 audit (R03),
-and the proposed special-function substitution does not replace those empirical
-moment definitions. This is a scoped implementation choice, not a claim that
-no numerical library can compute population-normalized moments.
+The full evidence, including the per-band tables, the dependency and target
+review, and the artifact impact ledger, is in
+[`docs/audits/2026-09-09/NUMERICS-MIGRATION.md`](https://github.com/general-liquidity/sharpebench/blob/main/docs/audits/2026-09-09/NUMERICS-MIGRATION.md).
+The new bodies are not correctly rounded either: `statrs`'s `erf` carries about
+5e-11 of absolute error, so `crates/sharpebench-stats/tests/special_function_bits.rs`
+still pins the exact bits all three return, and those pins are a change
+detector rather than a correctness proof.
+
+Two consequences are worth knowing when reading a printed number. `erf(0)` used
+to be `1e-9` and is now exactly `0`, so a zero-Sharpe stream that printed
+`"psr": 0.5000000005` in the frozen artifacts now prints `"psr": 0.5`. And
+`norm_cdf` used to saturate to exactly `0` from about `x = -8.3` downward,
+where it now returns the true tiny value (`norm_cdf(-8.5)` is 9.48e-18), so
+deep-tail PSR values that floored at zero are now small positive numbers.
+
+The two code goldens under `crates/sharpebench-core/golden/` were regenerated
+with the migration, moving in the eighth decimal place of `psr`,
+`deflated_sharpe`, the DSR interval and the deflation bar, with no verdict,
+ordering or agent-label change. The tutorial reports under
+`examples/forecast-quality/`, the prospective forecast report, the text board
+and the `arena` records are byte-identical, because none of their printed
+numbers passes through these functions at printed precision.
+
+**The published result artifacts are pre-migration and stay frozen.**
+`paper/evidence/final/`, `paper/evidence/after-v0.3.0/`,
+`paper/evidence/baseline-v0.2.1/` and `paper/figures/` were produced by the
+v0.9.0 snapshot, whose kernel this tree no longer reproduces for reasons far
+larger than this change: a current-tree rerun of `evidence_sweep` on
+`us-indices-1w` differs from the committed file by up to 0.22 in
+`deflated_sharpe` and by 5.4e-04 in `raw_mean_return`, six orders of magnitude
+above anything the special functions do. Rescoring them here would relabel
+every kernel repair since v0.9.0 as a numerics migration, so they were not
+regenerated. Read them as pre-migration records.
+
+The moment estimators (`mean`, `variance`, `std_dev`, `skewness`, `kurtosis`)
+stayed hand-rolled and were deliberately excluded from the migration: the
+standardized moments use the population normalisation fixed by the 2026-09-07
+audit (R03), and a general-purpose crate carries its own bias-adjustment
+convention for exactly those quantities. This is a scoped implementation
+choice, not a claim that no numerical library can compute population-normalized
+moments.
 > The implementation lives in `sharpebench-stats/src/deflated_sharpe.rs` (the
 > per-period kernel) and `sharpebench-core/src/composite.rs` (the unit conversion
 > and the gates), and is unit-tested for the "deflation penalizes many trials"

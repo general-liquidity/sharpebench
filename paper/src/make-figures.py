@@ -75,7 +75,11 @@ def _norm_cdf(x):
     return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
 
 
-def _norm_ppf(p):  # Acklam's rational approximation — matches stats.rs::norm_ppf
+def _norm_ppf(p):  # Acklam's rational approximation, which is what stats.rs::norm_ppf
+    # was through v0.19.0 and what produced the committed figures. The kernel moved to
+    # statrs on 2026-09-10 (docs/audits/2026-09-09/NUMERICS-MIGRATION.md); Acklam is kept
+    # here so this script still reproduces the frozen pre-migration figures byte for byte.
+    # Its relative error is about 1.2e-9, invisible at figure resolution either way.
     a = [-3.969683028665376e1, 2.209460984245205e2, -2.759285104469687e2,
          1.38357751867269e2, -3.066479806614716e1, 2.506628277459239e0]
     b = [-5.447609879822406e1, 1.615858368580409e2, -1.556989798598866e2,
