@@ -661,7 +661,7 @@ pub fn per_period_sr_std(cfg: &ScoreConfig) -> f64 {
 /// default 0.0 converts to 0.0 on every timeframe, so the default per-run test
 /// is the plain `PSR(returns, 0) >= per_run_psr_bar`.
 pub fn per_run_psr_benchmark(cfg: &ScoreConfig) -> f64 {
-    cfg.per_run_min_annual_sharpe / cfg.periods_per_year.sqrt()
+    per_period_from_annualized(cfg.per_run_min_annual_sharpe, cfg.periods_per_year)
 }
 
 /// Where the `trials_sr_std` that deflated a score came from.
@@ -1160,7 +1160,8 @@ impl Deflation {
     /// `sr_std` is the field's measured dispersion of per-period Sharpes: already
     /// in the kernel's units, so it must not pass through the conversion.
     fn measured(sr_std: f64, cfg: &ScoreConfig) -> Self {
-        let floor = cfg.min_measured_trials_sr_std / cfg.periods_per_year.sqrt();
+        let floor =
+            per_period_from_annualized(cfg.min_measured_trials_sr_std, cfg.periods_per_year);
         let floored = sr_std < floor;
         Self {
             sr_std: sr_std.max(floor),
