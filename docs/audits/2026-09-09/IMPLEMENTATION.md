@@ -1,5 +1,8 @@
 # Sharpe suite verification and completion
 
+Continuation: [detailed Claude handoff](CLAUDE-HANDOFF.md), including remaining
+tasks, recoverable branches and the lost uncommitted Docker prototype.
+
 Status: active. This is a new goal, not a reopening of the completed
 [2026-09-07 audit](../2026-09-07/IMPLEMENTATION.md).
 
