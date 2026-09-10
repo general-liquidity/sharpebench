@@ -45,6 +45,7 @@ pub mod correlation;
 pub mod decay;
 pub mod disqualification;
 pub mod econrationality;
+pub mod entrant_visibility;
 pub mod entrants;
 pub mod evidence_coverage;
 pub mod forecast;
@@ -90,6 +91,10 @@ pub use correlation::{crowdedness, Crowdedness};
 pub use disqualification::{classify_disqualification, rollup, DisqualThresholds, FailReason};
 pub use econrationality::{
     assess_rationality, elicit_revealed_selection, DominanceChoice, EconRationalityReport,
+};
+pub use entrant_visibility::{
+    seal, seal_board, seal_score, EntrantView, SealReport, Visibility, VisibilityAllowlist,
+    COMPOSITE_SCORE_VISIBILITY,
 };
 pub use entrants::{
     atr_breakout, bounce_counter, distribution_days, follow_through_day, max_exposure_timeout,

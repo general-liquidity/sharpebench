@@ -22,10 +22,10 @@ pub use checkpoint::{
     TaskRecord, TaskState, MAX_RUNTIME_RECOVERY_ROUNDS,
 };
 pub use failure::{
-    apply_oom_verdict, failing_sentinel_run, run_with_observed_retries, run_with_retries,
-    AttemptDuration, AttemptLedger, AttemptObservation, AttemptOutcome, AttemptRecord,
-    AttemptSummary, AttemptedRun, DurationSource, FailureKind, FailureLog, FailureRecord,
-    RunOutcome,
+    apply_oom_verdict, failing_sentinel_run, run_with_backoff, run_with_observed_retries,
+    run_with_retries, AttemptDuration, AttemptLedger, AttemptObservation, AttemptOutcome,
+    AttemptRecord, AttemptSummary, AttemptedRun, Backoff, BackoffSchedule, DurationSource,
+    FailureKind, FailureLog, FailureRecord, RunOutcome, Sleeper, ThreadSleeper,
 };
 
 use std::cell::RefCell;
@@ -146,6 +146,16 @@ pub fn cost_model_digest(costs: CostModel) -> String {
         costs.max_participation.to_bits(),
     );
     sharpebench_attest::content_digest(preimage.as_bytes())
+}
+
+/// Content identity of the declared wire-operation metadata
+/// ([`sharpebench_protocol::OPERATIONS`]). A change to what entrants are told
+/// about any operation changes this digest; a test pins its value so the change
+/// cannot land unreviewed.
+pub fn operation_contract_sha256() -> String {
+    let preimage = sharpebench_protocol::operation_contract_preimage()
+        .expect("the operation table holds no floats");
+    sharpebench_attest::content_digest(&preimage)
 }
 
 /// Contract for the semantic inputs a trajectory capture consumes. This is
@@ -274,6 +284,34 @@ pub fn run_agent_resilient_observed<F>(
     expected_run_lens: &[usize],
     seeds: &[u64],
     max_retries: u32,
+    attempt: F,
+) -> ResilientSubmission
+where
+    F: FnMut(usize, u64) -> AttemptObservation,
+{
+    run_agent_resilient_with_backoff(
+        agent_id,
+        expected_run_lens,
+        seeds,
+        max_retries,
+        &BackoffSchedule::immediate(),
+        &mut ThreadSleeper,
+        attempt,
+    )
+}
+
+/// [`run_agent_resilient_observed`] with an explicit wait between runtime
+/// retries (see [`run_with_backoff`]). Every scheduled wait lands in the
+/// attempt ledger and in `attempts.backoff_ns_total`. A caller that persists
+/// or resumes the sweep must bind the schedule into its invocation identity
+/// with [`BackoffSchedule::bind_invocation`].
+pub fn run_agent_resilient_with_backoff<F>(
+    agent_id: &str,
+    expected_run_lens: &[usize],
+    seeds: &[u64],
+    max_retries: u32,
+    schedule: &BackoffSchedule,
+    sleeper: &mut dyn Sleeper,
     mut attempt: F,
 ) -> ResilientSubmission
 where
@@ -284,7 +322,7 @@ where
     let mut ledger = AttemptLedger::default();
     for (w, &expected_run_len) in expected_run_lens.iter().enumerate() {
         for &seed in seeds {
-            let driven = run_with_observed_retries(max_retries, || attempt(w, seed));
+            let driven = run_with_backoff(max_retries, schedule, sleeper, || attempt(w, seed));
             // Append before branching on the outcome: a cell that failed twice
             // before completing spent that time, and the completion must not be
             // the only thing the accounting sees.
@@ -622,6 +660,39 @@ pub enum DeclaredVerdictVerification {
     FieldRequired { benchmark_id: String },
 }
 
+const DECLARED_VERDICT_VISIBILITY: sharpebench_core::VisibilityAllowlist =
+    sharpebench_core::VisibilityAllowlist {
+        document: "sharpebench_harness::DeclaredVerdictVerification",
+        fields: &[
+            ("status", sharpebench_core::Visibility::Visible),
+            ("benchmark_id", sharpebench_core::Visibility::Visible),
+        ],
+    };
+
+/// What `verify-trajectory --json` may show: the recomputed row goes through
+/// the same board-row allowlist as every other surface.
+pub const VERIFICATION_RESULT_VISIBILITY: sharpebench_core::VisibilityAllowlist =
+    sharpebench_core::VisibilityAllowlist {
+        document: "sharpebench_harness::VerificationResult",
+        fields: &[
+            ("agent_id", sharpebench_core::Visibility::Visible),
+            (
+                "score",
+                sharpebench_core::Visibility::Nested(&sharpebench_core::COMPOSITE_SCORE_VISIBILITY),
+            ),
+            ("runs_replayed", sharpebench_core::Visibility::Visible),
+            ("decisions_replayed", sharpebench_core::Visibility::Visible),
+            (
+                "verification_explanation",
+                sharpebench_core::Visibility::Visible,
+            ),
+            (
+                "declared_verdict",
+                sharpebench_core::Visibility::Nested(&DECLARED_VERDICT_VISIBILITY),
+            ),
+        ],
+    };
+
 /// Separate-verifier path: ingest a persisted trajectory artifact, **replay** its raw
 /// per-step decisions through the frozen dataset's point-in-time engine to regenerate
 /// every `Run`, then recompute the composite score with the core scorer. The agent's
@@ -823,6 +894,116 @@ pub fn verify_trajectory_strict(
     let mut bound_cfg = cfg.clone();
     bound_cfg.execution_seeds_per_window = contract.seeds.len();
     Ok(verify_trajectory(data, traj, costs, &bound_cfg))
+}
+
+/// The first place a re-executed agent departed from the decisions it
+/// recorded. `recorded` and `reexecuted` are the score-bearing JSON of the two
+/// decisions (see [`verify_trajectory_reexecuted`]).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct ReexecutionDivergence {
+    /// Window-major run index within the trajectory.
+    pub run: usize,
+    /// 0-based decision step within that run.
+    pub step: usize,
+    /// The observation both decisions answered.
+    pub observation_id: String,
+    pub recorded: String,
+    pub reexecuted: String,
+}
+
+/// Why a trajectory failed re-execution verification.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ReexecutionError {
+    /// Strict verification refused the artifact before any agent ran.
+    Refused(String),
+    /// The agent is not a deterministic function of its run's observations and
+    /// its own prior decisions in that run.
+    Diverged(ReexecutionDivergence),
+}
+
+impl std::fmt::Display for ReexecutionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Refused(reason) => write!(f, "{reason}"),
+            Self::Diverged(divergence) => write!(
+                f,
+                "re-execution diverged at run {} step {} (observation `{}`): recorded {}, \
+                 re-executed {}. The deterministic re-execution contract requires every \
+                 decision to be a function of the run's observations and the agent's own \
+                 prior decisions in that run only",
+                divergence.run,
+                divergence.step,
+                divergence.observation_id,
+                divergence.recorded,
+                divergence.reexecuted
+            ),
+        }
+    }
+}
+
+/// The part of a decision the score depends on, as JSON. Free-text
+/// `reasoning` and per-order `rationale` are audit prose, never read by the
+/// engine or the scorer, so the contract does not require them to repeat.
+fn score_bearing_decision(decision: &Decision) -> String {
+    let mut decision = decision.clone();
+    decision.reasoning.clear();
+    for order in &mut decision.orders {
+        order.rationale.clear();
+    }
+    serde_json::to_string(&decision).expect("decisions serialize")
+}
+
+/// Enforce the deterministic re-execution contract published in
+/// `sharpebench-protocol` and the book's "Submitting an agent" page.
+///
+/// After [`verify_trajectory_strict`] accepts the artifact, every captured run
+/// is re-executed from its first step: a fresh agent from `make_agent` is
+/// driven through the same window and seed on the same frozen data, and each
+/// decision is compared with the recorded one. The first score-bearing
+/// difference is refused as a typed [`ReexecutionDivergence`], never passed
+/// through as a silently different run. An agent that reads the wall clock,
+/// draws ambient randomness, or carries state in from outside the run fails
+/// here.
+pub fn verify_trajectory_reexecuted<F>(
+    data: &Dataset,
+    traj: &AgentTrajectory,
+    costs: CostModel,
+    cfg: &sharpebench_core::ScoreConfig,
+    runner_artifact_sha256: Option<&str>,
+    mut make_agent: F,
+) -> Result<VerificationResult, ReexecutionError>
+where
+    F: FnMut() -> Box<dyn Agent>,
+{
+    let verified = verify_trajectory_strict(data, traj, costs, cfg, runner_artifact_sha256)
+        .map_err(ReexecutionError::Refused)?;
+    for (run, recorded) in traj.runs.iter().enumerate() {
+        let mut agent = make_agent();
+        let (_, reexecuted) = run_backtest_capture(
+            data,
+            agent.as_mut(),
+            Window {
+                start: recorded.window_start,
+                end: recorded.window_end,
+            },
+            recorded.seed,
+            costs,
+        );
+        for (step, (was, now)) in recorded.steps.iter().zip(&reexecuted.steps).enumerate() {
+            let was_bytes = score_bearing_decision(&was.decision);
+            let now_bytes = score_bearing_decision(&now.decision);
+            if was_bytes != now_bytes {
+                return Err(ReexecutionError::Diverged(ReexecutionDivergence {
+                    run,
+                    step,
+                    observation_id: was.observation_id.clone(),
+                    recorded: was_bytes,
+                    reexecuted: now_bytes,
+                }));
+            }
+        }
+    }
+    Ok(verified)
 }
 
 /// One member of a trading team: a name plus a factory for fresh instances (the
@@ -1832,5 +2013,273 @@ mod tests {
             }
         );
         assert!(verified.score.declared_mandate_eligible.is_none());
+    }
+
+    /// An agent that reads a clock. The clock is a counter that advances on
+    /// every read, which is what wall-clock time does between a capture and a
+    /// later re-execution, without making the test depend on timer resolution.
+    struct ClockAgent {
+        clock: Rc<std::cell::Cell<u64>>,
+    }
+
+    impl Agent for ClockAgent {
+        fn decide(&mut self, obs: &MarketObservation) -> Decision {
+            let now = self.clock.get();
+            self.clock.set(now + 1);
+            Decision {
+                orders: vec![sharpebench_protocol::Order {
+                    symbol: obs.symbols[0].symbol.clone(),
+                    action: sharpebench_protocol::Action::Buy,
+                    target_weight: (now % 1000) as f64 / 1000.0,
+                    confidence: 0.5,
+                    rationale: String::new(),
+                }],
+                reasoning: String::new(),
+                cost: None,
+            }
+        }
+    }
+
+    fn reexecution_fixture() -> (Dataset, [Window; 1], CostModel) {
+        (
+            Dataset::synthetic(3, 80, 20_260_621),
+            [Window { start: 20, end: 80 }],
+            CostModel::default(),
+        )
+    }
+
+    #[test]
+    fn a_deterministic_agent_passes_reexecution() {
+        let (data, windows, costs) = reexecution_fixture();
+        let (_, trajectory) =
+            run_agent_capture("momentum", &data, &windows, &[0, 1], costs, || {
+                Box::new(Momentum::default()) as Box<dyn Agent>
+            });
+        let verified = verify_trajectory_reexecuted(
+            &data,
+            &trajectory,
+            costs,
+            &sharpebench_core::ScoreConfig::default(),
+            None,
+            || Box::new(Momentum::default()),
+        )
+        .expect("a deterministic agent reproduces its own decisions");
+        assert_eq!(verified.runs_replayed, 2);
+    }
+
+    /// The row's required test: an agent that reads the wall clock fails replay
+    /// verification with a typed divergence, not a silent difference.
+    #[test]
+    fn a_clock_reading_agent_fails_reexecution_with_a_typed_divergence() {
+        let (data, windows, costs) = reexecution_fixture();
+        let clock = Rc::new(std::cell::Cell::new(0));
+        let capture_clock = Rc::clone(&clock);
+        let (_, trajectory) = run_agent_capture("clock", &data, &windows, &[0], costs, || {
+            Box::new(ClockAgent {
+                clock: Rc::clone(&capture_clock),
+            }) as Box<dyn Agent>
+        });
+        // Replay of the recorded decisions alone is exact, so the existing
+        // verifier accepts the artifact; only re-execution can see the clock.
+        assert!(verify_trajectory_strict(
+            &data,
+            &trajectory,
+            costs,
+            &sharpebench_core::ScoreConfig::default(),
+            None
+        )
+        .is_ok());
+        let error = verify_trajectory_reexecuted(
+            &data,
+            &trajectory,
+            costs,
+            &sharpebench_core::ScoreConfig::default(),
+            None,
+            || {
+                Box::new(ClockAgent {
+                    clock: Rc::clone(&clock),
+                })
+            },
+        )
+        .expect_err("a clock-reading agent must be refused");
+        let ReexecutionError::Diverged(divergence) = &error else {
+            panic!("expected a typed divergence, got {error:?}");
+        };
+        assert_eq!((divergence.run, divergence.step), (0, 0));
+        assert_eq!(divergence.observation_id, data.dates[20]);
+        assert_ne!(divergence.recorded, divergence.reexecuted);
+        assert!(error
+            .to_string()
+            .contains("re-execution diverged at run 0 step 0"));
+    }
+
+    /// State carried in from outside the run is the other prohibited input: a
+    /// counter shared across agent instances makes a run differ from its own
+    /// re-execution even though no clock is read.
+    #[test]
+    fn state_carried_across_runs_fails_reexecution() {
+        let (data, windows, costs) = reexecution_fixture();
+        let shared = Rc::new(std::cell::Cell::new(0));
+        let factory = |shared: Rc<std::cell::Cell<u64>>| {
+            move || {
+                Box::new(ClockAgent {
+                    clock: Rc::clone(&shared),
+                }) as Box<dyn Agent>
+            }
+        };
+        let (_, trajectory) = run_agent_capture(
+            "carry",
+            &data,
+            &windows,
+            &[0],
+            costs,
+            factory(Rc::clone(&shared)),
+        );
+        // Resetting the shared state makes this re-execution faithful.
+        shared.set(0);
+        assert!(verify_trajectory_reexecuted(
+            &data,
+            &trajectory,
+            costs,
+            &sharpebench_core::ScoreConfig::default(),
+            None,
+            factory(Rc::clone(&shared)),
+        )
+        .is_ok());
+        // Without the reset, the state left by the previous run leaks in.
+        assert!(matches!(
+            verify_trajectory_reexecuted(
+                &data,
+                &trajectory,
+                costs,
+                &sharpebench_core::ScoreConfig::default(),
+                None,
+                factory(Rc::clone(&shared)),
+            ),
+            Err(ReexecutionError::Diverged(_))
+        ));
+    }
+
+    #[test]
+    fn free_text_is_not_part_of_the_reexecution_contract() {
+        struct Chatty {
+            inner: Momentum,
+            calls: u64,
+        }
+        impl Agent for Chatty {
+            fn decide(&mut self, obs: &MarketObservation) -> Decision {
+                self.calls += 1;
+                let mut decision = self.inner.decide(obs);
+                decision.reasoning = format!("call {}", self.calls);
+                for order in &mut decision.orders {
+                    order.rationale = format!("call {}", self.calls);
+                }
+                decision
+            }
+        }
+        let (data, windows, costs) = reexecution_fixture();
+        let (_, trajectory) = run_agent_capture("chatty", &data, &windows, &[0], costs, || {
+            Box::new(Chatty {
+                inner: Momentum::default(),
+                calls: 1000,
+            }) as Box<dyn Agent>
+        });
+        assert!(verify_trajectory_reexecuted(
+            &data,
+            &trajectory,
+            costs,
+            &sharpebench_core::ScoreConfig::default(),
+            None,
+            || Box::new(Chatty {
+                inner: Momentum::default(),
+                calls: 0,
+            }),
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn every_verification_result_field_is_declared_and_sealing_keeps_bytes() {
+        let audit = VERIFICATION_RESULT_VISIBILITY.audit(
+            sharpebench_core::entrant_visibility::declared_struct_fields::<VerificationResult>(),
+        );
+        assert!(audit.is_complete(), "{audit:?}");
+        let (data, windows, costs) = reexecution_fixture();
+        let (_, mut trajectory) =
+            run_agent_capture("momentum", &data, &windows, &[0], costs, || {
+                Box::new(Momentum::default()) as Box<dyn Agent>
+            });
+        trajectory.declared_mandate = Some(DeclaredMandate::RelativeTo {
+            benchmark_id: "buy-and-hold".to_string(),
+        });
+        let verified = verify_trajectory(
+            &data,
+            &trajectory,
+            costs,
+            &sharpebench_core::ScoreConfig::default(),
+        );
+        let sealed = sharpebench_core::seal(&verified, &VERIFICATION_RESULT_VISIBILITY).unwrap();
+        assert!(sealed.report().is_empty(), "{:?}", sealed.report());
+        assert_eq!(
+            serde_json::to_string_pretty(&sealed).unwrap(),
+            serde_json::to_string_pretty(&verified).unwrap()
+        );
+    }
+
+    /// Changing any operation's declared metadata changes what entrants were
+    /// told. Update this pin only together with the schema annotations and a
+    /// CHANGELOG entry that says what changed for entrants.
+    #[test]
+    fn the_operation_contract_digest_is_pinned() {
+        assert_eq!(
+            operation_contract_sha256(),
+            "1ed1a71b1a77d69c2c043c73c57cdfaa69cf6a91c791157f1fd818c6116fa99b"
+        );
+    }
+
+    /// A resilient sweep under a schedule waits exactly as scheduled and puts
+    /// every wait in the published accounting, apart from attempt time.
+    #[test]
+    fn a_resilient_sweep_records_its_backoff_in_the_accounting() {
+        #[derive(Default)]
+        struct Recorder(Vec<std::time::Duration>);
+        impl Sleeper for Recorder {
+            fn sleep(&mut self, delay: std::time::Duration) {
+                self.0.push(delay);
+            }
+        }
+        let schedule = BackoffSchedule::from_delays(&[
+            std::time::Duration::from_millis(250),
+            std::time::Duration::from_millis(750),
+        ]);
+        let mut sleeper = Recorder::default();
+        let mut calls = std::collections::BTreeMap::new();
+        let res = run_agent_resilient_with_backoff(
+            "flaky",
+            &[30],
+            &[0, 1],
+            3,
+            &schedule,
+            &mut sleeper,
+            |_, seed| {
+                let n = calls.entry(seed).or_insert(0);
+                *n += 1;
+                if seed == 1 && *n < 3 {
+                    Err(FailureKind::TransportError).into()
+                } else {
+                    Ok(failing_sentinel_run(30)).into()
+                }
+            },
+        );
+        assert_eq!(
+            sleeper.0,
+            vec![
+                std::time::Duration::from_millis(250),
+                std::time::Duration::from_millis(750)
+            ]
+        );
+        assert_eq!(res.attempts.attempts, 4);
+        assert_eq!(res.attempts.backoff_ns_total, 1_000_000_000);
+        assert_eq!(res.submission.runs.len(), 2);
     }
 }

@@ -11,8 +11,9 @@
 
 use sharpebench_core::{
     audit_briefing, bs_greeks, bs_price, classify_greeks_risk, compare_by_regime,
-    parse_declared_field, rank_declared, score_agent, AgentSubmission, AllocationPolicy,
-    AllocationTrajectory, Briefing, BriefingPolicy, GreeksPolicy, RegimeCompareOpts, ScoreConfig,
+    parse_declared_field, rank_declared, score_agent, seal_board, seal_score, AgentSubmission,
+    AllocationPolicy, AllocationTrajectory, Briefing, BriefingPolicy, GreeksPolicy,
+    RegimeCompareOpts, ScoreConfig,
 };
 
 /// Parse an optional config blob: blank → `T::default()`.
@@ -24,20 +25,23 @@ fn parse_or_default<T: serde::de::DeserializeOwned + Default>(json: &str) -> Res
     }
 }
 
-/// Score and rank a JSON array of submissions → JSON array of `CompositeScore`.
-/// Blank `config_json` uses the defaults.
+/// Score and rank a JSON array of submissions → JSON array of `CompositeScore`,
+/// sealed through the entrant-visibility allowlist
+/// ([`sharpebench_core::seal_board`]). Blank `config_json` uses the defaults.
 pub fn score_json(submissions_json: &str, config_json: &str) -> Result<String, String> {
     let (subs, declarations) = parse_declared_field(submissions_json)?;
     let cfg: ScoreConfig = parse_or_default(config_json)?;
-    serde_json::to_string(&rank_declared(&subs, &declarations, &cfg)).map_err(|e| e.to_string())
+    serde_json::to_string(&seal_board(&rank_declared(&subs, &declarations, &cfg)))
+        .map_err(|e| e.to_string())
 }
 
 /// Score a single submission → one `CompositeScore` (carries the deflated Sharpe,
-/// pass^k verdict, process score, rolling worst-case Sharpe, etc.).
+/// pass^k verdict, process score, rolling worst-case Sharpe, etc.), sealed
+/// through the same allowlist as [`score_json`].
 pub fn score_agent_json(submission_json: &str, config_json: &str) -> Result<String, String> {
     let sub: AgentSubmission = serde_json::from_str(submission_json).map_err(|e| e.to_string())?;
     let cfg: ScoreConfig = parse_or_default(config_json)?;
-    serde_json::to_string(&score_agent(&sub, &cfg)).map_err(|e| e.to_string())
+    serde_json::to_string(&seal_score(&score_agent(&sub, &cfg))).map_err(|e| e.to_string())
 }
 
 /// Run the benchmark self-audit (fires the known gaming attacks at the scorer) →
