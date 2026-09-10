@@ -2416,15 +2416,44 @@ mod tests {
     /// than absorbed, and the sweep stops instead of spending past the ceiling.
     #[test]
     fn usage_above_the_reservation_is_recorded_and_stops_the_sweep() {
-        let routes = table("2026-01-01");
+        // A priced route and a route the host prices at nothing, sharing one
+        // budget. The free route is what separates a breached ceiling from a
+        // merely exhausted one: it reserves zero, so only the ceiling stops it.
+        let routes = RouteTable::new(vec![
+            ModelRoute::new(
+                "fake.v1",
+                "https://provider.invalid/v1/messages",
+                Secret::new(KEY),
+                card(1, 1, "2026-01-01"),
+                4096,
+                TEST_OVERHEAD,
+            )
+            .expect("route"),
+            ModelRoute::new(
+                "free.v1",
+                "https://provider.invalid/v1/free",
+                Secret::new(KEY),
+                card(0, 0, "2026-01-01"),
+                4096,
+                TEST_OVERHEAD,
+            )
+            .expect("route"),
+        ])
+        .expect("table");
         let permits = CallPermits::new(4);
         let mut gateway = ModelGateway::new(
             &routes,
             &permits,
-            FakeProvider::new(vec![ProviderOutcome::Answered {
-                status: 200,
-                body: body("ok", Some((100, 0))),
-            }]),
+            FakeProvider::new(vec![
+                ProviderOutcome::Answered {
+                    status: 200,
+                    body: body("ok", Some((100, 0))),
+                },
+                ProviderOutcome::Answered {
+                    status: 200,
+                    body: body("ok", Some((1, 1))),
+                },
+            ]),
             budget(40, 4),
             GatewayLimits::default(),
         );
@@ -2442,10 +2471,26 @@ mod tests {
         assert_eq!(spend.overspent_calls, 1);
         assert!(gateway.journal().ceiling_breached());
 
-        let second = parse(&gateway.serve_line(&request("hello", 16)));
+        let paid = parse(&gateway.serve_line(&request("hello", 16)));
         assert_eq!(
-            second.error.expect("error").kind,
+            paid.error.expect("error").kind,
             GatewayErrorKind::BudgetExhausted
+        );
+        let free = serde_json::to_string(&GatewayRequest {
+            protocol: GATEWAY_PROTOCOL.into(),
+            model_alias: "free.v1".into(),
+            messages: vec![Message {
+                role: MessageRole::User,
+                content: "hello".into(),
+            }],
+            max_output_tokens: 16,
+            tools: Vec::new(),
+        })
+        .expect("json");
+        assert_eq!(
+            parse(&gateway.serve_line(&free)).error.expect("error").kind,
+            GatewayErrorKind::BudgetExhausted,
+            "a breached ceiling stops even a call that would reserve nothing"
         );
         assert_eq!(
             gateway.dispatches(),
