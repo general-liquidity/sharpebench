@@ -323,7 +323,7 @@ the PSR as `1 - p`; F9 applies.
 edge survives the search", and `paper/src/essay-prose.md` still describes the
 PSR as the probability that the true Sharpe exceeds a benchmark. The first is
 verdict output a caller may match on; the second is paper prose outside the
-package surfaces. `expected_max_sharpe` keeps a required, per-period
+package surfaces. The first was changed later, with a changelog entry, as F17. `expected_max_sharpe` keeps a required, per-period
 `trials_sr_std` with no default.
 
 **Mutation check.** Each mutant was applied in place to the committed file, the
@@ -350,6 +350,88 @@ install, npm mutants through `npm run build`), and the file was restored from
 | Python: `selection_robustness` ignores the converted default | killed |
 | npm: no `trialsSrStd` check | killed: no `RangeError` |
 | npm: type check only, NaN passes | killed: no `RangeError` |
+
+### F17. The LITE verdict's explanation read the deflated Sharpe as a probability of skill
+
+**Source.** LLZ 2026 p. 11, eq. 9, as in F9: the deflated Sharpe is the PSR
+benchmarked at the expected maximum Sharpe of `n_trials` zero-skill trials, so
+it equals `1 - p` for the one-sided null that the observed Sharpe is that
+maximum. It is not the probability that skill exists.
+
+**Found.** The explanation strings of `sharpebench_edge::is_my_sharpe_real`
+(`explain` in `crates/sharpebench-edge/src/verdict.rs`) read the number as a
+posterior or as a verdict on luck, and the `Verdict` variant docs repeated them.
+The strings joined their halves with an em dash, written here as `\u{2014}`:
+
+| Tier | Before |
+|---|---|
+| Pass | `PASS: deflated Sharpe {d} clears {confidence} after pricing in {n} trial(s) \u{2014} the edge survives the search.` |
+| Borderline | `BORDERLINE: deflated Sharpe {d} is between {borderline} and {confidence} over {n} trial(s) \u{2014} promising but underpowered.` |
+| Fail | `FAIL: deflated Sharpe {d} is below {borderline} over {n} trial(s) \u{2014} indistinguishable from luck once the search is priced in.` |
+
+**Changed.** Commit `045a673`. Each sentence now states the test and quotes the
+p-value, which is the verdict's `haircut`:
+
+| Tier | After |
+|---|---|
+| Pass | `PASS: deflated Sharpe {d} clears {confidence}: the Sharpe is significant against the expected maximum Sharpe of {n} zero-skill trial(s), one-sided p = {1-d} <= {1-confidence}.` |
+| Borderline | `BORDERLINE: deflated Sharpe {d} is between {borderline} and {confidence}: against the expected maximum Sharpe of {n} zero-skill trial(s), one-sided p = {1-d} is at most {1-borderline} but above {1-confidence}.` |
+| Fail | `FAIL: deflated Sharpe {d} is below {borderline}: the Sharpe is not significant against the expected maximum Sharpe of {n} zero-skill trial(s), one-sided p = {1-d} > {1-borderline}.` |
+
+The deflated Sharpe prints to three decimals and the thresholds to two, as
+before. The prefixes, the appended notes (estimated dispersion, assumed
+frequency, short track), the statistics-error sentence, the tier boundaries and
+every numeric field are unchanged. The `Verdict` variant docs now state each
+tier as a significance level. On the four-year daily track of F14 at twenty
+trials the Pass sentence reads `... one-sided p = 0.029 <= 0.05.`
+
+Callers may have matched on the old text, so the CHANGELOG states the change
+under Unreleased, Breaking. No test, snapshot, README, book page, npm, MCP or
+Python document quoted the old sentences. A search for each distinctive phrase
+finds only this audit, the CHANGELOG and a figure caption in
+`paper/src/essay-prose.md` that uses "indistinguishable from luck" about a
+figure, not about the verdict; the caption is paper prose and was left alone.
+
+**Surfaces.** The strings are compiled into the WASM module, so
+`npm/pkg/sharpebench_bg.wasm` was rebuilt with `wasm-pack` 0.15.0 (commit
+`56419d1`); the rebuilt module contains the new sentence, not the old, and no
+worktree path. The npm smoke test now pins the Pass sentence the shipped module
+emits. The Python wheel was rebuilt with `maturin` and installed into a fresh
+virtual environment: its `is_my_sharpe_real` returns the new sentence and the
+binding tests pass. The command line prints the same `explanation` field.
+
+**Tests.** `explanations_state_a_significance_level_not_a_probability_of_skill`
+pins all three sentences exactly for fixed inputs, refuses `survives`, `luck`,
+`probability` and `promising` in any of them, and checks that a real verdict
+quotes its own `haircut` as the p-value.
+
+**Mutation check.** Applied in place to the committed file, restored from
+`git show HEAD:<path>`, confirmed identical with `cmp`.
+
+| Mutant | Result |
+|---|---|
+| Edge: restore the old Pass sentence | killed: the new test failed |
+| Edge: Pass quotes `1 - borderline` instead of `1 - confidence` | killed: the new test failed |
+| npm: run the tests against the previously committed WASM module | killed: `isMySharpeReal converts the annualized prior by periodsPerYear` failed; the rebuilt module restored and `cmp`-verified |
+
+**Not changed.** `hlz.rs` still ends its Fail sentence "likely a
+multiple-testing artifact", and `paper/src/essay-prose.md` still describes the
+PSR as a probability; both are outside this finding.
+
+**Commands**, run in the worktree with the build directory inside it, for this
+finding and F16 in [CONTRACT-PORTS.md](CONTRACT-PORTS.md#f16-evidence-inventory-gap):
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all --check` | exit 0 |
+| `cargo clippy --all-targets --all-features -- -D warnings` | exit 0 |
+| `RUSTDOCFLAGS=-Dwarnings cargo doc --workspace --exclude xtask --no-deps` | exit 0 |
+| `cargo nextest run --workspace --exclude xtask` | exit 0, 1229 passed, 15 skipped |
+| `wasm-pack build crates/sharpebench-wasm --target nodejs --out-dir ../../npm/pkg --out-name sharpebench` | exit 0 |
+| `npm ci && npm run build && npm test` in `npm/` | exit 0, 23 passed |
+| `maturin build --release` (temporary `[workspace]` table, restored and `cmp`-verified), install into a fresh venv, `pytest crates/sharpebench-py/tests` | exit 0, 94 passed |
+
+No golden, example or `paper/evidence/` file changed.
 
 ## SharpeArena findings
 
