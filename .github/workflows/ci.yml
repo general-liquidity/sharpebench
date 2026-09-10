@@ -277,7 +277,20 @@ jobs:
       # is deliberately not used: the non-ignored arena tests already run in the
       # `test` job on three OSes, and this job should fail for one reason only.
       - name: Run the ignored live-boundary tests
-        run: cargo test -p sharpebench-arena -- --ignored --nocapture
+        run: >
+          cargo test -p sharpebench-arena -- --ignored --nocapture
+          --skip sandbox::tests::live_gateway_launch_serves_model_calls_over_stdio_with_no_network
+
+      # The gateway launch against the daemon: the argv `gateway_launch` returns
+      # starts the pinned fixture, model calls ride its stdio to a provider that
+      # cannot open a socket, the journal on disk records every call, only
+      # loopback exists inside, and the container is classified and removed.
+      # Named exactly, and skipped above, so it runs once.
+      - name: Run the live gateway launch against the pinned fixture
+        run: >
+          cargo test -p sharpebench-arena --lib --
+          --ignored --exact --nocapture
+          sandbox::tests::live_gateway_launch_serves_model_calls_over_stdio_with_no_network
 
       # The image preflight's one leg that a daemon-free machine cannot prove:
       # a clean pinned fixture authorizes, a known header needle refuses, both
@@ -290,6 +303,17 @@ jobs:
           cargo test -p sharpebench --bin sharpebench --
           --ignored --exact --nocapture
           artifact_preflight::tests::live_docker_image_preflight
+
+      # The runtime allowlist and the functional probe against the daemon: the
+      # entries Docker adds to an export are measured and printed, an allowlist
+      # naming exactly the fixture's paths admits it and the probe runs, and an
+      # allowlist missing one path refuses it by index without starting it.
+      - name: Run the live runtime allowlist and probe against the pinned fixture
+        run: >
+          cargo test -p sharpebench --bin sharpebench --
+          --ignored --exact --nocapture
+          artifact_preflight::tests::live_runtime_allowlist_admits_the_fixture_and_its_probe_passes
+          artifact_preflight::tests::live_runtime_allowlist_refuses_an_omitted_path_by_index
 
   audit:
     name: benchmark self-audit
