@@ -185,9 +185,22 @@ Tests, all in `crates/sharpebench-core/src/process.rs`:
 
 ### Mutation check
 
-The block condition was reverted in isolation, one line at a time, in this
-worktree, with the source restored from `git show HEAD:<path>` and verified with
-`cmp`. Results are in the commit's verification record.
+Four mutations, applied one at a time to the committed source in this isolated
+worktree, each restored from `git show HEAD:crates/sharpebench-core/src/process.rs`
+and verified with `cmp` (exit 0 every time, `git status --porcelain` empty
+after each). All four were killed.
+
+| Mutation | Killed by |
+|---|---|
+| Drop `AmbiguousWriteRetriedWithoutKey` from `is_block`, demoting it to warn | `blind_retry_after_an_unobserved_acknowledgment_blocks`, `a_retry_under_a_different_key_blocks` |
+| Drop the `key.is_some()` guard, so an absent key matches an absent key | `blind_retry_after_an_unobserved_acknowledgment_blocks`, `one_finding_per_retry_however_many_priors_are_outstanding` |
+| `progress.ambiguous = true` becomes `false`, so the marker is ignored | the two above plus `keyed_retry_after_an_unobserved_acknowledgment_is_clean` and `one_finding_per_retry_...` |
+| Delete the `AmbiguityUnavailable` push | `unobservable_ambiguity_is_reported_rather_than_passed` |
+
+The third mutation is the load-bearing one: with the marker ignored, every
+ambiguous write degrades to the unknown case, and the block silently becomes a
+warn. It is killed in both directions, by the block tests and by the clean
+keyed-retry test.
 
 ### Commands
 
