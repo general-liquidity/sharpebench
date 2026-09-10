@@ -13,7 +13,7 @@ An **MCP server** that exposes [SharpeBench](https://github.com/general-liquidit
 | `score_allocation` | Score a weight-vector trajectory (validity + turnover) |
 | `greeks` | One long European option: price, Greeks and local exposure flags |
 | `canary` | Derive a do-not-train contamination tripwire |
-| `is_my_sharpe_real` | Deflate one return series for its search footprint and render the honesty verdict |
+| `is_my_sharpe_real` | Deflate one return series for its search footprint and render the honesty verdict (`trials_sr_std` annualized, `periods_per_year` default 252) |
 | `regime_compare` | Compare aligned returns inside caller-supplied regimes |
 | `percentile_selection` | Compare the observed point winner with a bootstrap-percentile winner |
 | `decompose_uncertainty` | Report aleatoric, epistemic, and distributional diagnostic legs |

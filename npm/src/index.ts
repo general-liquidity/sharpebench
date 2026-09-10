@@ -118,6 +118,14 @@ function honestyConfigJson(opts: HonestyOpts): string {
   }
   const cfg: Record<string, unknown> = { n_trials: opts.nTrials };
   if (opts.trialsSrStd !== undefined) cfg.trials_sr_std = opts.trialsSrStd;
+  if (opts.periodsPerYear !== undefined) {
+    // JSON.stringify turns NaN and Infinity into null, which the kernel refuses
+    // rather than reading as "omitted"; say which input it was here instead.
+    if (typeof opts.periodsPerYear !== "number" || !Number.isFinite(opts.periodsPerYear)) {
+      throw new RangeError("periodsPerYear must be a finite number (omit it for the 252 default)");
+    }
+    cfg.periods_per_year = opts.periodsPerYear;
+  }
   if (opts.confidence !== undefined) cfg.confidence = opts.confidence;
   if (opts.borderline !== undefined) cfg.borderline = opts.borderline;
   if (opts.srBenchmark !== undefined) cfg.sr_benchmark = opts.srBenchmark;

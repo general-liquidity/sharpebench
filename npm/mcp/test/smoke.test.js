@@ -46,6 +46,39 @@ test("is_my_sharpe_real tool renders a verdict", async () => {
   await client.close();
 });
 
+test("is_my_sharpe_real tool converts the annualized prior by periods_per_year", async () => {
+  const client = await connectedClient();
+  try {
+    const returns = Array.from({ length: 1008 }, (_, i) => 0.0005 + 0.006 * Math.sin(0.7 * i));
+    const call = async (extra) => {
+      const res = await client.callTool({
+        name: "is_my_sharpe_real",
+        arguments: { returns, n_trials: 20, ...extra },
+      });
+      assert.notEqual(res.isError, true, res.content[0].text);
+      return JSON.parse(res.content[0].text);
+    };
+    const daily = await call({});
+    assert.equal(daily.verdict, "Pass");
+    assert.match(daily.explanation, /periods_per_year was not supplied/);
+    const weekly = await call({ periods_per_year: 52 });
+    assert.ok(weekly.expectedMaxSharpe > daily.expectedMaxSharpe);
+    assert.equal((await call({ periods_per_year: 252 })).expectedMaxSharpe, daily.expectedMaxSharpe);
+
+    const { tools } = await client.listTools();
+    const schema = tools.find((tool) => tool.name === "is_my_sharpe_real").inputSchema;
+    assert.equal(schema.properties.periods_per_year.exclusiveMinimum, 0);
+    for (const periods_per_year of [0, -252]) {
+      const result = await client.callTool({name: "is_my_sharpe_real",
+        arguments: {returns, n_trials: 20, periods_per_year}});
+      assert.equal(result.isError, true);
+      assert.match(result.content[0].text, /periods_per_year/);
+    }
+  } finally {
+    await client.close();
+  }
+});
+
 test("honesty tool advertises and enforces the kernel search-count bounds", async () => {
   const client = await connectedClient();
   try {
