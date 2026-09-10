@@ -8,9 +8,11 @@ are the twelve listed in [RELEASING.md](RELEASING.md), and `xtask` and
 `examples/reference-agent` are `publish = false`. Each section is one `v*` tag
 and links the commits it was built from.
 
-[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.20.0...HEAD
 
 ## [Unreleased]
+
+## [0.20.0] - 2026-09-10
 
 ### Breaking
 - edge: the LITE honesty verdict (`is_my_sharpe_real`, and the winner's verdict inside `is_my_sharpe_real_full`) now treats `trials_sr_std` as annualized and divides it by `sqrt(periods_per_year)` before deflating, through the conversion the core scorer already used (`sharpebench_stats::per_period_from_annualized`, which `sharpebench_core::per_period_sr_std` now calls). It used to apply the annualized 0.5 prior to a per-period Sharpe unconverted, the unit error the core ranking path fixed in 0.3.0: on daily bars at twenty trials the bar was an annualized Sharpe of about 15. `HonestyConfig` gains `periods_per_year: Option<f64>`, so Rust struct literals that list every field no longer compile. Omitted, it is 252 (daily bars) and the explanation says it was assumed; a non-finite or non-positive value is a `Fail` with `statistics_error`. The field reaches every surface: `sharpebench check --periods-per-year N`, Python `periods_per_year=`, npm `periodsPerYear`, the WASM config key `periods_per_year` (an explicit `null` is refused rather than defaulted, because JSON encodes NaN and infinity as `null`) and the MCP tool argument. **LITE verdicts change and become far less severe**, because the old bar was unreachable: a four-year daily track at an annualized Sharpe of about 1.9, kept as the best of twenty trials, went from a deflated Sharpe near 0 (`Fail`) to 0.971 (`Pass`). Any LITE verdict recorded before this change was deflated against the wrong bar and should be recomputed rather than compared. No committed golden, example output or paper evidence contains a LITE verdict; the core scores and goldens are bit-identical.
@@ -530,6 +532,7 @@ First published release.
 ### Fixed
 - Constant-time HMAC verification and bounded, timed agent HTTP reads ([6c3d174](https://github.com/general-liquidity/sharpebench/commit/6c3d174)).
 
+[0.20.0]: https://github.com/general-liquidity/sharpebench/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/general-liquidity/sharpebench/compare/v0.18.4...v0.19.0
 [0.18.4]: https://github.com/general-liquidity/sharpebench/compare/v0.18.3...v0.18.4
 [0.18.3]: https://github.com/general-liquidity/sharpebench/compare/v0.18.2...v0.18.3
