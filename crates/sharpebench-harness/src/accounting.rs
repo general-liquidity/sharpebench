@@ -84,6 +84,18 @@ impl RateCard {
         )
     }
 
+    pub fn provider(&self) -> &str {
+        &self.provider
+    }
+
+    pub fn model(&self) -> &str {
+        &self.model
+    }
+
+    pub fn revision(&self) -> &str {
+        &self.revision
+    }
+
     pub fn quote_nanos(&self, input: u64, output: u64) -> Option<u128> {
         (u128::from(input) * u128::from(self.input_usd_nanos_per_token))
             .checked_add(u128::from(output) * u128::from(self.output_usd_nanos_per_token))
