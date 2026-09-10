@@ -287,11 +287,20 @@ pub fn run_self_audit() -> SelfAuditReport {
     }
 
     // 7) Tail-selling: an agent posts the smoothest, highest linear returns in the
-    //    field by running a NAKED short-gamma options book — selling tail risk. The
-    //    Greeks classifier flags the exposure and the harness records it as an
+    //    field by running a NAKED short-gamma options book, selling tail risk. The
+    //    Greeks classifier flags the exposure and THIS AUDIT then records it as an
     //    unhedged TailSellingExposure (block severity). The agent must rank below an
-    //    honest skilled agent and be ineligible — a linear-return Sharpe alone would
+    //    honest skilled agent and be ineligible; a linear-return Sharpe alone would
     //    crown it.
+    //
+    //    What this case proves is the kernel's response to the event, not that the
+    //    event is produced in practice. No harness, simulator or importer emits
+    //    TailSellingExposure; this audit is its only producer. For harness-run
+    //    agents the real protection is that the simulator executes only linear
+    //    target-weight orders, so no option book can be built. An imported return
+    //    series, or a direct caller of `rank`, carries no such protection: a
+    //    short-volatility stream submitted as returns is scored on those returns
+    //    alone.
     {
         use crate::greeks::{
             classify_greeks_risk, classify_payoff_tail, portfolio_greeks, GreeksPolicy, Leg,

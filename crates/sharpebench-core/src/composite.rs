@@ -339,10 +339,17 @@ pub struct ScoreConfig {
     /// far the bar rises with `n_trials`. It materially decides who is
     /// rank-eligible.
     ///
-    /// The default 0.5 is a **modelling prior, not a measurement**: it is the
-    /// working value López de Prado uses in worked examples, adopted before any
-    /// field existed to measure it on. That worked example is in annualized
-    /// units, and so is this field; the kernel divides it by
+    /// The default 0.5 is a **free modelling prior, not a measurement and not a
+    /// value taken from the literature**, adopted before any field existed to
+    /// measure it on. It was once attributed to the worked example of Bailey and
+    /// López de Prado (2014, pp. 9-10 of the working paper), but that example
+    /// states the cross-trial *variance*, `V[{SR_n}] = 1/2` annualized, and
+    /// computes its threshold with `sqrt(1 / (2 * 250))`: a standard deviation of
+    /// about 0.707. This field is a standard deviation, so the shipped 0.5 is
+    /// less demanding than the cited example by a factor of `sqrt(2)`. The
+    /// paper's refusal result survives that: a higher prior only raises the bar,
+    /// and no agent clears the current one. The field is annualized, like the
+    /// example; the kernel divides it by
     /// `sqrt(periods_per_year)` before it touches a per-period statistic (see
     /// [`per_period_sr_std`]). Applied per period unconverted, 0.5 made the
     /// deflation benchmark an annualized Sharpe of 18 on daily bars and 106 on
@@ -633,9 +640,11 @@ fn excess_returns(returns: &[f64], benchmark: &[f64]) -> Option<Vec<f64>> {
 /// The per-period cross-trial Sharpe dispersion the kernel deflates with on the
 /// configured path: `cfg.trials_sr_std / sqrt(cfg.periods_per_year)`.
 ///
-/// A Sharpe ratio scales with the square root of the number of periods, so a
-/// dispersion of Sharpes does too; dividing by `sqrt(periods_per_year)` takes
-/// the annualized prior to the frequency the statistic is computed at. This is
+/// For serially independent returns a Sharpe ratio scales with the square root
+/// of the number of periods, so a dispersion of Sharpes does too; dividing by
+/// `sqrt(periods_per_year)` takes the annualized prior to the frequency the
+/// statistic is computed at. Under autocorrelation the scaling factor differs
+/// (Lo 2002), so the converted prior is an approximation. This is
 /// the only place that conversion happens. Every deflation call site in this
 /// module reads it from here so the prior can neither be converted twice nor
 /// reach a per-period statistic unconverted. The *measured* path in [`rank`]

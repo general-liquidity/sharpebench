@@ -37,7 +37,10 @@ pub enum BaselineBand {
 /// the board can plot a DSR against, instead of an abstract 0..1 number.
 ///
 /// The band is expressed as **per-period** Sharpe ratios (never annualized; the
-/// rest of the crate scores per-period returns).
+/// rest of the crate scores per-period returns), at the frequency chosen when it
+/// was built. Every input the band is compared with must be at that frequency:
+/// the track length is a count of those periods, and the trial dispersion is a
+/// per-period standard deviation.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct HumanBaseline {
     /// A marginally-skilled track (the floor of "has an edge at all").
@@ -51,14 +54,29 @@ pub struct HumanBaseline {
 impl HumanBaseline {
     /// Default band for a skilled discretionary trader, derived from the commonly
     /// cited *annualized* Sharpe range (≈0.5 marginal / 1.0 solid / 2.0 top-decile)
-    /// de-annualized over 252 trading periods (`SR_period = SR_annual / √252`).
-    pub fn skilled_trader() -> Self {
-        let per_period = |annual: f64| annual / 252.0_f64.sqrt();
-        Self {
+    /// de-annualized to the scored frequency:
+    /// `SR_period = SR_annual / sqrt(periods_per_year)`, with the same
+    /// `periods_per_year` as the [`ScoreConfig`](crate::ScoreConfig) the agent was
+    /// scored under (252 for daily equities, 8760 for hourly crypto). The
+    /// square-root scaling is exact only for serially independent returns.
+    ///
+    /// # Errors
+    ///
+    /// `periods_per_year` must be finite and positive; anything else has no
+    /// frequency to de-annualize to.
+    pub fn skilled_trader(periods_per_year: f64) -> Result<Self, StatisticalError> {
+        if !periods_per_year.is_finite() || periods_per_year <= 0.0 {
+            return Err(StatisticalError::InvalidParameter {
+                name: "periods_per_year",
+                requirement: "must be finite and positive",
+            });
+        }
+        let per_period = |annual: f64| annual / periods_per_year.sqrt();
+        Ok(Self {
             floor_sharpe: per_period(0.5),
             median_sharpe: per_period(1.0),
             ceiling_sharpe: per_period(2.0),
-        }
+        })
     }
 
     /// Convert the band into a frozen reference **DSR** population `[floor, median,
@@ -66,6 +84,15 @@ impl HumanBaseline {
     /// Sharpe is mapped to the Deflated Sharpe a *clean normal track* of that
     /// per-period Sharpe and `track_len` periods would earn against `n_trials`
     /// (skew 0, kurtosis 3: a reference marker, not a real return stream).
+    ///
+    /// Units: `track_len` counts periods at the band's frequency, and
+    /// `trials_sr_std` is the **per-period** standard deviation of trial Sharpes
+    /// at that frequency, not the annualized prior of
+    /// [`ScoreConfig::trials_sr_std`](crate::ScoreConfig::trials_sr_std). Pass
+    /// [`per_period_sr_std`](crate::per_period_sr_std) of the scoring config, or
+    /// the per-period `trials_sr_std` a [`CompositeScore`](crate::CompositeScore)
+    /// records. An annualized value passed here raises the bar by
+    /// `sqrt(periods_per_year)`, the unit error of the paper's first finding.
     ///
     /// # Errors
     ///
@@ -87,7 +114,7 @@ impl HumanBaseline {
 
     /// Classify a Deflated Sharpe against the band: `Below` the floor, `Within`
     /// the skilled-human range, or `Above` the ceiling. Uses the same normal-track
-    /// mapping as the `reference_dsr_population` score field.
+    /// mapping, and the same units, as [`Self::reference_dsr_population`].
     ///
     /// # Errors
     ///
@@ -141,6 +168,15 @@ mod tests {
         (a - b).abs() < 1e-9
     }
 
+    /// The daily band, and the shipped annualized prior of 0.5 in the per-period
+    /// unit the band is compared in.
+    fn daily() -> (HumanBaseline, f64) {
+        (
+            HumanBaseline::skilled_trader(252.0).unwrap(),
+            0.5 / 252.0_f64.sqrt(),
+        )
+    }
+
     #[test]
     fn ranks_within_population() {
         let pop = [0.2, 0.5, 0.8, 1.1, 1.4];
@@ -157,16 +193,63 @@ mod tests {
 
     #[test]
     fn skilled_trader_band_is_ordered_and_per_period() {
-        let b = HumanBaseline::skilled_trader();
+        let (b, _) = daily();
         assert!(b.floor_sharpe < b.median_sharpe && b.median_sharpe < b.ceiling_sharpe);
         // De-annualized: 1.0 annual / sqrt(252) ≈ 0.063 per period.
         assert!(approx(b.median_sharpe, 1.0 / 252.0_f64.sqrt()));
     }
 
+    /// F8: the band follows the scored frequency instead of assuming 252 bars a
+    /// year. An hourly band is sqrt(8760 / 252) times smaller per period than
+    /// the daily one, a weekly band larger, and each re-annualizes to the same
+    /// 0.5 / 1.0 / 2.0 at its own frequency.
+    #[test]
+    fn skilled_trader_follows_periods_per_year() {
+        for ppy in [52.0_f64, 252.0, 365.0, 2190.0, 8760.0] {
+            let b = HumanBaseline::skilled_trader(ppy).unwrap();
+            let annual = |sr: f64| sr * ppy.sqrt();
+            assert!(approx(annual(b.floor_sharpe), 0.5), "{ppy}");
+            assert!(approx(annual(b.median_sharpe), 1.0), "{ppy}");
+            assert!(approx(annual(b.ceiling_sharpe), 2.0), "{ppy}");
+        }
+        let daily = HumanBaseline::skilled_trader(252.0).unwrap();
+        let hourly = HumanBaseline::skilled_trader(8760.0).unwrap();
+        assert!(approx(
+            daily.median_sharpe / hourly.median_sharpe,
+            (8760.0_f64 / 252.0).sqrt()
+        ));
+    }
+
+    /// F8 boundary: a frequency that is not a positive real number is refused
+    /// rather than turned into an infinite or NaN band.
+    #[test]
+    fn skilled_trader_periods_per_year_boundary() {
+        let expected = Err(StatisticalError::InvalidParameter {
+            name: "periods_per_year",
+            requirement: "must be finite and positive",
+        });
+        for bad in [
+            0.0,
+            -0.0,
+            -252.0,
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ] {
+            assert_eq!(HumanBaseline::skilled_trader(bad), expected, "{bad}");
+        }
+        let smallest = HumanBaseline::skilled_trader(f64::MIN_POSITIVE).unwrap();
+        assert!(smallest.ceiling_sharpe.is_finite());
+        assert!(approx(
+            HumanBaseline::skilled_trader(1.0).unwrap().median_sharpe,
+            1.0
+        ));
+    }
+
     #[test]
     fn reference_population_is_ordered_and_scores_a_dsr() {
-        let b = HumanBaseline::skilled_trader();
-        let pop = b.reference_dsr_population(500, 50, 0.5).unwrap();
+        let (b, sigma) = daily();
+        let pop = b.reference_dsr_population(500, 50, sigma).unwrap();
         assert_eq!(pop.len(), 3);
         assert!(
             pop[0] <= pop[1] && pop[1] <= pop[2],
@@ -179,8 +262,8 @@ mod tests {
 
     #[test]
     fn classify_dsr_brackets_the_band() {
-        let b = HumanBaseline::skilled_trader();
-        let (len, nt, disp) = (500, 50, 0.5);
+        let (b, disp) = daily();
+        let (len, nt) = (500, 50);
         let pop = b.reference_dsr_population(len, nt, disp).unwrap();
         // A DSR under the floor, inside the band, and over the ceiling classify right.
         assert_eq!(
@@ -206,7 +289,7 @@ mod tests {
     /// that had been quietly made easier.
     #[test]
     fn an_invalid_dispersion_cannot_place_the_band() {
-        let b = HumanBaseline::skilled_trader();
+        let (b, _) = daily();
         let expected = StatisticalError::InvalidParameter {
             name: "trials_sr_std",
             requirement: "must be finite and non-negative",
@@ -224,9 +307,9 @@ mod tests {
     /// numbers the board publishes, so they are pinned exactly.
     #[test]
     fn valid_baseline_inputs_return_the_same_numbers() {
-        let b = HumanBaseline::skilled_trader();
-        let pop = b.reference_dsr_population(500, 50, 0.5).unwrap();
-        let sr_star = crate::deflated_sharpe::expected_max_sharpe(0.5, 50).unwrap();
+        let (b, sigma) = daily();
+        let pop = b.reference_dsr_population(500, 50, sigma).unwrap();
+        let sr_star = crate::deflated_sharpe::expected_max_sharpe(sigma, 50).unwrap();
         let expect = |sr: f64| {
             let denom = (1.0 + 0.5 * sr * sr).max(1e-12).sqrt();
             crate::stats::norm_cdf((sr - sr_star) * (500.0_f64 - 1.0).sqrt() / denom)
@@ -236,7 +319,7 @@ mod tests {
         assert_eq!(pop[2], expect(b.ceiling_sharpe));
         // A track too short to score still reports the historical 0.0 band.
         assert_eq!(
-            b.reference_dsr_population(1, 50, 0.5).unwrap(),
+            b.reference_dsr_population(1, 50, sigma).unwrap(),
             vec![0.0; 3]
         );
     }
