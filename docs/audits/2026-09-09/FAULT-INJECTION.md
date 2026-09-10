@@ -487,3 +487,105 @@ What this does not do: the `Commitment` an entrant registers before the
 deadline does not bind a plan (the attest crate is unchanged), so the plan is
 fixed by the window at open and checked against each entry's declaration at
 score, not committed to by the entrant.
+
+## Header cross-check and commitment binding follow-up
+
+Built on `0dcc4b8` in `687f9e6`. The two gaps recorded above are closed; the
+sections above are unchanged as the record of that round.
+
+**The verifier cross-checks the header against the window file.**
+`verify_arena` reads each published window's `window.json` and compares it with
+the signed header on every identity field both record (`IdentityField`):
+`window_id`, `schema_version`, `commit_deadline`, `data_reveal_epoch`,
+`score_config` (by the digest recomputed on each side), `score_config_sha256`,
+`scorer_artifact_sha256`, `sealed_eval_salt_sha256`, `fault_plan_sha256` and
+`dataset_hash`, an optional value present on one side only counting as a
+mismatch. A disagreement fails the window with typed `IdentityMismatch`
+records in `WindowVerification::identity_mismatches` (omitted from the JSON
+when empty), and `arena verify` exits 1; an unreadable window file is an
+`Err`, also exit 1. Refusals and scores are outcomes, not identity, and are
+not compared. No change to `main.rs` was needed: the CLI already exits 1 when
+the report is not `ok`.
+
+**A faulted window's commitment binds its plan.** The commitment pre-image
+already bound window identity as a framed field (`target_window`); the plan
+digest is appended the same way, as a fifth framed field under the unchanged
+`sharpebench-attest/commitment/v2` domain, only when the window has a plan
+(`make_commitment_under_fault_plan`, `verify_commitment_under_fault_plan`,
+`Registry::reveal_under_fault_plan`; `make_commitment`, `verify_commitment`
+and `Registry::reveal` delegate with `None`). `framed_preimage` commits to the
+field count, so a five-field pre-image never equals a four-field one.
+`Arena::reveal_and_score` reveals every entry under the window's plan; a
+commitment for another plan, for none on a faulted window, or for a plan on
+an unfaulted one is refused and recorded as `reveal does not match
+commitment`. `sharpebench commit` lives in `main.rs`, which this round does
+not touch, so the plan-binding commitment is printed by the new `sharpebench
+arena commitment <agent_id> <window> <artifact_digest> <salt> [--fault-plan
+<plan.json>]` in `arena_cmd.rs`, which without the flag prints exactly what
+`sharpebench commit` prints.
+
+**Byte identity.**
+
+- `an_unfaulted_commitment_keeps_its_bytes` pins three commitment hashes
+  printed by `sharpebench commit` built from `origin/main` (`0dcc4b8`),
+  separator-laden and empty fields included, and checks the JSON has no new
+  field.
+- The CLI built from `0dcc4b8` and from `687f9e6` ran the same 19-command
+  session in two directories (four `commit`s, `arena init`, `open` text and
+  `--json` with a sealed salt, two `arena commit`s, `advance`, `score` with one
+  entry refused for a wrong salt, `publish`, `verify` text, `--json`, pinned
+  and wrongly pinned, `verify` text and `--json` over a copy of the committed
+  `arena/`, and `advance` over it at its own epoch). Every exit code, stdout
+  and stderr and all 14 written files were identical (`diff -r` exit 0), and
+  the advanced copy of `arena/` was identical to the committed one.
+- `the_committed_arena_round_trips_byte_identically` still passes, and
+  `git diff 0dcc4b8 -- arena/ paper/evidence/ examples/` is empty apart from
+  the provenance manifest rebind.
+
+**Tests.** `crates/sharpebench-arena/tests/verify_identity.rs`:
+`a_clean_arena_reports_no_identity_field`,
+`a_window_whose_config_digest_differs_from_its_header_fails` (the digest, then
+the config under its old digest),
+`a_window_whose_fault_plan_differs_from_its_header_fails` (different, dropped,
+added), `every_other_identity_field_is_cross_checked` (seven fields),
+`a_published_board_without_its_window_file_is_an_error`.
+`crates/sharpebench-attest/tests/fault_plan_commitment.rs`:
+`an_unfaulted_commitment_keeps_its_bytes`,
+`a_commitment_verifies_only_under_the_plan_it_bound`,
+`the_plan_cannot_be_folded_into_the_salt`,
+`the_registry_refuses_a_reveal_under_another_plan`.
+`a_commitment_for_another_plan_is_refused_at_reveal` in
+`fault_plan_identity.rs` (different, none on a faulted window, a plan on an
+unfaulted one; the honest entrant still scores), whose `committed_window`
+helper now commits under the window's plan. The installed binary
+(`crates/sharpebench-cli/tests/arena_identity_cli.rs`):
+`arena_commitment_without_a_plan_is_sharpebench_commit` and
+`a_faulted_window_binds_its_plan_from_commitment_to_verify` (a `sharpebench
+commit` entrant refused on a faulted window, then `arena verify` exit 1 with
+the typed mismatch after the plan is dropped from `window.json`).
+
+**Mutation checks**, broken in place on the committed tree (`687f9e6`), the
+named tests run, the file restored from `git show HEAD:<path>` and confirmed
+identical before the next:
+
+| Invariant | Mutation | Killed by |
+|---|---|---|
+| Verify compares the plan digest | the window side of the pair reads the header's | `a_window_whose_fault_plan_differs_from_its_header_fails`, `a_faulted_window_binds_its_plan_from_commitment_to_verify` |
+| Verify refuses absent versus present | each side falls back to the other when absent | `a_window_whose_fault_plan_differs_from_its_header_fails` |
+| Verify compares the config digest | the window side reads the header's | `a_window_whose_config_digest_differs_from_its_header_fails` |
+| Verify compares the config itself | the window's recomputed digest reads the header's | `a_window_whose_config_digest_differs_from_its_header_fails` |
+| The other fields are compared | the sealed salt pair compares the header with itself | `every_other_identity_field_is_cross_checked` |
+| A mismatch fails the window | `ok` ignores `identity_mismatches` | three `verify_identity.rs` tests, `a_faulted_window_binds_its_plan_from_commitment_to_verify` |
+| A clean report keeps its bytes | `skip_serializing_if` removed on `identity_mismatches` | `a_clean_arena_reports_no_identity_field` |
+| The text report names the field | the detail drops the mismatch | `a_window_whose_fault_plan_differs_from_its_header_fails`, `a_faulted_window_binds_its_plan_from_commitment_to_verify` |
+| Score reveals under the window's plan | `reveal_and_score` passes `None` | `a_commitment_for_another_plan_is_refused_at_reveal`, `a_faulted_window_binds_its_plan_from_commitment_to_verify` |
+| The commitment binds the plan | the plan is not appended | `a_commitment_verifies_only_under_the_plan_it_bound`, `the_registry_refuses_a_reveal_under_another_plan`, `a_commitment_for_another_plan_is_refused_at_reveal` |
+| No plan: commitment bytes | an empty fifth field is appended when there is no plan | `an_unfaulted_commitment_keeps_its_bytes` |
+| The registry checks the plan | `reveal_under_fault_plan` verifies under `None` | `the_registry_refuses_a_reveal_under_another_plan` |
+| The CLI commitment binds the plan | `arena commitment` passes `None` | `arena_commitment_without_a_plan_is_sharpebench_commit`, `a_faulted_window_binds_its_plan_from_commitment_to_verify` |
+
+What this still does not do: a registered commitment carries no plan in the
+clear, so a commitment made for the wrong plan is accepted by `arena commit`
+and refused only at reveal, when the pre-image is known. The
+`sharpebench commit` subcommand in `main.rs` binds no plan; entrants to a
+faulted window use `arena commitment --fault-plan`.

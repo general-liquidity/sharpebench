@@ -33,7 +33,11 @@ open -> committed -> scoring -> published
 3. **`arena commit <dir> <window> <commitment.json>`** registers an entrant's
    commitment (the JSON that `sharpebench commit` prints). Late commitments,
    at or after the deadline epoch, are refused; so are duplicates. These are
-   the attest registry's own semantics, wrapped rather than re-derived.
+   the attest registry's own semantics, wrapped rather than re-derived. An
+   entrant to a faulted window makes its commitment with `arena commitment
+   <agent_id> <window> <artifact_digest> <salt> --fault-plan <plan.json>`
+   instead, so that it binds the plan (see [faulted windows](#faulted-windows));
+   without `--fault-plan` it prints exactly what `sharpebench commit` prints.
 4. **`arena advance <dir> <epoch>`** advances the clock. See below.
 5. **`arena score <dir> <window> <dataset> <entries.json>`** runs after the
    data-reveal epoch. Each entry reveals its pre-image (artifact digest plus
@@ -48,7 +52,9 @@ open -> committed -> scoring -> published
 7. **`arena verify <dir> [--pubkey <hex>]`** re-checks every published board
    and the cross-window chain from the documents alone. With `--pubkey` the
    host's advertised key is pinned; without it each board is checked under its
-   embedded key (consistency, not identity; see the attestation chapter).
+   embedded key (consistency, not identity; see the attestation chapter). Each
+   board's header is also checked against its window file (see
+   [the header and the window file](#the-header-and-the-window-file)).
 
 All subcommands honor the global `--json` flag and the `env:NAME` /
 `file:PATH` key convention.
@@ -90,6 +96,28 @@ The header also binds the window's rules (`ScoreConfig`), the revealed
 dataset's SHA-256, and the list of refused entries, so none of those can be
 quietly rewritten after publication either.
 
+### The header and the window file
+
+The signed header is the document of record; `window.json` beside it is not
+signed. `arena verify` therefore reads each published window's file and
+requires the header to record the same identity, field by field:
+`window_id`, `schema_version`, `commit_deadline`, `data_reveal_epoch`,
+`score_config` (compared by the digest recomputed on each side, so a config
+edited under its old digest is caught), `score_config_sha256`,
+`scorer_artifact_sha256`, `sealed_eval_salt_sha256`, `fault_plan_sha256` and
+`dataset_hash`. An optional field present on one side and absent on the other
+is a disagreement like two different values, so a window file that drops or
+invents a fault plan fails. Refusals and scores are outcomes rather than
+identity, and the scores are the signed links themselves; they are not
+compared.
+
+A disagreement fails that window. The `--json` report lists each one under the
+window's `identity_mismatches` as `{"field", "header", "window"}`, with `null`
+for an absent value; the text report names the field and both values; the exit
+code is 1. A published window whose file cannot be read is an error, also
+exit 1. When every field agrees the report carries no `identity_mismatches`
+key and is byte-identical to the report before the check existed.
+
 ## Faulted windows
 
 A window can be scored under a frozen fault plan, the one `sharpebench run
@@ -114,14 +142,25 @@ the same thing:
   any entry's declaration differs from the window's, including a declaration
   on an unfaulted window or none on a faulted one, `arena score` refuses the
   whole call and records nothing: the window stays `committed`.
+- Each entrant's pre-deadline commitment binds the plan too, so an entrant
+  cannot commit under one plan and be scored under another. The plan digest
+  is a fifth framed field of the commitment pre-image, after `agent_id`,
+  `target_window`, `artifact_digest` and `salt`, present only when the window
+  has a plan; `arena commitment ... --fault-plan <plan.json>` computes it. At
+  score time every entry is revealed under the window's plan, and a
+  commitment made for another plan, for no plan on a faulted window, or for a
+  plan on an unfaulted one does not match: it is refused and recorded like
+  any failed reveal, and the rest of the field is ranked.
 - `arena link-supersession` records the replacement's plan digest as
   `replacement_fault_plan_sha256`, and loading refuses a ledger whose recorded
   digest disagrees with the replacement window.
 - The signed header carries `fault_plan_sha256`, and `board.md` names it.
+  `arena verify` requires it to equal the window file's, absent versus
+  present included.
 
 Without `--fault-plan` none of these fields is written: an unfaulted window,
-its entries, the supersession ledger and the signed header have the same bytes
-as before the field existed.
+its entries, its commitments, the supersession ledger and the signed header
+have the same bytes as before the field existed.
 
 ## Sandboxed entrants
 

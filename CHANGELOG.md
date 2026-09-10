@@ -12,8 +12,17 @@ and links the commits it was built from.
 
 ## [Unreleased]
 
+### Breaking
+- arena: an entrant's commitment to a faulted window must now bind the window's fault plan digest, or its reveal is refused and recorded as `reveal does not match commitment`. A commitment for a faulted window made with `sharpebench commit`, which binds no plan, no longer scores; make it with `sharpebench arena commitment <agent_id> <window> <artifact_digest> <salt> --fault-plan <plan.json>`. A commitment that bound a plan is refused on an unfaulted window. Unfaulted windows are unchanged: their commitments have the same bytes as before.
+- arena: `WindowVerification` gains `identity_mismatches`, so Rust struct literals that list every field no longer compile. It is omitted from the JSON when empty, so the report of an arena that verifies is byte-identical.
+
 ### Fixed
+- arena: `arena verify` now cross-checks each published board's signed header against the window file it publishes. It verified the signed board alone, so a `window.json` edited after publication to another config digest or another fault plan, or with a plan added or dropped, still verified beside a board signed over the original identity. The header and the window must now agree on `window_id`, `schema_version`, `commit_deadline`, `data_reveal_epoch`, `score_config` (compared by the digest recomputed on each side), `score_config_sha256`, `scorer_artifact_sha256`, `sealed_eval_salt_sha256`, `fault_plan_sha256` and `dataset_hash`, absent versus present included. A disagreement fails the window with typed `IdentityMismatch` records (`field`, `header`, `window`) in the `--json` report, a `header identity mismatch` detail in the text report, and exit code 1; an unreadable window file is an error, also exit 1. See [cross-checked identity](docs/book/src/arena.md#the-header-and-the-window-file).
 - release: the MCP publish step now waits up to 20 minutes for the kernel package's npm tarball as well as its metadata before installing it. On v0.21.0 the metadata appeared minutes before the tarball, and the old 150-second wait on metadata alone failed with ETARGET and then E404 until the job was rerun.
+
+### Added
+- attest: `make_commitment_under_fault_plan`, `verify_commitment_under_fault_plan` and `Registry::reveal_under_fault_plan` bind a window's fault plan digest as a fifth framed field of the commitment pre-image, after `agent_id`, `target_window`, `artifact_digest` and `salt`, under the unchanged `sharpebench-attest/commitment/v2` domain. With no plan they are `make_commitment`, `verify_commitment` and `Registry::reveal` byte for byte; the framing commits to the field count, so a five-field pre-image never equals a four-field one. `arena score` reveals every entry under the window's plan.
+- cli: `sharpebench arena commitment <agent_id> <window> <artifact_digest> <salt> [--fault-plan <plan.json>]` prints the commitment an entrant registers with `arena commit`. The plan is read and validated as `arena open --fault-plan` reads it. Without the flag the output is `sharpebench commit`'s, byte for byte.
 
 ## [0.21.0] - 2026-09-10
 
