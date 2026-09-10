@@ -12,6 +12,12 @@ and links the commits it was built from.
 
 ## [Unreleased]
 
+### Breaking
+- arena: `ContainerInspector::oom_killed` is replaced by `exit_state`, which returns a `ContainerExitState` (status, `State.OOMKilled`, exit code) from one `docker inspect`, and `SandboxedAgent::finish_with` returns `Option<ResourceVerdict>` instead of `Option<bool>`. `SandboxedAgent::finish` keeps its `Result<Option<bool>, SandboxError>` signature.
+
+### Fixed
+- arena: a breach of the sandbox's published `--memory` budget is no longer classified from `State.OOMKilled` alone. Docker sets that flag from containerd's asynchronous `TaskOOM` event, which can be recorded after the exit or lost (containerd #8893, open), and the live CI job reproduced it: the 32 MiB tmpfs fixture exited non-zero while the flag read false, in four attempts. A breach recorded that way fell through to the transport classification and was retried as a runtime error. `classify_container_exit` now also treats an exited container with exit code 137 as a breach (the entrant is namespace PID 1, which nothing inside the hardened launch can SIGKILL, and the harness signals the container only after the read), keeps other exits and a still-running container within budget so a timeout is never a breach, and returns every other status as an indeterminate `SandboxError::Inspection`. The finalizer re-reads a container still reported running for up to 3 seconds before classifying. Out-of-band host kills and a surviving wrapper that exits 0 remain disclosed limits. Analysis, sources and mutation checks: [OOM-VERDICT.md](docs/audits/2026-09-09/OOM-VERDICT.md).
+
 ## [0.20.0] - 2026-09-10
 
 ### Breaking
