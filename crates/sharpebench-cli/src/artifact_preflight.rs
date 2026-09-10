@@ -241,6 +241,56 @@ impl RuntimeAllowlist {
     }
 }
 
+/// The shape Docker's init layer gives an entry it puts in every container.
+#[derive(Clone, Copy)]
+enum DockerInitShape {
+    EmptyFile,
+    Directory,
+    Symlink(&'static str),
+}
+
+/// What the daemon's init layer adds to the filesystem of every container it
+/// creates, and so to every export, whatever the image holds. Files are
+/// created empty (the daemon bind-mounts their contents only when a container
+/// starts, and an image's own file at the same path is replaced), directories
+/// are mount points or their parents, and `etc/mtab` is a fixed link. Measured
+/// against a live daemon in `live_runtime_allowlist_admits_the_fixture_and_its_probe_passes`.
+///
+/// Admitted without being listed only in exactly this shape: an entry at one of
+/// these paths that carries bytes, has another type or links elsewhere is image
+/// content and must be allowlisted like any other.
+const DOCKER_INIT_ENTRIES: [(&str, DockerInitShape); 12] = [
+    (".dockerenv", DockerInitShape::EmptyFile),
+    ("dev", DockerInitShape::Directory),
+    ("dev/console", DockerInitShape::EmptyFile),
+    ("dev/pts", DockerInitShape::Directory),
+    ("dev/shm", DockerInitShape::Directory),
+    ("etc", DockerInitShape::Directory),
+    ("etc/hostname", DockerInitShape::EmptyFile),
+    ("etc/hosts", DockerInitShape::EmptyFile),
+    ("etc/mtab", DockerInitShape::Symlink("/proc/mounts")),
+    ("etc/resolv.conf", DockerInitShape::EmptyFile),
+    ("proc", DockerInitShape::Directory),
+    ("sys", DockerInitShape::Directory),
+];
+
+/// Whether an export entry is one the daemon's init layer put there, in the
+/// shape it gives it. `link` is the entry's link target, if it has one.
+fn is_docker_init_entry(path: &str, kind: tar::EntryType, size: u64, link: Option<&[u8]>) -> bool {
+    let path = path.strip_prefix("./").unwrap_or(path);
+    let path = path.trim_start_matches('/').trim_end_matches('/');
+    DOCKER_INIT_ENTRIES.iter().any(|(init_path, shape)| {
+        *init_path == path
+            && match shape {
+                DockerInitShape::EmptyFile => kind.is_file() && size == 0,
+                DockerInitShape::Directory => kind.is_dir(),
+                DockerInitShape::Symlink(target) => {
+                    kind.is_symlink() && size == 0 && link == Some(target.as_bytes())
+                }
+            }
+    })
+}
+
 /// What the allowlist found in the export. Counts and archive-order indices
 /// only; no entry name leaves the preflight.
 #[derive(Debug, Serialize)]
@@ -248,6 +298,10 @@ pub struct AllowlistReport {
     pub allowlist_sha256: String,
     /// Entries enumerated, directories and links included.
     pub entries: u64,
+    /// Entries the allowlist does not name that were admitted as the daemon's
+    /// own init-layer entries ([`DOCKER_INIT_ENTRIES`]), in the shape the daemon
+    /// gives them.
+    pub docker_init_entries: u64,
     pub outside_allowlist: u64,
     pub outside_indices: Vec<u64>,
     /// False when the listing could not be read to the end. An incomplete
@@ -1076,6 +1130,7 @@ fn check_allowlist(
     let mut report = AllowlistReport {
         allowlist_sha256: allowlist.digest().to_string(),
         entries: 0,
+        docker_init_entries: 0,
         outside_allowlist: 0,
         outside_indices: Vec::new(),
         complete: false,
@@ -1097,9 +1152,17 @@ fn check_allowlist(
         let Ok(entry) = entry else {
             return report;
         };
-        let directory = entry.header().entry_type().is_dir();
-        let admitted = std::str::from_utf8(&entry.path_bytes())
-            .is_ok_and(|path| allowlist.admits(path, directory));
+        let kind = entry.header().entry_type();
+        let admitted = std::str::from_utf8(&entry.path_bytes()).is_ok_and(|path| {
+            allowlist.admits(path, kind.is_dir()) || {
+                // An unreadable size is never "empty".
+                let size = entry.header().size().unwrap_or(u64::MAX);
+                let docker =
+                    is_docker_init_entry(path, kind, size, entry.link_name_bytes().as_deref());
+                report.docker_init_entries += u64::from(docker);
+                docker
+            }
+        });
         if !admitted {
             if report.outside_indices.len() < MAX_REPORTED_OUTSIDE {
                 report.outside_indices.push(report.entries);
@@ -1650,6 +1713,129 @@ mod tests {
         ] {
             assert_eq!(list.admits(path, directory), admitted, "{path}");
         }
+    }
+
+    /// A TAR archive of typed entries: `('f', path, body)` is a regular file,
+    /// `('d', path, _)` a directory and `('l', path, target)` a symlink.
+    fn tar_typed(entries: &[(char, &str, &[u8])]) -> Vec<u8> {
+        let mut archive = Vec::new();
+        for (kind, path, body) in entries {
+            let mut header = tar::Header::new_gnu();
+            header.set_path(path).expect("the fixture path fits");
+            header.set_mode(0o755);
+            match kind {
+                'd' => {
+                    header.set_entry_type(tar::EntryType::Directory);
+                    header.set_size(0);
+                }
+                'l' => {
+                    header.set_entry_type(tar::EntryType::Symlink);
+                    header.set_size(0);
+                    header
+                        .set_link_name(std::str::from_utf8(body).expect("a UTF-8 target"))
+                        .expect("the fixture target fits");
+                }
+                _ => header.set_size(body.len() as u64),
+            }
+            header.set_cksum();
+            archive.extend_from_slice(header.as_bytes());
+            if *kind == 'f' {
+                archive.extend_from_slice(body);
+                archive.resize(archive.len().div_ceil(512) * 512, 0);
+            }
+        }
+        archive.extend_from_slice(&[0; 1024]);
+        archive
+    }
+
+    /// Every entry Docker's init layer adds to a created container, in the
+    /// shape the live daemon gives it.
+    const DOCKER_INIT_EXPORT: [(char, &str, &[u8]); 12] = [
+        ('f', ".dockerenv", b""),
+        ('d', "dev/", b""),
+        ('f', "dev/console", b""),
+        ('d', "dev/pts/", b""),
+        ('d', "dev/shm/", b""),
+        ('d', "etc/", b""),
+        ('f', "etc/hostname", b""),
+        ('f', "etc/hosts", b""),
+        ('l', "etc/mtab", b"/proc/mounts"),
+        ('f', "etc/resolv.conf", b""),
+        ('d', "proc/", b""),
+        ('d', "sys/", b""),
+    ];
+
+    /// The daemon's own init-layer entries need no allowlist line, because an
+    /// export always holds them and they carry no image content. The same
+    /// paths carrying bytes, of another type or linking elsewhere are image
+    /// content and still refuse by index.
+    #[test]
+    fn docker_init_entries_are_admitted_only_in_the_shape_docker_gives_them() {
+        let mut entries = DOCKER_INIT_EXPORT.to_vec();
+        entries.extend([('d', "app/", &b""[..]), ('f', "app/agent", b"#!/bin/sh\n")]);
+        let mut fake = Fake::new();
+        fake.export = tar_typed(&entries);
+        let report =
+            preflight_image(&allowlisted(&["app/"]), &fake).expect("the preflight completes");
+        let checked = report
+            .runtime_allowlist
+            .as_ref()
+            .expect("the allowlist ran");
+        assert_eq!(
+            (
+                checked.entries,
+                checked.docker_init_entries,
+                checked.outside_allowlist
+            ),
+            (14, 12, 0),
+            "{checked:?}"
+        );
+        assert!(report.authorizes_launch(), "{report:?}");
+
+        for (index, content) in [
+            ('f', ".dockerenv", &b"x"[..]),
+            ('f', "etc/hosts", b"10.0.0.1 held-out-store\n"),
+            ('f', "etc/resolv.conf", b"nameserver 10.0.0.1\n"),
+            ('l', "etc/mtab", b"/srv/window-scores.csv"),
+            ('f', "etc/mtab", b""),
+            ('f', "proc", b""),
+            ('d', "etc/hostname/", b""),
+            ('l', "dev/console", b"/proc/mounts"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut fake = Fake::new();
+            fake.export = tar_typed(&[('d', "app/", b""), content]);
+            let report =
+                preflight_image(&allowlisted(&["app/"]), &fake).expect("the preflight completes");
+            let checked = report
+                .runtime_allowlist
+                .as_ref()
+                .expect("the allowlist ran");
+            assert_eq!(
+                (checked.docker_init_entries, checked.outside_allowlist),
+                (0, 1),
+                "case {index}: {checked:?}"
+            );
+            assert_eq!(checked.outside_indices, vec![1], "case {index}");
+            assert!(!report.authorizes_launch(), "case {index}");
+            assert!(
+                !probed(&fake),
+                "case {index}: a refused image is never started"
+            );
+        }
+
+        // Below an init mount point is image content, not Docker's.
+        let mut fake = Fake::new();
+        fake.export = tar_typed(&[('d', "proc/", b""), ('f', "proc/cached", b"")]);
+        let report =
+            preflight_image(&allowlisted(&["app/"]), &fake).expect("the preflight completes");
+        let checked = report
+            .runtime_allowlist
+            .as_ref()
+            .expect("the allowlist ran");
+        assert_eq!(checked.outside_indices, vec![1], "{checked:?}");
     }
 
     #[test]
@@ -2253,5 +2439,402 @@ mod tests {
             matched.image_id, clean.image_id,
             "both captures must report the same configuration ID"
         );
+    }
+
+    fn live_fixture() -> String {
+        std::env::var("SHARPEBENCH_SANDBOX_FIXTURE").expect(
+            "the live allowlist tests need SHARPEBENCH_SANDBOX_FIXTURE set to a digest-pinned \
+             image that is present locally",
+        )
+    }
+
+    /// One archive entry as the live measurement records it.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct Listed {
+        path: String,
+        kind: tar::EntryType,
+        size: u64,
+        link: Option<String>,
+    }
+
+    impl std::fmt::Display for Listed {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{} {:?} size={}", self.path, self.kind, self.size)?;
+            if let Some(link) = &self.link {
+                write!(f, " -> {link}")?;
+            }
+            Ok(())
+        }
+    }
+
+    fn normalized(path: &str) -> String {
+        let path = path.strip_prefix("./").unwrap_or(path);
+        path.trim_start_matches('/')
+            .trim_end_matches('/')
+            .to_string()
+    }
+
+    /// Every entry of a TAR stream, in archive order.
+    fn list_tar(reader: impl Read) -> Vec<Listed> {
+        let mut archive = tar::Archive::new(reader);
+        archive
+            .entries()
+            .expect("a readable archive")
+            .map(|entry| {
+                let entry = entry.expect("a readable entry");
+                Listed {
+                    path: normalized(
+                        std::str::from_utf8(&entry.path_bytes()).expect("a UTF-8 entry name"),
+                    ),
+                    kind: entry.header().entry_type(),
+                    size: entry.header().size().expect("a readable size"),
+                    link: entry
+                        .link_name_bytes()
+                        .map(|link| String::from_utf8_lossy(&link).into_owned()),
+                }
+            })
+            .collect()
+    }
+
+    fn docker_stdout(args: &[&str]) -> String {
+        let output = Command::new("docker")
+            .args(args)
+            .stdin(Stdio::null())
+            .output()
+            .expect("docker must run");
+        assert!(
+            output.status.success(),
+            "docker {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    /// The export of a created, never-started container, taken exactly as the
+    /// preflight takes it: the same create arguments and the same capture.
+    fn live_export_listing(image: &str) -> Vec<Listed> {
+        let deadline = Instant::now() + Duration::from_secs(120);
+        let name = reserved_container_name();
+        let created = DockerProcess
+            .capture(
+                &create_args(&name, image),
+                MAX_CONTROL_RESPONSE_BYTES,
+                deadline,
+            )
+            .expect("docker create runs");
+        assert!(created.success, "{}", created.redacted_stderr);
+        let exported = DockerProcess
+            .capture(&owned(&["export", &name]), 1 << 30, deadline)
+            .expect("docker export runs");
+        assert!(
+            remove_container(&DockerProcess, &name),
+            "the listing container must be removed"
+        );
+        assert!(exported.success, "{}", exported.redacted_stderr);
+        list_tar(exported.stdout)
+    }
+
+    /// What the image itself holds: its layers from `docker save`, applied in
+    /// order with whiteouts, independently of any container the daemon creates.
+    fn live_image_listing(image: &str) -> Vec<Listed> {
+        let saved = DockerProcess
+            .capture(
+                &owned(&["save", image]),
+                1 << 30,
+                Instant::now() + Duration::from_secs(120),
+            )
+            .expect("docker save runs");
+        assert!(saved.success, "{}", saved.redacted_stderr);
+        let mut blobs = std::collections::HashMap::new();
+        let mut links = std::collections::HashMap::new();
+        let mut archive = tar::Archive::new(saved.stdout);
+        for entry in archive.entries().expect("a readable image archive") {
+            let mut entry = entry.expect("a readable image entry");
+            let path = normalized(&String::from_utf8_lossy(&entry.path_bytes()));
+            if entry.header().entry_type().is_symlink() {
+                let target = entry.link_name_bytes().expect("a link has a target");
+                let target = String::from_utf8_lossy(&target).into_owned();
+                // A save deduplicates a layer as a relative link to another.
+                let mut resolved: Vec<&str> = path.split('/').collect();
+                resolved.pop();
+                for segment in target.split('/') {
+                    match segment {
+                        ".." => {
+                            resolved.pop();
+                        }
+                        "." | "" => {}
+                        segment => resolved.push(segment),
+                    }
+                }
+                let resolved = resolved.join("/");
+                links.insert(path, resolved);
+            } else if entry.header().entry_type().is_file() {
+                let mut bytes = Vec::new();
+                entry.read_to_end(&mut bytes).expect("a readable blob");
+                blobs.insert(path, bytes);
+            }
+        }
+        let manifest: Value =
+            serde_json::from_slice(&blobs["manifest.json"]).expect("a manifest.json");
+        let layers = manifest[0]["Layers"].as_array().expect("a layer list");
+        let mut merged: Vec<Listed> = Vec::new();
+        for layer in layers {
+            let mut path = normalized(layer.as_str().expect("a layer path"));
+            while let Some(target) = links.get(&path) {
+                path = target.clone();
+            }
+            let bytes = &blobs[&path];
+            let entries = match bytes.get(..4) {
+                Some([0x1f, 0x8b, ..]) => {
+                    let output = Command::new("gzip")
+                        .arg("-dc")
+                        .stdin(spooled(bytes))
+                        .output()
+                        .expect("gzip must run");
+                    assert!(output.status.success(), "gzip could not read layer {path}");
+                    list_tar(&output.stdout[..])
+                }
+                Some([0x28, 0xb5, 0x2f, 0xfd]) => panic!("layer {path} is zstd; add a decoder"),
+                _ => list_tar(&bytes[..]),
+            };
+            println!("image layer {path}: {} entries", entries.len());
+            for entry in entries {
+                let (parent, base) = entry.path.rsplit_once('/').unwrap_or(("", &entry.path));
+                if base == ".wh..wh..opq" {
+                    merged.retain(|kept| !kept.path.starts_with(&format!("{parent}/")));
+                } else if let Some(hidden) = base.strip_prefix(".wh.") {
+                    let hidden = if parent.is_empty() {
+                        hidden.to_string()
+                    } else {
+                        format!("{parent}/{hidden}")
+                    };
+                    merged.retain(|kept| {
+                        kept.path != hidden && !kept.path.starts_with(&format!("{hidden}/"))
+                    });
+                } else {
+                    merged.retain(|kept| kept.path != entry.path);
+                    merged.push(entry);
+                }
+            }
+        }
+        merged
+    }
+
+    /// Export entries that are not the image's own: a path the image does not
+    /// hold, or one whose type, size or link target the daemon changed.
+    fn docker_added<'a>(image: &[Listed], export: &'a [Listed]) -> Vec<&'a Listed> {
+        export
+            .iter()
+            .filter(|entry| !entry.path.is_empty())
+            .filter(|entry| {
+                image
+                    .iter()
+                    .find(|own| own.path == entry.path)
+                    .is_none_or(|own| {
+                        own.kind != entry.kind || own.size != entry.size || own.link != entry.link
+                    })
+            })
+            .collect()
+    }
+
+    fn allowlist_of(paths: &[&str]) -> RuntimeAllowlist {
+        let json = serde_json::json!({"schema_version": ALLOWLIST_VERSION, "paths": paths});
+        let bytes = json.to_string();
+        println!(
+            "generated allowlist: {} paths, {} bytes",
+            paths.len(),
+            bytes.len()
+        );
+        RuntimeAllowlist::from_json(bytes.as_bytes()).expect("the generated allowlist validates")
+    }
+
+    /// The fixture's own paths, each admitted exactly (no subtree).
+    fn image_paths(image: &[Listed]) -> Vec<&str> {
+        image
+            .iter()
+            .map(|entry| entry.path.as_str())
+            .filter(|path| !path.is_empty())
+            .collect()
+    }
+
+    /// The pinned fixture with an entrypoint that answers one observation with
+    /// a hold. Committed from a created, never-started container, so its
+    /// filesystem is the fixture's; only the configuration changes.
+    fn commit_answering_image(fixture: &str) -> String {
+        let name = reserved_container_name();
+        docker_stdout(&["create", "--name", &name, "--pull", "never", fixture]);
+        let entrypoint = serde_json::to_string(&[
+            "/bin/sh",
+            "-c",
+            r#"IFS= read -r observation; echo '{"orders":[],"reasoning":"probe"}'"#,
+        ])
+        .expect("an entrypoint serializes");
+        let id = docker_stdout(&[
+            "commit",
+            "--change",
+            &format!("ENTRYPOINT {entrypoint}"),
+            &name,
+        ]);
+        docker_stdout(&["rm", "--force", &name]);
+        id
+    }
+
+    /// The runtime allowlist and the functional probe against a real daemon.
+    ///
+    /// Measures what the daemon adds to a created container's export (printed
+    /// for the audit record), requires every such entry to be one
+    /// [`DOCKER_INIT_ENTRIES`] admits in its shape, then runs the preflight
+    /// with an allowlist naming exactly the fixture's own paths. The pinned
+    /// fixture's own entrypoint is `/bin/sh` reading the observation as a
+    /// script, so its probe must refuse with `no_decision`: that is the probe
+    /// running the image, not assuming it. The same filesystem with an
+    /// entrypoint that answers must pass and authorize.
+    #[test]
+    #[ignore = "needs a running Docker daemon and SHARPEBENCH_SANDBOX_FIXTURE"]
+    fn live_runtime_allowlist_admits_the_fixture_and_its_probe_passes() {
+        let fixture = live_fixture();
+        println!(
+            "daemon: server {} / {} / {}",
+            docker_stdout(&["version", "--format", "{{.Server.Version}}"]),
+            docker_stdout(&["info", "--format", "{{.Driver}} {{json .DriverStatus}}"]),
+            docker_stdout(&[
+                "info",
+                "--format",
+                "cgroup {{.CgroupDriver}} v{{.CgroupVersion}}"
+            ]),
+        );
+        let image = live_image_listing(&fixture);
+        let export = live_export_listing(&fixture);
+        println!(
+            "fixture {fixture}: {} image entries, {} export entries",
+            image.len(),
+            export.len()
+        );
+        let added = docker_added(&image, &export);
+        for entry in &added {
+            let own = image.iter().find(|own| own.path == entry.path);
+            println!(
+                "docker-added export entry: {entry} (image holds: {})",
+                own.map_or("nothing".to_string(), ToString::to_string)
+            );
+        }
+        for own in &image {
+            if !export.iter().any(|entry| entry.path == own.path) {
+                println!("image entry absent from the export: {own}");
+            }
+        }
+        for entry in &added {
+            assert!(
+                is_docker_init_entry(
+                    &entry.path,
+                    entry.kind,
+                    entry.size,
+                    entry.link.as_deref().map(str::as_bytes)
+                ),
+                "the daemon added {entry}, which the init-entry rule does not admit"
+            );
+        }
+        let new_paths = added
+            .iter()
+            .filter(|entry| !image.iter().any(|own| own.path == entry.path))
+            .count() as u64;
+
+        let allowlist = allowlist_of(&image_paths(&image));
+        let pinned = preflight_image(
+            &PreflightRequest {
+                image: fixture.clone(),
+                policy: policy(),
+                allowlist: Some(allowlist.clone()),
+            },
+            &DockerProcess,
+        )
+        .expect("the pinned fixture's preflight completes");
+        println!(
+            "pinned fixture report: {}",
+            serde_json::to_string(&pinned).expect("serializes")
+        );
+        let checked = pinned
+            .runtime_allowlist
+            .as_ref()
+            .expect("the allowlist ran");
+        assert!(checked.admits_everything(), "{checked:?}");
+        assert_eq!(checked.entries, export.len() as u64);
+        assert_eq!(checked.docker_init_entries, new_paths);
+        let probe = pinned.functional_probe.as_ref().expect("the probe ran");
+        assert_eq!(probe.refusal, Some("no_decision"), "{probe:?}");
+        assert!(probe.cleanup_verified && !pinned.authorizes_launch());
+
+        let answering = commit_answering_image(&fixture);
+        let report = preflight_image(
+            &PreflightRequest {
+                image: answering.clone(),
+                policy: policy(),
+                allowlist: Some(allowlist),
+            },
+            &DockerProcess,
+        );
+        docker_stdout(&["image", "rm", "--force", &answering]);
+        let report = report.expect("the answering image's preflight completes");
+        println!(
+            "answering image report: {}",
+            serde_json::to_string(&report).expect("serializes")
+        );
+        let checked = report
+            .runtime_allowlist
+            .as_ref()
+            .expect("the allowlist ran");
+        assert!(checked.admits_everything(), "{checked:?}");
+        let probe = report.functional_probe.as_ref().expect("the probe ran");
+        assert!(probe.passed && probe.cleanup_verified, "{probe:?}");
+        assert!(report.cleanup_verified && report.authorizes_launch());
+        assert_eq!(
+            report.authorized_image_id().map(|id| id.0),
+            Some(report.image_id.clone())
+        );
+    }
+
+    /// An allowlist that names every fixture path but one refuses, reports the
+    /// one entry by its archive-order index in an independent export of the
+    /// same image, withholds its name and never starts the image.
+    #[test]
+    #[ignore = "needs a running Docker daemon and SHARPEBENCH_SANDBOX_FIXTURE"]
+    fn live_runtime_allowlist_refuses_an_omitted_path_by_index() {
+        const OMITTED: &str = "etc/alpine-release";
+        let fixture = live_fixture();
+        let image = live_image_listing(&fixture);
+        let export = live_export_listing(&fixture);
+        assert!(image.iter().any(|entry| entry.path == OMITTED));
+        let index = export
+            .iter()
+            .position(|entry| entry.path == OMITTED)
+            .expect("the export holds the omitted path") as u64;
+        let paths: Vec<&str> = image_paths(&image)
+            .into_iter()
+            .filter(|path| *path != OMITTED)
+            .collect();
+        let report = preflight_image(
+            &PreflightRequest {
+                image: fixture,
+                policy: policy(),
+                allowlist: Some(allowlist_of(&paths)),
+            },
+            &DockerProcess,
+        )
+        .expect("the preflight completes");
+        let published = serde_json::to_string(&report).expect("serializes");
+        println!("omitted-path report: {published}");
+        let checked = report
+            .runtime_allowlist
+            .as_ref()
+            .expect("the allowlist ran");
+        assert!(checked.complete);
+        assert_eq!(checked.outside_allowlist, 1, "{checked:?}");
+        assert_eq!(checked.outside_indices, vec![index], "{checked:?}");
+        assert!(
+            report.functional_probe.is_none(),
+            "a refused image is never started"
+        );
+        assert!(report.cleanup_verified && !report.authorizes_launch());
+        assert!(!published.contains("alpine-release"), "{published}");
     }
 }
