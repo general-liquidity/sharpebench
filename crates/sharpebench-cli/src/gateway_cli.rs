@@ -8,13 +8,19 @@
 //!
 //! Credential values are read but never printed: the report says which variable
 //! backs each alias and whether it is set.
+//!
+//! Serving is not this command's job, because serving needs a
+//! `ProviderTransport` and none ships in this build. The serving loop is
+//! `sharpebench_harness::gateway::serve::run_gateway_sweep`, which an operator
+//! calls from a binary that supplies the transport; this report reads the
+//! journal such a sweep writes, whichever sweep it is bound to.
 
 use std::path::PathBuf;
 
 use serde::Deserialize;
 use sharpebench_harness::accounting::RateCard;
 use sharpebench_harness::gateway::{GatewayLimits, ModelRoute, RouteTable, Secret};
-use sharpebench_harness::gateway_journal::{GatewayBudget, GatewayJournal, JournalIdentity};
+use sharpebench_harness::gateway_journal::{GatewayBudget, GatewayJournal};
 
 const ROUTES_SCHEMA_VERSION: &str = "sharpebench.gateway-routes.v1";
 const MAX_ROUTES_BYTES: u64 = 256 * 1024;
@@ -143,6 +149,7 @@ fn limits_json(limits: &GatewayLimits) -> serde_json::Value {
         "max_concurrent_calls": limits.max_concurrent_calls,
         "provider_read_timeout_ms": limits.provider_read_timeout.as_millis() as u64,
         "provider_call_timeout_ms": limits.provider_call_timeout.as_millis() as u64,
+        "max_requests_per_decision": limits.max_requests_per_decision,
     })
 }
 
@@ -155,18 +162,17 @@ fn report(
     let budget = parse_budget(args)?;
     let (routes, bindings) = load_routes(path, lookup)?;
     let limits = GatewayLimits::default();
-    let identity = JournalIdentity::new(routes.identity_digest(), budget);
     let journal_path = flag(args, "--journal").map(PathBuf::from);
     let journal = match &journal_path {
         Some(path) if path.exists() => Some(
-            GatewayJournal::load_bound(path, &identity)
+            GatewayJournal::load_for_routes(path, &routes.identity_digest(), budget)
                 .map_err(|error| format!("cannot resume the gateway journal: {error}"))?,
         ),
         _ => None,
     };
     let spend = journal.as_ref().map(|journal| {
         let state = journal.spend();
-        serde_json::json!({
+        let mut spend = serde_json::json!({
             "calls_started": state.calls_started,
             "priced_usd_nanos": state.priced_usd_nanos.to_string(),
             "unknown_usd_nanos": state.unknown_usd_nanos.to_string(),
@@ -176,7 +182,11 @@ fn report(
             "overspent_calls": state.overspent_calls,
             "ceiling_breached": journal.ceiling_breached(),
             "partial": state.is_partial(),
-        })
+        });
+        if let Some(sweep) = &journal.identity.sweep_sha256 {
+            spend["sweep_sha256"] = serde_json::Value::from(sweep.as_str());
+        }
+        spend
     });
     Ok(serde_json::json!({
         "route_table_sha256": routes.identity_digest(),
@@ -230,6 +240,7 @@ pub fn run(args: &[String], json: bool) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sharpebench_harness::gateway_journal::JournalIdentity;
 
     const KEY_VAR: &str = "SHARPEBENCH_TEST_GATEWAY_KEY";
     /// Not a credential: a fixed placeholder handed to a pure lookup, so no
@@ -448,6 +459,46 @@ mod tests {
         ]))
         .expect_err("a rebound journal refuses");
         assert!(error.contains("cannot resume"), "{error}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The journal a serving sweep writes is bound to that sweep. The report
+    /// reads it under the same routes and budget and names the sweep it
+    /// belongs to, rather than refusing it or hiding the binding.
+    #[test]
+    fn a_sweep_bound_journal_is_reported_with_its_sweep() {
+        let dir = temp_dir("sweepbound");
+        let routes_path = write(
+            &dir,
+            "routes.json",
+            &manifest("fake.v1", "2026-01-01", KEY_VAR),
+        );
+        let (routes, _) = load_routes(&routes_path, &present).expect("routes");
+        let budget = GatewayBudget {
+            max_usd_nanos: 1000,
+            max_calls: 5,
+        };
+        let journal = dir.join("journal.json");
+        let sweep = "9".repeat(64);
+        GatewayJournal::new(
+            JournalIdentity::new(routes.identity_digest(), budget).for_sweep(sweep.clone()),
+        )
+        .save(&journal)
+        .expect("save");
+        let journal = journal.display().to_string();
+        let value = present_report(&args(&[
+            "--routes",
+            &routes_path,
+            "--budget-usd-nanos",
+            "1000",
+            "--max-calls",
+            "5",
+            "--journal",
+            &journal,
+        ]))
+        .expect("a sweep-bound journal under the same routes and budget reports");
+        assert_eq!(value["spend"]["sweep_sha256"], sweep.as_str());
+        assert_eq!(value["limits"]["max_requests_per_decision"], 32);
         std::fs::remove_dir_all(&dir).ok();
     }
 }
