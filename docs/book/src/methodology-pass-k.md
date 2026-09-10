@@ -33,8 +33,11 @@ PSR(run returns, per_run_min_annual_sharpe / sqrt(periods_per_year)) >= per_run_
 ```
 
 `per_run_psr_bar` is a probability and stays one. `per_run_min_annual_sharpe` is
-the **annualized** Sharpe the run's true Sharpe must exceed with that confidence;
-it is converted to per period through `sharpebench_core::per_run_psr_benchmark`,
+the **annualized** Sharpe benchmark of the run's one-sided test: the run passes
+when its PSR, one minus that test's p-value, reaches the bar. That is not a
+statement that the true Sharpe exceeds the benchmark with that probability.
+The benchmark is converted to per period through
+`sharpebench_core::per_run_psr_benchmark`,
 the same way the deflation prior is. The default is `0.0`, the no-edge null, under
 which the test is exactly `PSR(returns, 0) >= 0.90`, the test the benchmark has
 always run. An operator who wants "beats an annualized 0.5 on every run" sets

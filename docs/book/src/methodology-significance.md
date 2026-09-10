@@ -8,8 +8,10 @@ reproducible.
 ## 1. Per-agent stationary-bootstrap p-value
 
 `bootstrap_pvalue` asks: under the null "true mean ≤ 0", how often does a
-block-resampled version of the agent's excess returns produce an average as large
-as the one observed? Block resampling (expected block length `1/block_prob`)
+block-resampled version of the agent's pooled returns produce an average as large
+as the one observed? The returns are the raw seed-averaged per-period returns,
+measured against a zero-rate cash benchmark, not excess returns over a risk-free
+rate or over another agent. Block resampling (expected block length `1/block_prob`)
 preserves serial correlation, so autocorrelated returns don't fool the test. An
 agent must beat `alpha` (default `0.05`) to be eligible.
 
