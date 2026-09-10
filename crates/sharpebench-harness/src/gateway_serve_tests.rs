@@ -381,6 +381,54 @@ fn an_entrant_reaches_the_model_through_its_own_pipe() {
     assert!(!wire.contains(KEY) && !wire.contains("provider.invalid"));
 }
 
+/// The delivered-artifact leak gate. A provider (or a proxy in front of it)
+/// that echoes a credential, a destination or the journal's location into the
+/// model text does not get it to the entrant: the answer is withheld with a
+/// typed refusal. The call still happened, so it is still charged.
+#[test]
+fn host_material_in_an_answer_never_reaches_the_entrant() {
+    let dir = temp_dir("leak");
+    let journal = dir.join("journal.json");
+    for echoed in [
+        format!("the key is {KEY}"),
+        "see https://provider.invalid/v1/messages".to_string(),
+        format!("spend is kept at {}", journal.display()),
+    ] {
+        std::fs::remove_file(&journal).ok();
+        let routes = table();
+        let permits = CallPermits::new(4);
+        let provider = ScriptedProvider::answering(&echoed);
+        let mut gateway = ModelGateway::open(
+            &routes,
+            &permits,
+            provider.clone(),
+            budget(1_000_000, 10),
+            GatewayLimits::default(),
+            &journal,
+        )
+        .expect("a fresh journal opens");
+        let log = Log::default();
+        {
+            let mut entrant =
+                GatewayEntrant::new(in_thread(model_entrant(log.clone(), 1)), &mut gateway);
+            entrant.decide(&observation());
+            assert!(!entrant.health().degraded());
+        }
+        let answers = log.lock().expect("log lock");
+        assert_eq!(
+            answers[0].error.as_ref().map(|error| error.kind),
+            Some(GatewayErrorKind::ResponseWithheld),
+            "{echoed}"
+        );
+        assert!(answers[0].text.is_none());
+        let wire = serde_json::to_string(&answers[0]).expect("serializes");
+        assert!(!wire.contains(&echoed), "{wire}");
+        assert_eq!(provider.calls(), 1);
+        assert_eq!(gateway.journal().spend().priced_calls, 1, "still charged");
+    }
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 /// The whole path: a real sweep, an entrant making a model call on every
 /// decision, the journal recording each one, and the scored output carrying
 /// the host-observed usage on the entrant's row, beside the rank.

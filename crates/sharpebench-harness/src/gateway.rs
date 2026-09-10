@@ -402,6 +402,7 @@ pub enum GatewayErrorKind {
     ProviderTimeout,
     ProviderResponseInvalid,
     DecisionRequestLimit,
+    ResponseWithheld,
 }
 
 impl GatewayErrorKind {
@@ -430,6 +431,7 @@ impl GatewayErrorKind {
             Self::ProviderTimeout => "the provider did not answer within the bound",
             Self::ProviderResponseInvalid => "the provider answer could not be read",
             Self::DecisionRequestLimit => "the decision made too many gateway requests",
+            Self::ResponseWithheld => "the answer carried host material and was withheld",
         }
     }
 }

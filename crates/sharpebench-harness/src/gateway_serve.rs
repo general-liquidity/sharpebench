@@ -525,6 +525,32 @@ impl<'g, 'r, T: ProviderTransport> GatewayEntrant<'g, 'r, T> {
         }
     }
 
+    /// Whether a response line would hand the entrant host-only material:
+    /// a route credential, a route destination or the journal's location. The
+    /// broker never writes these itself; a provider or proxy that echoes one
+    /// into the model text is what this catches. Both the raw and the
+    /// JSON-escaped spelling are checked, because the line is JSON.
+    fn carries_host_material(&self, line: &str) -> bool {
+        let journal = self
+            .gateway
+            .journal_path
+            .as_ref()
+            .map(|path| path.display().to_string());
+        let carries = self
+            .gateway
+            .routes
+            .routes
+            .iter()
+            .flat_map(|route| [route.credential.expose(), route.destination.as_str()])
+            .chain(journal.as_deref())
+            .filter(|needle| needle.len() >= 4)
+            .any(|needle| {
+                let escaped = serde_json::to_string(needle).expect("a string serializes");
+                line.contains(needle) || line.contains(&escaped[1..escaped.len() - 1])
+            });
+        carries
+    }
+
     fn decide_once(&mut self, observation: &MarketObservation) -> Result<Decision, DecideError> {
         if self.timed_out {
             return Err(DecideError::Timeout);
@@ -554,7 +580,14 @@ impl<'g, 'r, T: ProviderTransport> GatewayEntrant<'g, 'r, T> {
                 encode_refusal(GatewayErrorKind::DecisionRequestLimit)
             } else {
                 self.served = self.served.saturating_add(1);
-                self.gateway.serve_line(line)
+                let answered = self.gateway.serve_line(line);
+                // A gate on the delivered bytes, not a warning: the call is
+                // charged either way, but host material never crosses.
+                if self.carries_host_material(&answered) {
+                    encode_refusal(GatewayErrorKind::ResponseWithheld)
+                } else {
+                    answered
+                }
             };
             // The host's serving time is not the entrant's.
             deadline = deadline
