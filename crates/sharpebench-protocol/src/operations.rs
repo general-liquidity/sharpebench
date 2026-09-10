@@ -182,4 +182,19 @@ mod tests {
             operation_contract_preimage().unwrap()
         );
     }
+
+    #[test]
+    fn the_preimage_carries_every_declared_operation() {
+        // The digest itself is pinned in the harness; this keeps the protocol
+        // crate's own tests able to tell a real preimage from an empty one.
+        let preimage = operation_contract_preimage().unwrap();
+        let text = String::from_utf8_lossy(&preimage);
+        for operation in OPERATIONS {
+            assert!(
+                text.contains(&format!("\"{}\"", operation.name)),
+                "{} missing from {text}",
+                operation.name
+            );
+        }
+    }
 }

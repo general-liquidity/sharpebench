@@ -813,4 +813,62 @@ mod tests {
             serde_json::to_string(&value).unwrap()
         );
     }
+
+    const PAIR: VisibilityAllowlist = VisibilityAllowlist {
+        document: "test",
+        fields: &[
+            ("shown", Visibility::Visible),
+            ("hidden", Visibility::Withheld { reason: "test" }),
+        ],
+    };
+
+    #[test]
+    fn the_audit_names_undeclared_and_stale_fields() {
+        let audit = PAIR.audit(&["shown", "extra"]);
+        assert_eq!(audit.undeclared, vec!["extra".to_string()]);
+        assert_eq!(audit.stale, vec!["hidden".to_string()]);
+        assert!(!audit.is_complete());
+        assert!(PAIR.audit(&["shown", "hidden"]).is_complete());
+    }
+
+    #[test]
+    fn a_report_with_any_single_removal_is_not_empty() {
+        assert!(SealReport::default().is_empty());
+        let one = || vec!["x".to_string()];
+        for report in [
+            SealReport {
+                undeclared: one(),
+                ..SealReport::default()
+            },
+            SealReport {
+                withheld: one(),
+                ..SealReport::default()
+            },
+            SealReport {
+                restructured: one(),
+                ..SealReport::default()
+            },
+        ] {
+            assert!(!report.is_empty(), "{report:?}");
+        }
+    }
+
+    #[test]
+    fn a_visible_array_that_grew_an_object_is_withheld() {
+        let sealed = seal(&serde_json::json!({"shown": [1, {"secret": 2}]}), &PAIR).unwrap();
+        assert_eq!(serde_json::to_string(&sealed).unwrap(), "{}");
+        assert_eq!(sealed.report().restructured, vec!["shown".to_string()]);
+        let plain = seal(&serde_json::json!({"shown": [1, [2, 3]]}), &PAIR).unwrap();
+        assert_eq!(
+            serde_json::to_string(&plain).unwrap(),
+            r#"{"shown":[1,[2,3]]}"#
+        );
+        assert!(plain.report().is_empty());
+    }
+
+    #[test]
+    fn the_node_visitor_names_what_it_expects() {
+        let expected: &dyn de::Expected = &NodeVisitor;
+        assert_eq!(expected.to_string(), "any JSON value");
+    }
 }
