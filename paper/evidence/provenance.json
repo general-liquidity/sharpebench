@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "af6921558bb5ea0f85a3a2d4f5673c95b115dc66",
+  "generated_at_head": "c0f7069242d597d300b8b76d979fc47d7a7b1079",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -282,6 +282,10 @@
       "sha256": "18ce241fadcacea1a25a639f4ded53c8bed47f291dd0461af754ee8f4c12a855"
     },
     {
+      "path": "crates/sharpebench-cli/src/gateway_cli.rs",
+      "sha256": "55137506a2f323a90231342513f55d5adc6ca1de03196a2ea1e3dece9ec8487c"
+    },
+    {
       "path": "crates/sharpebench-cli/src/import_cmd.rs",
       "sha256": "c8cd12c3d6a6fc777751f563d648b23596966881660c4dad660c7f94a5568877"
     },
@@ -291,7 +295,7 @@
     },
     {
       "path": "crates/sharpebench-cli/src/main.rs",
-      "sha256": "3fadad43f710865e475907e4cbec1afb11234f7c33899db3da849975f655a013"
+      "sha256": "1e80396cdae97ea46e88f706d0caad90c029ed60f3253416bbbddee2258c702c"
     },
     {
       "path": "crates/sharpebench-cli/src/update.rs",
@@ -399,7 +403,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/lib.rs",
-      "sha256": "5968f127d145c24b8a637aa716f13b55428e20bd70507def3802557ca813b8f8"
+      "sha256": "6b7275f08288a8c1ecc22a8c54a787978b343f31ec108a12dca4818684c7c54d"
     },
     {
       "path": "crates/sharpebench-core/src/oos.rs",
@@ -415,7 +419,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/process.rs",
-      "sha256": "950a471c80711bea17d44ab8f1c5daa241073a3ca3ce28b5f1ef746dfb8b917f"
+      "sha256": "c385974c7ab6c6ee47a63926a998a5b50712ad3b582679b15f8e4b64f53cbc9f"
     },
     {
       "path": "crates/sharpebench-core/src/rediscovery.rs",
@@ -483,7 +487,7 @@
     },
     {
       "path": "crates/sharpebench-harness/Cargo.toml",
-      "sha256": "ae669b493a4da26730d67ba7facc45c9e5bb6f88119f0912a7f245d93aa7616c"
+      "sha256": "43f1233906a5594a0c81d238b7629a4d26b205dfe984cdb9f152c1ff4e126c01"
     },
     {
       "path": "crates/sharpebench-harness/examples/evidence_sweep.rs",
@@ -495,11 +499,11 @@
     },
     {
       "path": "crates/sharpebench-harness/examples/llm_field_eval.rs",
-      "sha256": "5b871770a3f1aa9afa4f2ae67316c056b61bcfb66d7ac52c5e901874440ce5d9"
+      "sha256": "4b6e90d491faa090fffac5dc7b1fd2aabaf46adaf20852b9d548b35f43c2ea60"
     },
     {
       "path": "crates/sharpebench-harness/examples/local_open_weight_field_eval.rs",
-      "sha256": "ca7f8ab3b4abe107b14b82c182339181d0044cec34592779281c1ea14e40dad0"
+      "sha256": "419bb61a14b88a484af48570b186b4bae279763dd1bd9f03d8e308a1d859151a"
     },
     {
       "path": "crates/sharpebench-harness/examples/luck_floor_1000.rs",
@@ -531,7 +535,7 @@
     },
     {
       "path": "crates/sharpebench-harness/src/accounting.rs",
-      "sha256": "54b5e0addae3fe8a9b4a705c15a9cce0184adcc839228bdd32e8ec4cb770e343"
+      "sha256": "2c0ec278d39e2b92116df3f489c14d5743cf9b847c919db428a1aba2a46788e3"
     },
     {
       "path": "crates/sharpebench-harness/src/checkpoint.rs",
@@ -542,8 +546,16 @@
       "sha256": "b92c206e71c62b9697eb2124e3b531c4c70afbfa8975cf70c392c72105768769"
     },
     {
+      "path": "crates/sharpebench-harness/src/gateway.rs",
+      "sha256": "6c452cc9fc6ea66036445cf2c3966f076116a9493589873b3ef35b9ed20264fe"
+    },
+    {
+      "path": "crates/sharpebench-harness/src/gateway_journal.rs",
+      "sha256": "817d4995a207dd918eb4bb4f8706e39e96cd19543109833cbcc13c2d3bd233d8"
+    },
+    {
       "path": "crates/sharpebench-harness/src/lib.rs",
-      "sha256": "0bf0e01003e026bdcc0df9028f2b687239a13fb527667be4f1c6dd9afe65c58a"
+      "sha256": "b5fe620f1477680516337f1222cade47059e1feb6ed2b012414779102806ddc4"
     },
     {
       "path": "crates/sharpebench-harness/src/perturb.rs",
@@ -1011,5 +1023,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "267136407c242a483f94d9d1a38817565b7c16a79d28a7551f05106d618a9e78"
+  "source_snapshot_sha256": "7aa1b255abdc8b7a3c47c13e1fcd6fa6bc66087d57c35f35141e56f32b707cf2"
 }

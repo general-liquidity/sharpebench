@@ -19,6 +19,7 @@ mod analysis_cmd;
 mod arena_cmd;
 mod csv_columns;
 mod forecast_cmd;
+mod gateway_cli;
 mod import_cmd;
 mod lineage_cmd;
 #[cfg(feature = "self-update")]
@@ -65,6 +66,7 @@ fn main() -> ExitCode {
             ExitCode::from(forecast_cmd::run(&args, json).clamp(0, 255) as u8)
         }
         Some("import") => ExitCode::from(import_cmd::run(&args, json).clamp(0, 255) as u8),
+        Some("gateway") => ExitCode::from(gateway_cli::run(&args, json).clamp(0, 255) as u8),
         Some(sub @ ("select" | "disqualify" | "rediscover" | "uncertainty" | "decay-prior")) => {
             ExitCode::from(analysis_cmd::run(sub, &args, json).clamp(0, 255) as u8)
         }

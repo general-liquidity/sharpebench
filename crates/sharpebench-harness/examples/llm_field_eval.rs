@@ -10,8 +10,13 @@
 //! of 0.80; ranking still deflates for at least the observed field size under
 //! the same measured-dispersion safeguards as every other ranked field.
 //!
-//! Run from the repo root with ANTHROPIC_API_KEY (and optionally LLM_CACHE_DIR /
-//! LLM_STATS_DIR / LLM_STRIDE / LLM_MAX_CALLS) exported. Those four controls
+//! Run from the repo root with ANTHROPIC_API_KEY and LLM_MAX_CALLS (and
+//! optionally LLM_CACHE_DIR / LLM_STATS_DIR / LLM_STRIDE) exported. The call
+//! ceiling is required, not optional: this producer makes paid provider calls,
+//! and a field started without a stated ceiling has no bound on what it spends
+//! before anyone notices. Set LLM_MODEL to run one declared model instead of
+//! the whole field, and SHARPEBENCH_DRY_RUN to print what the run would do and
+//! stop before the first spawn. The credential and the four controls
 //! are passed through the hermetic spawn and their effective values are written
 //! into every record: the documented invocation previously allowlisted only the
 //! credential, so an exported spending cap, decision cadence or evidence-cache
@@ -230,6 +235,120 @@ fn reference_field(data: &Dataset, windows: &[Window]) -> Vec<AgentSubmission> {
     subs
 }
 
+/// Environment name of the dry-run switch. A set, non-empty value makes the
+/// producer report what it would do and exit without spawning anything.
+const DRY_RUN: &str = "SHARPEBENCH_DRY_RUN";
+/// Optional model selector, resolved against LLM_MODELS before anything runs.
+const MODEL_SELECTOR: &str = "LLM_MODEL";
+/// The spend ceiling. It is required rather than optional: this producer makes
+/// paid provider calls, and a field started without a stated ceiling has no
+/// bound on what it can spend before someone notices.
+const BUDGET_CONTROL: &str = "LLM_MAX_CALLS";
+
+/// Why the producer refuses before it spawns anything or opens any output.
+#[derive(Debug, PartialEq)]
+enum Readiness {
+    MissingCredential {
+        name: &'static str,
+    },
+    MissingBudget {
+        name: &'static str,
+    },
+    InvalidBudget {
+        name: &'static str,
+        value: String,
+    },
+    UnsupportedModel {
+        requested: String,
+        declared: Vec<String>,
+    },
+}
+
+impl std::fmt::Display for Readiness {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Readiness::MissingCredential { name } => write!(
+                f,
+                "{name} is not set; this producer calls a paid provider and cannot run without it"
+            ),
+            Readiness::MissingBudget { name } => write!(
+                f,
+                "{name} is not set; a paid field needs an explicit call ceiling before it starts"
+            ),
+            Readiness::InvalidBudget { name, value } => {
+                write!(f, "{name}={value:?} is not a positive call ceiling")
+            }
+            Readiness::UnsupportedModel {
+                requested,
+                declared,
+            } => write!(
+                f,
+                "unknown model selector {requested:?}; declared models: {}",
+                declared.join(", ")
+            ),
+        }
+    }
+}
+
+/// What a ready run would do. Produced without spawning a process, opening an
+/// output file, or contacting a provider.
+#[derive(Debug, PartialEq)]
+struct FieldPlan {
+    models: Vec<String>,
+    max_calls: u64,
+    controls: Vec<String>,
+    dry_run: bool,
+}
+
+/// Preflight the effective configuration.
+///
+/// Pure in `lookup`, so every refusal path is testable with no process
+/// environment, no credential, and nothing spawned. The order matters: the
+/// credential and the ceiling are checked before the selector, because a run
+/// that cannot pay has nothing to select.
+fn plan_field(lookup: &dyn Fn(&str) -> Option<String>) -> Result<FieldPlan, Readiness> {
+    match lookup(LLM_CREDENTIAL) {
+        Some(value) if !value.trim().is_empty() => {}
+        _ => {
+            return Err(Readiness::MissingCredential {
+                name: LLM_CREDENTIAL,
+            })
+        }
+    }
+    let raw = lookup(BUDGET_CONTROL).ok_or(Readiness::MissingBudget {
+        name: BUDGET_CONTROL,
+    })?;
+    let max_calls = match raw.trim().parse::<u64>() {
+        Ok(calls) if calls > 0 => calls,
+        _ => {
+            return Err(Readiness::InvalidBudget {
+                name: BUDGET_CONTROL,
+                value: raw,
+            })
+        }
+    };
+    let declared: Vec<String> = LLM_MODELS
+        .iter()
+        .map(|model| (*model).to_string())
+        .collect();
+    let models = match lookup(MODEL_SELECTOR) {
+        None => declared.clone(),
+        Some(requested) if declared.contains(&requested) => vec![requested],
+        Some(requested) => {
+            return Err(Readiness::UnsupportedModel {
+                requested,
+                declared,
+            })
+        }
+    };
+    Ok(FieldPlan {
+        models,
+        max_calls,
+        controls: effective_controls(&agent_passthrough(), lookup),
+        dry_run: lookup(DRY_RUN).is_some_and(|value| !value.trim().is_empty()),
+    })
+}
+
 fn main() {
     // Required positional; see evidence_sweep for why there is no default.
     let out = env::args().nth(1).unwrap_or_else(|| {
@@ -247,8 +366,34 @@ fn main() {
     // Resolved once, before anything is spawned, so every record in the file
     // reports the same controls the first spawn actually received.
     let passthrough = agent_passthrough();
-    let controls = effective_controls(&passthrough, |name| env::var(name).ok());
+    let plan = match plan_field(&|name| env::var(name).ok()) {
+        Ok(plan) => plan,
+        Err(refusal) => {
+            eprintln!("refusing to run: {refusal}");
+            std::process::exit(2);
+        }
+    };
+    let controls = plan.controls.clone();
     eprintln!("agent controls: {}", controls.join(" "));
+    // The dry run is the readiness report: it states the plan and stops before
+    // the first spawn, the first output file and the first paid call.
+    if plan.dry_run {
+        println!(
+            "{}",
+            serde_json::json!({
+                "would_run": {
+                    "models": plan.models,
+                    "datasets": planned,
+                    "max_calls": plan.max_calls,
+                    "controls": plan.controls,
+                    "output": out,
+                },
+                "spawned": false,
+                "provider_calls": 0,
+            })
+        );
+        return;
+    }
     let partial = format!("{out}.partial");
     let mut w = BufWriter::new(File::create(&partial).expect("create partial output"));
     let mut n_records = 0usize;
@@ -276,7 +421,7 @@ fn main() {
         let mut subs = reference_field(&data, &windows);
         let mut model_by_agent: Vec<(String, String, usize)> = Vec::new();
 
-        for model in LLM_MODELS {
+        for model in &plan.models {
             let agent_id = format!("llm-{model}");
             eprintln!("{name}: running {agent_id}");
             let res = sharpebench_harness::run_external_agent(
@@ -290,9 +435,13 @@ fn main() {
                     // Hermetic spawn + exactly the credential and the four
                     // documented controls; the rest of the harness environment
                     // stays out.
-                    ExternalAgent::spawn_with_env("python", &[LLM_SCRIPT, model], &passthrough)
-                        .ok()
-                        .map(|a| a.with_decide_timeout(LLM_DECIDE_TIMEOUT))
+                    ExternalAgent::spawn_with_env(
+                        "python",
+                        &[LLM_SCRIPT, model.as_str()],
+                        &passthrough,
+                    )
+                    .ok()
+                    .map(|a| a.with_decide_timeout(LLM_DECIDE_TIMEOUT))
                 },
             );
             if res.failures.runtime_failures() > 0 {
@@ -303,7 +452,7 @@ fn main() {
                     res.failures.agent_faults(),
                 );
             }
-            model_by_agent.push((agent_id, model.to_string(), res.failures.agent_faults()));
+            model_by_agent.push((agent_id, model.clone(), res.failures.agent_faults()));
             subs.insert(0, res.submission);
         }
 
@@ -445,6 +594,146 @@ mod tests {
                 .iter()
                 .any(|entry| entry.contains("sk-live-do-not-log")),
             "a secret value reached the evidence: {bound:?}"
+        );
+    }
+
+    /// A pure environment for the readiness tests: no process environment, no
+    /// credential, no spawn. The value below is a placeholder, not a key.
+    fn env_of<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |name| {
+            pairs
+                .iter()
+                .find(|(key, _)| *key == name)
+                .map(|(_, value)| (*value).to_string())
+        }
+    }
+
+    const READY: &[(&str, &str)] = &[
+        (LLM_CREDENTIAL, "placeholder-not-a-credential"),
+        (BUDGET_CONTROL, "40"),
+    ];
+
+    /// A ready configuration reports what it would run: the declared field, the
+    /// ceiling, and the controls the spawn would carry.
+    #[test]
+    fn a_ready_configuration_reports_the_effective_plan() {
+        let plan = plan_field(&env_of(READY)).expect("a ready configuration plans");
+        assert_eq!(plan.models, LLM_MODELS);
+        assert_eq!(plan.max_calls, 40);
+        assert!(!plan.dry_run);
+        assert!(plan
+            .controls
+            .contains(&format!("{LLM_CREDENTIAL}=<secret>")));
+        assert!(plan.controls.contains(&format!("{BUDGET_CONTROL}=40")));
+        assert!(plan.controls.contains(&"LLM_STRIDE=<unset>".to_string()));
+    }
+
+    /// No credential is a refusal before anything spawns, not a spawn that
+    /// fails later inside the shim.
+    #[test]
+    fn a_missing_credential_refuses() {
+        assert_eq!(
+            plan_field(&env_of(&[(BUDGET_CONTROL, "40")])),
+            Err(Readiness::MissingCredential {
+                name: LLM_CREDENTIAL
+            })
+        );
+        assert_eq!(
+            plan_field(&env_of(&[(LLM_CREDENTIAL, "   "), (BUDGET_CONTROL, "40")])),
+            Err(Readiness::MissingCredential {
+                name: LLM_CREDENTIAL
+            }),
+            "an empty credential is no credential"
+        );
+    }
+
+    /// A paid field without a stated ceiling refuses, and a ceiling that is not
+    /// a positive count refuses rather than being read as unlimited.
+    #[test]
+    fn a_missing_or_unusable_budget_refuses() {
+        assert_eq!(
+            plan_field(&env_of(&[(LLM_CREDENTIAL, "placeholder-not-a-credential")])),
+            Err(Readiness::MissingBudget {
+                name: BUDGET_CONTROL
+            })
+        );
+        for value in ["0", "-1", "many", ""] {
+            let env = [
+                (LLM_CREDENTIAL, "placeholder-not-a-credential"),
+                (BUDGET_CONTROL, value),
+            ];
+            assert_eq!(
+                plan_field(&env_of(&env)),
+                Err(Readiness::InvalidBudget {
+                    name: BUDGET_CONTROL,
+                    value: value.to_string()
+                }),
+                "{value:?} is not a ceiling"
+            );
+        }
+    }
+
+    /// A model the field does not declare is refused, and the refusal names the
+    /// declared set instead of quietly running nothing.
+    #[test]
+    fn an_unsupported_model_refuses_and_names_the_declared_set() {
+        let env = [
+            (LLM_CREDENTIAL, "placeholder-not-a-credential"),
+            (BUDGET_CONTROL, "40"),
+            (MODEL_SELECTOR, "claude-not-a-model"),
+        ];
+        match plan_field(&env_of(&env)) {
+            Err(Readiness::UnsupportedModel {
+                requested,
+                declared,
+            }) => {
+                assert_eq!(requested, "claude-not-a-model");
+                assert_eq!(declared, LLM_MODELS);
+            }
+            other => panic!("an undeclared model must refuse, got {other:?}"),
+        }
+        let selected = [
+            (LLM_CREDENTIAL, "placeholder-not-a-credential"),
+            (BUDGET_CONTROL, "40"),
+            (MODEL_SELECTOR, LLM_MODELS[1]),
+        ];
+        assert_eq!(
+            plan_field(&env_of(&selected))
+                .expect("a declared model plans")
+                .models,
+            vec![LLM_MODELS[1].to_string()]
+        );
+    }
+
+    /// The dry run is a plan, not a run: it is switched on by the environment
+    /// and carries the same models and ceiling the real run would use.
+    #[test]
+    fn the_dry_run_switch_produces_a_plan_without_running() {
+        let env = [
+            (LLM_CREDENTIAL, "placeholder-not-a-credential"),
+            (BUDGET_CONTROL, "40"),
+            (DRY_RUN, "1"),
+        ];
+        let plan = plan_field(&env_of(&env)).expect("a dry run still needs a ready configuration");
+        assert!(plan.dry_run);
+        assert_eq!(plan.models, LLM_MODELS);
+        assert_eq!(plan.max_calls, 40);
+        // A dry run is not a way around the refusals: an unready configuration
+        // refuses whether or not the switch is set.
+        assert!(plan_field(&env_of(&[(DRY_RUN, "1")])).is_err());
+    }
+
+    /// The refusal text says which variable is missing, so an operator can fix
+    /// it without reading this file.
+    #[test]
+    fn a_refusal_names_the_variable_it_needs() {
+        let missing = plan_field(&env_of(&[])).expect_err("no configuration at all refuses");
+        assert!(missing.to_string().contains(LLM_CREDENTIAL), "{missing}");
+        let no_budget = plan_field(&env_of(&[(LLM_CREDENTIAL, "placeholder-not-a-credential")]))
+            .expect_err("no ceiling refuses");
+        assert!(
+            no_budget.to_string().contains(BUDGET_CONTROL),
+            "{no_budget}"
         );
     }
 }
