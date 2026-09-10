@@ -18,6 +18,13 @@ run emits.
 | `TailSellingExposure { hedged: true }` | The same exposure, hedged. | warn |
 | `ConcentrationBreach` | Exceeded a per-name concentration cap. | warn |
 
+No harness, simulator or importer emits `TailSellingExposure`; the self-audit's
+tail-seller case injects it to show how the kernel responds. What prevents
+option-based manipulation for a harness-run agent is that the simulator executes
+only linear target-weight orders, so no option book can be built. An imported
+return series, or a direct caller of `rank`, has no such protection: a
+short-volatility stream submitted as returns is scored on those returns alone.
+
 ## Block severity gates eligibility
 
 The eligibility gate is unforgiving on purpose, and it reads **block-severity

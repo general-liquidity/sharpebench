@@ -31,8 +31,10 @@ use crate::pbo::pbo_status;
 pub const METHODOLOGY_VERSION: &str = concat!("sharpebench-stats/", env!("CARGO_PKG_VERSION"));
 
 /// Default cross-trial Sharpe dispersion used when the caller doesn't supply one.
-/// 0.5 is a **modelling prior, not a measurement** — the working value López de
-/// Prado uses in worked examples. A LITE verdict sees one return series and has
+/// 0.5 is a **free modelling prior, not a measurement and not a value from the
+/// literature**. The worked example of Bailey and López de Prado (2014) states
+/// the cross-trial *variance* as 1/2, a standard deviation of about 0.707, so
+/// this default is not taken from it. A LITE verdict sees one return series and has
 /// no field to measure dispersion on, so the prior is all it can use; the
 /// explanation flags that it was estimated. When a field exists, measure it
 /// (`sharpebench_core::rank` does) and pass the value in `trials_sr_std`.
