@@ -195,3 +195,88 @@ fn schema_required_keys_deserialize_and_forbidden_keys_do_not() {
         serde_json::from_str(minimal_observation).expect("required keys suffice");
     assert!(observation.symbols[0].news.is_empty());
 }
+
+const OPERATION_KEYS: [&str; 4] = [
+    "x-operation",
+    "x-mutates-state",
+    "x-idempotency",
+    "x-automatic-retries",
+];
+
+/// Every schema object that carries operation annotations, by JSON pointer.
+fn annotated_objects(node: &serde_json::Value, pointer: &str, out: &mut Vec<String>) {
+    match node {
+        serde_json::Value::Object(map) => {
+            if OPERATION_KEYS.iter().any(|key| map.contains_key(*key)) {
+                out.push(pointer.to_string());
+            }
+            for (key, child) in map {
+                annotated_objects(child, &format!("{pointer}/{key}"), out);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for (index, child) in items.iter().enumerate() {
+                annotated_objects(child, &format!("{pointer}/{index}"), out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The published triple and the Rust table are one declaration: each
+/// operation's annotations sit exactly where the table says, carry exactly the
+/// derived values, and no other schema object carries any of them.
+#[test]
+fn published_operation_metadata_matches_the_declared_table() {
+    use sharpebench_protocol::{OperationMetadata, OPERATIONS};
+
+    let schema = read_schema("decision.schema.json");
+    for operation in OPERATIONS {
+        let node = schema
+            .pointer(operation.schema_pointer)
+            .unwrap_or_else(|| panic!("schema has no {}", operation.schema_pointer));
+        assert_eq!(
+            node.get("x-operation"),
+            Some(&serde_json::Value::String(operation.name.to_string())),
+            "{} must be declared at {:?}",
+            operation.name,
+            operation.schema_pointer
+        );
+        let published = OperationMetadata {
+            mutates_state: serde_json::from_value(node["x-mutates-state"].clone())
+                .expect("x-mutates-state is a boolean"),
+            idempotency: serde_json::from_value(node["x-idempotency"].clone())
+                .expect("x-idempotency is safe or not_guaranteed"),
+            automatic_retries: serde_json::from_value(node["x-automatic-retries"].clone())
+                .expect("x-automatic-retries is allowed or forbidden"),
+        };
+        assert_eq!(published, operation.metadata(), "{}", operation.name);
+    }
+
+    let mut found = Vec::new();
+    annotated_objects(&schema, "", &mut found);
+    let declared: Vec<String> = OPERATIONS
+        .iter()
+        .map(|operation| operation.schema_pointer.to_string())
+        .collect();
+    assert_eq!(
+        found, declared,
+        "operation annotations must appear only where OPERATIONS declares them"
+    );
+}
+
+/// The triple is contract metadata, not payload: it never appears on the wire,
+/// and a message carrying it is rejected like any other unknown key.
+#[test]
+fn operation_metadata_is_absent_from_wire_messages() {
+    let decision = Decision {
+        orders: vec![populated_order()],
+        reasoning: "r".to_string(),
+        cost: Some(populated_cost()),
+    };
+    let wire = serde_json::to_string(&decision).unwrap();
+    for key in OPERATION_KEYS {
+        assert!(!wire.contains(key), "{key} leaked into a decision: {wire}");
+    }
+    assert!(serde_json::from_str::<Decision>(r#"{"orders":[],"x-idempotency":"safe"}"#).is_err());
+}
