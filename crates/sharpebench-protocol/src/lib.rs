@@ -27,9 +27,50 @@
 //! Entrants migrating from 0.10.x: drop any extra keys, or move them under
 //! `reasoning` (free text) or `cost` (structured spend). [`decision_from_wire`]
 //! produces the diagnostic that names the offending field.
+//!
+//! # Decisions must be deterministic under re-execution
+//!
+//! A run may be executed more than once: a runtime failure is retried by
+//! restarting the run from its first step with a fresh agent, an interrupted
+//! sweep resumes by running its unfinished runs again, and a verifier may
+//! re-execute a captured trajectory to check it. Each decision must therefore
+//! be a deterministic function of the observations of the same run up to and
+//! including the one being answered, and of the agent's own earlier decisions
+//! in that run. Behaviour that depends on anything else (wall-clock time,
+//! ambient randomness, or state carried in from another run or from outside
+//! the run) may diverge on re-execution, and re-execution verification refuses
+//! a run that diverges.
+//!
+//! What must repeat is the score-bearing decision: every order's `symbol`,
+//! `action`, `target_weight` and `confidence`, and the `cost` report.
+//! `reasoning` and each order's `rationale` are audit text that the scorer
+//! never reads, so they may differ. An agent that wants randomness must derive
+//! it from the observation stream it was given.
+//!
+//! The harness checks this in `sharpebench_harness::verify_trajectory_reexecuted`:
+//! after the strict artifact checks pass, every captured run is re-executed
+//! with a fresh agent on the same frozen data, window and seed, and the first
+//! decision that differs is refused as a typed `ReexecutionDivergence` naming
+//! the run, the step and the observation, never accepted as a silently
+//! different run. Replaying recorded decisions alone
+//! (`sharpebench_harness::verify_trajectory_strict`) is exact by construction
+//! and cannot see a non-deterministic agent; re-execution is the check that
+//! can. A sweep's own retries and resumes do not compare a rerun against the
+//! attempt it replaced, so a non-deterministic agent is caught when its
+//! trajectory is re-executed, not while the sweep runs.
+//!
+//! The declared metadata of each wire operation (does it change state, is it
+//! safe to repeat, may the harness retry it) is published beside the schema;
+//! see [`operations`].
 #![forbid(unsafe_code)]
 
 pub mod canonical;
+pub mod operations;
+
+pub use operations::{
+    operation_contract_preimage, AutomaticRetries, Idempotency, Operation, OperationMetadata,
+    OPERATIONS,
+};
 
 use std::collections::BTreeMap;
 
