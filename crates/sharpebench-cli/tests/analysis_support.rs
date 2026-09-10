@@ -107,6 +107,47 @@ fn analysis_commands_reject_independently_missing_observations() {
     );
 }
 
+/// F-A: `disqualify` prints its reasons under a header promising that the hard
+/// gates mirror the scorer, so a reason the scorer does not gate on has to carry
+/// the advisory marker. A refusing candidate set leaves the track itself
+/// eligible, and an unmarked `SelectionUnavailable` claimed a disqualification
+/// the board had not applied.
+#[test]
+fn a_refusing_candidate_set_is_marked_advisory_next_to_an_eligible_verdict() {
+    let fixture = Fixture::new();
+    let track: Vec<f64> = (0..60)
+        .map(|i| 0.002 + 0.0005 * (i as f64 * 0.7).sin())
+        .collect();
+    let field = serde_json::json!([{
+        "agent_id": "refusing-candidates",
+        "runs": [{"returns": track}],
+        "candidates": [[1e308, 1e308, 1e308]],
+    }]);
+    fixture.write("field.json", &field.to_string());
+
+    let json = fixture.cli(&["disqualify", "field.json"]);
+    assert_eq!(json.status.code(), Some(0));
+    let report: Vec<serde_json::Value> = serde_json::from_slice(&json.stdout).unwrap();
+    assert_eq!(report[0]["rank_eligible"], true);
+    assert_eq!(
+        report[0]["reasons"],
+        serde_json::json!(["selection_unavailable"])
+    );
+
+    let text = Command::new(env!("CARGO_BIN_EXE_sharpebench"))
+        .current_dir(&fixture.0)
+        .args(["disqualify", "field.json"])
+        .output()
+        .unwrap();
+    assert_eq!(text.status.code(), Some(0));
+    let printed = String::from_utf8_lossy(&text.stdout).into_owned();
+    assert!(
+        printed.contains("SelectionUnavailable (advisory)"),
+        "a reason the scorer does not gate on must be marked: {printed}"
+    );
+    assert!(printed.contains("rank-eligible=true"), "{printed}");
+}
+
 #[test]
 fn score_and_disqualify_use_the_same_relative_field_and_cli_controls() {
     let fixture = Fixture::new();

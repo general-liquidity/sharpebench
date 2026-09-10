@@ -21,10 +21,13 @@ use crate::oos::OosDecayReport;
 use crate::rediscovery::RediscoveryVerdict;
 
 /// A single reason an agent was (or should be) demoted. The first five mirror the
-/// original eligibility gates in [`crate::composite::score_agent`]; three more
-/// name statistical unavailability. The last three are
+/// original eligibility gates in [`crate::composite::score_agent`]; two more name
+/// the unavailability of a statistic the scorer does gate on. The last four are
 /// advisory quality flags the scorer reports but does not gate on, surfaced here so
-/// they are legible alongside the hard failures.
+/// they are legible alongside the hard failures. `SelectionUnavailable` is advisory
+/// because the whole selection axis is: the scorer reports `selection_gap` and never
+/// consults it in `rank_eligible`, so its unavailability cannot demote an agent
+/// either.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FailReason {
@@ -45,7 +48,9 @@ pub enum FailReason {
     DeflationUnavailable,
     /// The bootstrap significance test could not be computed.
     BootstrapUnavailable,
-    /// Candidate-selection statistics could not be computed.
+    /// Advisory: candidate-selection statistics could not be computed, so the
+    /// selection-gap flag below could not be evaluated. The scorer does not gate
+    /// on the selection axis, so this never demotes an agent.
     SelectionUnavailable,
     /// Advisory: a large best-minus-median candidate gap — the headline result
     /// looks like a lucky pick from a family of tried strategies, not a robust edge.
@@ -56,6 +61,24 @@ pub enum FailReason {
     /// Advisory: the edge decays out of sample — little of the in-sample metric is
     /// retained in later windows.
     OosDecay,
+}
+
+impl FailReason {
+    /// Whether this reason is advisory: the scorer reports the signal but never
+    /// consults it in `rank_eligible`, so an agent carrying only advisory
+    /// reasons was still ranked. The complement mirrors a hard eligibility gate
+    /// in [`crate::composite::score_agent`], which is what makes
+    /// `rank_eligible == reasons.iter().all(FailReason::is_advisory)` hold for
+    /// every score the scorer produced.
+    pub const fn is_advisory(self) -> bool {
+        matches!(
+            self,
+            Self::SelectionUnavailable
+                | Self::HighSelectionGap
+                | Self::IsRediscovery
+                | Self::OosDecay
+        )
+    }
 }
 
 /// Thresholds for the disqualification classifier. The eligibility-gate bars mirror
@@ -132,11 +155,14 @@ pub fn classify_disqualification(
     if score.bootstrap_error.is_some() {
         reasons.push(FailReason::BootstrapUnavailable);
     }
+
+    // Advisory quality flags (reported by the scorer / supplied out of band).
+    // `SelectionUnavailable` belongs here, not above: the scorer never gates on
+    // the selection axis, so the enum order still places it before the gap flag
+    // it would otherwise have produced.
     if score.selection_error.is_some() {
         reasons.push(FailReason::SelectionUnavailable);
     }
-
-    // Advisory quality flags (reported by the scorer / supplied out of band).
     if score
         .selection_gap
         .is_some_and(|g| g > thresholds.selection_gap_max)
@@ -161,9 +187,10 @@ pub fn classify_disqualification(
 /// board, and one taken at default bars against a board scored at other bars
 /// explains it wrongly: it can count `DsrBelowBar` against agents the board ranked,
 /// or count none against agents the board demoted. Takes no out-of-band evidence, so
-/// it covers the signals intrinsic to a [`CompositeScore`] (the hard gates plus
-/// the reported selection gap). A [`BTreeMap`] keeps the output ordering
-/// deterministic.
+/// it covers the signals intrinsic to a [`CompositeScore`] (the hard gates plus the
+/// advisory selection signals, which are counted but never gated on, so a nonzero
+/// `SelectionUnavailable` or `HighSelectionGap` count does not describe agents the
+/// board demoted). A [`BTreeMap`] keeps the output ordering deterministic.
 pub fn rollup(
     scores: &[CompositeScore],
     thresholds: &DisqualThresholds,
@@ -218,6 +245,11 @@ mod tests {
         assert!(classify_disqualification(&s, &thresholds(), None, None).is_empty());
     }
 
+    /// The taxonomy must agree with the verdict it explains: an agent the
+    /// scorer ranked may carry only advisory reasons, and any hard reason must
+    /// come with `rank_eligible == false`. Asserting the two separately (as this
+    /// test once did) lets a reason be published as a hard disqualification of an
+    /// agent the board ranked.
     #[test]
     fn statistical_unavailability_has_named_disqualification_reasons() {
         let cfg = ScoreConfig {
@@ -254,14 +286,49 @@ mod tests {
             }
             let reasons = classify_disqualification(&score, &thresholds(), None, None);
             assert_eq!(
-                serde_json::to_value(reasons).unwrap(),
+                serde_json::to_value(&reasons).unwrap(),
                 serde_json::json!([label])
             );
             assert_eq!(
                 serde_json::to_value(rollup(&[score], &thresholds())).unwrap(),
                 serde_json::json!({label: 1})
             );
+            // Deflation and bootstrap are gates in `score_agent`; selection is
+            // not, so only the first two may be published as hard reasons.
+            assert_eq!(
+                reasons[0].is_advisory(),
+                error == "selection",
+                "{label} is labelled against the scorer's own gate chain"
+            );
         }
+    }
+
+    /// F-A reproduction: a submission whose declared candidate set refuses to
+    /// deflate keeps a normal eligible track. `score_agent` gates on the
+    /// bootstrap and deflation errors and deliberately not on `selection_error`,
+    /// so the agent is ranked and the reason naming that refusal must not read
+    /// as a disqualification.
+    #[test]
+    fn a_refusing_candidate_set_does_not_disqualify_a_ranked_agent() {
+        let mut sub = agent("strong", vec![run(0.002, 0.0005, 60)]);
+        sub.candidates = vec![vec![1e308, 1e308, 1e308]];
+        let score = score_agent(&sub, &ScoreConfig::default());
+        assert!(score.selection_error.is_some());
+        assert!(score.rank_eligible, "the scorer ranks this agent");
+        let reasons = classify_disqualification(&score, &thresholds(), None, None);
+        assert_eq!(
+            serde_json::to_value(&reasons).unwrap(),
+            serde_json::json!(["selection_unavailable"])
+        );
+        assert!(
+            reasons.iter().all(|r| r.is_advisory()),
+            "a ranked agent may carry only advisory reasons: {reasons:?}"
+        );
+        assert_eq!(
+            score.rank_eligible,
+            reasons.iter().all(|r| r.is_advisory()),
+            "the verdict and its explanation must agree"
+        );
     }
 
     #[test]
