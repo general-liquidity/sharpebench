@@ -130,29 +130,6 @@ struct Record<'a> {
 
 type AgentFactory = Box<dyn Fn() -> Box<dyn Agent>>;
 
-fn env_parse<T: std::str::FromStr>(name: &str, default: T) -> T
-where
-    T::Err: std::fmt::Display,
-{
-    env::var(name)
-        .map(|value| {
-            value
-                .parse::<T>()
-                .unwrap_or_else(|error| panic!("invalid {name}={value:?}: {error}"))
-        })
-        .unwrap_or(default)
-}
-
-fn model_tags() -> Vec<String> {
-    env::var("SHARPEBENCH_LOCAL_MODELS")
-        .expect("SHARPEBENCH_LOCAL_MODELS is required (comma-separated exact Ollama tags)")
-        .split(',')
-        .map(str::trim)
-        .filter(|tag| !tag.is_empty())
-        .map(str::to_string)
-        .collect::<Vec<_>>()
-}
-
 /// A filesystem- and identifier-safe encoding of an exact Ollama tag, injective
 /// on bytes.
 ///
@@ -287,6 +264,83 @@ fn read_identity(path: &Path) -> ModelIdentity {
         .unwrap_or_else(|error| panic!("invalid model identity {}: {error}", path.display()))
 }
 
+/// A set, non-empty value makes the producer report what it would do and stop
+/// before the shim probe, before any model is loaded and before any output.
+const DRY_RUN: &str = "SHARPEBENCH_DRY_RUN";
+
+/// The effective configuration a ready run would use.
+#[derive(Debug, PartialEq)]
+struct LocalPlan {
+    models: Vec<String>,
+    python: String,
+    cadence: u32,
+    thinking: bool,
+    max_tokens: u32,
+    timeout_seconds: u64,
+    n_trials: u32,
+    dry_run: bool,
+}
+
+/// Read one optional control, refusing an unparseable or non-positive value
+/// rather than panicking or silently falling back to the default.
+fn control<T: std::str::FromStr + PartialOrd + Default>(
+    lookup: &dyn Fn(&str) -> Option<String>,
+    name: &str,
+    default: T,
+) -> Result<T, String> {
+    let Some(raw) = lookup(name) else {
+        return Ok(default);
+    };
+    let value = raw
+        .trim()
+        .parse::<T>()
+        .map_err(|_| format!("invalid {name}={raw:?}"))?;
+    if value <= T::default() {
+        return Err(format!("{name}={raw:?} must be positive"));
+    }
+    Ok(value)
+}
+
+/// Preflight the effective configuration.
+///
+/// Pure in `lookup`, and it starts no interpreter: the refusal paths are
+/// testable with no environment, no Ollama and no model installed anywhere.
+fn plan_local(lookup: &dyn Fn(&str) -> Option<String>) -> Result<LocalPlan, String> {
+    let raw = lookup("SHARPEBENCH_LOCAL_MODELS").ok_or(
+        "SHARPEBENCH_LOCAL_MODELS is required (comma-separated exact Ollama tags)".to_string(),
+    )?;
+    let models: Vec<String> = raw
+        .split(',')
+        .map(str::trim)
+        .filter(|tag| !tag.is_empty())
+        .map(str::to_string)
+        .collect();
+    if models.is_empty() {
+        return Err("SHARPEBENCH_LOCAL_MODELS contains no tags".to_string());
+    }
+    // Two entries that cannot be told apart downstream would share one identity
+    // artifact and cross their metadata, so this is refused before any model
+    // is started rather than discovered in a published field.
+    check_model_ids(&models)?;
+    let thinking = match lookup("SHARPEBENCH_LOCAL_THINKING") {
+        None => false,
+        Some(raw) => raw
+            .trim()
+            .parse::<bool>()
+            .map_err(|_| format!("invalid SHARPEBENCH_LOCAL_THINKING={raw:?}"))?,
+    };
+    Ok(LocalPlan {
+        models,
+        python: lookup("SHARPEARENA_PYTHON").unwrap_or_else(|| "python".to_string()),
+        cadence: control(lookup, "SHARPEBENCH_LOCAL_CADENCE", 5)?,
+        thinking,
+        max_tokens: control(lookup, "SHARPEBENCH_LOCAL_MAX_TOKENS", 512)?,
+        timeout_seconds: control(lookup, "SHARPEBENCH_LOCAL_TIMEOUT_SECONDS", 120)?,
+        n_trials: control(lookup, "SHARPEBENCH_LOCAL_N_TRIALS", 1)?,
+        dry_run: lookup(DRY_RUN).is_some_and(|value| !value.trim().is_empty()),
+    })
+}
+
 fn main() {
     // Required positional; see evidence_sweep for why there is no default.
     let out = env::args().nth(1).unwrap_or_else(|| {
@@ -294,30 +348,52 @@ fn main() {
         std::process::exit(2);
     });
     let only = env::args().nth(2);
-    let models = model_tags();
-    assert!(
-        !models.is_empty(),
-        "SHARPEBENCH_LOCAL_MODELS contains no tags"
-    );
-    // Before any model is started: two entries that cannot be told apart
-    // downstream would share one identity artifact and cross their metadata.
-    if let Err(diagnostic) = check_model_ids(&models) {
-        eprintln!("{diagnostic}");
-        std::process::exit(2);
+    // Every configuration refusal happens here, before an interpreter is
+    // started and before any model is loaded.
+    let plan = match plan_local(&|name| env::var(name).ok()) {
+        Ok(plan) => plan,
+        Err(diagnostic) => {
+            eprintln!("refusing to run: {diagnostic}");
+            std::process::exit(2);
+        }
+    };
+    if plan.dry_run {
+        println!(
+            "{}",
+            serde_json::json!({
+                "would_run": {
+                    "models": plan.models,
+                    "dataset": only,
+                    "python": plan.python,
+                    "cadence": plan.cadence,
+                    "thinking": plan.thinking,
+                    "max_tokens": plan.max_tokens,
+                    "timeout_seconds": plan.timeout_seconds,
+                    "n_trials": plan.n_trials,
+                    "output": out,
+                },
+                "shim_probed": false,
+                "models_loaded": 0,
+            })
+        );
+        return;
     }
-    let python = env::var("SHARPEARENA_PYTHON").unwrap_or_else(|_| "python".to_string());
+    let LocalPlan {
+        models,
+        python,
+        cadence,
+        thinking,
+        max_tokens,
+        timeout_seconds,
+        n_trials,
+        dry_run: _,
+    } = plan;
     // Fail before touching any dataset: the shim is the whole model path, and a
     // run that cannot reach it has nothing to produce.
     if let Err(diagnostic) = probe_shim(&python) {
         eprintln!("{diagnostic}");
         std::process::exit(2);
     }
-    let cadence: u32 = env_parse("SHARPEBENCH_LOCAL_CADENCE", 5);
-    let thinking: bool = env_parse("SHARPEBENCH_LOCAL_THINKING", false);
-    let max_tokens: u32 = env_parse("SHARPEBENCH_LOCAL_MAX_TOKENS", 512);
-    let timeout_seconds: u64 = env_parse("SHARPEBENCH_LOCAL_TIMEOUT_SECONDS", 120);
-    let n_trials: u32 = env_parse("SHARPEBENCH_LOCAL_N_TRIALS", 1);
-    assert!(cadence > 0 && max_tokens > 0 && n_trials > 0);
 
     let partial = format!("{out}.partial");
     let identity_dir = PathBuf::from(format!("{out}.identities"));
@@ -577,5 +653,108 @@ mod tests {
     fn distinct_tags_are_accepted() {
         let models = ["a:b".to_string(), "a-b".to_string()];
         check_model_ids(&models).expect("distinct tags must be accepted");
+    }
+
+    /// A pure environment: no process environment, no interpreter, no Ollama and
+    /// no model installed anywhere.
+    fn env_of<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |name| {
+            pairs
+                .iter()
+                .find(|(key, _)| *key == name)
+                .map(|(_, value)| (*value).to_string())
+        }
+    }
+
+    /// A ready configuration reports its effective values, including the
+    /// defaults an operator did not override.
+    #[test]
+    fn a_ready_configuration_reports_the_effective_plan() {
+        let plan = plan_local(&env_of(&[("SHARPEBENCH_LOCAL_MODELS", "a:1, b:2")]))
+            .expect("a declared model list plans");
+        assert_eq!(plan.models, vec!["a:1".to_string(), "b:2".to_string()]);
+        assert_eq!(plan.python, "python");
+        assert_eq!(plan.cadence, 5);
+        assert_eq!(plan.max_tokens, 512);
+        assert_eq!(plan.timeout_seconds, 120);
+        assert_eq!(plan.n_trials, 1);
+        assert!(!plan.thinking);
+        assert!(!plan.dry_run);
+
+        let overridden = plan_local(&env_of(&[
+            ("SHARPEBENCH_LOCAL_MODELS", "a:1"),
+            ("SHARPEARENA_PYTHON", "python3.12"),
+            ("SHARPEBENCH_LOCAL_CADENCE", "3"),
+            ("SHARPEBENCH_LOCAL_THINKING", "true"),
+            ("SHARPEBENCH_LOCAL_MAX_TOKENS", "256"),
+            ("SHARPEBENCH_LOCAL_TIMEOUT_SECONDS", "60"),
+            ("SHARPEBENCH_LOCAL_N_TRIALS", "4"),
+        ]))
+        .expect("an overridden configuration plans");
+        assert_eq!(overridden.python, "python3.12");
+        assert_eq!(overridden.cadence, 3);
+        assert!(overridden.thinking);
+        assert_eq!(overridden.max_tokens, 256);
+        assert_eq!(overridden.timeout_seconds, 60);
+        assert_eq!(overridden.n_trials, 4);
+    }
+
+    /// The model list is required. An absent or effectively empty list refuses
+    /// rather than publishing a field with no model in it.
+    #[test]
+    fn a_missing_model_list_refuses() {
+        let absent = plan_local(&env_of(&[])).expect_err("no model list refuses");
+        assert!(absent.contains("SHARPEBENCH_LOCAL_MODELS"), "{absent}");
+        for value in ["", " , , "] {
+            assert!(
+                plan_local(&env_of(&[("SHARPEBENCH_LOCAL_MODELS", value)])).is_err(),
+                "{value:?} declares no model"
+            );
+        }
+    }
+
+    /// A repeated tag, or two tags that cannot be told apart downstream, refuse
+    /// before any model is loaded.
+    #[test]
+    fn an_unusable_model_list_refuses() {
+        let repeated = plan_local(&env_of(&[("SHARPEBENCH_LOCAL_MODELS", "a:1,a:1")]))
+            .expect_err("a repeated tag refuses");
+        assert!(repeated.contains("repeats"), "{repeated}");
+        assert!(check_model_ids(&["a:1".to_string(), "a-1".to_string()]).is_ok());
+    }
+
+    /// A control the host cannot use is a refusal that names it, not a panic
+    /// and not a silent fallback to the default.
+    #[test]
+    fn an_unusable_control_refuses_and_names_itself() {
+        for (name, value) in [
+            ("SHARPEBENCH_LOCAL_CADENCE", "0"),
+            ("SHARPEBENCH_LOCAL_CADENCE", "often"),
+            ("SHARPEBENCH_LOCAL_MAX_TOKENS", "0"),
+            ("SHARPEBENCH_LOCAL_TIMEOUT_SECONDS", "-1"),
+            ("SHARPEBENCH_LOCAL_N_TRIALS", "0"),
+            ("SHARPEBENCH_LOCAL_THINKING", "yes"),
+        ] {
+            let error = plan_local(&env_of(&[
+                ("SHARPEBENCH_LOCAL_MODELS", "a:1"),
+                (name, value),
+            ]))
+            .expect_err("an unusable control refuses");
+            assert!(error.contains(name), "{error} should name {name}");
+        }
+    }
+
+    /// The dry run is a plan, not a run, and it is not a way around the
+    /// refusals: an unready configuration still refuses with the switch set.
+    #[test]
+    fn the_dry_run_switch_produces_a_plan_without_probing_the_shim() {
+        let plan = plan_local(&env_of(&[
+            ("SHARPEBENCH_LOCAL_MODELS", "a:1"),
+            (DRY_RUN, "1"),
+        ]))
+        .expect("a dry run still needs a ready configuration");
+        assert!(plan.dry_run);
+        assert_eq!(plan.models, vec!["a:1".to_string()]);
+        assert!(plan_local(&env_of(&[(DRY_RUN, "1")])).is_err());
     }
 }
