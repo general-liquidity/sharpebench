@@ -243,6 +243,7 @@ All run in the worktree with `CARGO_TARGET_DIR` inside it.
    `certification`). Its drift test misses them because its probe never sets
    those options. The visibility drift test does not have that blind spot. Not
    fixed here: whether each is covered or excluded is a digest-policy decision.
+   Closed later as [F16](#f16-evidence-inventory-gap).
 2. **Not yet wired.** The CLI exposes neither re-execution verification nor a
    backoff schedule. `run_resumable_sweep_observed` in `checkpoint.rs` owns its
    own retry loop and still retries immediately; a CLI flag for a schedule must
@@ -337,3 +338,75 @@ restored from `git show HEAD:<path>` and confirmed with `cmp`:
 | A divergence is a refusal | exit 0 on `Diverged` | `reexecution_passes_a_deterministic_entrant_and_refuses_a_divergent_one` |
 | `--reexecute` re-executes | the flag falls through to strict replay | `reexecution_passes_a_deterministic_entrant_and_refuses_a_divergent_one` |
 | A transport failure is not a divergence | the transport-failure check disabled | `reexecution_passes_a_deterministic_entrant_and_refuses_a_divergent_one` (`reexecution_diverged` reported) |
+
+## F16. Evidence inventory gap
+
+**Found.** Open item 1 above, confirmed against the code.
+`COMPOSITE_SCORE_INVENTORY` did not declare `selection_error` or
+`certification`. Both are `Option` fields with
+`skip_serializing_if = "Option::is_none"`, and the drift guard
+`every_composite_score_field_is_declared_covered_or_excluded` built its field
+list from the serialized keys of probe rows. No probe declared candidates or
+selected a rank mode, so neither field was ever serialized, and the guard passed
+on `a136d14` with both undeclared.
+
+**What each digest actually covers.** Read from the code, not the inventory's
+own description:
+
+- The `agent_score` and `field_context` digests are defined by
+  `EvidenceInventory::preimage`, the only supported builder of their bytes: a
+  field enters a digest's preimage exactly when the inventory declares it
+  `Covered` or `Redacted` for that digest. No production code builds a
+  `CompositeScore` preimage today (`grep -rn "\.preimage(" crates/` finds only
+  this module's tests), so no computed digest exists that a class change could
+  move.
+- The signing path that does ship for scored rows, the leaderboard HMAC chain
+  (`sharpebench_leaderboard::sign_board`, `publish`, `publish_self_describing`),
+  signs `serde_json::to_string` of each whole row. It already signs both fields
+  whenever they are present, and nothing here changes it. The inventory does not
+  describe that chain; it classifies fields for the content digests, which is
+  why `role_contributions` can be excluded there while the chain signs it.
+
+**Decisions.**
+
+- `selection_error`: `Covered { agent_score }`. It is the reason the selection
+  diagnostic was withheld, computed from the agent's own candidate set,
+  effective trial footprint and dispersion: the inputs of
+  `selection_median_dsr` and `selection_gap`, which `agent_score` already
+  covers. Its analogues `bootstrap_error` and `deflation_error` are covered by
+  `agent_score`, the second added the same way when its probe first produced it
+  ([INHERITED-REPAIRS.md](INHERITED-REPAIRS.md)). The `agent_score` preimage now
+  emits a `selection_error` record, which the new test asserts. That changes the
+  declared preimage layout and no computed signature, because none is computed.
+- `certification`: `Excluded`, with its reason in the code. It is a nested
+  record whose `withheld` list is variable-length and whose elements are tagged
+  variants carrying their own fields: the shape the inventory already excludes
+  for `role_contributions`, whose reason is that a flat inventory would go stale
+  silently when the element type gains a field. Binding it would first need an
+  inventory for the nested record, a change to what a digest covers rather than a
+  classification, so it is excluded and no signature changes. It is also a
+  second, labeled verdict filled only by `rank_certified`. The HMAC chain still
+  signs it whenever present.
+
+**Drift test.** `observed_composite_score_fields` now starts from
+`entrant_visibility::declared_struct_fields::<CompositeScore>()`, the field list
+serde hands to `deserialize_struct`, which includes fields a
+`skip_serializing_if` hides, and adds the probe rows' serialized keys on top.
+The new `fields_a_skipped_none_hides_are_still_classified` asserts both fields
+are absent from a serialized probe row, present in the observed list, classified
+as above, and that `selection_error` is really in the `agent_score` preimage.
+`the_two_digests_partition_the_covered_fields` now counts four exclusions.
+Commit `c82fbba`.
+
+**Mutations.** Applied in place to the committed file, the core
+`evidence_coverage` tests run, the file restored from `git show HEAD:<path>` and
+confirmed identical with `cmp`.
+
+| Mutant | Result |
+|---|---|
+| Drop the `selection_error` declaration | killed: the drift guard (`undeclared: ["selection_error"]`), `a_new_undeclared_field_fails_the_audit` and the new test failed |
+| Drop the `certification` declaration | killed: the drift guard, the partition count, `a_new_undeclared_field_fails_the_audit` and the new test failed |
+| Build the observed list from probe keys alone, as before | killed: the drift guard (`stale: ["certification", "selection_error"]`), `a_removed_field_is_reported_as_stale`, `a_new_undeclared_field_fails_the_audit` and the new test failed |
+
+**No output moved.** The serialized `CompositeScore` is unchanged, the goldens
+pass unchanged, and no scoring, ranking or signing path reads the inventory.
