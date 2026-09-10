@@ -79,6 +79,29 @@ Eleven of the twenty-three rejections are rejections *because Bench or Arena
 already implements the mechanism more strictly*; those rows cite the existing
 Sharpe line. The remainder are rejections on the merits.
 
+## Implementation status, 2026-09-10
+
+Every accepted row is built or closed with a reason. Rows decided Reject are
+not listed.
+
+| # | Decision | Status |
+|---|---|---|
+| 1 | Adapt (G07) | Built, Bench PR #44 |
+| 4 | Adapt | Built at the run-level retry, not the per-decision transport, Bench PR #59 |
+| 9, 10, 15 | Take and Adapt (G11) | Built, Bench PRs #46 and #55; served to entrants in Bench PR #61 |
+| 14 | Defer (G11 prerequisite) | Closed as unnecessary: model traffic rides stdio and the launch keeps `--network none`, Bench PR #61 |
+| 16 | Adapt (G12) | Built, Bench PRs #46 and #56 |
+| 17 | Take | Built, every entrant-visible surface sealed, Bench PR #59 |
+| 24 | Adapt | Built with its own pinned digest rather than one folded into the capture contract, Bench PR #59 |
+| 25, 26 | Take (G17) | Built, Bench PRs #47 and #54 |
+| 27, 30, 31, 32, 33 | Take and Adapt | Built, Bench PR #58 |
+| 29 | Adapt, conditional | Condition not met: the observation schema has no paging. A plan naming the mode is refused by name, and a test fails the day paging appears, Bench PR #58 |
+| 34 | Defer | Still deferred: the run-identity requirement is met by the digests above, and nothing an offer and seal lifecycle would govern can change after construction |
+| 37 | Take | Built, with a new re-execution check because replaying recorded decisions cannot detect a non-deterministic agent, Bench PR #59 |
+| 38 | Defer | Still deferred: the only per-run surface added is frozen at construction |
+| 39 | Adapt (G07 adjacent) | Built as a preflight runtime allowlist and a hardened probe run, Bench PR #61 |
+| 40 | Adapt | Built as a gate on what the host hands an entrant, since no fixture ships beside held-out data, Bench PR #61 |
+
 ## 1. Known-content scan over entrant artifacts
 
 **Source.** `sandbox/orchestrator.py:256` `_build_contamination_report`, called at
