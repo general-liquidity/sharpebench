@@ -83,11 +83,24 @@ impl<R: Read> Read for Bounded<R> {
 /// `max_total_bytes` also caps the full archive, including padding. Malformed
 /// archives, unsupported formats and interrupted enumeration cannot pass.
 pub fn scan_tar_snapshot(reader: impl Read, policy: RawScanPolicy) -> TarScanReport {
+    let deadline = Instant::now() + Duration::from_secs(policy.limits().max_seconds);
+    scan_tar_snapshot_until(reader, policy, deadline)
+}
+
+/// As [`scan_tar_snapshot`], but against a deadline the caller already owns.
+///
+/// A caller that captured the snapshot under one policy budget must not get a
+/// second full budget for reading it back; it passes the same instant here.
+pub fn scan_tar_snapshot_until(
+    reader: impl Read,
+    policy: RawScanPolicy,
+    deadline: Instant,
+) -> TarScanReport {
     let bounded = Bounded {
         inner: reader,
         bytes: 0,
         limit: policy.limits().max_total_bytes,
-        deadline: Instant::now() + Duration::from_secs(policy.limits().max_seconds),
+        deadline,
         hash: Sha256::new(),
         failure: None,
     };
