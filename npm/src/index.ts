@@ -117,7 +117,14 @@ function honestyConfigJson(opts: HonestyOpts): string {
     throw new RangeError("nTrials must be an integer in 1..=4294967295");
   }
   const cfg: Record<string, unknown> = { n_trials: opts.nTrials };
-  if (opts.trialsSrStd !== undefined) cfg.trials_sr_std = opts.trialsSrStd;
+  if (opts.trialsSrStd !== undefined) {
+    // JSON.stringify turns NaN and Infinity into null, which the kernel reads as
+    // "omitted" and replaces with the 0.5 prior: refuse it before it crosses.
+    if (typeof opts.trialsSrStd !== "number" || !Number.isFinite(opts.trialsSrStd)) {
+      throw new RangeError("trialsSrStd must be a finite number (omit it for the 0.5 prior)");
+    }
+    cfg.trials_sr_std = opts.trialsSrStd;
+  }
   if (opts.periodsPerYear !== undefined) {
     // JSON.stringify turns NaN and Infinity into null, which the kernel refuses
     // rather than reading as "omitted"; say which input it was here instead.
