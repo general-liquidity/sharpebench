@@ -171,7 +171,10 @@ pub struct PercentileSelection {
     pub alpha: f64,
     /// True when `alpha` sits below [`MIN_RECOMMENDED_SELECTION_ALPHA`]. The
     /// result is still computed: this flags a choice, it does not veto one.
-    /// Always true alongside an `input_error`, which is not a choice at all.
+    /// Computed from `alpha` alone, on the refusal path too: a refusal with a
+    /// cause other than `alpha` (too few observations, an unobservable utility,
+    /// a rejected `block_prob`) leaves it false rather than blaming an argument
+    /// that was never the problem.
     pub alpha_warning: bool,
     /// Why no selection was made. `None` for valid inputs.
     ///
@@ -233,7 +236,7 @@ pub fn percentile_selection(
     percentile_selection_checked(candidates, utility, alpha, seed, n_boot, block_prob)
         .unwrap_or_else(|error| PercentileSelection {
             alpha,
-            alpha_warning: true,
+            alpha_warning: alpha < MIN_RECOMMENDED_SELECTION_ALPHA,
             candidates: Vec::new(),
             selected: None,
             point_argmax: None,
@@ -520,11 +523,46 @@ mod tests {
                 }),
                 "alpha {bad} must be refused"
             );
-            assert!(s.alpha_warning, "a refused alpha is never a silent choice");
+            assert_eq!(
+                s.alpha_warning,
+                bad < MIN_RECOMMENDED_SELECTION_ALPHA,
+                "the flag reports where alpha {bad} sits, nothing else"
+            );
             assert!(s.selected.is_none(), "no candidate may be selected");
             assert!(s.point_argmax.is_none());
             assert!(s.candidates.is_empty());
         }
+    }
+
+    /// F-C: the refusal arm used to hard-code `alpha_warning = true`, which was
+    /// written when an invalid alpha was the only way to reach it. F07 routed
+    /// every other refusal through the same arm, so a one-observation candidate
+    /// came back claiming alpha 0.5 sat below the 0.3 floor.
+    #[test]
+    fn a_refusal_that_is_not_about_alpha_does_not_blame_alpha() {
+        let s = percentile_selection(&[vec![0.01]], Utility::MeanReturn, 0.5, 1, 100, 0.1);
+        assert!(
+            matches!(
+                s.input_error,
+                Some(StatisticalError::InsufficientObservations { .. })
+            ),
+            "{:?}",
+            s.input_error
+        );
+        assert!(
+            !s.alpha_warning,
+            "alpha 0.5 is above the recommended floor and was not the refused argument"
+        );
+
+        let degenerate = percentile_selection(&[steady(60)], Utility::MeanReturn, 0.5, 1, 200, 0.0);
+        assert!(matches!(
+            degenerate.input_error,
+            Some(StatisticalError::InvalidParameter {
+                name: "block_prob",
+                ..
+            })
+        ));
+        assert!(!degenerate.alpha_warning);
     }
 
     /// R02: `block_prob = 0.0` never restarts a block, so the "stationary
