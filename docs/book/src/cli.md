@@ -249,8 +249,18 @@ persisted on each attempt record of the ledger. Human output prints the
 declaration before the sweep and the denominators on stderr. No grade is an
 input to a return, score, rank or pass^k pool, and an entrant whose decisions
 do not depend on the perturbed fields scores exactly as it does unfaulted.
-Without the flag nothing changes: no field is added and every output is
-byte-identical.
+
+A sweep that ends incomplete (a cell exhausts its retries) emits no board, but
+its `incomplete_external_sweep` error carries the same `fault_injection`
+object beside `attempt_accounting`, built from the same attempt ledger (read
+back from the checkpoint when there is one): the plan digest, the declaration,
+the denominators over the swept cells, and the evidence of every attempt that
+ran, failed attempts included. `fired` counts only the cells whose evidence
+shows the fault, so an exhausted cell counts in `cells` and `assigned` and
+fires only if it did before failing. Human output prints the denominators
+after the attempt accounting. The error is still rank-neutral: no score,
+board or rank is emitted. Without the flag nothing changes: no field is added
+and every output is byte-identical.
 
 ### Retry backoff
 
@@ -385,10 +395,52 @@ protocol or spawn failure during re-execution exits 1 as
 `reexecution_transport_failure`, not as a divergence, because a degraded
 transport says nothing about determinism. `--reexecute` refuses
 `--allow-unbound-trajectory` and a trajectory whose agent is not a reference
-agent unless `--cmd` or `--http` names it; `--cmd` and `--http` are refused
-without `--reexecute`. Each is exit code 2. `capture` records reference agents;
-a trajectory of an external entrant comes from
-`sharpebench_harness::run_agent_capture`.
+agent unless `--cmd`, `--http` or `--image` names it; `--cmd`, `--http` and
+`--image` are refused without `--reexecute`, and more than one agent flag with
+`--image` is refused. Each is exit code 2.
+
+`--reexecute --image <repository@sha256:...>` re-runs a digest-pinned image
+through the hardened launch `run --image` uses: the same refusal of an absent
+daemon, a mutable reference or an image that is not present locally, before
+anything starts, and then a fresh named container for every captured run,
+finished after its run with the post-exit resource verdict and removed. An
+out-of-memory verdict is reported as `reexecution_transport_failure` with
+`resource_limit_exceeded`, an indeterminate verdict or failed cleanup as
+`transport_error`, and a refused launch as `spawn_error`; no further container
+is started after the first failure. A divergence is `reexecution_diverged`,
+as for the other agents. There is no host fallback.
+
+`capture` also records an external entrant, over the same transports as `run`:
+
+```bash
+sharpebench capture traj.json --http 127.0.0.1:8080 --data data.csv
+sharpebench capture traj.json --cmd "./my-agent --flag" --data data.csv
+sharpebench capture traj.json --image registry/agent@sha256:<digest> --data data.csv
+```
+
+The first argument is the output file; a transport flag replaces the
+reference agent name, and passing both, or more than one transport, exits 2.
+Each run gets a fresh agent (a fresh process, connection or container), with
+the same launch checks as `run` (`--cmd` prints the unsandboxed warning; `--image`
+refuses what `run --image` refuses; `--scan-policy` is not accepted). The
+trajectory carries the same contract as a reference capture, and its
+`agent_id` names the entrant by the flag that re-runs it:
+
+| `agent_id` | Re-execute with |
+|---|---|
+| `cmd:<command line>` | `--reexecute --cmd "<command line>"` |
+| `http:<addr>` | `--reexecute --http <addr>` |
+| `sandbox:<repository@sha256:...>` | `--reexecute --image <repository@sha256:...>` |
+
+The CLI prints that command after a capture, and `--json` gives it as
+`reexecute_with`. Nothing is launched from the file itself: re-execution still
+needs the flag. The pinned image reference identifies the artifact; a command
+line or an address does not, and the environment a `--cmd` entrant receives
+(`SHARPEBENCH_AGENT_ENV`) is not recorded, so the operator re-runs those under
+the same conditions. A spawn, transport, protocol or resource failure during a
+capture exits 1 with `capture_transport_failure` and writes nothing, because a
+degraded transport would otherwise put the harness's holds into the trajectory
+as the entrant's decisions.
 
 ## `regime`
 

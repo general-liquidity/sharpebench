@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "593a6c7d251624eef3bc102eaaf87a0b17d8e16a",
+  "generated_at_head": "392b57bda62daa451715f20372bff8d1a976878c",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -294,6 +294,10 @@
       "sha256": "c841bfdd88706b6b5fe5b59ba5611fcce3d8107d564dfecff853e450cec42a3a"
     },
     {
+      "path": "crates/sharpebench-cli/src/external_capture.rs",
+      "sha256": "395b3ee9ddef4b05ac68cfe6a78aaacfd9f2219a5ab8b46d67f43d3309b7c57a"
+    },
+    {
       "path": "crates/sharpebench-cli/src/forecast_cmd.rs",
       "sha256": "18ce241fadcacea1a25a639f4ded53c8bed47f291dd0461af754ee8f4c12a855"
     },
@@ -311,7 +315,7 @@
     },
     {
       "path": "crates/sharpebench-cli/src/main.rs",
-      "sha256": "170041caa95cefa7d081e47885b7f7dbf6e9b7af5c84dd05b14f8887740e0a61"
+      "sha256": "87cd3211b4f4a6ce027d339a4d73018a27524d062a1d278dd56680e10ba65325"
     },
     {
       "path": "crates/sharpebench-cli/src/update.rs",
@@ -339,7 +343,7 @@
     },
     {
       "path": "crates/sharpebench-cli/tests/fault_backoff_reexecution_cli.rs",
-      "sha256": "687b8cdaebc25f340e7fba54377cc7fbc3b3b3750d3ad26b54583b8602d65d42"
+      "sha256": "5ff4d856e11fe79ec00574490a7587362470a9a3ae45e0c263afaad916086f2f"
     },
     {
       "path": "crates/sharpebench-cli/tests/frozen_rate_card_cli.rs",
@@ -1123,5 +1127,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "4e4a5bca697960eb39314f47bc6772f0629e7c840a37964bdf9ff236851c90a7"
+  "source_snapshot_sha256": "907f1dc648113b68b71bfb1794a59dfafc4b0701768ba3ca31662a51853b5f71"
 }

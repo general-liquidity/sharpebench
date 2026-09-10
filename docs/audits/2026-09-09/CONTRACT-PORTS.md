@@ -301,10 +301,11 @@ refusal exits 1 as before. A pass emits the usual sealed verification with a
 appended after the sealed fields. `--reexecute` with
 `--allow-unbound-trajectory`, with a non-reference trajectory and no agent
 flag, and `--cmd` or `--http` without `--reexecute` exit 2. Plain
-`verify-trajectory` output is byte-identical. Limit: `capture` records only the
-reference agents, so a trajectory of an external entrant has to come from
-`sharpebench_harness::run_agent_capture`; `--image` is not a re-execution
-agent.
+`verify-trajectory` output is byte-identical. Limit as built: `capture`
+recorded only the reference agents, so a trajectory of an external entrant had
+to come from `sharpebench_harness::run_agent_capture`, and `--image` was not a
+re-execution agent. Both closed since; see "External capture and image
+re-execution follow-up" below.
 
 **Tests.** Harness (`crates/sharpebench-harness/tests/runtime_recovery.rs`):
 `a_checkpointed_backoff_is_saved_before_each_wait_and_restarts_per_round`
@@ -338,6 +339,138 @@ restored from `git show HEAD:<path>` and confirmed with `cmp`:
 | A divergence is a refusal | exit 0 on `Diverged` | `reexecution_passes_a_deterministic_entrant_and_refuses_a_divergent_one` |
 | `--reexecute` re-executes | the flag falls through to strict replay | `reexecution_passes_a_deterministic_entrant_and_refuses_a_divergent_one` |
 | A transport failure is not a divergence | the transport-failure check disabled | `reexecution_passes_a_deterministic_entrant_and_refuses_a_divergent_one` (`reexecution_diverged` reported) |
+
+## External capture and image re-execution follow-up
+
+Built on `0dcc4b8`: the capture and `--image` re-execution in `8917c2b`, the
+live CI leg in `e95ad00`, after the incomplete-sweep fix in `2442d7f`
+([FAULT-INJECTION.md](FAULT-INJECTION.md#incomplete-sweeps-follow-up)). The
+row 37 text above is unchanged apart from its closing "Limit" sentence.
+
+**`capture <out.json> --cmd "<prog>" | --http <addr> | --image <ref>`**
+(`crates/sharpebench-cli/src/external_capture.rs`, `run_capture_external`).
+`run_capture` hands any command line naming a transport to it, so the
+reference form is untouched. It calls `sharpebench_harness::run_agent_capture`
+with a factory that gives each run a fresh agent: a fresh `ExternalAgent`
+process (after the same unsandboxed warning and spawn preflight as `run
+--cmd`), a fresh `HttpAgent`, or a fresh container. Each is watched: the first
+spawn, transport, protocol or resource failure is recorded, no further agent
+is started, and the capture exits 1 with `capture_transport_failure` and writes
+no file, because a degraded agent's holds would otherwise be recorded as its
+decisions. Exactly one transport, only `<out.json>` as a positional argument,
+and no `--scan-policy` are accepted; anything else exits 2.
+
+**How the trajectory identifies the entrant.** The trajectory carries the same
+contract a reference capture does (data, costs, engine, runner, windows,
+seeds), and its `agent_id` names the entrant by the flag that re-runs it:
+`cmd:<command line>` for `--cmd`, `http:<addr>` for `--http`, and
+`sandbox:<repository@sha256:...>` for `--image`. The CLI prints the
+`verify-trajectory ... --reexecute <flag> <target>` command after a capture
+(`reexecute_with` under `--json`). Re-execution still needs the flag: nothing
+is launched from a file's contents, and a non-reference trajectory without an
+agent flag is refused as before. The pinned reference identifies the image's
+bytes; a command line or an address does not identify the artifact behind it
+(the reason `run --checkpoint` requires `--entrant-sha256` for those), and the
+`SHARPEBENCH_AGENT_ENV` values a `--cmd` entrant receives are not recorded, so
+those are re-run under the operator's own control. The protocol schema is
+unchanged; binding an entrant digest into `TrajectoryContract` would change the
+published wire contract and is not done here.
+
+**`verify-trajectory --reexecute --image <ref>`** (`run_reexecution`, the
+`SandboxLauncher` seam in `external_capture.rs`). `DockerSandbox` makes the
+calls `run --image` makes for an unscanned image: `resolve_launch` with
+`docker_available()` and default `SandboxOptions`, then `require_local_image`,
+before anything starts; then `run_external_sandboxed` per captured run, so each
+run gets a fresh named container. The container is finished when the harness
+drops the run's agent at the end of the run: `SandboxedAgent::finish` reads the
+post-exit verdict and removes it. The outcomes are the existing ones: a
+refused admission or launch is `reexecution_transport_failure` with
+`spawn_error`, a transport fault or an indeterminate verdict or failed cleanup
+`transport_error`, an out-of-memory verdict `resource_limit_exceeded` (folded
+as `apply_oom_verdict` folds it for `run --image`), and a score-bearing
+difference `reexecution_diverged`. After the first failure no container is
+started and the failed run's container is not asked again. `--image` without
+`--reexecute`, and `--image` beside `--cmd` or `--http`, exit 2. There is no
+host fallback.
+
+**Tests.** Daemon-free, through a fake `SandboxLauncher` whose containers
+record their launch and finish (`external_capture::tests` in the binary):
+`a_sandboxed_capture_names_its_image_and_reexecutes_in_fresh_containers` (16
+launches and 16 finishes in launch order for the capture and for each
+re-execution, a pass through `run_reexecution`, and a typed divergence when a
+different policy sits behind the same reference, every started container
+finished), `a_sandbox_failure_is_typed_and_stops_launching` (an out-of-memory
+verdict, a failed finalization, a mid-run transport fault and a refused launch,
+each with its kind and its exact launch count, for re-execution and capture,
+with no trajectory written) and `an_image_the_boundary_refuses_launches_nothing`.
+Process level (`fault_backoff_reexecution_cli.rs`):
+`capture_records_an_http_entrant_that_reexecution_can_rerun` (the `agent_id`,
+`reexecute_with`, strict replay, a `--reexecute --http` pass that calls the
+entrant again, the exact human output, and a broken endpoint refused with no
+file) and
+`external_capture_and_image_reexecution_refuse_contradictory_or_unlaunchable_requests`
+(nine exit-2 refusals, an unspawnable `--cmd`, and an unpinned and an absent
+pinned image refused for both commands without host execution).
+
+**Live leg.** `live_image_capture_and_reexecution_launch_the_hardened_sandbox`,
+`#[ignore]`d, runs by exact name in the "live container boundary (hostile
+probe)" job against the digest-pinned Alpine fixture the job already pulls.
+The fixture's own entrypoint is `/bin/sh`, which does not speak the decision
+protocol, and the CLI deliberately launches an image's own entrypoint, as
+`run --image` does. So the live test proves the hardened launch against a real
+daemon, the typed `transport_error` for a silent entrant from both commands,
+no file written, and no `sharpebench-agent-*` container left behind; the
+passing comparison needs a protocol-speaking pinned image, which the job does
+not have, and is covered by the fake. The test did not run locally: the local
+Docker daemon did not answer `docker version` within 15 seconds.
+
+**Byte identity without the new flags.** The CLI built from `origin/main`
+(`0dcc4b8`, from a clean `git archive`) and from this branch ran the same 35
+commands, each in its own directory, the baseline twice: `--help`, `run` and
+`run --json`, `run --data <csv> --json`, `run --http <fixture>` with and
+without `--json` and with `--entrant-sha256 --checkpoint`, the incomplete-sweep
+path (`run --http <unframed fixture>`) in both modes with and without a
+checkpoint and with `--retry-backoff 1,2`, `run --cmd <reference-agent>` with
+and without a checkpoint, `run --image some/agent:latest`, `capture` with no
+argument, one argument, an unknown agent, and `momentum` and `buy-and-hold`
+(text and `--json`), and `verify-trajectory` with no argument, strict (text and
+JSON), `--allow-unbound-trajectory`, `--reexecute` against the reference agent
+(text and JSON), `--http` (a passing and a broken endpoint) and `--cmd
+<reference-agent>`, and the three existing refusals. Exit codes, stdout,
+stderr and all 10 written files (five checkpoints, three captured
+trajectories, a renamed copy and the data file) were identical after masking
+only host-clock `nanos`, `duration_ns_total` and "observed host duration", and
+each binary's own `runner_artifact_sha256`; the two baseline runs differed
+only in the host-clock fields. Unmasked, each trajectory differed from the
+baseline's in exactly its one `runner_artifact_sha256` line. Every command
+but `--help` matched; `--help` differs by two lines, the new `capture
+<out.json> --cmd|--http|--image` line and `|--image <ref>` in the
+`--reexecute` line. The usage messages of `capture` and `verify-trajectory`
+with too few arguments are unchanged on purpose, because both are output
+without the new flags.
+
+**Mutation checks**, for this follow-up and the incomplete-sweep fix, broken in
+place on the committed tree (`e95ad00`), the named tests run, the file restored
+from `git show HEAD:<path>` and confirmed with `cmp` before the next. All 15
+mutation runs were killed; the capture's failure check was broken twice, once
+against each test.
+
+| Invariant | Mutation | Killed by |
+|---|---|---|
+| An incomplete faulted sweep keeps its report | the JSON error drops `fault_injection` | `an_incomplete_faulted_sweep_keeps_its_fault_report` |
+| No plan: the error is unchanged | the error always carries `fault_injection` (null without a plan) | `an_incomplete_faulted_sweep_keeps_its_fault_report` |
+| Human output keeps the report | the incomplete human path skips `print_fault_injection` | `an_incomplete_faulted_sweep_keeps_its_fault_report` |
+| A failed capture writes nothing | the capture's failure check disabled (two runs) | `a_sandbox_failure_is_typed_and_stops_launching`; `capture_records_an_http_entrant_that_reexecution_can_rerun` |
+| The trajectory names the image | `agent_id` is a fixed string for `--image` | `a_sandboxed_capture_names_its_image_and_reexecutes_in_fresh_containers` |
+| The trajectory names the address | `agent_id` is a fixed string for `--http` | `capture_records_an_http_entrant_that_reexecution_can_rerun` |
+| Every container is finished | the run's agent is dropped without `finish` | `a_sandboxed_capture_names_its_image_and_reexecutes_in_fresh_containers`, `a_sandbox_failure_is_typed_and_stops_launching` |
+| An out-of-memory verdict is a failure | `Some(true)` from `finish` ignored | `a_sandbox_failure_is_typed_and_stops_launching` |
+| A failed finalization is a failure | the finalization error not recorded | `a_sandbox_failure_is_typed_and_stops_launching` |
+| A mid-run transport fault is a failure | the sandboxed run's health check disabled | `a_sandbox_failure_is_typed_and_stops_launching` |
+| Nothing launches after a failure | the factory's short-circuit removed | `a_sandbox_failure_is_typed_and_stops_launching` |
+| A refused launch is a failure | the launch error not recorded | `a_sandbox_failure_is_typed_and_stops_launching` |
+| The boundary admits before launch | `--reexecute --image` ignores the admission refusal | `an_image_the_boundary_refuses_launches_nothing` |
+| `--image` needs `--reexecute` | the check disabled | `external_capture_and_image_reexecution_refuse_contradictory_or_unlaunchable_requests` |
 
 ## F16. Evidence inventory gap
 

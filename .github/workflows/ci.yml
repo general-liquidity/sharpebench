@@ -315,6 +315,18 @@ jobs:
           artifact_preflight::tests::live_runtime_allowlist_admits_the_fixture_and_its_probe_passes
           artifact_preflight::tests::live_runtime_allowlist_refuses_an_omitted_path_by_index
 
+      # `--image` for the trajectory commands against the daemon: capture and
+      # `verify-trajectory --reexecute` launch the pinned fixture through the
+      # hardened boundary, the fixture's `/bin/sh` entrypoint answers no
+      # decision and is reported as a typed transport failure, nothing is
+      # written, and no `sharpebench-agent-*` container is left behind. Named
+      # exactly, for the same reason as the preflight legs above.
+      - name: Run the live trajectory capture and re-execution against the pinned fixture
+        run: >
+          cargo test -p sharpebench --test fault_backoff_reexecution_cli --
+          --ignored --exact --nocapture
+          live_image_capture_and_reexecution_launch_the_hardened_sandbox
+
   audit:
     name: benchmark self-audit
     runs-on: ubuntu-latest
