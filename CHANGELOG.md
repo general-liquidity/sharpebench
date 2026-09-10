@@ -12,6 +12,9 @@ and links the commits it was built from.
 
 ## [Unreleased]
 
+### Breaking
+- edge: the LITE honesty verdict's `sr_benchmark` (the benchmark of the PSR and MinTRL it reports) is now **annualized**, like `trials_sr_std`, and is divided by `sqrt(periods_per_year)` through `sharpebench_stats::per_period_from_annualized` before the PSR and MinTRL, with the same `periods_per_year` default (252) and refusal. It was documented as per period and passed unconverted, so a benchmark given in the unit the rest of `HonestyConfig` uses was a bar `sqrt(periods_per_year)` times too high, about 15.9 annualized for 1.0 on daily bars. The field keeps its name on every surface: Rust `HonestyConfig::sr_benchmark`, Python `sr_benchmark=`, npm `srBenchmark`, the WASM config key `sr_benchmark` and the MCP tool argument. `sharpebench check` does not take a benchmark and is unchanged. **Callers who passed a non-zero per-period benchmark must now pass it annualized**: before, `is_my_sharpe_real(xs, sr_benchmark=0.063)` on daily returns; after, `is_my_sharpe_real(xs, sr_benchmark=1.0, periods_per_year=252)`. The default 0.0 is zero in every unit, so default verdicts are bit-identical on every surface. Beside an invalid `periods_per_year`, which already fails the verdict, a non-zero benchmark has no per-period value and the PSR and MinTRL are NaN (`null` in JSON). The raw `probabilistic_sharpe_ratio` and `min_track_record_length` primitives still take a per-period benchmark. See F18 in the [literature audit](docs/audits/2026-09-09/LITERATURE-AUDIT.md).
+
 ### Fixed
 - release: the MCP publish step now waits up to 20 minutes for the kernel package's npm tarball as well as its metadata before installing it. On v0.21.0 the metadata appeared minutes before the tarball, and the old 150-second wait on metadata alone failed with ETARGET and then E404 until the job was rerun.
 

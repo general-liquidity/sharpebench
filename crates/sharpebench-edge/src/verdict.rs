@@ -82,12 +82,12 @@ pub enum Verdict {
 /// tried before this one was chosen).
 ///
 /// Units. The verdict computes every Sharpe ratio **per period** on the returns
-/// it is given and never annualizes them. `trials_sr_std` is quoted
-/// **annualized**, the unit the literature and the core scorer use, and
-/// `periods_per_year` converts it to per period before it touches a statistic,
-/// through the same conversion `sharpebench_core::per_period_sr_std` applies.
-/// Applied per period unconverted, the 0.5 prior put the bar at an annualized
-/// Sharpe of about 15 on daily bars at twenty trials.
+/// it is given and never annualizes them. `trials_sr_std` and `sr_benchmark`
+/// are quoted **annualized**, the unit the literature and the core scorer use,
+/// and `periods_per_year` converts each to per period before it touches a
+/// statistic, through the same conversion `sharpebench_core::per_period_sr_std`
+/// applies. Applied per period unconverted, the 0.5 prior put the bar at an
+/// annualized Sharpe of about 15 on daily bars at twenty trials.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct HonestyConfig {
     /// Number of strategy trials behind this result (a count). REQUIRED to think
@@ -121,9 +121,12 @@ pub struct HonestyConfig {
     pub confidence: f64,
     /// Deflated-Sharpe probability threshold for `Borderline`. Default 0.90.
     pub borderline: f64,
-    /// **Per-period** benchmark Sharpe the PSR and MinTRL test against. Default
-    /// 0.0, which means the same thing on every timeframe. It is not converted:
-    /// divide an annualized benchmark by `sqrt(periods_per_year)` first.
+    /// **Annualized** benchmark Sharpe the PSR and MinTRL test against, divided
+    /// by `sqrt(periods_per_year)` before use, like `trials_sr_std`. Default
+    /// 0.0, which is zero in every unit, so the default PSR and MinTRL do not
+    /// depend on the frequency. An invalid `periods_per_year` refuses the
+    /// verdict as it does for the prior; a non-zero benchmark then has no
+    /// per-period value, and the PSR and MinTRL are NaN.
     pub sr_benchmark: f64,
 }
 
@@ -243,8 +246,9 @@ pub fn is_my_sharpe_real(returns: &[f64], cfg: &HonestyConfig) -> HonestyVerdict
     });
     let statistics_error = deflation.as_ref().err().map(ToString::to_string);
     let (expected_max, deflated) = deflation.unwrap_or((0.0, 0.0));
-    let psr = probabilistic_sharpe_ratio(returns, cfg.sr_benchmark);
-    let mintrl = min_track_record_length(returns, cfg.sr_benchmark, cfg.confidence);
+    let sr_benchmark = per_period_sr_benchmark(cfg);
+    let psr = probabilistic_sharpe_ratio(returns, sr_benchmark);
+    let mintrl = min_track_record_length(returns, sr_benchmark, cfg.confidence);
 
     let verdict = if statistics_error.is_some() {
         Verdict::Fail
@@ -292,6 +296,29 @@ pub fn is_my_sharpe_real(returns: &[f64], cfg: &HonestyConfig) -> HonestyVerdict
 /// refused with it. A bad `trials_sr_std` stays negative or non-finite through
 /// the division and is refused by `expected_max_sharpe`.
 fn per_period_trials_sr_std(cfg: &HonestyConfig) -> Result<f64, StatisticalError> {
+    Ok(per_period_from_annualized(
+        cfg.trials_sr_std.unwrap_or(DEFAULT_TRIALS_SR_STD),
+        checked_periods_per_year(cfg)?,
+    ))
+}
+
+/// The per-period benchmark the PSR and MinTRL test against: the annualized
+/// `sr_benchmark` over `sqrt(periods_per_year)` (or 252), the conversion the
+/// prior gets.
+///
+/// A refused frequency has already failed the verdict through the deflation.
+/// Zero is zero in every unit, so the default benchmark keeps the PSR and
+/// MinTRL a refused verdict always reported; a non-zero benchmark has no
+/// per-period value without a frequency, and NaN carries that into both.
+fn per_period_sr_benchmark(cfg: &HonestyConfig) -> f64 {
+    match checked_periods_per_year(cfg) {
+        Ok(periods_per_year) => per_period_from_annualized(cfg.sr_benchmark, periods_per_year),
+        Err(_) if cfg.sr_benchmark == 0.0 => cfg.sr_benchmark,
+        Err(_) => f64::NAN,
+    }
+}
+
+fn checked_periods_per_year(cfg: &HonestyConfig) -> Result<f64, StatisticalError> {
     let periods_per_year = cfg.periods_per_year.unwrap_or(DEFAULT_PERIODS_PER_YEAR);
     if !periods_per_year.is_finite() || periods_per_year <= 0.0 {
         return Err(StatisticalError::InvalidParameter {
@@ -299,10 +326,7 @@ fn per_period_trials_sr_std(cfg: &HonestyConfig) -> Result<f64, StatisticalError
             requirement: "must be finite and positive",
         });
     }
-    Ok(per_period_from_annualized(
-        cfg.trials_sr_std.unwrap_or(DEFAULT_TRIALS_SR_STD),
-        periods_per_year,
-    ))
+    Ok(periods_per_year)
 }
 
 /// FULL: the LITE verdict on `field[winner_idx]` plus the data-snooping family
@@ -853,6 +877,139 @@ mod tests {
                 let full = is_my_sharpe_real_full(&[r.clone(), r.clone()], 0, &cfg);
                 assert_eq!(full.honesty, v, "periods_per_year {bad}");
             }
+        }
+    }
+
+    /// F18: `sr_benchmark` is annualized like the prior, so PSR and MinTRL test
+    /// against `b / sqrt(periods_per_year)` per period, bit for bit.
+    ///
+    /// On this four-year daily track the observed Sharpe is 0.1197 per period,
+    /// an annualized 1.9. An annualized benchmark of 1.0 is 0.0630 per period
+    /// and is beaten; applied per period unconverted it was a bar of 15.9
+    /// annualized, no track length sufficed and the PSR was near zero.
+    #[test]
+    fn an_annualized_benchmark_is_tested_per_period() {
+        let r = four_years_daily();
+        let b = 1.0;
+        for (periods_per_year, ppy) in [
+            (None, 252.0),
+            (Some(252.0), 252.0),
+            (Some(52.0), 52.0),
+            (Some(365.0), 365.0),
+            (Some(8760.0), 8760.0),
+        ] {
+            let cfg = HonestyConfig {
+                n_trials: 20,
+                periods_per_year,
+                sr_benchmark: b,
+                ..Default::default()
+            };
+            let v = is_my_sharpe_real(&r, &cfg);
+            let per_period = b / f64::sqrt(ppy);
+            assert_eq!(
+                v.probabilistic_sharpe.to_bits(),
+                probabilistic_sharpe_ratio(&r, per_period).to_bits(),
+                "periods_per_year {ppy}"
+            );
+            assert_eq!(
+                v.min_track_record_len.to_bits(),
+                min_track_record_length(&r, per_period, cfg.confidence).to_bits(),
+                "periods_per_year {ppy}"
+            );
+
+            // The benchmark does not enter the deflation.
+            let zero = is_my_sharpe_real(
+                &r,
+                &HonestyConfig {
+                    sr_benchmark: 0.0,
+                    ..cfg
+                },
+            );
+            assert_eq!(v.deflated_sharpe.to_bits(), zero.deflated_sharpe.to_bits());
+            assert_eq!(v.verdict, zero.verdict);
+        }
+
+        let daily = is_my_sharpe_real(
+            &r,
+            &HonestyConfig {
+                n_trials: 20,
+                periods_per_year: Some(252.0),
+                sr_benchmark: b,
+                ..Default::default()
+            },
+        );
+        assert!(daily.min_track_record_len.is_finite());
+        assert!(daily.min_track_record_len < r.len() as f64);
+        assert!(
+            daily.probabilistic_sharpe > 0.95,
+            "{}",
+            daily.probabilistic_sharpe
+        );
+        assert!(min_track_record_length(&r, b, 0.95).is_infinite());
+        assert!(probabilistic_sharpe_ratio(&r, b) < 1e-12);
+    }
+
+    /// F18: the default benchmark 0.0 is zero in every unit, so the default
+    /// verdict is bit for bit the unconverted one at every frequency, a refused
+    /// frequency included; a non-zero benchmark beside a refused frequency has
+    /// no per-period value and reports NaN.
+    #[test]
+    fn the_default_benchmark_is_unchanged_by_the_conversion() {
+        let tracks = [
+            four_years_daily(),
+            (0..400)
+                .map(|i| 0.001 + 0.00005 * ((i % 4) as f64 - 1.5))
+                .collect(),
+            (0..30).map(|i| 0.001 * ((i % 7) as f64 - 3.0)).collect(),
+        ];
+        let frequencies = [
+            None,
+            Some(252.0),
+            Some(52.0),
+            Some(8760.0),
+            Some(0.0),
+            Some(-252.0),
+            Some(f64::NAN),
+            Some(f64::INFINITY),
+        ];
+        for r in &tracks {
+            for periods_per_year in frequencies {
+                for sr_benchmark in [0.0, -0.0] {
+                    let cfg = HonestyConfig {
+                        n_trials: 20,
+                        periods_per_year,
+                        sr_benchmark,
+                        ..Default::default()
+                    };
+                    let v = is_my_sharpe_real(r, &cfg);
+                    assert_eq!(
+                        v.probabilistic_sharpe.to_bits(),
+                        probabilistic_sharpe_ratio(r, sr_benchmark).to_bits(),
+                        "periods_per_year {periods_per_year:?}"
+                    );
+                    assert_eq!(
+                        v.min_track_record_len.to_bits(),
+                        min_track_record_length(r, sr_benchmark, cfg.confidence).to_bits(),
+                        "periods_per_year {periods_per_year:?}"
+                    );
+                }
+            }
+        }
+
+        for bad in [0.0, -252.0, f64::NAN, f64::INFINITY] {
+            let v = is_my_sharpe_real(
+                &four_years_daily(),
+                &HonestyConfig {
+                    n_trials: 20,
+                    periods_per_year: Some(bad),
+                    sr_benchmark: 1.0,
+                    ..Default::default()
+                },
+            );
+            assert_eq!(v.verdict, Verdict::Fail);
+            assert!(v.statistics_error.is_some());
+            assert!(v.probabilistic_sharpe.is_nan(), "periods_per_year {bad}");
+            assert!(v.min_track_record_len.is_nan(), "periods_per_year {bad}");
         }
     }
 

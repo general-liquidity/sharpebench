@@ -288,6 +288,35 @@ def test_lite_verdict_converts_the_annualized_prior_by_frequency():
     assert weekly["verdict"] != "pass"
 
 
+@pytest.mark.parametrize("ppy", [252, 52, 8760])
+def test_lite_verdict_converts_the_annualized_benchmark_by_frequency(ppy):
+    """F18: the verdict's sr_benchmark is annualized like the prior.
+
+    PSR and MinTRL test against b / sqrt(ppy) per period, the value the raw
+    per-period primitives give. Read per period, an annualized 1.0 on this
+    track (per-period Sharpe 0.12) was a bar no track length clears.
+    """
+    xs = four_years_daily()
+    v = is_my_sharpe_real(xs, n_trials=20, sr_benchmark=1.0, periods_per_year=ppy)
+    per_period = 1.0 / math.sqrt(ppy)
+    assert v["probabilistic_sharpe"] == probabilistic_sharpe_ratio(xs, per_period)
+    assert v["min_track_record_len"] == min_track_record_length(xs, per_period)
+    full = is_my_sharpe_real_full([xs], n_trials=20, sr_benchmark=1.0, periods_per_year=ppy)
+    assert full["honesty"]["probabilistic_sharpe"] == v["probabilistic_sharpe"]
+    if ppy == 252:
+        assert v["probabilistic_sharpe"] > 0.95
+        assert math.isfinite(v["min_track_record_len"])
+        assert math.isinf(min_track_record_length(xs, 1.0))
+
+
+def test_lite_verdict_default_benchmark_does_not_depend_on_frequency():
+    xs = four_years_daily()
+    for ppy in (None, 52, 8760):
+        v = is_my_sharpe_real(xs, n_trials=20, periods_per_year=ppy)
+        assert v["probabilistic_sharpe"] == probabilistic_sharpe_ratio(xs)
+        assert v["min_track_record_len"] == min_track_record_length(xs)
+
+
 @pytest.mark.parametrize("bad", [0.0, -252.0, float("nan"), float("inf")])
 def test_lite_verdict_refuses_a_frequency_that_is_not_one(bad):
     xs = four_years_daily()

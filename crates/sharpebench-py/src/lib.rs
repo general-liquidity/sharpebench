@@ -236,7 +236,10 @@ fn min_track_record_length(returns: Vec<f64>, sr_benchmark: f64, confidence: f64
 /// divided by `sqrt(periods_per_year)` before use. `periods_per_year` says what
 /// a period is (default 252, daily bars, flagged in the explanation); a
 /// non-finite or non-positive value returns a `fail` verdict with
-/// `statistics_error`. `sr_benchmark` is per period.
+/// `statistics_error`. `sr_benchmark`, the PSR and MinTRL benchmark, is
+/// **annualized** too (default 0.0) and divided by `sqrt(periods_per_year)`
+/// the same way; the raw `probabilistic_sharpe_ratio` and
+/// `min_track_record_length` take theirs per period.
 #[pyfunction]
 #[pyo3(signature = (
     returns,
