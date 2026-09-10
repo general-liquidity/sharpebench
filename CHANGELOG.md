@@ -12,6 +12,9 @@ and links the commits it was built from.
 
 ## [Unreleased]
 
+### Fixed
+- release: the MCP publish step now waits up to 20 minutes for the kernel package's npm tarball as well as its metadata before installing it. On v0.21.0 the metadata appeared minutes before the tarball, and the old 150-second wait on metadata alone failed with ETARGET and then E404 until the job was rerun.
+
 ## [0.21.0] - 2026-09-10
 
 ### Breaking
