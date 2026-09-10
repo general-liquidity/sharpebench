@@ -1082,7 +1082,10 @@ pub fn gateway_launch(image: &str, opts: &SandboxOptions) -> Result<GatewayLaunc
     plan_gateway_launch(docker_available(), image, opts)
 }
 
-fn plan_gateway_launch(
+/// [`gateway_launch`] for a caller that has already established, through its
+/// own trusted Docker transport, whether a daemon is present. Pure: it spawns
+/// nothing and asks Docker nothing.
+pub fn plan_gateway_launch(
     docker_present: bool,
     image: &str,
     opts: &SandboxOptions,
