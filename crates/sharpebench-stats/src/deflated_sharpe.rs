@@ -65,6 +65,21 @@ fn checked_psr(returns: &[f64], sr_benchmark: f64) -> Result<f64, StatisticalErr
     finite_computation(norm_cdf(z), "PSR probability")
 }
 
+/// An annualized Sharpe-scale quantity (a Sharpe ratio, or the dispersion of
+/// Sharpe ratios across trials) in the per-period unit every statistic in this
+/// module is computed in: `annualized / sqrt(periods_per_year)`.
+///
+/// A Sharpe ratio scales with the square root of the number of periods, so a
+/// dispersion of Sharpes does too. This is the one place the conversion is
+/// written; `sharpebench_core::per_period_sr_std` and the `sharpebench-edge`
+/// verdict both read it from here. It does not validate `periods_per_year`:
+/// `+inf` would return a zero dispersion, the most favorable bar there is, so a
+/// caller taking the frequency from a user checks it is finite and positive
+/// first.
+pub fn per_period_from_annualized(annualized: f64, periods_per_year: f64) -> f64 {
+    annualized / periods_per_year.sqrt()
+}
+
 /// Expected maximum Sharpe ratio under `n_trials` independent strategy trials,
 /// given the cross-trial dispersion of Sharpe ratios `trials_sr_std`
 /// (Bailey & López de Prado, eq. for E[max SR_N]).
@@ -216,5 +231,23 @@ mod tests {
             deflated_sharpe_ratio(&r, 500, 0.5),
             Ok(probabilistic_sharpe_ratio(&r, sr_star))
         );
+    }
+
+    /// The annualized prior 0.5 on daily bars is 0.5 / sqrt(252) per period,
+    /// and on weekly bars 0.5 / sqrt(52): the literals are Python's
+    /// `0.5 / math.sqrt(n)`, the same two correctly rounded IEEE operations. Dividing instead of multiplying, or dropping the root, lands
+    /// orders of magnitude away.
+    #[test]
+    fn annualized_quantities_convert_by_the_root_of_the_frequency() {
+        assert_eq!(
+            per_period_from_annualized(0.5, 252.0),
+            0.031_497_039_417_435_6
+        );
+        assert_eq!(
+            per_period_from_annualized(0.5, 52.0),
+            0.069_337_524_528_153_64
+        );
+        assert_eq!(per_period_from_annualized(0.5, 1.0), 0.5);
+        assert_eq!(per_period_from_annualized(0.0, 252.0), 0.0);
     }
 }

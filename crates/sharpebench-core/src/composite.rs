@@ -22,8 +22,8 @@ use crate::certification::Certification;
 use crate::comparison_sets::{comparison_set, restrict_to_shared, TaggedRun, TaggedSubmission};
 use crate::decay::return_drift_half_life;
 use crate::deflated_sharpe::{
-    deflated_sharpe_ratio_against_null, expected_max_sharpe, probabilistic_sharpe_ratio,
-    sharpe_ratio,
+    deflated_sharpe_ratio_against_null, expected_max_sharpe, per_period_from_annualized,
+    probabilistic_sharpe_ratio, sharpe_ratio,
 };
 use crate::econrationality::{elicit_revealed_selection, rationality_score};
 use crate::pass_k::{pass_k, PassMode};
@@ -636,13 +636,15 @@ fn excess_returns(returns: &[f64], benchmark: &[f64]) -> Option<Vec<f64>> {
 /// A Sharpe ratio scales with the square root of the number of periods, so a
 /// dispersion of Sharpes does too; dividing by `sqrt(periods_per_year)` takes
 /// the annualized prior to the frequency the statistic is computed at. This is
-/// the only place that conversion happens. Every deflation call site in this
+/// the only place the kernel converts it, through
+/// [`sharpebench_stats::per_period_from_annualized`], the formula the
+/// `sharpebench-edge` honesty verdict also uses. Every deflation call site in this
 /// module reads it from here so the prior can neither be converted twice nor
 /// reach a per-period statistic unconverted. The *measured* path in [`rank`]
 /// never calls it: the dispersion it measures across the field is already a
 /// dispersion of per-period Sharpes.
 pub fn per_period_sr_std(cfg: &ScoreConfig) -> f64 {
-    cfg.trials_sr_std / cfg.periods_per_year.sqrt()
+    per_period_from_annualized(cfg.trials_sr_std, cfg.periods_per_year)
 }
 
 /// The per-period Sharpe benchmark each run's PSR is tested against for
