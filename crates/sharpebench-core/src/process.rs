@@ -1377,6 +1377,39 @@ mod tests {
     /// venue can collapse the two writes into one intent. It says nothing about
     /// whether that intent ever reached the venue, so the ambiguity is still
     /// open when a third, keyless submission appears.
+    /// Resolution is per intent, not global. An outcome observed for one
+    /// subject's chain says nothing about another subject's outstanding write,
+    /// so the second chain stays open and still blocks a blind retry.
+    #[test]
+    fn resolving_one_intent_leaves_another_subject_chain_open() {
+        let mut events = authorized_prefix(btc());
+        events.extend(authorized_prefix(eth()));
+        events.push(keyed_submission(btc(), "b1", "KB"));
+        events.push(step(
+            btc(),
+            Phase::AcknowledgmentUnobserved { order: oid("b1") },
+        ));
+        events.push(keyed_submission(eth(), "e1", "KE"));
+        events.push(step(
+            eth(),
+            Phase::AcknowledgmentUnobserved { order: oid("e1") },
+        ));
+        // BTC's intent is answered; ETH's is not.
+        events.push(step(btc(), Phase::Acknowledgment { order: oid("b1") }));
+        events.push(step(eth(), Phase::Submission { order: oid("e2") }));
+
+        let r = check_lifecycle(&Trace { events });
+        assert!(
+            r.violations.iter().any(|v| matches!(
+                v,
+                OrderingViolation::AmbiguousWriteRetriedWithoutKey { subject, ambiguous_order, .. }
+                    if *subject == eth() && *ambiguous_order == oid("e1")
+            )),
+            "resolving BTC must not close the open ETH intent: {:?}",
+            r.violations
+        );
+    }
+
     #[test]
     fn an_unresolved_intent_survives_a_keyed_retry() {
         let mut events = authorized_prefix(btc());
