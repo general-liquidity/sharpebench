@@ -49,7 +49,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::deflated_sharpe::{deflated_sharpe_ratio, sharpe_ratio};
+use crate::deflated_sharpe::{deflated_sharpe_ratio, per_period_from_annualized, sharpe_ratio};
 use crate::significance::bootstrap_pvalue;
 
 /// Tuning for the budget-curve analysis. All fields default to house constants; the
@@ -57,15 +57,20 @@ use crate::significance::bootstrap_pvalue;
 /// per-point p-values from the same inputs.
 #[derive(Clone, Debug, Serialize)]
 pub struct BudgetCurveOpts {
-    /// Periods per year, used only to annualize the reported raw Sharpe for
-    /// legibility. The deflated Sharpe is computed on per-period returns and is
-    /// never annualized (annualizing a DSR is meaningless).
+    /// Periods per year of the held-out returns. It converts the annualized
+    /// `trials_sr_std` to the per-period unit the deflated Sharpe is computed in,
+    /// and annualizes the reported raw Sharpe for legibility. The deflated Sharpe
+    /// itself is never annualized (annualizing a DSR is meaningless). Must be
+    /// finite and positive.
     pub periods_per_year: f64,
     /// Baseline multiple-testing footprint applied to *every* point's deflated
     /// Sharpe, before the budget-selection surcharge is folded into the peak.
     pub base_n_trials: u32,
-    /// Cross-trial dispersion of Sharpe ratios (the deflation footprint's scale),
-    /// matching [`crate::composite::ScoreConfig::trials_sr_std`].
+    /// **Annualized** cross-trial dispersion of Sharpe ratios (the deflation
+    /// footprint's scale), in the unit of
+    /// [`crate::composite::ScoreConfig::trials_sr_std`] and with the same 0.5
+    /// default prior. It is divided by `sqrt(periods_per_year)` before it reaches
+    /// the per-period deflated Sharpe.
     pub trials_sr_std: f64,
     /// Seed for the per-point significance bootstrap (fixed ⇒ reproducible).
     pub bootstrap_seed: u64,
@@ -158,9 +163,10 @@ pub struct BudgetCurveReport {
 ///
 /// Returns `Err` at the boundary when: the input is empty or has a single point (a
 /// curve needs at least two); the budgets are not strictly increasing; or any point
-/// has fewer than two held-out returns (a Sharpe needs dispersion); or the
-/// deflated Sharpe at a point could not be estimated, which includes a
-/// `trials_sr_std` that is not a dispersion. The curve is a sequence of
+/// has fewer than two held-out returns (a Sharpe needs dispersion); or
+/// `periods_per_year` is not finite and positive; or the deflated Sharpe at a
+/// point could not be estimated, which includes a `trials_sr_std` that is not a
+/// dispersion. The curve is a sequence of
 /// comparable deflated Sharpes, so one that could not be estimated has no
 /// stand-in value: the whole curve is withheld.
 pub fn budget_curve(
@@ -194,11 +200,20 @@ pub fn budget_curve(
         }
     }
 
-    let ann = opts.periods_per_year.max(0.0).sqrt();
+    // An infinite frequency would divide the prior to a zero dispersion, the
+    // most favorable deflation there is, so it is refused with the rest.
+    if !opts.periods_per_year.is_finite() || opts.periods_per_year <= 0.0 {
+        return Err(format!(
+            "periods_per_year must be finite and positive, got {}",
+            opts.periods_per_year
+        ));
+    }
+    let sr_std = per_period_from_annualized(opts.trials_sr_std, opts.periods_per_year);
+    let ann = opts.periods_per_year.sqrt();
     let mut curve: Vec<BudgetPoint> = Vec::with_capacity(n_budget_points);
     for i in 0..n_budget_points {
         let (budget, returns) = points[i];
-        let oos_dsr = deflated_sharpe_ratio(returns, opts.base_n_trials, opts.trials_sr_std)
+        let oos_dsr = deflated_sharpe_ratio(returns, opts.base_n_trials, sr_std)
             .map_err(|error| format!("point {i}: {error}"))?;
         let oos_sharpe = sharpe_ratio(returns);
         let oos_p_value =
@@ -237,7 +252,7 @@ pub fn budget_curve(
     // search over N, so the honest peak clears a higher bar.
     let peak_footprint = opts.base_n_trials.saturating_add(n_budget_points as u32);
     let peak_dsr_deflated_for_selection =
-        deflated_sharpe_ratio(points[peak_idx].1, peak_footprint, opts.trials_sr_std)
+        deflated_sharpe_ratio(points[peak_idx].1, peak_footprint, sr_std)
             .map_err(|error| format!("peak point {peak_idx}: {error}"))?;
 
     // First budget where more compute did not raise held-out edge. Non-strict, so a
@@ -450,6 +465,50 @@ mod tests {
         assert!(budget_curve(&[(1.0, full.as_slice()), (2.0, empty.as_slice())], &opts).is_err());
         let single = vec![0.01];
         assert!(budget_curve(&[(1.0, full.as_slice()), (2.0, single.as_slice())], &opts).is_err());
+    }
+
+    /// The annualized prior is deflated with in the returns' own unit:
+    /// `0.5 / sqrt(periods_per_year)` per period. Applied per period
+    /// unconverted, 0.5 on daily bars was an annualized bar about sqrt(252)
+    /// times too high.
+    #[test]
+    fn the_annualized_prior_is_converted_and_the_frequency_boundary_refused() {
+        let pts = vec![
+            (1.0, window(0.0010, 0.02, 40)),
+            (2.0, window(0.0020, 0.02, 40)),
+            (3.0, window(0.0012, 0.02, 40)),
+        ];
+        let c = curve_of(&pts);
+        for ppy in [52.0, 252.0, 8760.0] {
+            let opts = BudgetCurveOpts {
+                periods_per_year: ppy,
+                base_n_trials: 10,
+                ..BudgetCurveOpts::default()
+            };
+            let r = budget_curve(&c, &opts).unwrap();
+            let per_period = 0.5 / f64::sqrt(ppy);
+            for (p, (_, returns)) in r.points.iter().zip(&pts) {
+                let expected = deflated_sharpe_ratio(returns, 10, per_period).unwrap();
+                assert_eq!(p.oos_dsr.to_bits(), expected.to_bits(), "ppy {ppy}");
+            }
+            let peak = deflated_sharpe_ratio(&pts[1].1, 13, per_period).unwrap();
+            assert_eq!(
+                r.peak_dsr_deflated_for_selection.to_bits(),
+                peak.to_bits(),
+                "ppy {ppy}"
+            );
+        }
+        for bad in [f64::INFINITY, 0.0, -252.0, f64::NAN] {
+            let opts = BudgetCurveOpts {
+                periods_per_year: bad,
+                ..BudgetCurveOpts::default()
+            };
+            let err = budget_curve(&c, &opts).unwrap_err();
+            assert!(
+                err.starts_with("periods_per_year must be finite and positive"),
+                "{err}"
+            );
+        }
     }
 
     #[test]

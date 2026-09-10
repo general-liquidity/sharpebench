@@ -213,6 +213,123 @@ pooled returns straight to `bootstrap_pvalue`; nothing is subtracted.
 pooled per-period returns, measured against a zero-rate cash benchmark, not
 excess returns.
 
+### F15. The annualized prior reached per-period kernels outside the LITE verdict
+
+**Scope.** PR #62 fixed the LITE honesty verdict, which applied the annualized
+0.5 trial-dispersion prior per period. Its author reported related defects and
+left them; this section records each one checked against the source on the
+branch `fix/unit-defaults`, which builds on #62.
+
+**Source.** BLdP 2014 p. 10 converts the annualized dispersion to the
+frequency of the returns before it enters the expected maximum:
+`SR_0 = sqrt(1/(2*250)) * (...)`, a per-period quantity at 250 observations a
+year. The kernel's `expected_max_sharpe` and `deflated_sharpe_ratio` take that
+per-period dispersion (their rustdoc says so), and
+`sharpebench_stats::per_period_from_annualized` (added by #62) is the one
+conversion, `annualized / sqrt(periods_per_year)`. LLZ 2026 p. 11, eq. 9, gives
+the PSR as `1 - p`; F9 applies.
+
+**Verified and changed.**
+
+1. *Python raw primitives.* Confirmed: `deflated_sharpe_ratio`,
+   `bootstrap_dsr_ci` and `selection_robustness` in
+   `crates/sharpebench-py/src/lib.rs` defaulted `trials_sr_std` to
+   `DEFAULT_TRIALS_SR_STD = 0.5` and passed it to the per-period kernels, an
+   annualized dispersion of `0.5 * sqrt(252) = 7.9` on daily returns. The
+   parameter stays per period, the unit of the Rust functions these bind, so
+   an explicit value keeps its meaning. Omitted, it is now
+   `per_period_from_annualized(0.5, periods_per_year)`, with a new keyword
+   `periods_per_year` defaulting to 252 as in `ScoreConfig` and the verdict.
+   The keyword converts only the default: beside an explicit `trials_sr_std` it
+   is a `ValueError`, and so is a non-finite or non-positive frequency. On a
+   four-year daily track at an annualized Sharpe of 1.90 the default DSR at 20
+   trials moves from 0.0 to 0.971, and at 200 trials from 0.0 to 0.849; at one
+   trial nothing moves. The WASM, npm and MCP surfaces expose none of these
+   primitives (checked in `crates/sharpebench-wasm/src/lib.rs`,
+   `npm/src/index.ts` and `npm/mcp/src/server.ts`), so the committed WASM was
+   not rebuilt.
+2. *A sixth instance, not in the report: `budget_curve`.*
+   `BudgetCurveOpts::trials_sr_std` is documented as matching
+   `ScoreConfig::trials_sr_std`, the annualized prior, with the same 0.5
+   default, and `budget_curve` in `crates/sharpebench-core/src/budget_curve.rs`
+   passed it to `deflated_sharpe_ratio` unconverted, although the options
+   already carried `periods_per_year`. It is now converted, and a non-finite or
+   non-positive `periods_per_year` is an `Err` (a negative one used to be
+   clamped to zero for the annualized display). The Python `budget_curve`
+   inherits the fix. On the Python test's five-point daily curve the
+   selection-deflated peak moves from 0.005 to 0.875. Nothing in
+   `paper/`, `examples/` or the goldens calls it.
+3. *Core accepts an invalid frequency.* Confirmed: `per_period_sr_std` in
+   `crates/sharpebench-core/src/composite.rs` did not validate
+   `ScoreConfig::periods_per_year`. `+inf` gave a zero dispersion and scored
+   against no bar; zero gave an infinite dispersion and a negative or NaN one a
+   NaN, which `expected_max_sharpe` refused under the name `trials_sr_std`. On
+   the measured path, which converts only the floor, a negative, NaN or
+   infinite frequency was not refused at all: `f64::max` drops a NaN floor and
+   an infinite frequency floors at zero, so the measured dispersion was used
+   with no reason given. A malformed `trials_sr_std` is refused on the deflation
+   boundary of `score_agent_with` (R02: `deflation_error`, zero deflated
+   Sharpe and composite, no interval, ineligible). The frequency is now checked
+   on the same boundary, with the same outcome and its own reason, and the
+   selection diagnostic is withheld with it. `score_agent`,
+   `score_agent_declared` and `rank` all pass through that boundary. The core
+   goldens and the WASM parity goldens are unchanged.
+4. *Inlined formula.* `Deflation::measured` wrote the floor's division by hand,
+   and so did `per_run_psr_benchmark`. Both now call
+   `per_period_from_annualized`. The body is the same expression,
+   `a / b.sqrt()`, so the result is identical bit for bit; the committed
+   goldens (configured path), the WASM native-parity goldens and
+   `measured_dispersion_cannot_fall_below_the_precommitted_floor`, which
+   compares the floor's bits with `per_period_sr_std`, pass unchanged. No
+   golden exercises the measured floor, so that test and the identity of the
+   expression carry the claim for it.
+5. *npm NaN prior.* Confirmed: `honestyConfigJson` in `npm/src/index.ts` passed
+   `trialsSrStd` through, `JSON.stringify` turned NaN and infinity into `null`,
+   and `parse_honesty_config` in the WASM reads a null `trials_sr_std` as
+   omitted, so the verdict used the 0.5 prior. It now throws a `RangeError`, as
+   #62 does for `periodsPerYear`.
+6. *Docs.* The `sharpebench-stats` crate example passed 0.5 per period and
+   labelled the results "P(true Sharpe > 0)" and "P(skill survives the
+   search)". It now derives `per_period_from_annualized(0.5, 252.0)`, about
+   0.0315, and words PSR and DSR as one minus a p-value. The same posterior
+   reading was corrected in the Python PSR, DSR and Reality Check docstrings,
+   the Python README's PSR row, and the `haircut` docs of
+   `sharpebench-edge::HonestyVerdict` and the npm `HonestyVerdict` type. The
+   paired-boundary gate had flagged `per_period_from_annualized` since #62; a
+   boundary test now pins its unvalidated edges.
+
+**Not changed.** The LITE verdict's `Pass` explanation string still ends "the
+edge survives the search", and `paper/src/essay-prose.md` still describes the
+PSR as the probability that the true Sharpe exceeds a benchmark. The first is
+verdict output a caller may match on; the second is paper prose outside the
+package surfaces. `expected_max_sharpe` keeps a required, per-period
+`trials_sr_std` with no default.
+
+**Mutation check.** Each mutant was applied in place to the committed file, the
+named tests were run (Python mutants through a fresh `maturin build` and
+install, npm mutants through `npm run build`), and the file was restored from
+`git show HEAD:<path>` and confirmed identical with `cmp` and `git diff --quiet`.
+
+| Mutant | Result |
+|---|---|
+| Core: remove the frequency refusal | killed: `+inf` scored |
+| Core: refuse only non-finite frequencies | killed: zero refused as `trials_sr_std` |
+| Core: refuse only non-positive frequencies | killed: `+inf` scored |
+| Core: leave the DSR interval ungated | killed: interval reported |
+| Core: leave the selection diagnostic ungated | killed: no `selection_error` |
+| Core: measured floor multiplied by the root | killed: three measured-path tests |
+| Core: per-run benchmark left annualized | killed: `default_min_annual_sharpe_is_identical_to_the_old_per_run_test` |
+| Budget curve: prior unconverted | killed at 52 periods a year |
+| Budget curve: no frequency refusal | killed |
+| Budget curve: refuse only non-positive | killed at `+inf` |
+| Python: default 0.5 per period again | killed: two tests |
+| Python: accept a frequency beside an explicit dispersion | killed |
+| Python: no frequency refusal | killed: all four values |
+| Python: `bootstrap_dsr_ci` ignores the converted default | killed |
+| Python: `selection_robustness` ignores the converted default | killed |
+| npm: no `trialsSrStd` check | killed: no `RangeError` |
+| npm: type check only, NaN passes | killed: no `RangeError` |
+
 ## Additional observation, not acted on
 
 LLZ 2026 eqs. 4 and 5 evaluate the PSR standard error under the null, at

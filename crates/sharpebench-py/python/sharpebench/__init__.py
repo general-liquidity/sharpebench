@@ -14,6 +14,17 @@ lists and dicts.
 The verdict's ``trials_sr_std`` is annualized, like the leaderboard's, and
 ``periods_per_year`` (default 252, daily bars, named in the explanation when
 assumed) converts it to the per-period unit the Sharpe is computed in.
+``budget_curve`` takes the same annualized ``trials_sr_std`` and converts it
+with its own ``periods_per_year``.
+
+The raw primitives ``deflated_sharpe_ratio``, ``bootstrap_dsr_ci``,
+``selection_robustness`` and ``expected_max_sharpe`` take ``trials_sr_std``
+**per period**, used as given. When the first three omit it, they use the
+annualized 0.5 prior divided by ``sqrt(periods_per_year)`` (default 252, daily
+bars, about 0.0315 per period); ``periods_per_year`` converts only that default
+and is refused beside an explicit ``trials_sr_std``. The deflated Sharpe is one
+minus a p-value under a null of zero-skill trials, not the probability that a
+strategy is skilled.
 
 The whole surface is a pyo3 binding over the same Rust kernel the SharpeBench CLI
 and the ``@general-liquidity/sharpebench`` npm package use. The Python test suite

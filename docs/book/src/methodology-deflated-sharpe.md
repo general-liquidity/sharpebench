@@ -148,6 +148,18 @@ omitted `periods_per_year` is 252 and named in the verdict's explanation. Until
 the release after 0.19.0 the verdict applied the annualized prior per period
 unconverted, so its bar was the unreachable one in the table above.
 
+The budget curve (`sharpebench_core::budget_curve`, Python `budget_curve`)
+takes the same annualized `trials_sr_std` and converts it with its own
+`periods_per_year`; until the release after 0.19.0 it too deflated with the
+prior unconverted. The raw Python primitives `deflated_sharpe_ratio`,
+`bootstrap_dsr_ci` and `selection_robustness` take `trials_sr_std` per period,
+the unit of the Rust functions they bind, and use an explicit value as given.
+Omitted, it is `0.5 / sqrt(periods_per_year)` with `periods_per_year` defaulting
+to 252, about 0.0315 per period; until the same release the omitted value was
+0.5 per period. A frequency that is not finite and positive is refused on every
+one of these surfaces and on the `ScoreConfig` scoring path, because an
+infinite one divides the prior to a zero bar.
+
 Getting `periods_per_year` wrong is the single most consequential
 misconfiguration in the benchmark. Scoring hourly crypto with the daily default
 makes the deflation bar about six times too demanding; scoring weekly bars with

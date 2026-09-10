@@ -157,6 +157,23 @@ test("isMySharpeReal refuses a frequency that is not one", () => {
   assert.match(raw.error, /periods_per_year/);
 });
 
+test("isMySharpeReal refuses a dispersion JSON would turn into the default", () => {
+  const returns = Array.from({ length: 1008 }, (_, i) => 0.0005 + 0.006 * Math.sin(0.7 * i));
+  // NaN and infinity serialize to null, which the kernel reads as "omitted"
+  // and replaces with the 0.5 prior: the wrapper refuses them before that.
+  for (const trialsSrStd of [NaN, Infinity, -Infinity, "0.5", null]) {
+    assert.throws(() => sb.isMySharpeReal(returns, { nTrials: 20, trialsSrStd }), RangeError);
+    assert.throws(() => sb.isMySharpeRealFull([returns], 0, { nTrials: 20, trialsSrStd }), /trialsSrStd/);
+  }
+  const prior = sb.isMySharpeReal(returns, { nTrials: 20 });
+  assert.equal(sb.isMySharpeReal(returns, { nTrials: 20, trialsSrStd: 0.5 }).expectedMaxSharpe,
+    prior.expectedMaxSharpe);
+  // A finite negative value crosses JSON and is refused by the kernel.
+  const negative = sb.isMySharpeReal(returns, { nTrials: 20, trialsSrStd: -0.5 });
+  assert.equal(negative.verdict, "Fail");
+  assert.match(negative.statisticsError, /trials_sr_std/);
+});
+
 test("honesty wrappers refuse invalid or overflowing search counts", () => {
   const returns = [0.01, 0.02, -0.01];
   for (const nTrials of [0, 2 ** 32, 2 ** 32 + 1, Number.MAX_SAFE_INTEGER,

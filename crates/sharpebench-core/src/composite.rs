@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 pub use sharpebench_protocol::DeclaredMandate;
+use sharpebench_stats::StatisticalError;
 
 use crate::calibration::brier_score;
 use crate::certification::Certification;
@@ -652,8 +653,30 @@ fn excess_returns(returns: &[f64], benchmark: &[f64]) -> Option<Vec<f64>> {
 /// reach a per-period statistic unconverted. The *measured* path in [`rank`]
 /// never calls it: the dispersion it measures across the field is already a
 /// dispersion of per-period Sharpes.
+///
+/// It does not validate `periods_per_year`. [`score_agent`] and [`rank`] refuse
+/// a non-finite or non-positive frequency before they deflate with the result;
+/// a caller using this value directly checks the frequency itself.
 pub fn per_period_sr_std(cfg: &ScoreConfig) -> f64 {
     per_period_from_annualized(cfg.trials_sr_std, cfg.periods_per_year)
+}
+
+/// Refuse a `cfg.periods_per_year` that is not a frequency: finite and positive.
+///
+/// `+inf` divides the annualized prior down to a zero dispersion, the most
+/// favorable deflation bar there is and one no later check can tell apart from a
+/// single trial. Zero turns the prior infinite and a negative or NaN frequency
+/// turns it NaN, which `expected_max_sharpe` would refuse under the name of
+/// `trials_sr_std`. Every one is refused here, under its own name, on the
+/// deflation boundary that already refuses a malformed `trials_sr_std`.
+fn checked_periods_per_year(cfg: &ScoreConfig) -> Result<(), StatisticalError> {
+    if !cfg.periods_per_year.is_finite() || cfg.periods_per_year <= 0.0 {
+        return Err(StatisticalError::InvalidParameter {
+            name: "periods_per_year",
+            requirement: "must be finite and positive",
+        });
+    }
+    Ok(())
 }
 
 /// The per-period Sharpe benchmark each run's PSR is tested against for
@@ -661,7 +684,7 @@ pub fn per_period_sr_std(cfg: &ScoreConfig) -> f64 {
 /// default 0.0 converts to 0.0 on every timeframe, so the default per-run test
 /// is the plain `PSR(returns, 0) >= per_run_psr_bar`.
 pub fn per_run_psr_benchmark(cfg: &ScoreConfig) -> f64 {
-    cfg.per_run_min_annual_sharpe / cfg.periods_per_year.sqrt()
+    per_period_from_annualized(cfg.per_run_min_annual_sharpe, cfg.periods_per_year)
 }
 
 /// Where the `trials_sr_std` that deflated a score came from.
@@ -1160,7 +1183,8 @@ impl Deflation {
     /// `sr_std` is the field's measured dispersion of per-period Sharpes: already
     /// in the kernel's units, so it must not pass through the conversion.
     fn measured(sr_std: f64, cfg: &ScoreConfig) -> Self {
-        let floor = cfg.min_measured_trials_sr_std / cfg.periods_per_year.sqrt();
+        let floor =
+            per_period_from_annualized(cfg.min_measured_trials_sr_std, cfg.periods_per_year);
         let floored = sr_std < floor;
         Self {
             sr_std: sr_std.max(floor),
@@ -1237,16 +1261,20 @@ fn score_agent_with(
     // the trial dispersion), so it shares one error. On a refusal the agent is
     // scored at the no-skill floor and `deflation_error` says why: substituting
     // a number here is the exact failure R02 closes, since the favorable
-    // substitution (a zero deflation bar) is also the flattering one.
-    let deflation = expected_max_sharpe(defl.sr_std, effective_n_trials).and_then(|bar| {
-        let dsr = deflated_sharpe_ratio_against_null(
-            &pooled,
-            effective_n_trials,
-            defl.null_mean_per_period,
-            defl.sr_std,
-        )?;
-        Ok((dsr, defl.null_mean_per_period + bar))
-    });
+    // substitution (a zero deflation bar) is also the flattering one. The
+    // frequency that converted the dispersion is part of that boundary.
+    let frequency = checked_periods_per_year(cfg);
+    let deflation = frequency
+        .and_then(|()| expected_max_sharpe(defl.sr_std, effective_n_trials))
+        .and_then(|bar| {
+            let dsr = deflated_sharpe_ratio_against_null(
+                &pooled,
+                effective_n_trials,
+                defl.null_mean_per_period,
+                defl.sr_std,
+            )?;
+            Ok((dsr, defl.null_mean_per_period + bar))
+        });
     let deflation_error = deflation.as_ref().err().map(ToString::to_string);
     let (dsr, deflation_bar_per_period) = deflation.unwrap_or((0.0, 0.0));
 
@@ -1387,15 +1415,14 @@ fn score_agent_with(
     // all. Both fields are already optional, so the honest answer is `None` with
     // `selection_error` naming the cause, not a summary of ratios that were
     // never computed.
-    let selection = if sub.candidates.is_empty() {
-        None
-    } else {
-        Some(selection_robustness(
-            &sub.candidates,
-            effective_n_trials,
-            defl.sr_std,
-        ))
-    };
+    let selection =
+        if sub.candidates.is_empty() {
+            None
+        } else {
+            Some(frequency.and_then(|()| {
+                selection_robustness(&sub.candidates, effective_n_trials, defl.sr_std)
+            }))
+        };
     let selection_error = selection
         .as_ref()
         .and_then(|s: &Result<SelectionRobustness, _>| s.as_ref().err())
@@ -1434,16 +1461,18 @@ fn score_agent_with(
     // Sampling uncertainty of the DSR point estimate: a bootstrapped CI + SE, so
     // the leaderboard can flag noise-separated entries as tied rather than impose a
     // false hard ordering. Reuses the stationary-bootstrap resampler.
-    let dsr_ci = crate::significance::bootstrap_dsr_ci_against_null(
-        &pooled,
-        effective_n_trials,
-        defl.null_mean_per_period,
-        defl.sr_std,
-        cfg.bootstrap_seed,
-        cfg.n_boot,
-        cfg.block_prob,
-        cfg.dsr_ci_level,
-    );
+    let dsr_ci = frequency.and_then(|()| {
+        crate::significance::bootstrap_dsr_ci_against_null(
+            &pooled,
+            effective_n_trials,
+            defl.null_mean_per_period,
+            defl.sr_std,
+            cfg.bootstrap_seed,
+            cfg.n_boot,
+            cfg.block_prob,
+            cfg.dsr_ci_level,
+        )
+    });
     // An interval that could not be estimated is not a tight one. Any number in
     // its place is read as a bound, so the entry is reported without one and
     // with the reason, rather than with a width the estimator never measured.
@@ -2190,6 +2219,79 @@ mod tests {
             assert_eq!(s.composite, 0.0);
             assert!(!s.rank_eligible, "an unscored agent cannot be ranked");
         }
+    }
+
+    /// A frequency that is not one cannot score, on the same boundary as a
+    /// dispersion that is not one. `+inf` used to divide the annualized prior to
+    /// a zero dispersion and score the agent against no deflation bar at all;
+    /// zero, negative and NaN were refused under the name `trials_sr_std`, or,
+    /// on the measured path of a large field, not refused at all.
+    #[test]
+    fn an_invalid_frequency_disqualifies_on_the_score_and_rank_paths() {
+        let skilled = || {
+            let mut sub = agent("skilled", (0..5).map(|_| run(0.002, 0.0005, 60)).collect());
+            sub.candidates = vec![
+                vec![0.001; 30],
+                (0..30).map(|i| 0.001 * (i % 3) as f64).collect(),
+            ];
+            sub
+        };
+        // Five dissimilar agents: enough for the measured path, which converts
+        // only the floor with the frequency.
+        let field: Vec<AgentSubmission> = (0..5)
+            .map(|i| {
+                let m = 0.0002 + 0.0003 * i as f64;
+                let phase = 0.6 * i as f64;
+                let runs = (0..5)
+                    .map(|_| {
+                        let mut r = run(m, 0.003, 60);
+                        r.returns = (0..60)
+                            .map(|t| m + 0.003 * (t as f64 * 0.7 + phase).sin())
+                            .collect();
+                        r
+                    })
+                    .collect();
+                agent(&format!("a{i}"), runs)
+            })
+            .collect();
+        let valid = rank(&field, &ScoreConfig::default());
+        assert!(valid
+            .iter()
+            .all(|s| s.trials_sr_std_source != TrialsSrStdSource::Configured));
+
+        for bad in [f64::INFINITY, 0.0, -252.0, f64::NAN] {
+            let cfg = ScoreConfig {
+                periods_per_year: bad,
+                ..ScoreConfig::default()
+            };
+            let mut scores = vec![score_agent(&skilled(), &cfg)];
+            scores.extend(rank(&field, &cfg));
+            for s in &scores {
+                assert_eq!(
+                    s.deflation_error.as_deref(),
+                    Some("periods_per_year must be finite and positive"),
+                    "periods_per_year {bad}, {}",
+                    s.agent_id
+                );
+                assert_eq!(s.deflated_sharpe, 0.0);
+                assert_eq!(s.deflation_bar_per_period, 0.0);
+                assert_eq!(s.dsr_ci_low, None);
+                assert_eq!(s.dsr_ci_high, None);
+                assert_eq!(s.dsr_se, None);
+                assert_eq!(s.composite, 0.0);
+                assert!(!s.rank_eligible, "periods_per_year {bad}");
+            }
+            assert_eq!(
+                scores[0].selection_error.as_deref(),
+                Some("periods_per_year must be finite and positive")
+            );
+            assert!(scores[0].selection_gap.is_none());
+        }
+        // The same agent at a valid frequency scores, so the refusal is the
+        // frequency's alone.
+        let s = score_agent(&skilled(), &ScoreConfig::default());
+        assert!(s.deflation_error.is_none() && s.selection_error.is_none());
+        assert!(s.rank_eligible);
     }
 
     /// R02: a candidate set that cannot be deflated reports no selection

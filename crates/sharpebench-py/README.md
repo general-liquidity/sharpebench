@@ -29,11 +29,11 @@ print(ci["lower"], ci["point"], ci["upper"])
 |---|---|
 | `sharpe_ratio(returns)` | observed per-period Sharpe |
 | `moments(returns, target=0.0)` | mean / std / skew / kurtosis / downside deviation / Sortino |
-| `probabilistic_sharpe_ratio(returns, sr_benchmark=0.0)` | `P(true Sharpe > benchmark)` (PSR) |
-| `deflated_sharpe_ratio(returns, n_trials, trials_sr_std=0.5)` | PSR deflated for the size of the search (DSR) |
-| `expected_max_sharpe(trials_sr_std, n_trials)` | the Sharpe the best of `n_trials` shows with **zero** skill |
+| `probabilistic_sharpe_ratio(returns, sr_benchmark=0.0)` | PSR: one minus the p-value of `H0: SR <= benchmark` (not the probability the true Sharpe exceeds it) |
+| `deflated_sharpe_ratio(returns, n_trials, trials_sr_std=None, periods_per_year=None)` | PSR against the best of `n_trials` zero-skill trials (DSR): one minus a p-value, not the probability of skill. `trials_sr_std` is per period; omitted, it is the annualized 0.5 prior over `sqrt(periods_per_year)` (default 252) |
+| `expected_max_sharpe(trials_sr_std, n_trials)` | the per-period Sharpe the best of `n_trials` shows with **zero** skill, from a per-period `trials_sr_std` |
 | `min_track_record_length(returns, ...)` | periods needed before the Sharpe is believable |
-| `bootstrap_dsr_ci(returns, n_trials, ...)` | `{point, se, lower, upper}` on the DSR itself |
+| `bootstrap_dsr_ci(returns, n_trials, ...)` | `{point, se, lower, upper}` on the DSR itself; `trials_sr_std` / `periods_per_year` as in `deflated_sharpe_ratio` |
 | `bootstrap_pvalue(excess, ...)` | stationary-bootstrap p-value for one series |
 | `is_my_sharpe_real(returns, n_trials=1, ..., periods_per_year=None)` | LITE verdict dict: `pass \| borderline \| fail` + explanation. `trials_sr_std` is annualized and `periods_per_year` (default 252, flagged) converts it |
 | `is_my_sharpe_real_full(field, ...)` | FULL verdict over a whole candidate field (LITE + snooping family + PBO + HLZ) |
@@ -43,15 +43,33 @@ print(ci["lower"], ci["point"], ci["upper"])
 | `probability_of_backtest_overfitting(perf_matrix, s=16)` | CSCV PBO |
 | `benjamini_hochberg(p_values, q=0.05)` / `fdr_verdict(...)` | BH-FDR rejections and the operator summary |
 | `hlz_gate(t_stat, t_threshold=None)` | the Harvey-Liu-Zhu `\|t\| >= 3.0` factor bar |
-| `selection_robustness(candidates, n_trials, ...)` | best vs median DSR: is the headline a lucky pick? |
+| `selection_robustness(candidates, n_trials, ...)` | best vs median DSR: is the headline a lucky pick? `trials_sr_std` / `periods_per_year` as in `deflated_sharpe_ratio` |
 | `runs_for_power(effect, alpha, power)` | how many runs to detect an effect |
 | `pass_k(passed_per_run, mode="all", n=None)` | pass^k reliability: won on **every** run, not on average |
-| `budget_curve(...)` | DSR by search budget, marginal DSR, and the non-improvement onset |
+| `budget_curve(...)` | DSR by search budget, marginal DSR, and the non-improvement onset. `trials_sr_std` is annualized (default 0.5) and converted by `periods_per_year` (default 252) |
 | `rank_board(submissions, config_json="")` / `score_one(...)` | Full composite scoring over the CLI-compatible JSON contract |
 | `rank_returns(field, config_json="")` | Build and rank a board from agent IDs and per-run return arrays |
 | `default_score_config()` | Serialize the default scoring configuration |
 | `never_catastrophic_config()` | Serialize the preset that asks only whether every run avoids catastrophe |
 | `relative_to_benchmark_config(id)` | Serialize the benchmark-relative pass preset |
+
+### Units of the deflation prior
+
+Every Sharpe here is per period. The verdicts (`is_my_sharpe_real*`) and
+`budget_curve` take `trials_sr_std` **annualized**, like the leaderboard's
+`ScoreConfig`, and divide it by `sqrt(periods_per_year)`. The raw primitives
+(`deflated_sharpe_ratio`, `bootstrap_dsr_ci`, `selection_robustness`,
+`expected_max_sharpe`) take it **per period** and use an explicit value as
+given. Omitted, the first three use the annualized 0.5 prior at
+`periods_per_year` (default 252): `0.5 / sqrt(252) = 0.0315` per period on daily
+returns. Through 0.19.0 they used 0.5 per period, an annualized dispersion of about
+7.9 on daily returns.
+
+```python
+deflated_sharpe_ratio(returns, n_trials=200)                         # 0.5 / sqrt(252) per period
+deflated_sharpe_ratio(returns, n_trials=200, periods_per_year=8760)  # hourly: 0.5 / sqrt(8760)
+deflated_sharpe_ratio(returns, n_trials=200, trials_sr_std=0.02)     # your per-period value, as given
+```
 
 ### Matrix orientation
 

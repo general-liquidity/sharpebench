@@ -160,7 +160,10 @@ export interface HonestyOpts {
   nTrials: number;
   /**
    * **Annualized** cross-trial Sharpe dispersion, divided by
-   * `sqrt(periodsPerYear)` before use. Omit → estimated at 0.5 and flagged.
+   * `sqrt(periodsPerYear)` before use. Omit → estimated at 0.5 and flagged. A
+   * negative value yields a Fail verdict with `statisticsError`; NaN and
+   * infinity cannot cross JSON (they would arrive as the 0.5 prior) and throw a
+   * `RangeError`.
    */
   trialsSrStd?: number;
   /**
@@ -188,9 +191,13 @@ export interface HonestyVerdict {
   expectedMaxSharpe: number | null;
   deflatedSharpe: number | null;
   probabilisticSharpe: number | null;
-  /** `1 - deflatedSharpe`: probability the edge is a search artifact. */
+  /**
+   * `1 - deflatedSharpe`: the p-value of the test whose null is that this Sharpe
+   * is the best of `nTrials` zero-skill trials. Not the probability that the
+   * edge is a search artifact.
+   */
   haircut: number | null;
-  /** `sharpe * deflatedSharpe`: Sharpe discounted by survival probability. */
+  /** `sharpe * deflatedSharpe`: the Sharpe scaled down by the deflated Sharpe. */
   haircutSharpe: number | null;
   /** Null when no finite track length is returned by the kernel. */
   minTrackRecordLen: number | null;

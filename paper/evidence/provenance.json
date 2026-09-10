@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "63210693d35edacf9415d40eed9c1a77c7d23bcc",
+  "generated_at_head": "27ba71be58863257f30c0469f021afe8b82f5ded",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -359,7 +359,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/budget_curve.rs",
-      "sha256": "79e058168e663f1df8426c737a2752998f9194fef2c414a94f898b4a70ad45a8"
+      "sha256": "d1907e93c30bf27aff81ac7624f7e6e1cc6093b017d17439ab44d81104786bbc"
     },
     {
       "path": "crates/sharpebench-core/src/calibration.rs",
@@ -379,7 +379,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/composite.rs",
-      "sha256": "a2fe6c757aa0b8768fb7d058b4e8cf7e1bfdc90ad91cbaa564683540b3335c99"
+      "sha256": "506809c6c1aa6f8deec2933c720418fcb3a32b1455bdefa5987668ca3ad87d12"
     },
     {
       "path": "crates/sharpebench-core/src/correlation.rs",
@@ -499,7 +499,7 @@
     },
     {
       "path": "crates/sharpebench-edge/src/verdict.rs",
-      "sha256": "af33c6df976f93d02ae6931c30590c01dd416f79df526825e96c47ed6425161f"
+      "sha256": "c8e729256d4ef36eae38dfd3d1640750cb1ecb5cf9260313f69aafbe5411e2cf"
     },
     {
       "path": "crates/sharpebench-harness/Cargo.toml",
@@ -731,7 +731,7 @@
     },
     {
       "path": "crates/sharpebench-py/src/lib.rs",
-      "sha256": "505d15bf3b7775285137f6e2668b34c7f9950b94aa02bd55a98a794fc9f510e7"
+      "sha256": "62fa92447a12ab3562c0b287d9798a5627fe969d4bc1def845cf9499bbfe8b96"
     },
     {
       "path": "crates/sharpebench-sim/Cargo.toml",
@@ -803,7 +803,7 @@
     },
     {
       "path": "crates/sharpebench-stats/src/lib.rs",
-      "sha256": "b6a97ee5aef39731bfa17c5661d088e9c76985c2c0bfb03a35d0d7865fda46a5"
+      "sha256": "0c7e98968a94ddfb561a0bfa60c32ebbf48d8b2638960ad317f3236b410b6a89"
     },
     {
       "path": "crates/sharpebench-stats/src/paired_randomization.rs",
@@ -1087,5 +1087,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "f845c2a1658bab5f9a0895ab28c1135c63a6e6b034cabda1d484e725bea6f695"
+  "source_snapshot_sha256": "b9d2b540d4836108aefb12f1cf7b601ff9cfc1e8cc2809905de5365252eb8df3"
 }
