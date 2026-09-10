@@ -120,36 +120,69 @@ not correctly rounded values; in particular `erf(0)` evaluates to `1e-9` rather
 than `0`, which is why the committed synthetic golden fixture prints
 `"psr": 0.5000000005` for a zero-Sharpe stream.
 
-A measured replacement by `statrs` 0.19.1 (2026-09, `default-features =
-false`, so only its `erf`, `Normal::cdf` and `Normal::inverse_cdf`) was
-compared with the shipped bodies on 1.3 million grid points per function
-(plus subnormals, exact zero, saturated tails and infinities) and on the 10,033
-distinct arguments the kernel passes while scoring the two golden fields and
-the tutorial fixtures:
+A replacement by `statrs` 0.19.1 (`default-features = false`, so only its
+`erf`, `erfc` and `erfc_inv`) was measured against a 60-digit `mpmath`
+reference on 1,918,979 whole-domain grid points and on the 178,472 distinct
+arguments per function that the kernel evaluates while scoring the two golden
+fields and a full evidence sweep. The measurement was then **acted on by
+rejecting the migration**, and both halves of that are worth stating.
 
-| Function | Max absolute difference | Grid points differing in any bit | Kernel-passed arguments differing |
-|---|---|---|---|
-| `erf` | 1.4e-7 (near x = 0.045) | 81.6 percent | 4,432 of 10,033 |
-| `norm_cdf` | 7.0e-8 (near x = 0.064) | 90.5 percent | 6,434 of 10,033 |
-| `norm_ppf` | 6.8e-8 (at p = 5e-324; 2.0e-9 on the kernel's arguments) | 99.9 percent | 2 of 2 |
+`statrs` is more accurate almost everywhere. On the kernel's own arguments:
 
-The kernel-passed arguments that agree are the saturated ones, where both
-implementations return exactly 0 or 1. Under the replacement,
-`crates/sharpebench-core/golden/example_submissions.scores.json` moves in
-eight printed values (`deflation_bar_per_period`,
-`deflation_bar_annualized_equivalent`, `dsr_ci_low`, `dsr_se`),
-`synthetic_field.scores.json` moves (`psr` and `deflated_sharpe`), and every
-producer under `paper/evidence/final/` rerun with its documented command
-writes different `psr`, `deflated_sharpe` and deflation-bar values. The
-tutorial reports under `examples/forecast-quality/`, the prospective forecast
-report, the text board and the `arena` records are byte-identical, because
-none of their printed numbers passes through these functions at printed
-precision. The migration therefore cannot ship as a drop-in and is deferred to
-the next evidence regeneration, when the golden fixtures and the frozen
-records are rescored together. Until then
-`crates/sharpebench-stats/tests/special_function_bits.rs` pins the exact bits
-the three functions return, so a silent change fails there before it reaches
-the golden fixtures. The moment estimators (`mean`, `variance`, `std_dev`,
+| Function | Shipped max absolute error | `statrs` max absolute error |
+|---|---|---|
+| `erf` | 1.394e-7 | 4.939e-11 |
+| `norm_cdf` | 6.969e-8 | 2.470e-11 |
+| `norm_ppf` | 2.895e-9 | 5.593e-16 |
+
+It is closer to the reference on 811,411 of 857,622 `erf` arguments, 604,528 of
+857,608 normal-CDF arguments and 203,738 of 203,746 inverse arguments, and it is
+never worse on the latter two. Neither implementation is correctly rounded:
+`statrs`'s `erf` still carries about 4.9e-11 near `x = 0.5`, so the substitution
+buys three to seven orders of magnitude rather than correctness to the last bit.
+
+It is rejected on a property the accuracy work did not measure: **reproducibility
+across the three supported targets.** The migration was implemented and put
+through CI so the question would be answered by evidence. The two code goldens,
+regenerated on one platform, reproduced there and failed on the other two, while
+the same three jobs on the hand-rolled bodies pass on every target. Neither
+implementation uses a fused multiply-add, so this is not the usual contraction
+difference; both call the platform exponential and logarithm, and what differs is
+the arguments they pass. The Abramowitz and Stegun form evaluates a single
+exponential of negative x squared, and the three platform math libraries agree on
+that at every argument this kernel evaluates. The `statrs` rational path does not.
+That agreement is an empirical property of three vendors' libraries rather than a
+design guarantee.
+
+The deciding argument is what the benchmark promises. A committed field rescored
+anywhere should reproduce byte for byte. A disclosed, bounded 1.4e-7 that is
+identical on every supported target is compatible with that promise; a 4.9e-11
+that varies by target is not, because it makes two honest operators disagree
+about the same submission. The hand-rolled error is orders of magnitude below
+every bar the kernel tests against, so nothing in the published results turns on
+it.
+
+Had the substitution shipped, it would have moved printed values in
+`crates/sharpebench-core/golden/example_submissions.scores.json` and
+`synthetic_field.scores.json`, and every producer under `paper/evidence/final/`
+rerun with its documented command would have written different `psr`,
+`deflated_sharpe` and deflation-bar values. The tutorial reports under
+`examples/forecast-quality/`, the prospective forecast report, the text board
+and the `arena` records are byte-identical either way, because none of their
+printed numbers passes through these functions at printed precision.
+
+What stays in place: the hand-rolled bodies unchanged, and
+`crates/sharpebench-stats/tests/special_function_bits.rs`, which pins the exact
+bits the three functions return so a silent change fails there before it reaches
+the golden fixtures. What would reopen the question: an implementation that is
+both closer to the reference and bit-identical across the three targets, such as
+a vendored correctly-rounded routine restricted to operations IEEE-754 defines
+exactly, or a build that forces one deterministic math library on every target
+and demonstrates it in the three-platform job. If the paper's numerical evidence
+is ever regenerated wholesale, the reproducibility baseline is re-established
+from scratch and the question should be reopened then.
+
+The moment estimators (`mean`, `variance`, `std_dev`,
 `skewness`, `kurtosis`) stay hand-rolled in either case: the standardized
 moments use the population normalisation fixed by the 2026-09-07 audit (R03),
 and the proposed special-function substitution does not replace those empirical

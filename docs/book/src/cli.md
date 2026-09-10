@@ -17,6 +17,7 @@ sharpebench verify-trajectory <traj.json>             replay a trajectory → re
 sharpebench audit-briefing <briefing.json>            audit a shared briefing for salience bias
 sharpebench canary <seed>                             derive a do-not-train contamination tripwire
 sharpebench sandbox-check <image@sha256:digest>       run the live Docker-boundary acceptance checks
+sharpebench gateway --routes <routes.json> ...        report the host-observed model gateway configuration
 sharpebench score-allocation <alloc.json>             score a weight-vector trajectory (turnover)
 sharpebench greeks <spot> <strike> <t> <r> <vol> <call|put>   Black-Scholes price + Greeks + local exposure
 sharpebench self-update                               update an update-enabled binary in place
@@ -47,7 +48,10 @@ Three external-agent transports are explicit rather than interchangeable:
 - `--image <repository@sha256:...>` launches an already-present, digest-pinned
   image through the fail-closed Docker boundary. No daemon, mutable reference,
   absent image, failed readiness check, indeterminate OOM verdict, or failed
-  cleanup becomes host execution.
+  cleanup becomes host execution. Add the opt-in
+  `--scan-policy <policy.json>` to scan the image's configuration and container
+  export for operator-declared protected content and refuse before the entrant
+  is launched; see [entrant image preflight](image-preflight.md).
 - `--cmd "<program>"` executes a trusted program on the host and prints an
   unsandboxed warning on every run. Its environment is cleared to a small
   platform allowlist; opt named variables in with
@@ -60,6 +64,12 @@ ordered windows, ordered seeds, and retry policy. A checkpointed `--cmd` or
 `--http` run also requires `--entrant-sha256 <digest>` because a command line or
 endpoint address does not identify the artifact that served it. A mismatched or
 legacy checkpoint is refused rather than overwritten.
+
+The checkpoint schema version is 4. Schema 3 predates the persisted per-round
+attempt budget, so a schema-3 checkpoint carries no evidence of what an
+interrupted round already spent and would read that spend as zero. Resuming one
+is refused by version, naming the schema, rather than continued with a fresh
+round granted on top of work the writing binary had already done.
 
 Default resume skips all terminal cells, including exhausted runtime failures.
 Add `--retry-runtime-failures` to explicitly recover every runtime-failed cell
@@ -100,6 +110,27 @@ cost is not zero. These observations never enter ranking or the pass^k denominat
 Checkpoint totals cover persisted records only; a process killed before saving
 can leave unrecorded work.
 
+### Opt-in image preflight
+
+`--scan-policy <policy.json>` applies only to `--image`. It scans the pinned
+image's executable configuration and its container export for the exact bytes
+the policy protects, and refuses before the entrant is launched when either leg
+matches or when either leg could not complete. On a refusal no entrant runs and
+no board is emitted.
+
+The declared scope is `image-config-and-container-export/v1`. Container export
+omits volume contents, so an image that declares a volume refuses rather than
+being reported as scanned over a scope the scan did not cover. The accepted
+output caps are bounds on what the CLI will read, and the export spool size is
+polled, which makes it an accepted-output bound and **not a disk quota**.
+
+A completed negative report says the named streams did not contain the
+protected bytes. It never establishes that an agent has not memorized held-out
+data: compressed, encoded, encrypted, chunked and model-internalized copies are
+all outside raw-byte scope. The policy schema, the refusal order, the capture
+limits and the checkpoint identity are in
+[entrant image preflight](image-preflight.md).
+
 ### Frozen token rates
 
 Add `--rate-card <json>` to an external `run` to quote token usage under one
@@ -138,7 +169,10 @@ known tokens through retries and resume; a later success cannot erase them.
 Mixed cards and overflowing arithmetic cannot produce a total.
 
 These are estimates from the legacy decision protocol, not host-observed
-provider receipts. That protocol defaults omitted individual token counts to
+provider receipts. For usage the host itself observed, see
+[`gateway`](#gateway) and the
+[host-observed model gateway](model-gateway.md); that record is host-observed,
+which is still not verified billing. That protocol defaults omitted individual token counts to
 zero, so their completeness is not independently established. Entirely absent,
 dollar-only or all-zero usage is unpriced rather than assumed free. Invalid
 reasoning counts also withhold the estimate. The model identity is an operator
@@ -290,6 +324,31 @@ one long European option with its Greeks and local gamma/vega exposure flags.
 Invalid inputs and undefined Greek vectors are refused. Local Greeks do not
 establish payoff boundedness; see [Options pricing and payoff risk](options-risk.md).
 
+## `gateway`
+
+```bash
+sharpebench gateway --routes <routes.json> --budget-usd-nanos <n> --max-calls <n> [--journal <journal.json>] [--json]
+```
+
+Reports and preflights the host-observed model gateway. It never calls a
+provider. It resolves the route manifest, binds each alias's credential from the
+named environment variable, and prints the frozen route-table identity, the
+bounds a sweep would enforce, and what the money journal has already committed.
+Credential values are read but never printed; the report names the variable and
+marks the value redacted.
+
+Both `--budget-usd-nanos` and `--max-calls` are required, and neither may be
+zero: a paid run without a stated ceiling has no bound on what it spends before
+anyone notices, and a zero ceiling would refuse every call. A missing
+credential, a malformed manifest, inline key material and a journal bound to
+another route table each refuse with a nonzero exit code.
+
+The report labels its own provenance: `usage_source` is `host_observed`, which
+is not verified billing, and the provider transport is operator supplied
+because none ships in this build. See
+[the host-observed model gateway](model-gateway.md) for the protocol, the bound
+table and the reservation and settlement rules.
+
 ## `select`
 
 ```bash
@@ -312,6 +371,10 @@ distribution is decided by a handful of unlucky resamples nobody has real data
 for. The warning flags a choice; it does not veto one. Deterministic given
 (data, `--seed`).
 
+The flag reports where alpha sits and nothing else. A refusal that had nothing
+to do with alpha, such as too few observations or a rejected block probability,
+leaves it false rather than blaming an argument that was not the problem.
+
 ## `disqualify`
 
 ```bash
@@ -323,10 +386,22 @@ disqualification/quality signal that fired for each agent, instead of the
 single rank-eligible verdict. Pass the same field and [host controls](#score) as
 `score`: explanations come from the ranked field, including its benchmark and
 field-dependent deflation, rather than separately scoring each submission.
-Five reasons mirror the scorer's hard eligibility
-gates (`FailedPassK`, `DsrBelowBar`, `ProcessViolation`,
-`BootstrapInsignificant`, `MandateBreached`); the advisory flags
-(`HighSelectionGap`, `IsRediscovery`, `OosDecay`) are reported but never gate.
+The taxonomy has eleven reasons in three groups. Five mirror the scorer's hard
+eligibility gates (`FailedPassK`, `DsrBelowBar`, `ProcessViolation`,
+`BootstrapInsignificant`, `MandateBreached`). Two name the unavailability of a
+statistic the scorer really does gate on, so they are hard as well:
+`DeflationUnavailable` and `BootstrapUnavailable`. The remaining four are
+advisory and never gate: `SelectionUnavailable`, `HighSelectionGap`,
+`IsRediscovery` and `OosDecay`.
+
+`SelectionUnavailable` is advisory because the whole selection axis is. The
+scorer reports `selection_gap` and never consults it in `rank_eligible`, so the
+unavailability of that same diagnostic cannot demote an agent either. A
+submission whose candidate set refuses therefore keeps `rank_eligible: true` and
+carries the reason marked `(advisory)`. The invariant the classifier holds is
+`rank_eligible == reasons.iter().all(FailReason::is_advisory)`, and
+`is_advisory` lives in the core taxonomy next to the enum so the CLI cannot
+drift from it.
 JSON rows contain `agent_id`, host `rank_eligible` and `reasons`. These reasons
 explain the host score only, including its drawdown mandate; they do not explain
 the separate declared-mandate verdict. To inspect that verdict, use the

@@ -165,6 +165,59 @@ environment pass-through list is refused as a different experiment.
 > images, readiness failures, and indeterminate cleanup or OOM state; it never
 > falls through to host execution.
 
+### Opt-in image preflight
+
+```bash
+sharpebench run --image ghcr.io/you/agent@sha256:<digest>   --scan-policy contamination-policy.json
+```
+
+Scans the pinned image before the entrant is launched and refuses on a match or
+on an incomplete scan: no entrant runs and no board is emitted. The declared
+scope is the image's executable configuration plus its container export. Because
+container export omits volume contents, an image that declares a volume refuses
+rather than being reported as scanned over a scope the scan did not cover. The
+accepted-output caps bound what the CLI reads, and the export spool size is
+polled, which makes it an accepted-output bound rather than a disk quota.
+
+A completed negative report says the named streams did not contain the
+operator-declared protected bytes. It does not establish that an agent has not
+memorized held-out data: compressed, encoded, encrypted, chunked and
+model-internalized copies are outside raw-byte scope. Details and the policy
+schema are in [entrant image preflight](docs/book/src/image-preflight.md).
+
+### Recovery, cost and host-observed usage
+
+```bash
+sharpebench run --cmd "./agent" --checkpoint sweep.json   --entrant-sha256 <digest> --retry-runtime-failures   --rate-card rate-card.json
+```
+
+`--retry-runtime-failures` explicitly requeues runtime-failed cells under the
+same contract, with at most three additional rounds per cell over the
+checkpoint's lifetime and per-round attempt budgets persisted with the ledger.
+Completed cells and agent-fault cells are never requeued, attempts are appended
+rather than rewritten, and exhausting the ceiling refuses before executing a
+cell instead of resetting the budget.
+
+`--rate-card` quotes token usage under one operator-declared provider, model and
+revision, in nonnegative integer nanodollars per token with checked integer
+arithmetic. Reasoning tokens are a subset of output tokens, not an extra charge.
+The validated card binds into the checkpoint invocation identity, so changing
+its rates, model or revision refuses an existing checkpoint. These are
+entrant-reported estimates, not provider billing.
+
+Every external sweep publishes a rank-neutral `attempt_accounting` record, on
+the entrant's board row on success and on the error for an incomplete sweep.
+A missing cost is reported as unavailable rather than as zero, and none of it
+enters ranking or the pass^k denominator.
+
+`sharpebench gateway` reports the separate host-observed accounting path:
+newline-delimited JSON over a host-owned pipe, credentials that never reach the
+entrant, bounded request and response envelopes, reservations taken and
+persisted before dispatch, unknown cost charged at the full reservation, and an
+append-only journal. No networked transport ships in this build; the operator
+supplies it. Host-observed usage is not independently verified billing. See the
+[model gateway chapter](docs/book/src/model-gateway.md).
+
 The Docker-enabled CI suite verifies user, capability, and no-new-privilege
 state; read-only and `noexec` mounts; seven egress-denial classes with timeout
 discrimination; a real production spawn; a live cgroup OOM classification; and
@@ -177,7 +230,9 @@ A runnable stdio agent and Dockerfile live in
 
 Entrant faults remain in the pass^k denominator as failing sentinels. Exhausted
 runtime or transport failures make the sweep noncertifying: the CLI reports the
-missing cells, emits no board, and exits unsuccessfully.
+missing cells, emits no board, and exits unsuccessfully. A transport-failure
+label alone does not prove that infrastructure caused the failure, and the
+checkpoint is an operator-controlled record rather than tamper-proof evidence.
 
 ## Capture and verify
 
@@ -325,6 +380,7 @@ does not run agents or own a store. See the
 | Understand scoring | [Methodology](docs/book/src/methodology.md) · [Process discipline](docs/book/src/methodology-process.md) |
 | Analyze prospective forecasts | [Forecast quality](docs/book/src/forecast-quality.md) |
 | Operate the forward league or sandbox | [Arena](docs/book/src/arena.md) · [Attestation](docs/book/src/attestation.md) |
+| Scan an entrant image or account for model usage | [Image preflight](docs/book/src/image-preflight.md) · [Model gateway](docs/book/src/model-gateway.md) |
 | Audit integrity and provenance | [Integrity](docs/book/src/integrity.md) · [Evidence contracts](docs/book/src/evidence-contracts.md) · [75-benchmark architecture audit](docs/BENCHMARK_ARCHITECTURE_AUDIT.md) |
 | Reproduce the paper | [Paper PDF](paper/main.pdf) · [Commands](paper/sections/A-commands.tex) |
 | Contribute or propose a change | [`CONTRIBUTING.md`](CONTRIBUTING.md) · [Governance](docs/GOVERNANCE.md) |

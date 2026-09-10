@@ -98,7 +98,12 @@ example, is not zero required observations.
 The full verdict also exposes its existing kernel `hlz` diagnostic as
 `{tStat, tThreshold, passed, explanation}`. It is separate from the headline
 honesty verdict. Board explanations include `deflation_unavailable`,
-`bootstrap_unavailable` and `selection_unavailable`.
+`bootstrap_unavailable` and `selection_unavailable`. The first two are hard,
+because the scorer gates on the statistics they name. `selection_unavailable` is
+advisory: the scorer reports `selection_gap` and never consults it in
+`rank_eligible`, so a submission carrying only that reason is still
+rank-eligible. Read `rank_eligible` for the verdict rather than the presence of
+a reason.
 
 The same refusal regressions execute through the committed WASM wrapper and
 through an offline-installed npm tarball. A source-only fix is not sufficient:

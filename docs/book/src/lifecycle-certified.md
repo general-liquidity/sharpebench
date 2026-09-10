@@ -46,8 +46,13 @@ A row is certified when all three hold:
    check on a trace with no lifecycle events is vacuously clean, and a vacuous
    pass is not evidence that a lifecycle ran.
 3. No run has a block-severity ordering violation (a submission with no
-   passing risk evaluation for its own subject, a fill never acknowledged, and
-   the other four described under process discipline).
+   passing risk evaluation for its own subject, a fill never acknowledged, a
+   blind retry of a write whose acknowledgment was never observed, and the
+   other four described under [process
+   discipline](methodology-process.md#lifecycle-ordering-linked-by-subject)).
+   The separate warn-severity unavailability raised when a trace cannot
+   establish whether an outstanding write was ambiguous is reported in
+   `lifecycle_warnings` and withholds nothing.
 
 Each failing property is named in `withheld` with a typed `property` tag,
 following the repository's rule that an unavailable value is reported as

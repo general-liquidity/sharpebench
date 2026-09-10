@@ -20,6 +20,8 @@
 - [Forward attestation](attestation.md)
   - [Held-out dataset seals](sealed-datasets.md)
 - [The arena](arena.md)
+  - [Entrant image preflight](image-preflight.md)
+  - [Host-observed model gateway](model-gateway.md)
 - [Importing a rival field](importing.md)
 - [Benchmark integrity](integrity.md)
 - [CLI reference](cli.md)

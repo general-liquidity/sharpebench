@@ -47,7 +47,7 @@ console.log(greeks({ spot: 100, strike: 100, t_years: 1, rate: 0.05, vol: 0.2, i
 | `percentileSelection(candidates, opts?)` | Point winner versus bootstrap-percentile winner and optimism gaps |
 | `decomposeUncertainty(input)` | Aleatoric, epistemic, and distributional diagnostic legs |
 | `crowdingHalfLife(adoption, params)` | Caller-calibrated crowding-decay prior, reported but never gating |
-| `classifyDisqualification(submissions, config?)` | Named hard-gate and advisory reasons |
+| `classifyDisqualification(submissions, config?)` | Named hard-gate, unavailability, and advisory reasons |
 | `regimeCompare(a, b, regimes, opts?)` | Regime-conditional distribution comparison and pooled-sign reversal |
 
 All inputs and outputs are fully typed (TypeScript declarations ship with the
@@ -66,7 +66,18 @@ not measured results. Unavailable PBO is `null` with `pboError`.
 Nonfinite numeric diagnostics serialize as `null`, including a minimum track
 record length with no finite solution. TypeScript callers must handle nulls.
 `percentileSelection` reports `input_error` and null winner indices when any
-candidate is unsupported. See the [error and migration guide](https://github.com/general-liquidity/sharpebench/blob/main/docs/book/src/wasm.md#statistical-unavailability-and-migration).
+candidate is unsupported. Its `alpha_warning` reports where `alpha` sits and
+nothing else: a refusal that had nothing to do with alpha, such as too few
+observations or a rejected block probability, leaves the flag false.
+
+`classifyDisqualification` returns eleven reasons in three groups: five mirror
+the scorer's hard eligibility gates, two name the unavailability of a statistic
+the scorer gates on (`deflation_unavailable`, `bootstrap_unavailable`), and four
+are advisory and never gate (`selection_unavailable`, `high_selection_gap`,
+`is_rediscovery`, `oos_decay`). `selection_unavailable` is advisory because the
+scorer reports `selection_gap` and never consults it in `rank_eligible`, so a
+submission carrying only advisory reasons is still rank-eligible. Read
+`rank_eligible`, not the presence of a reason. See the [error and migration guide](https://github.com/general-liquidity/sharpebench/blob/main/docs/book/src/wasm.md#statistical-unavailability-and-migration).
 
 ## Why luck-robust?
 
