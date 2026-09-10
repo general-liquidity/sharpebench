@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "7139f033edb3132c00e5f4b6f38017d61707945c",
+  "generated_at_head": "96426b45ab1615c9a7938adcf8b94a887631abec",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -299,7 +299,7 @@
     },
     {
       "path": "crates/sharpebench-cli/src/main.rs",
-      "sha256": "9723ad08fbcfa50d8527947ceacd0d028c591f3a5ed87b2a0367124dcf84fbf8"
+      "sha256": "17d114c84c61fa3052cf7f08b2e6e9701c1a10e9ece20b6ea0e9a98e39464de0"
     },
     {
       "path": "crates/sharpebench-cli/src/update.rs",
@@ -324,6 +324,10 @@
     {
       "path": "crates/sharpebench-cli/tests/frozen_rate_card_cli.rs",
       "sha256": "65e23d4d71cd9c4e36a468340e3dcd1bb34fbeeab5bf280f23dcb64e7fc79d3e"
+    },
+    {
+      "path": "crates/sharpebench-cli/tests/honesty_units.rs",
+      "sha256": "5e628339284b5595413ea461a5d0fdfa491b3b3328b34fa380ff5ff783d7a069"
     },
     {
       "path": "crates/sharpebench-cli/tests/options_boundaries.rs",
@@ -375,7 +379,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/composite.rs",
-      "sha256": "029c498165919d0da7dedab748746a963aaaab579b3819dc9e12666ac0dc0869"
+      "sha256": "a2fe6c757aa0b8768fb7d058b4e8cf7e1bfdc90ad91cbaa564683540b3335c99"
     },
     {
       "path": "crates/sharpebench-core/src/correlation.rs",
@@ -491,7 +495,7 @@
     },
     {
       "path": "crates/sharpebench-edge/src/verdict.rs",
-      "sha256": "9430cef0865fbf06c9238f92364c6992f85e7c2c20daedf2593059ac0e740174"
+      "sha256": "af33c6df976f93d02ae6931c30590c01dd416f79df526825e96c47ed6425161f"
     },
     {
       "path": "crates/sharpebench-harness/Cargo.toml",
@@ -719,7 +723,7 @@
     },
     {
       "path": "crates/sharpebench-py/src/lib.rs",
-      "sha256": "475fc3db006b34cb00108a7fde72c0c5442b3e6dde47506fbdc47fd08392417f"
+      "sha256": "ad65fe5d79061f6082042fe4a57824f5e9d8681f203394422e950ad910860414"
     },
     {
       "path": "crates/sharpebench-sim/Cargo.toml",
@@ -779,7 +783,7 @@
     },
     {
       "path": "crates/sharpebench-stats/src/deflated_sharpe.rs",
-      "sha256": "0c6c11a265ae687ad0d691cefdd33a2d23c607420dbb61ba9d0813ed7b485c8a"
+      "sha256": "0de460e1d28b6b1651cdc7923a8387501e4788ecb615df17974f006583008bf0"
     },
     {
       "path": "crates/sharpebench-stats/src/dissent.rs",
@@ -791,7 +795,7 @@
     },
     {
       "path": "crates/sharpebench-stats/src/lib.rs",
-      "sha256": "a509ee7c06df86beeee14f859c16d9dbd49716c5f88d3ea10071244fd0e8560f"
+      "sha256": "b6a97ee5aef39731bfa17c5661d088e9c76985c2c0bfb03a35d0d7865fda46a5"
     },
     {
       "path": "crates/sharpebench-stats/src/paired_randomization.rs",
@@ -839,7 +843,7 @@
     },
     {
       "path": "crates/sharpebench-wasm/src/lib.rs",
-      "sha256": "f1a2cb82326c94ea3f6887a5e738431e1b9513f97987b7592ed5e9d1b4fb793a"
+      "sha256": "b9db49e57e7344c5151221ca4cccdeb0d9dee18b42684561d93372a9993ae0da"
     },
     {
       "path": "crates/sharpebench-wasm/tests/board_context.rs",
@@ -1071,5 +1075,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "d4b31b8a57aea945ad7d899da0d1e64eeaf2237a0feb01103928aed4b57b81e2"
+  "source_snapshot_sha256": "786d39c93b148812f3349306cd71918254d64a3ad1bb2343e1681f95019c3d27"
 }
