@@ -12,6 +12,9 @@ and links the commits it was built from.
 
 ## [Unreleased]
 
+### Fixed
+- release: the registry check polls crates.io and npm for up to ten minutes per package instead of checking crates.io once and npm for 100 seconds. v0.20.0, v0.21.0 and v0.22.0 each failed that check on registry lag alone and passed on a rerun.
+
 ## [0.22.0] - 2026-09-10
 
 ### Breaking

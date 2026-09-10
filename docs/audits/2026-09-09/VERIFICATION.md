@@ -15,6 +15,7 @@ again before it merged.
 | Bench #76 | Incomplete-sweep fault report; external capture; image re-execution | `b830142` |
 | Bench #77 | `sharpebench commit --fault-plan` | `bff54c0` |
 | Release | SharpeArena v0.25.0 | `f520d61` |
+| Release | SharpeBench v0.22.0 | `a0f0a42` |
 
 Unfaulted commitments were shown byte-identical by pinning three hashes printed
 by the main binary, and the committed `arena/` round-trips unchanged. Default
@@ -35,6 +36,14 @@ GitHub deployment records show `success` through the API; SharpeBench's
 latest npm and PyPI records were marked inactive at 20:40 and 20:44 UTC on
 2026-09-10 by a status change this work did not make, while every registry
 serves the released versions.
+
+All three SharpeBench releases in this record needed a rerun of the registry
+check, each for registry lag rather than a failed publish: crates.io on v0.20.0,
+and npm on v0.21.0 and v0.22.0. The v0.22.0 MCP publish itself went through on
+the first attempt, because Bench PR #71 made it wait for the kernel's tarball;
+only the final check, which waited 100 seconds for npm and did not retry
+crates.io at all, ran too early. It now polls each registry for up to ten
+minutes, Bench PR #79.
 
 The live image re-execution test proves the hardened launch and typed refusals
 against a real daemon, not a passing re-execution: the pinned Alpine fixture's

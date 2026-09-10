@@ -408,7 +408,7 @@ jobs:
     # skips verification reports success without proving the registries serve it.
     if: always() && (startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != '')
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - name: Fail if validation or a publish job failed
         env:
@@ -455,10 +455,17 @@ jobs:
             for c in sharpebench-stats sharpebench-memory sharpebench-edge sharpebench-protocol sharpebench-core \
                      sharpebench-attest sharpebench-sim sharpebench-leaderboard sharpebench-wasm \
                      sharpebench-harness sharpebench-arena sharpebench; do
-              if curl -s -A "$UA" "https://crates.io/api/v1/crates/$c/$TAG" | grep -q "\"num\":\"$TAG\""; then
+              # The crates.io index can lag a publish by minutes (v0.20.0 failed
+              # here on sharpebench-wasm and passed on a rerun), so poll.
+              ok=0
+              for i in $(seq 1 40); do
+                if curl -s -A "$UA" "https://crates.io/api/v1/crates/$c/$TAG" | grep -q "\"num\":\"$TAG\""; then ok=1; break; fi
+                sleep 15
+              done
+              if [ "$ok" = "1" ]; then
                 echo "ok   crates.io $c@$TAG"
               else
-                echo "::error::crates.io is not serving $c@$TAG"; fail=1
+                echo "::error::crates.io is not serving $c@$TAG after 10 minutes"; fail=1
               fi
             done
           fi
@@ -466,15 +473,16 @@ jobs:
           if [ "$PUBLISH_NPM" = "true" ]; then
             for p in @general-liquidity/sharpebench @general-liquidity/sharpebench-mcp; do
               ok=0
-              # the registry read-path lags a few seconds behind a publish
-              for i in $(seq 1 20); do
+              # npm can take minutes to serve a new version (v0.21.0 and v0.22.0
+              # both failed here on the MCP package and passed on a rerun).
+              for i in $(seq 1 40); do
                 if [ "$(npm view "$p@$TAG" version 2>/dev/null)" = "$TAG" ]; then ok=1; break; fi
-                sleep 5
+                sleep 15
               done
               if [ "$ok" = "1" ]; then
                 echo "ok   npm $p@$TAG"
               else
-                echo "::error::npm is not serving $p@$TAG"; fail=1
+                echo "::error::npm is not serving $p@$TAG after 10 minutes"; fail=1
               fi
             done
           fi
