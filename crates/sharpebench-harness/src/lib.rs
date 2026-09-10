@@ -9,6 +9,8 @@
 pub mod accounting;
 pub mod checkpoint;
 pub mod failure;
+pub mod gateway;
+pub mod gateway_journal;
 pub mod perturb;
 
 pub use checkpoint::{
