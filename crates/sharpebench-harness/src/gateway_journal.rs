@@ -50,6 +50,10 @@ pub enum UnknownCostReason {
     /// dropped connection, an unparseable or oversized body. The provider may
     /// have completed and billed the call.
     AmbiguousAfterCommit,
+    /// The transport returned only after the wall-clock deadline the host handed
+    /// it had already passed. The answer is refused, but the request was on the
+    /// wire, so the provider may have completed and billed it.
+    AdapterDeadlineExceeded,
     /// A reservation with no settlement was found on resume. The process died
     /// somewhere around the call.
     InterruptedBeforeSettlement,
@@ -145,6 +149,13 @@ pub struct SpendState {
     pub unknown_calls: u32,
     pub priced_calls: u32,
     pub released_calls: u32,
+    /// Money priced above what its call reserved, summed over every such call.
+    /// A reservation bounds what the host authorized, not what the provider
+    /// billed, so this is the measured gap between the two and it is never
+    /// folded away into the priced total.
+    pub overspent_usd_nanos: u128,
+    /// Calls whose observed price exceeded their reservation.
+    pub overspent_calls: u32,
 }
 
 impl SpendState {
@@ -162,11 +173,66 @@ impl SpendState {
     }
 }
 
+/// Why a journal could not be persisted. A conflict is a distinct outcome from
+/// an I/O failure: the write was refused because someone else owns the record,
+/// not because the disk would not take it.
+#[derive(Debug)]
+pub enum JournalSaveError {
+    /// The document on disk is not the one this snapshot was derived from, so
+    /// writing would replace a record this process never read. The in-memory
+    /// journal is left intact: the caller still holds every record it appended.
+    Conflict {
+        expected: u64,
+        found: u64,
+    },
+    Io(std::io::Error),
+}
+
+impl std::fmt::Display for JournalSaveError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Conflict { expected, found } => write!(
+                f,
+                "gateway journal on disk is at version {found}, this snapshot is at version {expected}"
+            ),
+            Self::Io(error) => write!(f, "gateway journal could not be written: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for JournalSaveError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Conflict { .. } => None,
+            Self::Io(error) => Some(error),
+        }
+    }
+}
+
 /// An append-only sequence of spending records, persisted as one JSON document.
+///
+/// # Ownership
+///
+/// A snapshot carries the `version` it was loaded at, and [`GatewayJournal::save`]
+/// is a compare-and-swap against that version: a save from a snapshot that does
+/// not match what is on disk is refused as
+/// [`JournalSaveError::Conflict`] rather than replacing a record this process
+/// never read. Atomic replacement alone would not make a shared budget, because
+/// two processes can each hold a stale snapshot and each replace it whole.
+///
+/// The compare-and-swap reads the on-disk version and then renames a temporary
+/// into place, so a second writer that lands between those two steps is not
+/// caught. That residual window is a real one; the check is what stops the
+/// far larger window of two long-lived gateways both spending from the snapshot
+/// they read at open.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GatewayJournal {
     pub identity: JournalIdentity,
+    /// Bumped by every successful save. Absent in a document written before the
+    /// field existed, which folds to the pre-first-save value.
+    #[serde(default)]
+    version: u64,
     records: Vec<JournalRecord>,
 }
 
@@ -174,12 +240,18 @@ impl GatewayJournal {
     pub fn new(identity: JournalIdentity) -> Self {
         Self {
             identity,
+            version: 0,
             records: Vec::new(),
         }
     }
 
     pub fn records(&self) -> &[JournalRecord] {
         &self.records
+    }
+
+    /// The version this snapshot will compare against on its next save.
+    pub fn version(&self) -> u64 {
+        self.version
     }
 
     /// Load a journal and refuse one that is not bound to this experiment. A
@@ -281,10 +353,14 @@ impl GatewayJournal {
                     let (_, reserved) = open.remove(index);
                     match settlement {
                         Settlement::Priced { usd_nanos, .. } => {
+                            let priced: u128 = usd_nanos.parse().unwrap_or(reserved);
                             state.priced_calls = state.priced_calls.saturating_add(1);
-                            state.priced_usd_nanos = state
-                                .priced_usd_nanos
-                                .saturating_add(usd_nanos.parse().unwrap_or(reserved));
+                            state.priced_usd_nanos = state.priced_usd_nanos.saturating_add(priced);
+                            if priced > reserved {
+                                state.overspent_calls = state.overspent_calls.saturating_add(1);
+                                state.overspent_usd_nanos =
+                                    state.overspent_usd_nanos.saturating_add(priced - reserved);
+                            }
                         }
                         Settlement::Unknown { .. } => {
                             state.unknown_calls = state.unknown_calls.saturating_add(1);
@@ -305,6 +381,15 @@ impl GatewayJournal {
             state.outstanding_usd_nanos = state.outstanding_usd_nanos.saturating_add(reserved);
         }
         state
+    }
+
+    /// Whether committed money has already passed the budget ceiling. Only an
+    /// observed price above its reservation can put a journal here, because a
+    /// reservation is refused before dispatch when it would not fit. Once true
+    /// the sweep must start no further call: the ceiling is the ceiling, and an
+    /// overage is not authority to keep spending.
+    pub fn ceiling_breached(&self) -> bool {
+        self.spend().committed_usd_nanos() > self.identity.budget.max_usd_nanos
     }
 
     /// Money still available under the budget, after everything committed.
@@ -380,25 +465,76 @@ impl GatewayJournal {
         }
     }
 
+    /// The version of the document at `path`, or `None` when no document is
+    /// there. A document written before the field existed reads as version 0.
+    fn version_on_disk(path: &Path) -> std::io::Result<Option<u64>> {
+        use std::io::Read as _;
+        let mut file = match std::fs::File::open(path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let mut bytes = Vec::new();
+        file.by_ref()
+            .take(MAX_JOURNAL_BYTES + 1)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() as u64 > MAX_JOURNAL_BYTES {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "gateway journal exceeds the accepted size",
+            ));
+        }
+        let value: serde_json::Value =
+            serde_json::from_slice(&bytes).map_err(std::io::Error::other)?;
+        Ok(Some(
+            value
+                .get("version")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0),
+        ))
+    }
+
     /// Persist through a sibling temporary file and fsync it before the rename,
     /// so a reservation is durable before the call it pays for is dispatched.
-    pub fn save(&self, path: &Path) -> std::io::Result<()> {
+    ///
+    /// The write is a compare-and-swap on [`GatewayJournal::version`]: a save
+    /// from a snapshot the disk has moved past is refused, and the caller keeps
+    /// every record it appended. See the type documentation for what the check
+    /// does and does not cover.
+    pub fn save(&mut self, path: &Path) -> Result<(), JournalSaveError> {
         use std::io::Write as _;
-        let payload = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
+        let found = Self::version_on_disk(path)
+            .map_err(JournalSaveError::Io)?
+            .unwrap_or(0);
+        if found != self.version {
+            return Err(JournalSaveError::Conflict {
+                expected: self.version,
+                found,
+            });
+        }
+        self.version += 1;
+        let payload = match serde_json::to_string_pretty(self) {
+            Ok(payload) => payload,
+            Err(error) => {
+                self.version -= 1;
+                return Err(JournalSaveError::Io(std::io::Error::other(error)));
+            }
+        };
         let parent = path
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
             .unwrap_or(Path::new("."));
-        let name = path.file_name().ok_or_else(|| {
-            std::io::Error::new(
+        let Some(name) = path.file_name() else {
+            self.version -= 1;
+            return Err(JournalSaveError::Io(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "gateway journal path needs a filename",
-            )
-        })?;
+            )));
+        };
         let mut temp_name = name.to_os_string();
         temp_name.push(format!(".{}.tmp", std::process::id()));
         let tmp = parent.join(temp_name);
-        let result = (|| {
+        let result: std::io::Result<()> = (|| {
             let mut file = std::fs::File::create(&tmp)?;
             file.write_all(payload.as_bytes())?;
             file.sync_all()?;
@@ -408,10 +544,16 @@ impl GatewayJournal {
             std::fs::File::open(parent)?.sync_all()?;
             Ok(())
         })();
-        if result.is_err() {
-            let _ = std::fs::remove_file(&tmp);
+        match result {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                let _ = std::fs::remove_file(&tmp);
+                // The bump only stands for a write that landed: a failed save
+                // must leave this snapshot comparing against what is on disk.
+                self.version -= 1;
+                Err(JournalSaveError::Io(error))
+            }
         }
-        result
     }
 }
 
