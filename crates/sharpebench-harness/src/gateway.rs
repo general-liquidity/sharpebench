@@ -31,18 +31,22 @@
 //! into a library that is otherwise offline, and every test in this module is
 //! hermetic by construction because the only transports that exist are fakes.
 //! An operator supplies the transport, and the bounds in [`GatewayLimits`] are
-//! handed to it rather than left to its discretion.
+//! handed to it rather than left to its discretion. Handing them over is not
+//! enforcing them: the timeouts and the response-body bound are obligations the
+//! adapter must satisfy, and [`ProviderTransport`] says exactly which parts of
+//! them the broker can and cannot check.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
 use crate::accounting::RateCard;
 use crate::gateway_journal::{
-    GatewayBudget, GatewayJournal, JournalIdentity, ReleaseReason, Settlement, UnknownCostReason,
+    GatewayBudget, GatewayJournal, JournalIdentity, JournalSaveError, ReleaseReason, Settlement,
+    UnknownCostReason,
 };
 
 pub const GATEWAY_PROTOCOL: &str = "sharpebench.model-gateway.v1";
@@ -164,18 +168,29 @@ pub struct ModelRoute {
     credential: Secret,
     rate_card: RateCard,
     max_output_tokens: u32,
+    input_token_overhead: u64,
 }
 
 impl ModelRoute {
     /// Build a route. The rate card carries the provider, model and revision;
     /// they are not separately declarable, so a route cannot price one revision
     /// while calling another.
+    ///
+    /// `input_token_overhead` is the input the provider bills that never appears
+    /// in the entrant's content: the adapter's system framing, the wire encoding
+    /// of tool schemas, and whatever the provider counts before a token of the
+    /// request is read. The host adds it to the content-byte bound when it
+    /// reserves, so an empty request still reserves a nonzero amount. It is per
+    /// route because it is a property of the provider's documented framing, and
+    /// it is required because a zero would silently restore a reservation that
+    /// bounds only part of the billed request.
     pub fn new(
         alias: impl Into<String>,
         destination: impl Into<String>,
         credential: Secret,
         rate_card: RateCard,
         max_output_tokens: u32,
+        input_token_overhead: u64,
     ) -> Result<Self, String> {
         let alias = alias.into();
         let destination = destination.into();
@@ -199,12 +214,18 @@ impl ModelRoute {
         if max_output_tokens == 0 {
             return Err(format!("route {alias} allows no output tokens"));
         }
+        if input_token_overhead == 0 {
+            return Err(format!(
+                "route {alias} declares no input token overhead; state the provider's framing overhead"
+            ));
+        }
         Ok(Self {
             alias,
             destination,
             credential,
             rate_card,
             max_output_tokens,
+            input_token_overhead,
         })
     }
 
@@ -220,9 +241,15 @@ impl ModelRoute {
         self.max_output_tokens
     }
 
+    pub fn input_token_overhead(&self) -> u64 {
+        self.input_token_overhead
+    }
+
     /// The identity fields, in fixed order, with the destination reduced to a
-    /// digest and the credential absent entirely.
-    fn identity_row(&self) -> (String, String, String, String, String, String, u32) {
+    /// digest and the credential absent entirely. The overhead is in here
+    /// because it decides what the host authorizes per call: changing it must
+    /// not resume an existing money journal.
+    fn identity_row(&self) -> (String, String, String, String, String, String, u32, u64) {
         (
             self.alias.clone(),
             self.rate_card.provider().to_string(),
@@ -231,6 +258,7 @@ impl ModelRoute {
             self.rate_card.digest(),
             sharpebench_attest::content_digest(self.destination.as_bytes()),
             self.max_output_tokens,
+            self.input_token_overhead,
         )
     }
 }
@@ -360,6 +388,7 @@ pub enum GatewayErrorKind {
     ConcurrencyLimit,
     ShuttingDown,
     JournalUnwritable,
+    JournalOwnershipLost,
     ProviderRateLimited,
     ProviderUnavailable,
     ProviderTimeout,
@@ -386,6 +415,7 @@ impl GatewayErrorKind {
             Self::ConcurrencyLimit => "too many calls are already in flight",
             Self::ShuttingDown => "the gateway is shutting down",
             Self::JournalUnwritable => "the spend journal could not be made durable",
+            Self::JournalOwnershipLost => "the spend journal is owned by another writer",
             Self::ProviderRateLimited => "the provider rejected the call",
             Self::ProviderUnavailable => "the provider could not be reached",
             Self::ProviderTimeout => "the provider did not answer within the bound",
@@ -431,9 +461,12 @@ pub struct GatewayRequest {
 }
 
 impl GatewayRequest {
-    /// Total content bytes. The gateway uses this as an upper bound on input
-    /// tokens when it reserves: no tokenizer emits more tokens than the text has
-    /// bytes, so a reservation computed from bytes can never under-reserve.
+    /// Total content bytes. No tokenizer emits more tokens than the text has
+    /// bytes, so this bounds the input tokens the *content* becomes. It does
+    /// not bound the billed request: the adapter's system framing and wire
+    /// encoding are outside it, and an empty request does not imply zero billed
+    /// input. The route's `input_token_overhead` covers that part, and the
+    /// reservation is the sum.
     fn content_bytes(&self) -> u64 {
         let messages: usize = self
             .messages
@@ -515,8 +548,22 @@ pub struct ProviderUsage {
     pub output_tokens: u64,
 }
 
-/// What the host hands a transport. The bounds travel with the call so the
-/// transport cannot pick its own.
+/// What the host hands a transport.
+///
+/// The bounds travel with the call so the transport cannot pick its own, but
+/// three of them are obligations the adapter must satisfy rather than
+/// guarantees the broker makes:
+///
+/// - `read_timeout` bounds one socket read. The broker never sees a socket.
+/// - `call_timeout` bounds the whole dispatch. The broker calls
+///   [`ProviderTransport::call`] synchronously and cannot interrupt it; what it
+///   does is measure the elapsed time and refuse an answer that arrived after
+///   the deadline, charging the call as
+///   [`crate::gateway_journal::UnknownCostReason::AdapterDeadlineExceeded`]. An
+///   adapter that blocks forever blocks the broker with it.
+/// - `max_response_body_bytes` bounds the body. The adapter allocates the
+///   buffer, so only the adapter can bound the allocation; the broker checks the
+///   length of what it is handed, which is after the fact.
 pub struct ProviderCall<'a> {
     pub destination: &'a str,
     pub credential: &'a Secret,
@@ -554,6 +601,16 @@ pub enum ProviderOutcome {
 
 /// The seam between the host's accounting and the bytes on the wire. No
 /// networked implementation ships in this crate.
+///
+/// # Adapter obligations
+///
+/// An implementation must honour `read_timeout`, `call_timeout` and
+/// `max_response_body_bytes` from [`ProviderCall`]. The broker cannot enforce
+/// them: it holds no socket, it calls this method synchronously with no way to
+/// cancel it, and the response buffer is allocated here. What it does instead is
+/// refuse to accept an answer that came back late, and refuse to read a body
+/// larger than the bound after the adapter has already built it. An adapter that
+/// ignores these bounds costs money and memory before the broker sees anything.
 pub trait ProviderTransport {
     fn call(&mut self, call: ProviderCall<'_>) -> ProviderOutcome;
 }
@@ -643,6 +700,10 @@ pub struct ModelGateway<'a, T: ProviderTransport> {
     limits: GatewayLimits,
     shutdown: GatewayShutdown,
     dispatches: u32,
+    /// Latched when a save was refused because another writer owns the journal.
+    /// The records this gateway appended are still in memory; what it may not
+    /// do is keep spending against a file it no longer owns.
+    journal_conflict: bool,
 }
 
 impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
@@ -665,6 +726,7 @@ impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
             limits,
             shutdown: GatewayShutdown::new(),
             dispatches: 0,
+            journal_conflict: false,
         }
     }
 
@@ -696,6 +758,7 @@ impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
             limits,
             shutdown: GatewayShutdown::new(),
             dispatches: 0,
+            journal_conflict: false,
         })
     }
 
@@ -715,6 +778,13 @@ impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
     /// the journal's reservation count: they must agree.
     pub fn dispatches(&self) -> u32 {
         self.dispatches
+    }
+
+    /// Whether this gateway lost ownership of its journal file. Once true it
+    /// starts no further call. Take [`ModelGateway::into_journal`] to recover
+    /// the records it appended after the last write it owned.
+    pub fn journal_conflict(&self) -> bool {
+        self.journal_conflict
     }
 
     /// Handle one request line and return one response line, newline excluded.
@@ -826,16 +896,28 @@ impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
         if self.shutdown.is_cancelled() {
             return Err(GatewayErrorKind::ShuttingDown);
         }
+        if self.journal_conflict {
+            return Err(GatewayErrorKind::JournalOwnershipLost);
+        }
+        // An earlier call whose observed price landed above its reservation can
+        // put committed money past the ceiling. That is recorded, not absorbed,
+        // and it is not authority to start another call.
+        if self.journal.ceiling_breached() {
+            return Err(GatewayErrorKind::BudgetExhausted);
+        }
         let spend = self.journal.spend();
         if spend.calls_started >= self.journal.identity.budget.max_calls {
             return Err(GatewayErrorKind::CallLimitExhausted);
         }
+        // The reservation bounds the whole request the host is willing to
+        // authorize: the content, bounded by its bytes, plus the framing the
+        // provider bills that never appears in the content.
+        let reserved_input_tokens = request
+            .content_bytes()
+            .saturating_add(route.input_token_overhead());
         let reserve = route
             .rate_card()
-            .quote_nanos(
-                request.content_bytes(),
-                u64::from(request.max_output_tokens),
-            )
+            .quote_nanos(reserved_input_tokens, u64::from(request.max_output_tokens))
             .ok_or(GatewayErrorKind::BudgetExhausted)?;
         if reserve > self.journal.available_usd_nanos() {
             return Err(GatewayErrorKind::BudgetExhausted);
@@ -850,13 +932,20 @@ impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
         // Durable before dispatch: a process that dies during the call leaves a
         // reservation behind, which folds as consumed rather than as free.
         if let Some(path) = &self.journal_path {
-            if self.journal.save(path).is_err() {
+            if let Err(error) = self.journal.save(path) {
+                // Nothing was dispatched, so the reservation is released. The
+                // release stays in memory when the file is owned elsewhere:
+                // writing it would replace a record this process never read.
                 self.journal.settle(
                     ordinal,
                     Settlement::Released {
                         reason: ReleaseReason::NeverDispatched,
                     },
                 );
+                if matches!(error, JournalSaveError::Conflict { .. }) {
+                    self.journal_conflict = true;
+                    return Err(GatewayErrorKind::JournalOwnershipLost);
+                }
                 return Err(GatewayErrorKind::JournalUnwritable);
             }
         }
@@ -874,6 +963,7 @@ impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
         }
 
         self.dispatches = self.dispatches.saturating_add(1);
+        let started = Instant::now();
         let outcome = self.transport.call(ProviderCall {
             destination: &route.destination,
             credential: &route.credential,
@@ -887,7 +977,23 @@ impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
             call_timeout: self.limits.provider_call_timeout,
             max_response_body_bytes: self.limits.max_response_body_bytes,
         });
+        let elapsed = started.elapsed();
         drop(permit);
+
+        // The broker cannot interrupt a synchronous transport, but it does not
+        // have to accept what one hands back after its deadline has passed. An
+        // adapter that overran breached the bound it was given, so its answer is
+        // refused and the call is charged: the request was on the wire, and a
+        // free retry is exactly what a slow provider must not get.
+        if elapsed > self.limits.provider_call_timeout {
+            self.settle_and_persist(
+                ordinal,
+                Settlement::Unknown {
+                    reason: UnknownCostReason::AdapterDeadlineExceeded,
+                },
+            );
+            return Err(GatewayErrorKind::ProviderTimeout);
+        }
 
         match outcome {
             ProviderOutcome::RefusedBeforeWork(fault) => {
@@ -1020,10 +1126,14 @@ impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
     /// Settle, then persist. A failed persist leaves the settlement in memory;
     /// the record it would have replaced is a reservation, which folds as
     /// consumed, so a lost write can only over-report spend, never under-report.
+    /// A refused write latches the ownership flag, so a gateway that lost the
+    /// file stops rather than spending against a record it cannot write.
     fn settle_and_persist(&mut self, ordinal: u32, settlement: Settlement) {
         self.journal.settle(ordinal, settlement);
         if let Some(path) = &self.journal_path {
-            let _ = self.journal.save(path);
+            if let Err(JournalSaveError::Conflict { .. }) = self.journal.save(path) {
+                self.journal_conflict = true;
+            }
         }
     }
 
@@ -1060,6 +1170,11 @@ mod tests {
     use crate::gateway_journal::JournalRecord;
 
     const KEY: &str = "sk-live-test-do-not-log-0123456789";
+    /// Framing tokens a test route declares the provider bills on every call,
+    /// standing in for the overhead an operator would read off provider docs.
+    /// A reservation in these tests is content bytes plus this plus the
+    /// requested output, so `request("hello", 16)` reserves 5 + 8 + 16 = 29.
+    const TEST_OVERHEAD: u64 = 8;
 
     fn card(input: u64, output: u64, revision: &str) -> RateCard {
         let json = format!(
@@ -1075,6 +1190,7 @@ mod tests {
             Secret::new(KEY),
             card(1, 1, revision),
             4096,
+            TEST_OVERHEAD,
         )
         .expect("a valid route")])
         .expect("a valid table")
@@ -1428,6 +1544,7 @@ mod tests {
             Secret::new(KEY),
             card(1, 1, "2026-01-01"),
             64,
+            TEST_OVERHEAD,
         )
         .expect("route")])
         .expect("table");
@@ -1739,7 +1856,7 @@ mod tests {
         );
         let spend = gateway.journal().spend();
         assert_eq!(spend.priced_usd_nanos, 0);
-        assert_eq!(spend.unknown_usd_nanos, 21, "charged at its reservation");
+        assert_eq!(spend.unknown_usd_nanos, 29, "charged at its reservation");
         assert!(spend.is_partial());
         assert!(matches!(
             settlements(gateway.journal())[0],
@@ -1770,7 +1887,7 @@ mod tests {
         );
         assert!(parse(&gateway.serve_line(&request("hello", 16))).ok);
         let spend = gateway.journal().spend();
-        assert_eq!(spend.unknown_usd_nanos, 21, "the timed out call is charged");
+        assert_eq!(spend.unknown_usd_nanos, 29, "the timed out call is charged");
         assert_eq!(spend.priced_usd_nanos, 15, "the retry is charged too");
         assert_eq!(spend.calls_started, 2);
         assert!(spend.is_partial(), "an unknown amount keeps it partial");
@@ -1835,7 +1952,7 @@ mod tests {
                 reason: UnknownCostReason::AmbiguousAfterCommit
             }
         ));
-        assert_eq!(gateway.journal().spend().unknown_usd_nanos, 21);
+        assert_eq!(gateway.journal().spend().unknown_usd_nanos, 29);
     }
 
     /// Resuming continues the same journal: earlier spend still counts against
@@ -1902,6 +2019,7 @@ mod tests {
             Secret::new(KEY),
             card(2, 2, "2026-01-01"),
             4096,
+            TEST_OVERHEAD,
         )
         .expect("route")])
         .expect("table");
@@ -1912,6 +2030,7 @@ mod tests {
             Secret::new(KEY),
             card(1, 1, "2026-01-01"),
             4096,
+            TEST_OVERHEAD,
         )
         .expect("route")])
         .expect("table");
@@ -1924,6 +2043,7 @@ mod tests {
             Secret::new("sk-live-rotated-9876543210abcdef"),
             card(1, 1, "2026-01-01"),
             4096,
+            TEST_OVERHEAD,
         )
         .expect("route")])
         .expect("table");
@@ -2186,7 +2306,8 @@ mod tests {
             "https://provider.invalid",
             Secret::new(KEY),
             card(1, 1, "2026-01-01"),
-            16
+            16,
+            TEST_OVERHEAD,
         )
         .is_err());
         assert!(ModelRoute::new(
@@ -2194,7 +2315,8 @@ mod tests {
             "https://provider.invalid",
             Secret::new(""),
             card(1, 1, "2026-01-01"),
-            16
+            16,
+            TEST_OVERHEAD,
         )
         .is_err());
         assert!(ModelRoute::new(
@@ -2202,7 +2324,8 @@ mod tests {
             "",
             Secret::new(KEY),
             card(1, 1, "2026-01-01"),
-            16
+            16,
+            TEST_OVERHEAD,
         )
         .is_err());
         let duplicate = RouteTable::new(vec![
@@ -2212,6 +2335,7 @@ mod tests {
                 Secret::new(KEY),
                 card(1, 1, "2026-01-01"),
                 16,
+                TEST_OVERHEAD,
             )
             .expect("route"),
             ModelRoute::new(
@@ -2220,9 +2344,209 @@ mod tests {
                 Secret::new(KEY),
                 card(1, 1, "2026-01-01"),
                 16,
+                TEST_OVERHEAD,
             )
             .expect("route"),
         ]);
         assert!(duplicate.is_err());
+    }
+
+    /// A transport that ignores the call deadline it was handed. It opens no
+    /// socket: it sleeps, then answers from memory.
+    struct SlowProvider {
+        delay: Duration,
+    }
+
+    impl ProviderTransport for SlowProvider {
+        fn call(&mut self, _call: ProviderCall<'_>) -> ProviderOutcome {
+            std::thread::sleep(self.delay);
+            ProviderOutcome::Answered {
+                status: 200,
+                body: body("ok", Some((10, 5))),
+            }
+        }
+    }
+
+    /// The reservation bounds the whole request the host authorizes, not the
+    /// part of it the entrant wrote. Empty content is not zero billed input:
+    /// the provider still frames the call, so a budget that cannot cover the
+    /// framing refuses before anything reaches the wire.
+    #[test]
+    fn a_reservation_covers_framing_the_entrant_never_wrote() {
+        let routes = table("2026-01-01");
+        let permits = CallPermits::new(4);
+        let mut gateway = ModelGateway::new(
+            &routes,
+            &permits,
+            FakeProvider::new(vec![ProviderOutcome::Answered {
+                status: 200,
+                body: body("ok", Some((10, 1))),
+            }]),
+            budget(1, 4),
+            GatewayLimits::default(),
+        );
+        let empty = serde_json::to_string(&GatewayRequest {
+            protocol: GATEWAY_PROTOCOL.into(),
+            model_alias: "fake.v1".into(),
+            messages: vec![Message {
+                role: MessageRole::User,
+                content: String::new(),
+            }],
+            max_output_tokens: 1,
+            tools: Vec::new(),
+        })
+        .expect("json");
+
+        let response = parse(&gateway.serve_line(&empty));
+        assert!(
+            !response.ok,
+            "a one-unit budget cannot authorize a framed call"
+        );
+        assert_eq!(
+            response.error.expect("error").kind,
+            GatewayErrorKind::BudgetExhausted
+        );
+        assert_eq!(gateway.dispatches(), 0, "no request starts");
+        assert_eq!(reservations(gateway.journal()), 0, "nothing is appended");
+        assert_eq!(gateway.journal().spend().committed_usd_nanos(), 0);
+    }
+
+    /// A reservation bounds what this host authorizes, not what a provider may
+    /// bill. When the observed price lands above it, the gap is recorded rather
+    /// than absorbed, and the sweep stops instead of spending past the ceiling.
+    #[test]
+    fn usage_above_the_reservation_is_recorded_and_stops_the_sweep() {
+        let routes = table("2026-01-01");
+        let permits = CallPermits::new(4);
+        let mut gateway = ModelGateway::new(
+            &routes,
+            &permits,
+            FakeProvider::new(vec![ProviderOutcome::Answered {
+                status: 200,
+                body: body("ok", Some((100, 0))),
+            }]),
+            budget(40, 4),
+            GatewayLimits::default(),
+        );
+        assert!(parse(&gateway.serve_line(&request("hello", 16))).ok);
+
+        let spend = gateway.journal().spend();
+        assert_eq!(
+            spend.priced_usd_nanos, 100,
+            "the observed price is recorded, never clipped to the reservation"
+        );
+        assert_eq!(
+            spend.overspent_usd_nanos, 71,
+            "the gap above the 29 reserved is what the host did not authorize"
+        );
+        assert_eq!(spend.overspent_calls, 1);
+        assert!(gateway.journal().ceiling_breached());
+
+        let second = parse(&gateway.serve_line(&request("hello", 16)));
+        assert_eq!(
+            second.error.expect("error").kind,
+            GatewayErrorKind::BudgetExhausted
+        );
+        assert_eq!(
+            gateway.dispatches(),
+            1,
+            "a breached ceiling starts no further call"
+        );
+    }
+
+    /// Two gateways over one journal path are not a shared budget just because
+    /// each save is atomic: the later writer would replace a record it never
+    /// read. The second is refused, and the first gateway's record survives.
+    #[test]
+    fn a_second_gateway_cannot_spend_the_journal_the_first_owns() {
+        let dir = temp_dir("ownership");
+        let path = dir.join("journal.json");
+        let routes = table("2026-01-01");
+        let permits = CallPermits::new(4);
+        let budget = budget(u128::MAX, 1);
+        let mut first = ModelGateway::open(
+            &routes,
+            &permits,
+            FakeProvider::answering(1),
+            budget,
+            GatewayLimits::default(),
+            &path,
+        )
+        .expect("open");
+        let mut second = ModelGateway::open(
+            &routes,
+            &permits,
+            FakeProvider::answering(1),
+            budget,
+            GatewayLimits::default(),
+            &path,
+        )
+        .expect("open");
+
+        assert!(parse(&first.serve_line(&request("hello", 16))).ok);
+        let refused = parse(&second.serve_line(&request("hello", 16)));
+        assert!(!refused.ok, "the second gateway does not own the journal");
+        assert_eq!(
+            refused.error.expect("error").kind,
+            GatewayErrorKind::JournalOwnershipLost
+        );
+        assert_eq!(second.dispatches(), 0, "the refused gateway starts no call");
+        assert!(second.journal_conflict(), "the refusal latches");
+        assert_eq!(
+            settlements(second.journal()).len(),
+            1,
+            "the refused reservation is released in memory, not lost"
+        );
+
+        let identity = JournalIdentity::new(routes.identity_digest(), budget);
+        let on_disk = GatewayJournal::load_bound(&path, &identity).expect("the journal survives");
+        assert_eq!(
+            on_disk.spend().calls_started,
+            1,
+            "the record on disk is the one that was written, not a stale replacement"
+        );
+        assert_eq!(on_disk.spend().priced_usd_nanos, 15);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The broker cannot interrupt a synchronous transport, but it does not
+    /// accept an answer that came back after the deadline it handed out. The
+    /// call is charged, because the request was on the wire.
+    #[test]
+    fn an_answer_returned_after_the_deadline_is_refused_and_charged() {
+        let routes = table("2026-01-01");
+        let permits = CallPermits::new(4);
+        let mut gateway = ModelGateway::new(
+            &routes,
+            &permits,
+            SlowProvider {
+                delay: Duration::from_millis(30),
+            },
+            budget(u128::MAX, 4),
+            GatewayLimits {
+                provider_call_timeout: Duration::from_millis(1),
+                max_retries_per_request: 0,
+                ..GatewayLimits::default()
+            },
+        );
+
+        let response = parse(&gateway.serve_line(&request("hello", 16)));
+        assert!(!response.ok, "an over-deadline answer is not a success");
+        assert_eq!(
+            response.error.expect("error").kind,
+            GatewayErrorKind::ProviderTimeout
+        );
+        assert_eq!(gateway.dispatches(), 1);
+        assert!(matches!(
+            settlements(gateway.journal())[0],
+            Settlement::Unknown {
+                reason: UnknownCostReason::AdapterDeadlineExceeded
+            }
+        ));
+        assert_eq!(
+            gateway.journal().spend().unknown_usd_nanos,
+            29,
+            "the breached call is charged at its reservation"
+        );
     }
 }
