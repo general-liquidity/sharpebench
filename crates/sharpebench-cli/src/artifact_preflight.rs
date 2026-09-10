@@ -1,0 +1,1484 @@
+//! Opt-in Docker image preflight for `run --image`.
+//!
+//! The byte engine in [`sharpebench_harness::artifact_scan`] matches known
+//! content in streams a trusted caller hands it. This module is that caller for
+//! one artifact class: a locally present, digest-pinned container image. It
+//! captures the image's executable configuration and a filesystem snapshot of a
+//! container that is created and never started, scans both without extracting
+//! anything, and refuses the entrant launch unless every leg completed clean.
+//!
+//! Trust boundary: Docker's client binary and its daemon are infrastructure.
+//! An entrant supplies an image reference and nothing else. There is no flag,
+//! environment override or policy field here that selects the Docker executable
+//! or a provider endpoint, and the launch that follows a passing preflight uses
+//! Docker's own immutable configuration ID rather than the caller's reference.
+//!
+//! What a negative result is not: this proves that the named streams inside the
+//! declared scope did not contain the policy's protected bytes. Compressed,
+//! encoded, encrypted or model-internalized copies are outside raw-byte scope,
+//! and so is anything the daemon does not put in an export (see
+//! [`SCAN_SCOPE`]).
+
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
+use std::path::Path;
+use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
+
+use serde::Serialize;
+use serde_json::Value;
+
+use sharpebench_harness::artifact_scan::{RawScanPolicy, RawScanReport, RawScanner};
+use sharpebench_harness::artifact_tar::{scan_tar_snapshot_until, TarScanReport};
+use sharpebench_harness::{SweepCheckpoint, SweepContract};
+
+/// Report schema for a completed (passing or refusing) preflight.
+pub const REPORT_VERSION: &str = "sharpebench.image-preflight.v1";
+/// Report schema for a preflight that could not complete a scan at all.
+pub const FAILURE_VERSION: &str = "sharpebench.image-preflight-failure.v1";
+/// Invocation framing bound into the checkpoint identity of a scanned run.
+pub const INVOCATION_VERSION: &str = "sharpebench.scanned-image-invocation.v1";
+
+/// What the preflight actually looked at.
+///
+/// The image configuration is the executable part an export cannot show, and
+/// the export is the filesystem the daemon writes for a created container.
+/// Docker documents that `container export` omits the contents of volumes, so
+/// an image declaring volumes is refused rather than reported as scanned.
+pub const SCAN_SCOPE: &str = "image-config-and-container-export/v1";
+
+/// Accepted `docker image inspect` / `docker inspect` output.
+const MAX_INSPECT_BYTES: u64 = 2 * 1024 * 1024;
+/// Accepted `docker create` / `docker rm` output: an ID or a short line.
+const MAX_CONTROL_RESPONSE_BYTES: u64 = 1024;
+/// Accepted captured stderr before a command is treated as runaway.
+const MAX_STDERR_BYTES: u64 = 64 * 1024;
+/// Cleanup gets its own allowance: an expired scan budget must not be the
+/// reason a container is left behind.
+const CLEANUP_ALLOWANCE: Duration = Duration::from_secs(10);
+const POLL_INTERVAL: Duration = Duration::from_millis(25);
+/// Bytes of untrusted stderr an operator may see, sanitized.
+const REDACTED_STDERR_BYTES: usize = 200;
+/// Deliberately absent. The snapshot container is created and never started;
+/// if some later change ever started one, this entrypoint fails to execute
+/// instead of running the entrant.
+const NEVER_STARTED_ENTRYPOINT: &str = "/sharpebench-preflight-never-started";
+
+/// Docker's immutable configuration ID for a locally present image.
+///
+/// The only constructor validates `sha256:<64 lowercase hex>`, and the only
+/// caller that gets one out of this module is
+/// [`ImagePreflightReport::authorized_image_id`], which yields it exclusively
+/// for a preflight that completed, matched nothing and verified its cleanup.
+/// That is what lets the launcher's unpinned-reference option be enabled for
+/// this value without letting operator input reach an unpinned launch.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ValidatedImageId(String);
+
+impl ValidatedImageId {
+    fn parse(raw: &str) -> Option<Self> {
+        let hex = raw.strip_prefix("sha256:")?;
+        if hex.len() != 64
+            || !hex
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        {
+            return None;
+        }
+        Some(Self(raw.to_string()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// A validated opt-in preflight request. Built only by [`parse_preflight_args`].
+pub struct PreflightRequest {
+    image: String,
+    policy: RawScanPolicy,
+}
+
+/// A preflight that produced at least a configuration scan.
+///
+/// No `Deserialize`: an entrant-supplied document is not a scan.
+#[derive(Debug, Serialize)]
+pub struct ImagePreflightReport {
+    pub schema_version: &'static str,
+    pub scope: &'static str,
+    pub image_id: String,
+    pub policy_sha256: String,
+    pub configuration: RawScanReport,
+    pub filesystem: Option<TarScanReport>,
+    pub cleanup_verified: bool,
+}
+
+impl ImagePreflightReport {
+    /// Every leg has to be present and clean: a configuration-only negative, a
+    /// partial filesystem scan or an unverified removal all refuse.
+    pub fn authorizes_launch(&self) -> bool {
+        self.cleanup_verified
+            && self.configuration.no_known_matches()
+            && self
+                .filesystem
+                .as_ref()
+                .is_some_and(TarScanReport::no_known_matches)
+    }
+
+    /// The single value the entrant may be launched from, and only when the
+    /// whole preflight authorizes it.
+    pub fn authorized_image_id(&self) -> Option<ValidatedImageId> {
+        self.authorizes_launch()
+            .then(|| ValidatedImageId::parse(&self.image_id))
+            .flatten()
+    }
+}
+
+/// A preflight that could not produce a scan. Structured and redacted: the
+/// message is composed here and never carries captured bytes.
+#[derive(Debug, Serialize)]
+pub struct PreflightFailure {
+    pub schema_version: &'static str,
+    pub stage: &'static str,
+    pub message: String,
+    pub cleanup_verified: bool,
+    pub docker_stderr_bytes: usize,
+}
+
+impl std::fmt::Display for PreflightFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "image preflight failed at {}: {}",
+            self.stage, self.message
+        )
+    }
+}
+
+/// Show the operator what Docker said, sanitized, and only on the console.
+///
+/// The redacted excerpt stays out of the report: a report can be published, and
+/// Docker's diagnostics can quote image-controlled metadata that a scan policy
+/// exists to keep out of the open.
+fn note_diagnostic(capture: &Capture) {
+    if capture.stderr_bytes > 0 {
+        eprintln!(
+            "note: docker reported ({} bytes, redacted): {}",
+            capture.stderr_bytes, capture.redacted_stderr
+        );
+    }
+}
+
+fn failure(stage: &'static str, message: impl Into<String>) -> PreflightFailure {
+    PreflightFailure {
+        schema_version: FAILURE_VERSION,
+        stage,
+        message: message.into(),
+        cleanup_verified: true,
+        docker_stderr_bytes: 0,
+    }
+}
+
+/// One captured Docker invocation. `stdout` is rewound to the start.
+#[derive(Debug)]
+pub struct Capture {
+    pub success: bool,
+    pub stdout: File,
+    pub stdout_bytes: u64,
+    /// Sanitized and bounded. Never enters a report; operator diagnostics only.
+    pub redacted_stderr: String,
+    pub stderr_bytes: usize,
+}
+
+/// How Docker is invoked. Implemented once for the real client; the test double
+/// exists so the refusal paths are provable without a daemon. Nothing an
+/// entrant controls can select an implementation.
+pub trait DockerTransport {
+    fn capture(
+        &self,
+        args: &[String],
+        accepted_stdout_bytes: u64,
+        deadline: Instant,
+    ) -> Result<Capture, String>;
+}
+
+/// The real client: the `docker` binary on the operator's PATH, exactly as the
+/// rest of the workspace invokes it.
+pub struct DockerProcess;
+
+impl DockerTransport for DockerProcess {
+    fn capture(
+        &self,
+        args: &[String],
+        accepted_stdout_bytes: u64,
+        deadline: Instant,
+    ) -> Result<Capture, String> {
+        capture_command("docker", args, accepted_stdout_bytes, deadline)
+    }
+}
+
+fn terminate(child: &mut Child) {
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+/// Sizes are checked between polls, so output can overshoot the accepted bound
+/// by whatever the child writes inside one interval. This is an accepted-output
+/// bound that ends the capture, not a disk quota the kernel enforces.
+fn within_caps(stdout: &File, stderr: &File, accepted_stdout_bytes: u64) -> Result<(), String> {
+    let out = stdout.metadata().map_err(|error| error.to_string())?.len();
+    if out > accepted_stdout_bytes {
+        return Err(format!(
+            "docker wrote more than the accepted {accepted_stdout_bytes} output bytes"
+        ));
+    }
+    let err = stderr.metadata().map_err(|error| error.to_string())?.len();
+    if err > MAX_STDERR_BYTES {
+        return Err(format!(
+            "docker wrote more than the accepted {MAX_STDERR_BYTES} diagnostic bytes"
+        ));
+    }
+    Ok(())
+}
+
+/// Non-graphic and non-ASCII bytes become dots, and the excerpt is short.
+///
+/// Docker's diagnostics can relay image-controlled metadata and terminal
+/// control sequences. They are shown to an operator, so they are sanitized
+/// rather than forwarded, and they never enter a machine-read report.
+fn redact(bytes: &[u8]) -> String {
+    let mut text: String = bytes
+        .iter()
+        .take(REDACTED_STDERR_BYTES)
+        .map(|byte| {
+            if (0x20..0x7f).contains(byte) {
+                *byte as char
+            } else {
+                '.'
+            }
+        })
+        .collect();
+    if bytes.len() > REDACTED_STDERR_BYTES {
+        text.push_str("[truncated]");
+    }
+    text
+}
+
+fn capture_command(
+    program: &str,
+    args: &[String],
+    accepted_stdout_bytes: u64,
+    deadline: Instant,
+) -> Result<Capture, String> {
+    let mut stdout = tempfile::tempfile().map_err(|error| {
+        format!("cannot open an owned capture file for {program} output: {error}")
+    })?;
+    let mut stderr = tempfile::tempfile().map_err(|error| {
+        format!("cannot open an owned capture file for {program} diagnostics: {error}")
+    })?;
+    let out_handle = stdout
+        .try_clone()
+        .map_err(|error| format!("cannot hand {program} its output capture: {error}"))?;
+    let err_handle = stderr
+        .try_clone()
+        .map_err(|error| format!("cannot hand {program} its diagnostic capture: {error}"))?;
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(out_handle))
+        .stderr(Stdio::from(err_handle))
+        .spawn()
+        .map_err(|error| format!("cannot start {program}: {error}"))?;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {
+                if let Err(reason) = within_caps(&stdout, &stderr, accepted_stdout_bytes) {
+                    terminate(&mut child);
+                    return Err(reason);
+                }
+                if Instant::now() >= deadline {
+                    terminate(&mut child);
+                    return Err(format!("{program} exceeded the preflight deadline"));
+                }
+                std::thread::sleep(POLL_INTERVAL);
+            }
+            Err(error) => {
+                terminate(&mut child);
+                return Err(format!("cannot poll {program}: {error}"));
+            }
+        }
+    };
+    // The child can write between the final poll and its exit, so the sizes are
+    // checked again once nothing more can be appended by the client itself.
+    within_caps(&stdout, &stderr, accepted_stdout_bytes)?;
+    let stdout_bytes = stdout
+        .metadata()
+        .map_err(|error| format!("cannot size the {program} capture: {error}"))?
+        .len();
+    stdout
+        .seek(SeekFrom::Start(0))
+        .map_err(|error| format!("cannot rewind the {program} capture: {error}"))?;
+    stderr
+        .seek(SeekFrom::Start(0))
+        .map_err(|error| format!("cannot rewind the {program} diagnostics: {error}"))?;
+    let mut raw = Vec::new();
+    stderr
+        .take(MAX_STDERR_BYTES)
+        .read_to_end(&mut raw)
+        .map_err(|error| format!("cannot read the {program} diagnostics: {error}"))?;
+    Ok(Capture {
+        success: status.success(),
+        stdout,
+        stdout_bytes,
+        redacted_stderr: redact(&raw),
+        stderr_bytes: raw.len(),
+    })
+}
+
+static PREFLIGHT_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// Unique across processes (pid) and within one (counter), reserved before the
+/// create call so removal can be attempted by name even when create's outcome
+/// is unknown.
+fn reserved_container_name() -> String {
+    format!(
+        "sharpebench-preflight-{}-{}",
+        std::process::id(),
+        PREFLIGHT_SEQ.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+fn owned(values: &[&str]) -> Vec<String> {
+    values.iter().map(|value| (*value).to_string()).collect()
+}
+
+fn create_args(name: &str, image_id: &str) -> Vec<String> {
+    owned(&[
+        "create",
+        "--name",
+        name,
+        "--pull",
+        "never",
+        "--network",
+        "none",
+        "--ipc",
+        "none",
+        "--read-only",
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges=true",
+        "--user",
+        "65532:65532",
+        "--entrypoint",
+        NEVER_STARTED_ENTRYPOINT,
+        image_id,
+    ])
+}
+
+/// Opt in only when `--scan-policy` is present.
+///
+/// Everything here is decided from arguments and one bounded file read, so an
+/// invalid policy or a conflicting transport costs zero Docker invocations.
+pub fn parse_preflight_args(args: &[String]) -> Result<Option<PreflightRequest>, String> {
+    if !args.iter().any(|arg| arg == "--scan-policy") {
+        return Ok(None);
+    }
+    let transports: Vec<&str> = ["--image", "--http", "--cmd"]
+        .into_iter()
+        .filter(|flag| flag_value(args, flag).is_some())
+        .collect();
+    match transports.as_slice() {
+        ["--image"] => {}
+        [] => {
+            return Err(
+                "--scan-policy requires --image <repository@sha256:...>; there is no artifact to \
+                 scan for an unspecified or host transport"
+                    .into(),
+            )
+        }
+        _ => {
+            return Err(format!(
+                "--scan-policy accepts exactly one transport and it must be --image; got {}",
+                transports.join(" and ")
+            ))
+        }
+    }
+    let image = flag_value(args, "--image").expect("the image transport was just matched");
+    validate_pinned_reference(image)?;
+    let path = flag_value(args, "--scan-policy")
+        .filter(|path| !path.starts_with("--"))
+        .ok_or("--scan-policy requires a JSON file path")?;
+    let file =
+        std::fs::File::open(path).map_err(|error| format!("cannot open scan policy: {error}"))?;
+    let mut bytes = Vec::new();
+    file.take(sharpebench_harness::artifact_scan::MAX_POLICY_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("cannot read scan policy: {error}"))?;
+    let policy = RawScanPolicy::from_json(&bytes)?;
+    Ok(Some(PreflightRequest {
+        image: image.to_string(),
+        policy,
+    }))
+}
+
+fn validate_pinned_reference(image: &str) -> Result<(), String> {
+    let Some((repository, digest)) = image.rsplit_once("@sha256:") else {
+        return Err(
+            "a scanned image must be pinned as <repository>@sha256:<64 lowercase hex>".into(),
+        );
+    };
+    if repository.is_empty()
+        || repository.starts_with('-')
+        || image.chars().any(char::is_whitespace)
+        || digest.len() != 64
+        || !digest
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return Err(
+            "a scanned image must be pinned as <repository>@sha256:<64 lowercase hex>".into(),
+        );
+    }
+    Ok(())
+}
+
+/// Duplicated from `main.rs` so this module stays independent of argument
+/// plumbing; three similar lines beat threading a parser through.
+fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
+    args.iter()
+        .position(|arg| arg == flag)
+        .and_then(|index| args.get(index + 1))
+        .map(String::as_str)
+}
+
+struct InspectedImage {
+    id: ValidatedImageId,
+    config: Value,
+}
+
+/// Validate the pinned image document Docker returned.
+///
+/// Docker 29 omits empty configuration fields entirely, so the shape check is
+/// "an object", not a list of required keys. `Volumes` is the field that
+/// decides scope: it is absent on an image with no `VOLUME`, `{"/path":{}}`
+/// when one is declared, and `null` on older daemons. Absent, null and empty
+/// all mean "no declared volumes"; anything else refuses, because a container
+/// export leaves volume contents out and a filesystem scan would then be
+/// reported over a scope it did not cover.
+fn validate_image_document(document: &Value) -> Result<InspectedImage, PreflightFailure> {
+    let id = document
+        .get("Id")
+        .and_then(Value::as_str)
+        .and_then(ValidatedImageId::parse)
+        .ok_or_else(|| {
+            failure(
+                "image_inspect",
+                "docker did not report a full lowercase sha256 configuration ID for the image",
+            )
+        })?;
+    if document.get("Os").and_then(Value::as_str) != Some("linux") {
+        return Err(failure(
+            "image_inspect",
+            "only Linux images are in scope for the container-export snapshot",
+        ));
+    }
+    let config = document.get("Config").ok_or_else(|| {
+        failure(
+            "image_inspect",
+            "the inspected image carries no executable configuration to scan",
+        )
+    })?;
+    if !config.is_object() {
+        return Err(failure(
+            "image_inspect",
+            "the inspected image configuration is not an object",
+        ));
+    }
+    match config.get("Volumes") {
+        None | Some(Value::Null) => {}
+        Some(Value::Object(volumes)) if volumes.is_empty() => {}
+        Some(Value::Object(_)) => {
+            return Err(failure(
+                "image_inspect",
+                "the image declares volumes and a container export omits their contents, so the \
+                 declared scan scope cannot be covered",
+            ))
+        }
+        Some(_) => {
+            return Err(failure(
+                "image_inspect",
+                "the inspected image reports declared volumes in an unexpected shape",
+            ))
+        }
+    }
+    Ok(InspectedImage {
+        id,
+        config: config.clone(),
+    })
+}
+
+/// Scan the serialized configuration and, separately, every decoded string and
+/// object key inside it.
+///
+/// A protected sequence containing a newline appears in the serialized document
+/// as the two bytes `\` and `n`, so a raw search over serialized JSON alone
+/// would miss it. Feeding the decoded values closes that, and the same is true
+/// of any other JSON escape the daemon emits.
+fn scan_configuration(config: &Value, policy: RawScanPolicy) -> RawScanReport {
+    let mut scanner = RawScanner::new(policy);
+    let serialized = serde_json::to_vec(config).expect("an inspected configuration re-serializes");
+    if !scanner.scan_file(
+        b"image/config/serialized",
+        serialized.len() as u64,
+        &serialized[..],
+    ) {
+        return scanner.finish();
+    }
+    let mut decoded = Vec::new();
+    collect_text(config, &mut decoded);
+    for (index, text) in decoded.iter().enumerate() {
+        let name = format!("image/config/decoded/{index}");
+        if !scanner.scan_file(name.as_bytes(), text.len() as u64, text.as_bytes()) {
+            break;
+        }
+    }
+    scanner.finish()
+}
+
+fn collect_text(value: &Value, out: &mut Vec<String>) {
+    match value {
+        Value::String(text) => {
+            if !text.is_empty() {
+                out.push(text.clone());
+            }
+        }
+        Value::Array(items) => items.iter().for_each(|item| collect_text(item, out)),
+        Value::Object(fields) => {
+            for (key, item) in fields {
+                if !key.is_empty() {
+                    out.push(key.clone());
+                }
+                collect_text(item, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn read_capture_json(
+    capture: &mut Capture,
+    accepted: u64,
+    stage: &'static str,
+) -> Result<Value, PreflightFailure> {
+    if capture.stdout_bytes > accepted {
+        return Err(failure(stage, "docker output exceeded its accepted size"));
+    }
+    let mut bytes = Vec::new();
+    (&mut capture.stdout)
+        .take(accepted)
+        .read_to_end(&mut bytes)
+        .map_err(|error| failure(stage, format!("cannot read the docker capture: {error}")))?;
+    if bytes.len() as u64 != capture.stdout_bytes {
+        return Err(failure(
+            stage,
+            "the docker capture changed while it was read",
+        ));
+    }
+    serde_json::from_slice(&bytes)
+        .map_err(|_| failure(stage, "docker did not return a JSON document"))
+}
+
+fn capture_json(
+    docker: &dyn DockerTransport,
+    args: &[String],
+    accepted: u64,
+    deadline: Instant,
+    stage: &'static str,
+) -> Result<Value, PreflightFailure> {
+    let mut capture = docker
+        .capture(args, accepted, deadline)
+        .map_err(|error| failure(stage, error))?;
+    if !capture.success {
+        note_diagnostic(&capture);
+        let mut refusal = failure(stage, "docker refused the request");
+        refusal.docker_stderr_bytes = capture.stderr_bytes;
+        return Err(refusal);
+    }
+    read_capture_json(&mut capture, accepted, stage)
+}
+
+/// Attempt removal by the reserved name and report whether it is verified.
+///
+/// A nonzero result is not read as "already clean": Docker returns nonzero both
+/// for a container that never existed and for one it could not remove, and the
+/// two cannot be told apart from the exit status. Uncertainty refuses.
+fn remove_container(docker: &dyn DockerTransport, name: &str) -> bool {
+    let args = owned(&["rm", "--force", "--volumes", name]);
+    let deadline = Instant::now() + CLEANUP_ALLOWANCE;
+    match docker.capture(&args, MAX_CONTROL_RESPONSE_BYTES, deadline) {
+        Ok(capture) => capture.success,
+        Err(_) => false,
+    }
+}
+
+fn validate_container_document(
+    document: &Value,
+    image_id: &ValidatedImageId,
+) -> Result<(), &'static str> {
+    if document.get("Image").and_then(Value::as_str) != Some(image_id.as_str()) {
+        return Err("the created container does not carry the inspected image ID");
+    }
+    if document
+        .pointer("/State/Status")
+        .and_then(Value::as_str)
+        .is_none_or(|status| status != "created")
+    {
+        return Err("the snapshot container is not in the created state");
+    }
+    if document.pointer("/State/Running").and_then(Value::as_bool) != Some(false) {
+        return Err("the snapshot container does not report a stopped process");
+    }
+    match document.get("Mounts") {
+        None | Some(Value::Null) => Ok(()),
+        Some(Value::Array(mounts)) if mounts.is_empty() => Ok(()),
+        Some(_) => Err("the snapshot container carries mounts, whose contents an export omits"),
+    }
+}
+
+/// Capture and scan one pinned image without ever starting its entrypoint.
+///
+/// Limitations, stated rather than papered over: the wall-clock deadline ends
+/// the client this process spawned. It cannot interrupt a blocked OS read, it
+/// does not reach Docker CLI descendants, and it does not stop daemon-side work
+/// that continues after the client is killed, which is why removal is attempted
+/// on every exit path and why an unverified removal refuses. A remote or
+/// rootless Docker context is the operator's configuration and is trusted as
+/// infrastructure; the environment this process inherits reaches the client
+/// unchanged, so an operator who points `DOCKER_HOST` elsewhere has scanned an
+/// image on that host, not this one.
+pub fn preflight_image(
+    request: &PreflightRequest,
+    docker: &dyn DockerTransport,
+) -> Result<ImagePreflightReport, PreflightFailure> {
+    let policy_sha256 = request.policy.digest();
+    let deadline = Instant::now() + Duration::from_secs(request.policy.limits().max_seconds);
+
+    let document = capture_json(
+        docker,
+        &owned(&["image", "inspect", "--format", "{{json .}}", &request.image]),
+        MAX_INSPECT_BYTES,
+        deadline,
+        "image_inspect",
+    )?;
+    let image = validate_image_document(&document)?;
+
+    let configuration = scan_configuration(&image.config, request.policy.clone());
+    let report = |configuration, filesystem, cleanup_verified| ImagePreflightReport {
+        schema_version: REPORT_VERSION,
+        scope: SCAN_SCOPE,
+        image_id: image.id.as_str().to_string(),
+        policy_sha256: policy_sha256.clone(),
+        configuration,
+        filesystem,
+        cleanup_verified,
+    };
+    if !configuration.no_known_matches() {
+        // Nothing was created, so nothing can leak. Refusing here is the point
+        // of scanning the configuration first.
+        return Ok(report(configuration, None, true));
+    }
+
+    let name = reserved_container_name();
+    let created = docker.capture(
+        &create_args(&name, image.id.as_str()),
+        MAX_CONTROL_RESPONSE_BYTES,
+        deadline,
+    );
+    // From here every exit path attempts removal by the reserved name, including
+    // the path where create's outcome is unknown.
+    let create_failed = match &created {
+        Ok(capture) if capture.success => None,
+        Ok(capture) => {
+            note_diagnostic(capture);
+            Some(capture.stderr_bytes)
+        }
+        Err(_) => Some(0),
+    };
+    if let Some(stderr_bytes) = create_failed {
+        let cleanup_verified = remove_container(docker, &name);
+        return Err(PreflightFailure {
+            schema_version: FAILURE_VERSION,
+            stage: "container_create",
+            message: "docker could not create the stopped snapshot container".into(),
+            cleanup_verified,
+            docker_stderr_bytes: stderr_bytes,
+        });
+    }
+
+    let inspected = match capture_json(
+        docker,
+        &owned(&["inspect", "--format", "{{json .}}", &name]),
+        MAX_INSPECT_BYTES,
+        deadline,
+        "container_inspect",
+    ) {
+        Ok(inspected) => inspected,
+        Err(mut error) => {
+            error.cleanup_verified = remove_container(docker, &name);
+            return Err(error);
+        }
+    };
+    if let Err(reason) = validate_container_document(&inspected, &image.id) {
+        let cleanup_verified = remove_container(docker, &name);
+        return Err(PreflightFailure {
+            schema_version: FAILURE_VERSION,
+            stage: "container_inspect",
+            message: reason.into(),
+            cleanup_verified,
+            docker_stderr_bytes: 0,
+        });
+    }
+
+    let exported = docker.capture(
+        &owned(&["export", &name]),
+        request.policy.limits().max_total_bytes,
+        deadline,
+    );
+    let snapshot = match exported {
+        Ok(capture) if capture.success => capture.stdout,
+        other => {
+            let stderr_bytes = other
+                .map(|capture| {
+                    note_diagnostic(&capture);
+                    capture.stderr_bytes
+                })
+                .unwrap_or(0);
+            let cleanup_verified = remove_container(docker, &name);
+            return Err(PreflightFailure {
+                schema_version: FAILURE_VERSION,
+                stage: "container_export",
+                message: "docker could not export the stopped snapshot container".into(),
+                cleanup_verified,
+                docker_stderr_bytes: stderr_bytes,
+            });
+        }
+    };
+    // The same policy deadline that bounded the capture bounds the scan.
+    let filesystem = scan_tar_snapshot_until(snapshot, request.policy.clone(), deadline);
+    let cleanup_verified = remove_container(docker, &name);
+    Ok(report(configuration, Some(filesystem), cleanup_verified))
+}
+
+/// The CLI entry point: parse the opt-in, then run it.
+///
+/// Argument and policy validation happens entirely before the transport is
+/// touched, so a conflicting transport or an unusable policy costs no Docker
+/// invocation at all.
+pub fn preflight_from_args(
+    args: &[String],
+    docker: &dyn DockerTransport,
+) -> Result<Option<ImagePreflightReport>, PreflightFailure> {
+    let request = parse_preflight_args(args).map_err(|error| failure("arguments", error))?;
+    match request {
+        None => Ok(None),
+        Some(request) => preflight_image(&request, docker).map(Some),
+    }
+}
+
+/// The entrant material a scanned run binds into its checkpoint identity.
+///
+/// The image configuration ID is the deployment identity, so it is bound along
+/// with the policy digest and the scanned scope. Export timestamps are not:
+/// they change on every capture and would make a resumed sweep look like a
+/// different experiment. An unscanned run keeps its legacy material untouched.
+pub fn scanned_invocation_material(
+    label: &str,
+    image_id: &str,
+    policy_sha256: &str,
+) -> Result<Vec<u8>, String> {
+    serde_json::to_vec(&(
+        INVOCATION_VERSION,
+        label,
+        image_id,
+        policy_sha256,
+        SCAN_SCOPE,
+    ))
+    .map_err(|error| format!("cannot frame the scanned invocation identity: {error}"))
+}
+
+/// Refuse a resume whose checkpoint was bound to a different contract.
+///
+/// The sweep layer treats a contract mismatch as "start a fresh sweep", which
+/// would overwrite the file. A scanned run must not silently do that when the
+/// scan policy changed, so the CLI checks first and leaves the bytes alone.
+pub fn checkpoint_admits(
+    path: &Path,
+    agent_id: &str,
+    contract: &SweepContract,
+) -> Result<(), String> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let existing = SweepCheckpoint::load(path)
+        .map_err(|error| format!("cannot read the existing checkpoint: {error}"))?;
+    if existing.matches_bound(agent_id, contract) {
+        return Ok(());
+    }
+    Err(format!(
+        "the checkpoint at {} was bound to a different scanned invocation; a changed scan policy, \
+         image identity or execution is a new experiment, not a resume",
+        path.display()
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+    use std::io::Write;
+
+    const POLICY: &str = r#"{"schema_version":"sharpebench.raw-scan-policy.v1","utf8_sequences":["sharpebench-protected-canary"]}"#;
+
+    fn policy() -> RawScanPolicy {
+        RawScanPolicy::from_json(POLICY.as_bytes()).expect("the fixture policy validates")
+    }
+
+    fn request(image: &str) -> PreflightRequest {
+        PreflightRequest {
+            image: image.to_string(),
+            policy: policy(),
+        }
+    }
+
+    fn pinned() -> String {
+        format!("registry.example/agent@sha256:{}", "b".repeat(64))
+    }
+
+    fn image_id() -> String {
+        format!("sha256:{}", "c".repeat(64))
+    }
+
+    fn spooled(bytes: &[u8]) -> File {
+        let mut file = tempfile::tempfile().expect("a capture file opens");
+        file.write_all(bytes)
+            .expect("the capture file accepts bytes");
+        file.seek(SeekFrom::Start(0)).expect("the capture rewinds");
+        file
+    }
+
+    fn ok(bytes: &[u8]) -> Result<Capture, String> {
+        Ok(Capture {
+            success: true,
+            stdout: spooled(bytes),
+            stdout_bytes: bytes.len() as u64,
+            redacted_stderr: String::new(),
+            stderr_bytes: 0,
+        })
+    }
+
+    fn refused() -> Result<Capture, String> {
+        Ok(Capture {
+            success: false,
+            stdout: spooled(b""),
+            stdout_bytes: 0,
+            redacted_stderr: "docker: no".into(),
+            stderr_bytes: 10,
+        })
+    }
+
+    /// A TAR archive with one regular entry, built by hand so the fixture does
+    /// not depend on a Docker daemon.
+    fn tar_with(path: &str, body: &[u8]) -> Vec<u8> {
+        let mut header = tar::Header::new_gnu();
+        header.set_path(path).expect("the fixture path fits");
+        header.set_size(body.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        let mut archive = Vec::new();
+        archive.extend_from_slice(header.as_bytes());
+        archive.extend_from_slice(body);
+        archive.resize(archive.len().div_ceil(512) * 512, 0);
+        archive.extend_from_slice(&[0; 1024]);
+        archive
+    }
+
+    struct Fake {
+        calls: RefCell<Vec<String>>,
+        image_inspect: String,
+        container_inspect: String,
+        export: Vec<u8>,
+        create_ok: bool,
+        export_ok: bool,
+        remove_ok: bool,
+    }
+
+    impl Fake {
+        fn new() -> Self {
+            Self {
+                calls: RefCell::new(Vec::new()),
+                image_inspect: format!(
+                    r#"{{"Id":"{}","Os":"linux","Config":{{"Env":["PATH=/usr/bin"],"Cmd":["/bin/sh"]}}}}"#,
+                    image_id()
+                ),
+                container_inspect: format!(
+                    r#"{{"Image":"{}","State":{{"Status":"created","Running":false}},"Mounts":[]}}"#,
+                    image_id()
+                ),
+                export: tar_with("etc/hostname", b"clean\n"),
+                create_ok: true,
+                export_ok: true,
+                remove_ok: true,
+            }
+        }
+
+        fn subcommands(&self) -> Vec<String> {
+            self.calls.borrow().clone()
+        }
+    }
+
+    impl DockerTransport for Fake {
+        fn capture(
+            &self,
+            args: &[String],
+            _accepted_stdout_bytes: u64,
+            _deadline: Instant,
+        ) -> Result<Capture, String> {
+            self.calls.borrow_mut().push(args.join(" "));
+            match args[0].as_str() {
+                "image" => ok(self.image_inspect.as_bytes()),
+                "inspect" => ok(self.container_inspect.as_bytes()),
+                "create" if self.create_ok => ok(b"containerid\n"),
+                "create" => refused(),
+                "export" if self.export_ok => ok(&self.export),
+                "export" => refused(),
+                "rm" if self.remove_ok => ok(b"containerid\n"),
+                "rm" => refused(),
+                other => panic!("the preflight issued an unexpected docker subcommand {other}"),
+            }
+        }
+    }
+
+    fn removal_attempted(fake: &Fake) -> bool {
+        fake.subcommands()
+            .iter()
+            .any(|call| call.starts_with("rm --force --volumes sharpebench-preflight-"))
+    }
+
+    #[test]
+    fn a_clean_image_authorizes_the_validated_configuration_id() {
+        let fake = Fake::new();
+        let report = preflight_image(&request(&pinned()), &fake).expect("a clean image completes");
+        assert!(report.authorizes_launch(), "{report:?}");
+        assert_eq!(
+            report
+                .authorized_image_id()
+                .map(|id| id.as_str().to_string()),
+            Some(image_id())
+        );
+        assert_eq!(report.scope, SCAN_SCOPE);
+        assert!(report.cleanup_verified);
+        assert!(removal_attempted(&fake));
+    }
+
+    #[test]
+    fn a_known_archive_match_refuses_and_still_removes_the_container() {
+        let mut fake = Fake::new();
+        fake.export = tar_with("etc/secret", b"sharpebench-protected-canary\n");
+        let report = preflight_image(&request(&pinned()), &fake).expect("the scan completes");
+        assert!(!report.authorizes_launch());
+        assert!(report.authorized_image_id().is_none());
+        assert!(report.cleanup_verified, "removal must still be verified");
+        assert!(removal_attempted(&fake));
+    }
+
+    /// The needle carries a real newline. It appears in the serialized document
+    /// only as an escape, so this fails if the decoded strings are not scanned.
+    #[test]
+    fn an_escaped_configuration_match_refuses_before_any_container_is_created() {
+        let mut fake = Fake::new();
+        fake.image_inspect = format!(
+            r#"{{"Id":"{}","Os":"linux","Config":{{"Env":["SECRET=alpha\nsharpebench-protected-canary"]}}}}"#,
+            image_id()
+        );
+        let policy = RawScanPolicy::from_json(
+            br#"{"schema_version":"sharpebench.raw-scan-policy.v1","utf8_sequences":["alpha\nsharpebench-protected-canary"]}"#,
+        )
+        .expect("the escaped-needle policy validates");
+        let report = preflight_image(
+            &PreflightRequest {
+                image: pinned(),
+                policy,
+            },
+            &fake,
+        )
+        .expect("the configuration scan completes");
+        assert!(!report.authorizes_launch());
+        assert!(report.filesystem.is_none());
+        assert_eq!(fake.subcommands().len(), 1, "{:?}", fake.subcommands());
+        assert!(fake.subcommands()[0].starts_with("image inspect"));
+    }
+
+    #[test]
+    fn declared_volumes_are_refused_before_the_snapshot_is_created() {
+        let mut fake = Fake::new();
+        fake.image_inspect = format!(
+            r#"{{"Id":"{}","Os":"linux","Config":{{"Volumes":{{"/data":{{}}}}}}}}"#,
+            image_id()
+        );
+        let error = preflight_image(&request(&pinned()), &fake).expect_err("volumes refuse");
+        assert_eq!(error.stage, "image_inspect");
+        assert!(error.message.contains("omits their contents"), "{error}");
+        assert_eq!(fake.subcommands().len(), 1);
+    }
+
+    /// Docker 29 omits the field entirely, older daemons send null, and an
+    /// empty object is also "no declared volumes". None of the three refuses.
+    #[test]
+    fn omitted_null_and_empty_volumes_all_mean_no_declared_volumes() {
+        for volumes in ["", r#","Volumes":null"#, r#","Volumes":{}"#] {
+            let mut fake = Fake::new();
+            fake.image_inspect = format!(
+                r#"{{"Id":"{}","Os":"linux","Config":{{"Cmd":["/bin/sh"]{volumes}}}}}"#,
+                image_id()
+            );
+            let report =
+                preflight_image(&request(&pinned()), &fake).expect("no declared volumes completes");
+            assert!(
+                report.authorizes_launch(),
+                "{volumes:?} refused: {report:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_non_linux_image_is_out_of_scope() {
+        let mut fake = Fake::new();
+        fake.image_inspect = format!(r#"{{"Id":"{}","Os":"windows","Config":{{}}}}"#, image_id());
+        let error = preflight_image(&request(&pinned()), &fake).expect_err("non-Linux refuses");
+        assert_eq!(error.stage, "image_inspect");
+        assert_eq!(fake.subcommands().len(), 1);
+    }
+
+    #[test]
+    fn a_mutable_image_id_is_never_accepted_as_a_configuration_id() {
+        let mut fake = Fake::new();
+        fake.image_inspect = r#"{"Id":"alpine:3.22","Os":"linux","Config":{}}"#.to_string();
+        let error = preflight_image(&request(&pinned()), &fake).expect_err("an alias refuses");
+        assert_eq!(error.stage, "image_inspect");
+    }
+
+    #[test]
+    fn a_malformed_archive_fails_closed() {
+        let mut fake = Fake::new();
+        fake.export = vec![0x7f; 900];
+        let report = preflight_image(&request(&pinned()), &fake).expect("the scan completes");
+        assert!(!report.authorizes_launch());
+        assert!(report
+            .filesystem
+            .as_ref()
+            .is_some_and(|scan| !scan.no_known_matches()));
+        assert!(removal_attempted(&fake));
+    }
+
+    #[test]
+    fn a_create_error_fails_closed_and_still_attempts_removal() {
+        let mut fake = Fake::new();
+        fake.create_ok = false;
+        let error =
+            preflight_image(&request(&pinned()), &fake).expect_err("a create error refuses");
+        assert_eq!(error.stage, "container_create");
+        assert!(removal_attempted(&fake));
+    }
+
+    #[test]
+    fn an_export_error_fails_closed_and_still_attempts_removal() {
+        let mut fake = Fake::new();
+        fake.export_ok = false;
+        let error =
+            preflight_image(&request(&pinned()), &fake).expect_err("an export error refuses");
+        assert_eq!(error.stage, "container_export");
+        assert!(removal_attempted(&fake));
+    }
+
+    #[test]
+    fn a_cleanup_error_cannot_authorize_a_launch() {
+        let mut fake = Fake::new();
+        fake.remove_ok = false;
+        let report = preflight_image(&request(&pinned()), &fake).expect("the scan completes");
+        assert!(report.configuration.no_known_matches());
+        assert!(report
+            .filesystem
+            .as_ref()
+            .is_some_and(TarScanReport::no_known_matches));
+        assert!(!report.cleanup_verified);
+        assert!(!report.authorizes_launch(), "an unverified removal refuses");
+        assert!(report.authorized_image_id().is_none());
+    }
+
+    #[test]
+    fn a_container_built_from_another_image_refuses_before_export() {
+        let mut fake = Fake::new();
+        fake.container_inspect = format!(
+            r#"{{"Image":"sha256:{}","State":{{"Status":"created","Running":false}},"Mounts":[]}}"#,
+            "d".repeat(64)
+        );
+        let error = preflight_image(&request(&pinned()), &fake).expect_err("a swap refuses");
+        assert_eq!(error.stage, "container_inspect");
+        assert!(!fake
+            .subcommands()
+            .iter()
+            .any(|call| call.starts_with("export")));
+        assert!(removal_attempted(&fake));
+    }
+
+    #[test]
+    fn a_running_container_refuses_before_export() {
+        let mut fake = Fake::new();
+        fake.container_inspect = format!(
+            r#"{{"Image":"{}","State":{{"Status":"running","Running":true}},"Mounts":[]}}"#,
+            image_id()
+        );
+        let error = preflight_image(&request(&pinned()), &fake).expect_err("a running one refuses");
+        assert_eq!(error.stage, "container_inspect");
+        assert!(!fake
+            .subcommands()
+            .iter()
+            .any(|call| call.starts_with("export")));
+    }
+
+    #[test]
+    fn a_mounted_container_refuses_before_export() {
+        let mut fake = Fake::new();
+        fake.container_inspect = format!(
+            r#"{{"Image":"{}","State":{{"Status":"created","Running":false}},"Mounts":[{{"Type":"volume"}}]}}"#,
+            image_id()
+        );
+        let error = preflight_image(&request(&pinned()), &fake).expect_err("a mount refuses");
+        assert_eq!(error.stage, "container_inspect");
+        assert!(!fake
+            .subcommands()
+            .iter()
+            .any(|call| call.starts_with("export")));
+    }
+
+    /// The container is created from the configuration ID and its entrypoint is
+    /// replaced with an absent path, so nothing the image declares can run.
+    #[test]
+    fn the_snapshot_container_is_created_from_the_id_and_never_started() {
+        let fake = Fake::new();
+        preflight_image(&request(&pinned()), &fake).expect("a clean image completes");
+        let create = fake
+            .subcommands()
+            .into_iter()
+            .find(|call| call.starts_with("create "))
+            .expect("a create call was issued");
+        assert!(create.ends_with(&image_id()), "{create}");
+        assert!(create.contains("--pull never"), "{create}");
+        assert!(create.contains("--network none"), "{create}");
+        assert!(create.contains("--ipc none"), "{create}");
+        assert!(create.contains("--read-only"), "{create}");
+        assert!(create.contains("--cap-drop ALL"), "{create}");
+        assert!(create.contains("no-new-privileges=true"), "{create}");
+        assert!(
+            create.contains(&format!("--entrypoint {NEVER_STARTED_ENTRYPOINT}")),
+            "{create}"
+        );
+        assert!(
+            !fake
+                .subcommands()
+                .iter()
+                .any(|call| call.starts_with("start")),
+            "the snapshot container must never be started"
+        );
+    }
+
+    /// Any invocation at all is a failure: these arguments must be refused
+    /// before Docker is reached.
+    struct Never;
+
+    impl DockerTransport for Never {
+        fn capture(&self, args: &[String], _: u64, _: Instant) -> Result<Capture, String> {
+            panic!("no docker command may be issued, got {args:?}")
+        }
+    }
+
+    fn refused_arguments(args: &[&str]) -> String {
+        let failure =
+            preflight_from_args(&argv(args), &Never).expect_err("these arguments must be refused");
+        assert_eq!(failure.stage, "arguments");
+        failure.message
+    }
+
+    fn policy_file() -> tempfile::NamedTempFile {
+        let mut file = tempfile::NamedTempFile::new().expect("a policy file opens");
+        file.write_all(POLICY.as_bytes())
+            .expect("the policy writes");
+        file.flush().expect("the policy flushes");
+        file
+    }
+
+    fn argv(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| (*value).to_string()).collect()
+    }
+
+    #[test]
+    fn an_absent_opt_in_leaves_the_legacy_path_untouched() {
+        assert!(
+            preflight_from_args(&argv(&["run", "--image", &pinned()]), &Never)
+                .expect("no policy is not an error")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_policy_without_an_image_issues_no_docker_command() {
+        let file = policy_file();
+        let path = file.path().to_string_lossy().into_owned();
+        let error = refused_arguments(&["run", "--scan-policy", &path]);
+        assert!(error.contains("requires --image"), "{error}");
+    }
+
+    #[test]
+    fn a_transport_conflict_issues_no_docker_command() {
+        let file = policy_file();
+        let path = file.path().to_string_lossy().into_owned();
+        let error = refused_arguments(&[
+            "run",
+            "--image",
+            &pinned(),
+            "--cmd",
+            "./agent",
+            "--scan-policy",
+            &path,
+        ]);
+        assert!(error.contains("exactly one transport"), "{error}");
+    }
+
+    #[test]
+    fn an_unpinned_scanned_image_issues_no_docker_command() {
+        let file = policy_file();
+        let path = file.path().to_string_lossy().into_owned();
+        let error = refused_arguments(&["run", "--image", "agent:latest", "--scan-policy", &path]);
+        assert!(error.contains("64 lowercase hex"), "{error}");
+    }
+
+    #[test]
+    fn a_malformed_policy_issues_no_docker_command() {
+        let mut file = tempfile::NamedTempFile::new().expect("a policy file opens");
+        file.write_all(b"{\"schema_version\":\"other\"}")
+            .expect("the policy writes");
+        file.flush().expect("the policy flushes");
+        let path = file.path().to_string_lossy().into_owned();
+        let error = refused_arguments(&["run", "--image", &pinned(), "--scan-policy", &path]);
+        assert!(error.contains("unsupported scan policy version"), "{error}");
+    }
+
+    #[test]
+    fn an_oversized_policy_issues_no_docker_command() {
+        let mut file = tempfile::NamedTempFile::new().expect("a policy file opens");
+        file.write_all(&vec![b' '; 64 * 1024 + 8])
+            .expect("the policy writes");
+        file.flush().expect("the policy flushes");
+        let path = file.path().to_string_lossy().into_owned();
+        let error = refused_arguments(&["run", "--image", &pinned(), "--scan-policy", &path]);
+        assert!(error.contains("64 KiB"), "{error}");
+    }
+
+    #[test]
+    fn the_scanned_invocation_binds_policy_image_and_scope() {
+        let material =
+            scanned_invocation_material("sandbox:agent", &image_id(), "policy-digest").unwrap();
+        let text = String::from_utf8(material).expect("the framing is UTF-8");
+        assert!(text.contains(INVOCATION_VERSION), "{text}");
+        assert!(text.contains(&image_id()), "{text}");
+        assert!(text.contains("policy-digest"), "{text}");
+        assert!(text.contains(SCAN_SCOPE), "{text}");
+        assert!(!text.contains("Created"), "no capture timestamp is bound");
+    }
+
+    fn contract(invocation: &str) -> SweepContract {
+        SweepContract::new(
+            sharpebench_harness::SweepIdentity {
+                dataset_sha256: "dataset".into(),
+                cost_model_sha256: "costs".into(),
+                score_config_sha256: "config".into(),
+                runner_artifact_sha256: "runner".into(),
+                entrant_sha256: "entrant".into(),
+                invocation_sha256: invocation.into(),
+            },
+            &[sharpebench_sim::Window { start: 0, end: 4 }],
+            &[0],
+            2,
+        )
+    }
+
+    #[test]
+    fn a_changed_scan_policy_refuses_a_resume_without_touching_the_checkpoint() {
+        let directory = tempfile::tempdir().expect("a checkpoint directory opens");
+        let path = directory.path().join("sweep.json");
+        let mut checkpoint = SweepCheckpoint::new("sandbox:agent", 1, &[0]);
+        checkpoint.contract = Some(contract("policy-a"));
+        checkpoint.save(&path).expect("the checkpoint saves");
+        let before = std::fs::read(&path).expect("the checkpoint reads back");
+
+        checkpoint_admits(&path, "sandbox:agent", &contract("policy-a"))
+            .expect("the same scanned invocation resumes");
+        let error = checkpoint_admits(&path, "sandbox:agent", &contract("policy-b"))
+            .expect_err("a changed policy refuses");
+        assert!(error.contains("different scanned invocation"), "{error}");
+        assert_eq!(
+            before,
+            std::fs::read(&path).expect("the checkpoint reads back"),
+            "a refused resume must not mutate the checkpoint"
+        );
+    }
+
+    #[test]
+    fn an_absent_checkpoint_admits_a_first_run() {
+        let directory = tempfile::tempdir().expect("a checkpoint directory opens");
+        checkpoint_admits(
+            &directory.path().join("absent.json"),
+            "sandbox:agent",
+            &contract("policy-a"),
+        )
+        .expect("a first run has nothing to contradict");
+    }
+
+    #[test]
+    fn accepted_output_bounds_end_a_capture() {
+        let (program, args) = shell(&["echo AAAAAAAA"]);
+        let error = capture_command(program, &args, 2, Instant::now() + Duration::from_secs(20))
+            .expect_err("an oversized capture is refused");
+        assert!(error.contains("accepted 2 output bytes"), "{error}");
+    }
+
+    #[test]
+    fn a_nonzero_exit_status_is_surfaced_not_swallowed() {
+        let (program, args) = shell(&["exit 3"]);
+        let capture = capture_command(
+            program,
+            &args,
+            1024,
+            Instant::now() + Duration::from_secs(20),
+        )
+        .expect("the capture completes");
+        assert!(!capture.success);
+    }
+
+    #[test]
+    fn a_capture_is_rewound_before_it_is_parsed() {
+        let (program, args) = shell(&["echo hello"]);
+        let mut capture = capture_command(
+            program,
+            &args,
+            1024,
+            Instant::now() + Duration::from_secs(20),
+        )
+        .expect("the capture completes");
+        assert_eq!(
+            capture.stdout.stream_position().expect("the capture seeks"),
+            0
+        );
+        let mut text = String::new();
+        capture
+            .stdout
+            .read_to_string(&mut text)
+            .expect("the capture reads");
+        assert!(text.starts_with("hello"), "{text:?}");
+        assert_eq!(capture.stdout_bytes, text.len() as u64);
+    }
+
+    #[test]
+    fn an_expired_deadline_kills_and_reaps_the_child() {
+        let (program, args) = sleeper();
+        let started = Instant::now();
+        let error = capture_command(program, &args, 1024 * 1024, Instant::now())
+            .expect_err("an expired deadline refuses");
+        assert!(error.contains("preflight deadline"), "{error}");
+        assert!(
+            started.elapsed() < Duration::from_secs(20),
+            "the child must be killed, not waited out"
+        );
+    }
+
+    #[test]
+    fn untrusted_diagnostics_are_sanitized_and_bounded() {
+        assert_eq!(
+            redact(b"docker: no such\x1b[31m image\n"),
+            "docker: no such.[31m image."
+        );
+        let long = redact(&vec![b'A'; REDACTED_STDERR_BYTES + 1]);
+        assert!(long.ends_with("[truncated]"), "{long}");
+        assert_eq!(long.len(), REDACTED_STDERR_BYTES + "[truncated]".len());
+    }
+
+    #[cfg(windows)]
+    fn shell(script: &[&str]) -> (&'static str, Vec<String>) {
+        let mut args = vec!["/c".to_string()];
+        args.extend(script.iter().map(|part| (*part).to_string()));
+        ("cmd", args)
+    }
+
+    #[cfg(not(windows))]
+    fn shell(script: &[&str]) -> (&'static str, Vec<String>) {
+        let mut args = vec!["-c".to_string()];
+        args.extend(script.iter().map(|part| (*part).to_string()));
+        ("/bin/sh", args)
+    }
+
+    #[cfg(windows)]
+    fn sleeper() -> (&'static str, Vec<String>) {
+        shell(&["ping -n 60 127.0.0.1"])
+    }
+
+    #[cfg(not(windows))]
+    fn sleeper() -> (&'static str, Vec<String>) {
+        shell(&["sleep 60"])
+    }
+
+    /// The one leg a daemon-free machine cannot prove. It runs only in the
+    /// live-container CI job, by this exact name.
+    #[test]
+    #[ignore = "needs a running Docker daemon and SHARPEBENCH_SANDBOX_FIXTURE"]
+    fn live_docker_image_preflight() {
+        let image = std::env::var("SHARPEBENCH_SANDBOX_FIXTURE").expect(
+            "the live preflight test needs SHARPEBENCH_SANDBOX_FIXTURE set to a digest-pinned \
+             image that is present locally",
+        );
+        let clean = preflight_image(&request(&image), &DockerProcess)
+            .expect("a clean pinned fixture completes");
+        assert!(
+            clean.authorizes_launch(),
+            "a clean fixture must authorize: {clean:?}"
+        );
+        assert!(clean.cleanup_verified);
+        let filesystem = clean.filesystem.as_ref().expect("a filesystem scan ran");
+        assert!(filesystem.archive_sha256.is_some());
+
+        // A needle that is genuinely in the fixture's TAR headers.
+        let needle_policy = RawScanPolicy::from_json(
+            br#"{"schema_version":"sharpebench.raw-scan-policy.v1","utf8_sequences":["etc/alpine-release"]}"#,
+        )
+        .expect("the live needle policy validates");
+        let matched = preflight_image(
+            &PreflightRequest {
+                image,
+                policy: needle_policy,
+            },
+            &DockerProcess,
+        )
+        .expect("a matching scan still completes");
+        assert!(
+            !matched.authorizes_launch(),
+            "a known match must refuse: {matched:?}"
+        );
+        assert!(matched.cleanup_verified, "removal must still be verified");
+        assert_eq!(
+            matched.image_id, clean.image_id,
+            "both captures must report the same configuration ID"
+        );
+    }
+}
