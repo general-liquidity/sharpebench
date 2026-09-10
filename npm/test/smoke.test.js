@@ -185,6 +185,11 @@ test("isMySharpeReal refuses a dispersion JSON would turn into the default", () 
   const returns = Array.from({ length: 1008 }, (_, i) => 0.0005 + 0.006 * Math.sin(0.7 * i));
   // NaN and infinity serialize to null, which the kernel reads as "omitted"
   // and replaces with the 0.5 prior: the wrapper refuses them before that.
+  for (const name of ["confidence", "borderline", "srBenchmark"]) {
+    for (const bad of [NaN, Infinity, -Infinity, "0.9", null]) {
+      assert.throws(() => sb.isMySharpeReal(returns, { nTrials: 20, [name]: bad }), new RegExp(name));
+    }
+  }
   for (const trialsSrStd of [NaN, Infinity, -Infinity, "0.5", null]) {
     assert.throws(() => sb.isMySharpeReal(returns, { nTrials: 20, trialsSrStd }), RangeError);
     assert.throws(() => sb.isMySharpeRealFull([returns], 0, { nTrials: 20, trialsSrStd }), /trialsSrStd/);

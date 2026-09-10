@@ -133,9 +133,19 @@ function honestyConfigJson(opts: HonestyOpts): string {
     }
     cfg.periods_per_year = opts.periodsPerYear;
   }
-  if (opts.confidence !== undefined) cfg.confidence = opts.confidence;
-  if (opts.borderline !== undefined) cfg.borderline = opts.borderline;
-  if (opts.srBenchmark !== undefined) cfg.sr_benchmark = opts.srBenchmark;
+  // The same JSON hazard applies to the thresholds and the benchmark: a NaN or
+  // infinity would reach the kernel as null and silently become its default.
+  for (const [name, key, value] of [
+    ["confidence", "confidence", opts.confidence],
+    ["borderline", "borderline", opts.borderline],
+    ["srBenchmark", "sr_benchmark", opts.srBenchmark],
+  ] as const) {
+    if (value === undefined) continue;
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      throw new RangeError(`${name} must be a finite number (omit it for the default)`);
+    }
+    cfg[key] = value;
+  }
   return JSON.stringify(cfg);
 }
 
