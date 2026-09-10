@@ -1,5 +1,61 @@
 # Verification record
 
+## Completion round, 2026-09-10
+
+Eight pull requests merged into SharpeBench, each with its relevant checks green
+on the exact pushed head, its merged tree verified byte-identical to the tested
+tree, and post-main CI green afterwards.
+
+| PR | Row | Main after merge |
+|---|---|---|
+| #45 | G02, G03 | `863b5e2` |
+| #46 | G11, G12 | `0575972` |
+| #44 | G07 | `e293093` |
+| #48 | G05 | `072fdb4` |
+| #47 | G17 | `35f60f5` |
+| #50 | G10 | `3edf6a0` |
+| #51 | G13 | `fde2024` |
+| #52 | G14, G15 | `1dabf2d` |
+
+Verification notes that bear on how much these results establish.
+
+The live Docker preflight could not be exercised locally: the daemon on this
+host answered long enough to measure `Config.Volumes` in its three forms and
+then wedged, so the leg was wired into the live-container CI job by exact test
+name and ran there against the pinned Alpine fixture. Never run all ignored CLI
+tests wholesale, because a subprocess fixture requires an environment mode.
+
+The mutation gate caught two surviving mutants that the authoring work missed,
+one per pull request, and both were killed by tests rather than by weakening the
+gate. In the selection refusal path no test used an alpha exactly equal to the
+recommended floor, so widening the comparison survived; the floor is a minimum,
+so an alpha sitting on it must not warn, now asserted on both the refusal and
+the accepted path. In the lifecycle check no trace recorded an unobserved
+acknowledgment against an order whose acknowledgment had already been observed,
+so dropping the stage guard survived; an acknowledged order has an outcome and
+cannot become ambiguous. Each was verified by mutating in place, observing the
+failure, restoring from the committed tree and comparing byte for byte.
+
+The statrs question was settled by CI rather than by argument. The migration was
+implemented, pushed and tested precisely so the reproducibility claim could be
+falsified: its regenerated goldens pass on Windows, where they were generated,
+and fail on Linux and macOS, while the same three jobs on main with the
+hand-rolled bodies pass everywhere. The accuracy measurement that motivated the
+migration stands and is preserved; only its conclusion changed.
+
+One live-container failure on the parity pull request was a flake in the cgroup
+out-of-memory probe, not a regression: main had passed the same job shortly
+before, and a rerun of the failed job alone passed. A rerun is not a diagnosis,
+so this is recorded as an observed flake in a timing-sensitive live probe rather
+than as an explained one.
+
+Not established by this round: no empirical field was run, because this
+environment holds no provider credentials; mdBook is not installed here, so the
+book was checked by link script and the CI leg remains the real gate; and the
+frozen paper evidence was neither regenerated nor reproduced, since the current
+tree already diverges from that snapshot for reasons that predate this work and
+sit in the simulator rather than in the statistics.
+
 ## Initial review and isolation
 
 - Baselines: Bench `5c4cfb2` (v0.19.0), Arena `4fdf672`.
