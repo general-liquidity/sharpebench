@@ -826,12 +826,156 @@ pub fn require_local_image(image: &str) -> Result<(), SandboxError> {
     Ok(())
 }
 
+/// The post-run state of a named container, as `docker inspect` reports it.
+///
+/// `State.OOMKilled` alone is not a reliable budget verdict: the daemon sets it
+/// from containerd's `TaskOOM` event, which is produced asynchronously from the
+/// exit event and can arrive after the exit is recorded or not at all
+/// (`docs/audits/2026-09-09/OOM-VERDICT.md`). The status and exit code are
+/// read in the same inspection so the classification can use the one signal
+/// that is recorded synchronously with the exit.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContainerExitState {
+    /// `State.Status`: `exited`, `running`, `paused`, `restarting`, `removing`,
+    /// `dead` or `created`.
+    pub status: String,
+    /// `State.OOMKilled`.
+    pub oom_killed: bool,
+    /// `State.ExitCode`. containerd reports an init killed by signal `n` as
+    /// `128 + n`, so a SIGKILL is 137.
+    pub exit_code: i64,
+}
+
+/// Why a run is recorded as a breach of the published `--memory` budget.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OomEvidence {
+    /// Docker recorded the kernel OOM kill (`State.OOMKilled=true`).
+    Recorded,
+    /// The entrant, which is namespace PID 1 on the inspectable launch, died of
+    /// SIGKILL (exit 137) before the harness sent the container any signal, and
+    /// Docker had not recorded the OOM event. Inside the hardened launch only the
+    /// kernel OOM killer delivers that signal; see [`classify_container_exit`].
+    UnrecordedSigkill,
+}
+
+/// The post-run resource verdict for a sandboxed entrant.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResourceVerdict {
+    /// The entrant exceeded the published memory budget.
+    OomKilled(OomEvidence),
+    /// No budget breach: the entrant exited on its own terms, or was still
+    /// running when the harness finalized it.
+    WithinBudget,
+}
+
+impl ResourceVerdict {
+    /// Whether the verdict is a budget breach, the value
+    /// `sharpebench_harness::apply_oom_verdict` folds into the failure taxonomy.
+    pub fn breached(self) -> bool {
+        matches!(self, ResourceVerdict::OomKilled(_))
+    }
+}
+
+/// The exit code containerd reports for an init process killed by SIGKILL.
+const SIGKILL_EXIT_CODE: i64 = 128 + 9;
+
+/// Classify a container state read **before** the harness signalled the
+/// container (the finalizer removes it only afterwards).
+///
+/// - `State.OOMKilled=true` is a breach whatever the status or exit code: the
+///   event can also report a child the kernel killed while PID 1 survived.
+/// - An `exited` container with exit code 137 is a breach. The launch has no
+///   `--init`, so the entrant is namespace PID 1, and the kernel forcibly
+///   delivers SIGKILL to a namespace init only from an ancestor namespace
+///   (`pid_namespaces(7)`): the entrant cannot SIGKILL itself or be SIGKILLed
+///   by its own children. The harness never sends the container SIGKILL before
+///   this read: a decide timeout kills the `docker` client's process group,
+///   which the container's processes are not part of, and the teardown's
+///   SIGTERM is at most proxied as SIGTERM. The remaining sources are the
+///   kernel OOM killer and an out-of-band host actor (`docker kill`, a daemon
+///   shutdown); the second is outside the benchmark's contract and is disclosed
+///   in the audit note rather than distinguished. An entrant that calls
+///   `exit(137)` classifies itself as a breach, which only ever costs it.
+/// - Any other `exited` code, or a container still `running`, is within budget.
+///   A timed-out entrant therefore never becomes a breach through this rule.
+/// - Any other status (`paused`, `restarting`, `removing`, `dead`, `created`)
+///   is indeterminate and returned as an error, never guessed.
+pub fn classify_container_exit(state: &ContainerExitState) -> Result<ResourceVerdict, String> {
+    if state.oom_killed {
+        return Ok(ResourceVerdict::OomKilled(OomEvidence::Recorded));
+    }
+    match state.status.as_str() {
+        "exited" if state.exit_code == SIGKILL_EXIT_CODE => {
+            Ok(ResourceVerdict::OomKilled(OomEvidence::UnrecordedSigkill))
+        }
+        "exited" | "running" => Ok(ResourceVerdict::WithinBudget),
+        other => Err(format!(
+            "the container is {other:?} (exit code {}), so its resource verdict is indeterminate",
+            state.exit_code
+        )),
+    }
+}
+
+/// How long the finalizer waits for a container the daemon still reports as
+/// `running` to be recorded as exited. The docker client can be reaped before
+/// the daemon finishes processing an exit, and a snapshot taken in that window
+/// carries no exit code. A container still running after this is treated as
+/// alive (a timed-out entrant that ignores EOF, for example).
+const EXIT_SETTLE: Duration = Duration::from_secs(3);
+const EXIT_SETTLE_POLL: Duration = Duration::from_millis(50);
+
+/// Read the container state, re-reading while it is `running` without an OOM
+/// record until `settle` elapses.
+fn settled_exit_state(
+    inspector: &dyn ContainerInspector,
+    name: &str,
+    settle: Duration,
+) -> Result<ContainerExitState, String> {
+    let deadline = Instant::now() + settle;
+    loop {
+        let state = inspector.exit_state(name)?;
+        if state.status != "running" || state.oom_killed || Instant::now() >= deadline {
+            return Ok(state);
+        }
+        thread::sleep(EXIT_SETTLE_POLL);
+    }
+}
+
+/// Parse `docker inspect --format '{{.State.Status}} {{.State.OOMKilled}}
+/// {{.State.ExitCode}}'` output.
+fn parse_exit_state(name: &str, stdout: &str) -> Result<ContainerExitState, String> {
+    let fields: Vec<&str> = stdout.split_whitespace().collect();
+    let [status, oom_killed, exit_code] = fields.as_slice() else {
+        return Err(format!(
+            "docker inspect for {name} returned an unparseable state {stdout:?}"
+        ));
+    };
+    let oom_killed = match *oom_killed {
+        "true" => true,
+        "false" => false,
+        value => {
+            return Err(format!(
+                "docker inspect for {name} returned an invalid OOMKilled value {value:?}"
+            ))
+        }
+    };
+    let exit_code = exit_code.parse::<i64>().map_err(|_| {
+        format!("docker inspect for {name} returned an invalid ExitCode value {exit_code:?}")
+    })?;
+    Ok(ContainerExitState {
+        status: (*status).to_string(),
+        oom_killed,
+        exit_code,
+    })
+}
+
 /// Post-exit inspection of a named container, injectable so the classification
 /// path is testable on a machine with no Docker daemon. The live implementation
 /// is [`DockerCli`]; the live leg runs only in the Docker-enabled CI job.
 pub trait ContainerInspector {
-    /// Whether the kernel OOM-killed the named container (`State.OOMKilled`).
-    fn oom_killed(&self, name: &str) -> Result<bool, String>;
+    /// The named container's status, `State.OOMKilled` and exit code, read in
+    /// one inspection.
+    fn exit_state(&self, name: &str) -> Result<ContainerExitState, String>;
     /// Remove the named container, force-stopping it if still running. This is
     /// the explicit replacement for `--rm`, so failure is observable rather
     /// than silently treated as cleanup.
@@ -843,11 +987,11 @@ pub trait ContainerInspector {
 pub struct DockerCli;
 
 impl ContainerInspector for DockerCli {
-    fn oom_killed(&self, name: &str) -> Result<bool, String> {
+    fn exit_state(&self, name: &str) -> Result<ContainerExitState, String> {
         let args = [
             "inspect".to_string(),
             "--format".to_string(),
-            "{{.State.OOMKilled}}".to_string(),
+            "{{.State.Status}} {{.State.OOMKilled}} {{.State.ExitCode}}".to_string(),
             name.to_string(),
         ];
         let output = command_output_with_timeout("docker", &args, READINESS_TIMEOUT)
@@ -859,13 +1003,7 @@ impl ContainerInspector for DockerCli {
                 String::from_utf8_lossy(&output.stderr).trim()
             ));
         }
-        match String::from_utf8_lossy(&output.stdout).trim() {
-            "true" => Ok(true),
-            "false" => Ok(false),
-            value => Err(format!(
-                "docker inspect for {name} returned an invalid OOMKilled value {value:?}"
-            )),
-        }
+        parse_exit_state(name, &String::from_utf8_lossy(&output.stdout))
     }
 
     fn remove(&self, name: &str) -> Result<(), String> {
@@ -890,8 +1028,9 @@ impl ContainerInspector for DockerCli {
 /// transport cannot tell apart from any other SIGKILL — so exceeding a
 /// *published* resource budget, a scoring-relevant fact, was invisible to the
 /// failure taxonomy. The container is therefore launched **named and without
-/// `--rm`**, and [`SandboxedAgent::finish`] reads `State.OOMKilled` after the
-/// wait, then removes the container explicitly. Removal uses `docker rm -f`, so
+/// `--rm`**, and [`SandboxedAgent::finish`] reads its status, `State.OOMKilled`
+/// and exit code after the wait ([`classify_container_exit`]), then removes the
+/// container explicitly. Removal uses `docker rm -f`, so
 /// the no-leak property `--rm` provided is preserved on both the `finish` path
 /// and `Drop` (a harness killed with SIGKILL between spawn and drop can still
 /// leave a stopped container behind; the deterministic `sharpebench-agent-*`
@@ -916,23 +1055,32 @@ impl SandboxedAgent {
         self.container.as_deref()
     }
 
-    /// Tear the agent down, then report whether the kernel OOM-killed its
-    /// container, removing the container afterwards. `Some(true)` means the
-    /// entrant exceeded the published `--memory` budget; the driver folds that
-    /// into the failure taxonomy via `sharpebench_harness::apply_oom_verdict`.
+    /// Tear the agent down, then report whether the entrant breached the
+    /// published `--memory` budget, removing the container afterwards.
+    /// `Some(true)` is a breach ([`ResourceVerdict::breached`]); the driver folds
+    /// that into the failure taxonomy via `sharpebench_harness::apply_oom_verdict`.
     /// `None` only for an explicitly opted-in unsandboxed run. An indeterminate
     /// container verdict or failed cleanup is a [`SandboxError::Inspection`],
     /// because silently scoring either state would weaken the sandbox contract.
     pub fn finish(self) -> Result<Option<bool>, SandboxError> {
-        self.finish_with(&DockerCli)
+        Ok(self.finish_with(&DockerCli)?.map(ResourceVerdict::breached))
     }
 
-    /// [`SandboxedAgent::finish`] with an injected inspector, so the
-    /// inspect-then-remove sequence is testable without a Docker daemon.
+    /// [`SandboxedAgent::finish`] with an injected inspector and the typed
+    /// verdict, so the inspect-then-remove sequence and the evidence behind a
+    /// breach are testable without a Docker daemon.
     pub fn finish_with(
+        self,
+        inspector: &dyn ContainerInspector,
+    ) -> Result<Option<ResourceVerdict>, SandboxError> {
+        self.finish_with_settle(inspector, EXIT_SETTLE)
+    }
+
+    fn finish_with_settle(
         mut self,
         inspector: &dyn ContainerInspector,
-    ) -> Result<Option<bool>, SandboxError> {
+        settle: Duration,
+    ) -> Result<Option<ResourceVerdict>, SandboxError> {
         // Reap the docker client first: once it is gone the container has
         // exited (or is orphaned and about to be force-removed), so the state
         // read below is final rather than mid-run.
@@ -940,10 +1088,14 @@ impl SandboxedAgent {
         let Some(name) = self.container.take() else {
             return Ok(None);
         };
-        let verdict = inspector.oom_killed(&name);
+        // The verdict is read before `remove`, whose `docker rm -f` SIGKILLs a
+        // still-running container: that harness-initiated 137 is never seen by
+        // the classification.
+        let verdict = settled_exit_state(inspector, &name, settle)
+            .and_then(|state| classify_container_exit(&state));
         let removed = inspector.remove(&name);
         match (verdict, removed) {
-            (Ok(oom_killed), Ok(())) => Ok(Some(oom_killed)),
+            (Ok(verdict), Ok(())) => Ok(Some(verdict)),
             (Err(inspect), Ok(())) => Err(SandboxError::Inspection(inspect)),
             (Ok(_), Err(remove)) => Err(SandboxError::Inspection(remove)),
             (Err(inspect), Err(remove)) => Err(SandboxError::Inspection(format!(
@@ -1076,8 +1228,9 @@ pub struct GatewayLaunch {
 /// all, handed back instead of spawned so the host can own the entrant's stdio
 /// and serve its model calls on that pipe. The gateway adds no network: model
 /// traffic leaves the container the way decisions do. After spawning it, call
-/// [`wait_until_running`]; after the run, read the resource verdict and remove
-/// the container with [`DockerCli`], as [`SandboxedAgent::finish`] does.
+/// [`wait_until_running`]; after the run, read the container state with
+/// [`DockerCli`], classify it with [`classify_container_exit`] and only then
+/// remove the container, as [`SandboxedAgent::finish`] does.
 pub fn gateway_launch(image: &str, opts: &SandboxOptions) -> Result<GatewayLaunch, SandboxError> {
     plan_gateway_launch(docker_available(), image, opts)
 }
@@ -1341,36 +1494,150 @@ mod tests {
     /// An inspector whose calls are journaled, so the inspect-then-remove
     /// sequence is provable without a Docker daemon (the live leg runs only in
     /// the Docker-enabled CI job).
+    ///
+    /// `states` are returned in order, the last one repeating, so a daemon that
+    /// records the exit a few reads late is expressible. `after_remove`, when
+    /// set, becomes the state once `remove` has run: `docker rm -f` SIGKILLs a
+    /// still-running container, and that harness-initiated 137 must never reach
+    /// the classification.
     struct FakeInspector {
-        verdict: Result<bool, String>,
+        states: std::cell::RefCell<Vec<Result<ContainerExitState, String>>>,
+        after_remove: Option<ContainerExitState>,
         removal: Result<(), String>,
         calls: std::cell::RefCell<Vec<String>>,
     }
 
+    impl FakeInspector {
+        fn new(states: Vec<Result<ContainerExitState, String>>) -> Self {
+            Self {
+                states: std::cell::RefCell::new(states),
+                after_remove: None,
+                removal: Ok(()),
+                calls: std::cell::RefCell::new(Vec::new()),
+            }
+        }
+    }
+
     impl ContainerInspector for FakeInspector {
-        fn oom_killed(&self, name: &str) -> Result<bool, String> {
+        fn exit_state(&self, name: &str) -> Result<ContainerExitState, String> {
             self.calls.borrow_mut().push(format!("inspect {name}"));
-            self.verdict.clone()
+            let mut states = self.states.borrow_mut();
+            if states.len() > 1 {
+                states.remove(0)
+            } else {
+                states[0].clone()
+            }
         }
         fn remove(&self, name: &str) -> Result<(), String> {
             self.calls.borrow_mut().push(format!("remove {name}"));
+            if let Some(killed) = &self.after_remove {
+                *self.states.borrow_mut() = vec![Ok(killed.clone())];
+            }
             self.removal.clone()
+        }
+    }
+
+    fn state(status: &str, oom_killed: bool, exit_code: i64) -> ContainerExitState {
+        ContainerExitState {
+            status: status.to_string(),
+            oom_killed,
+            exit_code,
+        }
+    }
+
+    fn named_agent() -> SandboxedAgent {
+        SandboxedAgent {
+            agent: None,
+            container: Some("c-1".to_string()),
+        }
+    }
+
+    /// Every combination of the three signals `docker inspect` returns, with the
+    /// verdict each must produce.
+    #[test]
+    fn the_resource_verdict_covers_every_status_flag_and_exit_code() {
+        let breach_recorded = Ok(ResourceVerdict::OomKilled(OomEvidence::Recorded));
+        let breach_inferred = Ok(ResourceVerdict::OomKilled(OomEvidence::UnrecordedSigkill));
+        let within = Ok(ResourceVerdict::WithinBudget);
+        for (status, oom_killed, exit_code, expected) in [
+            // Docker recorded the kill: a breach whatever else it says,
+            // including a surviving wrapper that exited 0 after its child died.
+            ("exited", true, 137, &breach_recorded),
+            ("exited", true, 0, &breach_recorded),
+            ("exited", true, 1, &breach_recorded),
+            ("running", true, 0, &breach_recorded),
+            ("dead", true, 137, &breach_recorded),
+            // The TaskOOM event was lost or late, but PID 1 died of SIGKILL
+            // that the harness did not send: the CI flake's shape.
+            ("exited", false, 137, &breach_inferred),
+            // Exits the entrant chose, or signals other than SIGKILL: SIGTERM
+            // (143) is what the teardown proxies; 139 is a segfault.
+            ("exited", false, 0, &within),
+            ("exited", false, 1, &within),
+            ("exited", false, 143, &within),
+            ("exited", false, 139, &within),
+            ("exited", false, 9, &within),
+            // Still running at finalization: a timed-out entrant that ignored
+            // EOF. Its running exit code carries no evidence.
+            ("running", false, 0, &within),
+        ] {
+            assert_eq!(
+                &classify_container_exit(&state(status, oom_killed, exit_code)),
+                expected,
+                "{status} OOMKilled={oom_killed} ExitCode={exit_code}"
+            );
+        }
+        for status in ["paused", "restarting", "removing", "dead", "created", ""] {
+            let error = classify_container_exit(&state(status, false, 137))
+                .expect_err("a state with no final exit must stay indeterminate");
+            assert!(error.contains("indeterminate"), "{error}");
+        }
+    }
+
+    #[test]
+    fn the_docker_inspect_state_line_parses_strictly() {
+        assert_eq!(
+            parse_exit_state("c-1", "exited false 137\n"),
+            Ok(state("exited", false, 137))
+        );
+        assert_eq!(
+            parse_exit_state("c-1", "running true 0"),
+            Ok(state("running", true, 0))
+        );
+        for bad in [
+            "",
+            "exited false",
+            "exited false 137 extra",
+            "exited maybe 137",
+            "exited false 13x",
+            "exited <no value> 137",
+        ] {
+            assert!(parse_exit_state("c-1", bad).is_err(), "{bad:?}");
         }
     }
 
     #[test]
     fn finish_inspects_before_removing_and_reports_the_verdict() {
-        for verdict in [true, false] {
-            let inspector = FakeInspector {
-                verdict: Ok(verdict),
-                removal: Ok(()),
-                calls: std::cell::RefCell::new(Vec::new()),
-            };
-            let agent = SandboxedAgent {
-                agent: None,
-                container: Some("c-1".to_string()),
-            };
-            assert_eq!(agent.finish_with(&inspector), Ok(Some(verdict)));
+        for (observed, verdict, breached) in [
+            (
+                state("exited", true, 137),
+                ResourceVerdict::OomKilled(OomEvidence::Recorded),
+                true,
+            ),
+            (
+                state("exited", false, 137),
+                ResourceVerdict::OomKilled(OomEvidence::UnrecordedSigkill),
+                true,
+            ),
+            (
+                state("exited", false, 0),
+                ResourceVerdict::WithinBudget,
+                false,
+            ),
+        ] {
+            let inspector = FakeInspector::new(vec![Ok(observed)]);
+            assert_eq!(named_agent().finish_with(&inspector), Ok(Some(verdict)));
+            assert_eq!(verdict.breached(), breached);
             assert_eq!(
                 *inspector.calls.borrow(),
                 vec!["inspect c-1".to_string(), "remove c-1".to_string()],
@@ -1381,30 +1648,79 @@ mod tests {
         }
     }
 
+    /// A timed-out entrant still running at finalization is removed with
+    /// `docker rm -f`, which exits it 137. That kill is the harness's own and
+    /// must never be read as a budget breach.
+    #[test]
+    fn a_harness_teardown_kill_is_never_classified_as_a_breach() {
+        let mut inspector = FakeInspector::new(vec![Ok(state("running", false, 0))]);
+        inspector.after_remove = Some(state("exited", false, 137));
+        assert_eq!(
+            named_agent().finish_with_settle(&inspector, Duration::ZERO),
+            Ok(Some(ResourceVerdict::WithinBudget))
+        );
+        assert_eq!(
+            *inspector.calls.borrow(),
+            vec!["inspect c-1".to_string(), "remove c-1".to_string()]
+        );
+    }
+
+    /// The client can be reaped before the daemon records the exit. The
+    /// finalizer re-reads a `running` container until it settles, so an OOM exit
+    /// recorded a few reads late still carries its exit code into the verdict.
+    #[test]
+    fn a_running_container_is_re_read_until_its_exit_is_recorded() {
+        let inspector = FakeInspector::new(vec![
+            Ok(state("running", false, 0)),
+            Ok(state("running", false, 0)),
+            Ok(state("exited", false, 137)),
+        ]);
+        assert_eq!(
+            named_agent().finish_with_settle(&inspector, Duration::from_secs(30)),
+            Ok(Some(ResourceVerdict::OomKilled(
+                OomEvidence::UnrecordedSigkill
+            )))
+        );
+        assert_eq!(
+            *inspector.calls.borrow(),
+            vec![
+                "inspect c-1".to_string(),
+                "inspect c-1".to_string(),
+                "inspect c-1".to_string(),
+                "remove c-1".to_string()
+            ]
+        );
+
+        // An OOM record ends the wait at once; no further read can change it.
+        let inspector = FakeInspector::new(vec![
+            Ok(state("running", true, 0)),
+            Ok(state("exited", false, 0)),
+        ]);
+        assert_eq!(
+            named_agent().finish_with_settle(&inspector, Duration::from_secs(30)),
+            Ok(Some(ResourceVerdict::OomKilled(OomEvidence::Recorded)))
+        );
+        assert_eq!(inspector.calls.borrow().len(), 2, "one read, one removal");
+    }
+
     #[test]
     fn finish_refuses_an_indeterminate_verdict_or_failed_cleanup() {
-        for (verdict, removal, expected) in [
+        for (observed, removal, expected) in [
             (
                 Err("inspect unavailable".to_string()),
                 Ok(()),
                 "inspect unavailable",
             ),
             (
-                Ok(false),
+                Ok(state("exited", false, 0)),
                 Err("container remains".to_string()),
                 "container remains",
             ),
+            (Ok(state("paused", false, 0)), Ok(()), "indeterminate"),
         ] {
-            let inspector = FakeInspector {
-                verdict,
-                removal,
-                calls: std::cell::RefCell::new(Vec::new()),
-            };
-            let agent = SandboxedAgent {
-                agent: None,
-                container: Some("c-1".to_string()),
-            };
-            let error = agent
+            let mut inspector = FakeInspector::new(vec![observed]);
+            inspector.removal = removal;
+            let error = named_agent()
                 .finish_with(&inspector)
                 .expect_err("unknown state or failed removal must not look like success");
             assert!(error.to_string().contains(expected), "{error}");
@@ -1418,11 +1734,7 @@ mod tests {
 
     #[test]
     fn an_unsandboxed_run_has_no_container_and_no_verdict() {
-        let inspector = FakeInspector {
-            verdict: Ok(true),
-            removal: Ok(()),
-            calls: std::cell::RefCell::new(Vec::new()),
-        };
+        let inspector = FakeInspector::new(vec![Ok(state("exited", true, 137))]);
         let agent = SandboxedAgent {
             agent: None,
             container: None,
@@ -1954,10 +2266,10 @@ mod tests {
     ///
     /// This test therefore RECORDS the answer rather than asserting a verdict we
     /// have not observed. It prints the daemon's version, the cgroup driver and
-    /// the observed value, and fails only if the daemon cannot answer at all. If
-    /// it reports `false` here, the row is a confirmed defect and the repair is
-    /// to stop relying on `State.OOMKilled` alone, for instance by also treating
-    /// exit 137 under a `--memory` limit as a budget breach.
+    /// the observed state, and fails only if the daemon cannot answer at all.
+    /// The exit-137 rule in [`classify_container_exit`] does not cover this
+    /// shape: the wrapper exits 0, so `State.OOMKilled` is the only signal, and
+    /// a `false` here is a residual false negative (see `OOM-VERDICT.md`).
     #[test]
     #[ignore = "needs a running Docker daemon and SHARPEBENCH_SANDBOX_FIXTURE"]
     fn live_surviving_wrapper_child_oom_is_recorded() {
@@ -1987,7 +2299,7 @@ mod tests {
             .stderr(Stdio::null())
             .status()
             .expect("docker must launch the surviving-wrapper fixture");
-        let verdict = DockerCli.oom_killed(&name);
+        let observed = DockerCli.exit_state(&name);
         let version = docker_output(&["version", "--format", "{{.Server.Version}}"])
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
             .unwrap_or_default();
@@ -1999,11 +2311,11 @@ mod tests {
             .expect("the surviving-wrapper fixture container must be removed");
 
         println!(
-            "surviving-wrapper OOM probe: docker {version}, cgroup {driver},              wrapper exit success={}, State.OOMKilled={verdict:?}",
+            "surviving-wrapper OOM probe: docker {version}, cgroup {driver},              wrapper exit success={}, state={observed:?}",
             status.success()
         );
-        let observed = verdict.expect("the daemon must answer the OOM question");
-        if !observed {
+        let observed = observed.expect("the daemon must answer the OOM question");
+        if !observed.oom_killed {
             println!(
                 "PROBE RESULT: a surviving wrapper HIDES its child's OOM kill on this daemon.                  State.OOMKilled alone is not sufficient to classify a budget breach."
             );
@@ -2043,19 +2355,30 @@ mod tests {
             .stderr(Stdio::null())
             .status()
             .expect("docker must launch the OOM fixture");
-        let verdict = DockerCli.oom_killed(&name);
+        // The same read and classification `SandboxedAgent::finish` performs.
+        let observed = settled_exit_state(&DockerCli, &name, EXIT_SETTLE);
+        let verdict = observed
+            .clone()
+            .and_then(|state| classify_container_exit(&state));
         DockerCli
             .remove(&name)
             .expect("the OOM fixture container must be removed");
 
-        assert!(
-            !status.success(),
-            "the allocator unexpectedly stayed inside 32 MiB"
+        // Recorded on every run so the CI log accumulates how often Docker's
+        // asynchronous OOM record is missing at read time (`OOM-VERDICT.md`).
+        println!(
+            "memory-limit OOM probe: docker run exit={:?}, state={observed:?}, verdict={verdict:?}",
+            status.code()
         );
         assert_eq!(
-            verdict,
-            Ok(true),
-            "the live cgroup kill must be visible through the production Docker inspector"
+            status.code(),
+            Some(137),
+            "the exec'd writer must die of SIGKILL when it crosses 32 MiB, not exit on its own"
+        );
+        assert!(
+            matches!(verdict, Ok(ResourceVerdict::OomKilled(_))),
+            "the live cgroup kill must be a budget breach through the production classification: \
+             {verdict:?}"
         );
         let inspect = Command::new("docker")
             .args(["inspect", &name])
