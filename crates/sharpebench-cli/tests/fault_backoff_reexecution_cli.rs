@@ -1,7 +1,9 @@
 //! The three harness features the CLI now exposes: `run --fault-plan`,
 //! `run --retry-backoff` and `verify-trajectory --reexecute`, with the fault
-//! report of an incomplete sweep. Hermetic: every entrant is an in-process
-//! HTTP fixture on loopback, and no model or market data is used.
+//! report of an incomplete sweep, `capture` of an external entrant and
+//! `--reexecute --image`. Hermetic: every entrant is an in-process HTTP
+//! fixture on loopback, and no model or market data is used. The one live
+//! Docker test is ignored and runs by exact name in the live-container job.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -846,4 +848,306 @@ fn an_incomplete_faulted_sweep_keeps_its_fault_report() {
     let persisted = checkpoint_evidence(&fixture.path("checkpoint.json"));
     assert!(!persisted.is_empty());
     assert_eq!(sorted_evidence(report), persisted);
+}
+
+#[test]
+fn capture_records_an_http_entrant_that_reexecution_can_rerun() {
+    let fixture = Fixture::new();
+    let steady = Entrant::start(deterministic);
+    let captured = fixture.cli(&[
+        "capture",
+        "trajectory.json",
+        "--http",
+        &steady.addr,
+        "--data",
+        "data.csv",
+        "--json",
+    ]);
+    assert!(captured.status.success(), "{}", stderr(&captured));
+    let label = format!("http:{}", steady.addr);
+    let summary = stdout_json(&captured);
+    assert_eq!(summary["captured"], true);
+    assert_eq!(summary["agent_id"], label.as_str());
+    assert_eq!(summary["runs"], 16);
+    assert_eq!(
+        summary["reexecute_with"],
+        serde_json::json!(["--http", steady.addr])
+    );
+    let trajectory: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(fixture.path("trajectory.json")).unwrap()).unwrap();
+    assert_eq!(trajectory["agent_id"], label.as_str());
+    assert!(trajectory["contract"]["runner_artifact_sha256"].is_string());
+
+    let verify = |extra: &[&str]| {
+        let mut args = vec![
+            "verify-trajectory",
+            "trajectory.json",
+            "--data",
+            "data.csv",
+            "--json",
+        ];
+        args.extend_from_slice(extra);
+        fixture.cli(&args)
+    };
+    let replayed = verify(&[]);
+    assert!(replayed.status.success(), "{}", stderr(&replayed));
+    let calls = steady.calls();
+    let rerun = verify(&["--reexecute", "--http", &steady.addr]);
+    assert!(rerun.status.success(), "{}", stderr(&rerun));
+    let rerun = stdout_json(&rerun);
+    assert_eq!(rerun["reexecution"]["agent"], label.as_str());
+    assert_eq!(rerun["reexecution"]["runs_reexecuted"], 16);
+    assert!(steady.calls() > calls, "the entrant itself was re-run");
+    // The recorded identity names the flag; nothing is launched from the file.
+    let unnamed = verify(&["--reexecute"]);
+    assert_eq!(unnamed.status.code(), Some(2));
+    assert!(stderr(&unnamed).contains("not a reference agent"));
+
+    let human = fixture.cli(&[
+        "capture",
+        "again.json",
+        "--http",
+        &steady.addr,
+        "--data",
+        "data.csv",
+    ]);
+    assert!(human.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&human.stdout),
+        format!(
+            "captured trajectory for `{label}` (16 runs) -> again.json\n\
+             re-execute it with: sharpebench verify-trajectory again.json --data data.csv --reexecute --http \"{}\"\n",
+            steady.addr
+        )
+    );
+
+    // A transport failure refuses the capture and writes nothing: the file
+    // would otherwise hold the harness's holds as the entrant's decisions.
+    let broken = Entrant::start(unreachable_transport);
+    let refused = fixture.cli(&[
+        "capture",
+        "broken.json",
+        "--http",
+        &broken.addr,
+        "--data",
+        "data.csv",
+        "--json",
+    ]);
+    assert_eq!(refused.status.code(), Some(1));
+    let refusal = stdout_json(&refused);
+    assert_eq!(refusal["captured"], false);
+    assert_eq!(refusal["error"], "capture_transport_failure");
+    assert_eq!(refusal["failure"], "transport_error");
+    assert!(!fixture.path("broken.json").exists());
+}
+
+#[test]
+fn external_capture_and_image_reexecution_refuse_contradictory_or_unlaunchable_requests() {
+    let fixture = Fixture::new();
+    assert!(fixture
+        .cli(&[
+            "capture",
+            "momentum",
+            "trajectory.json",
+            "--data",
+            "data.csv"
+        ])
+        .status
+        .success());
+    let pinned = format!("some/agent@sha256:{}", "a".repeat(64));
+    let usage: [(&[&str], &str); 9] = [
+        (
+            &["capture", "momentum", "out.json", "--http", "127.0.0.1:9"],
+            "takes only <out.json>",
+        ),
+        (
+            &["capture", "out.json", "--http", "127.0.0.1:9", "--cmd", "x"],
+            "exactly one of",
+        ),
+        (&["capture", "out.json", "--http"], "--http needs a value"),
+        (&["capture", "--http", "127.0.0.1:9"], "usage"),
+        (
+            &[
+                "capture",
+                "out.json",
+                "--image",
+                &pinned,
+                "--scan-policy",
+                "p.json",
+            ],
+            "--scan-policy",
+        ),
+        (
+            &["verify-trajectory", "trajectory.json", "--image", &pinned],
+            "--image names the agent to re-execute; it requires --reexecute",
+        ),
+        (
+            &[
+                "verify-trajectory",
+                "trajectory.json",
+                "--reexecute",
+                "--image",
+                &pinned,
+                "--http",
+                "127.0.0.1:9",
+            ],
+            "pass one",
+        ),
+        (
+            &[
+                "verify-trajectory",
+                "trajectory.json",
+                "--reexecute",
+                "--cmd",
+                "x",
+                "--image",
+                &pinned,
+            ],
+            "pass one",
+        ),
+        (
+            &[
+                "verify-trajectory",
+                "trajectory.json",
+                "--reexecute",
+                "--image",
+            ],
+            "digest-pinned reference",
+        ),
+    ];
+    for (args, message) in usage {
+        let output = fixture.cli(args);
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "{args:?}: {}",
+            stderr(&output)
+        );
+        assert!(output.stdout.is_empty(), "{args:?}");
+        let error = stderr(&output);
+        assert!(error.contains(message), "{args:?}: {error}");
+        assert!(!error.contains("NO sandbox"), "{args:?}: launched: {error}");
+        assert!(!fixture.path("out.json").exists(), "{args:?}");
+    }
+
+    // An unlaunchable entrant: exit 1, nothing written, and a refused sandbox
+    // never becomes host execution.
+    let spawn = fixture.cli(&[
+        "capture",
+        "out.json",
+        "--cmd",
+        "sharpebench-no-such-agent-binary",
+    ]);
+    assert_eq!(spawn.status.code(), Some(1));
+    assert!(
+        stderr(&spawn).contains("NO sandbox"),
+        "the host path announces itself"
+    );
+    assert!(stderr(&spawn).contains("cannot spawn agent"));
+    for image in ["some/agent:latest", pinned.as_str()] {
+        let refused = fixture.cli(&["capture", "out.json", "--image", image]);
+        assert_eq!(refused.status.code(), Some(1), "{}", stderr(&refused));
+        assert!(stderr(&refused).contains("cannot start the sandboxed agent"));
+        assert!(!stderr(&refused).contains("NO sandbox"));
+        assert!(refused.stdout.is_empty());
+
+        let refused = fixture.cli(&[
+            "verify-trajectory",
+            "trajectory.json",
+            "--data",
+            "data.csv",
+            "--reexecute",
+            "--image",
+            image,
+            "--json",
+        ]);
+        assert_eq!(refused.status.code(), Some(1), "{}", stderr(&refused));
+        let refusal = stdout_json(&refused);
+        assert_eq!(refusal["verified"], false);
+        assert_eq!(refusal["error"], "reexecution_transport_failure");
+        assert_eq!(refusal["failure"], "spawn_error");
+        assert_eq!(refusal["agent"], format!("sandbox:{image}"));
+        assert!(!stderr(&refused).contains("NO sandbox"));
+    }
+    assert!(!fixture.path("out.json").exists());
+}
+
+/// The live leg of `--image` for both trajectory commands, run only in the
+/// live-container CI job, by this exact name, against the pinned Alpine
+/// fixture. The fixture's own entrypoint is `/bin/sh`, which does not speak
+/// the decision protocol, and the CLI launches an image's own entrypoint on
+/// purpose. So this proves the hardened launch against a real daemon, the
+/// typed transport failure for a silent entrant, and that no container is
+/// left behind; the passing comparison is covered by the fake sandbox tests.
+#[test]
+#[ignore = "needs a running Docker daemon and SHARPEBENCH_SANDBOX_FIXTURE"]
+fn live_image_capture_and_reexecution_launch_the_hardened_sandbox() {
+    let image = std::env::var("SHARPEBENCH_SANDBOX_FIXTURE").expect(
+        "the live test needs SHARPEBENCH_SANDBOX_FIXTURE set to a digest-pinned image that is \
+         present locally",
+    );
+    let containers = || {
+        let listed = Command::new("docker")
+            .args([
+                "ps",
+                "-a",
+                "--filter",
+                "name=sharpebench-agent-",
+                "--format",
+                "{{.Names}}",
+            ])
+            .output()
+            .expect("docker ps runs");
+        assert!(listed.status.success());
+        String::from_utf8_lossy(&listed.stdout).into_owned()
+    };
+    let before = containers();
+    let fixture = Fixture::new();
+    assert!(fixture
+        .cli(&[
+            "capture",
+            "buy-and-hold",
+            "trajectory.json",
+            "--data",
+            "data.csv"
+        ])
+        .status
+        .success());
+
+    let rerun = fixture.cli(&[
+        "verify-trajectory",
+        "trajectory.json",
+        "--data",
+        "data.csv",
+        "--reexecute",
+        "--image",
+        &image,
+        "--json",
+    ]);
+    assert_eq!(rerun.status.code(), Some(1), "{}", stderr(&rerun));
+    let refusal = stdout_json(&rerun);
+    assert_eq!(
+        refusal["error"], "reexecution_transport_failure",
+        "{refusal}"
+    );
+    assert_eq!(refusal["failure"], "transport_error", "{refusal}");
+    assert_eq!(refusal["agent"], format!("sandbox:{image}"));
+    assert!(!stderr(&rerun).contains("NO sandbox"));
+
+    let captured = fixture.cli(&[
+        "capture",
+        "entrant.json",
+        "--image",
+        &image,
+        "--data",
+        "data.csv",
+        "--json",
+    ]);
+    assert_eq!(captured.status.code(), Some(1), "{}", stderr(&captured));
+    let refusal = stdout_json(&captured);
+    assert_eq!(refusal["error"], "capture_transport_failure", "{refusal}");
+    assert_eq!(refusal["failure"], "transport_error", "{refusal}");
+    assert!(!fixture.path("entrant.json").exists());
+
+    assert_eq!(containers(), before, "every launched container was removed");
 }

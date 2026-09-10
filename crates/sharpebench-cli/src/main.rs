@@ -21,6 +21,7 @@ mod analysis_cmd;
 mod arena_cmd;
 mod artifact_preflight;
 mod csv_columns;
+mod external_capture;
 mod forecast_cmd;
 mod gateway_cli;
 mod import_cmd;
@@ -604,11 +605,12 @@ fn help() {
     println!(
         "  sharpebench capture <agent> <out.json> [--data <csv>]  capture an agent's raw-decision trajectory artifact"
     );
+    println!("  sharpebench capture <out.json> --cmd \"<prog>\"|--http <addr>|--image <ref> [--data <csv>]  capture an external entrant's trajectory");
     println!(
         "  sharpebench verify-trajectory <traj.json> [--data <csv>]  strictly replay the complete data/cost/engine/runner/window/seed contract"
     );
     println!("                       --allow-unbound-trajectory: explicit legacy or cross-version regrade; never the default");
-    println!("                       --reexecute [--cmd \"<prog>\"|--http <addr>]: also re-run every captured run with a fresh agent and refuse the first divergent decision");
+    println!("                       --reexecute [--cmd \"<prog>\"|--http <addr>|--image <ref>]: also re-run every captured run with a fresh agent and refuse the first divergent decision");
     println!("  sharpebench audit-briefing <briefing.json>  audit a shared briefing for input-side salience bias");
     println!("  sharpebench canary <seed>             derive a do-not-train contamination tripwire token");
     println!("  sharpebench sandbox-check <image@sha256:digest>  run live hostile field-readiness checks (never skips)");
@@ -2228,6 +2230,13 @@ fn resolve_dataset(
 fn run_capture(args: &[String], json: bool) -> ExitCode {
     use sharpebench_sim::{Agent, BuyAndHold, CostModel, Momentum};
 
+    if external_capture::names_external_entrant(args) {
+        return external_capture::run_capture_external(
+            args,
+            json,
+            &external_capture::DockerSandbox,
+        );
+    }
     if args.len() < 4 {
         eprintln!(
             "usage: sharpebench capture <buy-and-hold|momentum> <out.json> [--data <csv>] [--json]"
@@ -2316,6 +2325,10 @@ fn run_verify_trajectory(args: &[String], json: bool) -> ExitCode {
         eprintln!("error: --cmd and --http name the agent to re-execute; they require --reexecute");
         return ExitCode::from(2);
     }
+    if !reexecute && args.iter().any(|arg| arg == "--image") {
+        eprintln!("error: --image names the agent to re-execute; it requires --reexecute");
+        return ExitCode::from(2);
+    }
     if reexecute && args.iter().any(|arg| arg == "--allow-unbound-trajectory") {
         eprintln!(
             "error: --reexecute requires the strict trajectory contract and cannot be combined with --allow-unbound-trajectory"
@@ -2346,7 +2359,15 @@ fn run_verify_trajectory(args: &[String], json: bool) -> ExitCode {
     let costs = CostModel::default();
     let cfg = ScoreConfig::default();
     if reexecute {
-        return run_reexecution(args, &data, &traj, costs, &cfg, json);
+        return run_reexecution(
+            args,
+            &data,
+            &traj,
+            costs,
+            &cfg,
+            json,
+            &external_capture::DockerSandbox,
+        );
     }
     let result = if args.iter().any(|arg| arg == "--allow-unbound-trajectory") {
         sharpebench_harness::verify_trajectory(&data, &traj, costs, &cfg)
@@ -2459,8 +2480,10 @@ impl<A: sharpebench_sim::Agent + sharpebench_sim::TransportDiagnostics> sharpebe
 
 /// `verify-trajectory --reexecute`: the strict checks, then every captured run
 /// re-executed with a fresh agent and compared decision by decision. The agent
-/// is `--cmd "<prog>"`, `--http <addr>`, or, with neither, the reference agent
-/// the trajectory names (`buy-and-hold` or `momentum`).
+/// is `--cmd "<prog>"`, `--http <addr>`, `--image <repository@sha256:...>` (a
+/// fresh hardened container per run, launched by `launcher`), or, with none of
+/// them, the reference agent the trajectory names (`buy-and-hold` or
+/// `momentum`).
 fn run_reexecution(
     args: &[String],
     data: &sharpebench_sim::Dataset,
@@ -2468,13 +2491,53 @@ fn run_reexecution(
     costs: sharpebench_sim::CostModel,
     cfg: &ScoreConfig,
     json: bool,
+    launcher: &dyn external_capture::SandboxLauncher,
 ) -> ExitCode {
     use sharpebench_sim::{Agent, BuyAndHold, ExternalAgent, HoldAgent, HttpAgent, Momentum};
 
-    let fault = std::rc::Rc::new(std::cell::RefCell::new(None));
-    let (label, mut make): (String, Box<dyn FnMut() -> Box<dyn Agent>>) = if let Some(cmd) =
-        flag_value(args, "--cmd")
+    let fault: external_capture::FaultCell = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let image = args.iter().any(|arg| arg == "--image");
+    if image
+        && ["--cmd", "--http"]
+            .iter()
+            .any(|flag| args.iter().any(|arg| arg == flag))
     {
+        eprintln!("error: --image, --cmd and --http each name the agent to re-execute; pass one");
+        return ExitCode::from(2);
+    }
+    let image = match flag_value(args, "--image") {
+        Some(reference) if !reference.starts_with("--") => Some(reference.to_string()),
+        _ if image => {
+            eprintln!("error: --image needs a digest-pinned reference, <repository@sha256:...>");
+            return ExitCode::from(2);
+        }
+        _ => None,
+    };
+    let (label, mut make): (String, Box<dyn FnMut() -> Box<dyn Agent> + '_>) = if let Some(image) =
+        &image
+    {
+        let label = format!("sandbox:{image}");
+        if let Err(error) = launcher.admit(image) {
+            if json {
+                emit_json(&serde_json::json!({
+                    "verified": false,
+                    "error": "reexecution_transport_failure",
+                    "failure": sharpebench_harness::FailureKind::SpawnError,
+                    "agent": label,
+                }));
+            }
+            eprintln!("error: cannot start the sandboxed agent `{image}`: {error}");
+            return ExitCode::FAILURE;
+        }
+        (
+            label,
+            Box::new(external_capture::sandbox_factory(
+                image,
+                launcher,
+                fault.clone(),
+            )),
+        )
+    } else if let Some(cmd) = flag_value(args, "--cmd") {
         let parts: Vec<String> = cmd.split_whitespace().map(String::from).collect();
         let Some((prog, rest)) = parts.split_first() else {
             eprintln!("error: --cmd needs a program to run");
