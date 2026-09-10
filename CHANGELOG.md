@@ -8,9 +8,11 @@ are the twelve listed in [RELEASING.md](RELEASING.md), and `xtask` and
 `examples/reference-agent` are `publish = false`. Each section is one `v*` tag
 and links the commits it was built from.
 
-[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.22.0...HEAD
 
 ## [Unreleased]
+
+## [0.22.0] - 2026-09-10
 
 ### Breaking
 - edge: the LITE honesty verdict's `sr_benchmark` (the benchmark of the PSR and MinTRL it reports) is now **annualized**, like `trials_sr_std`, and is divided by `sqrt(periods_per_year)` through `sharpebench_stats::per_period_from_annualized` before the PSR and MinTRL, with the same `periods_per_year` default (252) and refusal. It was documented as per period and passed unconverted, so a benchmark given in the unit the rest of `HonestyConfig` uses was a bar `sqrt(periods_per_year)` times too high, about 15.9 annualized for 1.0 on daily bars. The field keeps its name on every surface: Rust `HonestyConfig::sr_benchmark`, Python `sr_benchmark=`, npm `srBenchmark`, the WASM config key `sr_benchmark` and the MCP tool argument. `sharpebench check` does not take a benchmark and is unchanged. **Callers who passed a non-zero per-period benchmark must now pass it annualized**: before, `is_my_sharpe_real(xs, sr_benchmark=0.063)` on daily returns; after, `is_my_sharpe_real(xs, sr_benchmark=1.0, periods_per_year=252)`. The default 0.0 is zero in every unit, so default verdicts are bit-identical on every surface. Beside an invalid `periods_per_year`, which already fails the verdict, a non-zero benchmark has no per-period value and the PSR and MinTRL are NaN (`null` in JSON). The raw `probabilistic_sharpe_ratio` and `min_track_record_length` primitives still take a per-period benchmark. See F18 in the [literature audit](docs/audits/2026-09-09/LITERATURE-AUDIT.md).
@@ -567,6 +569,7 @@ First published release.
 ### Fixed
 - Constant-time HMAC verification and bounded, timed agent HTTP reads ([6c3d174](https://github.com/general-liquidity/sharpebench/commit/6c3d174)).
 
+[0.22.0]: https://github.com/general-liquidity/sharpebench/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/general-liquidity/sharpebench/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/general-liquidity/sharpebench/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/general-liquidity/sharpebench/compare/v0.18.4...v0.19.0
