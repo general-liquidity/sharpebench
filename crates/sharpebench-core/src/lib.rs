@@ -117,8 +117,8 @@ pub use oos::{oos_decay, OosDecayReport};
 pub use pass_k::{pass_k, PassMode};
 pub use percentile::{percentile_of, BaselineBand, HumanBaseline};
 pub use process::{
-    check_lifecycle, process_score_with_ordering, LifecycleReport, LifecycleStep, OrderId,
-    OrderingViolation, Phase, PhaseKind, ProcessEvent, ProcessScore, Subject, Trace,
+    check_lifecycle, process_score_with_ordering, ClientOrderKey, LifecycleReport, LifecycleStep,
+    OrderId, OrderingViolation, Phase, PhaseKind, ProcessEvent, ProcessScore, Subject, Trace,
 };
 pub use rediscovery::{
     classify_rediscovery, clone_clusters, cosine_similarity, RediscoveryVerdict,
