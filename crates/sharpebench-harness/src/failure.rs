@@ -111,9 +111,15 @@ pub enum AttemptOutcome {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttemptRecord {
     pub outcome: AttemptOutcome,
+    /// The attempt itself, never including a backoff wait before or after it.
     pub duration: AttemptDuration,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<crate::accounting::AttemptUsage>,
+    /// The wait the retry driver scheduled after this failed attempt and before
+    /// the next one. Absent when retries are immediate (the default), so every
+    /// ledger written without a schedule keeps its bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backoff_after: Option<Backoff>,
 }
 
 impl AttemptRecord {
@@ -122,6 +128,7 @@ impl AttemptRecord {
             outcome: AttemptOutcome::Completed,
             duration,
             usage: None,
+            backoff_after: None,
         }
     }
 
@@ -130,6 +137,7 @@ impl AttemptRecord {
             outcome: AttemptOutcome::Failed { kind },
             duration,
             usage: None,
+            backoff_after: None,
         }
     }
 
@@ -196,11 +204,15 @@ impl AttemptLedger {
     /// Rank-neutral totals over every attempt, failed ones included.
     pub fn summary(&self) -> AttemptSummary {
         let mut duration_ns_total: u64 = 0;
+        let mut backoff_ns_total: u64 = 0;
         let mut timed = 0usize;
         for record in &self.attempts {
             if let AttemptDuration::HostClock { nanos } = record.duration {
                 duration_ns_total = duration_ns_total.saturating_add(nanos);
                 timed += 1;
+            }
+            if let Some(backoff) = record.backoff_after {
+                backoff_ns_total = backoff_ns_total.saturating_add(backoff.delay_ns);
             }
         }
         AttemptSummary {
@@ -208,6 +220,7 @@ impl AttemptLedger {
             failed: self.attempts.iter().filter(|a| a.is_failure()).count(),
             completed: self.attempts.iter().filter(|a| !a.is_failure()).count(),
             duration_ns_total,
+            backoff_ns_total,
             duration_source: if timed == 0 {
                 DurationSource::Unavailable
             } else if timed == self.attempts.len() {
@@ -242,6 +255,15 @@ pub struct AttemptSummary {
     pub failed: usize,
     pub duration_ns_total: u64,
     pub duration_source: DurationSource,
+    /// Scheduled backoff between attempts, kept apart from `duration_ns_total`
+    /// so waiting is never read as work. Omitted while it is zero, which is
+    /// every sweep that retries immediately.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub backoff_ns_total: u64,
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 /// The outcome of attempting one (window, seed) run, after any retries.
@@ -341,7 +363,123 @@ where
 /// Retry while preserving usage from every observation, including failures.
 /// Failed attempts never establish complete billing, even if some decisions
 /// carried counts: the failed request itself may have consumed unobserved work.
-pub fn run_with_observed_retries<F>(max_retries: u32, mut attempt: F) -> AttemptedRun
+pub fn run_with_observed_retries<F>(max_retries: u32, attempt: F) -> AttemptedRun
+where
+    F: FnMut() -> AttemptObservation,
+{
+    run_with_backoff(
+        max_retries,
+        &BackoffSchedule::immediate(),
+        &mut ThreadSleeper,
+        attempt,
+    )
+}
+
+/// One scheduled wait between a failed attempt and its retry, as recorded in
+/// the ledger.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Backoff {
+    /// Which retry this wait preceded, counting from 1.
+    pub retry: u32,
+    /// The scheduled wait in nanoseconds. This is what the schedule asked for;
+    /// a real sleeper waits at least this long.
+    pub delay_ns: u64,
+}
+
+/// An explicit, deterministic wait schedule for runtime-failure retries.
+///
+/// Entry `i` is the wait before retry `i + 1`; retries past the end reuse the
+/// last entry. The empty schedule is immediate retry, the behaviour before
+/// schedules existed, and it records nothing. Nothing here reads a clock: the
+/// schedule is data, and the only thing that waits is the injected [`Sleeper`].
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackoffSchedule {
+    pub delays_ns: Vec<u64>,
+}
+
+impl BackoffSchedule {
+    /// Retry immediately. Records no backoff and changes no identity.
+    pub fn immediate() -> Self {
+        Self::default()
+    }
+
+    /// Wait `delays[i]` before retry `i + 1`, holding the last delay after.
+    pub fn from_delays(delays: &[std::time::Duration]) -> Self {
+        Self {
+            delays_ns: delays
+                .iter()
+                .map(|delay| u64::try_from(delay.as_nanos()).unwrap_or(u64::MAX))
+                .collect(),
+        }
+    }
+
+    /// Whether this schedule never waits.
+    pub fn is_immediate(&self) -> bool {
+        self.delays_ns.iter().all(|&delay| delay == 0)
+    }
+
+    /// The wait before retry number `retry` (1-based), or `None` for none.
+    pub fn delay_before(&self, retry: u32) -> Option<std::time::Duration> {
+        let index = usize::try_from(retry.saturating_sub(1)).unwrap_or(usize::MAX);
+        let delay = self
+            .delays_ns
+            .get(index)
+            .or(self.delays_ns.last())
+            .copied()?;
+        (delay > 0).then(|| std::time::Duration::from_nanos(delay))
+    }
+
+    /// Fold this schedule into a sweep's `invocation_sha256`.
+    ///
+    /// A wait can change results: against a transiently degraded endpoint it
+    /// decides whether a retry lands after recovery, and so which cells
+    /// complete and which exhaust. A checkpoint resumed under a different
+    /// schedule would mix two retry policies in one pool, so the schedule is
+    /// bound into the invocation identity. The immediate schedule returns the
+    /// digest unchanged, so every existing checkpoint contract stays valid.
+    pub fn bind_invocation(&self, invocation_sha256: &str) -> String {
+        if self.is_immediate() {
+            return invocation_sha256.to_string();
+        }
+        let delays = self
+            .delays_ns
+            .iter()
+            .map(u64::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        sharpebench_attest::content_digest(
+            format!("sharpebench-retry-backoff-v1|{invocation_sha256}|{delays}").as_bytes(),
+        )
+    }
+}
+
+/// Where a retry driver waits. Injected so tests run a schedule without real
+/// time passing and so the scoring kernel never sees a clock.
+pub trait Sleeper {
+    fn sleep(&mut self, delay: std::time::Duration);
+}
+
+/// Waits on the calling thread.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ThreadSleeper;
+
+impl Sleeper for ThreadSleeper {
+    fn sleep(&mut self, delay: std::time::Duration) {
+        std::thread::sleep(delay);
+    }
+}
+
+/// [`run_with_observed_retries`] under an explicit backoff schedule. Before each
+/// retry of a runtime error the driver records the scheduled wait on the failed
+/// attempt's ledger entry, then waits through `sleeper`. The wait is never
+/// inside an attempt's `duration`. Agent faults are still final and never
+/// wait.
+pub fn run_with_backoff<F>(
+    max_retries: u32,
+    schedule: &BackoffSchedule,
+    sleeper: &mut dyn Sleeper,
+    mut attempt: F,
+) -> AttemptedRun
 where
     F: FnMut() -> AttemptObservation,
 {
@@ -373,8 +511,8 @@ where
             Err(kind) => {
                 let mut record = AttemptRecord::failed(kind.clone(), duration);
                 record.usage = usage;
-                ledger.push(record);
                 if !kind.is_runtime() {
+                    ledger.push(record);
                     return AttemptedRun {
                         outcome: RunOutcome::AgentFault(kind.clone()),
                         last_failure: Some(kind),
@@ -382,6 +520,7 @@ where
                     };
                 }
                 if tries > max_retries || tries == u32::MAX {
+                    ledger.push(record);
                     return AttemptedRun {
                         outcome: RunOutcome::Exhausted {
                             last: kind.clone(),
@@ -391,7 +530,15 @@ where
                         ledger,
                     };
                 }
-                // else: loop and retry
+                let delay = schedule.delay_before(tries);
+                record.backoff_after = delay.map(|delay| Backoff {
+                    retry: tries,
+                    delay_ns: u64::try_from(delay.as_nanos()).unwrap_or(u64::MAX),
+                });
+                ledger.push(record);
+                if let Some(delay) = delay {
+                    sleeper.sleep(delay);
+                }
             }
         }
     }
@@ -507,6 +654,141 @@ mod tests {
         });
         assert_eq!(calls, 1, "a budget breach must not be retried");
         assert!(matches!(driven.outcome, RunOutcome::AgentFault(_)));
+    }
+
+    /// Records every requested wait and never waits.
+    #[derive(Default)]
+    struct FakeSleeper {
+        waits: Vec<std::time::Duration>,
+    }
+
+    impl Sleeper for FakeSleeper {
+        fn sleep(&mut self, delay: std::time::Duration) {
+            self.waits.push(delay);
+        }
+    }
+
+    fn secs(values: &[u64]) -> Vec<std::time::Duration> {
+        values
+            .iter()
+            .map(|&s| std::time::Duration::from_secs(s))
+            .collect()
+    }
+
+    /// The archive's schedule (5 s, then 15 s) over four retries: the sleeper
+    /// is asked for exactly 5, 15, 15, 15 seconds in that order, each wait is
+    /// recorded on the failure that preceded it, and the final exhausted
+    /// attempt, which is followed by no retry, records none.
+    #[test]
+    fn a_backoff_schedule_is_followed_exactly_and_recorded() {
+        let schedule = BackoffSchedule::from_delays(&secs(&[5, 15]));
+        let mut sleeper = FakeSleeper::default();
+        let mut calls = 0;
+        let driven = run_with_backoff(4, &schedule, &mut sleeper, || {
+            calls += 1;
+            Err(FailureKind::TransportError).into()
+        });
+        assert_eq!(calls, 5);
+        assert_eq!(sleeper.waits, secs(&[5, 15, 15, 15]));
+        let recorded: Vec<Option<Backoff>> = driven
+            .ledger
+            .attempts
+            .iter()
+            .map(|record| record.backoff_after)
+            .collect();
+        let backoff = |retry, s: u64| {
+            Some(Backoff {
+                retry,
+                delay_ns: s * 1_000_000_000,
+            })
+        };
+        assert_eq!(
+            recorded,
+            vec![
+                backoff(1, 5),
+                backoff(2, 15),
+                backoff(3, 15),
+                backoff(4, 15),
+                None
+            ]
+        );
+        assert_eq!(driven.ledger.summary().backoff_ns_total, 50_000_000_000);
+        // The wait is kept out of the attempt durations: four sleeps of real
+        // time would be 50 s, and a fake sleeper spends none.
+        assert!(driven.ledger.summary().duration_ns_total < 50_000_000_000);
+    }
+
+    #[test]
+    fn a_recovery_stops_the_schedule_and_an_agent_fault_never_waits() {
+        let schedule = BackoffSchedule::from_delays(&secs(&[1, 2, 3]));
+        let mut sleeper = FakeSleeper::default();
+        let mut calls = 0;
+        let driven = run_with_backoff(5, &schedule, &mut sleeper, || {
+            calls += 1;
+            if calls < 3 {
+                Err(FailureKind::Timeout).into()
+            } else {
+                Ok(failing_sentinel_run(3)).into()
+            }
+        });
+        assert!(matches!(driven.outcome, RunOutcome::Completed(_)));
+        assert_eq!(sleeper.waits, secs(&[1, 2]));
+        assert_eq!(driven.ledger.attempts[2].backoff_after, None);
+
+        let mut sleeper = FakeSleeper::default();
+        let driven = run_with_backoff(5, &schedule, &mut sleeper, || {
+            Err(FailureKind::AgentProtocolViolation).into()
+        });
+        assert!(matches!(driven.outcome, RunOutcome::AgentFault(_)));
+        assert!(sleeper.waits.is_empty());
+        assert_eq!(driven.ledger.attempts[0].backoff_after, None);
+    }
+
+    /// Without a schedule nothing waits, nothing is recorded, and the ledger
+    /// serializes exactly as it did before schedules existed.
+    #[test]
+    fn the_immediate_schedule_records_nothing_and_keeps_ledger_bytes() {
+        let mut sleeper = FakeSleeper::default();
+        let mut calls = 0;
+        let driven = run_with_backoff(2, &BackoffSchedule::immediate(), &mut sleeper, || {
+            calls += 1;
+            Err(FailureKind::SpawnError).into()
+        });
+        assert!(sleeper.waits.is_empty());
+        assert!(driven
+            .ledger
+            .attempts
+            .iter()
+            .all(|r| r.backoff_after.is_none()));
+        let text = serde_json::to_string(&driven.ledger.attempts[0]).unwrap();
+        assert!(!text.contains("backoff"), "{text}");
+        let summary = serde_json::to_string(&driven.ledger.summary()).unwrap();
+        assert!(!summary.contains("backoff"), "{summary}");
+        // A ledger written before the field existed still reads.
+        let legacy = r#"{"outcome":{"outcome":"completed"},"duration":{"source":"unavailable"}}"#;
+        let record: AttemptRecord = serde_json::from_str(legacy).unwrap();
+        assert_eq!(
+            record,
+            AttemptRecord::completed(AttemptDuration::Unavailable)
+        );
+    }
+
+    #[test]
+    fn only_a_waiting_schedule_changes_the_invocation_identity() {
+        let invocation = "a".repeat(64);
+        assert_eq!(
+            BackoffSchedule::immediate().bind_invocation(&invocation),
+            invocation
+        );
+        assert_eq!(
+            BackoffSchedule::from_delays(&secs(&[0])).bind_invocation(&invocation),
+            invocation
+        );
+        let five = BackoffSchedule::from_delays(&secs(&[5, 15])).bind_invocation(&invocation);
+        let other = BackoffSchedule::from_delays(&secs(&[5, 16])).bind_invocation(&invocation);
+        assert_ne!(five, invocation);
+        assert_ne!(five, other);
+        assert_eq!(five.len(), 64);
     }
 
     #[test]
