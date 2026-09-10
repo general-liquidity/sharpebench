@@ -21,6 +21,10 @@ sharpebench-edge = { path = "../sharpebench-edge", version = "0.19.0" }
 sharpebench-arena = { path = "../sharpebench-arena", version = "0.19.0" }
 serde = "1"
 serde_json = "1"
+# Owned, unlinked capture files for the opt-in image preflight: the Docker
+# client writes its inspect/export output into a handle this process owns, never
+# into a path an entrant could name or observe.
+tempfile = "3"
 
 # Opt-in self-update + version-check stack. Off by default so the published CLI and
 # the musl static binary stay dependency-free; mirrors xtask's ring-free TLS choice
@@ -28,6 +32,11 @@ serde_json = "1"
 ureq = { version = "2", default-features = false, features = ["native-tls"], optional = true }
 native-tls = { version = "0.2", optional = true }
 sha2 = { version = "0.10", optional = true }
+
+[dev-dependencies]
+# Hand-built TAR fixtures for the preflight tests, so the refusal paths are
+# provable without a Docker daemon. Same version the harness already uses.
+tar = { version = "0.4", default-features = false }
 
 [features]
 self-update = ["dep:ureq", "dep:native-tls", "dep:sha2"]

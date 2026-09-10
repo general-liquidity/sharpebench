@@ -160,7 +160,55 @@ The fixture now explicitly resets accepted sockets to blocking mode while
 retaining its read timeout. A third CLI test forces the initial nonblocking
 state; removing the reset in an isolated copy reproduces `WouldBlock`, and
 restoring it passes. All three pricing CLI tests and targeted clippy pass
-locally. The corrected head still requires cross-platform CI.
+locally. The corrected head `d957fe5` passed all PR checks, including macOS
+and Windows. PR #42 merged as `630183a` with an identical tree; post-main
+CI/npm runs 34407524104 and 34407524144 succeeded.
+
+### Raw artifact scan engine: partial G07 implementation
+
+The feature branch adds a streaming byte engine with a validated policy and
+explicit raw-file scope. Nine integration tests and one deadline unit test
+pass. Thirteen isolated mutations are caught: dropping sequence matching,
+dropping whole-file digest matches, bypassing the file-byte limit, accepting an
+empty scope, swallowing read errors, accepting truncated files, ignoring prior
+incompleteness, omitting names from inventory identity, overflowing the match
+list, accepting duplicate entries, resetting match state at chunk boundaries,
+accepting an empty policy, and omitting the final deadline check.
+Restored controls pass; targeted clippy passes with warnings denied.
+The full harness package suite passes 98 tests with two explicitly ignored
+tests (the slow CI leg and the installed sibling shim). Rustdoc with warnings
+denied and workspace formatting also pass.
+
+This does not yet establish pre-launch protection. No artifact enumerator,
+Docker export capture or CLI refusal path is wired to this engine at this
+checkpoint. Its caller must impose blocking-I/O deadlines and report
+enumeration failures. Negative raw-byte matching cannot exclude compressed,
+encoded, transformed or previously memorized content.
+
+### Non-extracting TAR reader: G07 integration in progress
+
+Nine synthetic archive tests and one deadline unit test pass. They cover
+repeated paths, concatenated archives, complete archive hashing, link/header
+content, GNU long names, PAX metadata, unsupported sparse/size forms, malformed
+records, bounded metadata allocation, padding/count limits, truncation, read
+errors, dangling extensions and duplicate pending extensions. No archive is
+extracted and no Docker container is started by these tests.
+
+Thirteen isolated mutations are caught: stopping at zero blocks, removing
+header matching, removing body matching, accepting PAX size overrides,
+ignoring blank PAX records, removing the metadata cap, excluding padding from
+the byte bound, swallowing enumeration errors, replacing the archive digest,
+hiding extension entries, accepting dangling extensions, accepting duplicate
+extensions and ignoring the reader deadline. Restored controls pass and the
+restored source is byte-identical to the feature worktree after formatting.
+The final harness suite passes 108 tests with two explicit ignores. Targeted
+clippy, rustdoc with warnings denied and formatting pass.
+
+The existing byte-engine head `c4d1c29` passed all PR #44 checks. That result
+does not cover this subsequent reader addition; its new dependency and package
+checks must run on the updated head. The dependency is `tar` 0.4.46 with
+default features disabled, adding `filetime` transitively. Docker capture,
+image configuration/volume handling and real launch refusal remain open.
 
 Rates use the legacy entrant-reported token fields. Individual omitted counts
 default to zero in that protocol; neither count completeness nor the declared
