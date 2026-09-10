@@ -7,7 +7,7 @@ sharpebench run                       run reference agents through the sim and r
 sharpebench score <submissions.json>  rank a JSON field of pre-computed submissions
 sharpebench check <returns.csv> --trials N [--periods-per-year N]   test one return series for backtest honesty
 sharpebench realism [--data <csv>]    run the stylized-facts dataset gate
-sharpebench commit <agent> <window> <digest> <salt>   forward-attestation pre-registration
+sharpebench commit <agent> <window> <digest> <salt> [--fault-plan <plan.json>]   forward-attestation pre-registration
 sharpebench stress                    run the adversarial stress suite (contamination-masked)
 sharpebench audit                     self-audit: prove the scorer resists gaming
 sharpebench sign <subs.json> <key> <out.json>         score + sign a board to a file

@@ -590,7 +590,7 @@ fn help() {
         "                         does not use: autocorrelated-psr,null-se-psr,mppm (comma-separated)"
     );
     println!(
-        "  sharpebench commit <agent> <window> <digest> <salt>  forward-attestation pre-registration"
+        "  sharpebench commit <agent> <window> <digest> <salt> [--fault-plan <plan.json>]  forward-attestation pre-registration"
     );
     println!("  sharpebench stress                    run the adversarial stress suite (masked)");
     println!("  sharpebench audit                     self-audit: prove the scorer resists gaming");
@@ -1091,10 +1091,27 @@ fn run_stress(json: bool) -> ExitCode {
 
 fn run_commit(args: &[String]) -> ExitCode {
     if args.len() < 6 {
-        eprintln!("usage: sharpebench commit <agent_id> <target_window> <artifact_digest> <salt>");
+        eprintln!(
+            "usage: sharpebench commit <agent_id> <target_window> <artifact_digest> <salt> [--fault-plan <plan.json>]"
+        );
         return ExitCode::from(2);
     }
-    let c = sharpebench_attest::make_commitment(&args[2], &args[3], &args[4], &args[5]);
+    // A faulted arena window refuses at reveal any commitment that does not bind
+    // its fault plan, so the plan is validated here exactly as `run` validates it.
+    let fault_plan_sha256 = match arena_cmd::fault_plan_digest(args) {
+        Ok(digest) => digest,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let c = sharpebench_attest::make_commitment_under_fault_plan(
+        &args[2],
+        &args[3],
+        &args[4],
+        &args[5],
+        fault_plan_sha256.as_deref(),
+    );
     match serde_json::to_string_pretty(&c) {
         Ok(j) => {
             println!("{j}");

@@ -188,7 +188,7 @@ fn cmd_link_supersession(args: &[String], json: bool) -> i32 {
 }
 
 /// Print the commitment an entrant registers with `arena commit`. Without
-/// `--fault-plan` it is the commitment `sharpebench commit` prints, byte for
+/// `--fault-plan` it is the commitment plain `sharpebench commit` prints, byte for
 /// byte; with it, the commitment also binds the validated plan's digest, which
 /// a faulted window requires at reveal.
 fn cmd_commitment(args: &[String], json: bool) -> i32 {
@@ -423,7 +423,7 @@ fn cmd_verify(args: &[String], json: bool) -> i32 {
 /// when the flag is absent. Read once and capped as `run --fault-plan` reads
 /// it; a plan `run` would refuse is refused here, so a window can only name a
 /// plan an entrant can actually be run under.
-fn fault_plan_digest(args: &[String]) -> Result<Option<String>, String> {
+pub(crate) fn fault_plan_digest(args: &[String]) -> Result<Option<String>, String> {
     use sharpebench_harness::fault_plan::{FaultPlan, MAX_FAULT_PLAN_BYTES};
     use std::io::Read;
     if !args.iter().any(|arg| arg == "--fault-plan") {

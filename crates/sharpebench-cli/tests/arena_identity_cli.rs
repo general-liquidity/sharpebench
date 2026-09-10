@@ -143,6 +143,61 @@ fn arena_commitment_without_a_plan_is_sharpebench_commit() {
 }
 
 #[test]
+fn sharpebench_commit_binds_a_fault_plan_like_arena_commitment() {
+    let fx = Fixture::new();
+    let artifact = content_digest(b"artifact");
+    std::fs::write(fx.path("plan.json"), PLAN).unwrap();
+    let args = |cmd: &[&'static str]| -> Vec<String> {
+        cmd.iter()
+            .map(|s| s.to_string())
+            .chain([
+                "alpha".to_string(),
+                "w1".to_string(),
+                artifact.clone(),
+                "salt-a".to_string(),
+                "--fault-plan".to_string(),
+                "plan.json".to_string(),
+            ])
+            .collect()
+    };
+    let plain_args = args(&["commit"]);
+    let arena_args = args(&["arena", "commitment"]);
+    let plain = fx.expect(
+        0,
+        &plain_args.iter().map(String::as_str).collect::<Vec<_>>(),
+        None,
+    );
+    let arena = fx.expect(
+        0,
+        &arena_args.iter().map(String::as_str).collect::<Vec<_>>(),
+        None,
+    );
+    assert_eq!(plain.stdout, arena.stdout);
+    let unfaulted = fx.expect(0, &["commit", "alpha", "w1", &artifact, "salt-a"], None);
+    assert_ne!(
+        plain.stdout, unfaulted.stdout,
+        "the plan must change the commitment"
+    );
+
+    // A plan `run --fault-plan` would refuse is refused before anything prints.
+    std::fs::write(fx.path("bad.json"), "{not json").unwrap();
+    let bad = fx.expect(
+        2,
+        &[
+            "commit",
+            "alpha",
+            "w1",
+            &artifact,
+            "salt-a",
+            "--fault-plan",
+            "bad.json",
+        ],
+        None,
+    );
+    assert!(bad.stdout.is_empty());
+}
+
+#[test]
 fn a_faulted_window_binds_its_plan_from_commitment_to_verify() {
     let fx = Fixture::new();
     std::fs::write(fx.path("plan.json"), PLAN).unwrap();
