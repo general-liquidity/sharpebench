@@ -186,9 +186,47 @@ def test_pure_noise_does_not_pass():
 
 
 def test_lite_verdict_trial_count_can_flip_a_pass_to_a_fail():
-    xs = edge_track(120, drift=0.00035)
+    # A daily track at an annualized Sharpe of about 1.9. At a million trials the
+    # per-period bar is 0.5 / sqrt(252) * k(1e6) = 0.153, above its per-period
+    # Sharpe of 0.120. (The former track here had a per-period Sharpe of 2.5,
+    # annualized about 39, and failed only against the unconverted prior.)
+    xs = four_years_daily()
     assert is_my_sharpe_real(xs, n_trials=1)["verdict"] != "fail"
     assert is_my_sharpe_real(xs, n_trials=1_000_000)["verdict"] == "fail"
+
+
+def four_years_daily():
+    return [0.0005 + 0.006 * math.sin(0.7 * i) for i in range(1008)]
+
+
+def test_lite_verdict_converts_the_annualized_prior_by_frequency():
+    """The prior is annualized: 0.5 / sqrt(252) * k(20) per period on daily bars.
+
+    The expected bar is SciPy's, computed outside the kernel. Applied per period
+    unconverted, the same prior made this track (annualized Sharpe about 1.9)
+    fail against an annualized bar of about 15.
+    """
+    xs = four_years_daily()
+    daily = is_my_sharpe_real(xs, n_trials=20)
+    assert daily["verdict"] == "pass"
+    assert daily["expected_max_sharpe"] == pytest.approx(0.05986667325938747, abs=1e-8)
+    assert "periods_per_year was not supplied" in daily["explanation"]
+    explicit = is_my_sharpe_real(xs, n_trials=20, periods_per_year=252)
+    assert explicit["expected_max_sharpe"] == daily["expected_max_sharpe"]
+    assert "periods_per_year" not in explicit["explanation"]
+    weekly = is_my_sharpe_real(xs, n_trials=20, periods_per_year=52)
+    assert weekly["expected_max_sharpe"] > daily["expected_max_sharpe"]
+    assert weekly["verdict"] != "pass"
+
+
+@pytest.mark.parametrize("bad", [0.0, -252.0, float("nan"), float("inf")])
+def test_lite_verdict_refuses_a_frequency_that_is_not_one(bad):
+    xs = four_years_daily()
+    v = is_my_sharpe_real(xs, n_trials=500, periods_per_year=bad)
+    assert v["verdict"] == "fail"
+    assert v["statistics_error"] == "periods_per_year must be finite and positive"
+    full = is_my_sharpe_real_full([xs, xs], n_trials=500, periods_per_year=bad)
+    assert full["honesty"]["statistics_error"] == v["statistics_error"]
 
 
 def test_full_verdict_over_a_noise_field():

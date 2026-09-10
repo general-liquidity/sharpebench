@@ -7,9 +7,13 @@ lists and dicts.
 
     >>> from sharpebench import is_my_sharpe_real
     >>> returns = [0.001 + 0.0001 * ((i % 5) - 2) for i in range(500)]
-    >>> v = is_my_sharpe_real(returns, n_trials=200)
+    >>> v = is_my_sharpe_real(returns, n_trials=200, periods_per_year=252)
     >>> v["verdict"] in {"pass", "borderline", "fail"}
     True
+
+The verdict's ``trials_sr_std`` is annualized, like the leaderboard's, and
+``periods_per_year`` (default 252, daily bars, named in the explanation when
+assumed) converts it to the per-period unit the Sharpe is computed in.
 
 The whole surface is a pyo3 binding over the same Rust kernel the SharpeBench CLI
 and the ``@general-liquidity/sharpebench`` npm package use. The Python test suite
