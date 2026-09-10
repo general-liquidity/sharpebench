@@ -79,7 +79,15 @@ impl SweepContract {
     /// checkpoint carries no failed-attempt evidence, and resuming into it would
     /// report everything its attempts already spent as zero. It is refused
     /// rather than read that way.
-    pub const SCHEMA_VERSION: u32 = 3;
+    ///
+    /// Bumped to 4 for `TaskRecord::attempts_in_round` for exactly the same
+    /// reason one level down. A version-3 checkpoint has no per-round spend, so
+    /// its unfinished cells deserialize at the `#[serde(default)]` zero and are
+    /// granted a fresh `max_retries + 1` attempts on top of whatever the writing
+    /// binary already spent in that round. The load-time budget pre-check reads
+    /// the same zero and cannot see the discontinuity, so the version is what
+    /// refuses it.
+    pub const SCHEMA_VERSION: u32 = 4;
 
     /// Build the contract from already-computed SHA-256 identities.
     pub fn new(
@@ -102,7 +110,11 @@ impl SweepContract {
         }
     }
 
-    fn matches_execution(&self, windows: &[Window], seeds: &[u64], max_retries: u32) -> bool {
+    /// Everything checkable without caller-supplied execution parameters: the
+    /// schema this binary understands, well-formed identity digests, and the
+    /// window matrix. Callers that take the seeds and the retry budget from the
+    /// contract itself have nothing further to compare against.
+    fn matches_windows(&self, windows: &[Window]) -> bool {
         let valid_digest = |digest: &str| {
             digest.len() == 64
                 && digest
@@ -121,8 +133,13 @@ impl SweepContract {
             .into_iter()
             .all(|digest| valid_digest(digest))
             && self.windows == windows.iter().map(|w| (w.start, w.end)).collect::<Vec<_>>()
-            && self.seeds == seeds
-            && self.max_retries == max_retries
+    }
+
+    /// The full check, for callers that supply seeds and a retry budget of their
+    /// own: those two legs only mean something against values the contract did
+    /// not provide.
+    fn matches_execution(&self, windows: &[Window], seeds: &[u64], max_retries: u32) -> bool {
+        self.matches_windows(windows) && self.seeds == seeds && self.max_retries == max_retries
     }
 }
 
@@ -707,15 +724,29 @@ pub fn run_resumable_sweep_observed<F>(
 where
     F: FnMut(usize, u64) -> crate::AttemptObservation,
 {
-    if !contract.matches_execution(windows, &contract.seeds, contract.max_retries) {
+    // Seeds and the retry budget come from the contract itself here, so
+    // comparing them against the contract would compare them against
+    // themselves. `run_resumable_sweep_bound` still makes the real comparison
+    // against the values its caller supplied.
+    if !contract.matches_windows(windows) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
-            "sweep contract does not describe the supplied windows and execution policy",
+            "sweep contract does not describe the supplied windows",
         ));
     }
 
     let mut cp =
         match SweepCheckpoint::load(path) {
+            Ok(existing)
+                if existing.contract.as_ref().is_some_and(|written| {
+                    written.schema_version != SweepContract::SCHEMA_VERSION
+                }) =>
+            {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "checkpoint was written under a different contract schema; its per-task attempt accounting cannot be read as this one",
+                ))
+            }
             Ok(existing) if existing.matches_bound(agent_id, contract) => {
                 let mut existing = existing;
                 // Validate every proposed recovery before modifying any cell.
@@ -1227,6 +1258,124 @@ mod tests {
             Err(error) => error,
         };
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(!path.exists());
+    }
+
+    /// F-B: `attempts_in_round` became a persisted spend invariant while the
+    /// contract schema stayed at 3, so a checkpoint written before it existed
+    /// deserializes at the serde default. Its claimed cell is requeued with a
+    /// per-round spend of zero and granted a fresh `max_retries + 1` attempts on
+    /// top of everything the writing binary already spent, which is the exact
+    /// "spend read as zero" case the schema-3 bump exists to refuse. The
+    /// budget pre-check reads the same zero and cannot see it.
+    #[test]
+    fn bound_resume_refuses_a_checkpoint_written_before_the_per_round_budget() {
+        let path = tmp_path("bound-pre-round-budget");
+        let windows = [Window { start: 20, end: 60 }];
+        let seeds = [0u64];
+        let contract = contract(&windows, &seeds, 1);
+        let legacy = format!(
+            r#"{{
+  "agent_id": "ext",
+  "contract": {{
+    "schema_version": 3,
+    "dataset_sha256": "{d}",
+    "cost_model_sha256": "{c}",
+    "score_config_sha256": "{sc}",
+    "runner_artifact_sha256": "{r}",
+    "entrant_sha256": "{e}",
+    "invocation_sha256": "{i}",
+    "windows": [[20, 60]],
+    "seeds": [0],
+    "max_retries": 1
+  }},
+  "tasks": [
+    {{
+      "window": 0,
+      "seed": 0,
+      "state": {{ "state": "claimed", "worker": 0, "epoch": 0 }},
+      "attempts": {{ "attempts": [] }}
+    }}
+  ]
+}}"#,
+            d = contract.dataset_sha256,
+            c = contract.cost_model_sha256,
+            sc = contract.score_config_sha256,
+            r = contract.runner_artifact_sha256,
+            e = contract.entrant_sha256,
+            i = contract.invocation_sha256,
+        );
+        std::fs::write(&path, &legacy).unwrap();
+
+        // The missing key really does read as an unspent round, which is why the
+        // version and not the budget pre-check has to refuse it.
+        let parsed = SweepCheckpoint::load(&path).unwrap();
+        assert_eq!(parsed.tasks[0].attempts_in_round, 0);
+        assert!(parsed.tasks[0].attempts.is_empty());
+
+        let error = match run_resumable_sweep_bound(
+            &path,
+            "ext",
+            &contract,
+            &windows,
+            &seeds,
+            1,
+            |_w, seed| Ok(skilled_run(seed)),
+        ) {
+            Ok(_) => panic!("a pre-budget checkpoint must not grant a fresh round"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert!(
+            error.to_string().contains("different contract schema"),
+            "{error}"
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// F-E: the seed and retry legs of `matches_execution` are real only against
+    /// values the contract did not supply. `run_resumable_sweep_bound` is the
+    /// caller that supplies them, so that is where the comparison has to bite.
+    #[test]
+    fn bound_resume_rejects_seeds_and_retries_the_contract_did_not_declare() {
+        let path = tmp_path("bound-execution-legs");
+        let windows = [Window { start: 20, end: 60 }];
+        let seeds = [0u64];
+        let contract = contract(&windows, &seeds, 1);
+
+        for (other_seeds, retries) in [(vec![1u64], 1u32), (vec![0u64], 2u32)] {
+            let error = match run_resumable_sweep_bound(
+                &path,
+                "ext",
+                &contract,
+                &windows,
+                &other_seeds,
+                retries,
+                |_w, seed| Ok(skilled_run(seed)),
+            ) {
+                Ok(_) => panic!("seeds {other_seeds:?} / {retries} retries are not the contract"),
+                Err(error) => error,
+            };
+            assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+            assert!(!path.exists(), "an invalid contract must write nothing");
+        }
+
+        // The windows leg is the one `run_resumable_sweep_observed` can still
+        // check, and it does.
+        let different = [Window { start: 21, end: 61 }];
+        let error = match run_resumable_sweep_bound_with_policy(
+            &path,
+            "ext",
+            &contract,
+            &different,
+            ResumePolicy::UnfinishedOnly,
+            |_w, seed| Ok(skilled_run(seed)),
+        ) {
+            Ok(_) => panic!("the window matrix must still be compared"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(error.to_string().contains("supplied windows"), "{error}");
         assert!(!path.exists());
     }
 }
