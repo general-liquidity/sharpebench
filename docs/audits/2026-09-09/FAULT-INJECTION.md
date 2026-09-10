@@ -291,6 +291,8 @@ confirmed byte-identical with `cmp` before the next mutation.
   `score_config_sha256` for a faulted window, per row 32.
 - Done, see below: the protocol text states each declarable relaxation, per
   row 27.
+- Done, see "Incomplete sweeps follow-up" below: an incomplete faulted sweep
+  carries its fault report.
 - Row 29 becomes due when a paged read exists; the tripwire test says when.
 
 ## CLI and protocol follow-up
@@ -321,8 +323,9 @@ gains a rank-neutral `fault_injection` object built from that ledger (read back
 from the checkpoint when there is one): plan digest, declared relaxations,
 `entrant_declaration()`, `denominators_with_evidence` over the swept cells and
 every attempt's `InjectedFaults`. Human output prints the declaration before
-the sweep and the denominators after it. The incomplete-sweep error carries no
-fault report; its evidence is in the checkpoint when one was used.
+the sweep and the denominators after it. As built, the incomplete-sweep error
+carried no fault report and its evidence was only in the checkpoint when one
+was used; closed since, see "Incomplete sweeps follow-up" below.
 
 **Row 27 protocol text.** The protocol crate documentation
 (`crates/sharpebench-protocol/src/lib.rs`, "Consistency relaxations a fault
@@ -487,3 +490,66 @@ What this does not do: the `Commitment` an entrant registers before the
 deadline does not bind a plan (the attest crate is unchanged), so the plan is
 fixed by the window at open and checked against each entry's declaration at
 score, not committed to by the entrant.
+
+## Incomplete sweeps follow-up
+
+Built on `0dcc4b8` in `2442d7f`. The sections above are unchanged apart from
+the closing sentence of "CLI and protocol follow-up".
+
+**Change.** `report_transport_failures` (`crates/sharpebench-cli/src/main.rs`)
+takes the sweep's report as `Option<&serde_json::Value>`, and each transport
+(`--http`, `--image`, `--cmd`) now builds `fault_injection_report` from its
+attempt ledger before the completeness check rather than after it: the ledger
+`run_agent_resilient_faulted` returns, or the one `checkpoint_fault_ledger`
+reads back from the checkpoint. The `incomplete_external_sweep` JSON gains
+`fault_injection` beside `attempt_accounting`, and human output prints the
+denominators after the attempt accounting. It is the same function over the
+same ledger as a completed row's report, so it carries the plan digest, the
+declaration and the evidence of every attempt that ran, failed attempts
+included. Every cell of an incomplete sweep was attempted (both drivers run
+every cell; an exhausted cell is recorded, not skipped), so the denominators
+stay over the swept cells: an exhausted cell counts in `cells` and `assigned`,
+and in `fired` only if its evidence shows the fault. The error still emits no
+score, board or rank. Without a plan the report is `None`, nothing is inserted
+and nothing is printed.
+
+**Test.** `an_incomplete_faulted_sweep_keeps_its_fault_report`
+(`crates/sharpebench-cli/tests/fault_backoff_reexecution_cli.rs`), against a
+loopback entrant that serves the first 40 requests and then breaks: the sweep
+completes some cells and exhausts the rest (exit 1); the refusal's digest,
+declaration and relaxations equal those of a completed faulted run under the
+same plan; the limit fired in at least the completed cells and in fewer than
+all 16; every piece of evidence is under the plan's digest; human output
+prints the digest and the denominators; without a plan neither mode mentions
+fault injection; and under `--checkpoint` the refusal's evidence equals the
+`injected_faults` persisted in the checkpoint.
+
+**Byte identity without the new flags.** The CLI built from `origin/main`
+(`0dcc4b8`, from a clean `git archive`) and from this branch ran the same 35
+commands, each in its own directory, the baseline twice: `--help`, `run` and
+`run --json`, `run --data <csv> --json`, `run --http <fixture>` with and
+without `--json` and with `--entrant-sha256 --checkpoint`, the incomplete-sweep
+path (`run --http <unframed fixture>`) in both modes with and without a
+checkpoint and with `--retry-backoff 1,2`, `run --cmd <reference-agent>` with
+and without a checkpoint, `run --image some/agent:latest`, `capture` with no
+argument, one argument, an unknown agent, and `momentum` and `buy-and-hold`
+(text and `--json`), and `verify-trajectory` with no argument, strict (text and
+JSON), `--allow-unbound-trajectory`, `--reexecute` against the reference agent
+(text and JSON), `--http` (a passing and a broken endpoint) and `--cmd
+<reference-agent>`, and the three existing refusals. Exit codes, stdout,
+stderr and all 10 written files (five checkpoints, three captured
+trajectories, a renamed copy and the data file) were identical after masking
+only host-clock `nanos`, `duration_ns_total` and "observed host duration", and
+each binary's own `runner_artifact_sha256`; the two baseline runs differed
+only in the host-clock fields. Unmasked, each trajectory differed from the
+baseline's in exactly its one `runner_artifact_sha256` line. Every command
+but `--help` matched; `--help` differs by two lines, the new `capture
+<out.json> --cmd|--http|--image` line and `|--image <ref>` in the
+`--reexecute` line. The usage messages of `capture` and `verify-trajectory`
+with too few arguments are unchanged on purpose, because both are output
+without the new flags. The five incomplete-sweep commands are the
+ones this change touches, and all five matched.
+
+**Mutation checks** are recorded with the capture and re-execution follow-up
+in [CONTRACT-PORTS.md](CONTRACT-PORTS.md#external-capture-and-image-re-execution-follow-up),
+in one table, since they ran together on the committed tree.
