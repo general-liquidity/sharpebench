@@ -286,11 +286,13 @@ fn run_greeks(args: &[String], json: bool) -> ExitCode {
 /// `check` — backtest-honesty verdict over a column of per-period returns.
 /// `--trials N` is REQUIRED: a single backtest you kept is the survivor of every
 /// variant you discarded, so there is no honest default for the search footprint.
+/// `--periods-per-year N` says what a row is; without it the verdict assumes
+/// daily bars and its explanation says so.
 fn run_check(args: &[String], json: bool) -> ExitCode {
     use sharpebench_edge::{is_my_sharpe_real, HonestyConfig, Verdict};
 
     let Some(path) = args.get(2).filter(|p| !p.starts_with('-')) else {
-        eprintln!("usage: sharpebench check <returns.csv> --trials N [--col NAME] [--confidence C] [--json]");
+        eprintln!("usage: sharpebench check <returns.csv> --trials N [--periods-per-year N] [--col NAME] [--confidence C] [--json]");
         return ExitCode::from(2);
     };
     let Some(trials_str) = flag_value(args, "--trials") else {
@@ -310,6 +312,13 @@ fn run_check(args: &[String], json: bool) -> ExitCode {
             }
         },
         None => 0.95,
+    };
+    let periods_per_year = match positive_f64_flag(args, "--periods-per-year") {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::from(2);
+        }
     };
     let col = flag_value(args, "--col");
 
@@ -334,6 +343,7 @@ fn run_check(args: &[String], json: bool) -> ExitCode {
 
     let cfg = HonestyConfig {
         n_trials,
+        periods_per_year,
         confidence,
         ..HonestyConfig::default()
     };
@@ -598,7 +608,7 @@ fn help() {
         "  sharpebench greeks <spot> <strike> <t> <r> <vol> <call|put>  Black-Scholes price + Greeks + local exposure"
     );
     println!(
-        "  sharpebench check <returns.csv> --trials N [--col NAME] [--confidence C]  is this Sharpe real? (deflated/MinTRL)"
+        "  sharpebench check <returns.csv> --trials N [--periods-per-year N] [--col NAME] [--confidence C]  is this Sharpe real? (deflated/MinTRL; default 252 periods/year)"
     );
     println!(
         "  sharpebench regime <a.csv> <b.csv> <regimes.csv> [--col NAME]  compare two return series within each regime (labels are an input)"

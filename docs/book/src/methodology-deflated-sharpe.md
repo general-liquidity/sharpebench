@@ -98,6 +98,13 @@ fifty tries at that dispersion produce a 1.14 by luck alone. Operators scoring a
 field of similar strategies should use the measured path or a prior that
 describes their field.
 
+The one-series honesty verdict (`sharpebench check`, `is_my_sharpe_real` in
+Rust, Python, npm and MCP) uses the same units. Its `trials_sr_std` is
+annualized, its `periods_per_year` converts it through the same function, and an
+omitted `periods_per_year` is 252 and named in the verdict's explanation. Until
+the release after 0.19.0 the verdict applied the annualized prior per period
+unconverted, so its bar was the unreachable one in the table above.
+
 Getting `periods_per_year` wrong is the single most consequential
 misconfiguration in the benchmark. Scoring hourly crypto with the daily default
 makes the deflation bar about six times too demanding; scoring weekly bars with

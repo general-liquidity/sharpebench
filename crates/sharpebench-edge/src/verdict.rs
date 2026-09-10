@@ -18,7 +18,8 @@ use sharpebench_stats::significance::{
 };
 use sharpebench_stats::stats::{kurtosis, skewness};
 use sharpebench_stats::{
-    deflated_sharpe_ratio, expected_max_sharpe, probabilistic_sharpe_ratio, sharpe_ratio,
+    deflated_sharpe_ratio, expected_max_sharpe, per_period_from_annualized,
+    probabilistic_sharpe_ratio, sharpe_ratio, StatisticalError,
 };
 
 use crate::mintrl::min_track_record_length;
@@ -30,13 +31,22 @@ use crate::pbo::pbo_status;
 /// crate share the workspace version, so the stamp cannot go stale on a release.
 pub const METHODOLOGY_VERSION: &str = concat!("sharpebench-stats/", env!("CARGO_PKG_VERSION"));
 
-/// Default cross-trial Sharpe dispersion used when the caller doesn't supply one.
-/// 0.5 is a **modelling prior, not a measurement** — the working value López de
-/// Prado uses in worked examples. A LITE verdict sees one return series and has
-/// no field to measure dispersion on, so the prior is all it can use; the
-/// explanation flags that it was estimated. When a field exists, measure it
-/// (`sharpebench_core::rank` does) and pass the value in `trials_sr_std`.
+/// Default **annualized** cross-trial Sharpe dispersion used when the caller
+/// doesn't supply one. 0.5 is a **modelling prior, not a measurement**: the
+/// working value López de Prado uses in worked examples, which are annualized.
+/// A LITE verdict sees one return series and has no field to measure dispersion
+/// on, so the prior is all it can use; the explanation flags that it was
+/// estimated. It is the same prior, in the same unit, as
+/// `sharpebench_core::ScoreConfig::trials_sr_std`. When a field exists, measure
+/// it (`sharpebench_core::rank` does) and pass the annualized value in
+/// `trials_sr_std`.
 const DEFAULT_TRIALS_SR_STD: f64 = 0.5;
+
+/// Default return periods per year when the caller doesn't say: daily equity
+/// bars, the same default as `sharpebench_core::ScoreConfig::periods_per_year`.
+/// See [`HonestyConfig::periods_per_year`] for why this is a flagged default
+/// rather than a required input.
+const DEFAULT_PERIODS_PER_YEAR: f64 = 252.0;
 
 /// Fixed bootstrap settings for the FULL data-snooping family. Held constant so a
 /// FULL verdict is deterministic and reproducible across runs.
@@ -59,20 +69,50 @@ pub enum Verdict {
 /// Knobs for the honesty verdict. `n_trials` is the one the caller must think
 /// about: it is the multiple-testing footprint (how many strategies/configs were
 /// tried before this one was chosen).
+///
+/// Units. The verdict computes every Sharpe ratio **per period** on the returns
+/// it is given and never annualizes them. `trials_sr_std` is quoted
+/// **annualized**, the unit the literature and the core scorer use, and
+/// `periods_per_year` converts it to per period before it touches a statistic,
+/// through the same conversion `sharpebench_core::per_period_sr_std` applies.
+/// Applied per period unconverted, the 0.5 prior put the bar at an annualized
+/// Sharpe of about 15 on daily bars at twenty trials.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct HonestyConfig {
-    /// Number of strategy trials behind this result. REQUIRED to think honestly:
-    /// `n_trials = 1` is almost always a lie — a single backtest you kept is the
-    /// survivor of every variant you discarded.
+    /// Number of strategy trials behind this result (a count). REQUIRED to think
+    /// honestly: `n_trials = 1` is almost always a lie — a single backtest you
+    /// kept is the survivor of every variant you discarded.
     pub n_trials: u32,
-    /// Cross-trial Sharpe dispersion. `None` ⇒ estimate at 0.5 and flag it in the
-    /// explanation.
+    /// **Annualized** cross-trial dispersion of Sharpe ratios, divided by
+    /// `sqrt(periods_per_year)` before use. `None` ⇒ estimate at the 0.5 prior
+    /// and flag it in the explanation. A negative or non-finite value refuses
+    /// the verdict.
     pub trials_sr_std: Option<f64>,
-    /// Deflated-Sharpe threshold for a `Pass`. Default 0.95.
+    /// How many return periods make a year for these returns (a frequency:
+    /// daily equities 252, daily crypto 365, hourly 8760, weekly 52). It is the
+    /// only input that says what a period is, and the deflation bar scales with
+    /// `1 / sqrt(periods_per_year)`: hourly returns verdicted at the daily
+    /// default face a bar about six times too high, weekly ones a bar about half
+    /// as high as intended.
+    ///
+    /// `None` ⇒ 252 (daily bars), flagged in the explanation. The return series
+    /// carries no timestamps, so the frequency cannot be inferred: the verdict
+    /// either refuses without it or assumes one openly. Refusing would turn every
+    /// default-configured call on every surface into a `Fail`, a verdict about
+    /// the configuration rather than the track. 252 is the core scorer's
+    /// default, so a LITE verdict and a board scored with defaults agree, and the
+    /// explanation names the assumption whenever it is made. A non-finite or
+    /// non-positive value refuses the verdict (a `Fail` with a statistics
+    /// error), the same way a bad `trials_sr_std` does.
+    pub periods_per_year: Option<f64>,
+    /// Deflated-Sharpe probability threshold for a `Pass`. Default 0.95. Also
+    /// the MinTRL confidence.
     pub confidence: f64,
-    /// Deflated-Sharpe threshold for `Borderline`. Default 0.90.
+    /// Deflated-Sharpe probability threshold for `Borderline`. Default 0.90.
     pub borderline: f64,
-    /// PSR / MinTRL benchmark Sharpe to beat. Default 0.0.
+    /// **Per-period** benchmark Sharpe the PSR and MinTRL test against. Default
+    /// 0.0, which means the same thing on every timeframe. It is not converted:
+    /// divide an annualized benchmark by `sqrt(periods_per_year)` first.
     pub sr_benchmark: f64,
 }
 
@@ -81,6 +121,7 @@ impl Default for HonestyConfig {
         Self {
             n_trials: 1,
             trials_sr_std: None,
+            periods_per_year: None,
             confidence: 0.95,
             borderline: 0.90,
             sr_benchmark: 0.0,
@@ -91,11 +132,14 @@ impl Default for HonestyConfig {
 /// The LITE verdict: everything derivable from one return series.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct HonestyVerdict {
+    /// Observed Sharpe ratio, per period (not annualized).
     pub sharpe: f64,
     pub n_obs: usize,
     pub skew: f64,
     pub kurtosis: f64,
     pub n_trials: u32,
+    /// The deflation bar: the per-period Sharpe the best of `n_trials` shows
+    /// with no skill, from the per-period dispersion.
     pub expected_max_sharpe: f64,
     pub deflated_sharpe: f64,
     pub probabilistic_sharpe: f64,
@@ -173,19 +217,14 @@ pub fn is_my_sharpe_real(returns: &[f64], cfg: &HonestyConfig) -> HonestyVerdict
     let kurt = kurtosis(returns);
     let n_obs = returns.len();
 
-    let estimated_std = cfg.trials_sr_std.is_none();
-    let trials_sr_std = cfg.trials_sr_std.unwrap_or(DEFAULT_TRIALS_SR_STD);
-
     // The bar and the ratio share one boundary, so they share one refusal. A
     // negative `trials_sr_std` used to zero the bar and hand back a deflated
     // Sharpe near 1.0: the most favorable verdict available, from the input
     // that had least earned it. There is no substitute number for a deflation
     // that was never computed, so the verdict fails closed and says why.
-    let deflation = expected_max_sharpe(trials_sr_std, cfg.n_trials).and_then(|bar| {
-        Ok((
-            bar,
-            deflated_sharpe_ratio(returns, cfg.n_trials, trials_sr_std)?,
-        ))
+    let deflation = per_period_trials_sr_std(cfg).and_then(|sr_std| {
+        let bar = expected_max_sharpe(sr_std, cfg.n_trials)?;
+        Ok((bar, deflated_sharpe_ratio(returns, cfg.n_trials, sr_std)?))
     });
     let statistics_error = deflation.as_ref().err().map(ToString::to_string);
     let (expected_max, deflated) = deflation.unwrap_or((0.0, 0.0));
@@ -206,15 +245,7 @@ pub fn is_my_sharpe_real(returns: &[f64], cfg: &HonestyConfig) -> HonestyVerdict
         Some(error) => format!(
             "FAIL: the deflated Sharpe could not be computed ({error}), so this track has not been checked against its search. No verdict is available for these inputs."
         ),
-        None => explain(
-            verdict,
-            deflated,
-            cfg,
-            n_obs,
-            mintrl,
-            estimated_std,
-            trials_sr_std,
-        ),
+        None => explain(verdict, deflated, cfg, n_obs, mintrl),
     };
 
     HonestyVerdict {
@@ -234,6 +265,29 @@ pub fn is_my_sharpe_real(returns: &[f64], cfg: &HonestyConfig) -> HonestyVerdict
         methodology_version: METHODOLOGY_VERSION.to_string(),
         statistics_error,
     }
+}
+
+/// The per-period cross-trial dispersion the verdict deflates with: the
+/// annualized `trials_sr_std` (or its 0.5 prior) over `sqrt(periods_per_year)`
+/// (or 252), through the conversion the core scorer uses.
+///
+/// The frequency is checked before the conversion because an infinite one
+/// divides the prior down to a zero dispersion, a bar no later check could tell
+/// apart from a genuine single trial; zero, negative and NaN frequencies are
+/// refused with it. A bad `trials_sr_std` stays negative or non-finite through
+/// the division and is refused by `expected_max_sharpe`.
+fn per_period_trials_sr_std(cfg: &HonestyConfig) -> Result<f64, StatisticalError> {
+    let periods_per_year = cfg.periods_per_year.unwrap_or(DEFAULT_PERIODS_PER_YEAR);
+    if !periods_per_year.is_finite() || periods_per_year <= 0.0 {
+        return Err(StatisticalError::InvalidParameter {
+            name: "periods_per_year",
+            requirement: "must be finite and positive",
+        });
+    }
+    Ok(per_period_from_annualized(
+        cfg.trials_sr_std.unwrap_or(DEFAULT_TRIALS_SR_STD),
+        periods_per_year,
+    ))
 }
 
 /// FULL: the LITE verdict on `field[winner_idx]` plus the data-snooping family
@@ -356,8 +410,6 @@ fn explain(
     cfg: &HonestyConfig,
     n_obs: usize,
     mintrl: f64,
-    estimated_std: bool,
-    trials_sr_std: f64,
 ) -> String {
     let head = match verdict {
         Verdict::Pass => format!(
@@ -375,9 +427,14 @@ fn explain(
     };
 
     let mut notes = String::new();
-    if estimated_std {
+    if cfg.trials_sr_std.is_none() {
         notes.push_str(&format!(
-            " trials_sr_std was not supplied and was estimated at {trials_sr_std:.2}."
+            " trials_sr_std was not supplied and was estimated at {DEFAULT_TRIALS_SR_STD:.2} annualized."
+        ));
+    }
+    if cfg.periods_per_year.is_none() {
+        notes.push_str(&format!(
+            " periods_per_year was not supplied and was assumed to be {DEFAULT_PERIODS_PER_YEAR:.0} (daily bars); the deflation bar scales with 1/sqrt(periods_per_year), so pass the frequency of these returns if they are not daily."
         ));
     }
     if mintrl.is_finite() && (n_obs as f64) < mintrl {
@@ -579,15 +636,17 @@ mod tests {
             ..Default::default()
         };
         let v = is_my_sharpe_real(&r, &cfg);
+        // The annualized 0.5 deflates at 0.5 / sqrt(252) per period.
+        let per_period = per_period_from_annualized(0.5, 252.0);
         assert!(v.statistics_error.is_none());
         assert_eq!(v.sharpe, sharpe_ratio(&r));
         assert_eq!(
             v.expected_max_sharpe,
-            expected_max_sharpe(0.5, 500).unwrap()
+            expected_max_sharpe(per_period, 500).unwrap()
         );
         assert_eq!(
             v.deflated_sharpe,
-            deflated_sharpe_ratio(&r, 500, 0.5).unwrap()
+            deflated_sharpe_ratio(&r, 500, per_period).unwrap()
         );
         assert_eq!(v.haircut, 1.0 - v.deflated_sharpe);
         assert_eq!(v.haircut_sharpe, v.sharpe * v.deflated_sharpe);
@@ -605,6 +664,127 @@ mod tests {
         );
         assert_eq!(estimated.deflated_sharpe, v.deflated_sharpe);
         assert!(estimated.explanation.contains("estimated"));
+
+        // An explicit 252 is the default, bit for bit, but only the default is
+        // flagged as an assumption.
+        let explicit = is_my_sharpe_real(
+            &r,
+            &HonestyConfig {
+                periods_per_year: Some(252.0),
+                ..cfg
+            },
+        );
+        assert_eq!(
+            explicit.expected_max_sharpe.to_bits(),
+            v.expected_max_sharpe.to_bits()
+        );
+        assert_eq!(
+            explicit.deflated_sharpe.to_bits(),
+            v.deflated_sharpe.to_bits()
+        );
+        assert!(v.explanation.contains("periods_per_year was not supplied"));
+        assert!(!explicit.explanation.contains("periods_per_year"));
+    }
+
+    /// Four years of daily returns at an annualized Sharpe of about 1.9, kept
+    /// as the best of twenty trials, under the default 0.5 prior.
+    fn four_years_daily() -> Vec<f64> {
+        (0..1008)
+            .map(|i| 0.0005 + 0.006 * (0.7 * i as f64).sin())
+            .collect()
+    }
+
+    /// The unit repair: a daily track the unconverted prior failed now passes.
+    ///
+    /// The expected numbers are computed outside the kernel (Python, SciPy
+    /// 1.16.2, the Bailey and López de Prado formula with
+    /// `scipy.stats.norm.ppf` and this track's sample Sharpe and population
+    /// skew and kurtosis):
+    /// `0.5 * k(20)` = 0.950354 per period, an annualized Sharpe of 15.1, was
+    /// the old bar; `0.5 / sqrt(252) * k(20)` = 0.0598667 per period, an
+    /// annualized Sharpe of 0.950, is the repaired one. The observed Sharpe is
+    /// 0.1197 per period, so the track sat 0.83 per period below the old bar
+    /// and 0.06 above the new one.
+    #[test]
+    fn a_daily_track_the_unconverted_prior_failed_now_passes() {
+        let r = four_years_daily();
+        let cfg = HonestyConfig {
+            n_trials: 20,
+            periods_per_year: Some(252.0),
+            ..Default::default()
+        };
+
+        // Before: the prior applied per period, unconverted.
+        let old_bar = expected_max_sharpe(DEFAULT_TRIALS_SR_STD, 20).unwrap();
+        assert!(
+            (old_bar - 0.950_353_975_590_599_4).abs() < 1e-8,
+            "{old_bar}"
+        );
+        let old_dsr = deflated_sharpe_ratio(&r, 20, DEFAULT_TRIALS_SR_STD).unwrap();
+        assert!(old_dsr < cfg.borderline, "old deflated Sharpe {old_dsr}");
+
+        // After: converted per period, the same track passes.
+        let v = is_my_sharpe_real(&r, &cfg);
+        assert!(v.statistics_error.is_none());
+        assert!((v.sharpe - 0.119_7).abs() < 1e-4, "sharpe {}", v.sharpe);
+        assert!(
+            (v.expected_max_sharpe - 0.059_866_673_259_387_47).abs() < 1e-8,
+            "bar {}",
+            v.expected_max_sharpe
+        );
+        assert!(
+            (v.deflated_sharpe - 0.971_001_182_624_128_8).abs() < 1e-6,
+            "deflated {}",
+            v.deflated_sharpe
+        );
+        assert_eq!(v.verdict, Verdict::Pass);
+
+        // The frequency is what moved it: the same track read as weekly bars
+        // faces a bar sqrt(252 / 52) times higher and no longer passes.
+        let weekly = is_my_sharpe_real(
+            &r,
+            &HonestyConfig {
+                periods_per_year: Some(52.0),
+                ..cfg
+            },
+        );
+        assert!(weekly.expected_max_sharpe > v.expected_max_sharpe);
+        assert_ne!(weekly.verdict, Verdict::Pass);
+    }
+
+    /// A frequency that is not a frequency fails closed, with or without a
+    /// supplied dispersion, on both tiers.
+    ///
+    /// `+inf` is the dangerous one: it divides the prior down to a zero
+    /// dispersion, the bar of a single trial, which would hand this 500-trial
+    /// track the most favorable verdict available.
+    #[test]
+    fn an_invalid_frequency_fails_closed_instead_of_passing() {
+        let r = four_years_daily();
+        for bad in [0.0, -252.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for trials_sr_std in [None, Some(0.5)] {
+                let cfg = HonestyConfig {
+                    n_trials: 500,
+                    trials_sr_std,
+                    periods_per_year: Some(bad),
+                    ..Default::default()
+                };
+                let v = is_my_sharpe_real(&r, &cfg);
+                assert_eq!(v.verdict, Verdict::Fail, "periods_per_year {bad}");
+                assert_eq!(
+                    v.statistics_error.as_deref(),
+                    Some("periods_per_year must be finite and positive"),
+                    "periods_per_year {bad}"
+                );
+                assert_eq!(v.deflated_sharpe, 0.0);
+                assert_eq!(v.expected_max_sharpe, 0.0);
+                assert_eq!(v.haircut, 1.0);
+                assert!(v.explanation.contains("could not be computed"));
+
+                let full = is_my_sharpe_real_full(&[r.clone(), r.clone()], 0, &cfg);
+                assert_eq!(full.honesty, v, "periods_per_year {bad}");
+            }
+        }
     }
 
     /// R02 guard: the FULL family on a valid field still publishes the same
