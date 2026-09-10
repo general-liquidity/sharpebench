@@ -107,7 +107,8 @@ pub fn canary_json(seed: &str) -> Result<String, String> {
 /// Parse a partial `HonestyConfig` blob: `n_trials` is required; the rest default
 /// (`trials_sr_std` → null, `periods_per_year` → absent, `confidence` → 0.95,
 /// `borderline` → 0.90, `sr_benchmark` → 0.0). Built field-by-field so callers
-/// can pass just `{"n_trials": N}`.
+/// can pass just `{"n_trials": N}`. `trials_sr_std` and `sr_benchmark` are
+/// annualized; the verdict divides both by `sqrt(periods_per_year)`.
 ///
 /// `periods_per_year` may be omitted (the verdict then assumes 252 and says so)
 /// but not sent as `null`: JSON has no NaN or infinity, so `JSON.stringify` turns

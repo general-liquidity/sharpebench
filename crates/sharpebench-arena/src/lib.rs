@@ -265,7 +265,138 @@ pub struct WindowVerification {
     /// The board is signed under the same verifying key as the rest of the
     /// arena (and the pinned key, when one is supplied).
     pub key_ok: bool,
+    /// Identity fields on which the signed header disagrees with the window
+    /// file it publishes. Omitted when there are none, so a clean report
+    /// serializes as it did before the check existed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub identity_mismatches: Vec<IdentityMismatch>,
     pub detail: String,
+}
+
+/// A window identity field that both a published [`WindowHeader`] and the
+/// window file ([`WindowState`]) record.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IdentityField {
+    WindowId,
+    SchemaVersion,
+    CommitDeadline,
+    DataRevealEpoch,
+    /// The frozen config itself, compared by the digest recomputed on each side.
+    ScoreConfig,
+    ScoreConfigSha256,
+    ScorerArtifactSha256,
+    SealedEvalSaltSha256,
+    FaultPlanSha256,
+    DatasetHash,
+}
+
+impl IdentityField {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::WindowId => "window_id",
+            Self::SchemaVersion => "schema_version",
+            Self::CommitDeadline => "commit_deadline",
+            Self::DataRevealEpoch => "data_reveal_epoch",
+            Self::ScoreConfig => "score_config",
+            Self::ScoreConfigSha256 => "score_config_sha256",
+            Self::ScorerArtifactSha256 => "scorer_artifact_sha256",
+            Self::SealedEvalSaltSha256 => "sealed_eval_salt_sha256",
+            Self::FaultPlanSha256 => "fault_plan_sha256",
+            Self::DatasetHash => "dataset_hash",
+        }
+    }
+}
+
+/// A published header that names a different identity than the window file it
+/// claims to publish. `None` is a field absent on that side, so a fault plan
+/// digest present on only one side is a mismatch like two different digests.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IdentityMismatch {
+    pub field: IdentityField,
+    pub header: Option<String>,
+    pub window: Option<String>,
+}
+
+impl std::fmt::Display for IdentityMismatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let side = |value: &Option<String>| value.clone().unwrap_or_else(|| "absent".to_string());
+        write!(
+            f,
+            "{} is {} in the header but {} in {WINDOW_FILE}",
+            self.field.as_str(),
+            side(&self.header),
+            side(&self.window)
+        )
+    }
+}
+
+/// Every identity field on which `header` and `window` disagree.
+fn identity_mismatches(
+    header: &WindowHeader,
+    window: &WindowState,
+) -> Result<Vec<IdentityMismatch>, String> {
+    let pairs = [
+        (
+            IdentityField::WindowId,
+            Some(header.window_id.clone()),
+            Some(window.id.clone()),
+        ),
+        (
+            IdentityField::SchemaVersion,
+            Some(header.schema_version.to_string()),
+            Some(window.schema_version.to_string()),
+        ),
+        (
+            IdentityField::CommitDeadline,
+            Some(header.commit_deadline.to_string()),
+            Some(window.commit_deadline.to_string()),
+        ),
+        (
+            IdentityField::DataRevealEpoch,
+            Some(header.data_reveal_epoch.to_string()),
+            Some(window.data_reveal_epoch.to_string()),
+        ),
+        (
+            IdentityField::ScoreConfig,
+            Some(score_config_digest(&header.score_config)?),
+            Some(score_config_digest(&window.score_config)?),
+        ),
+        (
+            IdentityField::ScoreConfigSha256,
+            Some(header.score_config_sha256.clone()),
+            Some(window.score_config_sha256.clone()),
+        ),
+        (
+            IdentityField::ScorerArtifactSha256,
+            Some(header.scorer_artifact_sha256.clone()),
+            Some(window.scorer_artifact_sha256.clone()),
+        ),
+        (
+            IdentityField::SealedEvalSaltSha256,
+            header.sealed_eval_salt_sha256.clone(),
+            window.sealed_eval_salt_sha256.clone(),
+        ),
+        (
+            IdentityField::FaultPlanSha256,
+            header.fault_plan_sha256.clone(),
+            window.fault_plan_sha256.clone(),
+        ),
+        (
+            IdentityField::DatasetHash,
+            Some(header.dataset_hash.clone()),
+            window.dataset_hash.clone(),
+        ),
+    ];
+    Ok(pairs
+        .into_iter()
+        .filter(|(_, header, window)| header != window)
+        .map(|(field, header, window)| IdentityMismatch {
+            field,
+            header,
+            window,
+        })
+        .collect())
 }
 
 /// Verification result for a whole arena directory.
@@ -832,7 +963,15 @@ impl Arena {
         let mut field = Vec::new();
         for e in entries {
             let agent_id = e.submission.agent_id.clone();
-            match reg.reveal(&agent_id, window_id, &e.artifact_digest, &e.salt) {
+            // A faulted window's commitments bind its plan digest, so one made
+            // for another plan, or for none, does not match and is refused.
+            match reg.reveal_under_fault_plan(
+                &agent_id,
+                window_id,
+                &e.artifact_digest,
+                &e.salt,
+                w.fault_plan_sha256.as_deref(),
+            ) {
                 Ok(()) => field.push(e.submission.clone()),
                 Err(reason) => refusals.push(Refusal { agent_id, reason }),
             }
@@ -947,7 +1086,10 @@ fn render_markdown(header: &WindowHeader, scores: &[CompositeScore]) -> String {
 /// chain, from the documents alone. `pinned` supplies a verifying key the
 /// caller trusts out of band; without it each board is checked under its own
 /// embedded key (consistency, not identity - see `sharpebench-attest`), and all
-/// boards are still required to share one key.
+/// boards are still required to share one key. Each board's signed header must
+/// also record the identity of the window file it publishes, field by field
+/// ([`IdentityField`]); a disagreement fails the window with its
+/// [`IdentityMismatch`]es, and an unreadable window file is an `Err`.
 pub fn verify_arena(
     dir: &Path,
     pinned: Option<&VerifyingKey>,
@@ -973,12 +1115,19 @@ pub fn verify_arena(
                 true
             }
         };
-        let (anchor_ok, detail) = match board
-            .chain
-            .first()
-            .ok_or(())
-            .and_then(|first| serde_json::from_str::<WindowHeader>(&first.payload).map_err(|_| ()))
-        {
+        let header =
+            board.chain.first().ok_or(()).and_then(|first| {
+                serde_json::from_str::<WindowHeader>(&first.payload).map_err(|_| ())
+            });
+        // The header must name the identity the window file records: a board
+        // signed over one config or fault plan cannot stand for a window
+        // recorded under another.
+        let window = read_window_state(&dir.join(WINDOWS_DIR).join(id).join(WINDOW_FILE))?;
+        let identity_mismatches = match &header {
+            Ok(header) => identity_mismatches(header, &window)?,
+            Err(()) => Vec::new(),
+        };
+        let (anchor_ok, detail) = match header {
             Ok(header) if header.kind != WINDOW_HEADER_KIND => {
                 (false, format!("unexpected header kind `{}`", header.kind))
             }
@@ -997,20 +1146,30 @@ pub fn verify_arena(
         if let Some(last) = board.chain.last() {
             expected_anchor = last.signature.clone();
         }
-        let ok = chain_ok && anchor_ok && key_ok;
+        let ok = chain_ok && anchor_ok && key_ok && identity_mismatches.is_empty();
         all_ok &= ok;
+        let detail = if ok && detail.is_empty() {
+            "ok".to_string()
+        } else if !chain_ok {
+            "Ed25519 chain invalid (tampered, or key mismatch)".to_string()
+        } else if identity_mismatches.is_empty() {
+            detail
+        } else {
+            let listed: Vec<String> = identity_mismatches.iter().map(|m| m.to_string()).collect();
+            let identity = format!("header identity mismatch: {}", listed.join("; "));
+            if detail.is_empty() {
+                identity
+            } else {
+                format!("{detail}; {identity}")
+            }
+        };
         windows.push(WindowVerification {
             window_id: id.clone(),
             chain_ok,
             anchor_ok,
             key_ok,
-            detail: if ok && detail.is_empty() {
-                "ok".to_string()
-            } else if !chain_ok {
-                "Ed25519 chain invalid (tampered, or key mismatch)".to_string()
-            } else {
-                detail
-            },
+            identity_mismatches,
+            detail,
         });
     }
     Ok(ArenaVerification {

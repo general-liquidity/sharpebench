@@ -24,6 +24,7 @@ pub fn run(args: &[String], json: bool) -> i32 {
         Some("open") => cmd_open(args, json),
         Some("supersede-empty") => cmd_supersede_empty(args, json),
         Some("link-supersession") => cmd_link_supersession(args, json),
+        Some("commitment") => cmd_commitment(args, json),
         Some("commit") => cmd_commit(args, json),
         Some("advance") => cmd_advance(args, json),
         Some("score") => cmd_score(args, json),
@@ -43,7 +44,9 @@ fn usage() {
     eprintln!("                                                         open a window; scorer/config/fault-plan provenance is fixed now");
     eprintln!("  arena supersede-empty <dir> <window> <reason>          archive an empty obsolete window before reopening");
     eprintln!("  arena link-supersession <dir> <old> <new>               record the audited replacement config link");
-    eprintln!("  arena commit <dir> <window> <commitment.json>          register a pre-deadline commitment (from `sharpebench commit`)");
+    eprintln!("  arena commitment <agent_id> <window> <artifact_digest> <salt> [--fault-plan <plan.json>]");
+    eprintln!("                                                         print a commitment; a faulted window's must bind its plan");
+    eprintln!("  arena commit <dir> <window> <commitment.json>          register a pre-deadline commitment (from `sharpebench commit` or `arena commitment`)");
     eprintln!("  arena advance <dir> <epoch>                            advance the epoch (operator/cron/CI supplies \"now\")");
     eprintln!("  arena score <dir> <window> <dataset> <entries.json>    verify reveals, refuse mismatches, rank the rest");
     eprintln!("  arena publish <dir> <window> <key>                     sign + write the window's Ed25519 board");
@@ -134,7 +137,7 @@ fn cmd_open(args: &[String], json: bool) -> i32 {
                     "opened window `{window}` (commit deadline: epoch {deadline}, data reveal: epoch {reveal}); scoring rules recorded"
                 );
                 if let Some(digest) = &fault_plan_sha256 {
-                    println!("  fault plan SHA-256 {digest} recorded; every entry must declare it");
+                    println!("  fault plan SHA-256 {digest} recorded; every entry must commit to it (`arena commitment --fault-plan`) and declare it");
                 }
             }
             0
@@ -182,6 +185,33 @@ fn cmd_link_supersession(args: &[String], json: bool) -> i32 {
         }
         Err(e) => fail(&e, json),
     }
+}
+
+/// Print the commitment an entrant registers with `arena commit`. Without
+/// `--fault-plan` it is the commitment `sharpebench commit` prints, byte for
+/// byte; with it, the commitment also binds the validated plan's digest, which
+/// a faulted window requires at reveal.
+fn cmd_commitment(args: &[String], json: bool) -> i32 {
+    let (Some(agent_id), Some(window), Some(artifact_digest), Some(salt)) =
+        (args.get(3), args.get(4), args.get(5), args.get(6))
+    else {
+        eprintln!(
+            "usage: sharpebench arena commitment <agent_id> <window> <artifact_digest> <salt> [--fault-plan <plan.json>]"
+        );
+        return 2;
+    };
+    let fault_plan_sha256 = match fault_plan_digest(args) {
+        Ok(digest) => digest,
+        Err(e) => return fail(&e, json),
+    };
+    emit_json(&sharpebench_attest::make_commitment_under_fault_plan(
+        agent_id,
+        window,
+        artifact_digest,
+        salt,
+        fault_plan_sha256.as_deref(),
+    ));
+    0
 }
 
 fn cmd_commit(args: &[String], json: bool) -> i32 {

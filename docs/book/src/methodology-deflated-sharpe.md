@@ -148,7 +148,14 @@ Rust, Python, npm and MCP) uses the same units. Its `trials_sr_std` is
 annualized, its `periods_per_year` converts it through the same function, and an
 omitted `periods_per_year` is 252 and named in the verdict's explanation. Until
 the release after 0.19.0 the verdict applied the annualized prior per period
-unconverted, so its bar was the unreachable one in the table above.
+unconverted, so its bar was the unreachable one in the table above. Its
+`sr_benchmark`, the benchmark of the PSR and MinTRL it reports (default 0), is
+annualized too and converted through the same function; through 0.21.0 it was
+read per period, so a benchmark meant as an annualized 1.0 on daily bars was a
+bar of about 15.9 annualized. Zero
+is zero in every unit, so default verdicts did not change. The raw
+`probabilistic_sharpe_ratio` and `min_track_record_length` primitives take the
+benchmark per period.
 
 The budget curve (`sharpebench_core::budget_curve`, Python `budget_curve`)
 takes the same annualized `trials_sr_std` and converts it with its own

@@ -141,6 +141,25 @@ test("isMySharpeReal converts the annualized prior by periodsPerYear", () => {
   assert.notEqual(weekly.verdict, "Pass");
 });
 
+test("isMySharpeReal converts the annualized srBenchmark by periodsPerYear", () => {
+  // F18: an annualized benchmark of 1.0 is 1 / sqrt(252) per period on daily
+  // bars. The expected PSR and MinTRL are the native kernel's at that per-period
+  // benchmark. Read per period, 1.0 was a bar this track (0.12 per period)
+  // never clears: PSR 0 and no finite MinTRL.
+  const returns = Array.from({ length: 1008 }, (_, i) => 0.0005 + 0.006 * Math.sin(0.7 * i));
+  const daily = sb.isMySharpeReal(returns, { nTrials: 20, periodsPerYear: 252, srBenchmark: 1.0 });
+  assert.ok(Math.abs(daily.probabilisticSharpe - 0.9637988673273685) < 1e-12, `${daily.probabilisticSharpe}`);
+  assert.ok(Math.abs(daily.minTrackRecordLen - 845.0943714883115) < 1e-9, `${daily.minTrackRecordLen}`);
+  const weekly = sb.isMySharpeReal(returns, { nTrials: 20, periodsPerYear: 52, srBenchmark: 1.0 });
+  assert.ok(Math.abs(weekly.probabilisticSharpe - 0.2734397099498166) < 1e-12, `${weekly.probabilisticSharpe}`);
+  assert.equal(weekly.minTrackRecordLen, null);
+  // The default benchmark 0 is the same in every unit.
+  const zeroDaily = sb.isMySharpeReal(returns, { nTrials: 20, periodsPerYear: 252 });
+  const zeroHourly = sb.isMySharpeReal(returns, { nTrials: 20, periodsPerYear: 8760 });
+  assert.equal(zeroDaily.probabilisticSharpe, zeroHourly.probabilisticSharpe);
+  assert.equal(zeroDaily.minTrackRecordLen, zeroHourly.minTrackRecordLen);
+});
+
 test("isMySharpeReal refuses a frequency that is not one", () => {
   const returns = Array.from({ length: 1008 }, (_, i) => 0.0005 + 0.006 * Math.sin(0.7 * i));
   for (const periodsPerYear of [0, -252]) {
@@ -166,6 +185,11 @@ test("isMySharpeReal refuses a dispersion JSON would turn into the default", () 
   const returns = Array.from({ length: 1008 }, (_, i) => 0.0005 + 0.006 * Math.sin(0.7 * i));
   // NaN and infinity serialize to null, which the kernel reads as "omitted"
   // and replaces with the 0.5 prior: the wrapper refuses them before that.
+  for (const name of ["confidence", "borderline", "srBenchmark"]) {
+    for (const bad of [NaN, Infinity, -Infinity, "0.9", null]) {
+      assert.throws(() => sb.isMySharpeReal(returns, { nTrials: 20, [name]: bad }), new RegExp(name));
+    }
+  }
   for (const trialsSrStd of [NaN, Infinity, -Infinity, "0.5", null]) {
     assert.throws(() => sb.isMySharpeReal(returns, { nTrials: 20, trialsSrStd }), RangeError);
     assert.throws(() => sb.isMySharpeRealFull([returns], 0, { nTrials: 20, trialsSrStd }), /trialsSrStd/);

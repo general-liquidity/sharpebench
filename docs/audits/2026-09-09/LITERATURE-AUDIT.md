@@ -433,6 +433,118 @@ finding and F16 in [CONTRACT-PORTS.md](CONTRACT-PORTS.md#f16-evidence-inventory-
 
 No golden, example or `paper/evidence/` file changed.
 
+### F18. The LITE verdict's benchmark Sharpe was the last per-period input
+
+**Found.** After F14, `HonestyConfig::trials_sr_std` was annualized and
+converted by `periods_per_year`, but `HonestyConfig::sr_benchmark`, the
+benchmark of the PSR and MinTRL the verdict reports (default 0.0), was
+documented as per period and passed to `probabilistic_sharpe_ratio` and
+`min_track_record_length` unconverted in `is_my_sharpe_real`
+(`crates/sharpebench-edge/src/verdict.rs`). Every surface said so or passed it
+through: the WASM config key `sr_benchmark` in `parse_honesty_config`
+(`crates/sharpebench-wasm/src/lib.rs`), npm `srBenchmark` ("Per-period ...
+(not converted)" in `npm/src/types.ts`, passed through by `honestyConfigJson`
+in `npm/src/index.ts`), the MCP tool description ("sr_benchmark is per period",
+`npm/mcp/src/server.ts`) and the Python `is_my_sharpe_real` and
+`is_my_sharpe_real_full` docstrings (`crates/sharpebench-py/src/lib.rs`).
+`sharpebench check` takes no benchmark and always uses the default. A caller
+who gave the benchmark in the unit of the rest of the config faced a bar
+`sqrt(periods_per_year)` times too high: 1.0 on daily bars was a bar of about
+15.9 annualized. The deflated Sharpe and the tier do not use the benchmark, so
+the verdict itself was not affected; the reported PSR and MinTRL were, and
+with them the explanation's short-track note.
+
+**Changed.** Commit `3d13fd0`. `sr_benchmark` is annualized and divided by
+`sqrt(periods_per_year)` through `sharpebench_stats::per_period_from_annualized`
+before the PSR and MinTRL, with the prior's default of 252 and the same
+frequency check, now shared by both conversions in `checked_periods_per_year`.
+A refused frequency already fails the verdict with `statistics_error`; beside
+it, a zero benchmark stays zero, so the PSR and MinTRL of such a verdict are
+what they were, and a non-zero benchmark has no per-period value and yields
+NaN (`null` in JSON). The field keeps its name on every surface: nothing in the
+name says per period, so the docs changed and the wire did not. The unit is
+stated in the `HonestyConfig` rustdoc, the WASM parser doc, the npm type, the
+MCP description, the Python docstrings, `crates/sharpebench-py/README.md`,
+`sharpebench/__init__.py`, `npm/README.md`, `npm/mcp/README.md` and
+[the deflated-Sharpe chapter](../../book/src/methodology-deflated-sharpe.md).
+The raw Rust and Python `probabilistic_sharpe_ratio` and
+`min_track_record_length` keep a per-period benchmark, the unit of the kernels
+they are. The CHANGELOG states it under Unreleased, Breaking, with a before
+and after example. On the four-year daily track of F14, an annualized
+benchmark of 1.0 gives a PSR of 0.964 and a MinTRL of 845 periods; read per
+period it gave a PSR of 0.0 and no finite MinTRL.
+
+**Default path.** `per_period_from_annualized(0.0, p)` is `+0.0` for every
+finite positive `p` (and `-0.0` for `-0.0`), so the default PSR and MinTRL are
+the unconverted ones bit for bit. Compared against `origin/main` (`0dcc4b8`):
+
+| Surface | Comparison | Result |
+|---|---|---|
+| Rust | `the_default_benchmark_is_unchanged_by_the_conversion`: three tracks, eight frequencies (four refused), benchmarks `0.0` and `-0.0`, PSR and MinTRL bits against the unconverted primitives | pass |
+| CLI | `sharpebench check` built from `origin/main` and from this branch, 150 invocations (five tracks, three trial counts, five flag sets, text and `--json`) | exit code, stdout and stderr identical in all 150 |
+| WASM | raw `is_my_sharpe_real` / `is_my_sharpe_real_full` JSON from the committed module on `origin/main` and the rebuilt one, 420 LITE and 2 FULL configurations | identical except `methodology_version`, which reads `sharpebench-stats/0.19.0` in the old module and `0.21.0` in the rebuilt one |
+| Python | wheels built with `maturin` from `origin/main` and from this branch, each in a fresh venv, 540 LITE and 2 FULL calls compared by `repr` | identical (sha256 `9ee1ab93...`) |
+
+The committed module on `origin/main` was built before the version bump, and
+run against it the npm test `rebuilt wasm and the wrapper preserve statistical
+refusals` fails on that stamp. CI rebuilds the module before testing, so this
+did not show there; the rebuild (commit `fb84c49`, `wasm-pack` 0.15.0) fixes the
+stamp and changes nothing else in the default output. Only
+`npm/pkg/sharpebench_bg.wasm` changed, and it contains no worktree path.
+
+**Tests.** Rust: `an_annualized_benchmark_is_tested_per_period` (PSR and
+MinTRL bits equal the primitives at `b / sqrt(ppy)` for 252, 52, 365, 8760 and
+the omitted default; the deflation and tier do not move) and
+`the_default_benchmark_is_unchanged_by_the_conversion`. Python:
+`test_lite_verdict_converts_the_annualized_benchmark_by_frequency` (exact
+equality with the raw per-period primitives at 252, 52, 8760, and through
+`is_my_sharpe_real_full`) and
+`test_lite_verdict_default_benchmark_does_not_depend_on_frequency`. npm:
+`isMySharpeReal converts the annualized srBenchmark by periodsPerYear` against
+the native values.
+
+**Mutation check.** Rust mutants were applied in place to the committed
+`verdict.rs`, `cargo nextest run -p sharpebench-edge` was run, and the file was
+restored from `git show HEAD:<path>` and confirmed identical with `cmp`. The
+npm mutant swapped in the previous module, and the rebuilt one was restored
+from `HEAD` and its blob hash checked.
+
+| Mutant | Result |
+|---|---|
+| Edge: benchmark left unconverted | killed: `an_annualized_benchmark_is_tested_per_period` |
+| Edge: benchmark multiplied by the root | killed: `an_annualized_benchmark_is_tested_per_period` |
+| Edge: converted at 252 whatever `periods_per_year` says | killed: `an_annualized_benchmark_is_tested_per_period` |
+| Edge: PSR fed the unconverted benchmark | killed: both new tests |
+| Edge: MinTRL fed the unconverted benchmark | killed: both new tests |
+| Edge: refused frequency passes a non-zero benchmark through | killed: `the_default_benchmark_is_unchanged_by_the_conversion` |
+| Edge: refused frequency turns the zero benchmark into NaN | killed: that test and `an_invalid_frequency_fails_closed_instead_of_passing` |
+| Python: the wheel built from `origin/main` | killed: the three parametrized conversion tests fail, the default test passes |
+| npm: the previously committed module | killed: the new `srBenchmark` test fails (and the stamp test above) |
+
+**Not changed.** `sharpebench check` gains no benchmark flag. npm passes
+`srBenchmark`, `confidence` and `borderline` through without the finiteness
+check `trialsSrStd` and `periodsPerYear` get, so a NaN benchmark crosses JSON
+as `null` and the WASM parser reads it as the default 0.0. That is a separate
+input-validation gap, not a unit error, and is left for its own change.
+
+**Commands**, run in the worktree with the build directory inside it:
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all --check` | exit 0 |
+| `cargo clippy --all-targets --all-features -- -D warnings` | exit 0 |
+| `RUSTDOCFLAGS=-Dwarnings cargo doc --workspace --exclude xtask --no-deps` | exit 0 |
+| `cargo nextest run --workspace --exclude xtask` | exit 0, 1280 passed, 18 skipped |
+| `python scripts/check-paired-boundaries.py` | exit 0 |
+| `wasm-pack build crates/sharpebench-wasm --target nodejs --out-dir ../../npm/pkg --out-name sharpebench` | exit 0 |
+| `npm ci && npm run build && npm test` in `npm/` | exit 0, 24 passed |
+| `maturin build --release` (temporary `[workspace]` table, restored and `cmp`-verified), install into a fresh venv, `pytest crates/sharpebench-py/tests` | exit 0, 98 passed |
+
+The worktree sits inside another checkout of this repository, so Cargo finds
+that checkout's workspace first; the temporary `[workspace]` table is what lets
+`maturin` build the Python crate there. No golden, example or `paper/evidence/`
+file changed.
+
 ## SharpeArena findings
 
 The same read applied to SharpeArena found three defects of its own, repaired in

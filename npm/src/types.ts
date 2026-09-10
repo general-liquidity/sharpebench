@@ -177,7 +177,11 @@ export interface HonestyOpts {
   confidence?: number;
   /** Deflated-Sharpe threshold for Borderline. Default 0.90. */
   borderline?: number;
-  /** **Per-period** PSR / MinTRL benchmark Sharpe to beat (not converted). Default 0.0. */
+  /**
+   * **Annualized** PSR / MinTRL benchmark Sharpe to beat, divided by
+   * `sqrt(periodsPerYear)` before use, like `trialsSrStd`. Default 0.0, which is
+   * zero in every unit. Until the release after 0.21.0 it was read per period.
+   */
   srBenchmark?: number;
 }
 

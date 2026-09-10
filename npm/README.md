@@ -42,7 +42,7 @@ console.log(greeks({ spot: 100, strike: 100, t_years: 1, rate: 0.05, vol: 0.2, i
 | `scoreAllocation(trajectory, policy?)` | `AllocationReport`, weight-vector validity plus L1 turnover |
 | `greeks(params)` | `GreeksResult`, Black-Scholes price, Greeks, and local exposure flags |
 | `canary(seed)` | `Canary`, a do-not-train contamination tripwire |
-| `isMySharpeReal(returns, opts)` | One-series deflation, PSR, haircut, MinTRL, and verdict. `trialsSrStd` is annualized; `periodsPerYear` (default 252) says what a period is |
+| `isMySharpeReal(returns, opts)` | One-series deflation, PSR, haircut, MinTRL, and verdict. `trialsSrStd` and `srBenchmark` are annualized; `periodsPerYear` (default 252) says what a period is and converts both |
 | `isMySharpeRealFull(field, winner, opts)` | Fieldwise Reality Check, SPA, step-down, PBO and HLZ diagnostics alongside the one-series verdict |
 | `percentileSelection(candidates, opts?)` | Point winner versus bootstrap-percentile winner and optimism gaps |
 | `decomposeUncertainty(input)` | Aleatoric, epistemic, and distributional diagnostic legs |
