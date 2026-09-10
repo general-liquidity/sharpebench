@@ -68,6 +68,7 @@ fn entry(agent_id: &str, sym_idx: usize, seed: u64, digest: &str, salt: &str) ->
         submission: submission_from_dataset(agent_id, sym_idx, seed),
         artifact_digest: digest.to_string(),
         salt: salt.to_string(),
+        fault_plan_sha256: None,
     }
 }
 

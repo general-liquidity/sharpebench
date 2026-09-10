@@ -39,8 +39,8 @@ pub fn run(args: &[String], json: bool) -> i32 {
 fn usage() {
     eprintln!("usage: sharpebench arena <subcommand> [--json]");
     eprintln!("  arena init <dir>                                       create an arena directory");
-    eprintln!("  arena open <dir> <window> <commit_deadline> <reveal_epoch> --scorer-artifact-sha256 <hex> [--config <score_config.json>] [--sealed-eval-salt-sha256 <hex>]");
-    eprintln!("                                                         open a window; scorer/config provenance is fixed now");
+    eprintln!("  arena open <dir> <window> <commit_deadline> <reveal_epoch> --scorer-artifact-sha256 <hex> [--config <score_config.json>] [--sealed-eval-salt-sha256 <hex>] [--fault-plan <plan.json>]");
+    eprintln!("                                                         open a window; scorer/config/fault-plan provenance is fixed now");
     eprintln!("  arena supersede-empty <dir> <window> <reason>          archive an empty obsolete window before reopening");
     eprintln!("  arena link-supersession <dir> <old> <new>               record the audited replacement config link");
     eprintln!("  arena commit <dir> <window> <commitment.json>          register a pre-deadline commitment (from `sharpebench commit`)");
@@ -74,7 +74,7 @@ fn cmd_open(args: &[String], json: bool) -> i32 {
         (args.get(3), args.get(4), args.get(5), args.get(6))
     else {
         eprintln!(
-            "usage: sharpebench arena open <dir> <window> <commit_deadline> <reveal_epoch> --scorer-artifact-sha256 <hex> [--config <score_config.json>] [--sealed-eval-salt-sha256 <hex>]"
+            "usage: sharpebench arena open <dir> <window> <commit_deadline> <reveal_epoch> --scorer-artifact-sha256 <hex> [--config <score_config.json>] [--sealed-eval-salt-sha256 <hex>] [--fault-plan <plan.json>]"
         );
         return 2;
     };
@@ -94,6 +94,10 @@ fn cmd_open(args: &[String], json: bool) -> i32 {
         },
         None => sharpebench_core::ScoreConfig::default(),
     };
+    let fault_plan_sha256 = match fault_plan_digest(args) {
+        Ok(digest) => digest,
+        Err(e) => return fail(&e, json),
+    };
     let mut arena = match Arena::load(Path::new(dir)) {
         Ok(a) => a,
         Err(e) => return fail(&e, json),
@@ -102,28 +106,36 @@ fn cmd_open(args: &[String], json: bool) -> i32 {
     let Some(scorer_artifact_sha256) = flag_value(args, "--scorer-artifact-sha256") else {
         return fail("--scorer-artifact-sha256 is required: freeze the exact release binary or immutable image before entries commit", json);
     };
-    match arena.open_window_with_provenance(
+    match arena.open_window_with_fault_plan(
         window,
         deadline,
         reveal,
         config,
         sealed_eval_salt_sha256,
         scorer_artifact_sha256.to_string(),
+        fault_plan_sha256.clone(),
     ) {
         Ok(()) => {
             if json {
-                emit_json(&serde_json::json!({
+                let mut out = serde_json::json!({
                     "ok": true,
                     "window": window,
                     "commit_deadline": deadline,
                     "data_reveal_epoch": reveal,
                     "sealed_eval_salt_sha256": arena.window(window).and_then(|w| w.sealed_eval_salt_sha256.as_deref()),
                     "scorer_artifact_sha256": arena.window(window).map(|w| w.scorer_artifact_sha256.as_str()),
-                }));
+                });
+                if let Some(digest) = &fault_plan_sha256 {
+                    out["fault_plan_sha256"] = serde_json::json!(digest);
+                }
+                emit_json(&out);
             } else {
                 println!(
                     "opened window `{window}` (commit deadline: epoch {deadline}, data reveal: epoch {reveal}); scoring rules recorded"
                 );
+                if let Some(digest) = &fault_plan_sha256 {
+                    println!("  fault plan SHA-256 {digest} recorded; every entry must declare it");
+                }
             }
             0
         }
@@ -375,6 +387,27 @@ fn cmd_verify(args: &[String], json: bool) -> i32 {
         }
         Err(e) => fail(&e, json),
     }
+}
+
+/// `--fault-plan <plan.json>`: the digest of a validated fault plan, or `None`
+/// when the flag is absent. Read once and capped as `run --fault-plan` reads
+/// it; a plan `run` would refuse is refused here, so a window can only name a
+/// plan an entrant can actually be run under.
+fn fault_plan_digest(args: &[String]) -> Result<Option<String>, String> {
+    use sharpebench_harness::fault_plan::{FaultPlan, MAX_FAULT_PLAN_BYTES};
+    use std::io::Read;
+    if !args.iter().any(|arg| arg == "--fault-plan") {
+        return Ok(None);
+    }
+    let path = flag_value(args, "--fault-plan")
+        .filter(|path| !path.starts_with("--"))
+        .ok_or("--fault-plan requires a JSON file path")?;
+    let file = std::fs::File::open(path).map_err(|e| format!("cannot open fault plan: {e}"))?;
+    let mut bytes = Vec::new();
+    file.take(MAX_FAULT_PLAN_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("cannot read fault plan: {e}"))?;
+    FaultPlan::from_json(&bytes).map(|plan| Some(plan.digest()))
 }
 
 fn fail(message: &str, json: bool) -> i32 {

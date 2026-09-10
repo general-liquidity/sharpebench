@@ -60,6 +60,27 @@ pub const WINDOW_HEADER_KIND: &str = "sharpebench-arena-window";
 /// Canonical on-disk schema for a forward window. A version bump is required
 /// when the meaning or required fields of the frozen scoring record change.
 pub const WINDOW_SCHEMA_VERSION: u32 = 2;
+/// Schema of a window opened under a fault plan: the unfaulted record plus a
+/// required `fault_plan_sha256`. A distinct version, rather than an optional
+/// field alone, makes a scorer that predates the field refuse a faulted
+/// window instead of loading it as unfaulted and dropping the digest on save.
+pub const FAULTED_WINDOW_SCHEMA_VERSION: u32 = 3;
+
+/// The schema a window must carry given whether it names a fault plan.
+fn expected_window_schema(fault_plan_sha256: Option<&str>) -> u32 {
+    if fault_plan_sha256.is_some() {
+        FAULTED_WINDOW_SCHEMA_VERSION
+    } else {
+        WINDOW_SCHEMA_VERSION
+    }
+}
+
+fn describe_fault_plan(fault_plan_sha256: Option<&str>) -> String {
+    fault_plan_sha256.map_or_else(
+        || "no fault plan".to_string(),
+        |d| format!("fault plan {d}"),
+    )
+}
 
 fn score_config_digest(config: &ScoreConfig) -> Result<String, String> {
     let bytes = serde_json::to_vec(config).map_err(|e| format!("serialize score config: {e}"))?;
@@ -131,6 +152,14 @@ pub struct WindowState {
     /// against this pre-entry commitment.
     #[serde(default)]
     pub sealed_eval_salt_sha256: Option<String>,
+    /// SHA-256 of the frozen fault plan (`FaultPlan::digest` in
+    /// `sharpebench-harness`) this window's entrants run under. Absent for an
+    /// unfaulted window, and then not serialized, so an unfaulted window's bytes
+    /// are unchanged. Present, the window carries
+    /// [`FAULTED_WINDOW_SCHEMA_VERSION`], every revealed entry must declare the
+    /// same digest, and the signed header binds it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fault_plan_sha256: Option<String>,
     pub commitments: Vec<Commitment>,
     #[serde(default)]
     pub refusals: Vec<Refusal>,
@@ -149,6 +178,11 @@ pub struct RevealedEntry {
     pub submission: AgentSubmission,
     pub artifact_digest: String,
     pub salt: String,
+    /// The fault plan digest the submission was produced under, as reported in
+    /// the `fault_injection.plan_sha256` of a `run --fault-plan` row. It must
+    /// equal the window's `fault_plan_sha256`, absent for an unfaulted window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fault_plan_sha256: Option<String>,
 }
 
 /// The first signed payload of every published board. Binding the window's
@@ -170,6 +204,10 @@ pub struct WindowHeader {
     /// SharpeArena's commit-reveal seed protocol.
     #[serde(default)]
     pub sealed_eval_salt_sha256: Option<String>,
+    /// The window's fault plan digest, when it is a faulted window. Omitted
+    /// otherwise, so an unfaulted header signs the same bytes as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fault_plan_sha256: Option<String>,
     pub refusals: Vec<Refusal>,
     /// Final signature of the previously published window's board, or
     /// [`GENESIS_ANCHOR`] for the arena's first published window.
@@ -206,6 +244,11 @@ pub struct WindowSupersession {
     pub replacement_window_id: Option<String>,
     #[serde(default)]
     pub replacement_score_config_sha256: Option<String>,
+    /// The replacement's fault plan digest, recorded with its config digest.
+    /// Omitted when the replacement has none; loading refuses a replacement
+    /// whose plan digest differs, including one present on only one side.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replacement_fault_plan_sha256: Option<String>,
 }
 
 /// Verification result for one published board.
@@ -372,15 +415,26 @@ impl Arena {
                         historical.window_id, replacement.id
                     ));
                 }
+                if replacement.fault_plan_sha256 != historical.replacement_fault_plan_sha256 {
+                    return Err(format!(
+                        "supersession `{}` replacement `{}` fault plan digest mismatch: recorded {}, window has {}",
+                        historical.window_id,
+                        replacement.id,
+                        describe_fault_plan(historical.replacement_fault_plan_sha256.as_deref()),
+                        describe_fault_plan(replacement.fault_plan_sha256.as_deref())
+                    ));
+                }
             }
         }
         let mut windows = BTreeMap::new();
         for id in &state.window_order {
             let w = read_window_state(&dir.join(WINDOWS_DIR).join(id).join(WINDOW_FILE))?;
-            if w.schema_version != WINDOW_SCHEMA_VERSION {
+            let expected_schema = expected_window_schema(w.fault_plan_sha256.as_deref());
+            if w.schema_version != expected_schema {
                 return Err(format!(
-                    "window `{id}` uses schema {}, expected {}",
-                    w.schema_version, WINDOW_SCHEMA_VERSION
+                    "window `{id}` uses schema {}, expected {expected_schema} for a window with {}",
+                    w.schema_version,
+                    describe_fault_plan(w.fault_plan_sha256.as_deref())
                 ));
             }
             let actual = score_config_digest(&w.score_config)?;
@@ -391,6 +445,9 @@ impl Arena {
                 ));
             }
             validate_sha256("scorer artifact", &w.scorer_artifact_sha256)?;
+            if let Some(plan) = &w.fault_plan_sha256 {
+                validate_sha256("fault plan", plan)?;
+            }
             windows.insert(id.clone(), w);
         }
         Ok(Self {
@@ -496,6 +553,32 @@ impl Arena {
         sealed_eval_salt_sha256: Option<String>,
         scorer_artifact_sha256: String,
     ) -> Result<(), String> {
+        self.open_window_with_fault_plan(
+            id,
+            commit_deadline,
+            data_reveal_epoch,
+            config,
+            sealed_eval_salt_sha256,
+            scorer_artifact_sha256,
+            None,
+        )
+    }
+
+    /// [`Arena::open_window_with_provenance`], optionally under a fault plan.
+    /// `fault_plan_sha256` is the digest of a validated plan (the CLI computes
+    /// it with `FaultPlan::digest`); it is frozen with the score config before
+    /// any entry exists and is part of the window's identity from then on.
+    #[allow(clippy::too_many_arguments)]
+    pub fn open_window_with_fault_plan(
+        &mut self,
+        id: &str,
+        commit_deadline: u64,
+        data_reveal_epoch: u64,
+        config: ScoreConfig,
+        sealed_eval_salt_sha256: Option<String>,
+        scorer_artifact_sha256: String,
+        fault_plan_sha256: Option<String>,
+    ) -> Result<(), String> {
         validate_window_id(id)?;
         if self.windows.contains_key(id) {
             return Err(format!("window `{id}` already exists"));
@@ -524,11 +607,14 @@ impl Arena {
             }
         }
         validate_sha256("scorer artifact", &scorer_artifact_sha256)?;
+        if let Some(plan) = &fault_plan_sha256 {
+            validate_sha256("fault plan", plan)?;
+        }
         let score_config_sha256 = score_config_digest(&config)?;
         self.windows.insert(
             id.to_string(),
             WindowState {
-                schema_version: WINDOW_SCHEMA_VERSION,
+                schema_version: expected_window_schema(fault_plan_sha256.as_deref()),
                 id: id.to_string(),
                 commit_deadline,
                 data_reveal_epoch,
@@ -537,6 +623,7 @@ impl Arena {
                 score_config_sha256,
                 scorer_artifact_sha256,
                 sealed_eval_salt_sha256,
+                fault_plan_sha256,
                 commitments: Vec::new(),
                 refusals: Vec::new(),
                 dataset_hash: None,
@@ -601,6 +688,7 @@ impl Arena {
             reason: reason.to_string(),
             replacement_window_id: None,
             replacement_score_config_sha256: None,
+            replacement_fault_plan_sha256: None,
         };
         state.window_order.remove(position);
         state.superseded.push(record.clone());
@@ -634,6 +722,7 @@ impl Arena {
         }
         record.replacement_window_id = Some(replacement_window_id.to_string());
         record.replacement_score_config_sha256 = Some(replacement.score_config_sha256);
+        record.replacement_fault_plan_sha256 = replacement.fault_plan_sha256;
         write_json(&dir.join(STATE_FILE), &state)
     }
 
@@ -719,6 +808,19 @@ impl Arena {
                 w.data_reveal_epoch, self.state.current_epoch
             ));
         }
+        // A submission produced under another fault plan, or under none when
+        // the window has one (or the reverse), is not the same experiment. It
+        // is refused before anything is recorded, as a config mismatch is.
+        for e in entries {
+            if e.fault_plan_sha256 != w.fault_plan_sha256 {
+                return Err(format!(
+                    "entry `{}` was produced under {}, but window `{window_id}` is scored under {}",
+                    e.submission.agent_id,
+                    describe_fault_plan(e.fault_plan_sha256.as_deref()),
+                    describe_fault_plan(w.fault_plan_sha256.as_deref())
+                ));
+            }
+        }
         let dataset_bytes = std::fs::read(dataset_path)
             .map_err(|e| format!("cannot read dataset {}: {e}", dataset_path.display()))?;
         let dataset_hash = content_digest(&dataset_bytes);
@@ -787,6 +889,7 @@ impl Arena {
             score_config_sha256: w.score_config_sha256.clone(),
             scorer_artifact_sha256: w.scorer_artifact_sha256.clone(),
             sealed_eval_salt_sha256: w.sealed_eval_salt_sha256.clone(),
+            fault_plan_sha256: w.fault_plan_sha256.clone(),
             refusals: w.refusals.clone(),
             prev_final_signature,
         };
@@ -822,6 +925,9 @@ fn render_markdown(header: &WindowHeader, scores: &[CompositeScore]) -> String {
         "- commit deadline: epoch {}\n- data reveal: epoch {}\n- dataset SHA-256: `{}`\n- scorer artifact SHA-256: `{}`\n- previous board signature: `{}`\n\n",
         header.commit_deadline, header.data_reveal_epoch, header.dataset_hash, header.scorer_artifact_sha256, header.prev_final_signature
     ));
+    if let Some(plan) = &header.fault_plan_sha256 {
+        out.push_str(&format!("Scored under fault plan SHA-256 `{plan}`.\n\n"));
+    }
     out.push_str("```\n");
     out.push_str(&sharpebench_leaderboard::render(scores));
     out.push_str("```\n");
