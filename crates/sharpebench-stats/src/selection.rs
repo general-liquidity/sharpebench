@@ -534,6 +534,38 @@ mod tests {
         }
     }
 
+    /// The recommended floor is a minimum, not an exclusive bound: an alpha
+    /// sitting exactly on it is recommended and must not warn. This pins the
+    /// comparison on both the refusal and the accepted path, so a `<` that
+    /// drifts to `<=` fails here instead of silently blaming alpha.
+    #[test]
+    fn alpha_exactly_at_the_recommended_floor_does_not_warn() {
+        let refused = percentile_selection(
+            &[vec![0.01]],
+            Utility::MeanReturn,
+            MIN_RECOMMENDED_SELECTION_ALPHA,
+            1,
+            100,
+            0.1,
+        );
+        assert!(refused.input_error.is_some(), "{:?}", refused.input_error);
+        assert!(
+            !refused.alpha_warning,
+            "alpha exactly at the floor is recommended, so a refusal must not blame it"
+        );
+
+        let accepted = percentile_selection(
+            &[steady(60)],
+            Utility::MeanReturn,
+            MIN_RECOMMENDED_SELECTION_ALPHA,
+            1,
+            200,
+            0.1,
+        );
+        assert!(accepted.input_error.is_none(), "{:?}", accepted.input_error);
+        assert!(!accepted.alpha_warning);
+    }
+
     /// F-C: the refusal arm used to hard-code `alpha_warning = true`, which was
     /// written when an invalid alpha was the only way to reach it. F07 routed
     /// every other refusal through the same arm, so a one-observation candidate
