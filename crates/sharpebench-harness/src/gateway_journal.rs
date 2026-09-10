@@ -712,6 +712,31 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    /// A sweep-bound journal resumes only under its own sweep, while the
+    /// inspection load reads it under the same routes and budget. A journal no
+    /// sweep owns serializes exactly as it did before the binding existed.
+    #[test]
+    fn a_sweep_bound_journal_resumes_only_under_its_sweep() {
+        let dir = std::env::temp_dir().join(format!("sb-journal-sweep-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = dir.join("journal.json");
+        let unbound = identity(budget(1_000, 8));
+        let legacy = serde_json::to_string(&GatewayJournal::new(unbound.clone())).expect("json");
+        assert!(!legacy.contains("sweep_sha256"), "{legacy}");
+
+        let bound = unbound.clone().for_sweep("1".repeat(64));
+        GatewayJournal::new(bound.clone())
+            .save(&path)
+            .expect("save");
+        assert!(GatewayJournal::load_bound(&path, &bound).is_ok());
+        assert!(GatewayJournal::load_bound(&path, &unbound).is_err());
+        let other = unbound.clone().for_sweep("2".repeat(64));
+        assert!(GatewayJournal::load_bound(&path, &other).is_err());
+        assert!(GatewayJournal::load_for_routes(&path, &"a".repeat(64), budget(1_000, 8)).is_ok());
+        assert!(GatewayJournal::load_for_routes(&path, &"a".repeat(64), budget(2_000, 8)).is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     /// Recovery cannot selectively erase a spent attempt: a hand-edited journal
     /// that drops a reservation, or settles one twice, is refused on load.
     #[test]

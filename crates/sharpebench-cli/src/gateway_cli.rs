@@ -172,7 +172,7 @@ fn report(
     };
     let spend = journal.as_ref().map(|journal| {
         let state = journal.spend();
-        serde_json::json!({
+        let mut spend = serde_json::json!({
             "calls_started": state.calls_started,
             "priced_usd_nanos": state.priced_usd_nanos.to_string(),
             "unknown_usd_nanos": state.unknown_usd_nanos.to_string(),
@@ -182,8 +182,11 @@ fn report(
             "overspent_calls": state.overspent_calls,
             "ceiling_breached": journal.ceiling_breached(),
             "partial": state.is_partial(),
-            "sweep_sha256": journal.identity.sweep_sha256,
-        })
+        });
+        if let Some(sweep) = &journal.identity.sweep_sha256 {
+            spend["sweep_sha256"] = serde_json::Value::from(sweep.as_str());
+        }
+        spend
     });
     Ok(serde_json::json!({
         "route_table_sha256": routes.identity_digest(),
@@ -205,7 +208,6 @@ fn report(
         "spend": spend,
         "usage_provenance": "host_observed_not_verified_billing",
         "provider_transport": "operator_supplied_none_ships_in_this_build",
-        "serving_loop": "sharpebench_harness::gateway::serve::run_gateway_sweep",
     }))
 }
 
@@ -497,10 +499,6 @@ mod tests {
         .expect("a sweep-bound journal under the same routes and budget reports");
         assert_eq!(value["spend"]["sweep_sha256"], sweep.as_str());
         assert_eq!(value["limits"]["max_requests_per_decision"], 32);
-        assert_eq!(
-            value["serving_loop"],
-            "sharpebench_harness::gateway::serve::run_gateway_sweep"
-        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }
