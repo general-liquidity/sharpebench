@@ -789,9 +789,10 @@ pub struct CompositeScore {
     pub bootstrap_error: Option<String>,
     /// Why the deflation family (the Deflated Sharpe, its bar and its bootstrap
     /// interval) was unavailable. Omitted for valid inputs. When present,
-    /// `deflated_sharpe`, `deflation_bar_per_period`, `dsr_ci_low`,
-    /// `dsr_ci_high` and `dsr_se` are the no-skill floor rather than estimates,
-    /// `composite` is 0.0 and `rank_eligible` is always false.
+    /// `deflated_sharpe` and `deflation_bar_per_period` are the no-skill floor
+    /// rather than estimates, `dsr_ci_low`, `dsr_ci_high` and `dsr_se` are
+    /// absent rather than numeric, `composite` is 0.0 and `rank_eligible` is
+    /// always false.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deflation_error: Option<String>,
     /// Why the selection-robustness diagnostic was unavailable. Omitted for
@@ -926,12 +927,18 @@ pub struct CompositeScore {
     pub realized_floored_return: f64,
     /// Lower bound of the bootstrapped Deflated-Sharpe confidence interval (at
     /// `cfg.dsr_ci_level`). The DSR point estimate is `deflated_sharpe`; this is
-    /// how far it might sink under resampling noise.
-    pub dsr_ci_low: f64,
+    /// how far it might sink under resampling noise. Absent, with the other two
+    /// interval fields, when `deflation_error` says the interval could not be
+    /// estimated: an interval nothing was resampled for is unavailable, and a
+    /// number in its place reads as a precision the estimator never had.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dsr_ci_low: Option<f64>,
     /// Upper bound of the bootstrapped Deflated-Sharpe confidence interval.
-    pub dsr_ci_high: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dsr_ci_high: Option<f64>,
     /// Bootstrap standard error of the Deflated Sharpe (the CI's scale).
-    pub dsr_se: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dsr_se: Option<f64>,
     /// 1-based tie-band index among rank-eligible agents: entries whose DSR
     /// confidence intervals overlap share a band and are statistically
     /// indistinguishable, so they are not hard-ranked against each other. 0 for
@@ -1426,18 +1433,11 @@ fn score_agent_with(
         cfg.block_prob,
         cfg.dsr_ci_level,
     );
-    // An interval that could not be estimated is not a tight one. Collapsing it
-    // onto the point estimate would read as perfect precision and make the
-    // entry look separated from every rival in the tie-band test, so the
-    // unavailability is recorded and the bounds are pinned to the same no-skill
-    // floor `dsr` already carries.
+    // An interval that could not be estimated is not a tight one. Any number in
+    // its place is read as a bound, so the entry is reported without one and
+    // with the reason, rather than with a width the estimator never measured.
     let dsr_ci_error = dsr_ci.as_ref().err().map(ToString::to_string);
-    let dsr_ci = dsr_ci.unwrap_or(crate::significance::DsrConfidence {
-        point: dsr,
-        se: 0.0,
-        lower: dsr,
-        upper: dsr,
-    });
+    let dsr_ci = dsr_ci.ok();
     let deflation_error = deflation_error.or(dsr_ci_error);
 
     // Economic rationality, elicited from the one choice a frozen submission
@@ -1547,9 +1547,9 @@ fn score_agent_with(
         dsr_per_cost,
         process_floored,
         realized_floored_return,
-        dsr_ci_low: dsr_ci.lower,
-        dsr_ci_high: dsr_ci.upper,
-        dsr_se: dsr_ci.se,
+        dsr_ci_low: dsr_ci.map(|c| c.lower),
+        dsr_ci_high: dsr_ci.map(|c| c.upper),
+        dsr_se: dsr_ci.map(|c| c.se),
         tie_group: 0,
         dsr_tied: false,
         trials_sr_std: defl.sr_std,
@@ -2109,8 +2109,16 @@ pub fn rank_declared(
 /// Do two agents' Deflated-Sharpe confidence intervals overlap? Overlapping CIs
 /// mean the difference in their DSR point estimates is within sampling noise, so
 /// they belong in the same tie band rather than being hard-ranked.
+/// An entry without an interval reports no overlap: an unavailable interval
+/// supports no claim about either agent, and eligibility already excludes such
+/// an entry from the banding this feeds.
 fn ci_overlap(a: &CompositeScore, b: &CompositeScore) -> bool {
-    a.dsr_ci_low <= b.dsr_ci_high && b.dsr_ci_low <= a.dsr_ci_high
+    match (a.dsr_ci_low, a.dsr_ci_high, b.dsr_ci_low, b.dsr_ci_high) {
+        (Some(a_low), Some(a_high), Some(b_low), Some(b_high)) => {
+            a_low <= b_high && b_low <= a_high
+        }
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -2165,9 +2173,9 @@ mod tests {
             );
             assert_eq!(s.deflated_sharpe, 0.0);
             assert_eq!(s.deflation_bar_per_period, 0.0);
-            assert_eq!(s.dsr_ci_low, 0.0);
-            assert_eq!(s.dsr_ci_high, 0.0);
-            assert_eq!(s.dsr_se, 0.0);
+            assert_eq!(s.dsr_ci_low, None);
+            assert_eq!(s.dsr_ci_high, None);
+            assert_eq!(s.dsr_se, None);
             assert_eq!(s.composite, 0.0);
             assert!(!s.rank_eligible, "an unscored agent cannot be ranked");
         }
@@ -2212,7 +2220,10 @@ mod tests {
             s.deflation_bar_per_period.to_bits(),
             expected_max_sharpe(sr_std, cfg.n_trials).unwrap().to_bits()
         );
-        assert!(s.dsr_ci_low <= s.deflated_sharpe && s.deflated_sharpe <= s.dsr_ci_high);
+        assert!(
+            s.dsr_ci_low.unwrap() <= s.deflated_sharpe
+                && s.deflated_sharpe <= s.dsr_ci_high.unwrap()
+        );
     }
 
     #[test]
@@ -2327,6 +2338,63 @@ mod tests {
         assert_eq!(score.bootstrap_p, 1.0);
         assert!(!score.rank_eligible);
         assert_eq!(score.declared_mandate_eligible, Some(false));
+    }
+
+    /// An interval with no bootstrap support is unavailable in the serialized
+    /// report, not a zero-width bracket.
+    ///
+    /// `n_boot = 0` used to reach the interval estimator and come back as
+    /// `se = 0` with both bounds on the point estimate, which is the tightest
+    /// interval the schema can express, published for the one configuration
+    /// from which nothing was resampled. The in-memory value is not the whole
+    /// claim: the JSON is what the board and the paper's checklist describe, so
+    /// the absence is asserted there too.
+    #[test]
+    fn an_unsupported_dsr_interval_is_absent_from_the_report() {
+        let entrant = agent("entrant", vec![run(0.002, 0.0005, 60); 2]);
+        let cfg = ScoreConfig {
+            n_boot: 0,
+            ..ScoreConfig::default()
+        };
+        let score = score_agent(&entrant, &cfg);
+        assert_eq!(
+            score.deflation_error.as_deref(),
+            Some("n_boot must be positive")
+        );
+        assert_eq!(
+            (score.dsr_ci_low, score.dsr_ci_high, score.dsr_se),
+            (None, None, None)
+        );
+        // The same configuration is refused by the p-value on this resampler,
+        // so the entry is already inadmissible and no ranking changes with it.
+        assert_eq!(
+            score.bootstrap_error.as_deref(),
+            Some("n_boot must be positive")
+        );
+        assert!(!score.rank_eligible);
+
+        let report = serde_json::to_value(&score).expect("serialize the score");
+        for field in ["dsr_ci_low", "dsr_ci_high", "dsr_se"] {
+            assert!(
+                report.get(field).is_none(),
+                "{field} must be absent from the report, got {:?}",
+                report.get(field)
+            );
+        }
+        assert_eq!(
+            report["deflation_error"], "n_boot must be positive",
+            "the report states why the interval is unavailable"
+        );
+
+        // A supported configuration still carries all three numbers.
+        let supported = score_agent(&entrant, &ScoreConfig::default());
+        let report = serde_json::to_value(&supported).expect("serialize the score");
+        for field in ["dsr_ci_low", "dsr_ci_high", "dsr_se"] {
+            assert!(
+                report[field].is_f64(),
+                "{field} must be reported when estimated"
+            );
+        }
     }
 
     /// The headline property: a lucky agent with a *higher raw return* ranks
@@ -2602,10 +2670,10 @@ mod tests {
         );
         assert!(!w.dsr_tied, "a distinct band is not a tie");
         assert!(
-            w.dsr_ci_high < a.dsr_ci_low,
+            w.dsr_ci_high.unwrap() < a.dsr_ci_low.unwrap(),
             "weak CI upper {} should sit below strong CI lower {}",
-            w.dsr_ci_high,
-            a.dsr_ci_low
+            w.dsr_ci_high.unwrap(),
+            a.dsr_ci_low.unwrap()
         );
     }
 
@@ -2731,7 +2799,10 @@ mod tests {
                 &cfg,
             );
             assert_eq!(s.deflated_sharpe.to_bits(), alone.deflated_sharpe.to_bits());
-            assert_eq!(s.dsr_ci_low.to_bits(), alone.dsr_ci_low.to_bits());
+            assert_eq!(
+                s.dsr_ci_low.map(f64::to_bits),
+                alone.dsr_ci_low.map(f64::to_bits)
+            );
         }
         // Pinning the measured path off reproduces the same board exactly.
         let pinned = rank(

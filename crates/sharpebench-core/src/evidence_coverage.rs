@@ -271,6 +271,7 @@ pub const COMPOSITE_SCORE_INVENTORY: EvidenceInventory = EvidenceInventory {
         ("process_ok", COVERED_SCORE),
         ("bootstrap_p", COVERED_SCORE),
         ("bootstrap_error", COVERED_SCORE),
+        ("deflation_error", COVERED_SCORE),
         ("raw_mean_return", COVERED_SCORE),
         ("rank_eligible", COVERED_SCORE),
         ("composite", COVERED_SCORE),

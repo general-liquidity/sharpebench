@@ -116,11 +116,12 @@ pub struct DsrConfidence {
 /// but resampling the raw track (no centering), because here we want the
 /// sampling distribution of the statistic, not its null distribution. `ci` is the
 /// two-sided coverage (e.g. 0.90 → the 5th and 95th percentiles). Deterministic
-/// given `seed`. A degenerate track (< 2 points, or `n_boot == 0`) returns a
-/// zero-width interval at the point estimate; an invalid `ci`, `block_prob`,
-/// `trials_sr_std` or observation returns an error instead, because a zero-width
-/// interval reads as perfect precision and that is the most favorable reading of
-/// an input the estimator never accepted.
+/// given `seed`. Every input the estimator cannot sample returns a typed error
+/// rather than a number: an invalid `ci`, `block_prob`, `trials_sr_std` or
+/// observation, and equally a track of fewer than two points or `n_boot == 0`,
+/// which have no bootstrap support at all. A zero-width interval at the point
+/// estimate reads as perfect precision, and that is the most favorable reading
+/// of a configuration from which nothing was resampled.
 pub fn bootstrap_dsr_ci(
     returns: &[f64],
     n_trials: u32,
@@ -161,17 +162,12 @@ pub fn bootstrap_dsr_ci_against_null(
     dispersion(trials_sr_std, "trials_sr_std")?;
     block_probability(block_prob)?;
     probability(ci, "ci")?;
+    // Same support requirement as the p-value that shares this resampler: an
+    // interval nothing was resampled for is unavailable, not tight.
+    bootstrap_inputs(returns, n_boot, block_prob)?;
     let n = returns.len();
     let point =
         deflated_sharpe_ratio_against_null(returns, n_trials, null_mean_sharpe, trials_sr_std)?;
-    if n < 2 || n_boot == 0 {
-        return Ok(DsrConfidence {
-            point,
-            se: 0.0,
-            lower: point,
-            upper: point,
-        });
-    }
     let mut rng = SplitMix64(seed ^ 0x0DEF_1A7E_D5B0_07C1);
     let mut boots: Vec<f64> = Vec::with_capacity(n_boot);
     let mut resample = vec![0.0; n];
@@ -968,6 +964,45 @@ mod tests {
                 requirement: "must be finite and non-negative",
             })
         );
+    }
+
+    /// A configuration with no bootstrap support is unavailable, not precise.
+    ///
+    /// Both shapes used to return `se = 0` and `lower == upper == point`, which
+    /// is the narrowest interval the estimator can express, published for the
+    /// one case where it resampled nothing at all. The refusal is the same
+    /// typed one the p-value on this resampler already gives, so a caller that
+    /// distinguishes only `Ok` from `Err` records the unavailability.
+    #[test]
+    fn dsr_ci_without_bootstrap_support_is_unavailable_not_zero_width() {
+        let r: Vec<f64> = (0..200)
+            .map(|i| 0.01 + 0.002 * (i as f64 * 0.5).sin())
+            .collect();
+        assert_eq!(
+            bootstrap_dsr_ci(&r, 50, 0.5, 7, 0, 0.1, 0.90),
+            Err(StatisticalError::InvalidParameter {
+                name: "n_boot",
+                requirement: "must be positive",
+            })
+        );
+        assert_eq!(
+            bootstrap_dsr_ci(&r[..1], 50, 0.5, 7, 800, 0.1, 0.90),
+            Err(StatisticalError::InsufficientObservations {
+                required: 2,
+                actual: 1,
+            })
+        );
+        assert_eq!(
+            bootstrap_dsr_ci(&[], 50, 0.5, 7, 800, 0.1, 0.90),
+            Err(StatisticalError::InsufficientObservations {
+                required: 2,
+                actual: 0,
+            })
+        );
+        // The p-value sharing this resampler refuses the same configurations,
+        // which is why no ranking admission depends on the interval alone.
+        assert!(bootstrap_pvalue(&r, 7, 0, 0.1).is_err());
+        assert!(bootstrap_pvalue(&r[..1], 7, 800, 0.1).is_err());
     }
 
     /// R02 guard: the valid-input numbers the boundary must not move. These are

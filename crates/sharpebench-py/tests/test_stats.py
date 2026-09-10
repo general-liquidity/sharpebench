@@ -230,10 +230,17 @@ def test_dsr_ci_is_deterministic_given_the_seed():
     assert bootstrap_dsr_ci(xs, n_trials=10, n_boot=200, seed=8) != a
 
 
-def test_dsr_ci_degenerate_track_is_zero_width():
-    ci = bootstrap_dsr_ci([0.01], n_trials=1)
-    assert ci["lower"] == ci["point"] == ci["upper"]
-    assert ci["se"] == 0.0
+def test_dsr_ci_without_bootstrap_support_is_refused():
+    """A track with nothing to resample has no interval, not a perfect one.
+
+    It used to come back as `lower == point == upper` with `se = 0`, the
+    narrowest interval the surface can express, for the one case the estimator
+    never sampled.
+    """
+    with pytest.raises(ValueError):
+        bootstrap_dsr_ci([0.01], n_trials=1)
+    with pytest.raises(ValueError):
+        bootstrap_dsr_ci(edge_track(50), n_trials=1, n_boot=0)
 
 
 def test_bootstrap_pvalue_separates_edge_from_noise():

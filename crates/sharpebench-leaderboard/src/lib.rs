@@ -78,7 +78,12 @@ pub fn render(board: &[CompositeScore]) -> String {
         } else {
             "-".to_string()
         };
-        let ci = format!("[{:.4},{:.4}]", s.dsr_ci_low, s.dsr_ci_high);
+        // An entry whose interval could not be estimated prints the absence, not
+        // a bracket of substitute numbers.
+        let ci = match (s.dsr_ci_low, s.dsr_ci_high) {
+            (Some(low), Some(high)) => format!("[{low:.4},{high:.4}]"),
+            _ => "unavailable".to_string(),
+        };
         let tie = if s.rank_eligible && s.dsr_tied {
             "="
         } else {
