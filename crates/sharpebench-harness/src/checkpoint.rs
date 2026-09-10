@@ -724,6 +724,26 @@ pub fn run_resumable_sweep_observed<F>(
 where
     F: FnMut(usize, u64) -> crate::AttemptObservation,
 {
+    run_resumable_sweep_faulted(path, agent_id, contract, windows, policy, |window, seed| {
+        attempt(window, seed).into()
+    })
+}
+
+/// [`run_resumable_sweep_observed`] persisting each attempt's injected-fault
+/// evidence on its ledger record. The plan must already be folded into
+/// `contract.invocation_sha256` with [`crate::fault_plan::bind_invocation`], so
+/// resuming under a different plan is refused as a different contract.
+pub fn run_resumable_sweep_faulted<F>(
+    path: &Path,
+    agent_id: &str,
+    contract: &SweepContract,
+    windows: &[Window],
+    policy: ResumePolicy,
+    mut attempt: F,
+) -> std::io::Result<ResilientSubmission>
+where
+    F: FnMut(usize, u64) -> crate::fault_plan::FaultedObservation,
+{
     // Seeds and the retry budget come from the contract itself here, so
     // comparing them against the contract would compare them against
     // themselves. `run_resumable_sweep_bound` still makes the real comparison
@@ -817,7 +837,7 @@ where
         loop {
             // The checkpoint driver owns the retry loop so that each observation
             // is durable before a later attempt can start.
-            let driven = crate::run_with_observed_retries(0, || attempt(w, seed));
+            let driven = crate::failure::run_with_faulted_retries(0, || attempt(w, seed));
             tries += 1;
             cp.task_mut(w, seed)
                 .expect("the claimed task exists")

@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "7071009e40cceff7f26f31f7414171a40270029b",
+  "generated_at_head": "cd7f16b5382b1349006b39733727a878eec9dcbd",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -555,11 +555,19 @@
     },
     {
       "path": "crates/sharpebench-harness/src/checkpoint.rs",
-      "sha256": "6bb94df09fd8e6abd7934fb00a0df0665a59b99db3c9ae2ede9c3feaddaf2882"
+      "sha256": "65889a8f6406630e543c823fc0fa7112432612e53b56a02709e439fc1dabcbfd"
     },
     {
       "path": "crates/sharpebench-harness/src/failure.rs",
-      "sha256": "b92c206e71c62b9697eb2124e3b531c4c70afbfa8975cf70c392c72105768769"
+      "sha256": "af08ab88763f506f212e287ef8774d07012858724b46efed8fd8226aa8b4d362"
+    },
+    {
+      "path": "crates/sharpebench-harness/src/fault_modes.rs",
+      "sha256": "6eb1bf40620b11f331c34898b2f32d7a10aac21ff88f499455c1104b19cc803e"
+    },
+    {
+      "path": "crates/sharpebench-harness/src/fault_plan.rs",
+      "sha256": "8cbe34e5724ed32a83ac03314fb56f88d6099be1b76cc263566947062ac903a7"
     },
     {
       "path": "crates/sharpebench-harness/src/gateway.rs",
@@ -571,7 +579,7 @@
     },
     {
       "path": "crates/sharpebench-harness/src/lib.rs",
-      "sha256": "dd2d97a16221b0cb8c46a37e12f20852420a8d1cd352dc937ac62cab4b9cd5c0"
+      "sha256": "892d3d588c76d4d317f5d23169670e1843553124a3b68e23e3d33e57d8a261b4"
     },
     {
       "path": "crates/sharpebench-harness/src/perturb.rs",
@@ -592,6 +600,10 @@
     {
       "path": "crates/sharpebench-harness/tests/evidence_fields_no_clone_merges.rs",
       "sha256": "4f474b6a2e32b46b4a27c9489d61cb25bc853aacac75a417f0985a91b7a6691e"
+    },
+    {
+      "path": "crates/sharpebench-harness/tests/fault_injection.rs",
+      "sha256": "67591ceae2c7f47178bac0b0293f34caf31189e7ccfad5e94c8e081d9b37da78"
     },
     {
       "path": "crates/sharpebench-harness/tests/frozen_rate_card.rs",
@@ -1051,5 +1063,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "5589a2df93f4765ec17557a52b349994bdf93d22880b8cd677303c9e046731f6"
+  "source_snapshot_sha256": "98716212d4744719051e2bcd33bd448014336c8ef74c2bb0719f43382eb5b433"
 }
