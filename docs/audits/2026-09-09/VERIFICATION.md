@@ -1,5 +1,59 @@
 # Verification record
 
+## Follow-ups and releases, 2026-09-10
+
+Every pull request below merged with all checks green on its exact pushed head,
+main unmoved since that head was tested, and the merged tree identical to the
+tested tree. Post-main CI passed after each release.
+
+| PR | Work | Main after merge |
+|---|---|---|
+| Arena #44 | Paired-test prose | `9fb589f` |
+| Bench #65 | Gateway chapter, evidence inventory, verdict wording | `95aed66` |
+| Bench #66 | CLI fault plan, backoff, re-execution; protocol relaxations | `ba89ea4` |
+| Release | SharpeBench v0.20.0 | `fa9525c` |
+| Bench #67 | OOM verdict from the exit code | `23276af` |
+| Arena #45 | Pin SharpeBench 0.20.0 | `dfd807e` |
+| Bench #68 | Fault plan digest in window identity | `ce2691b` |
+| Bench #69 | Live gateway and allowlist tests; Docker init-layer entries | `875c6bf` |
+| Bench #70 | Opt-in Sharpe diagnostics | `ae25dbb` |
+| Release | SharpeBench v0.21.0 | `f040493` |
+| Arena #46 | Pin SharpeBench 0.21.0 | `dea7068` |
+| Bench #71 | npm publish waits for the tarball | `4f09f2c` |
+
+The live out-of-memory probe had failed four times on branches that did not
+touch the sandbox. Recorded as a flake on its first failures, it was then traced to source: moby
+28.0.4 sets `State.OOMKilled` only from containerd's `TaskOOM` event, which
+containerd 2.3.4 publishes asynchronously and can drop when `memory.events` is
+already gone or requeue after the exit (containerd #8893, open). The exit code is
+recorded with the exit itself, and nothing inside the hardened launch can
+SIGKILL the entrant, so an exited container with code 137 is now a breach.
+Which loss path hit CI is not established; no containerd log was captured.
+
+The first live run of the image allowlist found that it could never pass: a
+container export always holds `.dockerenv`, `dev/console`, `dev/pts/`, `dev/shm/`
+and `etc/resolv.conf`, and replaces `etc/hostname`, `etc/hosts` and `etc/mtab`,
+none of which an image's own allowlist names. Those entries are now admitted
+only as the empty files, directories and `/proc/mounts` link Docker creates, and
+the live test fails if a daemon adds anything else.
+
+The v0.20.0 registry check failed once because crates.io had not yet indexed
+`sharpebench-wasm` when the check ran; the crate was already published, and a
+rerun of that job alone passed.
+
+The v0.21.0 npm job failed twice: npm served the kernel package's metadata
+minutes before its tarball, and the MCP step's 150-second wait on metadata alone
+first hit ETARGET and then E404 on the tarball. Both packages published on a
+rerun once the tarball was downloadable, and the registry check passed on its
+own rerun. Bench PR #71 makes the step wait up to 20 minutes for the tarball as
+well as the metadata.
+
+The opt-in diagnostics reproduce the 2026 paper's worked standard errors (0.379
+and 0.214) and PSRs (0.966 and 0.900), and at zero autocorrelation match the
+kernel's PSR bit for bit. Their implementation corrected one statement in the
+literature audit: the observed-Sharpe and null-evaluated standard errors
+coincide only when the observed Sharpe equals the benchmark.
+
 ## Port build and literature corrections, 2026-09-10
 
 Six pull requests merged into SharpeBench and one into SharpeArena. Each had
