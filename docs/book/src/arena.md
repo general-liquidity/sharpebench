@@ -36,8 +36,9 @@ open -> committed -> scoring -> published
    the attest registry's own semantics, wrapped rather than re-derived. An
    entrant to a faulted window makes its commitment with `arena commitment
    <agent_id> <window> <artifact_digest> <salt> --fault-plan <plan.json>`
-   instead, so that it binds the plan (see [faulted windows](#faulted-windows));
-   without `--fault-plan` it prints exactly what `sharpebench commit` prints.
+   or `sharpebench commit ... --fault-plan <plan.json>`, which prints the same
+   commitment, so that it binds the plan (see [faulted windows](#faulted-windows));
+   without `--fault-plan` both print the same plan-less commitment.
 4. **`arena advance <dir> <epoch>`** advances the clock. See below.
 5. **`arena score <dir> <window> <dataset> <entries.json>`** runs after the
    data-reveal epoch. Each entry reveals its pre-image (artifact digest plus
