@@ -17,22 +17,34 @@
 //! ## Example: is this Sharpe real?
 //!
 //! ```
-//! use sharpebench_stats::{deflated_sharpe_ratio, probabilistic_sharpe_ratio, sharpe_ratio};
+//! use sharpebench_stats::{
+//!     deflated_sharpe_ratio, per_period_from_annualized, probabilistic_sharpe_ratio,
+//!     sharpe_ratio,
+//! };
 //!
-//! // A per-period (NOT annualized) excess-return series.
+//! // A per-period (NOT annualized) excess-return series of daily bars.
 //! let returns = [0.012, -0.004, 0.009, 0.011, -0.002, 0.008, 0.010, -0.001];
 //!
 //! let sr = sharpe_ratio(&returns); // observed, per-period
-//! let psr = probabilistic_sharpe_ratio(&returns, 0.0); // P(true Sharpe > 0)
-//! // Deflate for the 200 strategies tried, with ~0.5 cross-trial Sharpe dispersion:
-//! // `Err` when an input is not one the estimator accepts: a non-finite return
-//! // or a `trials_sr_std` that is not a dispersion has no deflated Sharpe.
-//! let dsr = deflated_sharpe_ratio(&returns, 200, 0.5).unwrap(); // P(skill survives the search)
+//! // One minus the one-sided p-value of H0: SR <= 0. Not the probability that
+//! // the true Sharpe is positive: that is a posterior, and needs a prior.
+//! let psr = probabilistic_sharpe_ratio(&returns, 0.0);
+//! // The cross-trial Sharpe dispersion is per period, like every Sharpe here. An
+//! // annualized dispersion of 0.5 on daily bars is 0.5 / sqrt(252), about 0.0315
+//! // per period; 0.5 passed per period would be about 7.9 annualized.
+//! let trials_sr_std = per_period_from_annualized(0.5, 252.0);
+//! assert_eq!(trials_sr_std, 0.5 / 252f64.sqrt());
+//! // Deflate for the 200 strategies tried. `Err` when an input is not one the
+//! // estimator accepts: a non-finite return or a `trials_sr_std` that is not a
+//! // dispersion has no deflated Sharpe. The result is one minus the p-value of
+//! // the test whose null is that this Sharpe is the best of 200 zero-skill
+//! // trials, not the probability that the strategy is skilled.
+//! let dsr = deflated_sharpe_ratio(&returns, 200, trials_sr_std).unwrap();
 //!
 //! assert!(sr > 0.0);
 //! assert!((0.0..=1.0).contains(&psr));
 //! assert!((0.0..=1.0).contains(&dsr));
-//! assert!(dsr <= psr); // deflating for the search never raises the probability
+//! assert!(dsr <= psr); // deflating for the search never raises the statistic
 //! ```
 #![forbid(unsafe_code)]
 

@@ -145,9 +145,13 @@ pub struct HonestyVerdict {
     pub expected_max_sharpe: f64,
     pub deflated_sharpe: f64,
     pub probabilistic_sharpe: f64,
-    /// `1 - deflated_sharpe`: the probability the edge is a search artifact.
+    /// `1 - deflated_sharpe`: the p-value of the test whose null is that this
+    /// Sharpe is the best of `n_trials` zero-skill trials. It is not the
+    /// probability that the edge is a search artifact.
     pub haircut: f64,
-    /// `sharpe * deflated_sharpe`: the Sharpe discounted by survival probability.
+    /// `sharpe * deflated_sharpe`: the Sharpe scaled down by the deflated
+    /// Sharpe, a presentation discount rather than a probability-weighted
+    /// expectation.
     pub haircut_sharpe: f64,
     pub min_track_record_len: f64,
     pub verdict: Verdict,
