@@ -576,6 +576,38 @@ pub fn step_down_significant(
 
 #[cfg(test)]
 mod tests {
+    /// The interval is a function of its seed, and a benchmark that promises
+    /// byte-identical reproduction must pin that function, not just its shape.
+    /// This fixes the resampled bounds to the last bit for one seeded series,
+    /// so a change to the stream (including the constant that decorrelates this
+    /// resampler from the p-value's) fails here rather than silently moving
+    /// every published interval. The seed shares set bits with that constant,
+    /// so replacing its XOR with OR or AND yields a different stream; a seed
+    /// with no overlapping bits would let both mutations pass unnoticed.
+    #[test]
+    fn the_dsr_interval_is_bit_for_bit_reproducible_for_a_fixed_seed() {
+        let returns: Vec<f64> = (0..60)
+            .map(|i| ((i * 37 % 23) as f64 - 11.0) * 0.001 + 0.0004)
+            .collect();
+        let ci = bootstrap_dsr_ci_against_null(&returns, 5, 0.0, 0.5, 0xFFFF, 200, 0.1, 0.9)
+            .expect("a 60-point track with 200 draws has bootstrap support");
+        assert_eq!(
+            ci.lower.to_bits(),
+            0x3ea0_caa5_5358_0000,
+            "lower bound moved"
+        );
+        assert_eq!(
+            ci.upper.to_bits(),
+            0x3f30_5f83_b3a0_6400,
+            "upper bound moved"
+        );
+        assert_eq!(
+            ci.se.to_bits(),
+            0x3f17_3228_b985_1003,
+            "standard error moved"
+        );
+    }
+
     use super::*;
 
     #[test]
