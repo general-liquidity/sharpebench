@@ -10,7 +10,7 @@
 
 use std::collections::HashMap;
 
-use crate::{verify_commitment, Commitment};
+use crate::{verify_commitment_under_fault_plan, Commitment};
 
 /// A registered commitment and the epoch at which its window unlocks.
 #[derive(Clone, Debug)]
@@ -75,18 +75,33 @@ impl Registry {
         artifact_digest: &str,
         salt: &str,
     ) -> Result<(), String> {
+        self.reveal_under_fault_plan(agent_id, target_window, artifact_digest, salt, None)
+    }
+
+    /// [`Registry::reveal`] for a window scored under `fault_plan_sha256`. A
+    /// commitment that bound another plan, a plan when this is `None`, or no
+    /// plan when this names one, does not match and is refused.
+    pub fn reveal_under_fault_plan(
+        &mut self,
+        agent_id: &str,
+        target_window: &str,
+        artifact_digest: &str,
+        salt: &str,
+        fault_plan_sha256: Option<&str>,
+    ) -> Result<(), String> {
         let k = Self::key(agent_id, target_window);
         let unlocked = self.current_epoch;
         let reg = self.regs.get_mut(&k).ok_or("no such commitment")?;
         if unlocked < reg.unlock_epoch {
             return Err("window still locked".to_string());
         }
-        if !verify_commitment(
+        if !verify_commitment_under_fault_plan(
             &reg.commitment,
             agent_id,
             target_window,
             artifact_digest,
             salt,
+            fault_plan_sha256,
         ) {
             return Err("reveal does not match commitment".to_string());
         }
