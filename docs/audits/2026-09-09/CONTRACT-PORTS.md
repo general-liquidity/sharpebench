@@ -246,7 +246,8 @@ All run in the worktree with `CARGO_TARGET_DIR` inside it.
 2. **Not yet wired.** The CLI exposes neither re-execution verification nor a
    backoff schedule. `run_resumable_sweep_observed` in `checkpoint.rs` owns its
    own retry loop and still retries immediately; a CLI flag for a schedule must
-   also pass it through `BackoffSchedule::bind_invocation`.
+   also pass it through `BackoffSchedule::bind_invocation`. Since done: see
+   "CLI wiring follow-up" below.
 3. **Unsealed publications.** The signed board written by `sharpebench sign`
    (`sharpebench_leaderboard::publish`) and the scores persisted in arena window
    state are publications governed by the evidence-coverage digests. They were
@@ -255,3 +256,84 @@ All run in the worktree with `CARGO_TARGET_DIR` inside it.
 4. **MCP.** The server code is unchanged and forwards the npm result; its own
    test suite was not run locally because it needs the MCP SDK installed from
    the registry. CI runs it against the locally built package.
+
+## CLI wiring follow-up (rows 4 and 37)
+
+Built on `a136d14`: the harness driver in `7c019d6`, the CLI in `270fd71`, the
+book in `f6cdc7d`. The fault-plan flag built in the same change is recorded in
+[FAULT-INJECTION.md](FAULT-INJECTION.md).
+
+**Row 4: `run --retry-backoff <ms,ms,...>`.** `load_retry_backoff`
+(`crates/sharpebench-cli/src/main.rs`) parses whole milliseconds, digits only,
+each at most 600000, and at most as many entries as the per-round retry budget
+(two): a longer list could never be used but would still change the identity.
+Every refusal, and use without an external transport, exits 2 before launch.
+The schedule is folded into `invocation_sha256` with
+`BackoffSchedule::bind_invocation`, after the rate card and the fault plan.
+The gap item 2 named is closed in the harness, not worked around: the body of
+`run_resumable_sweep_faulted` moved into `run_resumable_sweep_with_backoff`
+(`crates/sharpebench-harness/src/checkpoint.rs`), which keeps its own retry
+loop and applies the schedule inside it with the record `run_with_backoff`
+makes. The scheduled wait is written on the failed attempt's `backoff_after`
+and saved before the driver sleeps; retries are numbered within the cell's
+round, so a resumed round continues the schedule and a
+`--retry-runtime-failures` round starts it again; agent faults never wait. The
+unpersisted paths use `run_agent_resilient_faulted` (`lib.rs`), onto which
+`run_agent_resilient_with_backoff` now delegates. The totals reach the
+existing `attempt_accounting.attempts.backoff_ns_total`. Without the flag the
+schedule is immediate, the identity is unchanged and nothing is recorded; the
+byte-identity comparison in FAULT-INJECTION.md covers these paths, including
+the incomplete-sweep and checkpointed failure paths.
+
+**Row 37: `verify-trajectory --reexecute`.** `run_reexecution` calls
+`verify_trajectory_reexecuted` with the running binary's digest and a factory
+for a fresh agent per captured run: `--cmd "<prog>"` (host execution, with an
+unsandboxed warning), `--http <addr>`, or with neither the reference agent the
+trajectory names (`buy-and-hold` or `momentum`). External agents are wrapped so
+that the first transport, protocol or spawn failure is recorded; any such
+failure exits 1 as `reexecution_transport_failure`, because an HttpAgent that
+degrades to a hold would otherwise surface as a divergence and be read as
+non-determinism. A divergence exits 1 with `reexecution_diverged` and the typed
+`ReexecutionDivergence` on stdout (JSON) and its `Display` on stderr; a strict
+refusal exits 1 as before. A pass emits the usual sealed verification with a
+`reexecution` object (`agent`, `runs_reexecuted`, `decisions_compared`)
+appended after the sealed fields. `--reexecute` with
+`--allow-unbound-trajectory`, with a non-reference trajectory and no agent
+flag, and `--cmd` or `--http` without `--reexecute` exit 2. Plain
+`verify-trajectory` output is byte-identical. Limit: `capture` records only the
+reference agents, so a trajectory of an external entrant has to come from
+`sharpebench_harness::run_agent_capture`; `--image` is not a re-execution
+agent.
+
+**Tests.** Harness (`crates/sharpebench-harness/tests/runtime_recovery.rs`):
+`a_checkpointed_backoff_is_saved_before_each_wait_and_restarts_per_round`
+(a sleeper that reloads the checkpoint at every wait and requires the wait to
+be on disk already; 5 s then 15 s for an exhausted cell, 5 s for a cell that
+recovers, the schedule again in a recovery round, totals 25 s then 45 s) and
+`an_immediate_checkpoint_schedule_writes_no_backoff`. CLI
+(`crates/sharpebench-cli/tests/fault_backoff_reexecution_cli.rs`):
+`retry_backoff_waits_are_recorded_and_bound_into_the_checkpoint` (48 attempts,
+`backoff_ns_total` 48 ms against no field without the flag; 32 recorded waits
+in the checkpoint; a changed schedule and no schedule are refused with the
+checkpoint unchanged and no entrant call),
+`a_malformed_retry_backoff_refuses_before_launch`,
+`reexecution_passes_a_deterministic_entrant_and_refuses_a_divergent_one`
+(reference and HTTP passes, a call-counting HTTP entrant refused at run 0 step
+1, a broken transport reported as a transport failure) and
+`reexecution_flags_refuse_an_unlaunchable_or_contradictory_request`.
+
+**Mutation checks**, broken in place on the committed tree, the named test run,
+restored from `git show HEAD:<path>` and confirmed with `cmp`:
+
+| Invariant | Mutation | Killed by |
+|---|---|---|
+| A changed schedule refuses to resume | `checkpoint_contract` binds the immediate schedule | `retry_backoff_waits_are_recorded_and_bound_into_the_checkpoint` |
+| A malformed schedule refuses | the digits-only check removed (`+5` accepted) | `a_malformed_retry_backoff_refuses_before_launch` |
+| A schedule longer than the budget refuses | the length check disabled | `a_malformed_retry_backoff_refuses_before_launch` |
+| No flag: immediate and unrecorded | an absent flag yields a 1 ms schedule | `retry_backoff_waits_are_recorded_and_bound_into_the_checkpoint`, and the binary comparison (4 outputs differ) |
+| No schedule: the checkpoint records nothing | the checkpoint driver records a zero wait | `an_immediate_checkpoint_schedule_writes_no_backoff`, and the binary comparison (the failing checkpoint differs) |
+| The wait is saved before the sleep | sleep moved before `save` | `a_checkpointed_backoff_is_saved_before_each_wait_and_restarts_per_round` |
+| Retries are numbered per round | always the first delay | `a_checkpointed_backoff_is_saved_before_each_wait_and_restarts_per_round` |
+| A divergence is a refusal | exit 0 on `Diverged` | `reexecution_passes_a_deterministic_entrant_and_refuses_a_divergent_one` |
+| `--reexecute` re-executes | the flag falls through to strict replay | `reexecution_passes_a_deterministic_entrant_and_refuses_a_divergent_one` |
+| A transport failure is not a divergence | the transport-failure check disabled | `reexecution_passes_a_deterministic_entrant_and_refuses_a_divergent_one` (`reexecution_diverged` reported) |
