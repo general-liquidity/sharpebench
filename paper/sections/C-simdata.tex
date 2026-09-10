@@ -17,7 +17,7 @@ A captured trajectory contains the agent's raw decisions and a schema-v2 \texttt
 
 \subsection{Contamination}\label{sec:contamination}
 
-Two defenses ship. A held-out dataset can be sealed under a published commitment to its hash, so the benchmark can prove later that the data a model was scored on is the data it committed to before scoring. A canary token with the standard training-corpus warning is embedded beside it, so post-hoc detection of a model that trained on the scenarios is possible. Separately, a masked view of any dataset renames symbols and dates to opaque identifiers, which defeats an agent that pattern-matches memorized tickers.
+Two defenses ship. A held-out dataset can be sealed under a published commitment to its hash, so the benchmark can show later that the data a model was scored on is byte-identical to the data it committed to before scoring. As in \cref{sec:attest}, the commitment binds bytes and not chronology. A canary token with the standard training-corpus warning is embedded beside it, so post-hoc detection of a verbatim copy of the scenarios in a model's output is possible. The signal is positive-only and literal-bytes-only: a hit is evidence of contamination, and a miss is not evidence of its absence, because a paraphrased, compressed, encoded or model-internalized copy carries none of the protected bytes. Separately, a masked view of any dataset renames symbols and dates to opaque identifiers, which defeats an agent that pattern-matches memorized tickers.
 
 \subsection{The units correction, in detail}\label{app:unitsfix}
 
