@@ -2393,6 +2393,268 @@ mod tests {
         );
     }
 
+    /// A provider behind the gateway's transport seam that cannot open a
+    /// socket. It records the content of every message it was handed and
+    /// answers each with the same text.
+    #[derive(Clone, Default)]
+    struct RecordingProvider {
+        contents: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    }
+
+    impl sharpebench_harness::gateway::ProviderTransport for RecordingProvider {
+        fn call(
+            &mut self,
+            call: sharpebench_harness::gateway::ProviderCall<'_>,
+        ) -> sharpebench_harness::gateway::ProviderOutcome {
+            use sharpebench_harness::gateway::{ProviderBody, ProviderOutcome, ProviderUsage};
+            self.contents
+                .lock()
+                .expect("contents lock")
+                .extend(call.messages.iter().map(|message| message.content.clone()));
+            ProviderOutcome::Answered {
+                status: 200,
+                body: serde_json::to_vec(&ProviderBody {
+                    text: GATEWAY_ANSWER.to_string(),
+                    finish_reason: Some("stop".to_string()),
+                    usage: Some(ProviderUsage {
+                        input_tokens: 10,
+                        output_tokens: 5,
+                    }),
+                })
+                .expect("a provider body serializes"),
+            }
+        }
+    }
+
+    const GATEWAY_ANSWER: &str = "hold-ack";
+
+    /// The entrant the gateway live test runs inside the fixture. Before any
+    /// observation it lists its network interfaces and attempts one outbound
+    /// connect, and it reports both to the model in every request, so the
+    /// host learns them from inside the container. Each decision is a hold
+    /// only if the gateway's answer arrived on stdin; anything else is written
+    /// as an invalid decision, which fails the run.
+    const GATEWAY_ENTRANT: &str = r#"trap 'exit 0' TERM
+ifaces=$(ls -1 /sys/class/net | tr '\n' ',')
+wget -q -T 2 -O /dev/null http://1.1.1.1/ >/dev/null 2>&1
+egress=$?
+while IFS= read -r observation; do
+  printf '%s\n' "{\"protocol\":\"sharpebench.model-gateway.v1\",\"model_alias\":\"fake.v1\",\"messages\":[{\"role\":\"user\",\"content\":\"ifaces=$ifaces egress_exit=$egress\"}],\"max_output_tokens\":16}"
+  IFS= read -r answer || exit 0
+  case "$answer" in
+    *'"ok":true'*'"text":"hold-ack"'*) printf '%s\n' '{"orders":[],"reasoning":"hold-ack"}' ;;
+    *) printf '%s\n' 'the gateway answer did not arrive' ;;
+  esac
+done
+"#;
+
+    /// The gateway launch against a real daemon: a sweep through
+    /// `run_gateway_sweep` whose one cell starts the pinned fixture from the
+    /// argv [`gateway_launch`] returns, with an explicit container command
+    /// appended after the image positional (the fixture's own `/bin/sh` would
+    /// read the observations as a script). Every model call rides the
+    /// entrant's stdio to a provider that cannot open a socket. Asserts that
+    /// every answer arrived (a missing one is an invalid decision), that the
+    /// journal on disk recorded every call, that inside the container only
+    /// loopback existed and the outbound connect failed, and that the
+    /// container was classified and then removed.
+    #[test]
+    #[ignore = "needs a running Docker daemon and SHARPEBENCH_SANDBOX_FIXTURE"]
+    fn live_gateway_launch_serves_model_calls_over_stdio_with_no_network() {
+        use sharpebench_harness::gateway::serve::{
+            gateway_backtest, run_gateway_sweep, EntrantLaunch, GatewayHost, GatewaySweep,
+        };
+        use sharpebench_harness::gateway::{
+            CallPermits, GatewayLimits, ModelRoute, RouteTable, Secret,
+        };
+        use sharpebench_harness::gateway_journal::{
+            GatewayBudget, GatewayJournal, JournalIdentity, JournalRecord,
+        };
+        use sharpebench_harness::{ResumePolicy, SweepIdentity};
+        use sharpebench_sim::{CostModel, Dataset, Window};
+
+        assert!(
+            docker_available(),
+            "this test was requested explicitly with --ignored, so an absent Docker daemon is a failure"
+        );
+        let image = live_fixture_image();
+        let dir = std::env::temp_dir().join(format!("sb-live-gateway-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("a temp dir");
+        let checkpoint = dir.join("checkpoint.json");
+        let journal = dir.join("journal.json");
+        let card = sharpebench_harness::accounting::RateCard::from_json(
+            br#"{"schema_version":"sharpebench.token-rate-card.v1","provider":"fake","model":"fake-1","revision":"2026-01-01","input_usd_nanos_per_token":1,"output_usd_nanos_per_token":1}"#,
+        )
+        .expect("a valid rate card");
+        let routes = RouteTable::new(vec![ModelRoute::new(
+            "fake.v1",
+            "https://provider.invalid/v1/messages",
+            Secret::new("sk-live-gateway-test-do-not-log-0123456789"),
+            card,
+            4096,
+            8,
+        )
+        .expect("a valid route")])
+        .expect("a valid route table");
+        let permits = CallPermits::new(2);
+        let budget = GatewayBudget {
+            max_usd_nanos: 1_000_000,
+            max_calls: 100,
+        };
+        let provider = RecordingProvider::default();
+        let data = Dataset::synthetic(4, 60, 7);
+        let windows = [Window { start: 20, end: 23 }];
+        let steps = 3;
+        let mut containers = Vec::new();
+
+        let outcome = run_gateway_sweep(
+            GatewaySweep {
+                checkpoint: &checkpoint,
+                journal: &journal,
+                agent_id: "gateway:live-fixture",
+                identity: SweepIdentity {
+                    dataset_sha256: "a".repeat(64),
+                    cost_model_sha256: "b".repeat(64),
+                    score_config_sha256: "c".repeat(64),
+                    runner_artifact_sha256: "d".repeat(64),
+                    entrant_sha256: "e".repeat(64),
+                    invocation_sha256: "f".repeat(64),
+                },
+                windows: &windows,
+                seeds: &[0],
+                max_retries: 0,
+                policy: ResumePolicy::UnfinishedOnly,
+            },
+            GatewayHost {
+                routes: &routes,
+                permits: &permits,
+                transport: provider.clone(),
+                budget,
+                limits: GatewayLimits::default(),
+            },
+            |window, seed, gateway| {
+                let launch = gateway_launch(&image, &SandboxOptions::default())
+                    .expect("docker is present and the fixture is pinned");
+                assert!(launch
+                    .args
+                    .windows(2)
+                    .any(|pair| pair == ["--network", "none"]));
+                assert_eq!(
+                    launch.args.last(),
+                    Some(&image),
+                    "the image is the last positional"
+                );
+                let name = launch
+                    .container
+                    .clone()
+                    .expect("a docker launch names its container");
+                let mut args = launch.args.clone();
+                args.extend(
+                    ["/bin/sh", "-c", GATEWAY_ENTRANT]
+                        .iter()
+                        .map(|arg| (*arg).to_string()),
+                );
+                let pipes = EntrantLaunch::isolating_launcher(launch.program.clone(), args)
+                    .spawn(&routes)
+                    .expect("the docker client spawns");
+                wait_until_running(&name).expect("the daemon reports the entrant running");
+                let observed = gateway_backtest(
+                    &data,
+                    pipes,
+                    gateway,
+                    windows[window],
+                    seed,
+                    CostModel::default(),
+                    None,
+                );
+                // The pipes are gone: read the verdict, then remove, as
+                // `SandboxedAgent::finish` does.
+                let state = settled_exit_state(&DockerCli, &name, EXIT_SETTLE);
+                let verdict = state
+                    .clone()
+                    .and_then(|state| classify_container_exit(&state));
+                let removed = DockerCli.remove(&name);
+                let remnant = Command::new("docker")
+                    .args(["inspect", &name])
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status()
+                    .expect("docker must run")
+                    .success();
+                println!(
+                    "gateway container {name}: state={state:?} verdict={verdict:?} removed={removed:?} remnant={remnant}"
+                );
+                containers.push((verdict, removed, remnant));
+                observed
+            },
+        );
+        let outcome = outcome.expect("the gateway sweep completes");
+        let on_disk = GatewayJournal::load_bound(
+            &journal,
+            &JournalIdentity::new(routes.identity_digest(), budget)
+                .for_sweep(outcome.host_observed.sweep_sha256.clone()),
+        )
+        .expect("the journal on disk is bound to this sweep");
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(containers.len(), 1, "one cell, one container");
+        for (verdict, removed, remnant) in &containers {
+            assert_eq!(verdict, &Ok(ResourceVerdict::WithinBudget));
+            assert_eq!(removed, &Ok(()), "the container must be removed");
+            assert!(!remnant, "no container may survive its cell");
+        }
+        assert!(
+            outcome.result.failures.is_empty(),
+            "every decision must be valid, so every answer arrived: {:?}",
+            outcome.result.failures
+        );
+        assert_eq!(outcome.result.submission.runs.len(), 1);
+        assert_eq!(outcome.result.submission.runs[0].returns.len(), steps);
+
+        let contents = provider.contents.lock().expect("contents lock").clone();
+        println!("model requests seen by the provider: {contents:?}");
+        assert_eq!(contents.len(), steps, "one model call per decision");
+        for content in &contents {
+            let ifaces = content
+                .strip_prefix("ifaces=")
+                .and_then(|rest| rest.split(' ').next())
+                .expect("the entrant reports its interfaces");
+            assert_eq!(
+                ifaces, "lo,",
+                "only loopback may exist inside the container"
+            );
+            let egress: i32 = content
+                .rsplit_once("egress_exit=")
+                .and_then(|(_, code)| code.parse().ok())
+                .expect("the entrant reports its egress attempt");
+            assert!(
+                egress != 0 && egress != 127,
+                "the outbound connect must have run and failed, got exit {egress}"
+            );
+        }
+
+        let reserved = on_disk
+            .records()
+            .iter()
+            .filter(|record| matches!(record, JournalRecord::Reserved { .. }))
+            .count();
+        let settled = on_disk
+            .records()
+            .iter()
+            .filter(|record| matches!(record, JournalRecord::Settled { .. }))
+            .count();
+        assert_eq!(
+            (reserved, settled),
+            (steps, steps),
+            "the journal reserves and settles every call"
+        );
+        let spend = on_disk.spend();
+        assert_eq!(spend.calls_started as usize, steps);
+        assert_eq!(spend.priced_calls as usize, steps);
+        assert_eq!(outcome.host_observed.calls_started as usize, steps);
+    }
+
     #[cfg(test)]
     fn sharpebench_protocol_obs() -> sharpebench_protocol::MarketObservation {
         sharpebench_protocol::MarketObservation {
