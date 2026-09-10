@@ -114,6 +114,10 @@ pub struct AttemptRecord {
     pub duration: AttemptDuration,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<crate::accounting::AttemptUsage>,
+    /// Faults a frozen plan injected into this attempt. Absent, and absent
+    /// from the serialized record, whenever no plan is configured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub injected_faults: Option<crate::fault_plan::InjectedFaults>,
 }
 
 impl AttemptRecord {
@@ -122,6 +126,7 @@ impl AttemptRecord {
             outcome: AttemptOutcome::Completed,
             duration,
             usage: None,
+            injected_faults: None,
         }
     }
 
@@ -130,6 +135,7 @@ impl AttemptRecord {
             outcome: AttemptOutcome::Failed { kind },
             duration,
             usage: None,
+            injected_faults: None,
         }
     }
 
@@ -345,12 +351,24 @@ pub fn run_with_observed_retries<F>(max_retries: u32, mut attempt: F) -> Attempt
 where
     F: FnMut() -> AttemptObservation,
 {
+    run_with_faulted_retries(max_retries, || attempt().into())
+}
+
+/// [`run_with_observed_retries`] carrying each attempt's injected-fault
+/// evidence onto its ledger record.
+pub fn run_with_faulted_retries<F>(max_retries: u32, mut attempt: F) -> AttemptedRun
+where
+    F: FnMut() -> crate::fault_plan::FaultedObservation,
+{
     let mut tries: u32 = 0;
     let mut ledger = AttemptLedger::default();
     loop {
         tries += 1;
         let started = std::time::Instant::now();
-        let AttemptObservation { result, mut usage } = attempt();
+        let crate::fault_plan::FaultedObservation {
+            observation: AttemptObservation { result, mut usage },
+            injected_faults,
+        } = attempt();
         if result.is_err() {
             if let Some(usage) = &mut usage {
                 usage.complete = false;
@@ -363,6 +381,7 @@ where
             Ok(run) => {
                 let mut record = AttemptRecord::completed(duration);
                 record.usage = usage;
+                record.injected_faults = injected_faults;
                 ledger.push(record);
                 return AttemptedRun {
                     outcome: RunOutcome::Completed(run),
@@ -373,6 +392,7 @@ where
             Err(kind) => {
                 let mut record = AttemptRecord::failed(kind.clone(), duration);
                 record.usage = usage;
+                record.injected_faults = injected_faults;
                 ledger.push(record);
                 if !kind.is_runtime() {
                     return AttemptedRun {

@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "eb41f02ac23cd7a6fd8f436e6580e42f9fa83c05",
+  "generated_at_head": "cd7f16b5382b1349006b39733727a878eec9dcbd",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -375,7 +375,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/composite.rs",
-      "sha256": "029c498165919d0da7dedab748746a963aaaab579b3819dc9e12666ac0dc0869"
+      "sha256": "50b1b028b6ae70a462da05caad39f650f21529ace416e5fca0244de0a4c70fdf"
     },
     {
       "path": "crates/sharpebench-core/src/correlation.rs",
@@ -423,7 +423,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/percentile.rs",
-      "sha256": "193f8f515fd84bee9d42fddaa9fc1a24ef242b2e792b29d9ba40daddc848eea8"
+      "sha256": "5a1aa565bd45b23f7a0572e8c9fd830e7f2948f59a9de83fd0997a077c50f565"
     },
     {
       "path": "crates/sharpebench-core/src/process.rs",
@@ -451,7 +451,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/selfaudit.rs",
-      "sha256": "225714f3accc86898850875eeef33a8f7b859897fee1a03f825768ae05531019"
+      "sha256": "a9f7a49923e13b38da27b4c9529220cf7b4c013edffdf18aa49526140275893d"
     },
     {
       "path": "crates/sharpebench-core/tests/forecast_contract_digest_versions.rs",
@@ -555,11 +555,19 @@
     },
     {
       "path": "crates/sharpebench-harness/src/checkpoint.rs",
-      "sha256": "6bb94df09fd8e6abd7934fb00a0df0665a59b99db3c9ae2ede9c3feaddaf2882"
+      "sha256": "65889a8f6406630e543c823fc0fa7112432612e53b56a02709e439fc1dabcbfd"
     },
     {
       "path": "crates/sharpebench-harness/src/failure.rs",
-      "sha256": "b92c206e71c62b9697eb2124e3b531c4c70afbfa8975cf70c392c72105768769"
+      "sha256": "af08ab88763f506f212e287ef8774d07012858724b46efed8fd8226aa8b4d362"
+    },
+    {
+      "path": "crates/sharpebench-harness/src/fault_modes.rs",
+      "sha256": "6eb1bf40620b11f331c34898b2f32d7a10aac21ff88f499455c1104b19cc803e"
+    },
+    {
+      "path": "crates/sharpebench-harness/src/fault_plan.rs",
+      "sha256": "8cbe34e5724ed32a83ac03314fb56f88d6099be1b76cc263566947062ac903a7"
     },
     {
       "path": "crates/sharpebench-harness/src/gateway.rs",
@@ -571,7 +579,7 @@
     },
     {
       "path": "crates/sharpebench-harness/src/lib.rs",
-      "sha256": "dd2d97a16221b0cb8c46a37e12f20852420a8d1cd352dc937ac62cab4b9cd5c0"
+      "sha256": "892d3d588c76d4d317f5d23169670e1843553124a3b68e23e3d33e57d8a261b4"
     },
     {
       "path": "crates/sharpebench-harness/src/perturb.rs",
@@ -592,6 +600,10 @@
     {
       "path": "crates/sharpebench-harness/tests/evidence_fields_no_clone_merges.rs",
       "sha256": "4f474b6a2e32b46b4a27c9489d61cb25bc853aacac75a417f0985a91b7a6691e"
+    },
+    {
+      "path": "crates/sharpebench-harness/tests/fault_injection.rs",
+      "sha256": "67591ceae2c7f47178bac0b0293f34caf31189e7ccfad5e94c8e081d9b37da78"
     },
     {
       "path": "crates/sharpebench-harness/tests/frozen_rate_card.rs",
@@ -759,7 +771,7 @@
     },
     {
       "path": "crates/sharpebench-stats/src/deflated_sharpe.rs",
-      "sha256": "0c6c11a265ae687ad0d691cefdd33a2d23c607420dbb61ba9d0813ed7b485c8a"
+      "sha256": "3e4d837be9deaa57ba2143d15c6c441036d086e7d03dced7a11711437d194fa2"
     },
     {
       "path": "crates/sharpebench-stats/src/dissent.rs",
@@ -891,7 +903,7 @@
     },
     {
       "path": "paper/refs.bib",
-      "sha256": "b0e89c0c9047e87465d6656b3a91bbef716db38f6a194aeb5ba2177f97238415"
+      "sha256": "1e76dc91840ed5bfe64dd2b2b588402b2f69a383f26e465be1036d5cb287646d"
     },
     {
       "path": "paper/sections/00-abstract.tex",
@@ -899,7 +911,7 @@
     },
     {
       "path": "paper/sections/01-introduction.tex",
-      "sha256": "6c164613b20a19aa5d29a6528aea09a86f412e92c23bedb29a1d19fbd8e23406"
+      "sha256": "f42e86508db6bc4a37accea7452e458d65874abf92877afe903e6ebe6a23538a"
     },
     {
       "path": "paper/sections/02-principles.tex",
@@ -907,15 +919,15 @@
     },
     {
       "path": "paper/sections/03-benchmark.tex",
-      "sha256": "2a6c423425d8fccda53f2a7b89b8f4d2530a3cbdd582ca5af09995fb03d782ff"
+      "sha256": "783ff18c465e0ff215336542f45f01fbacf216f45579595e4ed985133d66062f"
     },
     {
       "path": "paper/sections/04-integrity.tex",
-      "sha256": "d9320fbc3889b5e746a113b1577c6348591196d7b39027281561d1ebfd371fdf"
+      "sha256": "1084b28420db6ffbc2ea7a99019450a9323df2560cf2650e42748be3a1925571"
     },
     {
       "path": "paper/sections/05-experiments.tex",
-      "sha256": "a7ce0204fd3240f8bd3bbfc0e0756858a93012145c384ba5fd5fbe4b4276c832"
+      "sha256": "7d67641e7a8452a07d29f6a263fb31cae9c39240fded5cd317e9e1b36060d998"
     },
     {
       "path": "paper/sections/06-related.tex",
@@ -923,7 +935,7 @@
     },
     {
       "path": "paper/sections/07-limitations.tex",
-      "sha256": "760e4230c97f39fd0f227d288251da11d4d3b5a5755538e6d632529838aac33d"
+      "sha256": "6a2bf7a9bcab28b58369f16a2d7258c1f6dcbd006f88f013768f1401bc83d34f"
     },
     {
       "path": "paper/sections/08-reproducibility.tex",
@@ -935,7 +947,7 @@
     },
     {
       "path": "paper/sections/A-commands.tex",
-      "sha256": "1a3b5489f8394eb52bbdeb4559385c71946c65508d555cb4af15f0adbc8e1994"
+      "sha256": "3b28561eac17cdc29f00872fbc24a314d7ce2ae0b4b8630fa68861e14671177f"
     },
     {
       "path": "paper/sections/B-checklist.tex",
@@ -1051,5 +1063,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "536b28fcd895742afc4cfee634af0ac30d0b384274a5b1e22bbadfefa22490f5"
+  "source_snapshot_sha256": "98716212d4744719051e2bcd33bd448014336c8ef74c2bb0719f43382eb5b433"
 }
