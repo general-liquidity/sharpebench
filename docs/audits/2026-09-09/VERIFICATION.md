@@ -1,5 +1,46 @@
 # Verification record
 
+## Remaining gaps, 2026-09-11
+
+Every pull request below merged with all checks green on its exact pushed head,
+main unmoved since that head was tested, and the merged tree identical to the
+tested tree. A branch that fell behind main was brought up to date and tested
+again before it merged.
+
+| PR | Work | Main after merge |
+|---|---|---|
+| Bench #73 | Header cross-check; commitments bind the fault plan | `0eae8e8` |
+| Bench #74 | LITE `sr_benchmark` annualized | `91d5d0e` |
+| Bench #75 | npm finiteness checks; MCP lockfile | `84047ae` |
+| Bench #76 | Incomplete-sweep fault report; external capture; image re-execution | `b830142` |
+| Bench #77 | `sharpebench commit --fault-plan` | `bff54c0` |
+| Release | SharpeArena v0.25.0 | `f520d61` |
+
+Unfaulted commitments were shown byte-identical by pinning three hashes printed
+by the main binary, and the committed `arena/` round-trips unchanged. Default
+LITE verdicts were compared against main across 150 CLI runs, 422 WASM outputs
+and 542 Python calls. The CLI changes were compared against main across 35
+commands with only host durations and the runner hash masked.
+
+Two defects surfaced as side findings. The WASM module committed on main had
+been built before the 0.20.0 version bump and stamped `sharpebench-stats/0.19.0`;
+CI rebuilds the module before testing, so only a local run against the
+committed file showed it, and Bench PR #74's rebuild corrected it. And
+`npm ci` failed in `npm/mcp` because its lockfile still resolved the kernel at
+`^0.15.0`; the release job installs without the lockfile, which is why no
+release had failed on it.
+
+The SharpeArena release passed its registry check on the first run. Its
+GitHub deployment records show `success` through the API; SharpeBench's
+latest npm and PyPI records were marked inactive at 20:40 and 20:44 UTC on
+2026-09-10 by a status change this work did not make, while every registry
+serves the released versions.
+
+The live image re-execution test proves the hardened launch and typed refusals
+against a real daemon, not a passing re-execution: the pinned Alpine fixture's
+`/bin/sh` entrypoint does not speak the decision protocol. A passing
+re-execution is covered with a fake sandbox.
+
 ## Follow-ups and releases, 2026-09-10
 
 Every pull request below merged with all checks green on its exact pushed head,
