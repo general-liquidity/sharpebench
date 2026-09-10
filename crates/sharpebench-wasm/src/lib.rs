@@ -105,9 +105,14 @@ pub fn canary_json(seed: &str) -> Result<String, String> {
 }
 
 /// Parse a partial `HonestyConfig` blob: `n_trials` is required; the rest default
-/// (`trials_sr_std` → null, `confidence` → 0.95, `borderline` → 0.90,
-/// `sr_benchmark` → 0.0). Built field-by-field so callers can pass just
-/// `{"n_trials": N}`.
+/// (`trials_sr_std` → null, `periods_per_year` → absent, `confidence` → 0.95,
+/// `borderline` → 0.90, `sr_benchmark` → 0.0). Built field-by-field so callers
+/// can pass just `{"n_trials": N}`.
+///
+/// `periods_per_year` may be omitted (the verdict then assumes 252 and says so)
+/// but not sent as `null`: JSON has no NaN or infinity, so `JSON.stringify` turns
+/// both into `null`, and reading that as "omitted" would replace a caller's
+/// invalid frequency with the daily default instead of refusing it.
 fn parse_honesty_config(json: &str) -> Result<sharpebench_edge::HonestyConfig, String> {
     let v: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
     let n_trials = v
@@ -119,6 +124,12 @@ fn parse_honesty_config(json: &str) -> Result<sharpebench_edge::HonestyConfig, S
     let trials_sr_std = match v.get("trials_sr_std") {
         None | Some(serde_json::Value::Null) => None,
         Some(x) => Some(x.as_f64().ok_or("non-numeric field: trials_sr_std")?),
+    };
+    let periods_per_year = match v.get("periods_per_year") {
+        None => None,
+        Some(x) => Some(x.as_f64().ok_or(
+            "periods_per_year must be a number (null is how JSON encodes NaN and infinity; omit the field for the 252 default)",
+        )?),
     };
     let confidence = v
         .get("confidence")
@@ -135,6 +146,7 @@ fn parse_honesty_config(json: &str) -> Result<sharpebench_edge::HonestyConfig, S
     Ok(sharpebench_edge::HonestyConfig {
         n_trials,
         trials_sr_std,
+        periods_per_year,
         confidence,
         borderline,
         sr_benchmark,
@@ -613,6 +625,50 @@ mod tests {
         let out = is_my_sharpe_real_json("[0.001,0.002,0.0015,0.0018]", r#"{"n_trials":10}"#)
             .expect("verdict");
         assert!(out.contains("\"n_trials\":10"));
+    }
+
+    #[test]
+    fn honesty_frequency_reaches_the_verdict_and_refuses_what_is_not_one() {
+        let returns: Vec<f64> = (0..400)
+            .map(|i| 0.001 + 0.002 * (0.7 * i as f64).sin())
+            .collect();
+        let returns_json = serde_json::to_string(&returns).unwrap();
+        let bar = |config: &str| -> f64 {
+            let out = is_my_sharpe_real_json(&returns_json, config).expect("verdict");
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            v["expected_max_sharpe"].as_f64().unwrap()
+        };
+        let default = bar(r#"{"n_trials":50}"#);
+        assert_eq!(bar(r#"{"n_trials":50,"periods_per_year":252}"#), default);
+        assert!(bar(r#"{"n_trials":50,"periods_per_year":52}"#) > default);
+        assert_eq!(
+            parse_honesty_config(r#"{"n_trials":1}"#)
+                .unwrap()
+                .periods_per_year,
+            None
+        );
+
+        // A JSON-encodable invalid frequency is a Fail verdict with the reason.
+        let out = is_my_sharpe_real_json(&returns_json, r#"{"n_trials":50,"periods_per_year":0}"#)
+            .expect("a refused verdict is still a verdict");
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["verdict"], "Fail");
+        assert_eq!(
+            v["statistics_error"],
+            "periods_per_year must be finite and positive"
+        );
+
+        // `null` (what NaN and infinity become in JSON) and non-numbers are
+        // refused outright rather than read as "use the default".
+        for config in [
+            r#"{"n_trials":50,"periods_per_year":null}"#,
+            r#"{"n_trials":50,"periods_per_year":"252"}"#,
+        ] {
+            let lite = is_my_sharpe_real_json(&returns_json, config);
+            let full = is_my_sharpe_real_full_json(&format!("[{returns_json}]"), 0, config);
+            assert!(lite.unwrap_err().contains("periods_per_year"), "{config}");
+            assert!(full.unwrap_err().contains("periods_per_year"), "{config}");
+        }
     }
 
     #[test]

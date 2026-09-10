@@ -15,7 +15,8 @@ from sharpebench import is_my_sharpe_real, bootstrap_dsr_ci
 returns = df["strategy_ret"].to_numpy()          # per-period, NOT annualized
 
 # n_trials is the honest one: how many variants did you try before keeping this?
-v = is_my_sharpe_real(returns, n_trials=200)
+# periods_per_year says what a row is (default 252, daily bars).
+v = is_my_sharpe_real(returns, n_trials=200, periods_per_year=252)
 print(v["sharpe"], v["deflated_sharpe"], v["verdict"], v["explanation"])
 
 ci = bootstrap_dsr_ci(returns, n_trials=200)
@@ -34,7 +35,7 @@ print(ci["lower"], ci["point"], ci["upper"])
 | `min_track_record_length(returns, ...)` | periods needed before the Sharpe is believable |
 | `bootstrap_dsr_ci(returns, n_trials, ...)` | `{point, se, lower, upper}` on the DSR itself |
 | `bootstrap_pvalue(excess, ...)` | stationary-bootstrap p-value for one series |
-| `is_my_sharpe_real(returns, n_trials=1, ...)` | LITE verdict dict: `pass \| borderline \| fail` + explanation |
+| `is_my_sharpe_real(returns, n_trials=1, ..., periods_per_year=None)` | LITE verdict dict: `pass \| borderline \| fail` + explanation. `trials_sr_std` is annualized and `periods_per_year` (default 252, flagged) converts it |
 | `is_my_sharpe_real_full(field, ...)` | FULL verdict over a whole candidate field (LITE + snooping family + PBO + HLZ) |
 | `reality_check_pvalue(field, ...)` | White's Reality Check over the field |
 | `spa_pvalue` / `spa_consistent_pvalue(field, ...)` | Hansen's SPA (liberal / consistent) |

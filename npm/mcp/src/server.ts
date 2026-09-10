@@ -95,20 +95,22 @@ export function createServer(): McpServer {
 
   server.tool(
     "is_my_sharpe_real",
-    "Answer 'is this Sharpe real, or an artifact of luck and multiple testing?' for a single return series. Deflates the observed Sharpe for n_trials (the search footprint), then returns a Pass/Borderline/Fail verdict with deflated Sharpe, PSR, haircut, MinTRL, and a plain-English explanation. n_trials = 1 is almost always a lie — pass the true number of strategies/configs you tried.",
+    "Answer 'is this Sharpe real, or an artifact of luck and multiple testing?' for a single return series. Deflates the observed Sharpe for n_trials (the search footprint), then returns a Pass/Borderline/Fail verdict with deflated Sharpe, PSR, haircut, MinTRL, and a plain-English explanation. n_trials = 1 is almost always a lie — pass the true number of strategies/configs you tried. trials_sr_std is annualized (default 0.5) and periods_per_year converts it to the per-period unit of the returns (default 252, daily bars; 365 daily crypto, 8760 hourly, 52 weekly). sr_benchmark is per period.",
     {
       returns: z.array(z.number()),
       n_trials: z.number().int().min(1).max(0xffffffff),
       trials_sr_std: z.number().optional(),
+      periods_per_year: z.number().positive().optional(),
       confidence: z.number().optional(),
       borderline: z.number().optional(),
       sr_benchmark: z.number().optional(),
     },
-    async ({ returns, n_trials, trials_sr_std, confidence, borderline, sr_benchmark }) =>
+    async ({ returns, n_trials, trials_sr_std, periods_per_year, confidence, borderline, sr_benchmark }) =>
       run(() =>
         sb.isMySharpeReal(returns, {
           nTrials: n_trials,
           trialsSrStd: trials_sr_std,
+          periodsPerYear: periods_per_year,
           confidence,
           borderline,
           srBenchmark: sr_benchmark,

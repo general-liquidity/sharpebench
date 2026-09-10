@@ -80,6 +80,7 @@ fn verdict_label(v: Verdict) -> &'static str {
 fn honesty_config(
     n_trials: u32,
     trials_sr_std: Option<f64>,
+    periods_per_year: Option<f64>,
     confidence: f64,
     borderline: f64,
     sr_benchmark: f64,
@@ -87,6 +88,7 @@ fn honesty_config(
     HonestyConfig {
         n_trials,
         trials_sr_std,
+        periods_per_year,
         confidence,
         borderline,
         sr_benchmark,
@@ -165,6 +167,12 @@ fn min_track_record_length(returns: Vec<f64>, sr_benchmark: f64, confidence: f64
 /// LITE honesty verdict from one return series. Returns a dict with the Sharpe,
 /// PSR, expected-max-Sharpe, deflated Sharpe, haircut, MinTRL, a
 /// `pass|borderline|fail` verdict and a plain-English explanation.
+///
+/// `trials_sr_std` is **annualized** (default: the 0.5 prior, flagged) and is
+/// divided by `sqrt(periods_per_year)` before use. `periods_per_year` says what
+/// a period is (default 252, daily bars, flagged in the explanation); a
+/// non-finite or non-positive value returns a `fail` verdict with
+/// `statistics_error`. `sr_benchmark` is per period.
 #[pyfunction]
 #[pyo3(signature = (
     returns,
@@ -173,7 +181,9 @@ fn min_track_record_length(returns: Vec<f64>, sr_benchmark: f64, confidence: f64
     confidence = 0.95,
     borderline = 0.90,
     sr_benchmark = 0.0,
+    periods_per_year = None,
 ))]
+#[allow(clippy::too_many_arguments)]
 fn is_my_sharpe_real<'py>(
     py: Python<'py>,
     returns: Vec<f64>,
@@ -182,10 +192,12 @@ fn is_my_sharpe_real<'py>(
     confidence: f64,
     borderline: f64,
     sr_benchmark: f64,
+    periods_per_year: Option<f64>,
 ) -> PyResult<Bound<'py, PyDict>> {
     let cfg = honesty_config(
         n_trials,
         trials_sr_std,
+        periods_per_year,
         confidence,
         borderline,
         sr_benchmark,
@@ -200,6 +212,7 @@ fn is_my_sharpe_real<'py>(
 ///
 /// `field` is **N rows (strategies) x T cols (time)**. `winner_idx` defaults to
 /// the highest-Sharpe row, which is the candidate a search would actually keep.
+/// The configuration arguments mean what they mean in `is_my_sharpe_real`.
 #[pyfunction]
 #[pyo3(signature = (
     field,
@@ -209,6 +222,7 @@ fn is_my_sharpe_real<'py>(
     confidence = 0.95,
     borderline = 0.90,
     sr_benchmark = 0.0,
+    periods_per_year = None,
 ))]
 #[allow(clippy::too_many_arguments)]
 fn is_my_sharpe_real_full<'py>(
@@ -220,6 +234,7 @@ fn is_my_sharpe_real_full<'py>(
     confidence: f64,
     borderline: f64,
     sr_benchmark: f64,
+    periods_per_year: Option<f64>,
 ) -> PyResult<Bound<'py, PyDict>> {
     require_non_empty(&field, "field")?;
     let winner = match winner_idx {
@@ -244,6 +259,7 @@ fn is_my_sharpe_real_full<'py>(
     let cfg = honesty_config(
         n_trials,
         trials_sr_std,
+        periods_per_year,
         confidence,
         borderline,
         sr_benchmark,

@@ -24,6 +24,13 @@ module.exports = function assertKernelRepairContract(sb, version) {
   assert.equal(typeof lite.statisticsError, "string");
   assert.equal(lite.methodologyVersion, `sharpebench-stats/${version}`);
 
+  const badFrequency = sb.isMySharpeReal(returns, { nTrials: 2, periodsPerYear: 0 });
+  assert.equal(badFrequency.verdict, "Fail");
+  assert.equal(badFrequency.statisticsError, "periods_per_year must be finite and positive");
+  const weekly = sb.isMySharpeReal(returns, { nTrials: 2, periodsPerYear: 52 });
+  const daily = sb.isMySharpeReal(returns, { nTrials: 2, periodsPerYear: 252 });
+  assert.ok(weekly.expectedMaxSharpe > daily.expectedMaxSharpe);
+
   const overflow = sb.isMySharpeReal([Number.MAX_VALUE, Number.MAX_VALUE, Number.MAX_VALUE], { nTrials: 2 });
   assert.equal(overflow.verdict, "Fail");
   assert.equal(typeof overflow.statisticsError, "string");

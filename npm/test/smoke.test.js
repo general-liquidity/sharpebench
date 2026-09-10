@@ -121,6 +121,42 @@ test("isMySharpeReal fails a short series mined over many trials", () => {
   assert.equal(v.verdict, "Fail");
 });
 
+test("isMySharpeReal converts the annualized prior by periodsPerYear", () => {
+  // Four years of daily returns, annualized Sharpe about 1.9, best of 20 trials.
+  const returns = Array.from({ length: 1008 }, (_, i) => 0.0005 + 0.006 * Math.sin(0.7 * i));
+  const daily = sb.isMySharpeReal(returns, { nTrials: 20 });
+  assert.equal(daily.verdict, "Pass");
+  assert.ok(Math.abs(daily.expectedMaxSharpe - 0.05986667325938747) < 1e-8, `${daily.expectedMaxSharpe}`);
+  assert.match(daily.explanation, /periods_per_year was not supplied/);
+  const explicit = sb.isMySharpeReal(returns, { nTrials: 20, periodsPerYear: 252 });
+  assert.equal(explicit.expectedMaxSharpe, daily.expectedMaxSharpe);
+  assert.doesNotMatch(explicit.explanation, /periods_per_year/);
+  const weekly = sb.isMySharpeReal(returns, { nTrials: 20, periodsPerYear: 52 });
+  assert.ok(weekly.expectedMaxSharpe > daily.expectedMaxSharpe);
+  assert.notEqual(weekly.verdict, "Pass");
+});
+
+test("isMySharpeReal refuses a frequency that is not one", () => {
+  const returns = Array.from({ length: 1008 }, (_, i) => 0.0005 + 0.006 * Math.sin(0.7 * i));
+  for (const periodsPerYear of [0, -252]) {
+    const v = sb.isMySharpeReal(returns, { nTrials: 500, periodsPerYear });
+    assert.equal(v.verdict, "Fail");
+    assert.equal(v.statisticsError, "periods_per_year must be finite and positive");
+    const full = sb.isMySharpeRealFull([returns, returns], 0, { nTrials: 500, periodsPerYear });
+    assert.equal(full.honesty.statisticsError, v.statisticsError);
+  }
+  for (const periodsPerYear of [NaN, Infinity, -Infinity, "252", null]) {
+    assert.throws(() => sb.isMySharpeReal(returns, { nTrials: 500, periodsPerYear }), /periodsPerYear/);
+    assert.throws(() => sb.isMySharpeRealFull([returns], 0, { nTrials: 500, periodsPerYear }), /periodsPerYear/);
+  }
+  // What NaN becomes in JSON is refused by the kernel itself, not defaulted.
+  const kernel = require("../pkg/sharpebench.js");
+  const raw = JSON.parse(kernel.is_my_sharpe_real(JSON.stringify(returns),
+    JSON.stringify({ n_trials: 500, periods_per_year: NaN })));
+  assert.deepEqual(Object.keys(raw), ["error"]);
+  assert.match(raw.error, /periods_per_year/);
+});
+
 test("honesty wrappers refuse invalid or overflowing search counts", () => {
   const returns = [0.01, 0.02, -0.01];
   for (const nTrials of [0, 2 ** 32, 2 ** 32 + 1, Number.MAX_SAFE_INTEGER,

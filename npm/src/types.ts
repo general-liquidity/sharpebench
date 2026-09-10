@@ -158,13 +158,23 @@ export type Verdict = "Pass" | "Borderline" | "Fail";
 export interface HonestyOpts {
   /** Number of strategy trials behind this result, integer 1..=4294967295. REQUIRED. */
   nTrials: number;
-  /** Cross-trial Sharpe dispersion. Omit → estimated at 0.5 and flagged. */
+  /**
+   * **Annualized** cross-trial Sharpe dispersion, divided by
+   * `sqrt(periodsPerYear)` before use. Omit → estimated at 0.5 and flagged.
+   */
   trialsSrStd?: number;
+  /**
+   * Return periods per year for these returns (daily equities 252, daily crypto
+   * 365, hourly 8760, weekly 52). Omit → 252, flagged in the explanation. A
+   * non-positive value yields a Fail verdict with `statisticsError`; NaN and
+   * infinity cannot cross JSON and throw a `RangeError`.
+   */
+  periodsPerYear?: number;
   /** Deflated-Sharpe threshold for a Pass. Default 0.95. */
   confidence?: number;
   /** Deflated-Sharpe threshold for Borderline. Default 0.90. */
   borderline?: number;
-  /** PSR / MinTRL benchmark Sharpe to beat. Default 0.0. */
+  /** **Per-period** PSR / MinTRL benchmark Sharpe to beat (not converted). Default 0.0. */
   srBenchmark?: number;
 }
 

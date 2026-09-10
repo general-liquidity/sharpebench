@@ -93,7 +93,7 @@ table is pinned to the
 Common next steps:
 
 ```bash
-sharpebench check returns.csv --trials 200
+sharpebench check returns.csv --trials 200 --periods-per-year 252
 sharpebench run --data data/crypto-majors-1d.csv
 sharpebench audit
 sharpebench arena init league

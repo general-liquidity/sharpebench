@@ -5,7 +5,7 @@ The `sharpebench` binary (crate `sharpebench-cli`) is the command-line entry poi
 ```text
 sharpebench run                       run reference agents through the sim and rank them
 sharpebench score <submissions.json>  rank a JSON field of pre-computed submissions
-sharpebench check <returns.csv> --trials N             test one return series for backtest honesty
+sharpebench check <returns.csv> --trials N [--periods-per-year N]   test one return series for backtest honesty
 sharpebench realism [--data <csv>]    run the stylized-facts dataset gate
 sharpebench commit <agent> <window> <digest> <salt>   forward-attestation pre-registration
 sharpebench stress                    run the adversarial stress suite (contamination-masked)

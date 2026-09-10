@@ -53,7 +53,8 @@ pub use agreement::{
     binarize, cohens_kappa, cohens_kappa_binary, gate_vs_human, spearman_rho, GateAgreement,
 };
 pub use deflated_sharpe::{
-    deflated_sharpe_ratio, expected_max_sharpe, probabilistic_sharpe_ratio, sharpe_ratio,
+    deflated_sharpe_ratio, expected_max_sharpe, per_period_from_annualized,
+    probabilistic_sharpe_ratio, sharpe_ratio,
 };
 pub use dissent::{
     dissent, dissent_across, kendall_tau_b, DissentReport, DissentThresholds, DissentVerdict,
