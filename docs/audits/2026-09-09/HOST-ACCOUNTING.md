@@ -447,6 +447,18 @@ that speaks the gateway protocol; the argv is pinned against the one
 modules, `crates/sharpebench-arena/src/sandbox.rs` where the gateway attaches
 and nothing in `main.rs`.
 
+### Verification
+
+Run from the worktree root after merging `origin/main` at `c256adc`, with the
+build directory inside the worktree.
+
+| Command | Exit |
+|---|---|
+| `cargo fmt --all --check` | 0 |
+| `cargo clippy --all-targets --all-features -- -D warnings` | 0 |
+| `RUSTDOCFLAGS=-Dwarnings cargo doc --workspace --exclude xtask --no-deps` | 0 |
+| `cargo nextest run --workspace --exclude xtask` | 0 (1182 passed, 15 skipped) |
+
 ## G12: field readiness
 
 Neither field producer can run here: this environment has no provider

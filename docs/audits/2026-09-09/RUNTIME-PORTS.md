@@ -234,8 +234,10 @@ output is unchanged:
 - `crates/sharpebench-core`, `crates/sharpebench-sim`,
   `crates/sharpebench-stats`, `crates/sharpebench-protocol`, `examples/`,
   `suites/`, `data/`, `arena/`, `paper/` and `crates/sharpebench-cli/src/main.rs`
-  are not modified by this work (`git diff --stat 7fe5a06 HEAD` over those
-  paths is empty before the provenance rebind). The goldens pass unchanged:
+  are not modified by this work: over those paths, the only commits in
+  `git log --no-merges 7fe5a06..HEAD` are provenance rebinds of
+  `paper/evidence/provenance.json`, which bind digests and move no evidence
+  value. The goldens pass unchanged:
   `golden_scores` (five tests), `golden_input`,
   `synthetic_is_byte_identical_golden` and the WASM parity golden.
 - A preflight without an allowlist reports the same `policy_sha256` and none of
