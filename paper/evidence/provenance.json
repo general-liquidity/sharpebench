@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "0c8032f1a2b9cbe329988d441de3c296dfcf8dd7",
+  "generated_at_head": "68db45166b5c206e7c70858daf05d78115b0b084",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -211,7 +211,7 @@
     },
     {
       "path": "crates/sharpebench-arena/src/sandbox.rs",
-      "sha256": "54acebf18a37b0ee0e32753712ead228dcece561a4361a1951eba8349d55b216"
+      "sha256": "fcfe734f15348202c5dc94dc917ca085f697ff08a735966bf894e6c6cd8881b0"
     },
     {
       "path": "crates/sharpebench-arena/tests/cli_arena_cmd.rs",
@@ -279,7 +279,7 @@
     },
     {
       "path": "crates/sharpebench-cli/src/artifact_preflight.rs",
-      "sha256": "d7860db4b8452471f2e53bfc8aec2dbe1289296162700d68afc3e6b53997b2cb"
+      "sha256": "9a706e0235e5fafeaae1445ac2263c2f5cbb76929b52b77d1c47954e6ff57c41"
     },
     {
       "path": "crates/sharpebench-cli/src/csv_columns.rs",
@@ -1095,5 +1095,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "ecd80dc85537a071f4f3e0b4318046a3cce6becca8834663766ac688961d4542"
+  "source_snapshot_sha256": "2c6352b12599a95e91bf5f33b010b4e13b3a056b7a609476db83ce28652842ca"
 }
