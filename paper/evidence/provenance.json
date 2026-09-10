@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "7071009e40cceff7f26f31f7414171a40270029b",
+  "generated_at_head": "eb41f02ac23cd7a6fd8f436e6580e42f9fa83c05",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -375,7 +375,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/composite.rs",
-      "sha256": "50b1b028b6ae70a462da05caad39f650f21529ace416e5fca0244de0a4c70fdf"
+      "sha256": "029c498165919d0da7dedab748746a963aaaab579b3819dc9e12666ac0dc0869"
     },
     {
       "path": "crates/sharpebench-core/src/correlation.rs",
@@ -423,7 +423,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/percentile.rs",
-      "sha256": "5a1aa565bd45b23f7a0572e8c9fd830e7f2948f59a9de83fd0997a077c50f565"
+      "sha256": "193f8f515fd84bee9d42fddaa9fc1a24ef242b2e792b29d9ba40daddc848eea8"
     },
     {
       "path": "crates/sharpebench-core/src/process.rs",
@@ -451,7 +451,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/selfaudit.rs",
-      "sha256": "a9f7a49923e13b38da27b4c9529220cf7b4c013edffdf18aa49526140275893d"
+      "sha256": "225714f3accc86898850875eeef33a8f7b859897fee1a03f825768ae05531019"
     },
     {
       "path": "crates/sharpebench-core/tests/forecast_contract_digest_versions.rs",
@@ -759,7 +759,7 @@
     },
     {
       "path": "crates/sharpebench-stats/src/deflated_sharpe.rs",
-      "sha256": "3e4d837be9deaa57ba2143d15c6c441036d086e7d03dced7a11711437d194fa2"
+      "sha256": "0c6c11a265ae687ad0d691cefdd33a2d23c607420dbb61ba9d0813ed7b485c8a"
     },
     {
       "path": "crates/sharpebench-stats/src/dissent.rs",
@@ -891,7 +891,7 @@
     },
     {
       "path": "paper/refs.bib",
-      "sha256": "1e76dc91840ed5bfe64dd2b2b588402b2f69a383f26e465be1036d5cb287646d"
+      "sha256": "b0e89c0c9047e87465d6656b3a91bbef716db38f6a194aeb5ba2177f97238415"
     },
     {
       "path": "paper/sections/00-abstract.tex",
@@ -899,7 +899,7 @@
     },
     {
       "path": "paper/sections/01-introduction.tex",
-      "sha256": "f42e86508db6bc4a37accea7452e458d65874abf92877afe903e6ebe6a23538a"
+      "sha256": "6c164613b20a19aa5d29a6528aea09a86f412e92c23bedb29a1d19fbd8e23406"
     },
     {
       "path": "paper/sections/02-principles.tex",
@@ -907,15 +907,15 @@
     },
     {
       "path": "paper/sections/03-benchmark.tex",
-      "sha256": "783ff18c465e0ff215336542f45f01fbacf216f45579595e4ed985133d66062f"
+      "sha256": "2a6c423425d8fccda53f2a7b89b8f4d2530a3cbdd582ca5af09995fb03d782ff"
     },
     {
       "path": "paper/sections/04-integrity.tex",
-      "sha256": "1084b28420db6ffbc2ea7a99019450a9323df2560cf2650e42748be3a1925571"
+      "sha256": "d9320fbc3889b5e746a113b1577c6348591196d7b39027281561d1ebfd371fdf"
     },
     {
       "path": "paper/sections/05-experiments.tex",
-      "sha256": "7d67641e7a8452a07d29f6a263fb31cae9c39240fded5cd317e9e1b36060d998"
+      "sha256": "a7ce0204fd3240f8bd3bbfc0e0756858a93012145c384ba5fd5fbe4b4276c832"
     },
     {
       "path": "paper/sections/06-related.tex",
@@ -923,7 +923,7 @@
     },
     {
       "path": "paper/sections/07-limitations.tex",
-      "sha256": "6a2bf7a9bcab28b58369f16a2d7258c1f6dcbd006f88f013768f1401bc83d34f"
+      "sha256": "760e4230c97f39fd0f227d288251da11d4d3b5a5755538e6d632529838aac33d"
     },
     {
       "path": "paper/sections/08-reproducibility.tex",
@@ -935,7 +935,7 @@
     },
     {
       "path": "paper/sections/A-commands.tex",
-      "sha256": "3b28561eac17cdc29f00872fbc24a314d7ce2ae0b4b8630fa68861e14671177f"
+      "sha256": "1a3b5489f8394eb52bbdeb4559385c71946c65508d555cb4af15f0adbc8e1994"
     },
     {
       "path": "paper/sections/B-checklist.tex",
@@ -1051,5 +1051,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "5589a2df93f4765ec17557a52b349994bdf93d22880b8cd677303c9e046731f6"
+  "source_snapshot_sha256": "536b28fcd895742afc4cfee634af0ac30d0b384274a5b1e22bbadfefa22490f5"
 }
