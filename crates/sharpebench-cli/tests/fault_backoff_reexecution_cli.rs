@@ -1,7 +1,7 @@
 //! The three harness features the CLI now exposes: `run --fault-plan`,
-//! `run --retry-backoff` and `verify-trajectory --reexecute`. Hermetic: every
-//! entrant is an in-process HTTP fixture on loopback, and no model or market
-//! data is used.
+//! `run --retry-backoff` and `verify-trajectory --reexecute`, with the fault
+//! report of an incomplete sweep. Hermetic: every entrant is an in-process
+//! HTTP fixture on loopback, and no model or market data is used.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -704,4 +704,146 @@ fn reexecution_flags_refuse_an_unlaunchable_or_contradictory_request() {
             stderr(&output)
         );
     }
+}
+
+/// Serves the first cells, then breaks for good: a sweep that runs some cells
+/// to completion and exhausts the rest.
+fn early_cells_then_unreachable(call: usize) -> Option<String> {
+    (call < 40).then(|| BUY_AND_HOLD.to_string())
+}
+
+/// The recorded `injected_faults` of every attempt in a checkpoint, each as its
+/// JSON text, sorted: the evidence the report must carry, whatever its order.
+fn checkpoint_evidence(path: &std::path::Path) -> Vec<String> {
+    let checkpoint: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    let mut evidence: Vec<String> = checkpoint["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|task| task["attempts"]["attempts"].as_array().unwrap().clone())
+        .filter_map(|record| record.get("injected_faults").map(|e| e.to_string()))
+        .collect();
+    evidence.sort();
+    evidence
+}
+
+fn sorted_evidence(report: &serde_json::Value) -> Vec<String> {
+    let mut evidence: Vec<String> = report["evidence"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e.to_string())
+        .collect();
+    evidence.sort();
+    evidence
+}
+
+#[test]
+fn an_incomplete_faulted_sweep_keeps_its_fault_report() {
+    let fixture = Fixture::new();
+    fixture.write("plan.json", &plan(11));
+    let digest = "ab".repeat(32);
+    let run = |entrant: &Entrant, extra: &[&str]| {
+        let mut args = vec!["run", "--http", &entrant.addr, "--data", "data.csv"];
+        args.extend_from_slice(extra);
+        fixture.cli(&args)
+    };
+
+    // The report a completed row carries under the same plan.
+    let steady = Entrant::start(deterministic);
+    let completed = run(&steady, &["--json", "--fault-plan", "plan.json"]);
+    assert!(completed.status.success(), "{}", stderr(&completed));
+    let completed = stdout_json(&completed);
+    let reference = &entrant_row(&completed, "http:")["fault_injection"];
+
+    // Unpersisted: the refusal carries the report for the cells that ran.
+    let breaking = Entrant::start(early_cells_then_unreachable);
+    let incomplete = run(&breaking, &["--json", "--fault-plan", "plan.json"]);
+    assert_eq!(incomplete.status.code(), Some(1), "{}", stderr(&incomplete));
+    let refusal = stdout_json(&incomplete);
+    assert_eq!(refusal["error"], "incomplete_external_sweep");
+    let completed_cells = refusal["completeness"]["completed_cells"].as_u64().unwrap();
+    assert!(
+        (1..16).contains(&completed_cells),
+        "the fixture must complete some cells and exhaust the rest: {completed_cells}"
+    );
+    let report = &refusal["fault_injection"];
+    for key in [
+        "schema_version",
+        "plan_sha256",
+        "declared_relaxations",
+        "entrant_declaration",
+        "rank_neutral",
+    ] {
+        assert_eq!(report[key], reference[key], "{key}");
+    }
+    assert_eq!(report["rank_neutral"], true);
+    let plan_digest = report["plan_sha256"].as_str().unwrap();
+    for row in report["denominators"].as_array().unwrap() {
+        assert_eq!(row["cells"], 16);
+        assert_eq!(row["assigned"], 16);
+    }
+    let limit = report["denominators"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["fault_id"] == "limit")
+        .unwrap();
+    let fired = limit["fired"].as_u64().unwrap();
+    assert!(
+        fired >= completed_cells && fired < 16,
+        "the limit fired in the cells that ran, not in all: {fired}"
+    );
+    let evidence = report["evidence"].as_array().unwrap();
+    assert!(evidence.len() as u64 >= completed_cells);
+    assert!(evidence.iter().all(|e| e["plan_sha256"] == plan_digest));
+    // Rank neutral: the refusal still emits no board.
+    assert!(refusal.get("board").is_none() && !refusal.is_array());
+
+    // Human mode prints the same report after the attempt accounting.
+    let breaking = Entrant::start(early_cells_then_unreachable);
+    let human = run(&breaking, &["--fault-plan", "plan.json"]);
+    assert_eq!(human.status.code(), Some(1));
+    assert!(human.stdout.is_empty());
+    let error = stderr(&human);
+    assert!(error.contains("is incomplete"), "{error}");
+    assert!(
+        error.contains(&format!(
+            "fault injection for http:{}: plan {plan_digest} (rank-neutral)",
+            breaking.addr
+        )),
+        "{error}"
+    );
+    assert!(error.contains("  limit: assigned 16 of 16 cells, fired in "));
+
+    // Without a plan the refusal has no fault field and prints no report.
+    let breaking = Entrant::start(early_cells_then_unreachable);
+    let unfaulted = run(&breaking, &["--json"]);
+    assert_eq!(unfaulted.status.code(), Some(1));
+    assert!(stdout_json(&unfaulted).get("fault_injection").is_none());
+    let breaking = Entrant::start(early_cells_then_unreachable);
+    let unfaulted = run(&breaking, &[]);
+    assert!(!stderr(&unfaulted).contains("fault injection"));
+
+    // Persisted: the refusal's evidence is exactly what the checkpoint holds.
+    let breaking = Entrant::start(early_cells_then_unreachable);
+    let checkpointed = run(
+        &breaking,
+        &[
+            "--json",
+            "--fault-plan",
+            "plan.json",
+            "--entrant-sha256",
+            &digest,
+            "--checkpoint",
+            "checkpoint.json",
+        ],
+    );
+    assert_eq!(checkpointed.status.code(), Some(1));
+    let report = &stdout_json(&checkpointed)["fault_injection"];
+    assert_eq!(report["plan_sha256"], plan_digest);
+    let persisted = checkpoint_evidence(&fixture.path("checkpoint.json"));
+    assert!(!persisted.is_empty());
+    assert_eq!(sorted_evidence(report), persisted);
 }

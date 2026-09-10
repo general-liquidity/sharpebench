@@ -1133,25 +1133,34 @@ fn external_sweep_completeness(
     }
 }
 
+/// `fault_report` is the sweep's `fault_injection` report when `--fault-plan`
+/// armed it. An incomplete sweep carries it too, built from the same ledger as
+/// a completed row's, so the evidence of the cells that ran is not lost with
+/// the board. Without a plan it is `None` and the output is unchanged.
 fn report_transport_failures(
     label: &str,
     failures: &sharpebench_harness::FailureLog,
     expected_cells: usize,
     completed_cells: usize,
     accounting: (sharpebench_harness::AttemptSummary, &MonetarySummary),
+    fault_report: Option<&serde_json::Value>,
     json: bool,
 ) -> bool {
     let (attempts, monetary_cost) = accounting;
     let status = external_sweep_completeness(failures, expected_cells, completed_cells);
     if !status.complete {
         if json {
-            emit_json(&serde_json::json!({
+            let mut refusal = serde_json::json!({
                 "ok": false,
                 "error": "incomplete_external_sweep",
                 "agent": label,
                 "completeness": status,
                 "attempt_accounting": attempt_accounting_with_cost(attempts, monetary_cost),
-            }));
+            });
+            if let Some(report) = fault_report {
+                refusal["fault_injection"] = report.clone();
+            }
+            emit_json(&refusal);
         } else {
             eprintln!(
                 "error: external sweep for {label} is incomplete: expected {} cells, completed {}, runtime failures {}. No score or board was emitted",
@@ -1162,6 +1171,9 @@ fn report_transport_failures(
         }
         if !json {
             print_attempt_accounting(label, attempts, monetary_cost);
+            if let Some(report) = fault_report {
+                print_fault_injection(label, report);
+            }
         }
         return false;
     }
@@ -1803,19 +1815,20 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                 http_attempt,
             )
         };
+        fault_row = fault_plan
+            .as_ref()
+            .map(|plan| fault_injection_report(plan, &windows, &seeds, &ledger));
         if !report_transport_failures(
             &label,
             &res.failures,
             windows.len() * seeds.len(),
             res.submission.runs.len(),
             (res.attempts, &res.monetary_cost),
+            fault_row.as_ref(),
             json,
         ) {
             return ExitCode::FAILURE;
         }
-        fault_row = fault_plan
-            .as_ref()
-            .map(|plan| fault_injection_report(plan, &windows, &seeds, &ledger));
         external_accounting = Some((label, res.attempts, res.monetary_cost));
         field.insert(0, res.submission);
     } else if let Some(image) = flag_value(args, "--image") {
@@ -1986,19 +1999,20 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                 sandbox_attempt,
             )
         };
+        fault_row = fault_plan
+            .as_ref()
+            .map(|plan| fault_injection_report(plan, &windows, &seeds, &ledger));
         if !report_transport_failures(
             &label,
             &res.failures,
             windows.len() * seeds.len(),
             res.submission.runs.len(),
             (res.attempts, &res.monetary_cost),
+            fault_row.as_ref(),
             json,
         ) {
             return ExitCode::FAILURE;
         }
-        fault_row = fault_plan
-            .as_ref()
-            .map(|plan| fault_injection_report(plan, &windows, &seeds, &ledger));
         external_accounting = Some((label, res.attempts, res.monetary_cost));
         field.insert(0, res.submission);
     } else if let Some(cmd) = flag_value(args, "--cmd") {
@@ -2109,19 +2123,20 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                 cmd_attempt,
             )
         };
+        fault_row = fault_plan
+            .as_ref()
+            .map(|plan| fault_injection_report(plan, &windows, &seeds, &ledger));
         if !report_transport_failures(
             &label,
             &res.failures,
             windows.len() * seeds.len(),
             res.submission.runs.len(),
             (res.attempts, &res.monetary_cost),
+            fault_row.as_ref(),
             json,
         ) {
             return ExitCode::FAILURE;
         }
-        fault_row = fault_plan
-            .as_ref()
-            .map(|plan| fault_injection_report(plan, &windows, &seeds, &ledger));
         external_accounting = Some((label, res.attempts, res.monetary_cost));
         field.insert(0, res.submission);
     }
