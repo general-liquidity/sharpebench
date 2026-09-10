@@ -268,6 +268,43 @@ fn read_identity(path: &Path) -> ModelIdentity {
 /// before the shim probe, before any model is loaded and before any output.
 const DRY_RUN: &str = "SHARPEBENCH_DRY_RUN";
 
+/// Refuse a dataset selector that names no known dataset.
+///
+/// The field loop skips every dataset the selector does not match, so a
+/// misspelled name selected nothing, wrote nothing and still published: the
+/// empty partial was renamed into place and its zero records were reported as a
+/// complete field. The name is checked against the same table the loop walks,
+/// before the output or the identity directory exists.
+fn check_dataset_selector(only: Option<&str>) -> Result<(), String> {
+    let Some(selected) = only else {
+        return Ok(());
+    };
+    if DATASETS.iter().any(|(known, ..)| *known == selected) {
+        return Ok(());
+    }
+    let known = DATASETS
+        .iter()
+        .map(|(name, ..)| *name)
+        .collect::<Vec<_>>()
+        .join(", ");
+    Err(format!(
+        "unknown dataset {selected:?}; this producer knows: {known}"
+    ))
+}
+
+/// Refuse to publish a field that scored nothing.
+///
+/// Independent of the selector check: that one catches a name nobody has, this
+/// one catches a run whose planned support legitimately produced no scored
+/// record. Either way an empty file under the published name is a field that
+/// says every model was evaluated and none placed.
+fn check_records_written(n_records: usize) -> Result<(), String> {
+    if n_records == 0 {
+        return Err("the planned support produced no records; there is no field to publish".into());
+    }
+    Ok(())
+}
+
 /// The effective configuration a ready run would use.
 #[derive(Debug, PartialEq)]
 struct LocalPlan {
@@ -357,6 +394,10 @@ fn main() {
             std::process::exit(2);
         }
     };
+    if let Err(diagnostic) = check_dataset_selector(only.as_deref()) {
+        eprintln!("refusing to run: {diagnostic}");
+        std::process::exit(2);
+    }
     if plan.dry_run {
         println!(
             "{}",
@@ -536,6 +577,12 @@ fn main() {
         writer.flush().expect("flush completed dataset");
     }
     drop(writer);
+    if let Err(diagnostic) = check_records_written(n_records) {
+        eprintln!(
+            "refusing to publish {out}: {diagnostic}; the empty partial is left at {partial}"
+        );
+        std::process::exit(2);
+    }
     std::fs::rename(&partial, &out).expect("publish completed field atomically");
     eprintln!("wrote {n_records} complete records to {out}");
 }
@@ -568,6 +615,57 @@ mod tests {
                 && diagnostic.contains("SHARPEARENA_PYTHON"),
             "the diagnostic must state both remedies, got: {diagnostic}"
         );
+    }
+
+    /// A dataset name nobody has is refused before anything is created.
+    ///
+    /// The loop skips a dataset the selector does not match, so a typo used to
+    /// select nothing, and the empty partial was renamed into place and its
+    /// zero records announced as a complete field. The diagnostic names the
+    /// datasets that do exist, because the whole failure is a misspelling.
+    #[test]
+    fn an_unknown_dataset_selector_is_refused_and_names_the_known_ones() {
+        let diagnostic = check_dataset_selector(Some("us-indicies-1d"))
+            .expect_err("a misspelled dataset selects nothing and cannot run");
+        assert!(
+            diagnostic.contains("us-indicies-1d"),
+            "the diagnostic must quote the name it refused, got: {diagnostic}"
+        );
+        for (known, ..) in DATASETS {
+            assert!(
+                diagnostic.contains(known),
+                "the diagnostic must list {known}, got: {diagnostic}"
+            );
+        }
+    }
+
+    /// The refusal cannot be a blanket one: every shipped name still runs, and
+    /// so does the all-datasets form that passes no name at all.
+    #[test]
+    fn every_known_dataset_selector_is_accepted() {
+        check_dataset_selector(None).expect("no selector runs every dataset");
+        for (known, ..) in DATASETS {
+            check_dataset_selector(Some(known)).unwrap_or_else(|error| {
+                panic!("{known} is a shipped dataset and must be accepted: {error}")
+            });
+        }
+    }
+
+    /// A field with no records is not published, whatever produced the emptiness.
+    ///
+    /// The second, independent gate: the selector check catches a name nobody
+    /// has, and this catches a planned support that legitimately scored
+    /// nothing. Without it the rename published a zero-record file under the
+    /// completed name and the run reported success.
+    #[test]
+    fn an_empty_field_is_not_publishable_but_a_scored_one_is() {
+        let diagnostic =
+            check_records_written(0).expect_err("a zero-record field cannot be published");
+        assert!(
+            diagnostic.contains("no field to publish"),
+            "the diagnostic must say nothing is published, got: {diagnostic}"
+        );
+        check_records_written(1).expect("a scored field publishes");
     }
 
     /// The shim module path is the contract with the sibling repository. If it
