@@ -10,6 +10,7 @@ easier field.
 `sharpebench run --checkpoint <path>` stores a `SweepContract` beside the task
 matrix. The contract binds:
 
+- schema version, currently 4;
 - dataset SHA-256;
 - cost-model digest;
 - score-configuration digest;
@@ -30,7 +31,10 @@ invocation binding: changing the address, command arguments, or
 
 Resume is exact. A missing, malformed, legacy, or different contract is an
 error; SharpeBench does not silently replace it or mix tasks from two
-experiments. Before assembly, every declared task must be terminal and
+experiments. A checkpoint written under schema 3 is refused by version, naming
+the schema: it predates the persisted per-round attempt budget, so its missing
+spend would deserialize as zero and hand an interrupted round a fresh attempt
+allowance on top of what the writing binary had already spent. Before assembly, every declared task must be terminal and
 structurally consistent. A completed or agent-failed task carries exactly one
 full-length run. A runtime-failed task carries no run and records at least one
 attempt.
@@ -42,7 +46,10 @@ Entrant faults and infrastructure faults have different consequences:
 - An entrant protocol or resource-limit fault produces a failing sentinel with
   the correct window length. It remains in the pass^k denominator.
 - A runtime or transport failure is retried. If retries are exhausted, the
-  sweep is incomplete and no certifying board is emitted.
+  sweep is incomplete and no certifying board is emitted. Recovery is opt in
+  via [`--retry-runtime-failures`](cli.md#run), bounded at three additional
+  rounds per cell over the checkpoint's lifetime, and never requeues a
+  completed or agent-fault cell.
 
 The CLI reports expected, completed, runtime-failed, and agent-failed cell
 counts in both text and JSON modes. Infrastructure failure cannot improve an
