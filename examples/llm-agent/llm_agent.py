@@ -40,8 +40,17 @@ Determinism and cost controls:
     cross-seed repeats under an unchanged configuration remain free.
   - A decision stride (default 5): the model is consulted every Nth bar and
     the book is left untouched in between (empty orders = hold).
-  - A hard per-model cap on fresh API calls (default 800), measured by cache
-    size so it holds across the many subprocesses the harness spawns.
+  - A hard per-model cap on fresh API calls (default 800), counted as
+    dispatches rather than as cached results. Every fresh call reserves one
+    unit of the allowance in a per-model ledger file before the request is
+    sent, so a call that fails, times out or returns something uncacheable
+    still spends its unit, and the harness retrying the subprocess cannot
+    re-spend it. The ledger lives beside the response cache and survives the
+    process the same way, which is what makes the cap hold across the many
+    subprocesses the harness spawns. What it cannot see is retries made inside
+    the provider client: those are additional billable requests issued under
+    one reservation, so the cap bounds dispatches from this process, not the
+    HTTP requests the SDK ultimately makes.
   - Malformed model output is emitted as an invalid wire decision so the Rust
     transport classifies the affected run as an agent-protocol failure. It is
     never flattened into a hold. Explicit refusals remain deliberate holds.
@@ -54,7 +63,8 @@ Environment:
   LLM_CACHE_DIR       directory for llm-cache-<model>.jsonl response caches
   LLM_STATS_DIR       directory for per-process stats files (summed afterwards)
   LLM_STRIDE          decision stride in bars (default 5)
-  LLM_MAX_CALLS       fresh-API-call cap per model (default 800)
+  LLM_MAX_CALLS       fresh-API-call cap per model (default 800), counted as
+                      dispatches reserved, not as results cached
 """
 
 import hashlib
@@ -86,6 +96,10 @@ MAX_CALLS = int(os.environ.get("LLM_MAX_CALLS", "800"))
 HERE = Path(__file__).resolve().parent
 CACHE_DIR = Path(os.environ.get("LLM_CACHE_DIR", HERE))
 CACHE_PATH = CACHE_DIR / f"llm-cache-{MODEL}.jsonl"
+# The spend ledger: one appended line per dispatch this scaffold sends, written
+# before the request. Separate from the cache because a call that fails leaves
+# no cache record and must still count against the allowance.
+ATTEMPTS_PATH = CACHE_DIR / f"llm-attempts-{MODEL}.jsonl"
 STATS_DIR = Path(os.environ.get("LLM_STATS_DIR", HERE / "stats"))
 
 # First-party API pricing, USD per token (input, output).
@@ -121,6 +135,10 @@ STATS = {
     "malformed": 0,
     "refusals": 0,
     "budget_exhausted": 0,
+    # Dispatches reserved against the cap, this process and every earlier one
+    # sharing the ledger. Never smaller than llm_calls; larger by the calls that
+    # were sent and produced no cached result.
+    "calls_reserved": 0,
     "api_errors": 0,
     "tokens_in": 0,
     "tokens_out": 0,
@@ -223,6 +241,45 @@ def record_decision(cache, key, effective, fields):
         f.write(json.dumps(rec, sort_keys=True) + "\n")
     cache[key] = rec
     return rec
+
+
+def load_attempt_count():
+    """Dispatches already reserved against this model's allowance.
+
+    One line per reservation, so the count is the line count. Read at startup
+    the way the cache is, because the harness runs each window in its own
+    subprocess and the allowance is per model, not per process.
+    """
+    if not ATTEMPTS_PATH.exists():
+        return 0
+    with ATTEMPTS_PATH.open("r", encoding="utf-8") as f:
+        return sum(1 for line in f if line.strip())
+
+
+def reserve_call(key):
+    """Spend one unit of the allowance, durably, before the request is sent.
+
+    Written and flushed ahead of the call so that a provider failure, a timeout
+    or a killed process still consumes the unit: the alternative counts only
+    calls that came back, which lets a retried subprocess dispatch again under
+    the same allowance. The reservation names the request it was taken for, so
+    the ledger can be read against the cache afterwards.
+
+    Retries made inside the provider client are not visible here and are not
+    counted: one reservation can cover several billable requests.
+    """
+    ATTEMPTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "key": key,
+        "model_requested": REQUESTED_MODEL,
+        "scaffold_version": SCAFFOLD_VERSION,
+        "pid": os.getpid(),
+        "started_ns": _START_NS,
+    }
+    with ATTEMPTS_PATH.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(record, sort_keys=True) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
 
 
 def write_stats():
@@ -347,9 +404,13 @@ def call_model(client, prompt):
         ) from e
 
 
-def main():
-    client = anthropic.Anthropic()
+def main(client=None):
+    # The client is a parameter so the decision loop can be exercised against a
+    # stand-in; nothing but a test passes one.
+    client = client if client is not None else anthropic.Anthropic()
     cache = load_cache()
+    attempts = load_attempt_count()
+    STATS["calls_reserved"] = attempts
     step = 0
     for line in sys.stdin:
         line = line.strip()
@@ -382,18 +443,24 @@ def main():
                         # benchmark's efficiency column describes the model call
                         # that produced this frozen decision, not the replay cost.
                         decision["cost"] = cache[key]["cost"]
-            elif len(cache) >= MAX_CALLS:
-                # An incomplete model run is not evidence. Failing the
-                # subprocess makes the harness record a transport failure and
-                # the Rust driver refuses to publish the field.
+            elif attempts >= MAX_CALLS:
+                # Reserved dispatches, not cached results: a failed call spent
+                # the money and must count. An incomplete model run is not
+                # evidence either way. Failing the subprocess makes the harness
+                # record a transport failure and the Rust driver refuses to
+                # publish the field.
                 STATS["budget_exhausted"] += 1
                 write_stats()
                 raise RuntimeError(
-                    f"LLM call budget exhausted for {MODEL}; field incomplete"
+                    f"LLM call budget exhausted for {MODEL} "
+                    f"({attempts} of {MAX_CALLS} dispatches reserved); field incomplete"
                 )
             else:
                 valid = {s["symbol"] for s in obs.get("symbols", [])}
                 try:
+                    reserve_call(key)
+                    attempts += 1
+                    STATS["calls_reserved"] = attempts
                     STATS["llm_calls"] += 1
                     resp = call_model(client, prompt)
                     effective = effective_model(resp)
