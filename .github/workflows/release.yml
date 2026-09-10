@@ -314,13 +314,23 @@ jobs:
           # published, that lock cannot carry the registry's final tarball integrity for the
           # same version. npm otherwise accepts the fresh metadata but rejects the tarball
           # against the pre-release integrity, preventing the MCP package from publishing.
+          # Wait for the tarball as well as the metadata. On the v0.21.0 release the
+          # metadata appeared first while the tarball still returned 404 for several
+          # minutes ("Your package is being processed"), and the old 150-second wait on
+          # metadata alone failed twice: first ETARGET, then E404 on the tarball.
           DEPV="$(node -p "require('../package.json').version")"
-          for i in $(seq 1 30); do
-            if npm view "@general-liquidity/sharpebench@$DEPV" version >/dev/null 2>&1; then
-              echo "dep @general-liquidity/sharpebench@$DEPV available"; break
+          TARBALL="https://registry.npmjs.org/@general-liquidity/sharpebench/-/sharpebench-$DEPV.tgz"
+          ready=0
+          for i in $(seq 1 80); do
+            if npm view "@general-liquidity/sharpebench@$DEPV" version >/dev/null 2>&1               && curl --silent --fail --location --head --output /dev/null "$TARBALL"; then
+              echo "dep @general-liquidity/sharpebench@$DEPV and its tarball are available"; ready=1; break
             fi
-            echo "waiting for @general-liquidity/sharpebench@$DEPV to propagate ($i)…"; sleep 5
+            echo "waiting for @general-liquidity/sharpebench@$DEPV to propagate ($i/80)"; sleep 15
           done
+          if [ "$ready" != 1 ]; then
+            echo "::error::@general-liquidity/sharpebench@$DEPV was not downloadable after 20 minutes; rerun this job"
+            exit 1
+          fi
           npm install --package-lock=false
           npm run build
           V=$(node -p "require('./package.json').version")
