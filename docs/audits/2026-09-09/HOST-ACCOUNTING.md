@@ -116,6 +116,10 @@ Every bound is checked before the allocation it governs. Defaults from
 | Journal read from disk | 16 MiB | `MAX_JOURNAL_BYTES` |
 | Route manifest read from disk | 256 KiB | CLI `MAX_ROUTES_BYTES` |
 | Rate card read from disk | 64 KiB | G08 `MAX_RATE_CARD_BYTES` |
+| Gateway requests while answering one observation | 32; the one past it is a typed `decision_request_limit` refusal and never reaches the provider | `max_requests_per_decision` |
+| One entrant stdout line, request or decision | 8 MiB, the external-agent decision-line cap; a request is then held to the 256 KiB bound before it is parsed | serving loop `MAX_ENTRANT_LINE` |
+| Entrant stdout per process, requests included | 64 MiB | serving loop `MAX_ENTRANT_STDOUT` |
+| Entrant wall clock per decision | 30 s, net of the time the host spends serving its requests | serving loop `DEFAULT_DECIDE_TIMEOUT` |
 
 The concurrency ceiling is held by the host and shared across every entrant's
 gateway, so it bounds the host's fan-out rather than any one entrant's
@@ -277,17 +281,19 @@ record is what remains on disk), and
 `an_answer_returned_after_the_deadline_is_refused_and_charged` (a fake that
 sleeps past a 1 ms call deadline is refused and charged, not accepted).
 
-`crates/sharpebench-harness/src/gateway_journal.rs` (9 tests) covers the fold:
+`crates/sharpebench-harness/src/gateway_journal.rs` (10 tests) covers the fold:
 unsettled reservations charged rather than refunded, unknown cost keeping the
 whole reservation, released reservations still counting as calls, resume folding
 recorded amounts, refusal of a journal bound elsewhere, refusal of a journal
 that erases or double-settles an attempt, partial totals labelled partial,
-missing usage unavailable rather than zero, and the `host_observed` label.
+missing usage unavailable rather than zero, the `host_observed` label, and
+(added 2026-09-10) a sweep-bound journal resuming only under its own sweep.
 
-`crates/sharpebench-cli/src/gateway_cli.rs` (5 tests) covers the operator
+`crates/sharpebench-cli/src/gateway_cli.rs` (6 tests) covers the operator
 surface: the effective configuration report, a missing credential, missing and
 zero budgets, malformed route manifests (wrong schema, empty, inline key
-material), and a journal bound to another route table.
+material), a journal bound to another route table, and (added 2026-09-10) a
+sweep-bound journal reported with its sweep.
 
 ### Mutation results
 
@@ -316,6 +322,130 @@ has saturated it. The guard is load bearing only for a call that reserves
 nothing, so the regression now drives a free route and a priced route sharing one
 budget. That is recorded here rather than quietly fixed: a surviving mutant said
 the test was weaker than the invariant it claimed.
+
+## The entrant-serving loop (2026-09-10)
+
+An independent verification found that the broker above had no runtime: the
+`sharpebench gateway` command printed a report and returned, `serve_line` had
+only test callers, the only transport was the test fake, and nothing attached
+the broker to an entrant or read its journal as scored output. A
+network-disabled entrant was therefore not evaluable through this path. This
+section records the runtime that closes that gap.
+
+### Design
+
+The loop lives in `crates/sharpebench-harness/src/gateway_serve.rs`
+(`sharpebench_harness::gateway::serve`). It is a library entry point, not a CLI
+command, because serving needs a `ProviderTransport` and none ships here: an
+operator calls it from a binary that supplies the transport. The CLI report
+still never calls a provider.
+
+- **The pipe.** The entrant's own stdio carries both protocols. After the host
+  writes one observation line, the entrant may write any number of gateway
+  request lines, each answered by exactly one response line on its stdin,
+  before its decision line. A stdout line is a gateway request when it is a
+  JSON object whose top-level `protocol` member is a string in the
+  `sharpebench.model-gateway.` family; every other line is a decision under the
+  closed decision contract, which refuses unknown fields, so no line can be
+  both. The probe that tells them apart skips every other member without
+  building a tree. A request in the family with an unsupported version is still
+  routed to the broker and refused as `unknown_protocol`, rather than being
+  misread as a malformed decision.
+- **The agent.** `GatewayEntrant` is an `Agent` plus `TransportDiagnostics`
+  like any external agent, so `run_external_backtest_observed`, the failure
+  taxonomy and the scoring path are the ones every other entrant goes through.
+  Its reader, writer, per-line and per-process bounds, exit handling and
+  process-group teardown follow the external-agent transport; the host's time
+  at the provider is excluded from the entrant's per-decision clock.
+- **The sweep.** `run_gateway_sweep` wraps `run_resumable_sweep_observed`. It
+  folds the route-table identity digest and the budget into the checkpoint's
+  `invocation_sha256` (`sharpebench.gateway-invocation.v1`), binds the money
+  journal to the checkpoint contract through a new optional
+  `JournalIdentity::sweep_sha256` (`sharpebench.gateway-sweep.v1` over the
+  entrant id and the contract), and admits a checkpoint and a journal only as a
+  pair: a checkpoint whose journal is missing, and a journal with calls whose
+  checkpoint is missing, are both refused before any entrant runs. A fresh pair
+  starts by writing an empty journal, so a checkpoint never exists before its
+  journal. A journal no sweep owns serializes exactly as before.
+- **The output.** The sweep returns the `ResilientSubmission` unchanged and,
+  beside it, a `HostObservedUsage` (`sharpebench.host-observed-usage.v1`): the
+  host-observed `MonetarySummary`, the call counts, the overspend, whether the
+  ceiling was breached and whether journal ownership was lost, with
+  `rank_neutral: true`. `attach_host_observed_usage` puts it on the entrant's
+  row of a JSON board beside its scores; the board stays an array and no score
+  field moves.
+- **The sandbox.** `sharpebench_arena::sandbox::gateway_launch` hands back the
+  same hardened, `--network none`, inspectable `docker run` argv that
+  `run_external_sandboxed` spawns, so the host can own the container's stdio.
+  The launch plan was extracted from `run_external_sandboxed_with_command`, not
+  changed. `wait_until_running` exposes the existing readiness wait.
+
+### Properties kept
+
+- No networked transport ships. The loop hands requests to `serve_line`; the
+  bytes on the wire are still the operator's `ProviderTransport`.
+- Credentials never reach the entrant. `EntrantLaunch::spawn` refuses, before
+  anything starts, a launch whose program, arguments or declared environment
+  carries a route credential; a host entrant gets a cleared environment; a
+  launcher such as the Docker client inherits the host environment minus every
+  variable whose value carries a credential. An answer that would carry a
+  credential, a destination or the journal location, raw or JSON-escaped, is
+  withheld as a typed `response_withheld` refusal (the call is still charged).
+- Every bound in the table above is still enforced by the broker the loop
+  calls; the loop adds the per-decision request ceiling and the entrant stream
+  bounds listed there.
+
+### End-to-end evidence
+
+`crates/sharpebench-harness/src/gateway_serve_tests.rs` (12 tests). The
+entrant is scripted on real OS pipes (`std::io::pipe`) or, in one test, is a
+real child process (`sh` on Unix, PowerShell on Windows) on real stdio; the
+provider is a scripted `ProviderTransport` that cannot open a socket. No
+provider, key or network.
+
+| Claim | Test |
+|---|---|
+| An entrant makes a call through its own pipe; the provider sees the host credential, the entrant sees an ordinal and text only | `an_entrant_reaches_the_model_through_its_own_pipe` |
+| A real child process on real stdio reaches the model and is scored | `a_spawned_entrant_process_reaches_the_model_through_its_stdio` |
+| A real sweep: every decision makes a call, the journal on disk records all 12, the output carries `host_observed` usage on the entrant's row, and removing that key gives back the unattached board exactly | `a_gateway_sweep_publishes_host_observed_usage_beside_the_rank` |
+| A resume of a finished sweep makes no call, leaves the journal bytes identical and reports identical usage and returns | `a_resumed_gateway_sweep_makes_no_new_calls` |
+| A crash mid-sweep reruns only the unfinished cell, keeps the interrupted cell's first calls charged, and ends with the returns of an uninterrupted sweep | `an_interrupted_gateway_sweep_reruns_only_unfinished_cells_and_keeps_their_spend` |
+| A money refusal and a call refusal reach the entrant as typed errors (`budget_exhausted`, `call_limit_exhausted`) and nothing past the ceiling reaches the provider | `a_budget_refusal_reaches_the_entrant_as_a_typed_error` |
+| The checkpoint carries the gateway binding; a missing journal, a missing checkpoint, a foreign sweep's journal and a changed budget are refused | `the_journal_and_the_checkpoint_are_bound_together` |
+| An unsupported protocol version and an oversized request are typed refusals, not decision faults | `a_gateway_line_is_never_read_as_a_decision` |
+| The per-decision ceiling refuses by type | `requests_past_the_per_decision_ceiling_are_refused_by_type` |
+| A 400 ms provider under a 200 ms entrant clock is not an entrant timeout | `host_serving_time_does_not_count_against_the_entrant` |
+| No launch carries a credential; a launcher inherits none | `credentials_never_reach_an_entrant_launch` |
+| Host material echoed into an answer never crosses the pipe | `host_material_in_an_answer_never_reaches_the_entrant` |
+
+Supporting tests: `gateway_journal::tests::a_sweep_bound_journal_resumes_only_under_its_sweep`,
+`gateway_cli::tests::a_sweep_bound_journal_is_reported_with_its_sweep` and
+`sandbox::tests::a_gateway_launch_is_the_hardened_network_disabled_launch`.
+
+### Mutation results for the serving loop
+
+Mutated in place on a clean committed tree, restored with
+`git show HEAD:<path> > <path>`, and verified byte identical with `cmp` against
+a copy of the committed file.
+
+| Invariant | Mutation | Result |
+|---|---|---|
+| Host serving time is not the entrant's | the deadline extension adds `Duration::ZERO` instead of the serving time | killed: `host_serving_time_does_not_count_against_the_entrant` failed |
+| The checkpoint is bound to the gateway | `run_gateway_sweep` keeps the caller's invocation digest instead of folding in the route table and budget | killed: `the_journal_and_the_checkpoint_are_bound_together` failed |
+| A checkpoint without its journal is refused | the missing-journal refusal in `admit_pair` is made unreachable | killed: `the_journal_and_the_checkpoint_are_bound_together` failed |
+| The per-decision ceiling holds | the ceiling comparison uses `u32::MAX` | killed: `requests_past_the_per_decision_ceiling_are_refused_by_type` failed |
+| No launch carries a credential | `spawn` ignores the result of `refuse_credentials` | killed: `credentials_never_reach_an_entrant_launch` failed |
+| Host material never crosses the pipe | the `carries_host_material` gate is made unreachable | killed: `host_material_in_an_answer_never_reaches_the_entrant` failed |
+
+### What is still not here
+
+No provider adapter ships, so no field run can be made from this repository;
+that is the design, not a gap. The CLI does not run gateway sweeps, for the same
+reason. A live Docker leg for `gateway_launch` would need a daemon and an image
+that speaks the gateway protocol; the argv is pinned against the one
+`run_external_sandboxed` uses instead. This work edits, outside its own
+modules, `crates/sharpebench-arena/src/sandbox.rs` where the gateway attaches
+and nothing in `main.rs`.
 
 ## G12: field readiness
 
