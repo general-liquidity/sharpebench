@@ -32,6 +32,13 @@
 //! same intent is distinguishable from a second order. See
 //! [`OrderingViolation::AmbiguousWriteRetriedWithoutKey`].
 //!
+//! The key makes the *retry* safe; it does not resolve the ambiguity. Whether
+//! the intent ever reached the venue stays unknown until an acknowledgment,
+//! fill or reconciliation is observed for it, so the ambiguity is tracked per
+//! intent across the whole retry chain and only an observed outcome closes it.
+//! A keyless submission for the same subject while such an intent is open is a
+//! blind retry however many keyed retries preceded it.
+//!
 //! The checks are typed over [`ProcessEvent`], the representation the trace
 //! already uses. Nothing in this module inspects a tool name, and nothing does
 //! substring matching: tool names are scaffold-specific, so matching them would
@@ -403,47 +410,66 @@ struct OrderProgress {
     submitted_at: usize,
     /// The intent key the submission carried, if any.
     client_key: Option<ClientOrderKey>,
-    /// The trace recorded that this write's acknowledgment was not observed.
-    ambiguous: bool,
     /// A later submission has already been judged against this one. Keeps each
     /// outstanding write from being reported once per subsequent retry.
     answered: bool,
 }
 
+/// One intent whose outcome the trace has not settled.
+///
+/// The chain, not the single prior write, is the unit of ambiguity. It opens
+/// when a submission is marked [`Phase::AcknowledgmentUnobserved`], and every
+/// resubmission naming the same [`ClientOrderKey`] joins it: a shared key lets
+/// the venue collapse the writes into one intent, which makes the *retry* safe
+/// but says nothing about whether that intent ever reached the venue. The chain
+/// therefore stays open across any number of keyed retries, and closes only
+/// when an acknowledgment, fill or reconciliation is observed for one of its
+/// members, which settles every write in it at once.
+struct AmbiguousIntent {
+    subject: Subject,
+    /// The write that went ambiguous. Findings name it, not the latest retry.
+    origin: OrderId,
+    /// The key the origin carried. `None` matches nothing, including another
+    /// absent key, so a keyless chain can never be joined.
+    key: Option<ClientOrderKey>,
+    members: BTreeSet<OrderId>,
+    resolved: bool,
+}
+
 /// What the trace says about the fate of the newest outstanding write for a
-/// subject at the moment a fresh submission appears.
+/// subject at the moment a fresh submission appears. Ambiguity is not one of
+/// the answers: that lives in [`AmbiguousIntent`], per intent rather than per
+/// write.
 enum OutstandingWrite {
     /// Nothing is open for this subject: the submission stands alone.
     None,
-    /// A write is open and the trace records its acknowledgment as unobserved.
-    Ambiguous {
-        order: OrderId,
-        key: Option<ClientOrderKey>,
-    },
     /// A write is open and the trace records nothing about its outcome.
     Unknown { order: OrderId },
 }
 
 /// The newest submission for `subject` that has not progressed past
-/// `Submission` and has not already answered a retry.
+/// `Submission`, has not already answered a retry, and belongs to no intent
+/// chain.
 ///
 /// "Newest" is by position in the recorded trace. Nothing here consults a
 /// clock: an unobserved acknowledgment is a fact the trace states, never an
 /// inference from how long a silence lasted.
 fn outstanding_write(
     orders: &BTreeMap<OrderId, OrderProgress>,
+    chained: &BTreeSet<OrderId>,
     subject: &Subject,
 ) -> OutstandingWrite {
     let newest = orders
         .iter()
-        .filter(|(_, p)| p.subject == *subject && p.stage == PhaseKind::Submission && !p.answered)
+        .filter(|(o, p)| {
+            p.subject == *subject
+                && p.stage == PhaseKind::Submission
+                && !p.answered
+                && !chained.contains(*o)
+        })
         .max_by_key(|(_, p)| p.submitted_at);
     match newest {
         None => OutstandingWrite::None,
-        Some((order, progress)) if progress.ambiguous => OutstandingWrite::Ambiguous {
-            order: order.clone(),
-            key: progress.client_key.clone(),
-        },
         Some((order, _)) => OutstandingWrite::Unknown {
             order: order.clone(),
         },
@@ -467,6 +493,10 @@ pub fn check_lifecycle(trace: &Trace) -> LifecycleReport {
     let mut decided: BTreeSet<Subject> = BTreeSet::new();
     let mut authorized: BTreeSet<Subject> = BTreeSet::new();
     let mut orders: BTreeMap<OrderId, OrderProgress> = BTreeMap::new();
+    // Oldest first, so a finding names the write that originally went
+    // ambiguous rather than whichever retry happens to be newest.
+    let mut chains: Vec<AmbiguousIntent> = Vec::new();
+    let mut chained: BTreeSet<OrderId> = BTreeSet::new();
     let mut violations: Vec<OrderingViolation> = Vec::new();
 
     for (index, event) in trace.events.iter().enumerate() {
@@ -523,7 +553,17 @@ pub fn check_lifecycle(trace: &Trace) -> LifecycleReport {
         if attempted == PhaseKind::AcknowledgmentUnobserved {
             match orders.get_mut(order) {
                 Some(progress) if progress.stage == PhaseKind::Submission => {
-                    progress.ambiguous = true;
+                    // A write already inside an open chain adds nothing: the
+                    // intent it names is unresolved either way.
+                    if chained.insert(order.clone()) {
+                        chains.push(AmbiguousIntent {
+                            subject: progress.subject.clone(),
+                            origin: order.clone(),
+                            key: progress.client_key.clone(),
+                            members: BTreeSet::from([order.clone()]),
+                            resolved: false,
+                        });
+                    }
                 }
                 Some(progress) => {
                     violations.push(OrderingViolation::OutOfOrderTransition {
@@ -541,41 +581,62 @@ pub fn check_lifecycle(trace: &Trace) -> LifecycleReport {
             continue;
         }
 
+        // An observed acknowledgment, fill or reconciliation for any member of
+        // a chain is the outcome the whole intent was waiting on, so it closes
+        // the chain even when the transition itself is out of order.
+        if matches!(
+            attempted,
+            PhaseKind::Acknowledgment | PhaseKind::Fill | PhaseKind::Reconciliation
+        ) {
+            for chain in chains.iter_mut() {
+                if !chain.resolved && chain.members.contains(order) {
+                    chain.resolved = true;
+                }
+            }
+        }
+
         if attempted == PhaseKind::Submission && !orders.contains_key(order) {
-            match outstanding_write(&orders, subject) {
-                OutstandingWrite::None => {}
-                OutstandingWrite::Ambiguous {
-                    order: ambiguous_order,
-                    key,
-                } => {
-                    // Same key, same intent: the venue can collapse the two, so
-                    // this is one order sent twice rather than two orders. An
-                    // absent key matches nothing, including another absent key.
-                    let same_intent = key.is_some() && key.as_ref() == step.client_key.as_ref();
-                    if !same_intent {
-                        violations.push(OrderingViolation::AmbiguousWriteRetriedWithoutKey {
-                            subject: subject.clone(),
-                            ambiguous_order: ambiguous_order.clone(),
-                            retry_order: order.clone(),
-                            retry_key: step.client_key.clone(),
-                        });
-                    }
-                    if let Some(prior) = orders.get_mut(&ambiguous_order) {
-                        prior.answered = true;
-                    }
+            // A retry naming an open intent joins it; otherwise the oldest open
+            // intent for this subject is the one the finding names.
+            let same_intent = step.client_key.as_ref().and_then(|k| {
+                chains
+                    .iter()
+                    .position(|c| !c.resolved && c.subject == *subject && c.key.as_ref() == Some(k))
+            });
+            let open = same_intent.or_else(|| {
+                chains
+                    .iter()
+                    .position(|c| !c.resolved && c.subject == *subject)
+            });
+
+            match open {
+                Some(i) if same_intent.is_some() => {
+                    chains[i].members.insert(order.clone());
+                    chained.insert(order.clone());
                 }
-                OutstandingWrite::Unknown {
-                    order: prior_order, ..
-                } => {
-                    violations.push(OrderingViolation::AmbiguityUnavailable {
+                Some(i) => {
+                    violations.push(OrderingViolation::AmbiguousWriteRetriedWithoutKey {
                         subject: subject.clone(),
-                        prior_order: prior_order.clone(),
+                        ambiguous_order: chains[i].origin.clone(),
                         retry_order: order.clone(),
+                        retry_key: step.client_key.clone(),
                     });
-                    if let Some(prior) = orders.get_mut(&prior_order) {
-                        prior.answered = true;
-                    }
                 }
+                None => match outstanding_write(&orders, &chained, subject) {
+                    OutstandingWrite::None => {}
+                    OutstandingWrite::Unknown {
+                        order: prior_order, ..
+                    } => {
+                        violations.push(OrderingViolation::AmbiguityUnavailable {
+                            subject: subject.clone(),
+                            prior_order: prior_order.clone(),
+                            retry_order: order.clone(),
+                        });
+                        if let Some(prior) = orders.get_mut(&prior_order) {
+                            prior.answered = true;
+                        }
+                    }
+                },
             }
 
             if !authorized.contains(subject) {
@@ -598,31 +659,24 @@ pub fn check_lifecycle(trace: &Trace) -> LifecycleReport {
             (None, PhaseKind::Submission)
             | (Some(PhaseKind::Submission), PhaseKind::Acknowledgment)
             | (Some(PhaseKind::Acknowledgment), PhaseKind::Fill)
-            | (Some(PhaseKind::Fill), PhaseKind::Reconciliation) => {
-                match orders.get_mut(order) {
-                    // Advancing past submission settles the outcome, so the
-                    // write is no longer ambiguous whenever the acknowledgment
-                    // does eventually arrive.
-                    Some(progress) => {
-                        progress.subject = subject.clone();
-                        progress.stage = attempted;
-                        progress.ambiguous = false;
-                    }
-                    None => {
-                        orders.insert(
-                            order.clone(),
-                            OrderProgress {
-                                subject: subject.clone(),
-                                stage: attempted,
-                                submitted_at: index,
-                                client_key: step.client_key.clone(),
-                                ambiguous: false,
-                                answered: false,
-                            },
-                        );
-                    }
+            | (Some(PhaseKind::Fill), PhaseKind::Reconciliation) => match orders.get_mut(order) {
+                Some(progress) => {
+                    progress.subject = subject.clone();
+                    progress.stage = attempted;
                 }
-            }
+                None => {
+                    orders.insert(
+                        order.clone(),
+                        OrderProgress {
+                            subject: subject.clone(),
+                            stage: attempted,
+                            submitted_at: index,
+                            client_key: step.client_key.clone(),
+                            answered: false,
+                        },
+                    );
+                }
+            },
             (Some(c), a) if c == a => {
                 violations.push(OrderingViolation::DuplicateTransition {
                     order: order.clone(),
@@ -1317,6 +1371,130 @@ mod tests {
             .violations
             .iter()
             .all(|v| matches!(v, OrderingViolation::AmbiguousWriteRetriedWithoutKey { .. })));
+    }
+
+    /// The intent-chain regression. A keyed retry makes the *retry* safe: the
+    /// venue can collapse the two writes into one intent. It says nothing about
+    /// whether that intent ever reached the venue, so the ambiguity is still
+    /// open when a third, keyless submission appears.
+    #[test]
+    fn an_unresolved_intent_survives_a_keyed_retry() {
+        let mut events = authorized_prefix(btc());
+        events.push(keyed_submission(btc(), "o1", "intent-1"));
+        events.push(step(
+            btc(),
+            Phase::AcknowledgmentUnobserved { order: oid("o1") },
+        ));
+        events.push(keyed_submission(btc(), "o2", "intent-1"));
+        events.push(step(btc(), Phase::Submission { order: oid("o3") }));
+
+        let t = Trace { events };
+        let r = check_lifecycle(&t);
+        assert_eq!(
+            r.block_violations, 1,
+            "the blind third write is a bypass, not missing evidence: {:?}",
+            r.violations
+        );
+        assert_eq!(r.warn_violations, 0, "{:?}", r.violations);
+        match &r.violations[0] {
+            OrderingViolation::AmbiguousWriteRetriedWithoutKey {
+                subject,
+                ambiguous_order,
+                retry_order,
+                retry_key,
+            } => {
+                assert_eq!(*subject, btc());
+                assert_eq!(
+                    *ambiguous_order,
+                    oid("o1"),
+                    "the finding names the write whose outcome is unknown"
+                );
+                assert_eq!(*retry_order, oid("o3"));
+                assert_eq!(*retry_key, None);
+            }
+            other => panic!("expected an ambiguous-write violation, got {other:?}"),
+        }
+        assert_eq!(process_score_with_ordering(&t).score, 0.0);
+    }
+
+    #[test]
+    fn a_keyed_chain_resolved_by_an_acknowledgment_is_clean() {
+        let mut events = authorized_prefix(btc());
+        events.push(keyed_submission(btc(), "o1", "intent-1"));
+        events.push(step(
+            btc(),
+            Phase::AcknowledgmentUnobserved { order: oid("o1") },
+        ));
+        events.push(keyed_submission(btc(), "o2", "intent-1"));
+        events.push(step(
+            btc(),
+            Phase::AcknowledgmentUnobserved { order: oid("o2") },
+        ));
+        events.push(keyed_submission(btc(), "o3", "intent-1"));
+        events.push(step(btc(), Phase::Acknowledgment { order: oid("o3") }));
+
+        let t = Trace { events };
+        assert_eq!(
+            check_lifecycle(&t).violations,
+            vec![],
+            "every write in the chain names one intent, and that intent was acknowledged"
+        );
+        assert_eq!(process_score_with_ordering(&t).score, 1.0);
+    }
+
+    #[test]
+    fn a_fill_resolves_the_chain_so_a_later_keyless_submission_is_clean() {
+        let mut events = authorized_prefix(btc());
+        events.push(keyed_submission(btc(), "o1", "intent-1"));
+        events.push(step(
+            btc(),
+            Phase::AcknowledgmentUnobserved { order: oid("o1") },
+        ));
+        events.push(keyed_submission(btc(), "o2", "intent-1"));
+        events.push(step(btc(), Phase::Acknowledgment { order: oid("o2") }));
+        events.push(step(btc(), Phase::Fill { order: oid("o2") }));
+        events.push(step(btc(), Phase::Reconciliation { order: oid("o2") }));
+        events.push(step(btc(), Phase::Submission { order: oid("o3") }));
+
+        let t = Trace { events };
+        assert_eq!(
+            check_lifecycle(&t).violations,
+            vec![],
+            "the intent filled, so o1 is settled too and o3 is a fresh order"
+        );
+        assert_eq!(process_score_with_ordering(&t).score, 1.0);
+    }
+
+    /// The fill leg of the resolution rule on its own. The fill here skips the
+    /// acknowledgment, which is its own block-severity finding, but it is still
+    /// an observed outcome for the intent, so the later keyless submission is
+    /// not a blind retry.
+    #[test]
+    fn an_irregular_fill_still_resolves_the_chain() {
+        let mut events = authorized_prefix(btc());
+        events.push(keyed_submission(btc(), "o1", "intent-1"));
+        events.push(step(
+            btc(),
+            Phase::AcknowledgmentUnobserved { order: oid("o1") },
+        ));
+        events.push(step(btc(), Phase::Fill { order: oid("o1") }));
+        events.push(step(btc(), Phase::Submission { order: oid("o2") }));
+
+        let r = check_lifecycle(&Trace { events });
+        assert!(
+            r.violations
+                .iter()
+                .any(|v| matches!(v, OrderingViolation::FillWithoutAcknowledgment { .. })),
+            "{:?}",
+            r.violations
+        );
+        assert!(
+            !r.violations
+                .iter()
+                .any(|v| matches!(v, OrderingViolation::AmbiguousWriteRetriedWithoutKey { .. })),
+            "the fill observed the intent's outcome: {:?}",
+            r.violations
+        );
     }
 
     #[test]
