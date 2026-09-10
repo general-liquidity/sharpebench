@@ -45,15 +45,60 @@ use sharpebench_stats::stats::{
 use sharpebench_stats::{
     benjamini_hochberg as core_bh, deflated_sharpe_ratio as core_dsr,
     expected_max_sharpe as core_expected_max, fdr_verdict as core_fdr_verdict,
-    probabilistic_sharpe_ratio as core_psr, selection_robustness as core_selection,
-    sharpe_ratio as core_sharpe,
+    per_period_from_annualized, probabilistic_sharpe_ratio as core_psr,
+    selection_robustness as core_selection, sharpe_ratio as core_sharpe,
 };
 
 /// The fixed bootstrap seed used when a caller does not pick one, so a result is
 /// reproducible by default rather than silently run-dependent.
 const DEFAULT_SEED: u64 = 0x5BA7_ED60_2026_0008;
-/// The Lopez de Prado working assumption for cross-trial Sharpe dispersion.
+/// The **annualized** cross-trial Sharpe dispersion prior, the same free
+/// modelling prior (not a value from the literature) as
+/// `ScoreConfig::trials_sr_std` and the honesty verdict's default. The raw
+/// per-period primitives never receive it unconverted: see
+/// [`per_period_trials_sr_std`].
 const DEFAULT_TRIALS_SR_STD: f64 = 0.5;
+/// The frequency the annualized prior is converted at when the caller does not
+/// name one: daily bars, the default of `ScoreConfig::periods_per_year` and of
+/// the honesty verdict.
+const DEFAULT_PERIODS_PER_YEAR: f64 = 252.0;
+
+/// The **per-period** cross-trial dispersion a raw deflation primitive
+/// (`deflated_sharpe_ratio`, `bootstrap_dsr_ci`, `selection_robustness`) runs
+/// with.
+///
+/// An explicit `trials_sr_std` is per period and is used exactly as given, as it
+/// always was. Omitted, it is the annualized 0.5 prior divided by
+/// `sqrt(periods_per_year)` (default 252), the conversion `ScoreConfig` and the
+/// honesty verdict apply: 0.5 per period on daily returns was an annualized bar
+/// about sqrt(252), or 15.9, times too high. `periods_per_year` converts only
+/// that prior, so naming it beside an explicit per-period value is refused
+/// rather than silently ignored, and a frequency that is not finite and positive
+/// is refused because `+inf` would divide the prior to a zero bar.
+fn per_period_trials_sr_std(
+    trials_sr_std: Option<f64>,
+    periods_per_year: Option<f64>,
+) -> PyResult<f64> {
+    match (trials_sr_std, periods_per_year) {
+        (Some(_), Some(_)) => Err(PyValueError::new_err(
+            "trials_sr_std is already per period; periods_per_year only converts the default \
+             annualized prior, so pass one or the other",
+        )),
+        (Some(per_period), None) => Ok(per_period),
+        (None, periods_per_year) => {
+            let periods_per_year = periods_per_year.unwrap_or(DEFAULT_PERIODS_PER_YEAR);
+            if !periods_per_year.is_finite() || periods_per_year <= 0.0 {
+                return Err(PyValueError::new_err(
+                    "periods_per_year must be finite and positive",
+                ));
+            }
+            Ok(per_period_from_annualized(
+                DEFAULT_TRIALS_SR_STD,
+                periods_per_year,
+            ))
+        }
+    }
+}
 
 fn require_non_empty(field: &[Vec<f64>], what: &str) -> PyResult<()> {
     if field.is_empty() {
@@ -130,8 +175,11 @@ fn sharpe_ratio(returns: Vec<f64>) -> f64 {
     core_sharpe(&returns)
 }
 
-/// Probabilistic Sharpe Ratio: `P(true Sharpe > sr_benchmark)` given the observed
-/// track's length, skew and kurtosis.
+/// Probabilistic Sharpe Ratio: one minus the one-sided p-value of the test of
+/// `H0: SR <= sr_benchmark`, correcting for the track's length, skew and
+/// kurtosis (López de Prado, Lipton and Zoonekynd 2026, eq. 9). It is not the
+/// probability that the true Sharpe exceeds the benchmark. `sr_benchmark` is
+/// per period.
 #[pyfunction]
 #[pyo3(signature = (returns, sr_benchmark = 0.0))]
 fn probabilistic_sharpe_ratio(returns: Vec<f64>, sr_benchmark: f64) -> f64 {
@@ -139,20 +187,36 @@ fn probabilistic_sharpe_ratio(returns: Vec<f64>, sr_benchmark: f64) -> f64 {
 }
 
 /// The Sharpe you should expect the *best* of `n_trials` independent trials to
-/// show under the null of zero true skill.
+/// show under the null of zero true skill. `trials_sr_std` is the **per-period**
+/// cross-trial dispersion and the result is a per-period Sharpe; an annualized
+/// dispersion must be divided by `sqrt(periods_per_year)` first.
 #[pyfunction]
 #[pyo3(signature = (trials_sr_std, n_trials))]
 fn expected_max_sharpe(trials_sr_std: f64, n_trials: u32) -> PyResult<f64> {
     core_expected_max(trials_sr_std, n_trials).map_err(statistical_error)
 }
 
-/// Deflated Sharpe Ratio: the probability the edge survives the search that found
-/// it. Rises with track length, falls as `n_trials` (the multiple-testing
-/// footprint) grows. `n_trials = 1` is almost always a lie.
+/// Deflated Sharpe Ratio: one minus the p-value of the test whose null is that
+/// the observed Sharpe is the best of `n_trials` zero-skill trials. Near 1 means
+/// selection alone would rarely produce a Sharpe this high; it is not the
+/// probability that the strategy is skilled. Rises with track length, falls as
+/// `n_trials` (the multiple-testing footprint) grows. `n_trials = 1` is almost
+/// always a lie.
+///
+/// `returns` are per period. `trials_sr_std` is the **per-period** cross-trial
+/// Sharpe dispersion, used as given. Omitted, it is the annualized 0.5 prior
+/// over `sqrt(periods_per_year)`; `periods_per_year` (default 252, daily bars)
+/// only converts that prior and is refused beside an explicit `trials_sr_std`.
 #[pyfunction]
-#[pyo3(signature = (returns, n_trials, trials_sr_std = DEFAULT_TRIALS_SR_STD))]
-fn deflated_sharpe_ratio(returns: Vec<f64>, n_trials: u32, trials_sr_std: f64) -> PyResult<f64> {
-    core_dsr(&returns, n_trials, trials_sr_std).map_err(statistical_error)
+#[pyo3(signature = (returns, n_trials, trials_sr_std = None, periods_per_year = None))]
+fn deflated_sharpe_ratio(
+    returns: Vec<f64>,
+    n_trials: u32,
+    trials_sr_std: Option<f64>,
+    periods_per_year: Option<f64>,
+) -> PyResult<f64> {
+    let sr_std = per_period_trials_sr_std(trials_sr_std, periods_per_year)?;
+    core_dsr(&returns, n_trials, sr_std).map_err(statistical_error)
 }
 
 /// Minimum track record length (in periods) needed for the observed Sharpe to be
@@ -282,37 +346,36 @@ fn is_my_sharpe_real_full<'py>(
 /// Percentile confidence interval and standard error for the Deflated Sharpe
 /// Ratio via the stationary bootstrap. Returns
 /// `{"point", "se", "lower", "upper"}`; deterministic given `seed`.
+///
+/// `trials_sr_std` and `periods_per_year` mean what they mean in
+/// `deflated_sharpe_ratio`: an explicit dispersion is per period, and the
+/// omitted default is the annualized 0.5 prior over `sqrt(periods_per_year)`.
 #[pyfunction]
 #[pyo3(signature = (
     returns,
     n_trials,
-    trials_sr_std = DEFAULT_TRIALS_SR_STD,
+    trials_sr_std = None,
     seed = DEFAULT_SEED,
     n_boot = 1000,
     block_prob = 0.1,
     ci = 0.90,
+    periods_per_year = None,
 ))]
 #[allow(clippy::too_many_arguments)]
 fn bootstrap_dsr_ci<'py>(
     py: Python<'py>,
     returns: Vec<f64>,
     n_trials: u32,
-    trials_sr_std: f64,
+    trials_sr_std: Option<f64>,
     seed: u64,
     n_boot: usize,
     block_prob: f64,
     ci: f64,
+    periods_per_year: Option<f64>,
 ) -> PyResult<Bound<'py, PyDict>> {
-    let c = core_dsr_ci(
-        &returns,
-        n_trials,
-        trials_sr_std,
-        seed,
-        n_boot,
-        block_prob,
-        ci,
-    )
-    .map_err(statistical_error)?;
+    let sr_std = per_period_trials_sr_std(trials_sr_std, periods_per_year)?;
+    let c = core_dsr_ci(&returns, n_trials, sr_std, seed, n_boot, block_prob, ci)
+        .map_err(statistical_error)?;
     let d = PyDict::new(py);
     d.set_item("point", c.point)?;
     d.set_item("se", c.se)?;
@@ -331,8 +394,9 @@ fn bootstrap_pvalue(excess: Vec<f64>, seed: u64, n_boot: usize, block_prob: f64)
 }
 
 /// White's Reality Check p-value over a field of candidates (**N rows x T cols**
-/// of excess returns): the probability the best of them beats the benchmark by
-/// luck alone.
+/// of excess returns): under the null that no candidate beats the benchmark,
+/// the probability that the best of them would look at least this good. It is
+/// not the probability that the winner's edge is luck.
 #[pyfunction]
 #[pyo3(signature = (field, seed = DEFAULT_SEED, n_boot = 2000, block_prob = 0.1))]
 fn reality_check_pvalue(
@@ -439,15 +503,21 @@ fn hlz_gate<'py>(
 /// Deflated-Sharpe spread across candidate return streams:
 /// `{"n_candidates", "best_dsr", "median_dsr", "selection_gap"}`. A large
 /// `selection_gap` means the headline is a lucky pick, not a family of edges.
+///
+/// `trials_sr_std` and `periods_per_year` mean what they mean in
+/// `deflated_sharpe_ratio`: an explicit dispersion is per period, and the
+/// omitted default is the annualized 0.5 prior over `sqrt(periods_per_year)`.
 #[pyfunction]
-#[pyo3(signature = (candidates, n_trials, trials_sr_std = DEFAULT_TRIALS_SR_STD))]
+#[pyo3(signature = (candidates, n_trials, trials_sr_std = None, periods_per_year = None))]
 fn selection_robustness<'py>(
     py: Python<'py>,
     candidates: Vec<Vec<f64>>,
     n_trials: u32,
-    trials_sr_std: f64,
+    trials_sr_std: Option<f64>,
+    periods_per_year: Option<f64>,
 ) -> PyResult<Bound<'py, PyDict>> {
-    let r = core_selection(&candidates, n_trials, trials_sr_std).map_err(statistical_error)?;
+    let sr_std = per_period_trials_sr_std(trials_sr_std, periods_per_year)?;
+    let r = core_selection(&candidates, n_trials, sr_std).map_err(statistical_error)?;
     let d = PyDict::new(py);
     d.set_item("n_candidates", r.n_candidates)?;
     d.set_item("best_dsr", r.best_dsr)?;
@@ -524,10 +594,15 @@ fn moments<'py>(py: Python<'py>, returns: Vec<f64>, target: f64) -> PyResult<Bou
 /// they do not apply. No monotone law is fitted: the curve is reported, not gated.
 /// `non_improvement_onset` was previously emitted as `overfit_onset`; this surface
 /// only produces dicts, so the old key is gone rather than aliased.
+///
+/// Units, as in `ScoreConfig`: the held-out returns are per period,
+/// `trials_sr_std` is **annualized** (default: the 0.5 prior) and is divided by
+/// `sqrt(periods_per_year)` (default 252, daily bars; must be finite and
+/// positive) before it deflates a point.
 #[pyfunction]
 #[pyo3(signature = (
     points,
-    periods_per_year = 252.0,
+    periods_per_year = DEFAULT_PERIODS_PER_YEAR,
     base_n_trials = 1,
     trials_sr_std = DEFAULT_TRIALS_SR_STD,
     seed = DEFAULT_SEED,

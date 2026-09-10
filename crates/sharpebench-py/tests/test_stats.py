@@ -122,8 +122,13 @@ def test_psr_and_dsr_are_probabilities():
 
 
 def test_deflation_is_monotone_in_trial_count():
-    """The headline property: more trials searched, less believable the winner."""
-    xs = edge_track(120, drift=0.0004)
+    """The headline property: more trials searched, less believable the winner.
+
+    A daily track at an annualized Sharpe of about 1.9. (The former track here had
+    a per-period Sharpe of 2.8, annualized about 45, and deflated only against the
+    unconverted 0.5 prior; under the daily default it saturates at 1.0.)
+    """
+    xs = four_years_daily()
     dsrs = [deflated_sharpe_ratio(xs, k) for k in (1, 10, 100, 1000, 10_000)]
     assert all(a >= b for a, b in zip(dsrs, dsrs[1:])), dsrs
     assert dsrs[0] > dsrs[-1]
@@ -145,6 +150,70 @@ def test_a_negative_dispersion_is_refused_not_read_as_no_search(bad):
         expected_max_sharpe(bad, 500)
     with pytest.raises(ValueError):
         deflated_sharpe_ratio(edge_track(), 500, bad)
+
+
+def test_raw_primitives_default_to_the_per_period_prior():
+    """The omitted dispersion is the annualized 0.5 prior at the stated frequency.
+
+    It used to be 0.5 per period: on daily returns an annualized dispersion of
+    0.5 * sqrt(252), about 7.9, which failed this track (annualized Sharpe about
+    1.9) against a bar no daily strategy clears. The per-period literals are
+    Python's own ``0.5 / math.sqrt(n)``, the kernel's two IEEE operations.
+    """
+    xs = four_years_daily()
+    daily = 0.5 / math.sqrt(252)
+    assert deflated_sharpe_ratio(xs, 20) == deflated_sharpe_ratio(xs, 20, daily)
+    # The same number the LITE verdict reports under its own daily default.
+    assert deflated_sharpe_ratio(xs, 20) == is_my_sharpe_real(xs, n_trials=20)["deflated_sharpe"]
+    assert deflated_sharpe_ratio(xs, 20) > 0.95
+    assert deflated_sharpe_ratio(xs, 20, 0.5) < 0.01
+    weekly = deflated_sharpe_ratio(xs, 20, periods_per_year=52)
+    assert weekly == deflated_sharpe_ratio(xs, 20, 0.5 / math.sqrt(52))
+    assert weekly < deflated_sharpe_ratio(xs, 20)
+
+    ci = bootstrap_dsr_ci(xs, n_trials=20, n_boot=200)
+    assert ci == bootstrap_dsr_ci(xs, n_trials=20, n_boot=200, trials_sr_std=daily)
+    assert ci["point"] == deflated_sharpe_ratio(xs, 20)
+    assert bootstrap_dsr_ci(xs, n_trials=20, n_boot=200, periods_per_year=52)["point"] == weekly
+
+    candidates = [xs, [0.8 * x for x in xs], noise_track(3, len(xs))]
+    sel = selection_robustness(candidates, n_trials=20)
+    assert sel == selection_robustness(candidates, n_trials=20, trials_sr_std=daily)
+    assert sel["best_dsr"] == deflated_sharpe_ratio(xs, 20)
+    assert selection_robustness(candidates, n_trials=20, periods_per_year=52)["best_dsr"] == weekly
+
+
+def test_an_explicit_dispersion_is_still_per_period():
+    xs = edge_track(120, drift=0.0004)
+    bar = expected_max_sharpe(0.05, 200)
+    assert deflated_sharpe_ratio(xs, 200, 0.05) == deflated_sharpe_ratio(xs, 200, trials_sr_std=0.05)
+    assert deflated_sharpe_ratio(xs, 200, 0.05) == pytest.approx(
+        probabilistic_sharpe_ratio(xs, bar), abs=1e-15
+    )
+
+
+@pytest.mark.parametrize("bad", [0.0, -252.0, float("nan"), float("inf")])
+def test_raw_primitives_refuse_a_frequency_that_is_not_one(bad):
+    xs = four_years_daily()
+    for call in (
+        lambda: deflated_sharpe_ratio(xs, 20, periods_per_year=bad),
+        lambda: bootstrap_dsr_ci(xs, n_trials=20, n_boot=50, periods_per_year=bad),
+        lambda: selection_robustness([xs, xs], n_trials=20, periods_per_year=bad),
+    ):
+        with pytest.raises(ValueError, match="periods_per_year must be finite and positive"):
+            call()
+
+
+def test_raw_primitives_refuse_a_frequency_beside_an_explicit_dispersion():
+    """periods_per_year converts only the default; it never reinterprets a value."""
+    xs = four_years_daily()
+    for call in (
+        lambda: deflated_sharpe_ratio(xs, 20, 0.03, periods_per_year=252),
+        lambda: bootstrap_dsr_ci(xs, n_trials=20, trials_sr_std=0.03, periods_per_year=252),
+        lambda: selection_robustness([xs, xs], 20, 0.03, periods_per_year=252),
+    ):
+        with pytest.raises(ValueError, match="already per period"):
+            call()
 
 
 def test_a_non_finite_track_has_no_deflated_sharpe():
@@ -482,6 +551,28 @@ def test_budget_curve_monotone_improving_curve():
     r = budget_curve(points)
     assert r["is_monotone_improving"] is True
     assert r["non_improvement_onset"] is None
+
+
+def test_budget_curve_converts_its_annualized_prior():
+    """trials_sr_std is annualized here, as in ScoreConfig, and periods_per_year
+    converts it: the peak is deflated exactly as the raw primitive deflates it
+    under the same daily prior. It used to reach the kernel as 0.5 per period."""
+    points = [
+        (1.0, wiggle(0.0010, 0.02)),
+        (2.0, wiggle(0.0020, 0.02)),
+        (3.0, wiggle(0.0012, 0.02)),
+    ]
+    r = budget_curve(points, base_n_trials=10)
+    assert r == budget_curve(points, base_n_trials=10, trials_sr_std=0.5, periods_per_year=252)
+    assert r["points"][1]["oos_dsr"] == deflated_sharpe_ratio(points[1][1], 10)
+    assert r["peak_dsr_deflated_for_selection"] == deflated_sharpe_ratio(points[1][1], 13)
+    hourly = budget_curve(points, base_n_trials=10, periods_per_year=8760)
+    assert hourly["points"][1]["oos_dsr"] == deflated_sharpe_ratio(
+        points[1][1], 10, periods_per_year=8760
+    )
+    for bad in (0.0, -252.0, float("nan"), float("inf")):
+        with pytest.raises(ValueError, match="periods_per_year must be finite and positive"):
+            budget_curve(points, periods_per_year=bad)
 
 
 def test_budget_curve_rejects_degenerate_input():
