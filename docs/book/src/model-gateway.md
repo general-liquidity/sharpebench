@@ -391,12 +391,38 @@ non-positive control, and an unparseable thinking flag. Its dry run happens
 before the shim probe, so a readiness report starts no interpreter and loads no
 model.
 
+## Live Docker run
+
+`sandbox::tests::live_gateway_launch_serves_model_calls_over_stdio_with_no_network`
+runs by exact name in the live-container CI job (Docker 28.0.4). A real
+`run_gateway_sweep` with its journal on disk runs one cell of three decisions;
+the cell starts the digest-pinned Alpine fixture from the argv `gateway_launch`
+returns, spawned through `EntrantLaunch::isolating_launcher` and awaited with
+`wait_until_running`. The fixture's own entrypoint is `/bin/sh`, which would read
+the observations as a script, so the test appends an explicit container command
+after the image positional; everything before it is `gateway_launch`'s argv
+unchanged. Inside the container the entrant listed its interfaces and tried one
+outbound connect to `1.1.1.1:80` before its first observation, and put both in
+every model request. The provider behind the transport seam cannot open a socket
+and answers each call with a fixed text. Observed:
+
+- all three model requests arrived at the provider carrying
+  `ifaces=lo, egress_exit=1`: only loopback existed and the connect failed;
+- every decision was a valid hold, which the entrant writes only after the
+  gateway's answer arrived on its stdin, so the run completed with no failure;
+- the journal on disk reserved and settled all three calls, all priced;
+- the container exited 0, classified `WithinBudget`, was removed, and
+  `docker inspect` afterwards found nothing.
+
+The image preflight's functional probe also runs an image through
+`plan_gateway_launch` with no appended command, from the image's own
+entrypoint, against the same daemon ([image preflight](image-preflight.md)).
+
 ## What is not yet verified
 
-- **No live Docker run.** `gateway_launch` has never started a container in this
-  work. Its argv is pinned against the one `run_external_sandboxed` uses
-  (`a_gateway_launch_is_the_hardened_network_disabled_launch`), but no daemon,
-  and no image that speaks the gateway protocol, has exercised it.
+- **One daemon, one fixture.** The live run above is one Docker version on one
+  CI runner with a shell-script entrant, not an entrant image that ships a
+  gateway client of its own.
 - **No real provider.** Every test drives a scripted adapter that cannot open a
   socket. Nothing here shows that a particular provider's usage report, framing
   overhead or billing matches what the host reserved and recorded; that is what
@@ -413,7 +439,8 @@ model.
 
 ## Test evidence
 
-Hermetic fakes only: no API key, no network call, no model installation.
+Hermetic fakes only: no API key, no network call, no model installation. The one
+live leg is the Docker run above, whose provider is also a fake.
 
 | Where | Tests | Covers |
 |---|---|---|
@@ -421,7 +448,7 @@ Hermetic fakes only: no API key, no network call, no model installation.
 | `crates/sharpebench-harness/src/gateway_journal.rs` | 10 | the fold, partial and unavailable totals, the `host_observed` label, and a sweep-bound journal resuming only under its sweep |
 | `crates/sharpebench-harness/src/gateway_serve_tests.rs` | 12 | the serving loop on real OS pipes and one real child process: a call through the entrant's own pipe, a scored sweep with usage on the entrant's row, resume making no new calls, an interrupted sweep rerunning only unfinished cells, typed budget refusals, the checkpoint and journal pair, gateway lines never read as decisions, the per-decision ceiling, host serving time excluded from the entrant clock, no credential in any launch, and host material withheld |
 | `crates/sharpebench-cli/src/gateway_cli.rs` | 6 | the operator report, including `limits.max_requests_per_decision` |
-| `crates/sharpebench-arena/src/sandbox.rs` | 1 | the gateway launch is the hardened `--network none` launch |
+| `crates/sharpebench-arena/src/sandbox.rs` | 2 | the gateway launch is the hardened `--network none` launch; live, a gateway sweep served over a real container's stdio with no network, journaled, and the container removed |
 
 Each invariant of the serving loop (host serving time, the checkpoint binding,
 the missing-journal refusal, the per-decision ceiling, the credential refusal at
