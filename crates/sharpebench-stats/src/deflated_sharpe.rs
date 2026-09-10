@@ -3,6 +3,13 @@
 //! After Bailey & López de Prado, *The Deflated Sharpe Ratio* (2014). All ratios
 //! are computed on **per-period** returns (do not pre-annualize — annualizing a
 //! short track inflates the noise these statistics exist to expose).
+//!
+//! The PSR variance used here is the 2014 one: it corrects for skewness and
+//! kurtosis but assumes serially independent returns. Autocorrelated returns
+//! make it too small, and so the PSR and DSR point estimates too favorable.
+//! López de Prado, Lipton and Zoonekynd, *How to Use the Sharpe Ratio* (2026,
+//! eqs. 2, 3 and 5), give a generalized variance with a first-order
+//! autocorrelation term that relaxes the assumption; it is not implemented.
 
 use crate::stats::{kurtosis, mean, norm_cdf, norm_ppf, skewness, std_dev};
 use crate::validation::{
@@ -19,9 +26,14 @@ pub fn sharpe_ratio(returns: &[f64]) -> f64 {
     mean(returns) / s
 }
 
-/// Probabilistic Sharpe Ratio: the probability that the *true* Sharpe exceeds
-/// `sr_benchmark`, correcting for track length, skewness and kurtosis of the
-/// return distribution. Returns a probability in [0, 1].
+/// Probabilistic Sharpe Ratio: one minus the one-sided p-value of the test of
+/// `H0: SR <= sr_benchmark`, that is, the probability of observing a Sharpe
+/// below the observed one if the true Sharpe were exactly `sr_benchmark`
+/// (López de Prado, Lipton and Zoonekynd 2026, eq. 9). It corrects for track
+/// length, skewness and kurtosis, assuming serially independent returns. It is
+/// **not** the probability that the true Sharpe exceeds `sr_benchmark`: that is
+/// a posterior, and it needs a prior this statistic does not have. Returns a
+/// probability in [0, 1].
 pub fn probabilistic_sharpe_ratio(returns: &[f64], sr_benchmark: f64) -> f64 {
     let n = returns.len();
     if n < 2 {
@@ -84,6 +96,12 @@ pub fn per_period_from_annualized(annualized: f64, periods_per_year: f64) -> f64
 /// given the cross-trial dispersion of Sharpe ratios `trials_sr_std`
 /// (Bailey & López de Prado, eq. for E[max SR_N]).
 ///
+/// `trials_sr_std` is a **standard deviation**, `sqrt(V[{SR_n}])`, in the same
+/// per-period units as the Sharpe it is compared with. The paper states the
+/// variance: its worked example's `V[{SR_n}] = 1/2` annualized is a standard
+/// deviation of `sqrt(0.5 / 250)` per period at 250 periods a year, which the
+/// worked-example test below reproduces.
+///
 /// `Ok(0.0)` when there is nothing to deflate for: a single trial, or a field
 /// whose Sharpes do not disperse at all. A negative or non-finite
 /// `trials_sr_std` is neither of those, so it is a typed error rather than the
@@ -106,12 +124,16 @@ pub fn expected_max_sharpe(trials_sr_std: f64, n_trials: u32) -> Result<f64, Sta
 }
 
 /// Deflated Sharpe Ratio: the PSR computed against the *expected maximum* Sharpe
-/// you'd see by chance across `n_trials` strategies. A value near 1.0 means the
-/// observed Sharpe is very unlikely to be the product of selection over many
-/// trials; near 0.0 means it is indistinguishable from luck.
+/// you'd see by chance across `n_trials` strategies, so one minus the p-value of
+/// the test whose null is that the observed Sharpe is the best of `n_trials`
+/// zero-skill trials. A value near 1.0 means a Sharpe this high would rarely be
+/// observed under that null; near 0.0 means selection alone readily produces
+/// it. Like the PSR it does not say how likely the strategy is to be skilled,
+/// and it inherits the PSR's serial-independence assumption.
 ///
-/// `trials_sr_std` is the dispersion of Sharpe ratios across the trials/agents
-/// that were tested (the multiple-testing footprint). Larger ⇒ harder to clear.
+/// `trials_sr_std` is the per-period standard deviation of Sharpe ratios across
+/// the trials/agents that were tested (the multiple-testing footprint). Larger
+/// ⇒ harder to clear.
 pub fn deflated_sharpe_ratio(
     returns: &[f64],
     n_trials: u32,
@@ -235,8 +257,9 @@ mod tests {
 
     /// The annualized prior 0.5 on daily bars is 0.5 / sqrt(252) per period,
     /// and on weekly bars 0.5 / sqrt(52): the literals are Python's
-    /// `0.5 / math.sqrt(n)`, the same two correctly rounded IEEE operations. Dividing instead of multiplying, or dropping the root, lands
-    /// orders of magnitude away.
+    /// `0.5 / math.sqrt(n)`, the same two correctly rounded IEEE operations.
+    /// Dividing instead of multiplying, or dropping the root, lands orders of
+    /// magnitude away.
     #[test]
     fn annualized_quantities_convert_by_the_root_of_the_frequency() {
         assert_eq!(
@@ -249,5 +272,66 @@ mod tests {
         );
         assert_eq!(per_period_from_annualized(0.5, 1.0), 0.5);
         assert_eq!(per_period_from_annualized(0.0, 252.0), 0.0);
+    }
+
+    /// A series whose sample Sharpe is `sr`, built as `c + b * x` over the
+    /// pattern `levels` of `(value, count)` pairs. Skewness and kurtosis are
+    /// invariant under that positive affine map, so the pattern fixes them.
+    fn series_with_sharpe(levels: &[(f64, usize)], sr: f64) -> Vec<f64> {
+        let base: Vec<f64> = levels
+            .iter()
+            .flat_map(|&(v, k)| std::iter::repeat_n(v, k))
+            .collect();
+        let b = 0.01;
+        let c = sr * b * std_dev(&base) - b * mean(&base);
+        base.iter().map(|x| c + b * x).collect()
+    }
+
+    /// F11: Bailey and López de Prado (2014), "A numerical example", pp. 9-10 of
+    /// the working paper: N = 100 trials, V[{SR_n}] = 1/2 annualized, T = 1250
+    /// daily returns at 250 a year, skewness -3, kurtosis 10 and an annualized
+    /// Sharpe of 2.5. The paper prints SR_0 ≈ 0.1132 per period and DSR ≈ 0.9004,
+    /// then DSR = 0.9505 at N = 46, and DSR = 0.9505 at N = 88 had the returns
+    /// been Normal. Each is reproduced through the public entry points to the
+    /// printed four decimals.
+    ///
+    /// The returns are a constructed series, not the paper's. A two-point
+    /// distribution has kurtosis exactly skewness² + 1, so 1145 high and 105 low
+    /// values give skewness -2.9994 and kurtosis 9.9965; a symmetric three-point
+    /// series with 208 / 834 / 208 gives skewness 0 and kurtosis 3.0048.
+    #[test]
+    fn reproduces_the_deflated_sharpe_worked_example() {
+        let per_period = |annual: f64| annual / 250.0_f64.sqrt();
+        // The paper's dispersion is a variance of 1/2, so a standard deviation
+        // of sqrt(1/2) ≈ 0.707 annualized.
+        let sigma = per_period(0.5_f64.sqrt());
+        let sr = per_period(2.5);
+        let near = |got: f64, want: f64| (got - want).abs() < 5e-5;
+
+        let sr0 = expected_max_sharpe(sigma, 100).unwrap();
+        assert!(near(sr0, 0.1132), "SR_0 {sr0}");
+        // Reading 0.5 as a standard deviation lowers the bar by sqrt(2).
+        let half = expected_max_sharpe(per_period(0.5), 100).unwrap();
+        assert!(
+            (sr0 / half - 2.0_f64.sqrt()).abs() < 1e-12,
+            "{sr0} / {half}"
+        );
+
+        let skewed = series_with_sharpe(&[(1.0, 1145), (0.0, 105)], sr);
+        assert_eq!(skewed.len(), 1250);
+        assert!((sharpe_ratio(&skewed) - sr).abs() < 1e-12);
+        assert!((skewness(&skewed) + 3.0).abs() < 1e-3);
+        assert!((kurtosis(&skewed) - 10.0).abs() < 1e-2);
+        let dsr = deflated_sharpe_ratio(&skewed, 100, sigma).unwrap();
+        assert!(near(dsr, 0.9004), "DSR at N = 100: {dsr}");
+        let dsr46 = deflated_sharpe_ratio(&skewed, 46, sigma).unwrap();
+        assert!(near(dsr46, 0.9505), "DSR at N = 46: {dsr46}");
+
+        let normal = series_with_sharpe(&[(-1.0, 208), (0.0, 834), (1.0, 208)], sr);
+        assert_eq!(normal.len(), 1250);
+        assert!(skewness(&normal).abs() < 1e-12);
+        assert!((kurtosis(&normal) - 3.0).abs() < 1e-2);
+        let dsr88 = deflated_sharpe_ratio(&normal, 88, sigma).unwrap();
+        assert!(near(dsr88, 0.9505), "Normal DSR at N = 88: {dsr88}");
     }
 }

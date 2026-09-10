@@ -1,10 +1,28 @@
 # Deflated Sharpe & PSR
 
-The **Probabilistic Sharpe Ratio (PSR)** is the probability that an agent's true
-Sharpe exceeds a benchmark (here 0), given the observed Sharpe, the sample length,
-and the return distribution's skew and kurtosis. Fat tails and negative skew,
-the signatures of strategies that "work until they don't", lower the PSR for the
-same headline Sharpe.
+The **Probabilistic Sharpe Ratio (PSR)** is one minus the one-sided p-value of
+the test that an agent's Sharpe is no better than a benchmark (here 0): the
+probability of observing a Sharpe below the one observed if the true Sharpe
+were exactly the benchmark, given the sample length and the return
+distribution's skew and kurtosis. It is **not** the probability that the true
+Sharpe exceeds the benchmark. That would be a posterior, it needs a prior, and
+López de Prado, Lipton and Zoonekynd, *How to Use the Sharpe Ratio* (2026),
+single out reading a p-value that way as a recurring error (their eq. 9
+defines PSR as `1 - p`). Fat tails and negative skew, the signatures of
+strategies that "work until they don't", lower the PSR for the same headline
+Sharpe.
+
+The PSR variance the kernel uses is the 2014 one, and it **assumes serially
+independent returns**. Positive autocorrelation makes the true sampling variance
+of a Sharpe estimate larger, so on autocorrelated returns the PSR and DSR point
+estimates are too favorable. The stationary bootstrap preserves serial
+correlation, but only in the bootstrap p-value and the DSR interval, never in
+the point estimate the gate reads. The frozen datasets show volatility
+clustering, and the simulator's synthetic generator adds an AR(1) momentum
+component, so its returns are autocorrelated by construction. The 2026 paper's
+generalized variance (its eqs. 2, 3 and 5), which adds a first-order
+autocorrelation term, is the form that would relax the assumption; it is not
+implemented.
 
 The **Deflated Sharpe Ratio (DSR)** goes further: it is the PSR evaluated against
 a benchmark Sharpe that accounts for **how many strategies were tried**. Search
@@ -13,8 +31,8 @@ exactly that selection effect. The deflation uses three `ScoreConfig` inputs:
 
 - `n_trials`: the multiple-testing footprint (how many agents / configs were in
   the search).
-- `trials_sr_std`: the **annualized** dispersion of Sharpe ratios across those
-  trials.
+- `trials_sr_std`: the **annualized** standard deviation of Sharpe ratios
+  across those trials (a standard deviation, not a variance).
 - `periods_per_year`: how many return bars make a year on the dataset being
   scored, which is what converts the annualized dispersion into the units the
   statistic is computed in.
@@ -33,15 +51,17 @@ noise PSR and DSR exist to expose. That is correct and it does not change.
 
 The thresholds an operator reasons about are quoted **annualized**, because that
 is the unit the literature and every published track record use. The two have to
-meet somewhere, and that somewhere is `periods_per_year`. A Sharpe ratio scales
-with the square root of the number of periods, so a dispersion of Sharpes does
-too:
+meet somewhere, and that somewhere is `periods_per_year`. For serially
+independent returns a Sharpe ratio scales with the square root of the number of
+periods, so a dispersion of Sharpes does too:
 
 ```text
 per-period trials_sr_std = annualized trials_sr_std / sqrt(periods_per_year)
 ```
 
-The conversion lives in one function, `sharpebench_core::per_period_sr_std`, and
+Under autocorrelation the scaling factor differs (Lo 2002), so the converted
+prior is an approximation on the real datasets. The conversion lives in one
+function, `sharpebench_core::per_period_sr_std`, and
 every deflation call site reads from it, so the prior can neither be converted
 twice nor reach a per-period statistic unconverted. Every `CompositeScore`
 reports the per-period value it was actually deflated with, its annualized
@@ -71,8 +91,8 @@ near-duplicate submissions cannot shrink the dispersion and lower the bar
 
 ### Why this matters: the bar before 0.3.0
 
-Before 0.3.0 the kernel applied `trials_sr_std = 0.5` (López de Prado's worked
-example, an annualized number) directly at the period frequency. The table shows
+Before 0.3.0 the kernel applied `trials_sr_std = 0.5`, an annualized number,
+directly at the period frequency. The table shows
 the annualized Sharpe an agent had to beat on each shipped timeframe at
 `n_trials = 50`, reconstructed from the sweep in `paper/evidence/FINDING-units.md`:
 
@@ -89,6 +109,29 @@ near 2 to 3. Under the old default a daily strategy needed an annualized Sharpe 
 `PSR = 1.0000` and `DSR = 0.0000` on the same series, and zero agents were ever
 rank-eligible on any real dataset. The bar was not high, it was unreachable, and
 it got more unreachable with the square root of the number of periods per year.
+
+### Where 0.5 comes from: a free prior, not the cited example
+
+The 0.5 default is a free modelling prior. It used to be described as López de
+Prado's worked example, and `paper/evidence/FINDING-units.md`, a frozen record,
+still carries that wording. The worked example of Bailey and López de Prado
+(2014, pp. 9-10 of the working paper) states the cross-trial **variance**,
+`V[{SR_n}] = 1/2` annualized, and computes its threshold with
+`sqrt(1 / (2 * 250))`, so its dispersion is a standard deviation of
+`sqrt(0.5)`, about 0.707. The kernel multiplies `trials_sr_std` as a standard
+deviation, so the shipped 0.5 is **less demanding than the cited example by a
+factor of sqrt(2)**: at fifty trials it sets an annualized bar of about 1.14,
+where the example's dispersion would set about 1.61.
+
+The value is not changed. Published evidence is frozen, and a prior is a stated
+choice rather than a bug. The paper's refusal result survives the correction:
+the expected-maximum bar rises with the dispersion and the DSR falls as the bar
+rises, so a higher prior only refuses more agents, and no agent clears the
+current one. The test
+`deflated_sharpe::tests::reproduces_the_deflated_sharpe_worked_example` in
+`sharpebench-stats` reproduces the example's printed threshold (0.1132 per
+period) and deflated Sharpe (0.9004, then 0.9505 at N = 46 and 0.9505 for Normal
+returns at N = 88) from the kernel's own formula.
 
 With `trials_sr_std` read as annualized, the same 0.5 at fifty trials says "the
 best of fifty lucky strategies looks like an annualized Sharpe of about 1.14",

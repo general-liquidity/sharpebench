@@ -145,6 +145,12 @@ sharpebench score subs.json
 
 \paragraph{The pre-floor experiment quoted in \cref{sec:units}.} The DSR $0.984$ weekly and $0.000$ daily pair predates the dispersion floor and is read from the retained artifacts in \texttt{paper/evidence/after-v0.3.0/}, which are kept as the record of that intermediate kernel and are not used for any current result.
 
+\paragraph{The deflated Sharpe worked example (\cref{sec:units}).}
+\begin{verbatim}
+cargo test -p sharpebench-stats worked_example
+\end{verbatim}
+Reproduces the numerical example of \citet{bailey2014deflated} from the kernel's own formula, on constructed return series with the example's moments: $N=100$, a cross-trial variance of $1/2$ annualized, $T=1250$, skewness $-3$, kurtosis $10$ and an annualized Sharpe of $2.5$ at $250$ periods a year give a threshold of $0.1132$ per period and a deflated Sharpe of $0.9004$; $N=46$ gives $0.9505$, and Normal returns at $N=88$ give $0.9505$. It also asserts that reading $0.5$ as the standard deviation lowers the threshold by exactly $\sqrt{2}$.
+
 \paragraph{The clone-collapse regression tests (\cref{sec:sybil}).}
 \begin{verbatim}
 cargo test -p sharpebench-harness --test evidence_fields_no_clone_merges

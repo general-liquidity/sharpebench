@@ -18,15 +18,31 @@
 //! encoded, encrypted or model-internalized copies are outside raw-byte scope,
 //! and so is anything the daemon does not put in an export (see
 //! [`SCAN_SCOPE`]).
+//!
+//! # Runtime allowlist and functional probe
+//!
+//! `--runtime-allowlist` adds the other polarity. The scan policy refuses known
+//! content; the allowlist refuses every export entry whose path it does not
+//! admit, so what the runtime image may contain is declared rather than
+//! guessed at. An image that passes both is then run once, from its
+//! configuration ID and under the same hardened launch a sweep uses, against a
+//! fixed synthetic observation, and must answer with a valid decision. That is
+//! the post-strip functional test: an image restricted to what the allowlist
+//! admits is shown to work, not assumed to. The probe runs only after every
+//! scan leg authorized the image, so a refused image is still never started.
+//!
+//! What an allowlist result is not: it proves which paths the export holds. It
+//! says nothing about the bytes under an admitted path, and it does not make the
+//! image reproducible.
 
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom, Write as _};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use sharpebench_harness::artifact_scan::{RawScanPolicy, RawScanReport, RawScanner};
@@ -65,6 +81,27 @@ const REDACTED_STDERR_BYTES: usize = 200;
 /// instead of running the entrant.
 const NEVER_STARTED_ENTRYPOINT: &str = "/sharpebench-preflight-never-started";
 
+/// Schema of an opt-in runtime allowlist.
+pub const ALLOWLIST_VERSION: &str = "sharpebench.runtime-allowlist.v1";
+/// Framing of the preflight policy digest when a runtime allowlist applies, so
+/// a changed allowlist is a changed policy and cannot resume a checkpoint.
+pub const COMBINED_POLICY_VERSION: &str = "sharpebench.image-preflight-policy.v2";
+const MAX_ALLOWLIST_BYTES: u64 = 64 * 1024;
+const MAX_ALLOWLIST_PATHS: usize = 4096;
+const MAX_ALLOWLIST_PATH_BYTES: usize = 1024;
+/// Archive-order indices of refused entries a report carries. Entry names are
+/// withheld: a report can be published, and a name can be the very thing a
+/// policy exists to protect.
+const MAX_REPORTED_OUTSIDE: usize = 16;
+/// Wall clock for the functional probe, container start included.
+const PROBE_ALLOWANCE: Duration = Duration::from_secs(60);
+/// Accepted probe output: the external-agent transport's decision-line cap.
+const MAX_PROBE_OUTPUT_BYTES: u64 = 8 * 1024 * 1024;
+/// The one observation a functional probe hands the image. Deliberately
+/// generic: no real instrument, no window date and no dataset value, so the
+/// probe tells the image nothing about the evaluation it is entering.
+const PROBE_OBSERVATION: &str = r#"{"date":"1970-01-01","cash":1.0,"symbols":[{"symbol":"PROBE","close_history":[1.0]}],"portfolio":[]}"#;
+
 /// Docker's immutable configuration ID for a locally present image.
 ///
 /// The only constructor validates `sha256:<64 lowercase hex>`, and the only
@@ -98,6 +135,141 @@ impl ValidatedImageId {
 pub struct PreflightRequest {
     image: String,
     policy: RawScanPolicy,
+    allowlist: Option<RuntimeAllowlist>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AllowlistWire {
+    schema_version: String,
+    paths: Vec<String>,
+}
+
+/// The paths a runtime image may contain. Allowlist polarity: an export entry
+/// no path here admits refuses the launch.
+///
+/// A path ending in `/` admits that directory and everything below it; any
+/// other path admits exactly that entry. Paths are relative to the image root,
+/// with no `.`, `..` or empty segment. A directory that is an ancestor of an
+/// admitted path is admitted itself, because an archive lists the directories
+/// it descends through; it admits nothing else below it.
+#[derive(Clone, Debug)]
+pub struct RuntimeAllowlist {
+    paths: Vec<String>,
+    digest: String,
+}
+
+impl RuntimeAllowlist {
+    pub fn from_json(bytes: &[u8]) -> Result<Self, String> {
+        if bytes.len() as u64 > MAX_ALLOWLIST_BYTES {
+            return Err("runtime allowlist exceeds 64 KiB".into());
+        }
+        let wire: AllowlistWire = serde_json::from_slice(bytes)
+            .map_err(|error| format!("invalid runtime allowlist: {error}"))?;
+        if wire.schema_version != ALLOWLIST_VERSION {
+            return Err(format!(
+                "runtime allowlist schema_version must be {ALLOWLIST_VERSION}"
+            ));
+        }
+        if wire.paths.is_empty() || wire.paths.len() > MAX_ALLOWLIST_PATHS {
+            return Err(format!(
+                "a runtime allowlist declares 1..={MAX_ALLOWLIST_PATHS} paths"
+            ));
+        }
+        for (index, path) in wire.paths.iter().enumerate() {
+            let body = path.strip_suffix('/').unwrap_or(path);
+            if path.len() > MAX_ALLOWLIST_PATH_BYTES
+                || body.is_empty()
+                || path.starts_with('/')
+                || !path.bytes().all(|byte| (0x20..0x7f).contains(&byte))
+                || body
+                    .split('/')
+                    .any(|segment| segment.is_empty() || segment == "." || segment == "..")
+            {
+                return Err(format!(
+                    "runtime allowlist path {index} is not a relative path of printable ASCII \
+                     without empty, `.` or `..` segments"
+                ));
+            }
+            if wire.paths[..index].contains(path) {
+                return Err(format!("runtime allowlist path {index} is declared twice"));
+            }
+        }
+        let digest = sharpebench_attest::content_digest(
+            &serde_json::to_vec(&(ALLOWLIST_VERSION, &wire.paths))
+                .expect("validated paths serialize"),
+        );
+        Ok(Self {
+            paths: wire.paths,
+            digest,
+        })
+    }
+
+    pub fn digest(&self) -> &str {
+        &self.digest
+    }
+
+    /// Whether an export entry is admitted. `path` is the entry name as the
+    /// archive records it.
+    fn admits(&self, path: &str, directory: bool) -> bool {
+        let path = path.strip_prefix("./").unwrap_or(path);
+        let path = path.trim_start_matches('/').trim_end_matches('/');
+        if path.is_empty() || path == "." {
+            return directory;
+        }
+        self.paths
+            .iter()
+            .any(|allowed| match allowed.strip_suffix('/') {
+                Some(root) => {
+                    path == root
+                        || path
+                            .strip_prefix(root)
+                            .is_some_and(|rest| rest.starts_with('/'))
+                        || (directory
+                            && root
+                                .strip_prefix(path)
+                                .is_some_and(|rest| rest.starts_with('/')))
+                }
+                None => {
+                    path == allowed
+                        || (directory
+                            && allowed
+                                .strip_prefix(path)
+                                .is_some_and(|rest| rest.starts_with('/')))
+                }
+            })
+    }
+}
+
+/// What the allowlist found in the export. Counts and archive-order indices
+/// only; no entry name leaves the preflight.
+#[derive(Debug, Serialize)]
+pub struct AllowlistReport {
+    pub allowlist_sha256: String,
+    /// Entries enumerated, directories and links included.
+    pub entries: u64,
+    pub outside_allowlist: u64,
+    pub outside_indices: Vec<u64>,
+    /// False when the listing could not be read to the end. An incomplete
+    /// listing never admits.
+    pub complete: bool,
+}
+
+impl AllowlistReport {
+    pub fn admits_everything(&self) -> bool {
+        self.complete && self.outside_allowlist == 0
+    }
+}
+
+/// The post-strip functional test: one run of the admitted image against
+/// [`PROBE_OBSERVATION`].
+#[derive(Debug, Serialize)]
+pub struct FunctionalProbeReport {
+    pub observation_sha256: String,
+    pub passed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refusal: Option<&'static str>,
+    pub cleanup_verified: bool,
 }
 
 /// A preflight that produced at least a configuration scan.
@@ -108,22 +280,44 @@ pub struct ImagePreflightReport {
     pub schema_version: &'static str,
     pub scope: &'static str,
     pub image_id: String,
+    /// The digest of every policy input the preflight applied. Without a
+    /// runtime allowlist this is the scan policy's digest, as it always was.
     pub policy_sha256: String,
     pub configuration: RawScanReport,
     pub filesystem: Option<TarScanReport>,
     pub cleanup_verified: bool,
+    /// Present exactly when a runtime allowlist was applied; then
+    /// `policy_sha256` binds this and the allowlist digest together.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scan_policy_sha256: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_allowlist: Option<AllowlistReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub functional_probe: Option<FunctionalProbeReport>,
 }
 
 impl ImagePreflightReport {
     /// Every leg has to be present and clean: a configuration-only negative, a
-    /// partial filesystem scan or an unverified removal all refuse.
+    /// partial filesystem scan or an unverified removal all refuse. With a
+    /// runtime allowlist, so do an entry it does not admit and a functional
+    /// probe that did not pass.
     pub fn authorizes_launch(&self) -> bool {
-        self.cleanup_verified
+        let scanned = self.cleanup_verified
             && self.configuration.no_known_matches()
             && self
                 .filesystem
                 .as_ref()
-                .is_some_and(TarScanReport::no_known_matches)
+                .is_some_and(TarScanReport::no_known_matches);
+        let allowlisted = self.scan_policy_sha256.is_none()
+            || (self
+                .runtime_allowlist
+                .as_ref()
+                .is_some_and(AllowlistReport::admits_everything)
+                && self
+                    .functional_probe
+                    .as_ref()
+                    .is_some_and(|probe| probe.passed && probe.cleanup_verified));
+        scanned && allowlisted
     }
 
     /// The single value the entrant may be launched from, and only when the
@@ -201,6 +395,19 @@ pub trait DockerTransport {
         accepted_stdout_bytes: u64,
         deadline: Instant,
     ) -> Result<Capture, String>;
+
+    /// Like [`DockerTransport::capture`], with `stdin` written to the client
+    /// and then closed. Only the functional probe uses it, and only after every
+    /// scan leg authorized the image.
+    fn probe(
+        &self,
+        _args: &[String],
+        _stdin: &[u8],
+        _accepted_stdout_bytes: u64,
+        _deadline: Instant,
+    ) -> Result<Capture, String> {
+        Err("this Docker transport cannot run a functional probe".into())
+    }
 }
 
 /// The real client: the `docker` binary on the operator's PATH, exactly as the
@@ -214,7 +421,17 @@ impl DockerTransport for DockerProcess {
         accepted_stdout_bytes: u64,
         deadline: Instant,
     ) -> Result<Capture, String> {
-        capture_command("docker", args, accepted_stdout_bytes, deadline)
+        capture_command("docker", args, None, accepted_stdout_bytes, deadline)
+    }
+
+    fn probe(
+        &self,
+        args: &[String],
+        stdin: &[u8],
+        accepted_stdout_bytes: u64,
+        deadline: Instant,
+    ) -> Result<Capture, String> {
+        capture_command("docker", args, Some(stdin), accepted_stdout_bytes, deadline)
     }
 }
 
@@ -268,6 +485,7 @@ fn redact(bytes: &[u8]) -> String {
 fn capture_command(
     program: &str,
     args: &[String],
+    stdin: Option<&[u8]>,
     accepted_stdout_bytes: u64,
     deadline: Instant,
 ) -> Result<Capture, String> {
@@ -285,11 +503,21 @@ fn capture_command(
         .map_err(|error| format!("cannot hand {program} its diagnostic capture: {error}"))?;
     let mut child = Command::new(program)
         .args(args)
-        .stdin(Stdio::null())
+        .stdin(if stdin.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::from(out_handle))
         .stderr(Stdio::from(err_handle))
         .spawn()
         .map_err(|error| format!("cannot start {program}: {error}"))?;
+    // The input is written, then the pipe is closed, so the entrant reads one
+    // line and then end of input. A write the child refuses is not an error
+    // here: what it wrote back decides the outcome.
+    if let (Some(bytes), Some(mut pipe)) = (stdin, child.stdin.take()) {
+        let _ = pipe.write_all(bytes);
+    }
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
@@ -383,7 +611,17 @@ fn create_args(name: &str, image_id: &str) -> Vec<String> {
 /// Everything here is decided from arguments and one bounded file read, so an
 /// invalid policy or a conflicting transport costs zero Docker invocations.
 pub fn parse_preflight_args(args: &[String]) -> Result<Option<PreflightRequest>, String> {
+    let wants_allowlist = args.iter().any(|arg| arg == "--runtime-allowlist");
     if !args.iter().any(|arg| arg == "--scan-policy") {
+        // An allowlist on its own would be silently ignored, which is exactly
+        // the warning-not-gate shape a policy must not have.
+        if wants_allowlist {
+            return Err(
+                "--runtime-allowlist requires --scan-policy and --image; it is a leg of the \
+                 image preflight, not a policy of its own"
+                    .into(),
+            );
+        }
         return Ok(None);
     }
     let transports: Vec<&str> = ["--image", "--http", "--cmd"]
@@ -418,9 +656,24 @@ pub fn parse_preflight_args(args: &[String]) -> Result<Option<PreflightRequest>,
         .read_to_end(&mut bytes)
         .map_err(|error| format!("cannot read scan policy: {error}"))?;
     let policy = RawScanPolicy::from_json(&bytes)?;
+    let allowlist = if wants_allowlist {
+        let path = flag_value(args, "--runtime-allowlist")
+            .filter(|path| !path.starts_with("--"))
+            .ok_or("--runtime-allowlist requires a JSON file path")?;
+        let file = std::fs::File::open(path)
+            .map_err(|error| format!("cannot open runtime allowlist: {error}"))?;
+        let mut bytes = Vec::new();
+        file.take(MAX_ALLOWLIST_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|error| format!("cannot read runtime allowlist: {error}"))?;
+        Some(RuntimeAllowlist::from_json(&bytes)?)
+    } else {
+        None
+    };
     Ok(Some(PreflightRequest {
         image: image.to_string(),
         policy,
+        allowlist,
     }))
 }
 
@@ -663,7 +916,18 @@ pub fn preflight_image(
     request: &PreflightRequest,
     docker: &dyn DockerTransport,
 ) -> Result<ImagePreflightReport, PreflightFailure> {
-    let policy_sha256 = request.policy.digest();
+    let scan_policy_sha256 = request.policy.digest();
+    let policy_sha256 = match &request.allowlist {
+        None => scan_policy_sha256.clone(),
+        Some(allowlist) => sharpebench_attest::content_digest(
+            &serde_json::to_vec(&(
+                COMBINED_POLICY_VERSION,
+                &scan_policy_sha256,
+                allowlist.digest(),
+            ))
+            .expect("two digests serialize"),
+        ),
+    };
     let deadline = Instant::now() + Duration::from_secs(request.policy.limits().max_seconds);
 
     let document = capture_json(
@@ -684,6 +948,12 @@ pub fn preflight_image(
         configuration,
         filesystem,
         cleanup_verified,
+        scan_policy_sha256: request
+            .allowlist
+            .as_ref()
+            .map(|_| scan_policy_sha256.clone()),
+        runtime_allowlist: None,
+        functional_probe: None,
     };
     if !configuration.no_known_matches() {
         // Nothing was created, so nothing can leak. Refusing here is the point
@@ -766,10 +1036,165 @@ pub fn preflight_image(
             });
         }
     };
+    // A second handle on the same owned capture, for the allowlist listing.
+    let listing = request
+        .allowlist
+        .as_ref()
+        .map(|_| snapshot.try_clone().ok());
     // The same policy deadline that bounded the capture bounds the scan.
     let filesystem = scan_tar_snapshot_until(snapshot, request.policy.clone(), deadline);
     let cleanup_verified = remove_container(docker, &name);
-    Ok(report(configuration, Some(filesystem), cleanup_verified))
+    let mut report = report(configuration, Some(filesystem), cleanup_verified);
+    if let (Some(allowlist), Some(listing)) = (&request.allowlist, listing) {
+        // Names are read only from an archive the scan enumerated completely
+        // and found clean, so its structure and metadata sizes are already
+        // validated when the listing walks it.
+        if report
+            .filesystem
+            .as_ref()
+            .is_some_and(TarScanReport::no_known_matches)
+        {
+            let checked = check_allowlist(listing, allowlist, deadline);
+            let admitted = checked.admits_everything();
+            report.runtime_allowlist = Some(checked);
+            if admitted && report.cleanup_verified {
+                report.functional_probe = Some(functional_probe(docker, &image.id));
+            }
+        }
+    }
+    Ok(report)
+}
+
+/// Walk the export's entry names against the allowlist. An unreadable
+/// listing, an unreadable name or an expired deadline leaves the report
+/// incomplete, and an incomplete report never admits.
+fn check_allowlist(
+    listing: Option<File>,
+    allowlist: &RuntimeAllowlist,
+    deadline: Instant,
+) -> AllowlistReport {
+    let mut report = AllowlistReport {
+        allowlist_sha256: allowlist.digest().to_string(),
+        entries: 0,
+        outside_allowlist: 0,
+        outside_indices: Vec::new(),
+        complete: false,
+    };
+    let Some(mut listing) = listing else {
+        return report;
+    };
+    if listing.seek(SeekFrom::Start(0)).is_err() {
+        return report;
+    }
+    let mut archive = tar::Archive::new(listing);
+    let Ok(entries) = archive.entries() else {
+        return report;
+    };
+    for entry in entries {
+        if Instant::now() >= deadline {
+            return report;
+        }
+        let Ok(entry) = entry else {
+            return report;
+        };
+        let directory = entry.header().entry_type().is_dir();
+        let admitted = std::str::from_utf8(&entry.path_bytes())
+            .is_ok_and(|path| allowlist.admits(path, directory));
+        if !admitted {
+            if report.outside_indices.len() < MAX_REPORTED_OUTSIDE {
+                report.outside_indices.push(report.entries);
+            }
+            report.outside_allowlist += 1;
+        }
+        report.entries += 1;
+    }
+    report.complete = true;
+    report
+}
+
+/// Run the admitted image once, from its configuration ID and under the
+/// hardened launch a sweep uses, and require a valid decision for
+/// [`PROBE_OBSERVATION`]. The container is removed by name afterwards, and an
+/// unverified removal fails the probe.
+fn functional_probe(
+    docker: &dyn DockerTransport,
+    image_id: &ValidatedImageId,
+) -> FunctionalProbeReport {
+    let observation_sha256 = sharpebench_attest::content_digest(PROBE_OBSERVATION.as_bytes());
+    let options = sharpebench_arena::SandboxOptions {
+        allow_unpinned_image: true,
+        ..sharpebench_arena::SandboxOptions::default()
+    };
+    let launch =
+        match sharpebench_arena::sandbox::plan_gateway_launch(true, image_id.as_str(), &options) {
+            Ok(launch) => launch,
+            Err(_) => {
+                return FunctionalProbeReport {
+                    observation_sha256,
+                    passed: false,
+                    refusal: Some("launch_refused"),
+                    cleanup_verified: true,
+                }
+            }
+        };
+    let Some(name) = launch.container.clone() else {
+        return FunctionalProbeReport {
+            observation_sha256,
+            passed: false,
+            refusal: Some("launch_refused"),
+            cleanup_verified: true,
+        };
+    };
+    let mut input = PROBE_OBSERVATION.as_bytes().to_vec();
+    input.push(b'\n');
+    let captured = docker.probe(
+        &launch.args,
+        &input,
+        MAX_PROBE_OUTPUT_BYTES,
+        Instant::now() + PROBE_ALLOWANCE,
+    );
+    let cleanup_verified = remove_container(docker, &name);
+    let refusal = match captured {
+        Err(_) => Some("probe_did_not_complete"),
+        Ok(mut capture) => first_decision_refusal(&mut capture),
+    };
+    FunctionalProbeReport {
+        observation_sha256,
+        passed: refusal.is_none() && cleanup_verified,
+        refusal,
+        cleanup_verified,
+    }
+}
+
+/// `None` when the first line the image wrote is a decision valid for the
+/// probe observation; otherwise why not.
+fn first_decision_refusal(capture: &mut Capture) -> Option<&'static str> {
+    if capture.stdout_bytes > MAX_PROBE_OUTPUT_BYTES {
+        return Some("probe_output_exceeded");
+    }
+    let mut bytes = Vec::new();
+    if (&mut capture.stdout)
+        .take(MAX_PROBE_OUTPUT_BYTES)
+        .read_to_end(&mut bytes)
+        .is_err()
+    {
+        return Some("probe_output_unreadable");
+    }
+    let Some(line) = bytes
+        .split(|byte| *byte == b'\n')
+        .next()
+        .and_then(|line| std::str::from_utf8(line).ok())
+        .map(|line| line.trim_end_matches('\r'))
+        .filter(|line| !line.is_empty())
+    else {
+        return Some("no_decision");
+    };
+    let observation: sharpebench_protocol::MarketObservation =
+        serde_json::from_str(PROBE_OBSERVATION).expect("the probe observation is valid");
+    match sharpebench_protocol::decision_from_wire(line) {
+        Ok(decision) if decision.validate_for(&observation).is_ok() => None,
+        _ => Some("invalid_decision"),
+    }
 }
 
 /// The CLI entry point: parse the opt-in, then run it.
@@ -850,6 +1275,7 @@ mod tests {
         PreflightRequest {
             image: image.to_string(),
             policy: policy(),
+            allowlist: None,
         }
     }
 
@@ -905,6 +1331,31 @@ mod tests {
         archive
     }
 
+    /// A TAR archive with several entries; a path ending in `/` is a directory.
+    fn tar_entries(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut archive = Vec::new();
+        for (path, body) in entries {
+            let mut header = tar::Header::new_gnu();
+            header.set_path(path).expect("the fixture path fits");
+            if path.ends_with('/') {
+                header.set_entry_type(tar::EntryType::Directory);
+                header.set_size(0);
+                header.set_mode(0o755);
+            } else {
+                header.set_size(body.len() as u64);
+                header.set_mode(0o644);
+            }
+            header.set_cksum();
+            archive.extend_from_slice(header.as_bytes());
+            if !path.ends_with('/') {
+                archive.extend_from_slice(body);
+                archive.resize(archive.len().div_ceil(512) * 512, 0);
+            }
+        }
+        archive.extend_from_slice(&[0; 1024]);
+        archive
+    }
+
     struct Fake {
         calls: RefCell<Vec<String>>,
         image_inspect: String,
@@ -913,6 +1364,13 @@ mod tests {
         create_ok: bool,
         export_ok: bool,
         remove_ok: bool,
+        /// What the image writes to stdout when probed; `None` fails the probe
+        /// at the transport.
+        probe_output: Option<Vec<u8>>,
+        probe_input: RefCell<Vec<u8>>,
+        /// Whether removing the probe's container succeeds, independently of
+        /// the snapshot container.
+        probe_remove_ok: bool,
     }
 
     impl Fake {
@@ -931,6 +1389,9 @@ mod tests {
                 create_ok: true,
                 export_ok: true,
                 remove_ok: true,
+                probe_output: Some(br#"{"orders":[],"reasoning":"flat"}"#.to_vec()),
+                probe_input: RefCell::new(Vec::new()),
+                probe_remove_ok: true,
             }
         }
 
@@ -954,9 +1415,33 @@ mod tests {
                 "create" => refused(),
                 "export" if self.export_ok => ok(&self.export),
                 "export" => refused(),
+                "rm" if !self.probe_remove_ok
+                    && args
+                        .last()
+                        .is_some_and(|name| name.starts_with("sharpebench-agent-")) =>
+                {
+                    refused()
+                }
                 "rm" if self.remove_ok => ok(b"containerid\n"),
                 "rm" => refused(),
                 other => panic!("the preflight issued an unexpected docker subcommand {other}"),
+            }
+        }
+
+        fn probe(
+            &self,
+            args: &[String],
+            stdin: &[u8],
+            _accepted_stdout_bytes: u64,
+            _deadline: Instant,
+        ) -> Result<Capture, String> {
+            self.calls
+                .borrow_mut()
+                .push(format!("probe {}", args.join(" ")));
+            self.probe_input.borrow_mut().extend_from_slice(stdin);
+            match &self.probe_output {
+                Some(output) => ok(output),
+                None => Err("the probe did not complete".into()),
             }
         }
     }
@@ -965,6 +1450,284 @@ mod tests {
         fake.subcommands()
             .iter()
             .any(|call| call.starts_with("rm --force --volumes sharpebench-preflight-"))
+    }
+
+    fn allowlist(paths: &[&str]) -> RuntimeAllowlist {
+        RuntimeAllowlist::from_json(
+            serde_json::json!({"schema_version": ALLOWLIST_VERSION, "paths": paths})
+                .to_string()
+                .as_bytes(),
+        )
+        .expect("the fixture allowlist validates")
+    }
+
+    fn allowlisted(paths: &[&str]) -> PreflightRequest {
+        PreflightRequest {
+            allowlist: Some(allowlist(paths)),
+            ..request(&pinned())
+        }
+    }
+
+    fn probed(fake: &Fake) -> bool {
+        fake.subcommands()
+            .iter()
+            .any(|call| call.starts_with("probe "))
+    }
+
+    /// Allowlist polarity end to end: every export entry is admitted, the
+    /// admitted image is run once against the probe observation under the
+    /// hardened launch, answers with a valid decision, and only then is the
+    /// launch authorized. The probe container is removed by name.
+    #[test]
+    fn an_allowlisted_image_is_probed_before_it_is_authorized() {
+        let mut fake = Fake::new();
+        fake.export = tar_entries(&[
+            ("app/", b""),
+            ("app/agent", b"#!/bin/sh\n"),
+            ("etc/", b""),
+            ("etc/hostname", b"clean\n"),
+        ]);
+        let report = preflight_image(&allowlisted(&["app/", "etc/hostname"]), &fake)
+            .expect("the preflight completes");
+        let checked = report
+            .runtime_allowlist
+            .as_ref()
+            .expect("the allowlist ran");
+        assert_eq!((checked.entries, checked.outside_allowlist), (4, 0));
+        assert!(checked.complete);
+        let probe = report.functional_probe.as_ref().expect("the probe ran");
+        assert!(probe.passed && probe.cleanup_verified, "{probe:?}");
+        assert!(report.authorizes_launch(), "{report:?}");
+
+        let calls = fake.subcommands();
+        let probe_call = calls
+            .iter()
+            .find(|call| call.starts_with("probe "))
+            .expect("a probe call");
+        assert!(probe_call.contains("--network none"), "{probe_call}");
+        assert!(probe_call.ends_with(&image_id()), "{probe_call}");
+        let snapshot_removed = calls
+            .iter()
+            .position(|call| call.starts_with("rm --force --volumes sharpebench-preflight-"))
+            .expect("the snapshot container is removed");
+        let probed_at = calls
+            .iter()
+            .position(|call| call.starts_with("probe "))
+            .expect("probed");
+        assert!(
+            snapshot_removed < probed_at,
+            "the probe runs after the scan legs"
+        );
+        assert!(calls
+            .iter()
+            .any(|call| call.starts_with("rm --force --volumes sharpebench-agent-")));
+        assert_eq!(
+            fake.probe_input.borrow().as_slice(),
+            format!("{PROBE_OBSERVATION}\n").as_bytes()
+        );
+    }
+
+    /// An entry the allowlist does not name refuses, is reported by index
+    /// rather than by name, and the image is never started.
+    #[test]
+    fn an_entry_outside_the_allowlist_refuses_before_anything_runs() {
+        let mut fake = Fake::new();
+        fake.export = tar_entries(&[
+            ("etc/", b""),
+            ("etc/hostname", b"clean\n"),
+            ("srv/", b""),
+            ("srv/window-scores.csv", b"1,2,3\n"),
+        ]);
+        let report = preflight_image(&allowlisted(&["etc/hostname"]), &fake)
+            .expect("the preflight completes");
+        let checked = report
+            .runtime_allowlist
+            .as_ref()
+            .expect("the allowlist ran");
+        assert_eq!(checked.outside_allowlist, 2);
+        assert_eq!(checked.outside_indices, vec![2, 3]);
+        assert!(report.functional_probe.is_none());
+        assert!(!report.authorizes_launch());
+        assert!(!probed(&fake), "a refused image is never started");
+        let published = serde_json::to_string(&report).expect("serializes");
+        assert!(!published.contains("window-scores"), "{published}");
+        assert!(!published.contains("srv/"), "{published}");
+    }
+
+    /// The post-strip functional test is a gate: an image that does not answer,
+    /// answers with something other than a valid decision, or cannot be removed
+    /// afterwards is refused even though every scan leg passed.
+    #[test]
+    fn an_admitted_image_that_fails_its_functional_probe_refuses() {
+        for (output, refusal) in [
+            (None, "probe_did_not_complete"),
+            (Some(b"".to_vec()), "no_decision"),
+            (Some(b"not json\n".to_vec()), "invalid_decision"),
+            (
+                Some(
+                    br#"{"orders":[{"symbol":"AAPL","action":"buy","target_weight":0.5}]}"#
+                        .to_vec(),
+                ),
+                "invalid_decision",
+            ),
+        ] {
+            let mut fake = Fake::new();
+            fake.probe_output = output;
+            let report = preflight_image(&allowlisted(&["etc/hostname"]), &fake)
+                .expect("the preflight completes");
+            let probe = report.functional_probe.as_ref().expect("the probe ran");
+            assert_eq!(probe.refusal, Some(refusal));
+            assert!(!probe.passed && probe.cleanup_verified);
+            assert!(!report.authorizes_launch(), "{report:?}");
+        }
+
+        let mut fake = Fake::new();
+        fake.probe_remove_ok = false;
+        let report = preflight_image(&allowlisted(&["etc/hostname"]), &fake)
+            .expect("the preflight completes");
+        let probe = report.functional_probe.as_ref().expect("the probe ran");
+        assert_eq!(probe.refusal, None, "the image answered");
+        assert!(!probe.passed && !probe.cleanup_verified);
+        assert!(!report.authorizes_launch());
+
+        let mut fake = Fake::new();
+        fake.probe_output = Some(br#"{"orders":[]}"#.to_vec());
+        let report = preflight_image(&allowlisted(&["etc/hostname"]), &fake)
+            .expect("the preflight completes");
+        assert!(report.authorizes_launch());
+    }
+
+    /// Without an allowlist the report and the policy digest are exactly what
+    /// they were; with one, the digest binds both inputs, so a changed
+    /// allowlist is a changed experiment.
+    #[test]
+    fn the_policy_digest_binds_the_allowlist_only_when_one_applies() {
+        let plain = preflight_image(&request(&pinned()), &Fake::new()).expect("completes");
+        assert_eq!(plain.policy_sha256, policy().digest());
+        let published = serde_json::to_value(&plain).expect("serializes");
+        for absent in [
+            "scan_policy_sha256",
+            "runtime_allowlist",
+            "functional_probe",
+        ] {
+            assert!(
+                published.get(absent).is_none(),
+                "{absent} leaked into a legacy report"
+            );
+        }
+        assert!(!probed(&Fake::new()));
+
+        let one = preflight_image(&allowlisted(&["etc/hostname"]), &Fake::new()).expect("ok");
+        let two =
+            preflight_image(&allowlisted(&["etc/hostname", "app/"]), &Fake::new()).expect("ok");
+        assert_eq!(
+            one.scan_policy_sha256.as_deref(),
+            Some(policy().digest().as_str())
+        );
+        assert_ne!(one.policy_sha256, plain.policy_sha256);
+        assert_ne!(one.policy_sha256, two.policy_sha256);
+    }
+
+    #[test]
+    fn the_allowlist_admits_subtrees_exact_entries_and_their_ancestors_only() {
+        let list = allowlist(&["usr/lib/python3/", "etc/hostname"]);
+        for (path, directory, admitted) in [
+            ("usr/lib/python3/", true, true),
+            ("usr/lib/python3/os.py", false, true),
+            ("./usr/lib/python3/json/", true, true),
+            ("usr/", true, true),
+            ("usr/lib/", true, true),
+            ("etc/", true, true),
+            ("etc/hostname", false, true),
+            ("./", true, true),
+            ("usr/lib/python3x", false, false),
+            ("usr/lib/other.so", false, false),
+            ("usr/lib", false, false),
+            ("etc/hostname/", true, true),
+            ("etc/hostname/nested", false, false),
+            ("etc/passwd", false, false),
+            ("srv/", true, false),
+        ] {
+            assert_eq!(list.admits(path, directory), admitted, "{path}");
+        }
+    }
+
+    #[test]
+    fn a_malformed_allowlist_is_refused() {
+        for body in [
+            r#"{"schema_version":"sharpebench.runtime-allowlist.v0","paths":["app/"]}"#,
+            r#"{"schema_version":"sharpebench.runtime-allowlist.v1","paths":[]}"#,
+            r#"{"schema_version":"sharpebench.runtime-allowlist.v1","paths":["/app/"]}"#,
+            r#"{"schema_version":"sharpebench.runtime-allowlist.v1","paths":["app/../etc"]}"#,
+            r#"{"schema_version":"sharpebench.runtime-allowlist.v1","paths":["app//x"]}"#,
+            r#"{"schema_version":"sharpebench.runtime-allowlist.v1","paths":["./app"]}"#,
+            r#"{"schema_version":"sharpebench.runtime-allowlist.v1","paths":["/"]}"#,
+            r#"{"schema_version":"sharpebench.runtime-allowlist.v1","paths":["app/","app/"]}"#,
+            r#"{"schema_version":"sharpebench.runtime-allowlist.v1","paths":["app/"],"extra":1}"#,
+        ] {
+            assert!(
+                RuntimeAllowlist::from_json(body.as_bytes()).is_err(),
+                "{body} must be refused"
+            );
+        }
+    }
+
+    /// Generic naming: nothing the preflight names for Docker or hands the
+    /// image carries the entrant's reference, the policy or the allowlist.
+    /// After the one inspect that resolves it, the image is reached only by its
+    /// configuration ID, and the containers are named by process and counter
+    /// alone.
+    #[test]
+    fn host_named_artifacts_carry_no_evaluation_identity() {
+        let fake = Fake::new();
+        let request = allowlisted(&["etc/hostname"]);
+        let report = preflight_image(&request, &fake).expect("completes");
+        let allowlist_digest = request
+            .allowlist
+            .as_ref()
+            .expect("set")
+            .digest()
+            .to_string();
+        let calls = fake.subcommands();
+        assert!(calls[0].starts_with("image inspect"));
+        for call in &calls[1..] {
+            assert!(!call.contains("registry.example"), "{call}");
+            assert!(!call.contains(&report.policy_sha256), "{call}");
+            assert!(!call.contains(&allowlist_digest), "{call}");
+            let words: Vec<&str> = call.split(' ').collect();
+            if let Some(at) = words.iter().position(|word| *word == "--name") {
+                let name = words[at + 1];
+                let generic =
+                    ["sharpebench-preflight-", "sharpebench-agent-"]
+                        .iter()
+                        .any(|prefix| {
+                            name.strip_prefix(prefix).is_some_and(|rest| {
+                                rest.split('-').count() == 2
+                                    && rest.split('-').all(|part| {
+                                        !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit())
+                                    })
+                            })
+                        });
+                assert!(generic, "{name} is not a generic name");
+            }
+        }
+        let observation: sharpebench_protocol::MarketObservation =
+            serde_json::from_str(PROBE_OBSERVATION).expect("valid");
+        assert_eq!(observation.symbols.len(), 1);
+        assert_eq!(observation.symbols[0].symbol, "PROBE");
+        assert_eq!(observation.date, "1970-01-01");
+    }
+
+    #[test]
+    fn an_allowlist_without_a_scan_policy_issues_no_docker_command() {
+        let error = refused_arguments(&[
+            "run",
+            "--image",
+            &pinned(),
+            "--runtime-allowlist",
+            "allow.json",
+        ]);
+        assert!(error.contains("requires --scan-policy"), "{error}");
     }
 
     #[test]
@@ -1011,6 +1774,7 @@ mod tests {
             &PreflightRequest {
                 image: pinned(),
                 policy,
+                allowlist: None,
             },
             &fake,
         )
@@ -1350,8 +2114,14 @@ mod tests {
     #[test]
     fn accepted_output_bounds_end_a_capture() {
         let (program, args) = shell(&["echo AAAAAAAA"]);
-        let error = capture_command(program, &args, 2, Instant::now() + Duration::from_secs(20))
-            .expect_err("an oversized capture is refused");
+        let error = capture_command(
+            program,
+            &args,
+            None,
+            2,
+            Instant::now() + Duration::from_secs(20),
+        )
+        .expect_err("an oversized capture is refused");
         assert!(error.contains("accepted 2 output bytes"), "{error}");
     }
 
@@ -1361,6 +2131,7 @@ mod tests {
         let capture = capture_command(
             program,
             &args,
+            None,
             1024,
             Instant::now() + Duration::from_secs(20),
         )
@@ -1374,6 +2145,7 @@ mod tests {
         let mut capture = capture_command(
             program,
             &args,
+            None,
             1024,
             Instant::now() + Duration::from_secs(20),
         )
@@ -1395,7 +2167,7 @@ mod tests {
     fn an_expired_deadline_kills_and_reaps_the_child() {
         let (program, args) = sleeper();
         let started = Instant::now();
-        let error = capture_command(program, &args, 1024 * 1024, Instant::now())
+        let error = capture_command(program, &args, None, 1024 * 1024, Instant::now())
             .expect_err("an expired deadline refuses");
         assert!(error.contains("preflight deadline"), "{error}");
         assert!(
@@ -1467,6 +2239,7 @@ mod tests {
             &PreflightRequest {
                 image,
                 policy: needle_policy,
+                allowlist: None,
             },
             &DockerProcess,
         )
