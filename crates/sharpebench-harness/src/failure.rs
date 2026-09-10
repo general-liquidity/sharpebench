@@ -120,6 +120,10 @@ pub struct AttemptRecord {
     /// ledger written without a schedule keeps its bytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backoff_after: Option<Backoff>,
+    /// Faults a frozen plan injected into this attempt. Absent, and absent
+    /// from the serialized record, whenever no plan is configured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub injected_faults: Option<crate::fault_plan::InjectedFaults>,
 }
 
 impl AttemptRecord {
@@ -129,6 +133,7 @@ impl AttemptRecord {
             duration,
             usage: None,
             backoff_after: None,
+            injected_faults: None,
         }
     }
 
@@ -138,6 +143,7 @@ impl AttemptRecord {
             duration,
             usage: None,
             backoff_after: None,
+            injected_faults: None,
         }
     }
 
@@ -483,12 +489,44 @@ pub fn run_with_backoff<F>(
 where
     F: FnMut() -> AttemptObservation,
 {
+    run_with_faulted_backoff(max_retries, schedule, sleeper, || attempt().into())
+}
+
+/// [`run_with_observed_retries`] carrying each attempt's injected-fault
+/// evidence onto its ledger record.
+pub fn run_with_faulted_retries<F>(max_retries: u32, attempt: F) -> AttemptedRun
+where
+    F: FnMut() -> crate::fault_plan::FaultedObservation,
+{
+    run_with_faulted_backoff(
+        max_retries,
+        &BackoffSchedule::immediate(),
+        &mut ThreadSleeper,
+        attempt,
+    )
+}
+
+/// [`run_with_backoff`] carrying each attempt's injected-fault evidence onto
+/// its ledger record. Both retry drivers reduce to this one loop, so a faulted
+/// sweep and a backed-off sweep record identically.
+pub fn run_with_faulted_backoff<F>(
+    max_retries: u32,
+    schedule: &BackoffSchedule,
+    sleeper: &mut dyn Sleeper,
+    mut attempt: F,
+) -> AttemptedRun
+where
+    F: FnMut() -> crate::fault_plan::FaultedObservation,
+{
     let mut tries: u32 = 0;
     let mut ledger = AttemptLedger::default();
     loop {
         tries += 1;
         let started = std::time::Instant::now();
-        let AttemptObservation { result, mut usage } = attempt();
+        let crate::fault_plan::FaultedObservation {
+            observation: AttemptObservation { result, mut usage },
+            injected_faults,
+        } = attempt();
         if result.is_err() {
             if let Some(usage) = &mut usage {
                 usage.complete = false;
@@ -501,6 +539,7 @@ where
             Ok(run) => {
                 let mut record = AttemptRecord::completed(duration);
                 record.usage = usage;
+                record.injected_faults = injected_faults;
                 ledger.push(record);
                 return AttemptedRun {
                     outcome: RunOutcome::Completed(run),
@@ -511,6 +550,7 @@ where
             Err(kind) => {
                 let mut record = AttemptRecord::failed(kind.clone(), duration);
                 record.usage = usage;
+                record.injected_faults = injected_faults;
                 if !kind.is_runtime() {
                     ledger.push(record);
                     return AttemptedRun {
