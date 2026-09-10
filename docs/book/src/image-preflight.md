@@ -123,13 +123,86 @@ cannot produce a passing report. The ordered inventory digest identifies the
 named streams the engine was handed; it is withheld on incomplete enumeration
 and is not an independently authenticated deployment identity.
 
+## Runtime allowlist and functional probe
+
+`--runtime-allowlist <allowlist.json>` adds the other polarity. The scan policy
+refuses content it was told to look for; the allowlist refuses every entry of
+the container export whose path it was not told to expect. It is opt in and is
+a leg of the preflight, not a policy of its own: given without `--scan-policy`
+and `--image` it is refused, rather than silently ignored.
+
+```bash
+sharpebench run --image <repository@sha256:...> --scan-policy policy.json \
+  --runtime-allowlist allowlist.json ...
+```
+
+```json
+{
+  "schema_version": "sharpebench.runtime-allowlist.v1",
+  "paths": ["app/", "etc/passwd"]
+}
+```
+
+The file is read once and capped at 64 KiB, unknown fields are refused, and it
+declares 1 to 4096 paths of at most 1024 bytes each. A path is relative
+printable ASCII with no empty, `.` or `..` segment, and is declared once. A path
+ending in `/` admits that directory and everything below it; any other path
+admits exactly that entry. A directory that is an ancestor of an admitted path
+is admitted itself, because an archive lists the directories it descends
+through, and admits nothing else below it.
+
+The allowlist is applied only after the filesystem scan enumerated the whole
+export and found it clean, so the listing walks an archive whose structure the
+scan already validated. Every entry, directories and links included, must be
+admitted. An unreadable listing, an unreadable name or an expired policy
+deadline leaves the allowlist report incomplete, and an incomplete report never
+admits. Refused entries are reported by count and by archive-order index, at
+most 16 indices, never by name: the report can be published, and a name can be
+exactly what a policy protects.
+
+**The functional probe.** An image that passes every scan leg and the
+allowlist, with its snapshot container removal verified, is then run once, from
+its configuration ID and under the hardened launch a
+[gateway sweep](model-gateway.md) uses (`--network none` included), against one
+fixed synthetic observation: an instrument named `PROBE` on `1970-01-01`, which
+tells the image nothing about the evaluation it is entering. The first line it
+writes must be a decision valid for that observation, within 60 seconds and
+8 MiB of output, and removing its container by name must be verified. Otherwise
+the probe fails with one of `launch_refused`, `probe_did_not_complete`,
+`no_decision`, `invalid_decision`, `probe_output_exceeded` or
+`probe_output_unreadable`, or with `cleanup_verified: false`. The probe runs only
+after every scan leg authorized the image, so a refused image is still never
+started.
+
+With an allowlist, the report gains three fields: `scan_policy_sha256` (the scan
+policy's own digest), `runtime_allowlist` (`allowlist_sha256`, `entries`,
+`outside_allowlist`, `outside_indices`, `complete`) and `functional_probe`
+(`observation_sha256`, `passed`, `refusal`, `cleanup_verified`), and a launch
+additionally requires the allowlist to admit every entry and the probe to pass
+with its cleanup verified. `policy_sha256` becomes a digest over the scan policy
+digest and the allowlist digest (`sharpebench.image-preflight-policy.v2`), so a
+changed allowlist is a changed experiment for the checkpoint below. Without an
+allowlist, `policy_sha256` is the scan policy digest exactly as before and the
+three fields are absent.
+
+What this does not prove: an allowlist result says which paths the export
+holds. It says nothing about the bytes under an admitted path, which remain the
+scan policy's business, and it does not make the image reproducible. A passing
+probe says the admitted image answered one synthetic observation validly; it is
+not a behavioural test of the entrant. The export of a created container also
+holds entries the daemon itself adds, and an allowlist must name those too.
+Which ones a given daemon adds has not been measured against a live daemon, and
+neither the allowlist nor the probe has run against one, so the first live use
+should expect to read the refused indices once.
+
 ## Checkpoint identity
 
 A scanned run frames its checkpoint identity as
 `("sharpebench.scanned-image-invocation.v1", sandbox_label, image_id,
 policy_sha, scope)` and composes with the [rate-card
-binding](cli.md#frozen-token-rates). Unscanned runs keep their legacy identity
-unchanged. No export timestamp is bound, so a resume under the same policy is
+binding](cli.md#frozen-token-rates). `policy_sha` is the report's
+`policy_sha256`, so it binds the runtime allowlist whenever one was applied.
+Unscanned runs keep their legacy identity unchanged. No export timestamp is bound, so a resume under the same policy is
 still the same experiment. A checkpoint bound to a different scanned invocation
 is refused before any sweep call, and its bytes are left alone. A resumable
 invocation identity cannot silently change the scan policy.
@@ -186,7 +259,9 @@ bytes, under the limits the policy declared. It is not:
 Sixteen preflight unit tests cover the refusal, cleanup and capture paths
 against an injected transport. Eight CLI tests cover the shipped binary's
 argument surface, and one board regression proves that a successful scanned run
-emits an array with preflight metadata on the entrant row only. Nine
+emits an array with preflight metadata on the entrant row only. Eight further
+unit tests cover the runtime allowlist and the functional probe against the
+same injected transport; the live leg does not exercise either. Nine
 integration tests, a deadline unit test and thirteen isolated mutations cover
 the TAR reader. The live leg,
 `artifact_preflight::tests::live_docker_image_preflight`, runs by exact name in
