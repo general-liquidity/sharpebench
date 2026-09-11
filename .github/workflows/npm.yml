@@ -54,3 +54,28 @@ jobs:
           npm install
           npm run build
           npm test
+
+  committed-bundle:
+    name: committed wasm bundle answers like this tree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust (pinned via rust-toolchain.toml) + wasm target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      # Its own job, and it must not run in `build-test`: that job's first step
+      # overwrites npm/pkg with a fresh build, after which there is no committed
+      # bundle left to check. Here the checkout is untouched, so the script compares
+      # the bytes in git against a build it makes itself, in a temp directory.
+      - name: The committed bundle answers like the bundle this tree builds
+        run: node scripts/check-wasm-bundle.mjs
