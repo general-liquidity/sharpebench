@@ -389,7 +389,10 @@ then stops before the first spawn and before any output file is opened.
 dispatches from one process. The Python adapter reserves one unit in a per-model
 ledger beside the response cache, fsynced before the request goes out, and
 builds its client with the SDK's automatic retries disabled, so one reserved
-unit is exactly one HTTP request. A transient provider failure spends its unit
+unit is exactly one HTTP request. The setting is verified on the constructed
+client before the run starts, so the bound is conditional on that check rather
+than on an SDK version: a client that reports a non-zero retry setting, or none
+that can be read, refuses the run. A transient provider failure spends its unit
 and fails the subprocess rather than being retried under the same unit; the
 harness respawn draws the next unit from the same ledger, which is what keeps
 the ceiling whole across the subprocesses the run spawns.

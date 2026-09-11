@@ -48,9 +48,13 @@ Determinism and cost controls:
     ledger lives beside the response cache and survives the process the same
     way, which is what makes the cap hold across the many subprocesses the
     harness spawns, which the producer starts one at a time. The client is
-    built with the SDK's own automatic retries off, so one reservation is
-    exactly one HTTP request to the provider and the ceiling counts what the
-    provider is actually asked to do.
+    built with the SDK's own automatic retries off, and the effective setting
+    is read back off the constructed client before the run starts, so one
+    reservation is exactly one HTTP request to the provider and the ceiling
+    counts what the provider is actually asked to do. That guarantee is
+    conditional on the check, not on any SDK version: if the client reports a
+    non-zero retry setting, or none that can be read, the run refuses to start
+    rather than proceed on the assumption.
   - No in-process retry of a transient failure. A rate limit, a timeout or a
     connection fault raises on the first attempt, having spent its unit, and
     fails the subprocess. The harness respawns it (EXTERNAL_MAX_RETRIES) and
@@ -106,6 +110,13 @@ MAX_CALLS = int(os.environ.get("LLM_MAX_CALLS", "800"))
 # make the allowance bound dispatches from this process rather than provider
 # requests. Zero makes one reservation exactly one request.
 PROVIDER_MAX_RETRIES = 0
+# The SDK the retry reading was taken from, and the one the regression asserts
+# against. Recorded so a reader can tell which version the ceiling's
+# one-reservation-is-one-request property was established on. It is not a
+# runtime requirement: `assert_no_provider_retries` checks the knob on the
+# constructed client, so a compatible upgrade passes on behaviour rather than
+# on a version string.
+EVIDENCED_SDK_VERSION = "0.112.0"
 HERE = Path(__file__).resolve().parent
 CACHE_DIR = Path(os.environ.get("LLM_CACHE_DIR", HERE))
 CACHE_PATH = CACHE_DIR / f"llm-cache-{MODEL}.jsonl"
@@ -425,14 +436,53 @@ def call_model(client, prompt):
         ) from e
 
 
+def assert_no_provider_retries(client):
+    """Refuse the run unless this client really will not retry.
+
+    Passing `max_retries=0` is a request, not a guarantee. The shim imports
+    whatever `anthropic` the operator installed, and a later major version that
+    renames, moves or ignores the knob would accept the keyword and drop it,
+    restoring silently the exact defect the ledger exists to prevent: several
+    billable requests under one reserved unit. So the effective setting is read
+    back off the object the run will use, which lets a compatible upgrade pass
+    on its behaviour instead of on an allowlist of version strings.
+
+    Fails closed in both directions. A setting that is present and not zero
+    refuses, and so does one that cannot be determined, because a money ceiling
+    that cannot be shown to hold is worse than a run that does not start.
+    """
+    effective = getattr(client, "max_retries", None)
+    readable = isinstance(effective, int) and not isinstance(effective, bool)
+    if readable and effective == PROVIDER_MAX_RETRIES:
+        return
+    installed = getattr(anthropic, "__version__", "unknown")
+    detail = (
+        f"reports max_retries={effective!r}"
+        if readable
+        else f"does not report a readable max_retries (got {effective!r})"
+    )
+    raise RuntimeError(
+        f"the provider client {detail}, but the call ceiling requires "
+        f"{PROVIDER_MAX_RETRIES}: one reserved unit must be exactly one "
+        "provider request, and a client that retries bills several against "
+        f"one unit. anthropic {installed} is installed; the ceiling's "
+        f"guarantee was established against {EVIDENCED_SDK_VERSION}. Refusing "
+        "to start rather than risk overspending the declared allowance."
+    )
+
+
 def build_client():
     """The provider client the call ceiling is defined against.
 
     `max_retries=0` is load-bearing rather than a tuning choice: the allowance
     is reserved once per `messages.create`, so the SDK must not expand that
     into several HTTP requests. With retries off the SDK sends exactly one.
+    The setting is then verified on the constructed client, because the ceiling
+    depends on it binding and not merely on it having been asked for.
     """
-    return anthropic.Anthropic(max_retries=PROVIDER_MAX_RETRIES)
+    client = anthropic.Anthropic(max_retries=PROVIDER_MAX_RETRIES)
+    assert_no_provider_retries(client)
+    return client
 
 
 def main(client=None):

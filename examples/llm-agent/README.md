@@ -25,7 +25,12 @@ results. Each fresh call reserves one unit in `llm-attempts-<model>.jsonl`
 beside the response cache, fsynced before the request is sent, so a call that
 fails or times out still spends its unit and a respawned subprocess cannot
 re-spend it. The client disables the SDK's own automatic retries, so one
-reserved unit is exactly one HTTP request to the provider. Nothing is retried
+reserved unit is exactly one HTTP request to the provider. That is checked, not
+assumed: the effective retry setting is read back off the constructed client
+before the run starts, and a client that reports a non-zero setting, or none
+that can be read, refuses the run rather than risking several billable requests
+per reserved unit. So the ceiling holds whatever SDK version is installed, or
+the run does not start. Nothing is retried
 inside the adapter: a rate limit or a timeout fails the subprocess, and the
 harness respawn takes a fresh unit from the same ledger.
 

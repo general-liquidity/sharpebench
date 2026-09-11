@@ -21,6 +21,18 @@ retries some failures itself (two by default), billing each one under the one
 reservation. The client now sets `max_retries=0`. The load-bearing case is
 driven through a real SDK client over a stand-in HTTP transport, so it is the
 SDK's own retry behaviour being observed and not a restatement of the setting.
+
+The SDK behaviour asserted here is `anthropic` 0.112.0's, the version the
+retry reading was taken from and the version CI pins for this file:
+`DEFAULT_MAX_RETRIES` is 2, and `_base_client` loops `range(max_retries + 1)`
+over 408, 409, 429, every 5xx, connection faults and timeouts. anthropic 1.x is
+a different SDK (it depends on httpx2) and its retry semantics are not assumed
+from this reading.
+
+The pin protects CI, not a paid run, which imports whatever the operator has.
+That is what `assert_no_provider_retries` is for, and two cases here drive the
+refusal rather than the happy path: a client that accepts `max_retries` and
+ignores it, and one that exposes no readable setting at all.
 """
 
 from __future__ import annotations
@@ -131,6 +143,41 @@ def message_payload(text):
         "stop_sequence": None,
         "usage": {"input_tokens": 10, "output_tokens": 5},
     }
+
+
+# The three stand-in SDKs the runtime check is exercised against. All of them
+# answer normally, so a run that is not refused completes and records a
+# reservation. That is deliberate: removing the check must make these cases fail
+# because nothing refused, not because the stand-in was too thin to dispatch.
+
+
+class Honouring(Client):
+    """Takes `max_retries` and reports it back, as `anthropic` 0.112.0 does."""
+
+    def __init__(self, **kw):
+        super().__init__([Response('{"orders":[]}')])
+        self.max_retries = kw.get("max_retries")
+
+
+class Ignoring(Client):
+    """Accepts `max_retries` and does not honour it.
+
+    The shape a future SDK takes if it renames the knob, or drops it from the
+    constructor's effect while still tolerating the keyword. Without the check
+    the ceiling is back to billing several requests per reserved unit, and
+    nothing says so.
+    """
+
+    def __init__(self, **kw):
+        super().__init__([Response('{"orders":[]}')])
+        self.max_retries = 2
+
+
+class Opaque(Client):
+    """Exposes no readable retry setting at all, and answers anyway."""
+
+    def __init__(self, **kw):
+        super().__init__([Response('{"orders":[]}')])
 
 
 def sdk_client(shim, http_client):
@@ -285,7 +332,7 @@ class ProviderRequestTests(CallCeilingCase):
 
         def recording_constructor(**kw):
             seen.append(kw)
-            return object()
+            return Honouring(**kw)
 
         with unittest.mock.patch.object(
             shim.anthropic, "Anthropic", recording_constructor
@@ -294,6 +341,38 @@ class ProviderRequestTests(CallCeilingCase):
             drive(shim, None, observations=0)
         self.assertEqual(len(seen), 1, "the run builds exactly one client")
         self.assertEqual(seen[0].get("max_retries"), 0)
+
+    def test_a_client_that_accepts_the_setting_and_ignores_it_refuses_the_run(self):
+        """The failure the check exists for, not the happy path.
+
+        A later SDK may keep taking `max_retries` and stop honouring it. The
+        stand-in does exactly that: the keyword is accepted, the effective
+        setting is two. Nothing may be dispatched under a client that will
+        retry, so the run must refuse before the first observation.
+        """
+        shim = load_shim(self.tmp.name)
+        with unittest.mock.patch.object(shim.anthropic, "Anthropic", Ignoring):
+            with self.assertRaises(RuntimeError) as caught:
+                drive(shim, None, observations=1)
+        message = str(caught.exception)
+        self.assertIn("max_retries=2", message)
+        self.assertIn("Refusing to start", message)
+        self.assertEqual(self.ledger_lines(shim), [], "nothing was reserved")
+
+    def test_a_client_whose_setting_cannot_be_read_refuses_the_run(self):
+        """"Cannot be determined" is a refusal, not an assumption.
+
+        A client that has dropped the attribute entirely, which is what a rename
+        or a move looks like from here, leaves the ceiling unprovable. The run
+        must not proceed on the hope that it binds anyway.
+        """
+        shim = load_shim(self.tmp.name)
+        with unittest.mock.patch.object(shim.anthropic, "Anthropic", Opaque):
+            with self.assertRaises(RuntimeError) as caught:
+                drive(shim, None, observations=1)
+        message = str(caught.exception)
+        self.assertIn("does not report a readable max_retries", message)
+        self.assertEqual(self.ledger_lines(shim), [], "nothing was reserved")
 
     def test_n_units_allow_exactly_n_provider_requests_across_a_retryable_failure(self):
         """Two units, a 429 and an answer, and exactly two HTTP requests.
