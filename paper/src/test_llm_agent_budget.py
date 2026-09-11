@@ -349,41 +349,31 @@ class LedgerOwnershipTests(CallCeilingCase):
         self.assertEqual(shim.STATS["budget_exhausted"], 1)
         self.assertEqual(len(self.ledger_lines(shim)), 1, "nothing was appended")
 
-    def test_concurrent_reservations_spend_one_unit_between_them(self):
-        """Eight real threads released together against a ceiling of one.
+    def test_a_reservation_is_refused_while_another_holds_the_ledger(self):
+        """Two shims cannot be between the count and the append at once.
 
-        Exactly one may come back with a reservation; every other must raise,
-        whether it lost the lock or found the allowance spent. The assertion is
-        winner-independent, so it rests on no scheduling assumption. Without the
-        lock and the re-read, all eight append and the ledger holds eight units
-        under a ceiling of one.
+        The allowance is eight and one unit is spent, so nothing here is short
+        of budget and the reservation attempted under the held lock is one that
+        otherwise succeeds, as the second half of the case shows. Exclusive
+        ownership is therefore the only thing that can refuse it.
+
+        Deterministic on purpose. A threaded version of this assertion, eight
+        reservations released together against a ceiling of one, was tried
+        first and discarded: with the ceiling still in place, "exactly one
+        unit" is produced by the lock, by the ceiling, or by threads that
+        happened not to interleave, and it caught a build with `O_EXCL`
+        removed in four runs out of six.
         """
-        shim = load_shim(self.tmp.name, max_calls="1")
-        start = threading.Barrier(8)
-        granted, refused = [], []
-        lock = threading.Lock()
-
-        def reserve(index):
-            start.wait()
-            try:
-                spent = shim.reserve_call(f"key-{index}")
-            except RuntimeError as error:
-                with lock:
-                    refused.append(error)
-                return
-            with lock:
-                granted.append(spent)
-
-        threads = [threading.Thread(target=reserve, args=(i,)) for i in range(8)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-
-        self.assertEqual(granted, [1], "exactly one unit, taken exactly once")
-        self.assertEqual(len(refused), 7)
+        shim = load_shim(self.tmp.name, max_calls="8")
+        with shim.ledger_lock():
+            with self.assertRaises(shim.LedgerBusy) as caught:
+                shim.reserve_call("while-held")
+            self.assertIn(str(os.getpid()), str(caught.exception))
+            self.assertEqual(self.ledger_lines(shim), [], "nothing was appended")
+        self.assertEqual(
+            shim.reserve_call("while-held"), 1, "the same reservation then works"
+        )
         self.assertEqual(len(self.ledger_lines(shim)), 1)
-        self.assertEqual(shim.load_attempt_count(), 1)
 
     def test_a_lock_left_behind_refuses_rather_than_being_broken(self):
         """A lock nobody can prove is dead is refused, not removed.
@@ -404,6 +394,29 @@ class LedgerOwnershipTests(CallCeilingCase):
         self.assertIn(str(shim.LEDGER_LOCK_PATH), message)
         self.assertEqual(self.ledger_lines(shim), [], "nothing was reserved")
         self.assertTrue(shim.LEDGER_LOCK_PATH.exists(), "the lock was not broken")
+
+    def test_the_release_outlasts_a_refused_shim_reading_the_holder(self):
+        """Releasing must not be defeated by the refusal it races with.
+
+        A refused shim reads the holder document, and Windows refuses to delete
+        a file another handle holds (WinError 32). The holder retries rather
+        than stranding a lock that would refuse every later reservation, which
+        eight contending threads reproduced before the retry existed. The
+        reader here is closed on a timer while the release is in flight, so the
+        case is deterministic rather than timing-dependent.
+
+        On a platform that allows an unlinked file to stay open, the first
+        attempt succeeds and this asserts the same end state for free.
+        """
+        shim = load_shim(self.tmp.name, max_calls="8")
+        with shim.ledger_lock():
+            reader = open(shim.LEDGER_LOCK_PATH, encoding="utf-8")
+            self.addCleanup(reader.close)
+            threading.Timer(0.15, reader.close).start()
+        self.assertFalse(
+            shim.LEDGER_LOCK_PATH.exists(), "the lock was released, not stranded"
+        )
+        self.assertEqual(shim.reserve_call("after-release"), 1)
 
     def test_the_lock_is_released_when_the_reservation_returns(self):
         """Strictness must not defeat the ledger: a reservation that completed
