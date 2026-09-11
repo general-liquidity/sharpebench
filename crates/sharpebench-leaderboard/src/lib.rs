@@ -311,7 +311,32 @@ mod tests {
         let board = rank(&[sub("a", 0.002), sub("b", 0.0)], &ScoreConfig::default());
         let text = render(&board);
         assert!(text.contains("agent"));
+        // The header is printed whatever the rows hold, so it says nothing
+        // about the intervals: every row could read "unavailable" and this
+        // would still pass. The rows are asserted against the intervals the
+        // scores actually carry, and the absence spelling against a score that
+        // has none, so each arm is what its own case turns on.
         assert!(text.contains("DSR CI"), "the DSR CI column is rendered");
+        for (row, s) in text.lines().skip(1).zip(&board) {
+            let (low, high) = (
+                s.dsr_ci_low.expect("a scored entry has an interval"),
+                s.dsr_ci_high.expect("a scored entry has an interval"),
+            );
+            assert!(
+                row.contains(&format!("[{low:.4},{high:.4}]")),
+                "the row prints the entry's own interval: {row:?}"
+            );
+        }
+        let mut absent = board.clone();
+        absent[0].dsr_ci_low = None;
+        let text = render(&absent);
+        assert!(
+            text.lines()
+                .nth(1)
+                .expect("a first row")
+                .contains("unavailable"),
+            "an entry with no interval prints the absence\n{text}"
+        );
         let chain = sign_board(&board, b"key");
         assert!(verify_board(&chain, b"key"));
         assert!(!verify_board(&chain, b"wrong-key"));
@@ -366,6 +391,28 @@ mod tests {
             text.matches('=').count(),
             2,
             "both tied rows carry `=`\n{text}"
+        );
+
+        // Two rows that are eligible and tied say nothing about which of the
+        // two conditions the marker reads: either one alone would print it.
+        // These rows carry one condition each, so the marker is absent unless
+        // both hold.
+        let mut ineligible = board.clone();
+        ineligible[1].rank_eligible = false;
+        let text = render(&ineligible);
+        assert_eq!(
+            text.matches('=').count(),
+            1,
+            "a tied row that cannot be ranked is not in a tie band\n{text}"
+        );
+
+        let mut untied = board.clone();
+        untied[1].dsr_tied = false;
+        let text = render(&untied);
+        assert_eq!(
+            text.matches('=').count(),
+            1,
+            "an eligible row that ties nothing carries no marker\n{text}"
         );
     }
 

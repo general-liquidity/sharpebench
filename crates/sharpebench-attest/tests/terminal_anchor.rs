@@ -114,6 +114,90 @@ fn public_receipt_rejects_terminal_deletion_that_the_chain_accepts() {
     assert!(!verify_chain_public_anchored(&truncated, &receipt, &vk));
 }
 
+/// The public receipt's clauses, isolated one at a time. A truncation is
+/// refused by all of them at once, so the case above says only that something
+/// refused: the whole signature check could be gone and it would still pass,
+/// which is how the published anchor could stop being unforgeable without any
+/// test noticing. Each receipt here is wrong in one way.
+///
+/// The count clause is not isolated, and cannot be: the signature commits to
+/// the pair, and a chain with the committed terminal signature has the
+/// committed length, so no honestly signed receipt can state the right terminal
+/// signature and the wrong count. It is defence in depth against a future
+/// caller that builds a receipt by hand, and it is recorded as unfalsifiable
+/// rather than covered by a case that would really be testing something else.
+#[test]
+fn a_public_receipt_is_refused_clause_by_clause() {
+    let host = signing_key();
+    let vk = host.verifying_key();
+    let board = public_chain();
+    let honest = board
+        .receipt
+        .clone()
+        .expect("published boards carry a receipt");
+
+    // Only the signature can refuse: the receipt is honestly signed for this
+    // chain, but under a key the reader does not hold. Count and terminal
+    // signature both agree with the chain supplied.
+    let other_key = SigningKey::derive(b"not-the-host-key");
+    let other = sign_chain_receipt_public(&board.chain, &other_key);
+    assert_eq!(other.records, honest.records);
+    assert_eq!(other.terminal_signature, honest.terminal_signature);
+    assert!(!verify_chain_receipt_public(&board.chain, &other, &vk));
+    // The same receipt verifies under its own key, so the fixture is sound and
+    // the key is what that case turns on.
+    assert!(verify_chain_receipt_public(
+        &board.chain,
+        &other,
+        &other_key.verifying_key()
+    ));
+
+    // Only the signature again, this time a receipt whose stated values were
+    // edited after signing to match the chain it is presented against. Every
+    // other clause agrees; nothing but the signature knows.
+    let mut truncated = board.chain.clone();
+    truncated.pop();
+    let restated = ChainReceipt {
+        records: truncated.len(),
+        terminal_signature: truncated[1].signature.clone(),
+        signature: honest.signature.clone(),
+    };
+    assert_eq!(restated.records, truncated.len());
+    assert_eq!(restated.terminal_signature, truncated[1].signature);
+    assert!(!verify_chain_receipt_public(&truncated, &restated, &vk));
+
+    // Only the terminal-signature clause can refuse: an honestly signed receipt
+    // for a different chain of the same length, so the count agrees and the
+    // signature verifies over exactly what the receipt states.
+    let sibling = publish_public_chain(
+        &[
+            "{\"agent\":\"x\"}",
+            "{\"agent\":\"y\"}",
+            "{\"agent\":\"z\"}",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect::<Vec<_>>(),
+        &host,
+    );
+    let for_sibling = sibling
+        .receipt
+        .clone()
+        .expect("published boards carry a receipt");
+    assert_eq!(for_sibling.records, board.chain.len());
+    assert_ne!(for_sibling.terminal_signature, honest.terminal_signature);
+    assert!(verify_chain_receipt_public(
+        &sibling.chain,
+        &for_sibling,
+        &vk
+    ));
+    assert!(!verify_chain_receipt_public(
+        &board.chain,
+        &for_sibling,
+        &vk
+    ));
+}
+
 #[test]
 fn a_published_document_with_its_last_record_removed_no_longer_verifies() {
     let board = public_chain();
