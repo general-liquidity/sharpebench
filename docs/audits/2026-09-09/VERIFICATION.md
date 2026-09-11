@@ -1,5 +1,44 @@
 # Verification record
 
+## Closing the fail-open paths, 2026-09-11
+
+Every pull request below merged with all checks green on its exact pushed head,
+main unmoved since that head was tested, and the merged tree identical to the
+tested tree.
+
+| PR | Work | Main after merge |
+|---|---|---|
+| Bench #87 | The retry check on every path to a provider request | `a3fb777` |
+| Bench #88 | Pre-identity journals owned; the version check's role named | `6e19fa2` |
+| Bench #89 | An unpriced model refused; a replay screened by the identity rule | `3d3232c` |
+
+The shape these share is worth naming alongside the isolated-cause rule above.
+Each was a property the project publishes that quietly did not hold on some
+input: a retry setting checked on one route to the provider and not another, a
+cost reported as zero for a model the table did not know, a rate card chosen by
+a prefix that also matches a different model, and an identity rule applied when
+a decision is written but not when one is replayed. None of them failed loudly.
+Each produced a plausible number or an accepted answer instead.
+
+Two decisions in this round were settled by measurement rather than by
+argument, and both went against the obvious answer. Locking a journal file
+directly, to key ownership on the file rather than its name, was probed against
+the operations saving actually performs: it prevents the sole owner from reading
+its own version, and protects nothing past the first save, because the rename
+that makes a save durable replaces the entry with a different file. And a lock
+in a shared namespace was rejected because such directories are swept by age on
+many hosts, so a long run's held lock can vanish and silently readmit a second
+writer for every journal at once.
+
+### Not established
+
+No gateway has served a real provider, no concurrent or paid run has happened,
+and every crashed holder in these tests is simulated. Cross-directory aliases
+remain open, as do two byte-identical journals in one directory deriving one
+identity, and a version check that is still read-then-write. The shim and the
+assembler now carry two pricing tables stating the same rule, which a future
+edit could desynchronize; that is recorded rather than prevented.
+
 ## Verifying the repairs, 2026-09-11
 
 Every pull request below merged with all checks green on its exact pushed head,
