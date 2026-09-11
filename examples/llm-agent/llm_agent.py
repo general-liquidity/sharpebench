@@ -86,7 +86,20 @@ Determinism and cost controls:
     prevent.
   - Malformed model output is emitted as an invalid wire decision so the Rust
     transport classifies the affected run as an agent-protocol failure. It is
-    never flattened into a hold. Explicit refusals remain deliberate holds.
+    never flattened into a hold, and the fault names the offending order when
+    there is one to name. An order must state a `target_weight` and state it as
+    a JSON number: a missing key used to become a zero-weight order, which is a
+    decision to go flat rather than an absent instruction, and a JSON `true`
+    became a full allocation, because `float(True)` is 1.0. Explicit refusals
+    remain deliberate holds.
+  - Usage is recorded for every call that reached the provider, before any rule
+    that can refuse the run. The served model's identity is checked after it:
+    that refusal is a `RuntimeError` and is not caught below, so checking first
+    dropped a call the provider had already answered and billed out of the
+    statistics the field sums. A refused identity records its tokens and no
+    dollar amount, because the model served is not one this field prices, and
+    counts itself in `identity_refusals`, which the assembler refuses a field
+    over.
     Infrastructure failures (missing credit, authentication, rate limits,
     network faults, or an exhausted call budget) fail the subprocess.
 
@@ -236,6 +249,11 @@ STATS = {
     "malformed": 0,
     "refusals": 0,
     "budget_exhausted": 0,
+    # Calls the provider answered under a model this run does not publish. Each
+    # one is billed, recorded in the token counters and absent from `cost_usd`,
+    # and fails the subprocess; the assembler refuses a field whose statistics
+    # carry any.
+    "identity_refusals": 0,
     # Provider requests reserved against the cap, this process and every
     # earlier one sharing the ledger. Equal to llm_calls within one process,
     # which counts the same dispatches; larger by whatever earlier processes
@@ -554,8 +572,58 @@ def summarize(obs):
     return "\n".join(lines)
 
 
+class MalformedDecision(ValueError):
+    """An order the reply carries is not one the model can have expressed.
+
+    Carried out of `parse_decision` rather than flattened into its `None`,
+    because there is a specific order to name and the fault site reports it.
+    The reply-level failures stay `None`: a reply that is not JSON, or whose
+    `orders` is not a list, has no order to point at.
+    """
+
+
+def weight_of(order):
+    """The target weight `order` states, or a refusal naming the order.
+
+    `float(order.get("target_weight", 0.0))` accepted two inputs that are not
+    weights the model expressed, and turned each into a plausible number
+    instead of refusing.
+
+    An omitted key became `0.0`, which is not an absent instruction but a
+    deliberate one: go flat in that symbol. The system prompt tells the model
+    to omit a symbol to leave its position untouched, so a reply that omits the
+    weight of a symbol it did name is exactly the ambiguous case, and reading it
+    as a decision to hold nothing publishes an allocation the model never chose.
+
+    A JSON `true` became `1.0`: `bool` is a subclass of `int` in Python and
+    `float(True)` is 1.0, so a boolean in the weight field was a full
+    allocation. A JSON string was converted too, so `"0.5"` was a half
+    allocation from a reply that did not state a number. JSON numbers are `int`
+    and `float`; `bool` is excluded explicitly because Python says it is one.
+
+    Finiteness and the [0, 1] bound stay with the caller, which also sums the
+    weights: this decides only whether a number was stated at all.
+    """
+    if "target_weight" not in order:
+        raise MalformedDecision(
+            f"order {json.dumps(order, sort_keys=True, default=str)} states no "
+            "target_weight; an omitted weight is not a zero-weight order"
+        )
+    w = order["target_weight"]
+    if isinstance(w, bool) or not isinstance(w, (int, float)):
+        raise MalformedDecision(
+            f"order {json.dumps(order, sort_keys=True, default=str)} states a "
+            f"target_weight of {w!r}, which is not a JSON number"
+        )
+    return float(w)
+
+
 def parse_decision(text, valid_symbols):
-    """Parse the model's reply into a validated order list, or None."""
+    """Parse the model's reply into a validated order list, or None.
+
+    `None` is a reply that is not a decision. A `MalformedDecision` is a reply
+    carrying an order that is not one, and names it.
+    """
     t = text.strip()
     if t.startswith("```"):
         t = t.strip("`")
@@ -578,10 +646,7 @@ def parse_decision(text, valid_symbols):
             return None
         sym = o.get("symbol")
         action = o.get("action")
-        try:
-            w = float(o.get("target_weight", 0.0))
-        except (TypeError, ValueError):
-            return None
+        w = weight_of(o)
         if sym not in valid_symbols or action not in ("buy", "sell", "hold"):
             return None
         if not math.isfinite(w) or not 0.0 <= w <= 1.0:
@@ -795,15 +860,37 @@ def main(client=None):
                 try:
                     STATS["llm_calls"] += 1
                     resp = call_model(client, prompt)
-                    effective = effective_model(resp)
-                    STATS["model_effective"] = effective
-                    text = "".join(
-                        b.text for b in resp.content if b.type == "text"
-                    )
+                    # What the call billed is recorded before any rule that can
+                    # refuse the run. The identity check ran first and raises
+                    # `RuntimeError`, which the `except anthropic.APIError`
+                    # below does not catch, so a call the provider had already
+                    # made and billed left no trace of its tokens in the
+                    # statistics the field sums: the run refused, correctly,
+                    # and forgot the money. Refusing the run is the rule; the
+                    # spend it refuses over is a fact that already happened.
                     tin = resp.usage.input_tokens
                     tout = resp.usage.output_tokens
                     STATS["tokens_in"] += tin
                     STATS["tokens_out"] += tout
+                    try:
+                        effective = effective_model(resp)
+                    except RuntimeError:
+                        # Counted and flushed, because nothing below this point
+                        # runs and the statistics file is what survives the
+                        # process. The tokens are stated and `cost_usd` is not:
+                        # the served model is not one this field names, so its
+                        # rate card is not the requested model's, and a dollar
+                        # amount under the requested model's card would be the
+                        # plausible wrong number the pricing refusal exists to
+                        # prevent. The count is what tells a reader the run's
+                        # spend is understated in dollars and by how many calls.
+                        STATS["identity_refusals"] += 1
+                        write_stats()
+                        raise
+                    STATS["model_effective"] = effective
+                    text = "".join(
+                        b.text for b in resp.content if b.type == "text"
+                    )
                     pin, pout = price_for(effective)
                     usd = tin * pin + tout * pout
                     STATS["cost_usd"] += usd
@@ -821,10 +908,15 @@ def main(client=None):
                              "tokens_in": tin, "tokens_out": tout, "cost": cost},
                         )
                     else:
-                        orders = parse_decision(text, valid)
+                        fault = "malformed model output"
+                        try:
+                            orders = parse_decision(text, valid)
+                        except MalformedDecision as exc:
+                            orders = None
+                            fault = f"malformed model output: {exc}"
                         if orders is None:
                             STATS["malformed"] += 1
-                            decision = {"protocol_error": "malformed model output"}
+                            decision = {"protocol_error": fault}
                             # The call is billed whether or not its reply parsed,
                             # so the record carries what it cost, as the refusal
                             # and success records do. Without it a replayed

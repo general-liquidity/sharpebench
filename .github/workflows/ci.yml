@@ -426,6 +426,10 @@ jobs:
       # goes away.
       - name: The shim and the assembler price from one rate card
         run: python -m unittest paper/src/test_llm_pricing.py
+      # Same job, same reason: the assembler reads files and imports the rate
+      # card, which imports nothing, so this needs no provider SDK either.
+      - name: The published field is complete, unduplicated and fully accounted
+        run: python -m unittest paper/src/test_llm_field_assembly.py
       - name: A prospective field plan must declare the contracts it verifies
         run: python -m unittest paper/src/test_import_prospective_field.py
       - name: The forecast report recomputes independently in Python
@@ -465,6 +469,10 @@ jobs:
         run: python -m unittest paper/src/test_llm_agent_budget.py
       - name: The requested model is the only policy that can answer
         run: python -m unittest paper/src/test_llm_agent_identity.py
+      # Here rather than in `paper-provenance`: these cases import the shim,
+      # which imports the SDK at module scope.
+      - name: An order states its weight, or it is not a decision
+        run: python -m unittest paper/src/test_llm_agent_orders.py
 
   # --- packaged consumers: usability, not identity ----------------------------------
   # Every other packaging guard in this repository checks that the right version, commit

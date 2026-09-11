@@ -14,6 +14,13 @@ response was malformed or a refusal. That makes the accounting restart-proof
 recounted). The per-process stats files supply the secondary counters
 (observations, stride holds, cache hits).
 
+What it refuses to publish: a field whose (model, dataset) cells are not all
+present, one recording a (dataset, agent_id) submission twice, a model whose
+calls it cannot cost -- because no rate card names it, or because no accounting
+row was built for it -- a statistics file it cannot parse, and a run reporting
+API errors, an exhausted budget or a refused model identity. Each is an
+incompleteness whose only plausible alternative is a number nobody measured.
+
 Run from the repo root after the field run:
   python paper/evidence/assemble_llm_field.py
 """
@@ -43,6 +50,26 @@ if not RECORDS.exists() or not RECORDS.read_text(encoding="utf-8").strip():
     raise SystemExit("refusing to assemble: score record file is empty")
 
 
+def refuse_unaccountable(model, cause, detail):
+    """Refuse the field: `model`'s spend cannot be stated, so it is not published.
+
+    The single statement of that rule. Two causes reach it, and they are the
+    same unavailability seen from two sides: no rate card names the model, so
+    its calls cannot be costed, and no per-model accounting row was built for
+    it, so there are no calls to cost. Zero is the tempting answer to each and
+    is a plausible wrong number where the project records an unavailability.
+
+    Stated once because the two are one rule. Restated, a later edit could
+    repair the refusal on one path and leave the other reporting a billed model
+    as free, which is the shape this file exists to refuse.
+    """
+    raise SystemExit(
+        f"refusing to assemble: {cause} for {model}; {detail}. A model whose "
+        "spend this field cannot state has no cost it can publish, and "
+        "reporting zero would publish calls that were billed as free"
+    )
+
+
 def price_for(model):
     """The rate card for `model`, or a refusal to assemble the field.
 
@@ -60,10 +87,8 @@ def price_for(model):
     rate = lookup_price(model)
     if rate is not None:
         return rate
-    raise SystemExit(
-        f"refusing to assemble: no rate card for {model}; PRICING names "
-        f"{sorted(PRICING)}. A model absent from the table has no cost this "
-        "field can state, and reporting zero would publish billed calls as free"
+    refuse_unaccountable(
+        model, "no rate card", f"PRICING names {sorted(PRICING)}"
     )
 
 
@@ -92,17 +117,43 @@ for cache in sorted(FINAL.glob("llm-cache-*.jsonl")):
     }
 
 secondary_keys = ["observations", "stride_holds", "cache_hits",
-                  "budget_exhausted", "api_errors"]
+                  "budget_exhausted", "api_errors", "identity_refusals"]
+stats_files_read = 0
+unaccounted = {}
 for f in sorted(STATS_DIR.glob("stats-*.json")):
+    stats_files_read += 1
     try:
         rec = json.loads(f.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise SystemExit(f"refusing to assemble: corrupt stats file {f}: {exc}") from exc
     m = rec.get("model")
+    # A model a run reported statistics for and the per-model table does not
+    # name is collected here and refused below, not skipped. `continue` alone
+    # treated it as costing nothing: its calls, tokens and spend were dropped
+    # and the totals were published as if that model had never run, which is
+    # the free-by-omission form of the zero `price_for` refuses. Collected
+    # rather than refused on the first file so the refusal can say how much of
+    # the run is unaccounted for, which is what tells an operator whether a
+    # stray file or an entire model's spend is missing.
     if m not in per_model:
+        unaccounted[m] = unaccounted.get(m, 0) + 1
         continue
     for k in secondary_keys:
         per_model[m][k] = per_model[m].get(k, 0) + rec.get(k, 0)
+
+if unaccounted:
+    counted = ", ".join(f"{m} ({n})" for m, n in sorted(unaccounted.items()))
+    refuse_unaccountable(
+        ", ".join(sorted(unaccounted)),
+        "no accounting row",
+        f"{sum(unaccounted.values())} of {stats_files_read} statistics files "
+        f"report a model the per-model table does not name: {counted}. The "
+        f"table is built from the response caches and names {sorted(per_model)}, "
+        "so no llm-cache file was read for these. Their calls, tokens and spend "
+        "would be absent from per_model and from llm_calls_total and "
+        "cost_usd_total while the score records still carry the model, so the "
+        "field would name more models than it accounts for",
+    )
 
 records = [
     json.loads(line)
@@ -116,24 +167,61 @@ required_models = {
     "claude-haiku-4-5-20251001",
 }
 required_datasets = {"us-indices-1d", "crypto-majors-1d"}
-observed_models = {
-    r.get("model") for r in records if r.get("agent_id", "").startswith("llm-")
+
+# The field is one submission per model per dataset, so what has to be complete
+# is the product of the two sets and not each set on its own. Two separate
+# memberships were checked, `observed_models` against the required models and
+# `observed_datasets` against the required datasets, and a field missing a
+# specific cell passed both as long as every model appeared against some dataset
+# and every dataset appeared against some model: dropping
+# (claude-opus-5, crypto-majors-1d) alone left opus-5 present on us-indices-1d
+# and crypto-majors-1d present under the other two models. The published field
+# would then have named three models and two datasets while carrying five of the
+# six cells, and every total it states would have been over five.
+required_cells = {(m, d) for m in required_models for d in required_datasets}
+observed_cells = {
+    (r.get("model"), r.get("dataset"))
+    for r in records
+    if r.get("agent_id", "").startswith("llm-")
 }
-observed_datasets = {r.get("dataset") for r in records}
-if observed_models != required_models:
+missing = sorted(f"{m}/{d}" for m, d in required_cells - observed_cells)
+unexpected = sorted(f"{m}/{d}" for m, d in observed_cells - required_cells)
+if missing or unexpected:
     raise SystemExit(
-        f"refusing to assemble: models {sorted(observed_models)}; "
-        f"required {sorted(required_models)}"
+        "refusing to assemble: the LLM field is one submission per model per "
+        f"dataset, so {len(required_cells)} (model, dataset) cells are "
+        f"required; missing {missing}; unexpected {unexpected}"
     )
+
+# Completeness of the product says every cell is present at least once; it does
+# not say any cell is present once. A repeated (dataset, agent_id) is two score
+# rows for one submission, which every per-cell reader would count twice and no
+# gate here would have noticed. Checked over all records rather than the LLM
+# rows alone: the reference-field and luck-floor rows the file carries are
+# submissions under the same pairing.
+pairs = [(r.get("dataset"), r.get("agent_id")) for r in records]
+duplicates = sorted(f"{d}/{a}" for d, a in set(pairs) if pairs.count((d, a)) > 1)
+if duplicates:
+    raise SystemExit(
+        "refusing to assemble: one (dataset, agent_id) is one submission and "
+        f"these are recorded more than once: {duplicates}"
+    )
+
+observed_datasets = {r.get("dataset") for r in records}
 if observed_datasets != required_datasets:
     raise SystemExit(
         f"refusing to assemble: datasets {sorted(observed_datasets)}; "
         f"required {sorted(required_datasets)}"
     )
+# An identity refusal is a call the provider answered under a model this field
+# does not name. It fails the shim, so it is the same kind of incompleteness as
+# an API error or an exhausted budget, and it is refused with them.
 if any(m.get("api_errors", 0) or m.get("budget_exhausted", 0)
+       or m.get("identity_refusals", 0)
        for m in per_model.values()):
     raise SystemExit(
-        "refusing to assemble: API errors or exhausted budgets make the field incomplete"
+        "refusing to assemble: API errors, exhausted budgets or refused model "
+        "identities make the field incomplete"
     )
 
 meta = {
@@ -149,6 +237,11 @@ meta = {
         "--example llm_field_eval -- <out.jsonl> [dataset]"
     ),
     "stride_bars": 5,
+    # The denominator for the secondary counters below: how many per-process
+    # statistics files were read into them. Every file found is either read into
+    # a model's row or refuses the assembly, so this is also how many were
+    # found, and a reader can tell that none was dropped on the way.
+    "stats_files_read": stats_files_read,
     "datasets": sorted({r["dataset"] for r in records}),
     "per_model": per_model,
     "llm_calls_total": sum(m["llm_calls"] for m in per_model.values()),

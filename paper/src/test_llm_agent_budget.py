@@ -44,6 +44,15 @@ model whose name extends a priced one at the other model's card. The rate card
 is now matched by the model-identity rule, exactly or as a dated snapshot, and
 an unpriced model refuses the run before the first observation is read.
 
+A later review found one more, about a call that was made and then forgotten.
+The served model's identity was checked before the reply's usage was read, and
+that refusal is a `RuntimeError`, which the decision loop's
+`except anthropic.APIError` does not catch. A call the provider had answered and
+billed therefore left the statistics file with no record of its tokens. Usage is
+now recorded for every call that reached the provider, and the identity rule
+applied after it: the run still refuses, and the spend it refuses over is still
+stated.
+
 The pin protects CI, not a paid run, which imports whatever the operator has.
 That is what `assert_no_provider_retries` is for, and three cases here drive the
 refusal rather than the happy path: a client that accepts `max_retries` and
@@ -657,8 +666,9 @@ class AssemblerPricingTests(unittest.TestCase):
 
     def test_an_unpriced_model_stops_the_assembly(self):
         """Four other gates in that script can exit non-zero on this fixture:
-        the empty-records check, the model set, the dataset set and the
-        incompleteness check. Each of them states its own reason, so the
+        the empty-records check, the (model, dataset) cell completeness check,
+        the dataset set and the incompleteness check. Each states its own
+        reason, so the
         assertion is on the pricing refusal's message rather than on the exit
         code, and the priced control below shows the fixture reaches those later
         gates when the model is one the table names.
@@ -671,11 +681,81 @@ class AssemblerPricingTests(unittest.TestCase):
         code, output = self.assemble(MODEL)
         self.assertEqual(code, 1)
         self.assertNotIn("no rate card", output)
-        self.assertIn("refusing to assemble: models", output)
+        # The gate that now refuses this one-row fixture is the cell
+        # completeness check, which replaced the separate model-set and
+        # dataset-set memberships.
+        self.assertIn("(model, dataset) cells are required", output)
 
     def test_a_name_that_extends_a_priced_model_is_not_billed_at_its_card(self):
         code, output = self.assemble("claude-opus-5-1")
         self.assertIn("no rate card for claude-opus-5-1", output)
+
+
+class RefusedIdentityAccountingTests(CallCeilingCase):
+    """A call the provider made and billed is recorded even when it is refused.
+
+    The identity of the served model was checked before the call's usage was
+    read, and the refusal is a `RuntimeError`, which the decision loop's
+    `except anthropic.APIError` does not catch. So a call that reached the
+    provider, was answered and was billed left the statistics file with no
+    record of its tokens: the run refused, correctly, and forgot the money.
+    Refusing is the rule; the spend is a fact that already happened.
+    """
+
+    def stats_on_disk(self, shim):
+        files = sorted(shim.STATS_DIR.glob("stats-*.json"))
+        self.assertEqual(len(files), 1, files)
+        return json.loads(files[0].read_text(encoding="utf-8"))
+
+    def test_a_refused_identity_still_records_what_the_call_billed(self):
+        """The exact defect. The stand-in answers under a served id the rule
+        refuses, carrying usage. The refusal must stand, and the tokens must be
+        in the statistics file the assembler sums."""
+        shim = load_shim(self.tmp.name, max_calls="2")
+        client = Client([ReplyUnder(MODEL + "-mini")])
+        with self.assertRaises(RuntimeError) as caught:
+            drive(shim, client)
+        self.assertIn("model substitution", str(caught.exception))
+        self.assertEqual(len(client.requests), 1, "the call was made and billed")
+        written = self.stats_on_disk(shim)
+        self.assertEqual(written["tokens_in"], 10)
+        self.assertEqual(written["tokens_out"], 5)
+        self.assertEqual(written["identity_refusals"], 1)
+
+    def test_a_reply_naming_no_model_is_accounted_the_same_way(self):
+        """The other identity refusal on the same path: absence is refused, and
+        the call that produced it was billed just the same."""
+        shim = load_shim(self.tmp.name, max_calls="2")
+        with self.assertRaises(RuntimeError) as caught:
+            drive(shim, Client([ReplyUnder(None)]))
+        self.assertIn("unverifiable", str(caught.exception))
+        written = self.stats_on_disk(shim)
+        self.assertEqual((written["tokens_in"], written["tokens_out"]), (10, 5))
+        self.assertEqual(written["identity_refusals"], 1)
+
+    def test_a_refused_identity_states_no_dollar_amount(self):
+        """What is recorded is what was measured. The served model is not one
+        this field names, so its rate card is not the requested model's, and a
+        dollar figure under the requested card would be the plausible wrong
+        number the pricing refusal exists to prevent. The count is what says the
+        spend is understated and by how many calls."""
+        shim = load_shim(self.tmp.name, max_calls="2")
+        with self.assertRaises(RuntimeError):
+            drive(shim, Client([ReplyUnder(MODEL + "-mini")]))
+        written = self.stats_on_disk(shim)
+        self.assertEqual(written["cost_usd"], 0.0)
+        self.assertGreater(written["identity_refusals"], 0)
+
+    def test_the_control_is_the_same_call_under_an_accepted_identity(self):
+        """The tokens are not recorded by something incidental to the refusal:
+        an accepted identity records the same call, prices it, and counts no
+        refusal."""
+        shim = load_shim(self.tmp.name, max_calls="2")
+        drive(shim, Client([ReplyUnder(MODEL)]))
+        written = self.stats_on_disk(shim)
+        self.assertEqual((written["tokens_in"], written["tokens_out"]), (10, 5))
+        self.assertEqual(written["identity_refusals"], 0)
+        self.assertGreater(written["cost_usd"], 0.0)
 
 
 class ProviderRequestTests(CallCeilingCase):
