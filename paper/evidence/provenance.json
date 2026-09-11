@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "4d91567436eafc3a528ff915da48d7af14482677",
+  "generated_at_head": "20cc024796f38b5bc969e15fa119bbb9f77a6d3d",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -267,7 +267,7 @@
     },
     {
       "path": "crates/sharpebench-attest/tests/terminal_anchor.rs",
-      "sha256": "dd6e6bd1361b1c8baf9d49155309e7d12a95e10a85babf514b21ca5bc947ce29"
+      "sha256": "7e1d6beb431d132b2ff382864eaa7d69e45fbefe6fcdaa00b2f1f55dd23585fb"
     },
     {
       "path": "crates/sharpebench-cli/Cargo.toml",
@@ -607,11 +607,11 @@
     },
     {
       "path": "crates/sharpebench-harness/src/fault_plan.rs",
-      "sha256": "248db87f61b14c54e2bf605f0a68c50cd4e4371734c15381835663190dfb2e87"
+      "sha256": "43494b220e135960618a45830da3d7e8ac73a7e4e9bf469ab787c74dcd28e752"
     },
     {
       "path": "crates/sharpebench-harness/src/gateway.rs",
-      "sha256": "b27d8ba4be725e1b2b2668cafb703459fd18256f0db4e1706c7ad23670ee69c3"
+      "sha256": "3e4e56216b711ddf00ec2ffc1819cec9a13ce97a971a6d699e68e3c9126ada72"
     },
     {
       "path": "crates/sharpebench-harness/src/gateway_journal.rs",
@@ -623,7 +623,7 @@
     },
     {
       "path": "crates/sharpebench-harness/src/gateway_serve_tests.rs",
-      "sha256": "ac26c404bba717d702de93463987bd209fa2e115bfb7cc408a76d09a85d308c6"
+      "sha256": "8fcdc9f65601f604ca6a32ca8d3a2138890cb3a9c6adc10707941f0e9d549c77"
     },
     {
       "path": "crates/sharpebench-harness/src/lib.rs",
@@ -687,7 +687,7 @@
     },
     {
       "path": "crates/sharpebench-leaderboard/src/lib.rs",
-      "sha256": "b42de9c9ed98e394e7c06b04f999128d3f33c25c8e5dd92e3aa829aa1c381431"
+      "sha256": "faf02dce1740e62e8c1b4143cc1c70673d080d8c57497540b40eaf02d749e981"
     },
     {
       "path": "crates/sharpebench-leaderboard/tests/board_binding.rs",
@@ -1143,5 +1143,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "3ec399377c87de3e1a86bd3698cb12ec3e95a8082ab556ab8b5c0a5ebbec96e4"
+  "source_snapshot_sha256": "3c450deb1267620fe490ed6f1f42e1fc6427bdb41d55fa62ad5d99cf21ccda9b"
 }
