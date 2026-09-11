@@ -552,6 +552,34 @@ pub fn assess_resources(
     })
 }
 
+/// Read the bundle's frozen cost model.
+///
+/// JSON writes every non-finite float as `null`, and the shipped
+/// unlimited-liquidity setting is `max_participation = +infinity`, so a cost
+/// model serialized as it stands cannot be read back by the derived
+/// deserializer. A null cap therefore means unlimited, the same encoding
+/// `sharpebench_leaderboard::CostProfile` documents for a published board's
+/// cost profile. Every other field is the cost model's own, so a frozen model
+/// that declares turnover costs or execution noise keeps them and is hashed
+/// bit for bit by [`sharpebench_harness::cost_model_digest`].
+fn frozen_cost_model(bytes: &[u8]) -> Result<CostModel, RescoreRefusal> {
+    let mut value: serde_json::Value = serde_json::from_slice(bytes)
+        .map_err(|error| refuse("frozen cost model", error.to_string()))?;
+    let unlimited = matches!(
+        value.get("max_participation"),
+        Some(serde_json::Value::Null)
+    );
+    if unlimited {
+        value["max_participation"] = serde_json::Value::from(0.0);
+    }
+    let mut costs: CostModel = serde_json::from_value(value)
+        .map_err(|error| refuse("frozen cost model", error.to_string()))?;
+    if unlimited {
+        costs.max_participation = f64::INFINITY;
+    }
+    Ok(costs)
+}
+
 fn refuse(stage: &'static str, reason: impl Into<String>) -> RescoreRefusal {
     RescoreRefusal::Recompute {
         stage,
@@ -576,8 +604,7 @@ pub fn rescore(
     let dataset_text = std::str::from_utf8(&bytes[&bundle.dataset])
         .map_err(|error| refuse("frozen dataset", error.to_string()))?;
     let data = Dataset::from_csv(dataset_text).map_err(|error| refuse("frozen dataset", error))?;
-    let costs: CostModel = serde_json::from_slice(&bytes[&bundle.costs])
-        .map_err(|error| refuse("frozen cost model", error.to_string()))?;
+    let costs = frozen_cost_model(&bytes[&bundle.costs])?;
     let traj: sharpebench_protocol::AgentTrajectory =
         serde_json::from_slice(&bytes[&bundle.trajectory])
             .map_err(|error| refuse("frozen trajectory", error.to_string()))?;
@@ -915,6 +942,16 @@ fn emit_report(report: &RescoreReport, json: bool) {
             }
         );
     }
+    let (assessment, disclosed) = match &report.comparability {
+        Comparability::NotAssessed { disclosed } => ("not assessed (no --envelope)", disclosed),
+        Comparability::Comparable { disclosed } => {
+            ("comparable with the declared envelope", disclosed)
+        }
+    };
+    println!("  comparability   : {assessment}");
+    for (key, value) in disclosed {
+        println!("    disclosed {key} = {value}");
+    }
     println!("\nVerified:");
     for line in &report.verified {
         println!("  - {line}");
@@ -984,13 +1021,9 @@ mod tests {
         let dir = tempfile::tempdir().expect("a temporary directory");
         let csv = dataset_csv();
         let data = Dataset::from_csv(&csv).expect("the fixture CSV parses");
-        // A frozen cost model is a file, so the fixture uses a JSON-representable
-        // one: `CostModel::default` carries an infinite participation cap, which
-        // serializes to `null` and cannot be read back.
-        let costs = CostModel {
-            max_participation: 1.0,
-            ..CostModel::default()
-        };
+        // The shipped default, unlimited participation cap and all, so the
+        // fixture exercises the `null` the cap serializes to.
+        let costs = CostModel::default();
         let windows = [Window { start: 20, end: 80 }];
         let (_, mut traj) = run_agent_capture("momentum", &data, &windows, &[0], costs, || {
             Box::new(Momentum::default()) as Box<dyn Agent>
@@ -1078,6 +1111,25 @@ mod tests {
     /// merely as some refusal: an empty manifest refuses too, for a different
     /// reason, and the roles are then unbound, so a bare `is_err` here would
     /// still pass with the absence downgraded to a warning.
+    /// The shipped unlimited-liquidity cap is `+infinity`, which JSON writes as
+    /// `null`. A frozen cost model has to come back as that same cap, because
+    /// `cost_model_digest` hashes its IEEE-754 bits and the strict verifier
+    /// refuses a trajectory whose cost model does not match.
+    #[test]
+    fn an_unlimited_liquidity_cap_survives_the_json_null_it_is_written_as() {
+        let written = serde_json::to_vec_pretty(&CostModel::default()).expect("serializes");
+        assert!(
+            String::from_utf8_lossy(&written).contains("\"max_participation\": null"),
+            "the fixture depends on the cap being written as null"
+        );
+        let read = frozen_cost_model(&written).expect("a frozen cost model reads back");
+        assert_eq!(
+            sharpebench_harness::cost_model_digest(read),
+            sharpebench_harness::cost_model_digest(CostModel::default()),
+            "an unlimited cap read back as anything else is a different cost model"
+        );
+    }
+
     #[test]
     fn an_absent_frozen_manifest_is_refused_not_warned_about() {
         let mut fixture = fixture();
