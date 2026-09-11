@@ -13,13 +13,18 @@
 //! resumed journal folds the amounts that were written, not a fresh quote
 //! against whatever rate card the process happens to hold now.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 use crate::accounting::{MonetarySummary, RateCard};
 
 pub const JOURNAL_SCHEMA_VERSION: &str = "sharpebench.gateway-journal.v1";
+
+/// Schema of the document a [`JournalLock`] writes. A lock is not a journal:
+/// it lives at a different path, carries a different schema version and is
+/// refused by [`GatewayJournal::load_bound`] like any other foreign document.
+pub const JOURNAL_LOCK_SCHEMA_VERSION: &str = "sharpebench.gateway-journal-lock.v1";
 
 /// The largest journal accepted from disk. A journal is one record per call
 /// under a bounded call ceiling, so this is generous; it exists so a corrupt or
@@ -223,22 +228,287 @@ impl std::error::Error for JournalSaveError {
     }
 }
 
+/// The largest lock document read back to name a holder. The document this
+/// code writes is a few dozen bytes; the bound exists so a hostile file at the
+/// lock path cannot be read into memory unbounded.
+const MAX_LOCK_BYTES: u64 = 4096;
+
+/// What a [`JournalLock`] writes about its holder. Enough for an operator to
+/// find the process, and nothing else: no journal path, no destination, no
+/// credential, nothing that could carry provider material into a file the
+/// operator is meant to read.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct JournalLockDocument {
+    pub schema_version: String,
+    /// The process that took the lock, on the host that took it.
+    pub pid: u32,
+    pub acquired_unix_ms: u128,
+    /// Present only when this lock displaced another through
+    /// [`JournalLock::take_over`]: the operator's stated reason, and the pid
+    /// the takeover displaced.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub superseded: Option<SupersededHolder>,
+}
+
+/// The holder a takeover displaced, recorded in the lock that displaced it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SupersededHolder {
+    pub pid: u32,
+    pub acquired_unix_ms: u128,
+    /// Why an operator decided the earlier holder was gone. Free text, written
+    /// by the operator, kept so the decision is not invisible afterwards.
+    pub reason: String,
+}
+
+/// Why exclusive ownership of a journal path could not be taken.
+#[derive(Debug)]
+pub enum JournalLockError {
+    /// Someone else holds this journal, or a process that crashed while
+    /// holding it left its lock behind. Never broken automatically: breaking a
+    /// lock nobody can prove is dead puts two writers back on one budget,
+    /// which is the whole defect the lock exists to prevent.
+    Held {
+        lock_path: PathBuf,
+        holder: String,
+    },
+    /// A takeover named a lock that is not there.
+    NotHeld {
+        lock_path: PathBuf,
+    },
+    Io(std::io::Error),
+}
+
+impl std::fmt::Display for JournalLockError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Held { lock_path, holder } => write!(
+                f,
+                "the gateway journal is locked by {holder}; its lock file is {}. \
+                 Check whether that process is still running before doing anything else: \
+                 if it is, this gateway must not spend the same budget. \
+                 If it is gone, the lock is stale and an operator must take it over \
+                 deliberately, which records who was displaced and why.",
+                lock_path.display()
+            ),
+            Self::NotHeld { lock_path } => write!(
+                f,
+                "no gateway journal lock is held at {}, so there is nothing to take over",
+                lock_path.display()
+            ),
+            Self::Io(error) => write!(f, "gateway journal lock could not be taken: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for JournalLockError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Held { .. } | Self::NotHeld { .. } => None,
+            Self::Io(error) => Some(error),
+        }
+    }
+}
+
+impl From<JournalLockError> for std::io::Error {
+    fn from(error: JournalLockError) -> Self {
+        match error {
+            held @ JournalLockError::Held { .. } => {
+                Self::new(std::io::ErrorKind::AlreadyExists, held)
+            }
+            absent @ JournalLockError::NotHeld { .. } => {
+                Self::new(std::io::ErrorKind::NotFound, absent)
+            }
+            JournalLockError::Io(error) => error,
+        }
+    }
+}
+
+/// Exclusive ownership of one journal path, held for as long as the gateway
+/// that spends it lives.
+///
+/// The lock is a sibling file named after the journal with `.lock` appended,
+/// created with `create_new`, which is `O_EXCL | O_CREAT` on Unix and
+/// `CREATE_NEW` on Windows: the file system decides the winner, and a second
+/// attempt is refused as [`JournalLockError::Held`] rather than queued. There
+/// is no wait and no timeout, because two gateways over one budget is not a
+/// situation that improves by waiting.
+///
+/// # What it does not cover
+///
+/// One host. Two hosts reaching the same path over a network file system are
+/// not separated by this: `create_new` is only as exclusive as the remote
+/// server's create semantics, and NFS in particular does not guarantee them.
+///
+/// A crash leaves the lock behind, and that is deliberate. Nothing on disk can
+/// distinguish a dead holder from a live one, so the stale lock is refused with
+/// a message naming the file, and clearing it is an operator decision taken
+/// through [`JournalLock::take_over`], which records who was displaced and why.
+#[derive(Debug)]
+pub struct JournalLock {
+    path: PathBuf,
+}
+
+impl JournalLock {
+    /// Where the lock for `journal` lives: the journal's own name with `.lock`
+    /// appended, so it sorts beside the journal and can never be opened as one.
+    pub fn lock_path(journal: &Path) -> Result<PathBuf, JournalLockError> {
+        let Some(name) = journal.file_name() else {
+            return Err(JournalLockError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "gateway journal path needs a filename",
+            )));
+        };
+        let mut lock_name = name.to_os_string();
+        lock_name.push(".lock");
+        let parent = journal
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        Ok(parent.join(lock_name))
+    }
+
+    /// Take exclusive ownership of `journal`, or refuse.
+    pub fn acquire(journal: &Path) -> Result<Self, JournalLockError> {
+        Self::create(Self::lock_path(journal)?, None)
+    }
+
+    /// Displace the holder of `journal`'s lock, recording `reason` and the pid
+    /// displaced in the lock that replaces it.
+    ///
+    /// This is the deliberate act an operator takes after establishing that the
+    /// earlier holder is gone. It is never taken automatically, and it is not a
+    /// way around a live gateway: a takeover of a lock a running process holds
+    /// puts two writers back on one budget.
+    pub fn take_over(journal: &Path, reason: &str) -> Result<Self, JournalLockError> {
+        let lock_path = Self::lock_path(journal)?;
+        let bytes = match read_bounded(&lock_path, MAX_LOCK_BYTES) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Err(JournalLockError::NotHeld { lock_path });
+            }
+            Err(error) => return Err(JournalLockError::Io(error)),
+        };
+        let displaced = serde_json::from_slice::<JournalLockDocument>(&bytes)
+            .ok()
+            .map(|document| SupersededHolder {
+                pid: document.pid,
+                acquired_unix_ms: document.acquired_unix_ms,
+                reason: reason.to_string(),
+            })
+            .unwrap_or(SupersededHolder {
+                pid: 0,
+                acquired_unix_ms: 0,
+                reason: reason.to_string(),
+            });
+        std::fs::remove_file(&lock_path).map_err(JournalLockError::Io)?;
+        Self::create(lock_path, Some(displaced))
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    fn create(
+        lock_path: PathBuf,
+        superseded: Option<SupersededHolder>,
+    ) -> Result<Self, JournalLockError> {
+        use std::io::Write as _;
+        let document = JournalLockDocument {
+            schema_version: JOURNAL_LOCK_SCHEMA_VERSION.to_string(),
+            pid: std::process::id(),
+            acquired_unix_ms: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|since| since.as_millis())
+                .unwrap_or(0),
+            superseded,
+        };
+        let payload = serde_json::to_vec(&document)
+            .map_err(|error| JournalLockError::Io(std::io::Error::other(error)))?;
+        let mut file = match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock_path)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                let holder = describe_holder(&lock_path);
+                return Err(JournalLockError::Held { lock_path, holder });
+            }
+            Err(error) => return Err(JournalLockError::Io(error)),
+        };
+        // A lock whose document never landed would name no holder, so a failure
+        // here releases rather than leaving an anonymous file behind.
+        if let Err(error) = file.write_all(&payload).and_then(|()| file.sync_all()) {
+            drop(file);
+            let _ = std::fs::remove_file(&lock_path);
+            return Err(JournalLockError::Io(error));
+        }
+        Ok(Self { path: lock_path })
+    }
+}
+
+impl Drop for JournalLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+/// A short operator-facing description of whoever holds a lock. Never fails:
+/// an unreadable or foreign document still has to produce a refusal message.
+fn describe_holder(lock_path: &Path) -> String {
+    let Ok(bytes) = read_bounded(lock_path, MAX_LOCK_BYTES) else {
+        return "a holder whose lock document could not be read".to_string();
+    };
+    match serde_json::from_slice::<JournalLockDocument>(&bytes) {
+        Ok(document) => format!(
+            "pid {} since unix ms {}",
+            document.pid, document.acquired_unix_ms
+        ),
+        Err(_) => "a holder whose lock document is not a gateway lock".to_string(),
+    }
+}
+
+fn read_bounded(path: &Path, max_bytes: u64) -> std::io::Result<Vec<u8>> {
+    use std::io::Read as _;
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)?
+        .take(max_bytes)
+        .read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
 /// An append-only sequence of spending records, persisted as one JSON document.
 ///
 /// # Ownership
 ///
-/// A snapshot carries the `version` it was loaded at, and [`GatewayJournal::save`]
-/// is a compare-and-swap against that version: a save from a snapshot that does
-/// not match what is on disk is refused as
-/// [`JournalSaveError::Conflict`] rather than replacing a record this process
-/// never read. Atomic replacement alone would not make a shared budget, because
-/// two processes can each hold a stale snapshot and each replace it whole.
+/// A journal that is spent from is owned exclusively. A gateway takes a
+/// [`JournalLock`] when it binds a path and holds it until it drops, so a
+/// second writer on the same host is refused at open with a typed
+/// [`JournalLockError::Held`] rather than admitted to the same budget. The lock
+/// is what makes concurrent writers impossible; nothing below it is a
+/// substitute for it.
 ///
-/// The compare-and-swap reads the on-disk version and then renames a temporary
-/// into place, so a second writer that lands between those two steps is not
-/// caught. That residual window is a real one; the check is what stops the
-/// far larger window of two long-lived gateways both spending from the snapshot
-/// they read at open.
+/// A snapshot also carries the `version` it was loaded at, and
+/// [`GatewayJournal::save`] is a compare-and-swap against that version: a save
+/// from a snapshot that does not match what is on disk is refused as
+/// [`JournalSaveError::Conflict`] rather than replacing a record this process
+/// never read. That check is now a second line of defence rather than the only
+/// one: it catches a journal that moved under a single writer, such as a file
+/// restored from a backup or edited by hand mid-sweep.
+///
+/// # What ownership does not cover
+///
+/// Two hosts sharing one journal path over a network file system. The lock's
+/// exclusivity is the local file system's `create_new`, and a remote server
+/// need not honour it; NFS in particular does not. One host per journal path
+/// is a deployment rule, not something this code can enforce.
+///
+/// A holder that crashed. Its lock stays, and the next gateway is refused
+/// rather than admitted, because no file on disk distinguishes a dead holder
+/// from a live one. Clearing it is [`JournalLock::take_over`], which an
+/// operator performs deliberately and which records who was displaced and why.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GatewayJournal {
@@ -535,8 +805,9 @@ impl GatewayJournal {
     ///
     /// The write is a compare-and-swap on [`GatewayJournal::version`]: a save
     /// from a snapshot the disk has moved past is refused, and the caller keeps
-    /// every record it appended. See the type documentation for what the check
-    /// does and does not cover.
+    /// every record it appended. Concurrent writers are kept apart by the
+    /// [`JournalLock`] a gateway holds, not by this check; see the type
+    /// documentation for what each one covers.
     pub fn save(&mut self, path: &Path) -> Result<(), JournalSaveError> {
         use std::io::Write as _;
         let found = Self::version_on_disk(path)
@@ -771,6 +1042,107 @@ mod tests {
         doubled["records"] = serde_json::Value::Array(records);
         std::fs::write(&path, doubled.to_string()).expect("write");
         assert!(GatewayJournal::load_bound(&path, &identity).is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn lock_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("sb-journal-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        dir
+    }
+
+    /// A second holder is refused by type. It is not queued behind the first,
+    /// because two gateways over one budget is not a situation waiting improves.
+    #[test]
+    fn a_second_holder_of_one_journal_is_refused() {
+        let dir = lock_dir("lockheld");
+        let path = dir.join("journal.json");
+        let held = JournalLock::acquire(&path).expect("the first holder takes the path");
+        let error = JournalLock::acquire(&path).expect_err("the second holder is refused");
+        assert!(
+            matches!(&error, JournalLockError::Held { lock_path, .. } if lock_path == held.path()),
+            "{error}"
+        );
+        assert!(
+            error
+                .to_string()
+                .contains(&held.path().display().to_string()),
+            "the refusal names the lock file: {error}"
+        );
+        drop(held);
+        JournalLock::acquire(&path).expect("a released path is free again");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A lock left behind by a crashed process is refused, not broken. Nothing
+    /// on disk tells a dead holder from a live one, and breaking the lock on a
+    /// guess puts two writers back on one budget.
+    #[test]
+    fn a_stale_lock_is_refused_rather_than_broken() {
+        let dir = lock_dir("lockstale");
+        let path = dir.join("journal.json");
+        let lock_path = JournalLock::lock_path(&path).expect("a lock path");
+        // What a process that died mid-sweep leaves behind: the lock file, with
+        // no live holder anywhere.
+        std::mem::forget(JournalLock::acquire(&path).expect("the crashed holder took the path"));
+
+        let error = JournalLock::acquire(&path).expect_err("a stale lock is still a lock");
+        assert!(matches!(error, JournalLockError::Held { .. }), "{error}");
+        assert!(
+            lock_path.exists(),
+            "the refusal leaves the stale lock in place for the operator to judge"
+        );
+        std::fs::remove_file(&lock_path).ok();
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Clearing a stale lock is an explicit act, and it leaves a record: the
+    /// lock that replaces it names the holder it displaced and the reason.
+    #[test]
+    fn a_takeover_is_explicit_and_records_who_it_displaced() {
+        let dir = lock_dir("locktakeover");
+        let path = dir.join("journal.json");
+        let lock_path = JournalLock::lock_path(&path).expect("a lock path");
+        assert!(
+            matches!(
+                JournalLock::take_over(&path, "nothing is running"),
+                Err(JournalLockError::NotHeld { .. })
+            ),
+            "a takeover of an unheld path is refused rather than treated as an acquire"
+        );
+
+        std::mem::forget(JournalLock::acquire(&path).expect("the crashed holder took the path"));
+        let taken = JournalLock::take_over(&path, "host rebooted, pid 4321 is gone")
+            .expect("an operator may displace a holder deliberately");
+        let document: JournalLockDocument =
+            serde_json::from_slice(&std::fs::read(taken.path()).expect("the new lock is readable"))
+                .expect("the new lock is a lock document");
+        let superseded = document.superseded.expect("the displacement is recorded");
+        assert_eq!(superseded.pid, std::process::id());
+        assert_eq!(superseded.reason, "host rebooted, pid 4321 is gone");
+        assert_eq!(document.pid, std::process::id());
+
+        drop(taken);
+        assert!(!lock_path.exists());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The lock lives beside the journal and is never mistaken for one: it has
+    /// its own name and its own schema, and a journal reader refuses it.
+    #[test]
+    fn a_lock_is_not_a_journal() {
+        let dir = lock_dir("locknotjournal");
+        let path = dir.join("journal.json");
+        let held = JournalLock::acquire(&path).expect("lock");
+        assert_eq!(held.path(), dir.join("journal.json.lock"));
+        assert!(!path.exists(), "taking the lock writes no journal");
+        let error = GatewayJournal::load_bound(held.path(), &identity(budget(1_000, 8)))
+            .expect_err("a lock document is never read as a journal");
+        assert_ne!(
+            error.kind(),
+            std::io::ErrorKind::NotFound,
+            "the file is there; it is refused for what it is: {error}"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 

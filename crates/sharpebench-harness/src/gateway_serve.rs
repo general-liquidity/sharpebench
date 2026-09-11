@@ -61,7 +61,9 @@ use super::{
     ProviderTransport, RouteTable,
 };
 use crate::accounting::{MonetarySummary, RateCard};
-use crate::gateway_journal::{GatewayBudget, GatewayJournal, JournalIdentity, JournalSaveError};
+use crate::gateway_journal::{
+    GatewayBudget, GatewayJournal, JournalIdentity, JournalLock, JournalSaveError,
+};
 use crate::{AttemptObservation, ResilientSubmission, ResumePolicy, SweepContract, SweepIdentity};
 
 /// The protocol family a stdout line must name to be read as a gateway request.
@@ -723,6 +725,11 @@ pub struct HostObservedUsage {
     /// The gateway lost its journal file to another writer and stopped
     /// spending. The figures above are this process's in-memory record.
     pub journal_ownership_lost: bool,
+    /// A settlement could not be written to the journal file and the gateway
+    /// stopped. The figures above are this process's in-memory record, and the
+    /// file on disk is missing at least one call's outcome: reading it back
+    /// would fold that call at its reservation rather than at what it cost.
+    pub journal_unwritable: bool,
     pub rank_neutral: bool,
 }
 
@@ -743,6 +750,7 @@ impl HostObservedUsage {
             overspent_calls: state.overspent_calls,
             ceiling_breached: journal.ceiling_breached(),
             journal_ownership_lost: gateway.journal_conflict(),
+            journal_unwritable: gateway.journal_unwritable(),
             rank_neutral: true,
         }
     }
@@ -829,6 +837,9 @@ where
     let sweep_sha256 = gateway_sweep_sha256(sweep.agent_id, &contract);
     let journal_identity = JournalIdentity::new(host.routes.identity_digest(), host.budget)
         .for_sweep(sweep_sha256.clone());
+    // Exclusive ownership first: the pair is admitted, and a fresh journal
+    // written, under a lock no second sweep on this host can also hold.
+    let journal_lock = JournalLock::acquire(sweep.journal)?;
     let journal = admit_pair(sweep.checkpoint, sweep.journal, &journal_identity)?;
     let mut gateway = ModelGateway {
         routes: host.routes,
@@ -836,10 +847,12 @@ where
         transport: host.transport,
         journal,
         journal_path: Some(sweep.journal.to_path_buf()),
+        journal_lock: Some(journal_lock),
         limits: host.limits,
         shutdown: GatewayShutdown::new(),
         dispatches: 0,
         journal_conflict: false,
+        journal_unwritable: false,
     };
     let result = crate::run_resumable_sweep_observed(
         sweep.checkpoint,

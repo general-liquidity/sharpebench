@@ -14,13 +14,18 @@
 //! `sharpebench_harness::gateway::serve::run_gateway_sweep`, which an operator
 //! calls from a binary that supplies the transport; this report reads the
 //! journal such a sweep writes, whichever sweep it is bound to.
+//!
+//! Reading is never blocked. A spending gateway holds its journal path
+//! exclusively, but this command only reads, so it takes no lock: a sweep in
+//! flight can be inspected while it runs. Whether the path is owned is
+//! reported as a fact (`journal_lock_held`), never as a refusal.
 
 use std::path::PathBuf;
 
 use serde::Deserialize;
 use sharpebench_harness::accounting::RateCard;
 use sharpebench_harness::gateway::{GatewayLimits, ModelRoute, RouteTable, Secret};
-use sharpebench_harness::gateway_journal::{GatewayBudget, GatewayJournal};
+use sharpebench_harness::gateway_journal::{GatewayBudget, GatewayJournal, JournalLock};
 
 const ROUTES_SCHEMA_VERSION: &str = "sharpebench.gateway-routes.v1";
 const MAX_ROUTES_BYTES: u64 = 256 * 1024;
@@ -170,6 +175,13 @@ fn report(
         ),
         _ => None,
     };
+    // Information, not a gate: a journal someone is spending still reports, and
+    // an operator reading a lock-held figure knows it is a moving one.
+    let lock_held = journal_path.as_ref().map(|path| {
+        JournalLock::lock_path(path)
+            .map(|lock| lock.exists())
+            .unwrap_or(false)
+    });
     let spend = journal.as_ref().map(|journal| {
         let state = journal.spend();
         let mut spend = serde_json::json!({
@@ -204,7 +216,8 @@ fn report(
             "max_calls": budget.max_calls,
         },
         "limits": limits_json(&limits),
-        "journal": journal_path.map(|path| path.display().to_string()),
+        "journal": journal_path.as_ref().map(|path| path.display().to_string()),
+        "journal_lock_held": lock_held,
         "spend": spend,
         "usage_provenance": "host_observed_not_verified_billing",
         "provider_transport": "operator_supplied_none_ships_in_this_build",
@@ -499,6 +512,49 @@ mod tests {
         .expect("a sweep-bound journal under the same routes and budget reports");
         assert_eq!(value["spend"]["sweep_sha256"], sweep.as_str());
         assert_eq!(value["limits"]["max_requests_per_decision"], 32);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A sweep in flight owns its journal exclusively. Reading is not spending,
+    /// so the report is not refused: it reads the file and says the path is
+    /// owned, which is what tells an operator the figures are moving.
+    #[test]
+    fn a_locked_journal_still_reports_and_says_it_is_locked() {
+        let dir = temp_dir("locked");
+        let routes_path = write(
+            &dir,
+            "routes.json",
+            &manifest("fake.v1", "2026-01-01", KEY_VAR),
+        );
+        let (routes, _) = load_routes(&routes_path, &present).expect("routes");
+        let budget = GatewayBudget {
+            max_usd_nanos: 1000,
+            max_calls: 5,
+        };
+        let path = dir.join("journal.json");
+        GatewayJournal::new(JournalIdentity::new(routes.identity_digest(), budget))
+            .save(&path)
+            .expect("save");
+        let journal = path.display().to_string();
+        let arguments = args(&[
+            "--routes",
+            &routes_path,
+            "--budget-usd-nanos",
+            "1000",
+            "--max-calls",
+            "5",
+            "--journal",
+            &journal,
+        ]);
+
+        let unlocked = present_report(&arguments).expect("an unowned journal reports");
+        assert_eq!(unlocked["journal_lock_held"], false);
+
+        let held = JournalLock::acquire(&path).expect("a sweep takes the path");
+        let locked = present_report(&arguments).expect("an owned journal still reports");
+        assert_eq!(locked["journal_lock_held"], true);
+        assert_eq!(locked["spend"]["calls_started"], 0);
+        drop(held);
         std::fs::remove_dir_all(&dir).ok();
     }
 }
