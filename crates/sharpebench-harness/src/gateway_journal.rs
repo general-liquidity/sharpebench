@@ -161,6 +161,11 @@ pub struct SpendState {
     /// Reservations that are neither settled nor released: calls in flight, or
     /// interrupted ones a fold has not yet charged.
     pub outstanding_usd_nanos: u128,
+    /// Reservations that are neither settled nor released, counted rather than
+    /// summed. A reservation of zero contributes nothing to
+    /// `outstanding_usd_nanos`, so an amount cannot stand in for the question
+    /// "is an outcome missing from this record".
+    pub outstanding_calls: u32,
     /// Calls started, retries included. Released reservations still count: the
     /// call ceiling bounds attempts, not successes.
     pub calls_started: u32,
@@ -188,7 +193,7 @@ impl SpendState {
     /// Whether any amount in this state is a reservation standing in for an
     /// unmeasured cost. A total containing one is a partial total.
     pub fn is_partial(&self) -> bool {
-        self.unknown_calls > 0 || self.outstanding_usd_nanos > 0
+        self.unknown_calls > 0 || self.outstanding_calls > 0
     }
 }
 
@@ -548,11 +553,15 @@ impl JournalLock {
     /// bytes. `None` when there is no document at `journal`, and `None` for one
     /// that names a usable identity of its own, which is what ownership keys on
     /// instead.
+    ///
+    /// One read, for the reason [`JournalLock::document_id`] is one read: a caller
+    /// that saw `None` here and a caller that saw a digest must have been
+    /// looking at different bytes, not at two moments of one resolution.
     pub fn derived_document_id(journal: &Path) -> Option<String> {
-        journal_id_on_disk(journal)
+        let bytes = read_bounded(journal, MAX_JOURNAL_BYTES).ok()?;
+        journal_id_in(&bytes)
             .is_none()
-            .then(|| derived_document_id(journal))
-            .flatten()
+            .then(|| derived_identity_of(&bytes))
     }
 
     /// Whether this lock covers the journal *document* as well as the path
@@ -717,39 +726,56 @@ impl Drop for JournalLock {
     }
 }
 
-/// The document identity a journal file names, if it names a usable one. The
+/// The document identity these bytes name, if they name a usable one. The
 /// value becomes a filename component, so anything that is not a plain
 /// hexadecimal token is treated as no identity at all rather than joined onto a
 /// path.
-fn journal_id_on_disk(journal: &Path) -> Option<String> {
-    let bytes = read_bounded(journal, MAX_JOURNAL_BYTES).ok()?;
-    let document: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+fn journal_id_in(bytes: &[u8]) -> Option<String> {
+    let document: serde_json::Value = serde_json::from_slice(bytes).ok()?;
     let id = document.get("journal_id")?.as_str()?;
     let usable = !id.is_empty() && id.len() <= 64 && id.chars().all(|c| c.is_ascii_hexdigit());
     usable.then(|| id.to_string())
 }
 
+/// The document identity a journal file names, if it names a usable one.
+fn journal_id_on_disk(journal: &Path) -> Option<String> {
+    journal_id_in(&read_bounded(journal, MAX_JOURNAL_BYTES).ok()?)
+}
+
 /// What ownership is keyed on for the document at `journal`: the identity it
 /// names, or, for one written before the field existed, the identity derived
 /// from its bytes.
+///
+/// One read, and the bytes it returned are the sole basis for both the choice
+/// between the two and the value each produces. Reading twice, once to look for
+/// a named identity and again to derive one, is a race rather than a tidier
+/// spelling: a legacy document is stamped with its derived identity by whichever
+/// opener wins it, so a resolution whose first read lands before that stamp and
+/// whose second lands after derives a digest over the stamped bytes, which is
+/// not the identity the stamp names. Two openers of one document would then hold
+/// two different locks and spend the same budget twice. With a single read the
+/// identity is a function of the bytes read: an opener that reads the legacy
+/// bytes derives the value the stamp will carry, an opener that reads the
+/// stamped bytes reads that same value back, and no interleaving produces a
+/// third answer.
 fn document_identity(journal: &Path) -> Option<String> {
-    journal_id_on_disk(journal).or_else(|| derived_document_id(journal))
+    let bytes = read_bounded(journal, MAX_JOURNAL_BYTES).ok()?;
+    Some(journal_id_in(&bytes).unwrap_or_else(|| derived_identity_of(&bytes)))
 }
 
-/// The identity to give a document that names none: a digest of the bytes on
-/// disk. Two gateways reaching one such document under two names read the same
-/// bytes and derive the same identity, so exactly one of them takes its lock,
-/// where a fresh identity each would let both proceed and both spend. Two
-/// documents that are byte for byte the same and share a directory derive one
-/// identity and one lock, which refuses a second gateway that could have been
-/// admitted; that is the direction this is allowed to be wrong in.
-fn derived_document_id(journal: &Path) -> Option<String> {
+/// The identity to give a document that names none: a digest of its bytes. Two
+/// gateways reaching one such document under two names read the same bytes and
+/// derive the same identity, so exactly one of them takes its lock, where a
+/// fresh identity each would let both proceed and both spend. Two documents that
+/// are byte for byte the same and share a directory derive one identity and one
+/// lock, which refuses a second gateway that could have been admitted; that is
+/// the direction this is allowed to be wrong in.
+fn derived_identity_of(bytes: &[u8]) -> String {
     use sha2::{Digest as _, Sha256};
-    let bytes = read_bounded(journal, MAX_JOURNAL_BYTES).ok()?;
     let mut hash = Sha256::new();
     hash.update(b"sharpebench.gateway-journal-derived-identity.v1");
-    hash.update(&bytes);
-    Some(format!("{:x}", hash.finalize())[..32].to_string())
+    hash.update(bytes);
+    format!("{:x}", hash.finalize())[..32].to_string()
 }
 
 /// A short operator-facing description of whoever holds a lock. Never fails:
@@ -767,8 +793,43 @@ fn describe_holder(lock_path: &Path) -> String {
     }
 }
 
+/// Bounded reads this thread has attempted, so a test can observe how many
+/// times a resolution went to the file rather than inferring it from a value
+/// the resolution itself produced. Thread-local: one test's count cannot be
+/// moved by another running beside it.
+#[cfg(test)]
+pub(crate) mod read_count {
+    use std::cell::Cell;
+
+    // The same clippy 0.1.96 false positive `fault_injection` below documents:
+    // the initializer already is a `const` block.
+    #[allow(clippy::missing_const_for_thread_local)]
+    mod counter {
+        use std::cell::Cell;
+
+        thread_local! {
+            pub(super) static BOUNDED_READS: Cell<usize> = const { Cell::new(0) };
+        }
+    }
+
+    pub(crate) fn record_read() {
+        counter::BOUNDED_READS.with(|reads| reads.set(reads.get() + 1));
+    }
+
+    /// Bounded reads this thread has made since the last reset.
+    pub(crate) fn since_reset() -> usize {
+        counter::BOUNDED_READS.with(Cell::get)
+    }
+
+    pub(crate) fn reset() {
+        counter::BOUNDED_READS.with(|reads| reads.set(0));
+    }
+}
+
 fn read_bounded(path: &Path, max_bytes: u64) -> std::io::Result<Vec<u8>> {
     use std::io::Read as _;
+    #[cfg(test)]
+    read_count::record_read();
     let mut bytes = Vec::new();
     std::fs::File::open(path)?
         .take(max_bytes)
@@ -1005,6 +1066,7 @@ impl GatewayJournal {
         // its reservation, which is what makes a crash mid-call neither a free
         // retry nor an automatic refund.
         for (_, reserved) in open {
+            state.outstanding_calls = state.outstanding_calls.saturating_add(1);
             state.outstanding_usd_nanos = state.outstanding_usd_nanos.saturating_add(reserved);
         }
         state
@@ -1829,6 +1891,58 @@ mod tests {
             JournalLock::document_id(&path).as_deref(),
             Some(derived.as_str()),
             "so the lock's name still matches the document once the bytes move"
+        );
+    }
+
+    /// A2, the pre-identity half, as a race rather than as a value. Resolving a
+    /// legacy document's identity consults the file once, so the choice between
+    /// "this document names an identity" and "derive one from these bytes"
+    /// cannot straddle the rewrite that stamps the derived identity into the
+    /// document. A resolution that read twice could take the first branch's
+    /// answer from pre-stamp bytes and the second's from post-stamp bytes and
+    /// return a digest of the stamped document, which is an identity no other
+    /// opener of that document ever computes: the two would take two locks and
+    /// spend one budget twice.
+    ///
+    /// The count is the assertion because the value cannot be: every identity a
+    /// resolution can return is a digest the code computed, so no comparison
+    /// between them separates one read from two. The read count is observed
+    /// through the file-reading primitive, and the expected identity is computed
+    /// here from the bytes this test wrote, not read back from the resolution.
+    ///
+    /// Two causes could leave the count at one: the resolution reading once, and
+    /// the document naming an identity so that the second read is never reached.
+    /// The second is ruled out by the assertion below it, which fails for any
+    /// document that names one.
+    #[test]
+    fn a_legacy_journal_identity_is_resolved_from_one_read_of_the_document() {
+        use sha2::{Digest as _, Sha256};
+
+        let dir = lock_dir("legacyonread");
+        let path = dir.join("journal.json");
+        let identity = identity(budget(1_000_000, 8));
+        legacy_document(&path, &identity);
+
+        read_count::reset();
+        let resolved = JournalLock::document_id(&path).expect("a legacy document has an identity");
+        assert_eq!(
+            read_count::since_reset(),
+            1,
+            "the identity a legacy document is owned on comes from one read of it"
+        );
+
+        let bytes = std::fs::read(&path).expect("the document this test wrote");
+        assert!(
+            journal_id_in(&bytes).is_none(),
+            "the document names no identity, so the derived branch is the one that ran"
+        );
+        let mut hash = Sha256::new();
+        hash.update(b"sharpebench.gateway-journal-derived-identity.v1");
+        hash.update(&bytes);
+        assert_eq!(
+            resolved,
+            format!("{:x}", hash.finalize())[..32],
+            "and it is the digest of exactly those bytes"
         );
     }
 

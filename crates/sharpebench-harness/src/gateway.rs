@@ -724,6 +724,12 @@ pub struct ModelGateway<'a, T: ProviderTransport> {
     /// then holds a reservation whose outcome is missing, and this gateway
     /// starts no further call: a settlement above its reservation that never
     /// landed would make a restart under-report real spend.
+    ///
+    /// The flag itself is in memory and dies with the process. What outlives it
+    /// is the record that defines the condition, the reservation with no
+    /// outcome, which [`ModelGateway::open`] refuses. Persisting the flag is not
+    /// the alternative: it would have to be written to the journal that could
+    /// not be written.
     journal_unwritable: bool,
 }
 
@@ -763,6 +769,12 @@ impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
     /// refused: the error is [`std::io::ErrorKind::AlreadyExists`] carrying a
     /// [`crate::gateway_journal::JournalLockError`] as its source, naming the
     /// lock file.
+    ///
+    /// A journal holding a reservation with no settlement beside it is refused
+    /// too, with [`std::io::ErrorKind::InvalidData`]. That record is what an
+    /// earlier gateway leaves when a settlement could not be written, or when a
+    /// process died mid-call; either way the file says less than was spent, and
+    /// resuming it would re-reserve budget against a figure known to be low.
     pub fn open(
         routes: &'a RouteTable,
         permits: &'a CallPermits,
@@ -782,6 +794,28 @@ impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
             }
             Err(error) => return Err(error),
         };
+        // A reservation the file holds with no outcome beside it is what a
+        // settlement that never landed leaves behind. The in-memory latch that
+        // stopped the gateway which produced it does not survive that process,
+        // and it cannot be made durable by writing it: the condition is defined
+        // by a write to this journal having failed. What is already durable is
+        // the record itself, so that is what this reads, and a journal in that
+        // state is refused rather than resumed with a clean slate. Resuming
+        // charges the reservation, and a provider may price a call above what it
+        // reserved, so the resumed gateway would spend against a figure it
+        // cannot know is the real one.
+        let unsettled = journal.spend().outstanding_calls;
+        if unsettled > 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "gateway journal at {} holds {unsettled} reservation(s) whose settlement never reached the file; \
+                     real spend is at least what the record says and may be more, so it is not resumed. \
+                     Read it with `sharpebench gateway --journal <path>` and run what is left under a fresh journal.",
+                    path.display()
+                ),
+            ));
+        }
         // A journal that does not exist yet names no document, so it is written
         // here rather than at the first call: until there is a document,
         // ownership is keyed on this path's spelling alone, which is what lets
@@ -2896,6 +2930,123 @@ mod tests {
             "the refusal happens before anything is dispatched"
         );
         drop(gateway);
+    }
+
+    /// The latch that stops a gateway whose settlement never landed is a flag in
+    /// memory, and the process it belongs to is what a restart replaces. What
+    /// cannot be restarted away is the record: the file holds the reservation
+    /// and no outcome beside it. A reopen that read that and carried on would
+    /// re-reserve budget against a total the file is known to understate, since
+    /// the settlement that went missing may have priced above its reservation.
+    /// So the reopen is refused.
+    ///
+    /// The refusal is not asserted on the latch, which is gone: the on-disk
+    /// shape it leaves is checked here independently, one reservation and no
+    /// settlement, before the reopen is attempted.
+    ///
+    /// Three causes could refuse a reopen of this path. The lock is ruled out by
+    /// the first gateway being dropped and its lock file gone. A binding
+    /// mismatch is ruled out by the same routes and budget opening the same file
+    /// once the missing settlement is appended, at the end. A malformed document
+    /// is ruled out by the journal loading and folding here.
+    #[test]
+    fn a_journal_whose_settlement_never_landed_is_not_reopened_with_a_clean_slate() {
+        let dir = temp_dir("unwritablereopen");
+        let path = dir.join("journal.json");
+        let routes = table("2026-01-01");
+        let permits = CallPermits::new(4);
+        let budget = budget(u128::MAX, 8);
+        let removed = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let mut gateway = ModelGateway::open(
+            &routes,
+            &permits,
+            SabotageJournal {
+                path: path.clone(),
+                removed: std::sync::Arc::clone(&removed),
+            },
+            budget,
+            GatewayLimits::default(),
+            &path,
+        )
+        .expect("open");
+        let response = parse(&gateway.serve_line(&request("hello", 16)));
+        assert_eq!(
+            response.error.expect("error").kind,
+            GatewayErrorKind::JournalUnwritable
+        );
+        assert!(
+            gateway.journal_unwritable(),
+            "the condition arose in memory"
+        );
+
+        // Put back exactly what the call took away, which is the file as it
+        // stood when the settlement failed to reach it.
+        std::fs::remove_dir(&path).expect("the directory goes");
+        std::fs::write(
+            &path,
+            removed
+                .lock()
+                .expect("the mutex holds")
+                .as_ref()
+                .expect("the journal was read before it was taken away"),
+        )
+        .expect("the journal is back, byte for byte");
+        drop(gateway);
+        assert!(
+            !JournalLock::lock_path(&path).expect("a lock path").exists(),
+            "the lock is released, so nothing but the record can refuse the reopen"
+        );
+
+        let identity = JournalIdentity::new(routes.identity_digest(), budget);
+        let mut stranded = GatewayJournal::load_bound(&path, &identity).expect("the record loads");
+        assert_eq!(
+            stranded.records().len(),
+            1,
+            "the file holds the reservation and nothing else"
+        );
+        assert!(
+            matches!(stranded.records()[0], JournalRecord::Reserved { .. }),
+            "and what it holds is a reservation with no outcome"
+        );
+
+        let refused = ModelGateway::open(
+            &routes,
+            &permits,
+            FakeProvider::answering(1),
+            budget,
+            GatewayLimits::default(),
+            &path,
+        )
+        .err()
+        .expect("a journal missing a settlement is not resumed");
+        assert_eq!(refused.kind(), std::io::ErrorKind::InvalidData);
+        assert!(
+            refused.to_string().contains(&path.display().to_string()),
+            "the refusal names the journal: {refused}"
+        );
+        assert!(
+            !JournalLock::lock_path(&path).expect("a lock path").exists(),
+            "a gateway that is refused owns nothing"
+        );
+
+        // And the refusal is the missing outcome, not the path: once the
+        // reservation has one, the same routes and budget open the same file.
+        stranded.settle(
+            0,
+            Settlement::Unknown {
+                reason: UnknownCostReason::UsageAbsent,
+            },
+        );
+        stranded.save(&path).expect("the record is completed");
+        ModelGateway::open(
+            &routes,
+            &permits,
+            FakeProvider::answering(1),
+            budget,
+            GatewayLimits::default(),
+            &path,
+        )
+        .expect("a complete record resumes");
     }
 
     /// A7. An I/O fault by the sole owner is published as an I/O fault. A

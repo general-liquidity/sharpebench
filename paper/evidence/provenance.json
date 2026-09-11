@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "7d8a365b857f128bedf8b77a6dea07fbe9a4e806",
+  "generated_at_head": "24032a60c25bc96c3ba83404fc27878933ffa8ee",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -611,11 +611,11 @@
     },
     {
       "path": "crates/sharpebench-harness/src/gateway.rs",
-      "sha256": "3e4e56216b711ddf00ec2ffc1819cec9a13ce97a971a6d699e68e3c9126ada72"
+      "sha256": "ecd51ee9c2a15b2d1559a468ae6c7a75b2ab5a2c298c55b9d2b0fb3dc44a5fea"
     },
     {
       "path": "crates/sharpebench-harness/src/gateway_journal.rs",
-      "sha256": "509564aa48039746009dae8d3c529da7761881aeaed949a37e50e8fd82ecf2b7"
+      "sha256": "0d774604b0ee131cb66cc11e8c0ed173ae1911f4aaf77d889d79cdcf6c7fb2d5"
     },
     {
       "path": "crates/sharpebench-harness/src/gateway_serve.rs",
@@ -955,7 +955,7 @@
     },
     {
       "path": "paper/evidence/assemble_llm_field.py",
-      "sha256": "0ddd5a9b22c1a4e4eb721ec842f0fdff15817963233815788507e1d02943f2fa"
+      "sha256": "8f79d49ebeb39d068531b9f457024481e4696bd6ce4beb40fa002655d91e9b84"
     },
     {
       "path": "paper/evidence/assemble_sweep.py",
@@ -1103,19 +1103,11 @@
     },
     {
       "path": "paper/src/test_llm_agent_budget.py",
-      "sha256": "a9ddfc6cb7e6b759f8abf197b523696a69f2c09b7be10bd1461a4ae42712c65c"
+      "sha256": "ad19315483442900ba6eaf899523cf723b473af47d361d598df187a576d6d073"
     },
     {
       "path": "paper/src/test_llm_agent_identity.py",
       "sha256": "82bbbba17cae89339bb1fda70409d597acb1c5a5b1cac18b0d7ebce028941941"
-    },
-    {
-      "path": "paper/src/test_llm_agent_orders.py",
-      "sha256": "f782b83d5b10f1567e7c3968ebbd25b53022da437ec85a914fec6bf1da02dfc6"
-    },
-    {
-      "path": "paper/src/test_llm_field_assembly.py",
-      "sha256": "175fdf0c7bfea7cec8cda2e03a7220c2d6aa99f31a70f0a7f6b0a8f031c675a1"
     },
     {
       "path": "paper/src/test_llm_pricing.py",
@@ -1151,5 +1143,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "6388ffc7f99faf212bb8750af6701ee8fe1561fd04673018bebfd05d12bd0129"
+  "source_snapshot_sha256": "cdd94f1f9985f5d5cbec577ccfc55ad68953b78fb950da0a0ed9bd21d38c59b1"
 }
