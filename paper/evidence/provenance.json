@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "8fad4e922a9124e9cc4f2b5b9cc9345d7dc50be5",
+  "generated_at_head": "7d8a365b857f128bedf8b77a6dea07fbe9a4e806",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -955,7 +955,7 @@
     },
     {
       "path": "paper/evidence/assemble_llm_field.py",
-      "sha256": "71e3ec24e75650ee83365316775250272e5aba7434ffc2e8f6588b7c271fccea"
+      "sha256": "0ddd5a9b22c1a4e4eb721ec842f0fdff15817963233815788507e1d02943f2fa"
     },
     {
       "path": "paper/evidence/assemble_sweep.py",
@@ -1115,7 +1115,7 @@
     },
     {
       "path": "paper/src/test_llm_field_assembly.py",
-      "sha256": "e99d6a4f45e9b699273aea28931fbbe70b312182f619541744df5c2e4d0505ea"
+      "sha256": "175fdf0c7bfea7cec8cda2e03a7220c2d6aa99f31a70f0a7f6b0a8f031c675a1"
     },
     {
       "path": "paper/src/test_llm_pricing.py",
@@ -1151,5 +1151,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "38f727fd2b4b93cae0b822ff0f321a0f531c98f3a2e3116a6bacaee17d1e75d3"
+  "source_snapshot_sha256": "6388ffc7f99faf212bb8750af6701ee8fe1561fd04673018bebfd05d12bd0129"
 }
