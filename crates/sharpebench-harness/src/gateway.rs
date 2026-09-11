@@ -45,8 +45,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::accounting::RateCard;
 use crate::gateway_journal::{
-    GatewayBudget, GatewayJournal, JournalIdentity, JournalSaveError, ReleaseReason, Settlement,
-    UnknownCostReason,
+    GatewayBudget, GatewayJournal, JournalIdentity, JournalLock, JournalSaveError, ReleaseReason,
+    Settlement, UnknownCostReason,
 };
 
 #[path = "gateway_serve.rs"]
@@ -709,6 +709,10 @@ pub struct ModelGateway<'a, T: ProviderTransport> {
     transport: T,
     journal: GatewayJournal,
     journal_path: Option<PathBuf>,
+    /// Exclusive ownership of `journal_path`, held for this gateway's whole
+    /// life and released when it drops. `None` for an in-memory journal, which
+    /// owns no path.
+    journal_lock: Option<JournalLock>,
     limits: GatewayLimits,
     shutdown: GatewayShutdown,
     dispatches: u32,
@@ -716,6 +720,11 @@ pub struct ModelGateway<'a, T: ProviderTransport> {
     /// The records this gateway appended are still in memory; what it may not
     /// do is keep spending against a file it no longer owns.
     journal_conflict: bool,
+    /// Latched when a settlement could not be made durable. The file on disk
+    /// then holds a reservation whose outcome is missing, and this gateway
+    /// starts no further call: a settlement above its reservation that never
+    /// landed would make a restart under-report real spend.
+    journal_unwritable: bool,
 }
 
 impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
@@ -735,16 +744,25 @@ impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
             transport,
             journal: GatewayJournal::new(identity),
             journal_path: None,
+            journal_lock: None,
             limits,
             shutdown: GatewayShutdown::new(),
             dispatches: 0,
             journal_conflict: false,
+            journal_unwritable: false,
         }
     }
 
     /// Open a gateway over a persisted journal at `path`, resuming an existing
     /// one when it is bound to the same routes and budget. A resumed journal is
     /// folded, never repriced, and its records are never rewritten.
+    ///
+    /// Opening takes exclusive ownership of `path` through a [`JournalLock`]
+    /// held for this gateway's lifetime. A second gateway over the same path,
+    /// and a path whose earlier holder crashed without releasing it, are both
+    /// refused: the error is [`std::io::ErrorKind::AlreadyExists`] carrying a
+    /// [`crate::gateway_journal::JournalLockError`] as its source, naming the
+    /// lock file.
     pub fn open(
         routes: &'a RouteTable,
         permits: &'a CallPermits,
@@ -753,6 +771,9 @@ impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
         limits: GatewayLimits,
         path: &Path,
     ) -> std::io::Result<Self> {
+        // Ownership before reading: a snapshot taken without the lock could be
+        // stale by the time the lock is held.
+        let journal_lock = JournalLock::acquire(path)?;
         let identity = JournalIdentity::new(routes.identity_digest(), budget);
         let journal = match GatewayJournal::load_bound(path, &identity) {
             Ok(journal) => journal,
@@ -767,10 +788,12 @@ impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
             transport,
             journal,
             journal_path: Some(path.to_path_buf()),
+            journal_lock: Some(journal_lock),
             limits,
             shutdown: GatewayShutdown::new(),
             dispatches: 0,
             journal_conflict: false,
+            journal_unwritable: false,
         })
     }
 
@@ -797,6 +820,20 @@ impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
     /// the records it appended after the last write it owned.
     pub fn journal_conflict(&self) -> bool {
         self.journal_conflict
+    }
+
+    /// Whether a settlement this gateway made could not be written to its
+    /// journal file. Once true it starts no further call, because the file no
+    /// longer says what the last call cost and a restart would read the
+    /// reservation instead. Take [`ModelGateway::into_journal`] to recover the
+    /// settled records the file is missing.
+    pub fn journal_unwritable(&self) -> bool {
+        self.journal_unwritable
+    }
+
+    /// The lock file this gateway holds, when it owns a persisted journal.
+    pub fn journal_lock_path(&self) -> Option<&Path> {
+        self.journal_lock.as_ref().map(JournalLock::path)
     }
 
     /// Handle one request line and return one response line, newline excluded.
@@ -910,6 +947,12 @@ impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
         }
         if self.journal_conflict {
             return Err(GatewayErrorKind::JournalOwnershipLost);
+        }
+        // A settlement that never reached disk leaves the file disagreeing with
+        // what was actually spent. Starting another call would spend against a
+        // record that is already wrong.
+        if self.journal_unwritable {
+            return Err(GatewayErrorKind::JournalUnwritable);
         }
         // An earlier call whose observed price landed above its reservation can
         // put committed money past the ceiling. That is recorded, not absorbed,
@@ -1123,7 +1166,18 @@ impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
             },
         };
         let usage_observed = matches!(settlement, Settlement::Priced { .. });
-        self.settle_and_persist(ordinal, settlement);
+        if !self.settle_and_persist(ordinal, settlement) {
+            // The call happened and the money is spent; what failed is the
+            // record of it. Handing back the completion as a success would let
+            // the sweep carry on over a journal that no longer says what it
+            // cost, so the answer is refused the same way a reservation that
+            // could not be made durable is, and the flag says which.
+            return Err(if self.journal_conflict {
+                GatewayErrorKind::JournalOwnershipLost
+            } else {
+                GatewayErrorKind::JournalUnwritable
+            });
+        }
         Ok(GatewayResponse {
             protocol: GATEWAY_PROTOCOL.to_string(),
             ok: true,
@@ -1135,16 +1189,31 @@ impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
         })
     }
 
-    /// Settle, then persist. A failed persist leaves the settlement in memory;
-    /// the record it would have replaced is a reservation, which folds as
-    /// consumed, so a lost write can only over-report spend, never under-report.
-    /// A refused write latches the ownership flag, so a gateway that lost the
-    /// file stops rather than spending against a record it cannot write.
-    fn settle_and_persist(&mut self, ordinal: u32, settlement: Settlement) {
+    /// Settle, then persist, and report whether the settlement reached disk.
+    ///
+    /// A settlement that did not land leaves the file holding a reservation
+    /// whose outcome is missing. That is not a safe direction to fail in: a
+    /// provider may price a call above what it reserved, and this gateway
+    /// records such a settlement at the observed amount, so a restart that
+    /// folds the reservation instead under-reports real spend. Both failure
+    /// modes therefore latch and stop the gateway: a refused write means
+    /// another writer owns the file, an I/O failure means the record cannot be
+    /// completed at all. The settled records stay in memory either way,
+    /// reachable through [`ModelGateway::into_journal`].
+    fn settle_and_persist(&mut self, ordinal: u32, settlement: Settlement) -> bool {
         self.journal.settle(ordinal, settlement);
-        if let Some(path) = &self.journal_path {
-            if let Err(JournalSaveError::Conflict { .. }) = self.journal.save(path) {
+        let Some(path) = &self.journal_path else {
+            return true;
+        };
+        match self.journal.save(path) {
+            Ok(()) => true,
+            Err(JournalSaveError::Conflict { .. }) => {
                 self.journal_conflict = true;
+                false
+            }
+            Err(JournalSaveError::Io(_)) => {
+                self.journal_unwritable = true;
+                false
             }
         }
     }
@@ -1178,8 +1247,10 @@ fn encode_refusal(kind: GatewayErrorKind) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicUsize;
+
     use super::*;
-    use crate::gateway_journal::JournalRecord;
+    use crate::gateway_journal::{JournalLockError, JournalRecord};
 
     const KEY: &str = "sk-live-test-do-not-log-0123456789";
     /// Framing tokens a test route declares the provider bills on every call,
@@ -1310,6 +1381,34 @@ mod tests {
                 ProviderOutcome::RefusedBeforeWork(ProviderFault::Unreachable)
             } else {
                 self.script.remove(0)
+            }
+        }
+    }
+
+    /// A provider that makes the journal path unwritable while its call is in
+    /// flight, so the failure lands at settlement and nowhere else: the
+    /// reservation was already durable before the call started.
+    ///
+    /// The seam is the transport, not the persistence gate: nothing in the
+    /// gateway is weakened to make this reachable. Putting a directory where
+    /// the journal was is the portable way to make both the version read and
+    /// the rename fail, on Windows and on Unix alike.
+    struct SabotageJournal {
+        path: PathBuf,
+        sabotaged: bool,
+    }
+
+    impl ProviderTransport for SabotageJournal {
+        fn call(&mut self, _call: ProviderCall<'_>) -> ProviderOutcome {
+            if !self.sabotaged {
+                std::fs::remove_file(&self.path)
+                    .expect("the reservation was on disk before the call started");
+                std::fs::create_dir(&self.path).expect("a directory where the journal was");
+                self.sabotaged = true;
+            }
+            ProviderOutcome::Answered {
+                status: 200,
+                body: body("ok", Some((10, 5))),
             }
         }
     }
@@ -2511,9 +2610,207 @@ mod tests {
         );
     }
 
-    /// Two gateways over one journal path are not a shared budget just because
-    /// each save is atomic: the later writer would replace a record it never
-    /// read. The second is refused, and the first gateway's record survives.
+    /// Two gateways over one journal path are not a shared budget. The second
+    /// never opens: the first holds the path for its lifetime, and the refusal
+    /// is typed and names the lock file rather than being a bare failure.
+    #[test]
+    fn a_second_gateway_cannot_open_the_journal_the_first_owns() {
+        let dir = temp_dir("lockopen");
+        let path = dir.join("journal.json");
+        let routes = table("2026-01-01");
+        let permits = CallPermits::new(4);
+        let budget = budget(u128::MAX, 4);
+        let first = ModelGateway::open(
+            &routes,
+            &permits,
+            FakeProvider::answering(1),
+            budget,
+            GatewayLimits::default(),
+            &path,
+        )
+        .expect("open");
+        let lock = first
+            .journal_lock_path()
+            .expect("a persisted gateway owns a lock")
+            .to_path_buf();
+
+        let refused = ModelGateway::open(
+            &routes,
+            &permits,
+            FakeProvider::answering(1),
+            budget,
+            GatewayLimits::default(),
+            &path,
+        )
+        .err()
+        .expect("a second gateway over one journal is refused");
+        assert_eq!(refused.kind(), std::io::ErrorKind::AlreadyExists);
+        assert!(
+            matches!(
+                refused
+                    .get_ref()
+                    .and_then(|source| source.downcast_ref::<JournalLockError>()),
+                Some(JournalLockError::Held { .. })
+            ),
+            "the refusal is typed, not a bare failure: {refused}"
+        );
+        assert!(
+            refused.to_string().contains(&lock.display().to_string()),
+            "the refusal names the lock file: {refused}"
+        );
+
+        // Released on drop, so a sequential second gateway opens normally.
+        drop(first);
+        assert!(!lock.exists(), "the lock is released with its gateway");
+        ModelGateway::open(
+            &routes,
+            &permits,
+            FakeProvider::answering(1),
+            budget,
+            GatewayLimits::default(),
+            &path,
+        )
+        .expect("the released path opens again");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Many gateways racing for one journal path: the file system admits
+    /// exactly one, every other attempt is refused by type, and the record the
+    /// admitted writer made is on disk whole. The barrier is what makes the
+    /// race real; the assertion holds whichever thread wins it.
+    #[test]
+    fn only_one_of_many_racing_gateways_owns_the_journal() {
+        const WRITERS: usize = 8;
+        let dir = temp_dir("race");
+        let path = dir.join("journal.json");
+        let routes = table("2026-01-01");
+        let permits = CallPermits::new(WRITERS as u32);
+        let budget = budget(u128::MAX, 8);
+        let start = std::sync::Barrier::new(WRITERS);
+        let admitted = AtomicUsize::new(0);
+        let refused = std::sync::Mutex::new(Vec::new());
+
+        std::thread::scope(|scope| {
+            for _ in 0..WRITERS {
+                scope.spawn(|| {
+                    start.wait();
+                    match ModelGateway::open(
+                        &routes,
+                        &permits,
+                        FakeProvider::answering(1),
+                        budget,
+                        GatewayLimits::default(),
+                        &path,
+                    ) {
+                        Ok(mut gateway) => {
+                            admitted.fetch_add(1, Ordering::SeqCst);
+                            assert!(
+                                parse(&gateway.serve_line(&request("hello", 16))).ok,
+                                "the admitted writer spends"
+                            );
+                        }
+                        Err(error) => refused.lock().expect("the mutex holds").push(error),
+                    }
+                });
+            }
+        });
+
+        assert_eq!(
+            admitted.load(Ordering::SeqCst),
+            1,
+            "one writer is admitted to one budget, not several"
+        );
+        let refused = refused.into_inner().expect("the mutex holds");
+        assert_eq!(refused.len(), WRITERS - 1);
+        for error in &refused {
+            assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+            assert!(
+                matches!(
+                    error
+                        .get_ref()
+                        .and_then(|source| source.downcast_ref::<JournalLockError>()),
+                    Some(JournalLockError::Held { .. })
+                ),
+                "every refusal is typed: {error}"
+            );
+        }
+
+        let identity = JournalIdentity::new(routes.identity_digest(), budget);
+        let on_disk = GatewayJournal::load_bound(&path, &identity).expect("the journal survives");
+        assert_eq!(
+            on_disk.spend().calls_started,
+            1,
+            "the admitted call is recorded and nothing replaced it"
+        );
+        assert_eq!(settlements(&on_disk).len(), 1, "no record is lost");
+        assert_eq!(on_disk.spend().priced_usd_nanos, 15);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A settlement that cannot be written is not a lost log line. The file
+    /// keeps the reservation, and a reservation is not what the call cost: this
+    /// gateway records observed usage above a reservation, so a restart that
+    /// folds the reservation instead under-reports real spend. The gateway
+    /// therefore fails closed, and says so.
+    #[test]
+    fn a_settlement_that_cannot_be_persisted_stops_the_gateway() {
+        let dir = temp_dir("unwritable");
+        let path = dir.join("journal.json");
+        let routes = table("2026-01-01");
+        let permits = CallPermits::new(4);
+        let mut gateway = ModelGateway::open(
+            &routes,
+            &permits,
+            SabotageJournal {
+                path: path.clone(),
+                sabotaged: false,
+            },
+            budget(u128::MAX, 8),
+            GatewayLimits::default(),
+            &path,
+        )
+        .expect("open");
+
+        let response = parse(&gateway.serve_line(&request("hello", 16)));
+        assert!(
+            !response.ok,
+            "an answer whose cost was not recorded is not handed back as a success"
+        );
+        assert_eq!(
+            response.error.expect("error").kind,
+            GatewayErrorKind::JournalUnwritable
+        );
+        assert!(gateway.journal_unwritable(), "the failure latches");
+        assert!(
+            !gateway.journal_conflict(),
+            "an I/O failure is not another writer"
+        );
+        assert_eq!(
+            gateway.journal().spend().priced_usd_nanos,
+            15,
+            "the settlement the file is missing is still in memory"
+        );
+
+        let next = parse(&gateway.serve_line(&request("hello", 16)));
+        assert_eq!(
+            next.error.expect("error").kind,
+            GatewayErrorKind::JournalUnwritable,
+            "a gateway whose record is incomplete starts no further call"
+        );
+        assert_eq!(
+            gateway.dispatches(),
+            1,
+            "the refusal happens before anything is dispatched"
+        );
+        drop(gateway);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The compare-and-swap is the second line of defence, for a journal that
+    /// moved under a single writer: a file restored from a backup, or edited by
+    /// hand, while one gateway holds the lock. That gateway is refused and its
+    /// records stay in memory. The unlocked second gateway here stands in for
+    /// whatever moved the file; the lock is what stops a real second gateway.
     #[test]
     fn a_second_gateway_cannot_spend_the_journal_the_first_owns() {
         let dir = temp_dir("ownership");
@@ -2530,15 +2827,19 @@ mod tests {
             &path,
         )
         .expect("open");
-        let mut second = ModelGateway::open(
-            &routes,
-            &permits,
-            FakeProvider::answering(1),
-            budget,
-            GatewayLimits::default(),
-            &path,
-        )
-        .expect("open");
+        let mut second = ModelGateway {
+            routes: &routes,
+            permits: &permits,
+            transport: FakeProvider::answering(1),
+            journal: GatewayJournal::new(JournalIdentity::new(routes.identity_digest(), budget)),
+            journal_path: Some(path.clone()),
+            journal_lock: None,
+            limits: GatewayLimits::default(),
+            shutdown: GatewayShutdown::new(),
+            dispatches: 0,
+            journal_conflict: false,
+            journal_unwritable: false,
+        };
 
         assert!(parse(&first.serve_line(&request("hello", 16))).ok);
         let refused = parse(&second.serve_line(&request("hello", 16)));
