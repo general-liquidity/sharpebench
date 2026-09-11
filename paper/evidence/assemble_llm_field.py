@@ -119,6 +119,7 @@ for cache in sorted(FINAL.glob("llm-cache-*.jsonl")):
 secondary_keys = ["observations", "stride_holds", "cache_hits",
                   "budget_exhausted", "api_errors", "identity_refusals"]
 stats_files_read = 0
+unaccounted = {}
 for f in sorted(STATS_DIR.glob("stats-*.json")):
     stats_files_read += 1
     try:
@@ -127,21 +128,32 @@ for f in sorted(STATS_DIR.glob("stats-*.json")):
         raise SystemExit(f"refusing to assemble: corrupt stats file {f}: {exc}") from exc
     m = rec.get("model")
     # A model a run reported statistics for and the per-model table does not
-    # name is refused, not skipped. `continue` treated it as costing nothing:
-    # its calls, tokens and spend were dropped from the field and the totals
-    # were published as if that model had never run, which is the free-by-
-    # omission form of the zero `price_for` refuses. The table is built from the
-    # response caches, so the cause is a run whose cache file is missing or
-    # named otherwise, and what its calls cost is exactly what is unknown.
+    # name is collected here and refused below, not skipped. `continue` alone
+    # treated it as costing nothing: its calls, tokens and spend were dropped
+    # and the totals were published as if that model had never run, which is
+    # the free-by-omission form of the zero `price_for` refuses. Collected
+    # rather than refused on the first file so the refusal can say how much of
+    # the run is unaccounted for, which is what tells an operator whether a
+    # stray file or an entire model's spend is missing.
     if m not in per_model:
-        refuse_unaccountable(
-            m,
-            "no accounting row",
-            f"{f.name} reports statistics for it and no llm-cache-{m}.jsonl "
-            f"was read; the table names {sorted(per_model)}",
-        )
+        unaccounted[m] = unaccounted.get(m, 0) + 1
+        continue
     for k in secondary_keys:
         per_model[m][k] = per_model[m].get(k, 0) + rec.get(k, 0)
+
+if unaccounted:
+    counted = ", ".join(f"{m} ({n})" for m, n in sorted(unaccounted.items()))
+    refuse_unaccountable(
+        ", ".join(sorted(unaccounted)),
+        "no accounting row",
+        f"{sum(unaccounted.values())} of {stats_files_read} statistics files "
+        f"report a model the per-model table does not name: {counted}. The "
+        f"table is built from the response caches and names {sorted(per_model)}, "
+        "so no llm-cache file was read for these. Their calls, tokens and spend "
+        "would be absent from per_model and from llm_calls_total and "
+        "cost_usd_total while the score records still carry the model, so the "
+        "field would name more models than it accounts for",
+    )
 
 records = [
     json.loads(line)

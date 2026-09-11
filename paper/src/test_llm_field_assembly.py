@@ -232,6 +232,27 @@ class StatisticsAccountingTests(AssemblerCase):
         self.assertIn("no accounting row", output)
         self.assertNotIn("no rate card", output)
 
+    def test_the_refusal_says_how_much_of_the_run_is_unaccounted_for(self):
+        """A stray file and an entire model's spend are different problems, and
+        the operator reading the refusal has to be able to tell them apart.
+
+        On the working tree the second is the real case: 262 of 694 statistics
+        files name `claude-opus-5`, which has no response cache and therefore no
+        accounting row, so an assembled field would have named three models in
+        its score rows and two in `per_model`, with a third of the run's calls
+        missing from `llm_calls_total` and `cost_usd_total`. The refusal states
+        the proportion and what the totals would have omitted, not just that a
+        model is unknown.
+        """
+        orphan = "claude-fable-5-20260101"
+        for i in range(3):
+            self.write_stats(f"stats-{i}.json", {"model": orphan, "observations": 1})
+        self.write_stats("stats-9.json", {"model": "claude-fable-5"})
+        output = self.refusal()
+        self.assertIn("3 of 4 statistics files", output)
+        self.assertIn(f"{orphan} (3)", output)
+        self.assertIn("cost_usd_total", output)
+
     def test_a_matched_stats_file_lands_in_the_model_it_names(self):
         """The control for the case above, and the reason it is about the join
         and not about statistics files in general."""
