@@ -738,11 +738,67 @@ models it requires, so a stray or hand-placed `llm-cache-<model>.jsonl` was
 still assembled at zero.
 
 Repaired the same way, as a `SystemExit`, which is how every other
-incompleteness in that script refuses. The rule is restated there rather than
+incompleteness in that script refuses. The rule was restated there rather than
 imported: importing the shim would pull the Anthropic SDK into an assembler that
-reads only files. The two tables must agree, and that is now a stated
-requirement rather than an accident, but it is a duplication and it is recorded
-as one.
+reads only files. The two tables had to agree, and that was a stated requirement
+rather than an accident, but it was a duplication and it was recorded as one.
+Closed by 7e.
+
+### 7e. The stated requirement is now a checked one
+
+The limit left by 7c was that two pricing tables and two copies of one matching
+rule could be edited apart: a model priced by one side and refused by the other,
+or priced differently by each, with nothing to say so until a published number
+was already wrong.
+
+**They agreed at the time.** Checked against the committed tree before changing
+anything: both tables named the same three models at the same rates
+(`claude-fable-5` 10/50, `claude-opus-5` 5/25, `claude-haiku-4-5` 1/5 USD per
+million tokens in/out), both carried `SNAPSHOT_SEPARATOR = "-"` and
+`SNAPSHOT_DIGITS = 8`, and the two `is_dated_snapshot_of` bodies were identical
+up to parameter naming (`requested`/`served` against `alias`/`model`). So this
+is the hypothetical the entry describes and not a live mispricing.
+
+**Shared, not gated.** Of the three options, the duplication is removed rather
+than watched. The reason it existed was a dependency: importing the shim pulls
+the Anthropic SDK into a file reader. The evidence says a shared module does not
+have that problem. The assembler imports `json`, `sys` and `pathlib`; the new
+`paper/evidence/llm_pricing.py` imports nothing at all, which a case asserts, so
+it cannot carry anything into either side. Both files now take `PRICING`,
+`lookup_price` and the snapshot rule from it, each keeping its own refusal:
+`UnpricedModel` before the first observation in the shim, `SystemExit` in the
+assembler, which is how every other incompleteness there refuses.
+
+It sits in `paper/evidence/` rather than beside the shim because
+`SOURCE_SCOPE` in `paper/src/provenance_common.py` hashes `paper/evidence/*.py`
+and does not cover `examples/`. The table that decides a published number is
+inside the source snapshot, where the assembler's copy already was. That also
+corrects something section 7 said in passing: only one of the two files that
+mentioned pricing, the assembler, was hashed as source. `llm_agent.py` was not
+and still is not.
+
+**And gated anyway, against re-duplication.** A shared definition is only one
+rule while both sides reach for it, so `paper/src/test_llm_pricing.py` fails if
+either file grows its own `PRICING`, its own `SNAPSHOT_*` or its own
+`is_dated_snapshot_of` / `lookup_price`, and the message names the file, the
+line and how the second table differs from the shared one. Three further cases
+drive the assembler as a subprocess against a mutated copy of the shared module,
+so what is established is that the published `cost_usd` is computed from that
+table at run time rather than that the file merely mentions it.
+
+It runs in the `paper-provenance` CI job, not `llm-shim`. `llm-shim` pins
+`anthropic==0.112.0` because its regressions drive a real SDK client over a
+stand-in transport; a check that two files agree about a price list has no use
+for a provider SDK, and this one never imports the shim. Putting it in the job
+that installs nothing also means it keeps running if that pin is ever dropped.
+
+**Frozen values.** None moved. The two consumers compute exactly what they
+computed before on every model either could previously price: the shared table
+is the same three entries at the same rates, and `lookup_price` is the same
+match. `paper/evidence/final/llm-field.jsonl` still does not exist, no committed
+evidence file names a `claude-` model or a `cost_usd`, and the only manifest
+change is the source snapshot, which gains `paper/evidence/llm_pricing.py`,
+loses nothing, and rebinds. No artifact digest changes.
 
 ### 7d. A replay was screened by a shorter rule than a fresh answer
 
@@ -856,6 +912,52 @@ against a price list: this repair changes which card is selected and what
 happens when none is, not whether the numbers in the table are right. The two
 pricing tables, in the shim and in the assembler, are still separate literals
 that a future edit could desynchronize; the duplication is stated rather than
-prevented. And the refusal is at startup on the requested model: it rests on
+prevented. (Closed by 7e: one table and one rule in a module both import, with a
+check that fails if either side grows a second. The rates themselves are still
+unverified against a price list.) And the refusal is at startup on the requested
+model: it rests on
 `effective_model` binding the served id to the requested one, which is argued
 from that function rather than observed against a provider.
+
+## Verification, section 7e (2026-09-11)
+
+Python, CI wiring and prose only. No Rust file was touched and no recorded value
+moved, so the workspace suites are unaffected and were not re-run for it.
+
+| Command | Exit |
+|---|---|
+| `python -m unittest paper/src/test_llm_pricing.py` (9 tests) | 0 |
+| `python -m unittest paper/src/test_llm_agent_budget.py paper/src/test_llm_agent_identity.py` (52 tests) | 0 |
+| `python -m unittest paper/src/test_provenance.py` | 0 |
+| `python -m unittest paper/src/test_sweep_grid.py` | 0 |
+| `python paper/src/check-provenance.py` | 0 |
+
+Mutations were applied in an isolated copy of the tree under the session
+scratchpad, never in the worktree. Each file was restored from a pre-mutation
+copy and confirmed byte-identical with `cmp` before the next mutation, and the
+worktree copies were compared against those originals afterwards and are
+identical.
+
+The assertion this check makes is one several unrelated causes could also
+satisfy: the assembler has four other gates that exit non-zero (empty records,
+the model set, the dataset set, the incompleteness check), and a pricing suite
+can go red for a broken fixture. So each case below changes one side alone, and
+what is recorded is which cases failed and what the message said, not the exit
+code. The structural cases fail on a message naming the file, the line and the
+difference; the run-time cases are held apart from a broken fixture by a control
+that assembles the same fixture on the unmodified table.
+
+| Mutation (one side only) | Observed |
+|---|---|
+| the assembler regains its own `PRICING`, with `claude-opus-5` at 7.00e-6 input | 1 of 9 fails, `test_neither_consumer_carries_its_own_rate_card`: "pricing drift: paper/evidence/assemble_llm_field.py:42 defines its own PRICING table; it already disagrees with the shared table at claude-opus-5: (7e-06, 2.5e-05) here, (5e-06, 2.5e-05) in the shared table" |
+| the assembler regains its own `PRICING` with a model added (`claude-sonnet-9`) | 1 of 9 fails, the same case: "claude-sonnet-9: priced (3e-06, 1.5e-05) here, absent from the shared table" |
+| the shim regains its own `PRICING` with a model removed (`claude-opus-5`) | 1 of 9 fails, the same case: "examples/llm-agent/llm_agent.py:122 defines its own PRICING table; it already disagrees with the shared table at claude-opus-5: absent here, priced (5e-06, 2.5e-05) in the shared table" |
+| the assembler restates the acceptance rule (`SNAPSHOT_*` and `is_dated_snapshot_of`, at six digits) | 1 of 9 fails, `test_neither_consumer_restates_the_snapshot_rule`: "paper/evidence/assemble_llm_field.py:42 defines its own SNAPSHOT_SEPARATOR; the alias-expansion rule is paper/evidence/llm_pricing.py's, and a second copy can admit a served id the other side refuses" |
+| the assembler keeps the import but prices from a literal instead of `lookup_price` | 3 of 9 fail, all in `AssemblerReadsTheSharedTableTests`: the published total (7.5 against 15.0), the rate changed in the shared module (7.5 against 52.5), and the dropped model that no longer stops the assembly (exit 0 against 1). The control assembles, so the fixture is not what broke. This is the case that makes the import load-bearing rather than decorative |
+| the shim keeps the import but prices from a literal instead of `lookup_price` | 2 of 26 in the budget suite: `test_the_rate_card_is_matched_by_the_model_identity_rule` fails with "pricing drift: the run priced a served id the shared rule no longer admits, so it is pricing from something other than paper/evidence/llm_pricing.py", and the extending-name case errors incidentally. The first is the isolating one: narrowing `SNAPSHOT_DIGITS` in the shared module has to change what the shim prices |
+
+**Not established.** The rates in the table are still unverified against a
+published price list; this closes the question of whether the two sides agree,
+not whether either is right. No provider was called and no field was run. And
+the two consumers are checked, not every possible one: a third file that priced
+a call would have to be added to `CONSUMERS` in the check by whoever writes it.

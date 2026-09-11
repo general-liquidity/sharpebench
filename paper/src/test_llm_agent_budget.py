@@ -575,16 +575,35 @@ class ModelPricingTests(CallCeilingCase):
                     shim.price_for(extended)
 
     def test_the_rate_card_is_matched_by_the_model_identity_rule(self):
-        """One rule, not two. `price_for` accepts a dated snapshot because
-        `is_dated_snapshot_of` says it is the same policy, so narrowing that
-        rule narrows the pricing match with it."""
+        """One rule, not two, and one table, in `paper/evidence/llm_pricing.py`.
+
+        `price_for` accepts a dated snapshot because `is_dated_snapshot_of` says
+        it is the same policy, so narrowing that rule narrows the pricing match
+        with it. Narrowing it in the shared module is also what shows this run
+        prices from that module rather than from a copy of it: the assembler
+        that publishes the cost reads the same file, so neither can price a
+        model the other refuses. That the files carry no second copy is checked
+        without the SDK in `paper/src/test_llm_pricing.py`.
+        """
         shim = load_shim(self.tmp.name)
+        pricing = sys.modules[shim.lookup_price.__module__]
         self.assertEqual(
             shim.price_for("claude-haiku-4-5-20251001"),
-            shim.PRICING["claude-haiku-4-5"],
+            pricing.PRICING["claude-haiku-4-5"],
         )
-        shim.SNAPSHOT_DIGITS = 6
-        with self.assertRaises(shim.UnpricedModel):
+        self.assertIs(shim.PRICING, pricing.PRICING)
+        digits = pricing.SNAPSHOT_DIGITS
+        self.addCleanup(setattr, pricing, "SNAPSHOT_DIGITS", digits)
+        pricing.SNAPSHOT_DIGITS = 6
+        with self.assertRaises(
+            shim.UnpricedModel,
+            msg=(
+                "pricing drift: the run priced a served id the shared rule no longer "
+                "admits, so it is pricing from something other than "
+                "paper/evidence/llm_pricing.py, which is what the assembler publishes "
+                "from"
+            ),
+        ):
             shim.price_for("claude-haiku-4-5-20251001")
 
     def test_the_requested_model_the_field_runs_is_priced(self):
@@ -605,13 +624,22 @@ class AssemblerPricingTests(unittest.TestCase):
     """
 
     ASSEMBLER = ROOT / "paper/evidence/assemble_llm_field.py"
+    PRICING_MODULE = ROOT / "paper/evidence/llm_pricing.py"
 
     def assemble(self, cache_model):
-        """Run the assembler over one response cache named for `cache_model`."""
+        """Run the assembler over one response cache named for `cache_model`.
+
+        The rate card travels with the script: it is the same
+        `paper/evidence/llm_pricing.py` the shim prices by, imported from beside
+        the assembler, so this fixture is the pair of files rather than one.
+        """
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         script = Path(tmp.name) / "assemble_llm_field.py"
         script.write_text(self.ASSEMBLER.read_text(encoding="utf-8"), encoding="utf-8")
+        (Path(tmp.name) / "llm_pricing.py").write_text(
+            self.PRICING_MODULE.read_text(encoding="utf-8"), encoding="utf-8"
+        )
         final = Path(tmp.name) / "final"
         final.mkdir()
         (final / "llm-field-records-all.jsonl").write_text(

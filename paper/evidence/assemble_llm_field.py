@@ -19,58 +19,47 @@ Run from the repo root after the field run:
 """
 
 import json
+import sys
 from pathlib import Path
 
-FINAL = Path(__file__).resolve().parent / "final"
+HERE = Path(__file__).resolve().parent
+FINAL = HERE / "final"
 RECORDS = FINAL / "llm-field-records-all.jsonl"
 STATS_DIR = FINAL / "llm-stats"
 OUT = FINAL / "llm-field.jsonl"
 
-# First-party API pricing, USD per token (input, output), by model alias. A
-# cache file may name the alias or the dated snapshot the provider expanded it
-# into, and nothing else: `examples/llm-agent/llm_agent.py` refuses to record a
-# decision under any other served id.
-PRICING = {
-    "claude-fable-5": (10.00e-6, 50.00e-6),
-    "claude-opus-5": (5.00e-6, 25.00e-6),
-    "claude-haiku-4-5": (1.00e-6, 5.00e-6),
-}
-# The alias expansion the provider makes: one hyphen and eight digits. The rule
-# is stated in the shim (`is_dated_snapshot_of`) and restated here rather than
-# imported, because importing the shim would pull the Anthropic SDK into an
-# assembler that reads only files. The two must agree; a model the shim prices
-# and this one does not now stops the assembly instead of publishing a zero.
-SNAPSHOT_SEPARATOR = "-"
-SNAPSHOT_DIGITS = 8
+# The rate card, the alias-expansion rule and the acceptance decision, shared
+# with `examples/llm-agent/llm_agent.py`, which meters the run this file
+# publishes. Both were restated here once, because importing the shim would pull
+# the Anthropic SDK into an assembler that reads only files, and the two copies
+# could then be edited apart: a model priced by one side and refused by the
+# other, or priced differently by each. `llm_pricing` imports nothing at all, so
+# sharing it carries nothing into either side. `paper/src/test_llm_pricing.py`
+# fails if this file or the shim grows a second table or a second rule.
+sys.path.insert(0, str(HERE))
+from llm_pricing import PRICING, lookup_price  # noqa: E402
 
 if not RECORDS.exists() or not RECORDS.read_text(encoding="utf-8").strip():
     raise SystemExit("refusing to assemble: score record file is empty")
 
 
-def is_dated_snapshot_of(alias, model):
-    prefix = alias + SNAPSHOT_SEPARATOR
-    if not model.startswith(prefix):
-        return False
-    snapshot = model[len(prefix):]
-    return (
-        len(snapshot) == SNAPSHOT_DIGITS and snapshot.isascii() and snapshot.isdigit()
-    )
-
-
 def price_for(model):
     """The rate card for `model`, or a refusal to assemble the field.
 
-    Matched exactly or as a dated snapshot of a priced alias. Two fail-open
-    behaviours are gone. A prefix walk billed a model whose name extends a
-    priced one at the other model's card, and an unknown model fell back to
-    `(0.0, 0.0)`, so the assembled field published a `cost_usd` of 0 for calls
-    that were billed. This file's whole job is to publish what the field spent,
-    and a plausible wrong number is worse there than no field at all: every
-    other incompleteness here refuses the same way.
+    A cache file may name a priced alias or the dated snapshot the provider
+    expanded it into, and nothing else: the shim refuses to record a decision
+    under any other served id, and `lookup_price` admits exactly those two.
+
+    Two fail-open behaviours are gone. A prefix walk billed a model whose name
+    extends a priced one at the other model's card, and an unknown model fell
+    back to `(0.0, 0.0)`, so the assembled field published a `cost_usd` of 0 for
+    calls that were billed. This file's whole job is to publish what the field
+    spent, and a plausible wrong number is worse there than no field at all:
+    every other incompleteness here refuses the same way.
     """
-    for alias, p in PRICING.items():
-        if model == alias or is_dated_snapshot_of(alias, model):
-            return p
+    rate = lookup_price(model)
+    if rate is not None:
+        return rate
     raise SystemExit(
         f"refusing to assemble: no rate card for {model}; PRICING names "
         f"{sorted(PRICING)}. A model absent from the table has no cost this "

@@ -12,6 +12,12 @@ and links the commits it was built from.
 
 ## [Unreleased]
 
+### Changed
+- llm field: the rate card, the alias-expansion rule and the acceptance decision move to `paper/evidence/llm_pricing.py`, imported by both files that price a call. `examples/llm-agent/llm_agent.py` and `paper/evidence/assemble_llm_field.py` each carried a literal copy of the table and a restatement of the rule, recorded as a limit when the second was written: the rule was restated rather than imported because importing the shim would pull the Anthropic SDK into an assembler that reads only files, so two tables and two copies of one rule could be edited apart and a model could be priced by one side and refused by the other, or priced differently by each. They agreed at the time, checked before anything changed: the same three models at the same rates, the same eight-digit snapshot rule. The shared module imports nothing, so it carries nothing into either side; each file keeps its own refusal, `UnpricedModel` before the first observation in the shim and `SystemExit` in the assembler. Nothing about which models are priced, at what rates, or which served ids count as one of them has changed, so no computed cost moves. An operator adding a rate card now edits one file. See A8 in the [accounting review](docs/audits/2026-09-09/ACCOUNTING-REVIEW.md) and section 7e of [inherited repairs](docs/audits/2026-09-09/INHERITED-REPAIRS.md).
+
+### Added
+- llm field: `paper/src/test_llm_pricing.py` fails when either consumer grows its own pricing table, its own snapshot constants or its own matching rule, naming the file, the line and how the copy differs from the shared table, and drives the assembler as a subprocess against a mutated shared module so that importing it is load-bearing rather than decorative. It runs in the `paper-provenance` CI job, which installs nothing: comparing two price lists has no use for the SDK that `llm-shim` pins, and the check never imports the shim.
+
 ## [0.24.0] - 2026-09-11
 
 ### Breaking

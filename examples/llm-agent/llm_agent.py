@@ -37,7 +37,11 @@ the run before the first observation is read. A prefix walk returning
 `(0.0, 0.0)` for an unknown model reported every call of such a run as free,
 and a plausible wrong number is worse than an absence for a benchmark that
 publishes what an agent spent. It also let a model whose name extends a priced
-one be billed at the other model's card.
+one be billed at the other model's card. The table, the snapshot rule and the
+acceptance decision live in `paper/evidence/llm_pricing.py`, shared with the
+assembler that publishes the cost, so the metering here and the published
+number cannot disagree about what a model costs or about which models are
+priced at all.
 
 Determinism and cost controls:
   - temperature 0 where the API accepts it; the summarization is a pure
@@ -107,6 +111,14 @@ from pathlib import Path
 
 import anthropic
 
+# The rate card is shared with the assembler that publishes what the field
+# spent, so the two cannot price a model differently or disagree about which
+# models are priced at all. Located relative to this file rather than assumed to
+# be on the path: the harness spawns this script from the repository root, and
+# the regressions import it by file location.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "paper" / "evidence"))
+from llm_pricing import PRICING, is_dated_snapshot_of, lookup_price  # noqa: E402
+
 _START_NS = time.time_ns()
 
 MODEL = sys.argv[1] if len(sys.argv) > 1 else os.environ.get(
@@ -146,19 +158,6 @@ ATTEMPTS_PATH = CACHE_DIR / f"llm-attempts-{MODEL}.jsonl"
 # read of the count and the append that spends against it are one step.
 LEDGER_LOCK_PATH = CACHE_DIR / f"llm-attempts-{MODEL}.jsonl.lock"
 STATS_DIR = Path(os.environ.get("LLM_STATS_DIR", HERE / "stats"))
-# The separator and the width of a dated snapshot the provider expands a
-# requested alias into. Every alias/pinned pair the SDK's own `Message.model`
-# literal enumerates has this shape: claude-haiku-4-5-20251001,
-# claude-opus-4-5-20251101, claude-sonnet-4-5-20250929, claude-opus-4-1-20250805.
-SNAPSHOT_SEPARATOR = "-"
-SNAPSHOT_DIGITS = 8
-
-# First-party API pricing, USD per token (input, output).
-PRICING = {
-    "claude-fable-5": (10.00e-6, 50.00e-6),
-    "claude-opus-5": (5.00e-6, 25.00e-6),
-    "claude-haiku-4-5": (1.00e-6, 5.00e-6),
-}
 
 
 class UnpricedModel(RuntimeError):
@@ -180,6 +179,11 @@ class UnpricedModel(RuntimeError):
 def price_for(model):
     """The rate card for `model`, by the rule that decides model identity.
 
+    The table and the match are `paper/evidence/llm_pricing.py`'s, shared with
+    the assembler that publishes the number, so a model this run prices is a
+    model the field prices at the same rates. What stays here is the refusal:
+    the run cannot continue on a call it cannot price.
+
     Matched exactly, or as a dated snapshot of a priced alias, which is the one
     expansion the provider makes and the same rule `is_dated_snapshot_of`
     states. A prefix walk took any continuation, so a model whose name extends a
@@ -189,9 +193,9 @@ def price_for(model):
     first. That is the model-identity defect in the accounting, and it is
     repaired the same way.
     """
-    for alias, p in PRICING.items():
-        if model == alias or is_dated_snapshot_of(alias, model):
-            return p
+    rate = lookup_price(model)
+    if rate is not None:
+        return rate
     raise UnpricedModel(
         f"no rate card for {model}: PRICING names {sorted(PRICING)}, and a "
         "model absent from it has no cost this run can state. Reporting zero "
@@ -594,35 +598,6 @@ def hold(reason, cost=None):
     if cost:
         d["cost"] = cost
     return d
-
-
-def is_dated_snapshot_of(requested, served):
-    """Whether `served` is `requested` pinned to a dated snapshot of itself.
-
-    The rule is taken from what the provider returns, not from what a served id
-    happens to start with. An alias expands into the same alias followed by one
-    hyphen and an eight-digit date, and that is the only remainder the API
-    appends: `claude-haiku-4-5` -> `claude-haiku-4-5-20251001`,
-    `claude-opus-4-5` -> `claude-opus-4-5-20251101`, `claude-sonnet-4-5` ->
-    `claude-sonnet-4-5-20250929`, `claude-opus-4-1` -> `claude-opus-4-1-20250805`.
-    Those four pairs are the alias/pinned pairs the installed SDK's own
-    `Message.model` literal enumerates.
-
-    So any other continuation is a different model, not a more precise name for
-    the requested one: `-mini` is not a date, and neither is a truncated or
-    padded one. The rule is deliberately narrower than the provider's whole
-    namespace. Two deprecated aliases rebind rather than expand
-    (`claude-sonnet-4-0` is served as `claude-sonnet-4-20250514`), and this
-    refuses those; refusing a policy that is arguably the requested one costs a
-    run, while accepting one that is not publishes the wrong identity.
-    """
-    prefix = requested + SNAPSHOT_SEPARATOR
-    if not served.startswith(prefix):
-        return False
-    snapshot = served[len(prefix):]
-    return (
-        len(snapshot) == SNAPSHOT_DIGITS and snapshot.isascii() and snapshot.isdigit()
-    )
 
 
 def is_requested_policy(served):
