@@ -1395,17 +1395,23 @@ mod tests {
     /// the rename fail, on Windows and on Unix alike.
     struct SabotageJournal {
         path: PathBuf,
-        sabotaged: bool,
+        /// What was at the journal path when it was taken away, so a test can
+        /// put it back exactly and separate the latch from a fresh failure.
+        removed: std::sync::Arc<std::sync::Mutex<Option<String>>>,
     }
 
     impl ProviderTransport for SabotageJournal {
         fn call(&mut self, _call: ProviderCall<'_>) -> ProviderOutcome {
-            if !self.sabotaged {
-                std::fs::remove_file(&self.path)
-                    .expect("the reservation was on disk before the call started");
+            let mut removed = self.removed.lock().expect("the mutex holds");
+            if removed.is_none() {
+                *removed = Some(
+                    std::fs::read_to_string(&self.path)
+                        .expect("the reservation was on disk before the call started"),
+                );
+                std::fs::remove_file(&self.path).expect("the journal file goes");
                 std::fs::create_dir(&self.path).expect("a directory where the journal was");
-                self.sabotaged = true;
             }
+            drop(removed);
             ProviderOutcome::Answered {
                 status: 200,
                 body: body("ok", Some((10, 5))),
@@ -2758,12 +2764,13 @@ mod tests {
         let path = dir.join("journal.json");
         let routes = table("2026-01-01");
         let permits = CallPermits::new(4);
+        let removed = std::sync::Arc::new(std::sync::Mutex::new(None));
         let mut gateway = ModelGateway::open(
             &routes,
             &permits,
             SabotageJournal {
                 path: path.clone(),
-                sabotaged: false,
+                removed: std::sync::Arc::clone(&removed),
             },
             budget(u128::MAX, 8),
             GatewayLimits::default(),
@@ -2791,11 +2798,24 @@ mod tests {
             "the settlement the file is missing is still in memory"
         );
 
+        // Put back exactly what was taken away. The path is writable again, so
+        // what refuses the next call is the latch and nothing else.
+        std::fs::remove_dir(&path).expect("the directory goes");
+        std::fs::write(
+            &path,
+            removed
+                .lock()
+                .expect("the mutex holds")
+                .as_ref()
+                .expect("the journal was read before it was taken away"),
+        )
+        .expect("the journal is back, byte for byte");
+
         let next = parse(&gateway.serve_line(&request("hello", 16)));
         assert_eq!(
             next.error.expect("error").kind,
             GatewayErrorKind::JournalUnwritable,
-            "a gateway whose record is incomplete starts no further call"
+            "a gateway whose record is incomplete starts no further call, even once the file is writable again"
         );
         assert_eq!(
             gateway.dispatches(),
