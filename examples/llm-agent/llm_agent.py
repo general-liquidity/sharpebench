@@ -26,7 +26,18 @@ different policy answering under the requested name and fails the subprocess.
 A reply that names no model at all fails too, because `Message.model` is a
 required field of this API and an identity that was never stated cannot be
 published as the requested one. Both identities are recorded on every cached
-decision, so a replay states which model actually answered.
+decision, so a replay states which model actually answered, and the served one
+is screened on the way back in by the same rule that admitted it: a cached
+record naming a model this scaffold would refuse today is dropped rather than
+replayed.
+
+Pricing: the rate card is matched by that same identity rule, exactly or as a
+dated snapshot of a priced alias, and a model the table does not name refuses
+the run before the first observation is read. A prefix walk returning
+`(0.0, 0.0)` for an unknown model reported every call of such a run as free,
+and a plausible wrong number is worse than an absence for a benchmark that
+publishes what an agent spent. It also let a model whose name extends a priced
+one be billed at the other model's card.
 
 Determinism and cost controls:
   - temperature 0 where the API accepts it; the summarization is a pure
@@ -150,11 +161,57 @@ PRICING = {
 }
 
 
+class UnpricedModel(RuntimeError):
+    """No rate card names this model, so what its calls cost is not known.
+
+    Raised rather than answered with a zero. The benchmark publishes what an
+    agent spent, and a zero for a model the table does not price is a plausible
+    wrong number where the project records an unavailability: the Rust side
+    answers an unknowable cost with `MonetarySummary::Unavailable` and a reason,
+    never with an amount (`crates/sharpebench-harness/src/accounting.rs`). This
+    shim has no such channel. Its statistics file carries a single `cost_usd`
+    that `paper/evidence/assemble_llm_field.py` sums, so the only way it can
+    decline to state a number is to not produce the run. The model is the
+    operator's choice and the table is in this file, so a missing rate card is
+    an operator error, knowable before any money moves.
+    """
+
+
 def price_for(model):
-    for prefix, p in PRICING.items():
-        if model.startswith(prefix):
+    """The rate card for `model`, by the rule that decides model identity.
+
+    Matched exactly, or as a dated snapshot of a priced alias, which is the one
+    expansion the provider makes and the same rule `is_dated_snapshot_of`
+    states. A prefix walk took any continuation, so a model whose name extends a
+    priced one was billed at the other model's card: `claude-opus-5-1` would
+    have been priced as `claude-opus-5`, and a table gaining a `claude-haiku-4`
+    would price every `claude-haiku-4-5` at whichever key the walk reached
+    first. That is the model-identity defect in the accounting, and it is
+    repaired the same way.
+    """
+    for alias, p in PRICING.items():
+        if model == alias or is_dated_snapshot_of(alias, model):
             return p
-    return (0.0, 0.0)
+    raise UnpricedModel(
+        f"no rate card for {model}: PRICING names {sorted(PRICING)}, and a "
+        "model absent from it has no cost this run can state. Reporting zero "
+        "would publish a call that was billed as free. Add the model's rate "
+        "card or run a model the table prices"
+    )
+
+
+def assert_model_is_priced():
+    """Refuse the run unless the requested policy has a rate card.
+
+    Checked before the first observation is read, so a missing rate card costs
+    nothing rather than being discovered after a field's worth of calls has been
+    billed and cannot be priced. The served id is bound to the requested one by
+    `effective_model`, which admits only the requested id or a dated snapshot of
+    it, and `price_for` matches on exactly that rule, so a requested model this
+    prices is a served model it prices too. `price_for` still refuses on its own
+    path rather than trusting that argument.
+    """
+    price_for(REQUESTED_MODEL)
 
 
 SYSTEM = (
@@ -239,6 +296,15 @@ def load_cache():
     digest is not its own key, was taken under a configuration this process is
     not running. It is dropped rather than replayed, and counted so the drop is
     reported instead of silent.
+
+    The served identity is screened here by `is_requested_policy`, the same
+    function `effective_model` accepts a fresh reply with, so a record naming a
+    model this scaffold would refuse today is not resurrected by replaying it.
+    This scaffold cannot write such a record, which bounds the case to a cache
+    file from somewhere else, and the request digest still has to match a
+    request for the requested model; but a replay is a published decision, and
+    it is screened by the rule that governs a fresh one rather than by a shorter
+    one.
     """
     cache = {}
     if CACHE_PATH.exists():
@@ -257,6 +323,7 @@ def load_cache():
                     rec.get("scaffold_version") != SCAFFOLD_VERSION
                     or rec.get("request_sha256") != key
                     or rec.get("model_requested") != REQUESTED_MODEL
+                    or not is_requested_policy(rec.get("model_effective"))
                 ):
                     STATS["cache_records_ignored"] += 1
                     continue
@@ -558,6 +625,24 @@ def is_dated_snapshot_of(requested, served):
     )
 
 
+def is_requested_policy(served):
+    """Whether `served` names the policy this run publishes.
+
+    The single statement of the rule. `effective_model` applies it to the id an
+    API reply carries and `load_cache` to the id a stored decision carries, so a
+    served model refused on the writing path cannot be admitted on the replaying
+    one. Two copies of the rule would be free to drift apart, and a replay
+    screened by a stale copy resurrects exactly what the fresh path refuses.
+
+    `None` is not the requested policy. `Message.model` is required on this API,
+    and a cached record whose `model_effective` is absent or null states no
+    identity at all, which is the same absence `effective_model` refuses.
+    """
+    if not isinstance(served, str):
+        return False
+    return served == REQUESTED_MODEL or is_dated_snapshot_of(REQUESTED_MODEL, served)
+
+
 def effective_model(response):
     """The id the API says answered, and whether it is the policy requested.
 
@@ -581,7 +666,7 @@ def effective_model(response):
             "answered, so an absent id is not evidence that the requested "
             "policy did, and the field pins policy identity to the requested model"
         )
-    if served == REQUESTED_MODEL or is_dated_snapshot_of(REQUESTED_MODEL, served):
+    if is_requested_policy(served):
         return served
     raise RuntimeError(
         f"model substitution: requested {REQUESTED_MODEL}, served {served}; "
@@ -675,6 +760,11 @@ def main(client=None):
     # client's setting a second time costs one attribute lookup.
     client = client if client is not None else build_client()
     assert_no_provider_retries(client)
+    # Beside the retry guard for the same reason: a run whose calls cannot be
+    # priced must not start, rather than bill a field and then report it as
+    # free. Both are established before the first observation is read, when
+    # refusing is still free.
+    assert_model_is_priced()
     cache = load_cache()
     STATS["calls_reserved"] = load_attempt_count()
     step = 0

@@ -26,6 +26,8 @@ and are named for it.
 | A7 | Fixed. A save whose rename landed no longer rewinds its version, so the sole owner's I/O fault is published as `journal_unwritable` rather than as `journal_ownership_lost` |
 | A4 | Fixed, separately from this branch. `main` checks the retry setting of whatever client it will use, so a caller-supplied one is on the same footing as one the run builds, and the ceiling case that drives a real SDK client now runs through the check rather than around it |
 | A5 | Fixed, separately from this branch. The case's recording constructor reports a compliant setting whatever it was built with, so removing the keyword it names fails its own assertion instead of erroring inside the driver |
+| A8 | Fixed, separately from this branch. An unpriced model refuses the run before the first observation is read, and the rate card is matched by the model-identity rule rather than by a prefix walk. The assembler that publishes the number refuses the same way |
+| A9 | Fixed, separately from this branch. A replay is screened by `is_requested_policy`, the one function that also admits a fresh reply, so a record naming a served model this scaffold would refuse is dropped rather than resurrected |
 
 ## Findings
 
@@ -602,6 +604,76 @@ panicked at crates\sharpebench-harness\src\gateway.rs:2885:9:
   left: JournalOwnershipLost
  right: JournalUnwritable
 ```
+
+### A8. An unpriced model reports its calls as free
+
+Severity: medium. A plausible wrong number published as what a run spent, on the
+producer behind the money column.
+
+Found while repairing A4, reported in section 6 of
+[inherited repairs](INHERITED-REPAIRS.md) and left for a decision rather than
+fixed silently.
+
+`examples/llm-agent/llm_agent.py:153-157`
+
+```python
+def price_for(model):
+    for prefix, p in PRICING.items():
+        if model.startswith(prefix):
+            return p
+    return (0.0, 0.0)
+```
+
+Two fail-open behaviours in five lines.
+
+The fallback answers a model the table does not name with a zero rate card, so
+every call of such a run priced at nothing, `STATS["cost_usd"]` stayed 0.0 and
+that zero was what the field reported as spend. For a benchmark that prices what
+an agent spent, a plausible zero is worse than an absence: a reader has no way
+to tell it from a run that really cost nothing.
+
+The prefix walk is the model-identity defect in the accounting. It takes any
+continuation, so a model whose name extends a priced one is billed at the other
+model's card: `claude-opus-5-1` prices as `claude-opus-5`, at half the input
+rate, and a table gaining a `claude-haiku-4` would price every
+`claude-haiku-4-5` at whichever key `dict` iteration reached first. That is the
+same shape as the served-id prefix acceptance already repaired in
+`effective_model`, in the file that repaired it.
+
+`paper/evidence/assemble_llm_field.py:39-44` carried an independent copy of both,
+and it is the script that writes the published `cost_usd`.
+
+**Disposition: fixed, 2026-09-11.** Refusal, not a recorded unavailability, and
+the reasoning is in section 7 of [inherited repairs](INHERITED-REPAIRS.md). The
+rate card is matched by `is_dated_snapshot_of`, the rule that decides model
+identity, and an unpriced model raises `UnpricedModel`. `main` establishes it
+through `assert_model_is_priced` before the first observation is read, beside
+the retry guard, so the refusal costs nothing rather than arriving after a field
+has been billed. The assembler refuses the same way, as `SystemExit`, which is
+how every other incompleteness in that script refuses.
+
+### A9. A replay is screened by a shorter rule than a fresh answer
+
+Severity: low, and bounded. Reachable only through a cache file this scaffold
+did not write.
+
+Also found while repairing A4 and reported with it.
+`effective_model` refuses a served id that is not the requested policy, and
+`record_decision` stamps `model_effective` on every record, but `load_cache`
+screened a record on `scaffold_version`, `request_sha256` equal to its own key
+and `model_requested`, and not on `model_effective`. A record naming a served
+model this scaffold would refuse today was replayed rather than dropped.
+
+The bound is real: this scaffold cannot write such a record, so it takes a
+foreign or hand-edited cache file, and the request digest must still match a
+request for the requested model. It is the same shape as A4 either way, a check
+on the writing path and not on the reading one, and a replayed decision is
+published exactly as a fresh one is.
+
+**Disposition: fixed, 2026-09-11.** The rule moved into `is_requested_policy`,
+which `effective_model` and `load_cache` both call, so the replay screen is the
+rule rather than a copy of it that can drift. A record whose `model_effective`
+is absent or null is dropped too, the same absence `effective_model` refuses.
 
 ## Claims checked and found sound
 

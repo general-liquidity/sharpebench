@@ -26,22 +26,56 @@ RECORDS = FINAL / "llm-field-records-all.jsonl"
 STATS_DIR = FINAL / "llm-stats"
 OUT = FINAL / "llm-field.jsonl"
 
-# First-party API pricing, USD per token (input, output), by model prefix.
+# First-party API pricing, USD per token (input, output), by model alias. A
+# cache file may name the alias or the dated snapshot the provider expanded it
+# into, and nothing else: `examples/llm-agent/llm_agent.py` refuses to record a
+# decision under any other served id.
 PRICING = {
     "claude-fable-5": (10.00e-6, 50.00e-6),
     "claude-opus-5": (5.00e-6, 25.00e-6),
     "claude-haiku-4-5": (1.00e-6, 5.00e-6),
 }
+# The alias expansion the provider makes: one hyphen and eight digits. The rule
+# is stated in the shim (`is_dated_snapshot_of`) and restated here rather than
+# imported, because importing the shim would pull the Anthropic SDK into an
+# assembler that reads only files. The two must agree; a model the shim prices
+# and this one does not now stops the assembly instead of publishing a zero.
+SNAPSHOT_SEPARATOR = "-"
+SNAPSHOT_DIGITS = 8
 
 if not RECORDS.exists() or not RECORDS.read_text(encoding="utf-8").strip():
     raise SystemExit("refusing to assemble: score record file is empty")
 
 
+def is_dated_snapshot_of(alias, model):
+    prefix = alias + SNAPSHOT_SEPARATOR
+    if not model.startswith(prefix):
+        return False
+    snapshot = model[len(prefix):]
+    return (
+        len(snapshot) == SNAPSHOT_DIGITS and snapshot.isascii() and snapshot.isdigit()
+    )
+
+
 def price_for(model):
-    for prefix, p in PRICING.items():
-        if model.startswith(prefix):
+    """The rate card for `model`, or a refusal to assemble the field.
+
+    Matched exactly or as a dated snapshot of a priced alias. Two fail-open
+    behaviours are gone. A prefix walk billed a model whose name extends a
+    priced one at the other model's card, and an unknown model fell back to
+    `(0.0, 0.0)`, so the assembled field published a `cost_usd` of 0 for calls
+    that were billed. This file's whole job is to publish what the field spent,
+    and a plausible wrong number is worse there than no field at all: every
+    other incompleteness here refuses the same way.
+    """
+    for alias, p in PRICING.items():
+        if model == alias or is_dated_snapshot_of(alias, model):
             return p
-    return (0.0, 0.0)
+    raise SystemExit(
+        f"refusing to assemble: no rate card for {model}; PRICING names "
+        f"{sorted(PRICING)}. A model absent from the table has no cost this "
+        "field can state, and reporting zero would publish billed calls as free"
+    )
 
 
 per_model = {}

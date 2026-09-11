@@ -36,6 +36,14 @@ and a second reservation is refused rather than silently sharing a unit. And a
 malformed reply's record carried its tokens but not its cost, so replaying that
 decision reported a billed call as free.
 
+A later review added one more, about what a call cost rather than how many were
+made. `price_for` walked the pricing table by prefix and answered `(0.0, 0.0)`
+for a model no entry matched, so a run on an unpriced model reported every call
+as free and that zero was published as its spend; the prefix walk also billed a
+model whose name extends a priced one at the other model's card. The rate card
+is now matched by the model-identity rule, exactly or as a dated snapshot, and
+an unpriced model refuses the run before the first observation is read.
+
 The pin protects CI, not a paid run, which imports whatever the operator has.
 That is what `assert_no_provider_retries` is for, and three cases here drive the
 refusal rather than the happy path: a client that accepts `max_retries` and
@@ -53,6 +61,7 @@ import importlib.util
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import threading
@@ -73,7 +82,7 @@ OBSERVATION = {
 }
 
 
-def load_shim(tmp, max_calls="1"):
+def load_shim(tmp, max_calls="1", model=MODEL):
     """Import the shim as a fresh module bound to a throwaway cache directory.
 
     Re-importing against the same directory is how a harness retry is modeled:
@@ -81,7 +90,7 @@ def load_shim(tmp, max_calls="1"):
     """
     argv = sys.argv
     environ = dict(os.environ)
-    sys.argv = ["llm_agent.py", MODEL]
+    sys.argv = ["llm_agent.py", model]
     os.environ["LLM_CACHE_DIR"] = str(tmp)
     os.environ["LLM_STATS_DIR"] = str(Path(tmp) / "stats")
     os.environ["LLM_MAX_CALLS"] = max_calls
@@ -117,6 +126,20 @@ class Response:
         self.content = [Block(text)]
         self.stop_reason = "end_turn"
         self.usage = Usage()
+
+
+class ReplyUnder(Response):
+    """A usable reply carrying a chosen served id.
+
+    The pricing cases run under models other than `MODEL`, and the identity rule
+    would refuse a reply naming a different one. Answering under the requested
+    id takes that cause off the table, so a pricing case that is not refused
+    completes and fails on its own assertion.
+    """
+
+    def __init__(self, model, text='{"orders":[]}'):
+        super().__init__(text)
+        self.model = model
 
 
 class Client:
@@ -478,6 +501,153 @@ class MalformedCostTests(CallCeilingCase):
         out = drive(replay, Client([]))
         self.assertIn("protocol_error", json.loads(out.strip()))
         self.assertEqual(replay.STATS["cache_hits"], 1)
+
+
+class ModelPricingTests(CallCeilingCase):
+    """A call this run cannot price is refused, never reported as free.
+
+    `price_for` walked `PRICING` by prefix and returned `(0.0, 0.0)` when
+    nothing matched, so a run on a model absent from the table reported every
+    call as costing nothing and that zero was published as what the run spent.
+    The prefix walk also billed a model whose name extends a priced one at the
+    other model's card.
+    """
+
+    def test_an_unpriced_model_refuses_the_run_before_anything_is_dispatched(self):
+        """The named cause is the missing rate card, and nothing else here can
+        refuse this run.
+
+        Four other causes could raise from `drive` and each is excluded rather
+        than assumed:
+
+          * the retry guard: the stand-in reports the compliant setting, and the
+            control below is refused by nothing while reporting the same one;
+          * a stand-in too thin to dispatch: the control drives the same client
+            class to a decision;
+          * the allowance: `LLM_MAX_CALLS` is 2 for one observation and the
+            ledger is asserted empty afterwards;
+          * the identity rule: the stand-in answers under the requested id, so
+            it has nothing to refuse.
+
+        The last assertion is what separates this refusal from every cause that
+        lives further down: the client was never called, so the run stopped
+        before the first observation was priced.
+        """
+        unpriced = "claude-not-a-model-9"
+        shim = load_shim(self.tmp.name, max_calls="2", model=unpriced)
+        client = Client([ReplyUnder(unpriced)])
+        with self.assertRaises(shim.UnpricedModel) as caught:
+            drive(shim, client)
+        self.assertIn(f"no rate card for {unpriced}", str(caught.exception))
+        self.assertEqual(client.requests, [], "the refusal precedes every dispatch")
+        self.assertEqual(self.ledger_lines(shim), [], "and spends no unit")
+
+    def test_the_control_is_a_priced_model_on_the_same_stand_in(self):
+        """What makes the case above about pricing: the same client, the same
+        allowance, the same observation, and a model the table prices runs to a
+        decision."""
+        shim = load_shim(self.tmp.name, max_calls="2")
+        client = Client([Response('{"orders":[]}')])
+        out = drive(shim, client)
+        self.assertEqual(json.loads(out.strip())["orders"], [])
+        self.assertEqual(len(client.requests), 1)
+        self.assertGreater(shim.STATS["cost_usd"], 0.0)
+
+    def test_a_name_that_extends_a_priced_model_is_not_billed_at_its_card(self):
+        """The prefix defect in the accounting.
+
+        `claude-opus-5-1` starts with `claude-opus-5` and is a different model.
+        Under the prefix walk it was priced at Opus 5's card, silently. Only
+        `price_for` can answer here, so nothing else needs excluding.
+        """
+        shim = load_shim(self.tmp.name)
+        opus = shim.PRICING["claude-opus-5"]
+        self.assertEqual(shim.price_for("claude-opus-5"), opus)
+        self.assertEqual(shim.price_for("claude-opus-5-20260101"), opus)
+        for extended in (
+            "claude-opus-5-1",
+            "claude-opus-5-1-20260101",
+            "claude-opus-5-mini",
+            "claude-opus-50",
+        ):
+            with self.subTest(model=extended):
+                with self.assertRaises(shim.UnpricedModel):
+                    shim.price_for(extended)
+
+    def test_the_rate_card_is_matched_by_the_model_identity_rule(self):
+        """One rule, not two. `price_for` accepts a dated snapshot because
+        `is_dated_snapshot_of` says it is the same policy, so narrowing that
+        rule narrows the pricing match with it."""
+        shim = load_shim(self.tmp.name)
+        self.assertEqual(
+            shim.price_for("claude-haiku-4-5-20251001"),
+            shim.PRICING["claude-haiku-4-5"],
+        )
+        shim.SNAPSHOT_DIGITS = 6
+        with self.assertRaises(shim.UnpricedModel):
+            shim.price_for("claude-haiku-4-5-20251001")
+
+    def test_the_requested_model_the_field_runs_is_priced(self):
+        """The table has to cover what the producer asks for, or the refusal
+        above would stop the field itself."""
+        shim = load_shim(self.tmp.name)
+        self.assertGreater(shim.price_for(shim.REQUESTED_MODEL)[0], 0.0)
+
+
+class AssemblerPricingTests(unittest.TestCase):
+    """The same fail-open, on the script that publishes the number.
+
+    `paper/evidence/assemble_llm_field.py` carried its own prefix walk and its
+    own `(0.0, 0.0)` fallback, so a response cache naming a model its table does
+    not price was assembled with `cost_usd` 0. It is a script rather than an
+    importable module, so it is exercised the way an operator runs it: a copy in
+    a temporary directory with a fabricated `final/` beside it.
+    """
+
+    ASSEMBLER = ROOT / "paper/evidence/assemble_llm_field.py"
+
+    def assemble(self, cache_model):
+        """Run the assembler over one response cache named for `cache_model`."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        script = Path(tmp.name) / "assemble_llm_field.py"
+        script.write_text(self.ASSEMBLER.read_text(encoding="utf-8"), encoding="utf-8")
+        final = Path(tmp.name) / "final"
+        final.mkdir()
+        (final / "llm-field-records-all.jsonl").write_text(
+            json.dumps({"agent_id": "llm-x", "model": cache_model, "dataset": "d"})
+            + "\n",
+            encoding="utf-8",
+        )
+        (final / f"llm-cache-{cache_model}.jsonl").write_text(
+            json.dumps({"tokens_in": 10, "tokens_out": 5}) + "\n", encoding="utf-8"
+        )
+        done = subprocess.run(
+            [sys.executable, str(script)], capture_output=True, text=True
+        )
+        return done.returncode, done.stdout + done.stderr
+
+    def test_an_unpriced_model_stops_the_assembly(self):
+        """Four other gates in that script can exit non-zero on this fixture:
+        the empty-records check, the model set, the dataset set and the
+        incompleteness check. Each of them states its own reason, so the
+        assertion is on the pricing refusal's message rather than on the exit
+        code, and the priced control below shows the fixture reaches those later
+        gates when the model is one the table names.
+        """
+        code, output = self.assemble("claude-not-a-model-9")
+        self.assertEqual(code, 1)
+        self.assertIn("no rate card for claude-not-a-model-9", output)
+
+    def test_a_priced_model_gets_past_pricing(self):
+        code, output = self.assemble(MODEL)
+        self.assertEqual(code, 1)
+        self.assertNotIn("no rate card", output)
+        self.assertIn("refusing to assemble: models", output)
+
+    def test_a_name_that_extends_a_priced_model_is_not_billed_at_its_card(self):
+        code, output = self.assemble("claude-opus-5-1")
+        self.assertIn("no rate card for claude-opus-5-1", output)
 
 
 class ProviderRequestTests(CallCeilingCase):
