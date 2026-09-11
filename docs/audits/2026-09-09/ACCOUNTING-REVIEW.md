@@ -26,7 +26,7 @@ and are named for it.
 | A7 | Fixed. A save whose rename landed no longer rewinds its version, so the sole owner's I/O fault is published as `journal_unwritable` rather than as `journal_ownership_lost` |
 | A4 | Fixed, separately from this branch. `main` checks the retry setting of whatever client it will use, so a caller-supplied one is on the same footing as one the run builds, and the ceiling case that drives a real SDK client now runs through the check rather than around it |
 | A5 | Fixed, separately from this branch. The case's recording constructor reports a compliant setting whatever it was built with, so removing the keyword it names fails its own assertion instead of erroring inside the driver |
-| A8 | Fixed, separately from this branch. An unpriced model refuses the run before the first observation is read, and the rate card is matched by the model-identity rule rather than by a prefix walk. The assembler that publishes the number refuses the same way |
+| A8 | Fixed, separately from this branch. An unpriced model refuses the run before the first observation is read, and the rate card is matched by the model-identity rule rather than by a prefix walk. The assembler that publishes the number refuses the same way, from the same rate card: the table and the rule are one module both import, and a check fails if either side grows a second |
 | A9 | Fixed, separately from this branch. A replay is screened by `is_requested_policy`, the one function that also admits a fresh reply, so a record naming a served model this scaffold would refuse is dropped rather than resurrected |
 
 ## Findings
@@ -651,6 +651,22 @@ through `assert_model_is_priced` before the first observation is read, beside
 the retry guard, so the refusal costs nothing rather than arriving after a field
 has been billed. The assembler refuses the same way, as `SystemExit`, which is
 how every other incompleteness in that script refuses.
+
+That repair left one thing open and recorded it: the assembler restated the rule
+and kept its own table, because importing the shim would have pulled the
+Anthropic SDK into a file reader, so two tables and two copies of one rule could
+be edited apart. **Closed, 2026-09-11**, and section 7e of
+[inherited repairs](INHERITED-REPAIRS.md) has the reasoning. They agreed at the
+time, checked before anything changed: the same three models, the same rates,
+the same eight-digit snapshot rule. The table, the rule and the acceptance
+decision now live in `paper/evidence/llm_pricing.py`, which imports nothing and
+so carries nothing into either side, and both files take them from there while
+keeping their own refusals. `paper/src/test_llm_pricing.py` fails if either side
+grows a second table or a second rule, naming the file, the line and how the
+copy differs, and drives the assembler against a mutated shared module so the
+import is load-bearing rather than decorative. It runs in the
+`paper-provenance` CI job, which installs nothing: comparing two price lists has
+no use for the SDK that `llm-shim` pins.
 
 ### A9. A replay is screened by a shorter rule than a fresh answer
 

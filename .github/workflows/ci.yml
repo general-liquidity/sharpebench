@@ -418,6 +418,14 @@ jobs:
         run: python -m unittest paper/src/test_provenance.py
       - name: Sweep coverage requires the declared grid, not row count
         run: python -m unittest paper/src/test_sweep_grid.py
+      # Here rather than in `llm-shim`, which pins the Anthropic SDK for the
+      # regressions that drive a real client. Nothing about two files agreeing on
+      # a price list needs a provider SDK: the shared rate card imports nothing,
+      # the assembler reads files, and this check never imports the shim. So it
+      # runs in the job that installs nothing, and keeps running if the pin ever
+      # goes away.
+      - name: The shim and the assembler price from one rate card
+        run: python -m unittest paper/src/test_llm_pricing.py
       - name: A prospective field plan must declare the contracts it verifies
         run: python -m unittest paper/src/test_import_prospective_field.py
       - name: The forecast report recomputes independently in Python
