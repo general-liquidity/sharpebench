@@ -320,17 +320,25 @@ the work happened, and suppressing it would not unspend the money.
 A total that contains any unmeasured amount is not published as a total at all.
 It becomes `unavailable`, with a separately named `known_subtotal_usd_nanos`.
 
-**One writer per journal.** A gateway that spends a journal owns its path
-exclusively. Opening takes a lock file, `<journal>.lock`, created with
-`create_new` so the file system picks the winner, and holds it until the gateway
-drops. A second gateway on the same host is refused when it opens, by type,
-naming the lock file. A lock left behind by a crashed process is refused too,
-not broken: nothing on disk tells a dead holder from a live one, and breaking it
-on a guess is how two writers end up on one budget again. Clearing it is
-`JournalLock::take_over`, which an operator performs deliberately and which
-records the displaced holder and the stated reason inside the new lock. Reading
-takes no lock, so `sharpebench gateway` can inspect a sweep that is running; the
-report says whether the path is owned, in `journal_lock_held`.
+**One writer per journal.** A gateway that spends a journal owns it exclusively.
+Opening takes a lock file, `<journal>.lock`, created with `create_new` so the
+file system picks the winner, and holds it until the gateway drops. It also
+takes a second lock named for the journal document itself,
+`sb-gateway-journal-<id>.lock`, where the id is carried inside the document and
+survives every save, so one journal reached under two names in one directory is
+one lock and not two. A journal that does not exist yet names no document, so
+opening writes one and binds to it there and then. A second gateway on the same
+host is refused when it opens, by type, naming the lock it could not take. A
+lock left behind by a crashed process is refused too, not broken: nothing on
+disk tells a dead holder from a live one, and breaking it on a guess is how two
+writers end up on one budget again. Clearing it is `JournalLock::take_over`,
+which an operator performs deliberately and which records the displaced holder
+and the stated reason inside the new lock. Each lock names the holder that wrote
+it, and a holder releases only a file that still names it, so a takeover of a
+process that turns out to be alive does not end with that process unlocking the
+journal under its successor. Reading takes no lock, so `sharpebench gateway` can
+inspect a sweep that is running; the report says whether the path is owned, in
+`journal_lock_held`.
 
 Underneath that, the journal carries a version and a save is a compare-and-swap
 on it: a gateway whose snapshot the file has moved past is refused, answers
@@ -346,6 +354,12 @@ refused write and an I/O failure therefore latch, the answer is refused rather
 than handed back over a record that no longer says what it cost, every later
 request is refused as `journal_unwritable` or `journal_ownership_lost`, and the
 sweep's `HostObservedUsage` carries the flag beside the figures.
+
+The two flags mean what they say. A save whose rename landed and whose
+durability could not be confirmed is the owner's own I/O fault: it keeps the
+version it wrote, so its next save is not mistaken for another writer's, and it
+publishes `journal_unwritable`. Only a version that moved under this gateway
+publishes `journal_ownership_lost`.
 
 ## Identity and resume
 
@@ -471,6 +485,15 @@ entrypoint, against the same daemon ([image preflight](image-preflight.md)).
   separated by it: `create_new` is only as exclusive as the remote server makes
   it, and NFS does not guarantee that. One host per journal path is a deployment
   rule, not something this code enforces.
+- **Aliases in different directories.** Both locks sit beside the journal, so a
+  document reached through two directory entries in two different directories
+  derives two locks and both gateways open. Aliases that share a directory are
+  refused. So is a journal document written before it carried an identity, but
+  only once its opener has assigned one and saved.
+- **The version check is not a concurrency control.** A save reads the version
+  on disk and renames after a create, a write and an `fsync`. Two writers that
+  both read the same version inside that window both proceed. It is a second
+  line of defence behind the lock, and it is not a substitute for one.
 - **A crashed holder needs an operator.** The stale lock is refused rather than
   broken, so a host that died mid-sweep does not resume unattended. That is the
   deliberate trade: an unattended resume is exactly the automatic break that

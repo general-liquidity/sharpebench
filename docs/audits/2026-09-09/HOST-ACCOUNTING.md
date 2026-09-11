@@ -233,22 +233,45 @@ with no dependency outside `std`. A second holder is refused immediately as
 timeout: two gateways over one budget is not a situation that improves by
 waiting.
 
+Ownership is keyed on the journal *document*, not on the name it was reached
+through (added 2026-09-11). A document carries a `journal_id`, assigned once and
+carried through every save, so it survives the rename a save persists through
+and every directory entry that reaches the document reports it alike. A second
+lock file named for it, `sb-gateway-journal-<id>.lock`, is held beside the
+spelling lock, and both have to be free. Before this, two directory entries for
+one journal gave two lock names and both gateways opened, and the
+compare-and-swap did not catch it either, because the first save's rename turned
+the two names into two files. A journal that does not exist yet names no
+document, so `ModelGateway::open` and `run_gateway_sweep` now write one and bind
+to it at open rather than waiting for the first call: opening a persisted
+journal creates the file.
+
 A stale lock is refused, not broken. Nothing on disk distinguishes a holder that
 crashed from one that is running, so an automatic break is a guess, and a wrong
 guess puts two writers back on the same budget: exactly the defect the lock
 exists to prevent. The refusal names the lock file and says what to check.
 Clearing it is `JournalLock::take_over(path, reason)`, a deliberate operator act
-that records the displaced pid and the stated reason inside the lock that
-replaces it, so the decision is visible afterwards rather than invisible. The
-cost of this choice is stated plainly: a host that died mid-sweep does not
-resume unattended.
+that records the displaced pid, its timestamp and the stated reason inside the
+lock that replaces it, so the decision is visible afterwards rather than
+invisible. The cost of this choice is stated plainly: a host that died mid-sweep
+does not resume unattended.
+
+A takeover does not leave the path unlocked afterwards (added 2026-09-11). Each
+lock document carries the `instance` that wrote it, and a holder's drop removes
+a file only while it still carries that instance, so a displaced holder that
+exits normally no longer deletes the lock of whoever displaced it. A displaced
+holder can also ask, through `JournalLock::is_still_held`, rather than finding
+out by writing; nothing polls it, and what stops such a holder from spending
+remains the compare-and-swap. The read and the unlink are not one operation, so
+a takeover landing between them can still lose the taker's lock; that is
+microseconds against an action an operator takes by hand.
 
 The lock is not a journal and cannot be read as one. It sits at a different path,
 carries `sharpebench.gateway-journal-lock.v1`, is refused by
 `GatewayJournal::load_bound` like any other foreign document, and matches no
 pattern in the provenance manifest scope (`crates/**/*.rs`, `arena/**/*.json` and
-the rest name no `.lock`). It holds a pid and a millisecond timestamp, and no
-path, destination or credential.
+the rest name no `.lock`). It holds a pid, a millisecond timestamp and the lock
+instance that wrote it, and no path, destination or credential.
 
 Reading is never blocked. `sharpebench gateway` only reads the journal, so it
 takes no lock and can inspect a sweep in flight; whether the path is owned is
@@ -266,10 +289,24 @@ second line of defence rather than the only one: what it catches is a journal
 that moved under a single writer, such as a file restored from a backup or
 edited by hand mid-sweep.
 
-What none of this covers is two hosts sharing one journal path over a network
-file system. The lock's exclusivity is the local file system's `create_new`, and
-a remote server need not honour it; NFS in particular does not. One host per
-journal path is a deployment rule, not something this code can enforce.
+What none of this covers, stated as narrowly as the evidence allows:
+
+- Two hosts sharing one journal path over a network file system. The lock's
+  exclusivity is the local file system's `create_new`, and a remote server need
+  not honour it; NFS in particular does not. One host per journal path is a
+  deployment rule, not something this code can enforce.
+- Two directory entries for one document in *different* directories. Both locks
+  are siblings of the journal, so two parents give two lock files. Measured with
+  a hard link across two directories: both gateways still open. Aliases that
+  share a directory, which is the hard link and the symlink to the file, are
+  refused.
+- A journal document written before `journal_id` existed names none. Its opener
+  assigns one and saves before binding, so until that save ownership is keyed on
+  the spelling alone.
+- The compare-and-swap is a read then a write, not an atomic swap: `save` reads
+  the version on disk and renames after a create, a write and an `fsync`. Two
+  writers that both read the same version inside that window both proceed. It is
+  a second line of defence, and it is not a concurrency control.
 
 ### A settlement that cannot be written
 
@@ -297,6 +334,17 @@ The reservation path is deliberately different: an I/O failure there is refused
 per call without latching. Nothing was dispatched, the release stays in memory,
 and the file still holds exactly what it held before, so no amount can be lost
 by trying again.
+
+That holds for a save that failed before its rename, and only for one (narrowed
+2026-09-11). A save whose rename landed and whose parent directory sync did not
+has moved the file to the new version, so it is a distinct outcome,
+`JournalSaveError::Unsynced`, and the snapshot keeps the version it wrote rather
+than rewinding a version behind the file it owns. On the reservation path it
+latches `journal_unwritable`, because the file holds a reservation this gateway
+will never settle, and that is what the sweep publishes. Before this, such a
+save rewound, the next reservation was refused as a `Conflict`, and the sweep
+published `journal_ownership_lost` for an I/O fault by the sole owner. Money was
+safe either way; the diagnosis beside the pool was wrong.
 
 ## Identity
 
@@ -359,7 +407,15 @@ missing usage unavailable rather than zero, the `host_observed` label,
 (added 2026-09-11) ownership of the path: a second holder refused by type, a
 stale lock refused rather than broken and still on disk afterwards, a takeover
 refused where nothing is held and recording the displaced pid and reason where
-something is, and a lock document refused by the journal reader.
+something is, and a lock document refused by the journal reader. Five more were
+added later the same day with the review repairs: a displaced holder leaving the
+taker's lock alone, a takeover of an illegible lock recording that it learned
+nothing, a document identity surviving every save and reported alike under two
+names, a second name for one document refused the lock, and a save whose rename
+landed reported as unsynced rather than as a conflict on the next one. The
+regressions now take a directory each from `crate::scratch::ScratchDir`, unique
+per run and removed on drop, so a crashed run cannot leave a journal for a later
+one to resume.
 
 `crates/sharpebench-cli/src/gateway_cli.rs` (7 tests) covers the operator
 surface: the effective configuration report, a missing credential, missing and
@@ -408,6 +464,19 @@ restored from the committed file, verified byte identical with `cmp`.
 | A takeover is a takeover, not an acquire | `take_over` falls back to `create` when no lock is there instead of returning `NotHeld` | killed: `a_takeover_is_explicit_and_records_who_it_displaced` failed |
 | An unwritable settlement latches | the `JournalSaveError::Io` arm of `settle_and_persist` returns success and sets no flag, the behaviour before this repair | killed: `a_settlement_that_cannot_be_persisted_stops_the_gateway` failed |
 | A latched gateway starts no further call | the `journal_unwritable` guard in `dispatch_once` is made unreachable | killed: `a_settlement_that_cannot_be_persisted_stops_the_gateway` failed |
+
+Six more for the ownership repairs of 2026-09-11, which close findings A1, A2,
+A3 and A7 of the adversarial review. Mutated in place on a clean tree and
+restored from the committed file, verified byte identical with `cmp`.
+
+| Invariant | Mutation | Result |
+|---|---|---|
+| A holder releases the lock it holds and no other | `Drop for JournalLock` removes each held path unconditionally, the behaviour before this repair | killed: `a_displaced_holder_leaves_the_lock_of_the_holder_that_displaced_it` failed in both the library suite (`149 passed; 1 failed`) and the integration file, and nothing else failed |
+| Ownership is keyed on the document, not the spelling | the identity lock's name carries the journal's file name again | killed: `two_names_for_one_journal_document_admit_one_gateway`, `a_second_name_for_one_journal_document_is_refused_the_lock` and `a_journal_identity_is_the_documents_and_survives_every_save` failed |
+| An open binds the document it found | `JournalLock::acquire` takes the spelling lock and binds no document | killed: `a_second_name_for_one_journal_document_is_refused_the_lock` failed; the gateway-level test survives, because `ModelGateway::open` binds the document itself |
+| A document keeps one identity across saves | `save` assigns a fresh `journal_id` before every write | killed: `a_journal_identity_is_the_documents_and_survives_every_save` failed |
+| A takeover records who it displaced | `take_over` writes `std::process::id()` in place of `document.pid`, and separately zeroes `acquired_unix_ms` | killed: `a_takeover_is_explicit_and_records_who_it_displaced` failed for each, where before the restaging of its assertions the whole suite stayed green |
+| A partly landed save is an I/O fault, not another writer | the landed arm of `save` rewinds the version and reports `Io`, the behaviour before this repair | killed: `a_save_whose_rename_landed_is_unsynced_rather_than_a_later_conflict` and `a_reservation_whose_durability_is_unconfirmed_is_not_published_as_lost_ownership` failed. Latching `journal_conflict` on `Unsynced` instead, which is the misdiagnosis itself, kills the second alone |
 
 The last mutant would have survived the regression as first written: the
 sabotage transport left a directory at the journal path, so a gateway with no

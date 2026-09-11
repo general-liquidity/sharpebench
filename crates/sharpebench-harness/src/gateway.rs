@@ -773,15 +773,37 @@ impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
     ) -> std::io::Result<Self> {
         // Ownership before reading: a snapshot taken without the lock could be
         // stale by the time the lock is held.
-        let journal_lock = JournalLock::acquire(path)?;
+        let mut journal_lock = JournalLock::acquire(path)?;
         let identity = JournalIdentity::new(routes.identity_digest(), budget);
-        let journal = match GatewayJournal::load_bound(path, &identity) {
+        let mut journal = match GatewayJournal::load_bound(path, &identity) {
             Ok(journal) => journal,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 GatewayJournal::new(identity)
             }
             Err(error) => return Err(error),
         };
+        // A lock can only name the document once the document is on disk, so a
+        // journal that does not exist yet, or one written before it had an
+        // identity, is written here rather than at the first call. Until then
+        // ownership is keyed on this path's spelling alone, which is what lets
+        // a second name for one journal open it.
+        if !journal_lock.covers_document() {
+            let journal_id = match JournalLock::document_id(path) {
+                Some(journal_id) => journal_id,
+                None => {
+                    let journal_id = journal.ensure_journal_id();
+                    journal.save(path).map_err(|error| match error {
+                        JournalSaveError::Io(error) | JournalSaveError::Unsynced(error) => error,
+                        conflict => std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            conflict.to_string(),
+                        ),
+                    })?;
+                    journal_id
+                }
+            };
+            journal_lock.bind_journal_id(path, &journal_id)?;
+        }
         Ok(Self {
             routes,
             permits,
@@ -997,11 +1019,25 @@ impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
                         reason: ReleaseReason::NeverDispatched,
                     },
                 );
-                if matches!(error, JournalSaveError::Conflict { .. }) {
-                    self.journal_conflict = true;
-                    return Err(GatewayErrorKind::JournalOwnershipLost);
+                match error {
+                    JournalSaveError::Conflict { .. } => {
+                        self.journal_conflict = true;
+                        return Err(GatewayErrorKind::JournalOwnershipLost);
+                    }
+                    // The reservation reached the file and its durability did
+                    // not. The release above stays in memory, so the file holds
+                    // a reservation whose outcome is missing: the same shape as
+                    // a settlement that could not be written, and it latches for
+                    // the same reason. It is this owner's I/O fault, and it is
+                    // published as one rather than as another writer.
+                    JournalSaveError::Unsynced(_) => {
+                        self.journal_unwritable = true;
+                        return Err(GatewayErrorKind::JournalUnwritable);
+                    }
+                    // Nothing landed: the file still holds exactly what it held,
+                    // so this is refused per call without latching.
+                    JournalSaveError::Io(_) => return Err(GatewayErrorKind::JournalUnwritable),
                 }
-                return Err(GatewayErrorKind::JournalUnwritable);
             }
         }
         // Cancellation observed after the reservation and before the wire: the
@@ -1211,7 +1247,7 @@ impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
                 self.journal_conflict = true;
                 false
             }
-            Err(JournalSaveError::Io(_)) => {
+            Err(JournalSaveError::Unsynced(_) | JournalSaveError::Io(_)) => {
                 self.journal_unwritable = true;
                 false
             }
@@ -1251,6 +1287,7 @@ mod tests {
 
     use super::*;
     use crate::gateway_journal::{JournalLockError, JournalRecord};
+    use crate::scratch::ScratchDir;
 
     const KEY: &str = "sk-live-test-do-not-log-0123456789";
     /// Framing tokens a test route declares the provider bills on every call,
@@ -1419,14 +1456,8 @@ mod tests {
         }
     }
 
-    fn temp_dir(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "sb-gateway-{tag}-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        std::fs::create_dir_all(&dir).expect("temp dir");
-        dir
+    fn temp_dir(tag: &str) -> ScratchDir {
+        ScratchDir::new(&format!("gateway-{tag}"))
     }
 
     fn parse(line: &str) -> GatewayResponse {
@@ -1808,7 +1839,6 @@ mod tests {
         );
         assert_eq!(records[0]["record"], "reserved");
         assert_eq!(records[0]["revision"], "2026-01-01");
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// A hard budget refusal starts no request. Both ceilings, money and calls,
@@ -2116,7 +2146,6 @@ mod tests {
             "the second call adds to the first, it does not replace it"
         );
         assert_eq!(reservations(resumed.journal()), 2);
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// Model, revision and rate-card identity are frozen into the gateway's
@@ -2202,7 +2231,6 @@ mod tests {
             error.to_string().contains("different route table"),
             "{error}"
         );
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// Credentials never reach an error, a log or published evidence, whether
@@ -2677,7 +2705,6 @@ mod tests {
             &path,
         )
         .expect("the released path opens again");
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// Many gateways racing for one journal path: the file system admits
@@ -2750,7 +2777,6 @@ mod tests {
         );
         assert_eq!(settlements(&on_disk).len(), 1, "no record is lost");
         assert_eq!(on_disk.spend().priced_usd_nanos, 15);
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// A settlement that cannot be written is not a lost log line. The file
@@ -2823,7 +2849,66 @@ mod tests {
             "the refusal happens before anything is dispatched"
         );
         drop(gateway);
-        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A7. An I/O fault by the sole owner is published as an I/O fault. A
+    /// reservation whose rename landed and whose durability did not leaves the
+    /// file holding a call the gateway will not settle, which is the
+    /// `journal_unwritable` condition; what it is not is another writer, and
+    /// the sweep publishes `journal_ownership_lost` beside the pool.
+    ///
+    /// Three causes could leave `journal_conflict` false here: the save not
+    /// failing at all, the save failing before the rename, and the repair. The
+    /// first is ruled out by the refusal itself, the second by the file being a
+    /// version ahead of where the last whole save left it, and the third is
+    /// what the second request pins: a gateway a version behind its own file is
+    /// refused as another writer on its next save.
+    #[test]
+    fn a_reservation_whose_durability_is_unconfirmed_is_not_published_as_lost_ownership() {
+        let dir = temp_dir("unsynced");
+        let path = dir.join("journal.json");
+        let routes = table("2026-01-01");
+        let permits = CallPermits::new(4);
+        let mut gateway = ModelGateway::open(
+            &routes,
+            &permits,
+            FakeProvider::answering(4),
+            budget(u128::MAX, 8),
+            GatewayLimits::default(),
+            &path,
+        )
+        .expect("open");
+        let whole = GatewayJournal::version_on_disk(&path).expect("the journal is there");
+
+        crate::gateway_journal::fault_injection::fail_next_parent_sync();
+        let refused = parse(&gateway.serve_line(&request("hello", 16)));
+        assert_eq!(
+            refused.error.expect("error").kind,
+            GatewayErrorKind::JournalUnwritable
+        );
+        assert_eq!(
+            gateway.dispatches(),
+            0,
+            "the reservation could not be made durable, so nothing was dispatched"
+        );
+        assert!(gateway.journal_unwritable(), "the fault latches");
+        assert!(
+            !gateway.journal_conflict(),
+            "the sole owner's I/O fault is not lost ownership"
+        );
+        assert_eq!(
+            GatewayJournal::version_on_disk(&path).expect("readable"),
+            whole.map(|version| version + 1),
+            "the rename landed, so the file holds the reservation"
+        );
+
+        let next = parse(&gateway.serve_line(&request("hello", 16)));
+        assert_eq!(
+            next.error.expect("error").kind,
+            GatewayErrorKind::JournalUnwritable,
+            "and the next refusal names the same cause rather than another writer"
+        );
+        assert!(!gateway.journal_conflict());
     }
 
     /// The compare-and-swap is the second line of defence, for a journal that
@@ -2884,7 +2969,6 @@ mod tests {
             "the record on disk is the one that was written, not a stale replacement"
         );
         assert_eq!(on_disk.spend().priced_usd_nanos, 15);
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// The broker cannot interrupt a synchronous transport, but it does not

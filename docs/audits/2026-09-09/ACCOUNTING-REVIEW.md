@@ -9,6 +9,23 @@ One new test file was added to demonstrate two of the findings:
 Every mutation below was applied to an isolated copy of the tree under the
 session scratchpad, never to the worktree.
 
+## Dispositions, 2026-09-11
+
+The findings were repaired on `fix/journal-lock-identity`. Each one below now
+carries its disposition inline, with the test that pins it and the mutation
+that kills that test. The characterization tests in
+`journal_ownership_review.rs` were inverted: they assert the repaired behaviour
+and are named for it.
+
+| Finding | Disposition |
+|---|---|
+| A1 | Fixed. A lock document carries the instance that wrote it, and a holder removes only a file still carrying its own |
+| A2 | Fixed for aliases that share a directory, by keying ownership on a `journal_id` inside the document. Cross-directory aliases and pre-identity documents remain, and are now documented rather than silent |
+| A3 | Fixed. The displaced holder's identity is a value this process cannot produce for itself, and the timestamp is asserted |
+| A6 | Fixed. One directory per test, unique and removed on drop, leaks included |
+| A7 | Fixed. A save whose rename landed no longer rewinds its version, so the sole owner's I/O fault is published as `journal_unwritable` rather than as `journal_ownership_lost` |
+| A4, A5 | Not this branch. They are the Python surface and are handled separately |
+
 ## Findings
 
 ### A1. A displaced holder's drop removes the lock of the holder that displaced it
@@ -55,6 +72,34 @@ cargo test -p sharpebench-harness --test journal_ownership_review \
 The test asserts the current behaviour (`lock_path` gone after the displaced
 holder drops, a third `acquire` admitted). It is a record of the defect, not a
 guarantee, and must be inverted when the defect is fixed.
+
+**Disposition: fixed, 2026-09-11.** `JournalLockDocument` carries an `instance`,
+a token the lock value generates when it writes the file, and `Drop` removes a
+path only when the document still there carries this holder's instance. A
+takeover writes a new instance, so the displaced holder's drop is a no-op on the
+taker's lock. A displaced holder can also find out, rather than discovering it
+by writing: `JournalLock::is_still_held` compares the same way. Nothing polls
+it, and what stops a displaced holder from spending remains the journal's
+compare-and-swap, which refuses the second of the two writers to save. What is
+left is a read then an unlink rather than one operation: a takeover landing
+between them can still lose the taker's lock, which is microseconds against an
+operator action taken by hand, where the old behaviour was certain.
+
+Both tests now assert the repair:
+`a_displaced_holder_leaves_the_lock_of_the_holder_that_displaced_it`, in
+`journal_ownership_review.rs` and in the library suite. A drop that removes
+nothing at all would also leave the taker's lock in place, so both tests require
+the taker's own drop to release it. Mutation: `Drop` back to
+`let _ = std::fs::remove_file(path);` for each held path. Observed, both tests
+failing and nothing else, `149 passed; 1 failed` in the library suite and
+`1 passed; 1 failed` in the integration file:
+
+```
+panicked at crates\sharpebench-harness\src\gateway_journal.rs:1479:9:
+the taker's lock survives the displaced holder's drop
+panicked at crates\sharpebench-harness\tests\journal_ownership_review.rs:164:5:
+the taker's lock is still there once the holder it displaced has gone
+```
 
 ### A2. Ownership is keyed on the path spelling, so one journal under two names is two locks, and the compare-and-swap does not catch it
 
@@ -108,6 +153,64 @@ code calls it "a second line of defence", which is accurate, but it is not a
 concurrency control and should not be read as one. I did not build a racing
 repro for this; it is a code reading.
 
+**Disposition: fixed for aliases that share a directory, 2026-09-11.** A journal
+document now carries a `journal_id`, assigned once and carried through every
+save. It is a property of the document rather than of the entry it was reached
+through, so it survives the rename a save persists through and every name for
+one document reports it alike. Ownership is a second lock file keyed on it,
+`sb-gateway-journal-<id>.lock`, taken beside the spelling lock and held with it.
+A journal that does not exist yet names no document, so `ModelGateway::open` and
+`run_gateway_sweep` write one before binding: opening a persisted journal now
+creates the file rather than waiting for the first call.
+
+Canonicalizing the path, the obvious approach, was measured and does not do the
+job. It does not resolve hard links at all, which is the case this finding is
+about; on Windows it returns verbatim paths
+(`\\?\C:\Users\...\a\journal.json`), which would leak into
+`ModelGateway::journal_lock_path` and into the operator-facing refusal message;
+and for a journal that does not exist yet, the normal first-run case, it fails
+with `NotFound`, so there would be nothing to key the first lock on. Every
+spelling of one path already resolves to one lock file through the file system,
+which is what this review measured for `.`, trailing separators, relative paths
+and symlinked parents.
+
+What remains open, measured rather than assumed:
+
+- Two directory entries for one document in **different** directories. The lock
+  is a sibling of the journal, so two parents give two lock files. Observed with
+  a hard link across `a/` and `b/`: `ids equal: true`, and
+  `cross-directory alias: first=true second=true`.
+- A journal document written before `journal_id` existed names none. Its opener
+  assigns one and saves before binding, so two gateways opening such a document
+  under two names would each assign one. Only documents from before this change
+  are in that state, and only until their next save.
+- The compare-and-swap is still a read then a write, not an atomic swap. That is
+  unchanged, and it is still not a concurrency control.
+
+The test is inverted and renamed
+`two_names_for_one_journal_document_admit_one_gateway`. Two causes could refuse
+the second open, the spelling lock and the document lock, so the test shows the
+alias's spelling lock free first and requires the refusal to name the document's
+lock; a third cause, a journal bound to another experiment, would refuse with
+`InvalidData` rather than with a lock error. Mutation: put the journal's file
+name back into the identity lock's name, which is keying on the spelling again.
+Observed, `1 passed; 1 failed`:
+
+```
+panicked at crates\sharpebench-harness\tests\journal_ownership_review.rs:220:10:
+the second gateway is refused the document the first owns
+```
+
+and in the library suite `148 passed; 2 failed`, the two being
+`a_second_name_for_one_journal_document_is_refused_the_lock` and
+`a_journal_identity_is_the_documents_and_survives_every_save`. A second
+mutation, `JournalLock::acquire` not binding the document at all, kills
+`a_second_name_for_one_journal_document_is_refused_the_lock` alone
+(`149 passed; 1 failed`) and leaves the gateway-level test green, because
+`ModelGateway::open` binds the document itself. A third, assigning a fresh
+`journal_id` on every save, kills
+`a_journal_identity_is_the_documents_and_survives_every_save` alone.
+
 ### A3. `a_takeover_is_explicit_and_records_who_it_displaced` passes for a cause other than the one it names
 
 Severity: medium as an evidence defect. The named property, that a takeover
@@ -141,6 +244,38 @@ lock document (`gateway_journal.rs:400-404`, pid 0) is likewise untested.
 Fixing the test needs a displaced document whose pid is not this process's: write
 a lock document with a chosen pid directly, then take it over and assert that
 pid and that timestamp come back.
+
+**Disposition: fixed, 2026-09-11.** The test writes the displaced holder's lock
+document itself, with pid 424242 and `acquired_unix_ms` 1111111111111, and
+asserts on both. Neither is a value this process can produce for itself, so only
+the takeover having read the displaced document can satisfy the assertion. The
+`SupersededHolder` fallback for an unparseable document is covered too, by
+`a_takeover_of_an_illegible_lock_records_that_it_learned_nothing`.
+
+Mutation, the one this finding names, at the same line:
+
+```rust
+-                pid: document.pid,
++                pid: std::process::id(),
+```
+
+Observed, `149 passed; 1 failed`, where the whole harness suite used to stay
+green:
+
+```
+panicked at crates\sharpebench-harness\src\gateway_journal.rs:1413:9:
+  left: 16104
+ right: 424242
+```
+
+And the timestamp half, `acquired_unix_ms: document.acquired_unix_ms` to
+`acquired_unix_ms: 0`, also `149 passed; 1 failed`:
+
+```
+panicked at crates\sharpebench-harness\src\gateway_journal.rs:1417:9:
+  left: 0
+ right: 1111111111111
+```
 
 ### A4. The runtime retry guard is not on the path a caller-supplied client takes
 
@@ -245,6 +380,22 @@ pid's directory for `a_second_holder_of_one_journal_is_refused` as well.
 
 A `TempDir` with a random component, or a cleanup guard, removes the class.
 
+**Disposition: fixed, 2026-09-11.** `crate::scratch::ScratchDir` gives every test
+its own directory, named with the pid, a counter within the process and a
+nanosecond stamp, and removes it in `Drop`, which a panicking test still runs.
+The gateway, gateway-journal and gateway-serve regressions all take their
+directories from it, as does the integration file through a local copy of the
+same shape. `a_stale_lock_is_refused_rather_than_broken` still leaks a lock
+deliberately, and now leaks it into a directory nothing else will ever name.
+
+Observed: 30 directories under the system temp matched the old naming before a
+full `cargo test -p sharpebench-harness` run and 30 after it, so the run left
+nothing behind. The 30 are leftovers from runs before this change, including the
+`journal.json` left as a *directory* that this finding names; they are outside
+the worktree and were not touched. No new-scheme directory survives a run, and
+an old-scheme leftover cannot be inherited by one, because the names no longer
+have the same shape.
+
 ### A7. A reservation write that fails with I/O does not latch, and a partly landed save is later reported as another writer
 
 Severity: low. No double spend; a wrong diagnosis in the published record.
@@ -267,6 +418,50 @@ owns, does not latch, and the next reserve save is refused as
 fault by the sole owner. Money is still safe: the gateway stops before
 dispatching. I did not reproduce this; it needs a directory fsync to fail after
 a successful rename, which is a Unix-only path I cannot force here.
+
+**Disposition: fixed, 2026-09-11.** `save` now knows whether the rename landed.
+When it did, the version bump stands, because the disk really is at the new
+version, and the failure comes back as a new `JournalSaveError::Unsynced` rather
+than as `Io`. The snapshot therefore stays level with the file it owns and its
+next save is not refused as another writer's. The reservation path treats
+`Unsynced` as it treats a settlement that could not be written: it latches
+`journal_unwritable`, because the file holds a reservation this gateway will
+never settle, and the sweep publishes `journal_unwritable` rather than
+`journal_ownership_lost`. A plain `Io`, where nothing landed, still refuses per
+call without latching, which the review found defensible and which is unchanged.
+
+The partly landed save is now reachable on every platform. The post-rename
+durability step is its own function with a thread-local one-shot fault behind
+`cfg(test)`: forcing a real directory fsync to fail is Unix-only, and what the
+finding is about is what the caller does with a half-landed write, so the fault
+is injected rather than provoked.
+
+Two tests pin it.
+`a_save_whose_rename_landed_is_unsynced_rather_than_a_later_conflict` reads the
+version off the disk, so a save that never bumped at all cannot satisfy it, and
+then requires the next save to succeed.
+`a_reservation_whose_durability_is_unconfirmed_is_not_published_as_lost_ownership`
+asserts the label: three causes could leave `journal_conflict` false, the save
+not failing, the save failing before the rename, and the repair, and the first
+two are ruled out by the refusal itself and by the file being a version ahead.
+
+Mutation, decrementing the version on the landed path as before and reporting
+`Io`. Observed `148 passed; 2 failed`, both of them these:
+
+```
+panicked at crates\sharpebench-harness\src\gateway.rs:2894:9:
+the fault latches
+panicked at crates\sharpebench-harness\src\gateway_journal.rs:1637:9
+```
+
+A second mutation, latching `journal_conflict` on `Unsynced` instead, which is
+the misdiagnosis itself, kills the gateway test alone (`149 passed; 1 failed`):
+
+```
+panicked at crates\sharpebench-harness\src\gateway.rs:2885:9:
+  left: JournalOwnershipLost
+ right: JournalUnwritable
+```
 
 ## Claims checked and found sound
 
@@ -400,12 +595,16 @@ The three stated limits are accurate as far as they go:
 Silently unprevented and undocumented:
 
 1. One journal reached through two directory entries, defeating both the lock
-   and the compare-and-swap (A2).
+   and the compare-and-swap (A2). **Closed for aliases sharing a directory on
+   2026-09-11, and what remains, cross-directory aliases and pre-identity
+   documents, is now stated in `JournalLock`'s own documentation, in
+   `HOST-ACCOUNTING.md` and in the book.**
 2. A takeover leaving the path unlocked once the displaced process exits
-   normally (A1).
+   normally (A1). **Closed 2026-09-11.**
 3. The compare-and-swap being a read then a write rather than an atomic swap,
    so it is not a concurrency control even where it does fire (A2, last
-   paragraph).
+   paragraph). **Still true, and now stated in the limits rather than left to
+   be inferred from "second line of defence".**
 4. The ceiling's dependence on sequential spawning is documented in the shim's
    own docstring (`llm_agent.py:298-301`) but not in the verification record's
    limits, where the other conditional guarantees are stated.
@@ -426,7 +625,10 @@ Silently unprevented and undocumented:
   enough to hit in practice was not measured.
 - **A7's partly landed save was not reproduced.** Forcing a parent directory
   `sync_all` to fail after a successful rename is a Unix-only path and was not
-  available here.
+  available here. The repair of 2026-09-11 exercises the case with an injected
+  failure at that step, which is not the same as a real one: what is pinned is
+  what the caller does with a half-landed write, not that a real directory sync
+  fails in the way assumed.
 - **The mutation evidence is local.** Every mutation was run against
   `cargo test -p sharpebench-harness` and `python -m unittest
   paper/src/test_llm_agent_budget.py` on Windows with anthropic 0.112.0. The

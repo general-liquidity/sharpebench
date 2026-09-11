@@ -1,10 +1,16 @@
-//! Demonstrations for the two journal-ownership defects recorded in
-//! `docs/audits/2026-09-09/ACCOUNTING-REVIEW.md` (findings A1 and A2).
+//! The two journal-ownership findings recorded in
+//! `docs/audits/2026-09-09/ACCOUNTING-REVIEW.md` (A1 and A2), as guarantees.
 //!
-//! These assert the behaviour as it stands today, so they are records of a
-//! defect rather than guarantees. When either defect is repaired the assertion
-//! it pins will flip, and the test must be rewritten as the guarantee instead
-//! of relaxed.
+//! These began as characterization tests asserting the defects. They now assert
+//! the repaired behaviour through the public surface only: a holder releases
+//! the lock it holds and no other, and one journal document admits one gateway
+//! whatever name it is reached under.
+//!
+//! What A2's repair does not reach, and what no test here claims: the lock is a
+//! sibling of the journal, so two directory entries for one document in
+//! *different* directories still derive two lock files; and a journal document
+//! written before it carried an identity names none, so two gateways opening
+//! such a document under two names each assign one.
 //!
 //! Nothing here opens a socket: the provider is a local stand-in.
 
@@ -16,7 +22,7 @@ use sharpebench_harness::gateway::{
     ProviderTransport, RouteTable, Secret, GATEWAY_PROTOCOL,
 };
 use sharpebench_harness::gateway_journal::{
-    GatewayBudget, GatewayJournal, JournalIdentity, JournalLock,
+    GatewayBudget, GatewayJournal, JournalIdentity, JournalLock, JournalLockError,
 };
 
 const KEY: &str = "sk-live-test-do-not-log-0123456789";
@@ -70,15 +76,37 @@ fn answered(line: &str) -> bool {
     response["ok"].as_bool().expect("ok is a boolean")
 }
 
-fn temp_dir(tag: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "sb-review-{tag}-{}-{:?}",
-        std::process::id(),
-        std::thread::current().id()
-    ));
-    std::fs::remove_dir_all(&dir).ok();
-    std::fs::create_dir_all(&dir).expect("temp dir");
-    dir
+/// One directory per test, removed when the test ends: a leak here can never
+/// be inherited by a later run, whatever the operating system does with pids.
+struct ScratchDir {
+    path: std::path::PathBuf,
+}
+
+impl ScratchDir {
+    fn new(tag: &str) -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|since| since.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!(
+            "sb-review-{tag}-{}-{}-{stamp:x}",
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&path).expect("a scratch directory");
+        Self { path }
+    }
+
+    fn join(&self, name: &str) -> std::path::PathBuf {
+        self.path.join(name)
+    }
+}
+
+impl Drop for ScratchDir {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.path).ok();
+    }
 }
 
 fn open<'a>(
@@ -96,14 +124,28 @@ fn open<'a>(
     )
 }
 
-/// A1. `Drop for JournalLock` removes the lock file by path without checking
-/// that the file there is still the lock this value created. After a takeover
-/// the displaced holder is still alive and still owns a `JournalLock` naming
-/// that path, so its drop deletes the *taker's* lock and leaves the journal
-/// unowned while the taker is live and spending.
+fn held_lock_path(error: &std::io::Error) -> std::path::PathBuf {
+    match error
+        .get_ref()
+        .and_then(|source| source.downcast_ref::<JournalLockError>())
+    {
+        Some(JournalLockError::Held { lock_path, .. }) => lock_path.clone(),
+        other => panic!("expected a refusal naming a held lock, got {other:?}"),
+    }
+}
+
+/// A1. A holder removes the lock it holds and no other. After a takeover the
+/// file at the path is the taker's, and the displaced holder, which may still
+/// be alive and may still be spending, must leave it alone: otherwise its exit
+/// unlocks the journal under the taker and any number of further gateways may
+/// open it.
+///
+/// What could satisfy the middle assertion other than the repair: a drop that
+/// removes nothing at all. The last assertion rules that out by requiring the
+/// holder that does own the lock to release it.
 #[test]
-fn a_displaced_holder_unlocks_the_holder_that_displaced_it() {
-    let dir = temp_dir("takeover-drop");
+fn a_displaced_holder_leaves_the_lock_of_the_holder_that_displaced_it() {
+    let dir = ScratchDir::new("takeover-drop");
     let path = dir.join("journal.json");
     let lock_path = JournalLock::lock_path(&path).expect("a lock path");
 
@@ -111,37 +153,46 @@ fn a_displaced_holder_unlocks_the_holder_that_displaced_it() {
     let taker = JournalLock::take_over(&path, "believed gone, in fact still running")
         .expect("an operator displaces it");
     assert!(lock_path.exists(), "the taker holds the path");
+    assert!(
+        !displaced.is_still_held(),
+        "the displaced holder can tell that the lock at its path is not its own"
+    );
 
     // The displaced process was not dead after all, and now exits normally.
     drop(displaced);
 
     assert!(
-        !lock_path.exists(),
-        "DEFECT A1: the displaced holder's drop removed the taker's lock file"
+        lock_path.exists(),
+        "the taker's lock is still there once the holder it displaced has gone"
     );
-    let third = JournalLock::acquire(&path);
     assert!(
-        third.is_ok(),
-        "DEFECT A1: a third holder is admitted while the taker is still live"
+        matches!(
+            JournalLock::acquire(&path),
+            Err(JournalLockError::Held { .. })
+        ),
+        "so no third holder is admitted while the taker is live"
     );
 
-    drop(third);
     drop(taker);
-    std::fs::remove_dir_all(&dir).ok();
+    assert!(
+        !lock_path.exists(),
+        "and the holder that does own the lock still releases it"
+    );
 }
 
-/// A2. Ownership is keyed on the journal's path spelling, not on the file it
-/// names. Two directory entries for one journal (here a hard link; a
-/// symlink-to-file has the same shape) produce two different `.lock` names, so
-/// both gateways open. The version compare-and-swap does not catch it either:
-/// `save` persists through a temporary file and a rename, which replaces the
-/// directory entry, so after the first save the two names are two files and
-/// neither writer ever sees the other's version.
+/// A2. Ownership is keyed on the journal document, not on the directory entry
+/// it was reached through. Two names for one journal (here a hard link; a
+/// symlink to the file has the same shape) name one document identity, so the
+/// second gateway is refused at open and never reaches the budget.
 ///
-/// Both gateways then spend the same declared budget in full.
+/// Two causes could refuse that second open: the spelling lock, and the
+/// document lock. The spelling lock is shown free first, and the refusal is
+/// required to name the document lock, so only the document lock can be what
+/// refused. A third cause, the journal being bound to a different experiment,
+/// would refuse with `InvalidData` rather than with a lock error.
 #[test]
-fn two_names_for_one_journal_file_are_two_locks_and_both_gateways_spend() {
-    let dir = temp_dir("aliased-journal");
+fn two_names_for_one_journal_document_admit_one_gateway() {
+    let dir = ScratchDir::new("aliased-journal");
     let real = dir.join("journal.json");
     let alias = dir.join("journal-copy.json");
     let routes = table();
@@ -151,27 +202,36 @@ fn two_names_for_one_journal_file_are_two_locks_and_both_gateways_spend() {
         .save(&real)
         .expect("seed the journal the operator owns");
     std::fs::hard_link(&real, &alias).expect("a second name for one file");
+    assert_eq!(
+        JournalLock::document_id(&real),
+        JournalLock::document_id(&alias),
+        "one document, reached under two names"
+    );
 
     let mut first = open(&routes, &permits, &real).expect("the first gateway opens");
-    let mut second = open(&routes, &permits, &alias)
-        .expect("DEFECT A2: a second gateway opens the same journal under its other name");
-    assert_ne!(
-        first.journal_lock_path().expect("a lock"),
-        second.journal_lock_path().expect("a lock"),
-        "one journal, two lock files"
+    let alias_spelling_lock = JournalLock::lock_path(&alias).expect("a lock path");
+    assert!(
+        !alias_spelling_lock.exists(),
+        "the other name's spelling lock is free, so only the document lock can refuse"
+    );
+
+    let refused = open(&routes, &permits, &alias)
+        .err()
+        .expect("the second gateway is refused the document the first owns");
+    assert_eq!(refused.kind(), std::io::ErrorKind::AlreadyExists);
+    assert_eq!(
+        held_lock_path(&refused),
+        JournalLock::identity_lock_path(
+            &real,
+            &JournalLock::document_id(&real).expect("an identity")
+        ),
+        "the refusal names the document's lock, not a spelling's"
+    );
+    assert!(
+        !alias_spelling_lock.exists(),
+        "a refused gateway leaves no lock of its own behind"
     );
 
     assert!(answered(&first.serve_line(&request("hello"))));
-    assert!(
-        answered(&second.serve_line(&request("world"))),
-        "DEFECT A2: the second gateway spends too; the compare-and-swap never fires"
-    );
-    assert_eq!(first.dispatches(), 1);
-    assert_eq!(second.dispatches(), 1);
-    assert!(
-        !first.journal_conflict() && !second.journal_conflict(),
-        "neither writer ever learns about the other"
-    );
-
-    std::fs::remove_dir_all(&dir).ok();
+    assert_eq!(first.dispatches(), 1, "one writer, one spend");
 }
