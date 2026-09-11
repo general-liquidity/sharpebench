@@ -416,6 +416,27 @@ jobs:
       - name: Every recorded source and artifact matches the committed scope
         run: python paper/src/check-provenance.py
 
+  llm-shim:
+    name: LLM field shim (call ceiling, model identity)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Its own job rather than a step in `paper-provenance`, which installs nothing:
+    # these regressions need the Anthropic SDK on the path because the load-bearing
+    # case drives a real SDK client over a stand-in HTTP transport to observe the
+    # SDK's own retry policy. No credential and no provider are involved; the
+    # transport answers every request locally.
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install the SDK the shim imports
+        run: python -m pip install anthropic
+      - name: A ceiling of N buys exactly N provider requests
+        run: python -m unittest paper/src/test_llm_agent_budget.py
+      - name: The requested model is the only policy that can answer
+        run: python -m unittest paper/src/test_llm_agent_identity.py
+
   # --- packaged consumers: usability, not identity ----------------------------------
   # Every other packaging guard in this repository checks that the right version, commit
   # and registry are involved. None of them checks that the artifact a consumer actually

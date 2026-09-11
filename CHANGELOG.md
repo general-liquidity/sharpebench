@@ -13,6 +13,7 @@ and links the commits it was built from.
 ## [Unreleased]
 
 ### Fixed
+- llm field: the call ceiling in `examples/llm-agent/llm_agent.py` now bounds provider requests rather than dispatches from the shim. One unit of `LLM_MAX_CALLS` was reserved before each `client.messages.create`, but the client was a bare `anthropic.Anthropic()`, so the SDK's default two automatic retries on 408, 409, 429, 5xx, connection faults and timeouts billed up to three requests against that one unit and a run could spend up to three times its declared ceiling. The client is now built with `max_retries=0`, so `LLM_MAX_CALLS=N` permits at most N HTTP requests to the provider for that model across every subprocess sharing the ledger, failures included. Nothing in the shim retries a transient failure: it spends its unit and fails the subprocess, and the harness respawn takes a fresh unit from the same ledger. The docstring's admission that one reservation could cover several billable requests is gone because it is no longer true. A new `llm-shim` CI job runs the shim's ceiling and model-identity regressions, which no workflow ran before. See [inherited repairs](docs/audits/2026-09-09/INHERITED-REPAIRS.md#4-the-ceiling-counted-dispatches-not-provider-requests).
 - release: the registry check polls crates.io and npm for up to ten minutes per package instead of checking crates.io once and npm for 100 seconds. v0.20.0, v0.21.0 and v0.22.0 each failed that check on registry lag alone and passed on a rerun.
 
 ## [0.22.0] - 2026-09-10

@@ -385,6 +385,15 @@ optional. `LLM_MODEL` selects one declared model, and `SHARPEBENCH_DRY_RUN`
 prints the plan (models, datasets, ceiling, effective controls, output path)
 then stops before the first spawn and before any output file is opened.
 
+`LLM_MAX_CALLS` bounds provider requests per model, not cached results and not
+dispatches from one process. The Python adapter reserves one unit in a per-model
+ledger beside the response cache, fsynced before the request goes out, and
+builds its client with the SDK's automatic retries disabled, so one reserved
+unit is exactly one HTTP request. A transient provider failure spends its unit
+and fails the subprocess rather than being retried under the same unit; the
+harness respawn draws the next unit from the same ledger, which is what keeps
+the ceiling whole across the subprocesses the run spawns.
+
 `plan_local` is likewise pure. It refuses an absent or empty model list, a
 repeated tag, two tags that would collide downstream, an unparseable or
 non-positive control, and an unparseable thinking flag. Its dry run happens

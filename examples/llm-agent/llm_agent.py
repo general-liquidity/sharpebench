@@ -40,17 +40,25 @@ Determinism and cost controls:
     cross-seed repeats under an unchanged configuration remain free.
   - A decision stride (default 5): the model is consulted every Nth bar and
     the book is left untouched in between (empty orders = hold).
-  - A hard per-model cap on fresh API calls (default 800), counted as
-    dispatches rather than as cached results. Every fresh call reserves one
-    unit of the allowance in a per-model ledger file before the request is
-    sent, so a call that fails, times out or returns something uncacheable
-    still spends its unit, and the harness retrying the subprocess cannot
-    re-spend it. The ledger lives beside the response cache and survives the
-    process the same way, which is what makes the cap hold across the many
-    subprocesses the harness spawns. What it cannot see is retries made inside
-    the provider client: those are additional billable requests issued under
-    one reservation, so the cap bounds dispatches from this process, not the
-    HTTP requests the SDK ultimately makes.
+  - A hard per-model cap on fresh API calls (default 800), counted as provider
+    requests rather than as cached results. Every fresh call reserves one unit
+    of the allowance in a per-model ledger file before the request is sent, so
+    a call that fails, times out or returns something uncacheable still spends
+    its unit, and the harness retrying the subprocess cannot re-spend it. The
+    ledger lives beside the response cache and survives the process the same
+    way, which is what makes the cap hold across the many subprocesses the
+    harness spawns, which the producer starts one at a time. The client is
+    built with the SDK's own automatic retries off, so one reservation is
+    exactly one HTTP request to the provider and the ceiling counts what the
+    provider is actually asked to do.
+  - No in-process retry of a transient failure. A rate limit, a timeout or a
+    connection fault raises on the first attempt, having spent its unit, and
+    fails the subprocess. The harness respawns it (EXTERNAL_MAX_RETRIES) and
+    the next attempt takes a fresh unit from the same ledger, so a retried
+    window is bounded by the same allowance as any other call. Retrying inside
+    this process, or leaving the SDK to do it, would issue several billable
+    requests under one reservation, which is the thing the ledger exists to
+    prevent.
   - Malformed model output is emitted as an invalid wire decision so the Rust
     transport classifies the affected run as an agent-protocol failure. It is
     never flattened into a hold. Explicit refusals remain deliberate holds.
@@ -64,7 +72,7 @@ Environment:
   LLM_STATS_DIR       directory for per-process stats files (summed afterwards)
   LLM_STRIDE          decision stride in bars (default 5)
   LLM_MAX_CALLS       fresh-API-call cap per model (default 800), counted as
-                      dispatches reserved, not as results cached
+                      provider requests reserved, not as results cached
 """
 
 import hashlib
@@ -93,6 +101,11 @@ REQUESTED_MODEL = MODEL
 SCAFFOLD_VERSION = "summarize-v1/parse-v1"
 STRIDE = int(os.environ.get("LLM_STRIDE", "5"))
 MAX_CALLS = int(os.environ.get("LLM_MAX_CALLS", "800"))
+# The SDK retries some failures itself (anthropic.DEFAULT_MAX_RETRIES is 2).
+# Those extra requests are billable and invisible to the ledger, which would
+# make the allowance bound dispatches from this process rather than provider
+# requests. Zero makes one reservation exactly one request.
+PROVIDER_MAX_RETRIES = 0
 HERE = Path(__file__).resolve().parent
 CACHE_DIR = Path(os.environ.get("LLM_CACHE_DIR", HERE))
 CACHE_PATH = CACHE_DIR / f"llm-cache-{MODEL}.jsonl"
@@ -135,9 +148,10 @@ STATS = {
     "malformed": 0,
     "refusals": 0,
     "budget_exhausted": 0,
-    # Dispatches reserved against the cap, this process and every earlier one
-    # sharing the ledger. Never smaller than llm_calls; larger by the calls that
-    # were sent and produced no cached result.
+    # Provider requests reserved against the cap, this process and every
+    # earlier one sharing the ledger. Equal to llm_calls within one process,
+    # which counts the same dispatches; larger by whatever earlier processes
+    # sharing this model's ledger already spent.
     "calls_reserved": 0,
     "api_errors": 0,
     "tokens_in": 0,
@@ -265,8 +279,15 @@ def reserve_call(key):
     the same allowance. The reservation names the request it was taken for, so
     the ledger can be read against the cache afterwards.
 
-    Retries made inside the provider client are not visible here and are not
-    counted: one reservation can cover several billable requests.
+    One reservation is one provider request. The client disables the SDK's own
+    automatic retries (`PROVIDER_MAX_RETRIES`), so nothing issues a second
+    billable request under a unit already spent; a transient failure is raised
+    to the harness, whose respawn takes a fresh unit from this ledger.
+
+    Reservations are serialized by the producer, which runs one model against
+    one window at a time. The count is read at startup and advanced in memory,
+    so concurrent processes sharing one ledger would each start from the same
+    base; the ceiling assumes the sequential spawn the harness performs.
     """
     ATTEMPTS_PATH.parent.mkdir(parents=True, exist_ok=True)
     record = {
@@ -404,10 +425,20 @@ def call_model(client, prompt):
         ) from e
 
 
+def build_client():
+    """The provider client the call ceiling is defined against.
+
+    `max_retries=0` is load-bearing rather than a tuning choice: the allowance
+    is reserved once per `messages.create`, so the SDK must not expand that
+    into several HTTP requests. With retries off the SDK sends exactly one.
+    """
+    return anthropic.Anthropic(max_retries=PROVIDER_MAX_RETRIES)
+
+
 def main(client=None):
     # The client is a parameter so the decision loop can be exercised against a
     # stand-in; nothing but a test passes one.
-    client = client if client is not None else anthropic.Anthropic()
+    client = client if client is not None else build_client()
     cache = load_cache()
     attempts = load_attempt_count()
     STATS["calls_reserved"] = attempts
