@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "1c30140b8734fa500d5a51dabec4dafc8ee6767b",
+  "generated_at_head": "2994c81a9730f9dfb57554c0198b3a8aa509ea05",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -531,7 +531,7 @@
     },
     {
       "path": "crates/sharpebench-edge/src/verdict.rs",
-      "sha256": "0c1e5033b971f467ad724058bc947ecab26dc4e523d2b0d03d2f3e6ac1000c6b"
+      "sha256": "14cc29f13e8911dac88f05c1ae79a7bbf14e3f44a6b867c44d2ec4b5ada7b125"
     },
     {
       "path": "crates/sharpebench-harness/Cargo.toml",
@@ -879,7 +879,7 @@
     },
     {
       "path": "crates/sharpebench-stats/tests/opt_in_diagnostics.rs",
-      "sha256": "25d8229a0cf4bf9eeadec1cc2e6be0cecc8b8d3bc51a73eccd12bac06c4cccbe"
+      "sha256": "a907c58f92d7df4133044953cef63b935e7d78710ef855214a5eff78f2d6a34b"
     },
     {
       "path": "crates/sharpebench-stats/tests/r02_statistical_boundaries.rs",
@@ -1151,5 +1151,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "c526437c70e4de9fe57bde07238d5316e8ce3bea1e52bbfc4ac38a815d7d7de7"
+  "source_snapshot_sha256": "3b159030fb5bd3090646a66a66ba5af75679cc1a409193d507e5ce751939bd5c"
 }

@@ -261,11 +261,29 @@ and `rho = 3`, the risk aversion the authors use and describe as consistent
 with the market portfolio (they report 2 to 4 as the plausible range). `Theta`
 is the annualized continuously compounded certainty equivalent: a riskless
 stream earning `c` a period scores `ln(1 + c) * periods_per_year` at every risk
-aversion. Unlike the Sharpe ratio it cannot be raised by selling tail risk. A
-test builds a stream that collects 1.5% in 99 periods and loses 50% in one: its
-Sharpe (0.191) and mean beat a symmetric +5.8% / -4.2% stream (Sharpe 0.159),
-and its MPPM is lower at risk aversion 2, 3 and 4 (per period -0.00048 against
-0.00428 at 3). The measure is the one defense against option-like payoffs that
+aversion. Where the Sharpe ratio can be raised by selling tail risk, the MPPM
+resists it, but only in the sense GISW prove and only at the risk aversion that
+sense requires. Their property 2 is that an uninformed investor cannot *expect*
+to raise his *estimated* score by deviating, and it holds when `rho` is chosen
+so that holding the benchmark is optimal for that investor (their eq. 19). This
+kernel takes `rho` from the caller and defaults it to 3; it does not solve eq.
+19 against a benchmark, and the theorem is about an expectation, so "the MPPM
+penalizes tail selling" is a statement about the risk aversion and the
+evaluation point, not a property of any finite sample.
+
+A test builds a stream that collects 1.5% in 99 periods and loses 50% in one:
+its Sharpe (0.191) and mean beat a symmetric +5.8% / -4.2% stream (Sharpe
+0.159), and its MPPM is lower at risk aversion 2, 3 and 4 (per period -0.00048
+against 0.00428 at 3). That is what the test pins, and it does not generalize.
+On the same two streams the tail seller *wins* at every `rho` below about
+1.6444, including `rho = 1`, the geometric-average measure GISW themselves list
+as unmanipulable against dynamic manipulation (0.00781 against 0.00674). And
+because `Theta` is a sample average, an unrealized tail is invisible to it: the
+same 99 collecting periods with the loss falling outside the sample score
+0.01489 at every `rho`, three and a half times the symmetric stream's 0.00428
+at `rho = 3`. Raising the premium from 1.5% to 2.5% flips the ordering even with
+the tail realized at `rho = 3`. Both flips are pinned by tests. The measure is
+the one defense against option-like payoffs that
 an imported return series has: the simulator only executes linear exposures,
 but nothing checks an imported series. It is reported, not gated. A return at
 or below -1 is outside its domain and refused.

@@ -121,12 +121,30 @@ pub struct HonestyConfig {
     pub confidence: f64,
     /// Deflated-Sharpe probability threshold for `Borderline`. Default 0.90.
     pub borderline: f64,
-    /// **Annualized** benchmark Sharpe the PSR and MinTRL test against, divided
-    /// by `sqrt(periods_per_year)` before use, like `trials_sr_std`. Default
-    /// 0.0, which is zero in every unit, so the default PSR and MinTRL do not
-    /// depend on the frequency. An invalid `periods_per_year` refuses the
-    /// verdict as it does for the prior; a non-zero benchmark then has no
-    /// per-period value, and the PSR and MinTRL are NaN.
+    /// **Annualized** null value `SR0` in the PSR and MinTRL test of
+    /// `H0: SR <= SR0`, divided by `sqrt(periods_per_year)` before use, like
+    /// `trials_sr_std`. Default 0.0, the no-edge null, which is zero in every
+    /// unit, so the default PSR and MinTRL do not depend on the frequency. An
+    /// operator who wants "the true Sharpe beats an annualized 0.5" sets 0.5
+    /// here, in units that mean the same thing on every timeframe. An invalid
+    /// `periods_per_year` refuses the verdict as it does for the prior; a
+    /// non-zero null then has no per-period value, and the PSR and MinTRL are
+    /// NaN.
+    ///
+    /// This is a hypothesis-test null, **not** a benchmark portfolio in
+    /// Sharpe's (1994) sense, despite the field name. Sharpe's ratio against a
+    /// risky benchmark is the mean over the standard deviation of the
+    /// *period-by-period differential* return, and that differential has a
+    /// standard deviation of its own: a fund at mu 0.08, sigma 0.20 against a
+    /// benchmark at mu 0.06, sigma 0.15 correlated 0.9 has a differential ratio
+    /// of `0.02 / sqrt(0.04 + 0.0225 - 2 * 0.9 * 0.03)` = 0.217, while the two
+    /// standalone Sharpes are both 0.40 and their difference is 0. Even a
+    /// riskless constant `c` enters the differential form as `SR - c / sigma`,
+    /// not as a Sharpe number to subtract: setting `SR0` is a different test
+    /// that coincides with Sharpe's only at zero. To test against a risky
+    /// benchmark, build the differential series: the board scorer does exactly
+    /// that under `PassMode::RelativeToBenchmark`, which computes each run's
+    /// PSR on its excess returns over the aligned benchmark run.
     pub sr_benchmark: f64,
 }
 
