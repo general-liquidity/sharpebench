@@ -8,9 +8,11 @@ are the twelve listed in [RELEASING.md](RELEASING.md), and `xtask` and
 `examples/reference-agent` are `publish = false`. Each section is one `v*` tag
 and links the commits it was built from.
 
-[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.23.0...HEAD
+[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.24.0...HEAD
 
 ## [Unreleased]
+
+## [0.24.0] - 2026-09-11
 
 ### Breaking
 - llm field: a run whose model has no rate card refuses to start. `price_for` in `examples/llm-agent/llm_agent.py` walked `PRICING` by prefix and answered `(0.0, 0.0)` when nothing matched, so a run on a model absent from the table priced every call at nothing and that zero was published as what the run spent. A plausible wrong number is worse than an absence for a benchmark that prices what an agent spent, and unlike the unknowable costs the Rust side records as `MonetarySummary::Unavailable`, this one is knowable before any money moves: the operator names the model and the table is a literal in the same file. `price_for` now raises a typed `UnpricedModel`, and `main` establishes it through `assert_model_is_priced` beside the retry guard, before the first observation is read. The rate card is also matched by the model-identity rule rather than by a prefix, so a model whose name extends a priced one is no longer billed at the other model's card (`claude-opus-5-1` priced as `claude-opus-5`, at half the rate); a card matches a model that equals its alias or is that alias followed by one hyphen and an eight-digit dated snapshot. Operators running a model outside `claude-fable-5`, `claude-opus-5` and `claude-haiku-4-5` must add its rate card. `paper/evidence/assemble_llm_field.py`, which writes the published `cost_usd`, carried an independent copy of both and refuses the same way, as a `SystemExit` beside its other completeness gates. See A8 in the [accounting review](docs/audits/2026-09-09/ACCOUNTING-REVIEW.md) and section 7 of [inherited repairs](docs/audits/2026-09-09/INHERITED-REPAIRS.md).
@@ -604,6 +606,7 @@ First published release.
 ### Fixed
 - Constant-time HMAC verification and bounded, timed agent HTTP reads ([6c3d174](https://github.com/general-liquidity/sharpebench/commit/6c3d174)).
 
+[0.24.0]: https://github.com/general-liquidity/sharpebench/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/general-liquidity/sharpebench/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/general-liquidity/sharpebench/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/general-liquidity/sharpebench/compare/v0.20.0...v0.21.0
