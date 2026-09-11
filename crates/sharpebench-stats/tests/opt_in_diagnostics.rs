@@ -439,6 +439,12 @@ fn short_volatility_raises_the_sharpe_but_not_the_mppm() {
     }
 }
 
+/// The risk aversion at which the MPPM stops ordering the tail-selling stream of
+/// [`mppm_does_not_order_tail_selling_last_at_every_rho_or_sample`] above the
+/// symmetric one, bisected on this kernel to the last double on the tail
+/// seller's side.
+const FLIP_RHO: f64 = 1.644_367_729_837_862_7;
+
 /// The bound of the test above. GISW's property 2 is that an uninformed
 /// investor cannot *expect* to raise his *estimated* score, at a `rho` chosen so
 /// that holding the benchmark is optimal (their eq. 19), which this kernel does
@@ -446,9 +452,9 @@ fn short_volatility_raises_the_sharpe_but_not_the_mppm() {
 /// same tail-selling stream beats the symmetric one two ways, so the book must
 /// not claim the measure cannot be raised by selling tail risk.
 ///
-/// 1. Below `rho` about 1.6444 the ordering is reversed even with the tail
-///    realized, including at `rho = 1`, the geometric-average measure GISW list
-///    as unmanipulable against dynamic manipulation (p. 17).
+/// 1. Below [`FLIP_RHO`] the ordering is reversed even with the tail realized,
+///    including at `rho = 1`, the geometric-average measure GISW list as
+///    unmanipulable against dynamic manipulation (p. 17).
 /// 2. `Theta` is a sample average, so a tail that does not land in the sample is
 ///    invisible to it at every `rho`.
 #[test]
@@ -459,8 +465,23 @@ fn mppm_does_not_order_tail_selling_last_at_every_rho_or_sample() {
         .map(|i| if i % 2 == 0 { 0.058 } else { -0.042 })
         .collect();
 
-    // The ordering flips between these two risk aversions, so the pin is the
-    // bracket rather than a property that holds on one side of it.
+    // The root itself, bisected to the last double that still orders the tail
+    // seller first. Pinned rather than bracketed so that a change to the measure
+    // moves a number a reader has to account for instead of silently widening a
+    // range: the two sides below are 1e-6 away, where the gap is about 2e-9 and
+    // a hundred million times the arithmetic's own error.
+    let flip = |rho: f64| {
+        manipulation_proof_performance(&short_vol, rho, 1.0).unwrap()
+            - manipulation_proof_performance(&symmetric, rho, 1.0).unwrap()
+    };
+    assert!(
+        flip(FLIP_RHO).abs() < 1e-11,
+        "at the root: {}",
+        flip(FLIP_RHO)
+    );
+    assert!(flip(FLIP_RHO - 1e-6) > 0.0, "{}", flip(FLIP_RHO - 1e-6));
+    assert!(flip(FLIP_RHO + 1e-6) < 0.0, "{}", flip(FLIP_RHO + 1e-6));
+
     for (rho, sv_want, sym_want) in [
         (1.0, 0.007_808_254_563_213_695, 0.006_736_416_212_415_563),
         (1.5, 0.006_410_991_723_567_494_5, 0.006_120_349_841_980_698),
