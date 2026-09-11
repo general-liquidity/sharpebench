@@ -8,9 +8,11 @@ are the twelve listed in [RELEASING.md](RELEASING.md), and `xtask` and
 `examples/reference-agent` are `publish = false`. Each section is one `v*` tag
 and links the commits it was built from.
 
-[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.23.0...HEAD
 
 ## [Unreleased]
+
+## [0.23.0] - 2026-09-11
 
 ### Breaking
 - harness: `HostObservedUsage` gains a public `journal_unwritable` field, so a Rust struct literal or exhaustive destructuring that lists every field must add it, and the published board JSON gains the key.
@@ -588,6 +590,7 @@ First published release.
 ### Fixed
 - Constant-time HMAC verification and bounded, timed agent HTTP reads ([6c3d174](https://github.com/general-liquidity/sharpebench/commit/6c3d174)).
 
+[0.23.0]: https://github.com/general-liquidity/sharpebench/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/general-liquidity/sharpebench/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/general-liquidity/sharpebench/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/general-liquidity/sharpebench/compare/v0.19.0...v0.20.0
