@@ -843,22 +843,7 @@ where
     let mut journal = admit_pair(sweep.checkpoint, sweep.journal, &journal_identity)?;
     // The journal exists from here on, so ownership can be keyed on the
     // document rather than on the name this sweep was given for it.
-    if !journal_lock.covers_document() {
-        let journal_id = match JournalLock::document_id(sweep.journal) {
-            Some(journal_id) => journal_id,
-            None => {
-                let journal_id = journal.ensure_journal_id();
-                journal.save(sweep.journal).map_err(|error| match error {
-                    JournalSaveError::Io(error) | JournalSaveError::Unsynced(error) => error,
-                    conflict => {
-                        std::io::Error::new(std::io::ErrorKind::InvalidData, conflict.to_string())
-                    }
-                })?;
-                journal_id
-            }
-        };
-        journal_lock.bind_journal_id(sweep.journal, &journal_id)?;
-    }
+    journal_lock.bind_document(sweep.journal, &mut journal)?;
     let mut gateway = ModelGateway {
         routes: host.routes,
         permits: host.permits,

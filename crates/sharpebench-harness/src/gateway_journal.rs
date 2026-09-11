@@ -378,12 +378,20 @@ impl From<JournalLockError> for std::io::Error {
 /// `sb-gateway-journal-<id>.lock`, beside the journal. Both are held, and both
 /// have to be free.
 ///
+/// A document written before the id field existed names no id. Its identity is
+/// then derived from its own bytes, so every gateway that reaches one such
+/// document derives the same value and exactly one of them takes the lock; the
+/// derived identity is written into the document by the gateway that wins, so
+/// the name stays put once the next save changes those bytes. Assigning a fresh
+/// identity instead would let two gateways opening one legacy document assign
+/// two and both proceed, which is the defect this lock exists to prevent.
+///
 /// What that leaves open, precisely: the identity lock is a sibling of the
 /// journal, so it separates aliases that share a directory and not aliases in
-/// different directories; and a journal document written before the id field
-/// existed names no id, so a gateway assigns one and saves before it binds,
-/// which two gateways opening such a document under two names would each do
-/// separately.
+/// different directories. Closing that needs a lock outside the journal's own
+/// directory, in a namespace the journal's owner does not control; see
+/// `docs/audits/2026-09-09/HOST-ACCOUNTING.md` for why that cost is not paid
+/// here.
 ///
 /// # Detecting displacement
 ///
@@ -395,10 +403,14 @@ impl From<JournalLockError> for std::io::Error {
 #[derive(Debug)]
 pub struct JournalLock {
     path: PathBuf,
-    /// The journal-identity lock, held alongside `path` once the document names
-    /// an id. `None` for a journal that does not exist yet, or one written
-    /// before the field existed, until [`JournalLock::bind_journal_id`].
+    /// The journal-identity lock, held alongside `path` once there is a
+    /// document to name. `None` for a journal that does not exist yet, until
+    /// [`JournalLock::bind_journal_id`].
     identity_path: Option<PathBuf>,
+    /// The document identity `identity_path` is named for, so a lock taken on a
+    /// derived identity can write that identity into the document rather than
+    /// deriving it a second time from bytes a save is about to change.
+    document_id: Option<String>,
     /// What this value wrote into both files, so its drop can tell its own lock
     /// from whatever else may be at those paths.
     instance: String,
@@ -459,13 +471,13 @@ impl JournalLock {
 
     /// Take exclusive ownership of `journal`, or refuse.
     ///
-    /// Both the spelling and, when the document on disk names one, the
+    /// Both the spelling and, when there is a document at `journal` at all, the
     /// document's identity have to be free. A journal that does not exist yet
     /// names no document; its opener binds the identity once it has written one
-    /// through [`JournalLock::bind_journal_id`].
+    /// through [`JournalLock::bind_document`].
     pub fn acquire(journal: &Path) -> Result<Self, JournalLockError> {
         let mut lock = Self::create(Self::lock_path(journal)?, None, fresh_token())?;
-        if let Some(id) = journal_id_on_disk(journal) {
+        if let Some(id) = document_identity(journal) {
             // A refusal here drops `lock`, which releases the spelling lock it
             // just took: a gateway that cannot own the document owns nothing.
             lock.bind_journal_id(journal, &id)?;
@@ -484,14 +496,63 @@ impl JournalLock {
         let identity_path = Self::identity_lock_path(journal, journal_id);
         write_lock_file(&identity_path, None, &self.instance)?;
         self.identity_path = Some(identity_path);
+        self.document_id = Some(journal_id.to_string());
         Ok(())
     }
 
-    /// The identity of the journal document at `journal`, as the lock reads it.
-    /// `None` when there is no journal there yet, or when its document names no
-    /// usable identity.
+    /// Bind this lock to the document at `journal`, writing an identity into
+    /// `snapshot` and persisting it when the document names none.
+    ///
+    /// A document that already names an identity is bound to that. A document
+    /// written before the field existed is bound to the identity derived from
+    /// its bytes, which [`JournalLock::acquire`] already took, and that value is
+    /// written into it so the lock's name survives the next save. A journal that
+    /// does not exist yet gets a fresh identity, written and then bound: there
+    /// is no second name that could reach a document which is not there.
+    pub fn bind_document(
+        &mut self,
+        journal: &Path,
+        snapshot: &mut GatewayJournal,
+    ) -> std::io::Result<()> {
+        // A document may have appeared between the acquire and here, written by
+        // whatever admitted the journal under this lock.
+        if let Some(named) = journal_id_on_disk(journal) {
+            if self.identity_path.is_none() {
+                self.bind_journal_id(journal, &named)?;
+            }
+            return Ok(());
+        }
+        match self.document_id.clone() {
+            Some(derived) => {
+                snapshot.journal_id = Some(derived);
+                save_for_binding(snapshot, journal)
+            }
+            None => {
+                let assigned = snapshot.ensure_journal_id();
+                save_for_binding(snapshot, journal)?;
+                self.bind_journal_id(journal, &assigned)?;
+                Ok(())
+            }
+        }
+    }
+
+    /// The identity of the journal document at `journal`, as the lock keys
+    /// ownership on it: the one the document names, or, for a document written
+    /// before the field existed, the one derived from its bytes. `None` when
+    /// there is no journal there yet.
     pub fn document_id(journal: &Path) -> Option<String> {
+        document_identity(journal)
+    }
+
+    /// The identity a document that names none is given: a digest of its own
+    /// bytes. `None` when there is no document at `journal`, and `None` for one
+    /// that names a usable identity of its own, which is what ownership keys on
+    /// instead.
+    pub fn derived_document_id(journal: &Path) -> Option<String> {
         journal_id_on_disk(journal)
+            .is_none()
+            .then(|| derived_document_id(journal))
+            .flatten()
     }
 
     /// Whether this lock covers the journal *document* as well as the path
@@ -543,7 +604,7 @@ impl JournalLock {
             });
         std::fs::remove_file(&lock_path).map_err(JournalLockError::Io)?;
         let mut taken = Self::create(lock_path, Some(displaced), fresh_token())?;
-        if let Some(id) = journal_id_on_disk(journal) {
+        if let Some(id) = document_identity(journal) {
             let identity_path = Self::identity_lock_path(journal, &id);
             match std::fs::remove_file(&identity_path) {
                 Ok(()) => {}
@@ -568,9 +629,20 @@ impl JournalLock {
         Ok(Self {
             path: lock_path,
             identity_path: None,
+            document_id: None,
             instance,
         })
     }
+}
+
+/// Persist a journal whose only reason for being written is that the lock needs
+/// a document to name. A conflict here is not this caller's to reconcile: it
+/// means the file moved under the lock, which is data, not an I/O fault.
+fn save_for_binding(snapshot: &mut GatewayJournal, journal: &Path) -> std::io::Result<()> {
+    snapshot.save(journal).map_err(|error| match error {
+        JournalSaveError::Io(error) | JournalSaveError::Unsynced(error) => error,
+        conflict => std::io::Error::new(std::io::ErrorKind::InvalidData, conflict.to_string()),
+    })
 }
 
 fn write_lock_file(
@@ -657,6 +729,29 @@ fn journal_id_on_disk(journal: &Path) -> Option<String> {
     usable.then(|| id.to_string())
 }
 
+/// What ownership is keyed on for the document at `journal`: the identity it
+/// names, or, for one written before the field existed, the identity derived
+/// from its bytes.
+fn document_identity(journal: &Path) -> Option<String> {
+    journal_id_on_disk(journal).or_else(|| derived_document_id(journal))
+}
+
+/// The identity to give a document that names none: a digest of the bytes on
+/// disk. Two gateways reaching one such document under two names read the same
+/// bytes and derive the same identity, so exactly one of them takes its lock,
+/// where a fresh identity each would let both proceed and both spend. Two
+/// documents that are byte for byte the same and share a directory derive one
+/// identity and one lock, which refuses a second gateway that could have been
+/// admitted; that is the direction this is allowed to be wrong in.
+fn derived_document_id(journal: &Path) -> Option<String> {
+    use sha2::{Digest as _, Sha256};
+    let bytes = read_bounded(journal, MAX_JOURNAL_BYTES).ok()?;
+    let mut hash = Sha256::new();
+    hash.update(b"sharpebench.gateway-journal-derived-identity.v1");
+    hash.update(&bytes);
+    Some(format!("{:x}", hash.finalize())[..32].to_string())
+}
+
 /// A short operator-facing description of whoever holds a lock. Never fails:
 /// an unreadable or foreign document still has to produce a refusal message.
 fn describe_holder(lock_path: &Path) -> String {
@@ -697,8 +792,10 @@ fn read_bounded(path: &Path, max_bytes: u64) -> std::io::Result<Vec<u8>> {
 /// from a snapshot that does not match what is on disk is refused as
 /// [`JournalSaveError::Conflict`] rather than replacing a record this process
 /// never read. That check is now a second line of defence rather than the only
-/// one: it catches a journal that moved under a single writer, such as a file
-/// restored from a backup or edited by hand mid-sweep.
+/// one, and what it defends against is named: the writer a
+/// [`JournalLock::take_over`] deliberately adds to a journal whose first holder
+/// may still be alive, and a journal that moved under its sole owner, such as a
+/// file restored from a backup or edited by hand mid-sweep.
 ///
 /// # What ownership does not cover
 ///
@@ -723,7 +820,8 @@ pub struct GatewayJournal {
     /// through every save, and reported alike by every directory entry that
     /// reaches it, so ownership can be taken on the journal rather than on the
     /// name a gateway happened to be given. Absent in a document written before
-    /// the field existed; its next opener assigns one.
+    /// the field existed; its next opener assigns the identity derived from its
+    /// bytes, which is the one its lock was already taken on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     journal_id: Option<String>,
     records: Vec<JournalRecord>,
@@ -1031,6 +1129,21 @@ impl GatewayJournal {
     /// every record it appended. Concurrent writers are kept apart by the
     /// [`JournalLock`] a gateway holds, not by this check; see the type
     /// documentation for what each one covers.
+    ///
+    /// The check is not redundant now that the lock serialises the writers that
+    /// go through it, because two of them do not. A [`JournalLock::take_over`]
+    /// deliberately puts a second writer on a journal whose first holder may
+    /// still be alive, and nothing here consults a lock, so this is what refuses
+    /// the displaced holder's next write. A journal that moved under its sole
+    /// owner, restored from a backup or edited by hand mid-sweep, is the other.
+    /// What it does not cover is two writers inside its own window: the version
+    /// is read, then a temporary file is created, written and synced, and only
+    /// then renamed. Two writers that read one version both proceed. There is no
+    /// portable file-system operation that renames a file only if its target
+    /// still holds a given version, so making this atomic would mean a separate
+    /// claim file per version, which a crashed writer would leave behind for an
+    /// operator to clear: a benign fault turned into a stuck journal, to narrow
+    /// a window the lock already covers.
     pub fn save(&mut self, path: &Path) -> Result<(), JournalSaveError> {
         use std::io::Write as _;
         let found = Self::version_on_disk(path)
@@ -1610,6 +1723,186 @@ mod tests {
                 .exists(),
             "a refused holder leaves no lock of its own behind"
         );
+    }
+
+    /// A journal document as it was written before `journal_id` existed: the
+    /// same fields, with no identity in it.
+    fn legacy_document(path: &Path, identity: &JournalIdentity) {
+        let mut document =
+            serde_json::to_value(GatewayJournal::new(identity.clone())).expect("json");
+        document
+            .as_object_mut()
+            .expect("a journal is an object")
+            .remove("journal_id");
+        std::fs::write(path, serde_json::to_vec_pretty(&document).expect("json"))
+            .expect("a document from before the identity existed");
+    }
+
+    /// A2, the pre-identity half. A document that names no identity is owned on
+    /// the identity derived from its bytes, which every name for it derives
+    /// alike, so two gateways opening one before either has written anything
+    /// contend for one lock instead of assigning one identity each.
+    ///
+    /// Two causes could refuse the second holder: the alias's spelling lock,
+    /// which is shown free first, and the document's lock, which the refusal is
+    /// required to name. Nothing has been written at this point, so no third
+    /// cause is available.
+    #[test]
+    fn a_second_name_for_one_legacy_journal_document_is_refused_the_lock() {
+        let dir = lock_dir("legacyalias");
+        let path = dir.join("journal.json");
+        let alias = dir.join("journal-copy.json");
+        legacy_document(&path, &identity(budget(1_000_000, 8)));
+        std::fs::hard_link(&path, &alias).expect("a second name for one file");
+
+        let derived = JournalLock::derived_document_id(&path).expect("a derived identity");
+        assert_eq!(
+            JournalLock::derived_document_id(&alias).as_deref(),
+            Some(derived.as_str()),
+            "one document derives one identity, whatever name it is reached under"
+        );
+
+        let held = JournalLock::acquire(&path).expect("the first holder takes the document");
+        assert!(
+            held.covers_document(),
+            "a document that names no identity is still a document to own"
+        );
+        assert!(
+            !JournalLock::lock_path(&alias)
+                .expect("a lock path")
+                .exists(),
+            "the other name's spelling lock is free, so only the document lock can refuse"
+        );
+        let error = JournalLock::acquire(&alias).expect_err("the second name is refused");
+        assert!(
+            matches!(&error, JournalLockError::Held { lock_path, .. }
+                if *lock_path == JournalLock::identity_lock_path(&path, &derived)),
+            "{error}"
+        );
+        drop(held);
+        JournalLock::acquire(&alias).expect("a released document is free again");
+    }
+
+    /// A2, the pre-identity half. The identity a legacy document is given is the
+    /// one its lock was already taken on, so the lock's name is still the
+    /// document's name once the save that writes it changes the bytes it was
+    /// derived from.
+    ///
+    /// A fresh identity would satisfy neither assertion: it cannot equal a
+    /// digest of the bytes. Nor can the identity be being re-derived rather than
+    /// stored, because both reads are of bytes that have changed since.
+    #[test]
+    fn a_legacy_journal_document_is_bound_to_the_identity_derived_from_its_bytes() {
+        let dir = lock_dir("legacybind");
+        let path = dir.join("journal.json");
+        let identity = identity(budget(1_000_000, 8));
+        legacy_document(&path, &identity);
+        assert!(
+            GatewayJournal::load_bound(&path, &identity)
+                .expect("a legacy document still resumes")
+                .journal_id()
+                .is_none(),
+            "and it names no identity of its own"
+        );
+
+        let derived = JournalLock::derived_document_id(&path).expect("a derived identity");
+        let mut lock = JournalLock::acquire(&path).expect("the holder takes the document");
+        let mut journal = GatewayJournal::load_bound(&path, &identity).expect("resume");
+        lock.bind_document(&path, &mut journal).expect("bind");
+        assert_eq!(
+            JournalLock::document_id(&path).as_deref(),
+            Some(derived.as_str()),
+            "the document is given the identity its lock was taken on, not a fresh one"
+        );
+
+        let ordinal = journal.reserve("alias", &card(1, 1), 10);
+        journal.settle(
+            ordinal,
+            Settlement::Released {
+                reason: ReleaseReason::NeverDispatched,
+            },
+        );
+        journal
+            .save(&path)
+            .expect("a save that changes the document");
+        assert_eq!(
+            JournalLock::document_id(&path).as_deref(),
+            Some(derived.as_str()),
+            "so the lock's name still matches the document once the bytes move"
+        );
+    }
+
+    /// What the compare-and-swap defends against now that the lock serialises
+    /// the writers that go through it: the two writers a takeover deliberately
+    /// creates. `take_over` displaces a holder that may be alive and may still
+    /// be spending, and `save` consults no lock, so the version is the only
+    /// thing that refuses the displaced holder's next write.
+    ///
+    /// Three causes could refuse that save. An I/O fault is ruled out by the
+    /// refusal being a `Conflict` carrying both versions. The lock is ruled out
+    /// by the displaced holder's earlier save landing while its lock is already
+    /// displaced: the only thing that changes between the two is the taker
+    /// having written in between.
+    #[test]
+    fn a_displaced_holder_is_refused_by_the_version_check_once_the_taker_writes() {
+        let dir = lock_dir("displacedsave");
+        let path = dir.join("journal.json");
+        let identity = identity(budget(1_000_000, 8));
+        let displaced = JournalLock::acquire(&path).expect("the first holder takes the path");
+        let mut theirs = GatewayJournal::new(identity.clone());
+        theirs.reserve("alias", &card(1, 1), 10);
+        theirs.save(&path).expect("the owner writes");
+
+        let taker = JournalLock::take_over(&path, "believed gone, in fact still running")
+            .expect("an operator displaces it");
+        assert!(
+            !displaced.is_still_held(),
+            "the displaced holder no longer holds the lock at its path"
+        );
+        theirs
+            .save(&path)
+            .expect("and a save consults no lock, so this one still lands");
+        assert_eq!(
+            GatewayJournal::version_on_disk(&path).expect("readable"),
+            Some(2)
+        );
+
+        let mut taken = GatewayJournal::load_bound(&path, &identity)
+            .expect("the taker reads the journal it now owns");
+        taken.settle(
+            0,
+            Settlement::Released {
+                reason: ReleaseReason::NeverDispatched,
+            },
+        );
+        taken.save(&path).expect("the taker writes");
+
+        theirs.settle(
+            0,
+            Settlement::Unknown {
+                reason: UnknownCostReason::InterruptedBeforeSettlement,
+            },
+        );
+        let error = theirs
+            .save(&path)
+            .expect_err("the displaced holder's next write is refused");
+        assert!(
+            matches!(
+                error,
+                JournalSaveError::Conflict {
+                    expected: 2,
+                    found: 3
+                }
+            ),
+            "{error}"
+        );
+        assert_eq!(
+            theirs.records().len(),
+            2,
+            "and the records it appended stay its own rather than being dropped"
+        );
+        drop(taker);
+        drop(displaced);
     }
 
     /// A7. A save whose rename landed and whose durability step did not is a

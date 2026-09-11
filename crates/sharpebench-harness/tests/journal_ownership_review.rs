@@ -6,11 +6,13 @@
 //! the lock it holds and no other, and one journal document admits one gateway
 //! whatever name it is reached under.
 //!
-//! What A2's repair does not reach, and what no test here claims: the lock is a
-//! sibling of the journal, so two directory entries for one document in
-//! *different* directories still derive two lock files; and a journal document
-//! written before it carried an identity names none, so two gateways opening
-//! such a document under two names each assign one.
+//! A document written before it carried an identity is owned on the identity
+//! derived from its own bytes, so two gateways opening one under two names
+//! contend for one lock rather than assigning an identity each.
+//!
+//! What A2's repair does not reach, and what no test here claims: both locks
+//! are siblings of the journal, so two directory entries for one document in
+//! *different* directories still derive two lock files and both gateways open.
 //!
 //! Nothing here opens a socket: the provider is a local stand-in.
 
@@ -230,6 +232,73 @@ fn two_names_for_one_journal_document_admit_one_gateway() {
     assert!(
         !alias_spelling_lock.exists(),
         "a refused gateway leaves no lock of its own behind"
+    );
+
+    assert!(answered(&first.serve_line(&request("hello"))));
+    assert_eq!(first.dispatches(), 1, "one writer, one spend");
+}
+
+/// A2, the pre-identity half. A journal document written before it carried an
+/// identity names none, and a gateway opening one used to assign a fresh
+/// identity of its own, so two gateways opening one such document under two
+/// names assigned two identities and both spent. The identity is now derived
+/// from the document's own bytes, which both names derive alike.
+///
+/// Two causes could refuse the second gateway here: the identity the first
+/// gateway wrote, whichever it was, and the derived identity in particular.
+/// They are separated by requiring the document's identity to be the value
+/// derived from the legacy bytes before any gateway opened, which a freshly
+/// generated identity cannot equal. The alias's spelling lock is shown free, so
+/// it is not what refuses; a binding mismatch would refuse with `InvalidData`
+/// rather than a lock error. The concurrent window, where neither gateway has
+/// written yet, is pinned in the library suite by
+/// `a_second_name_for_one_legacy_journal_document_is_refused_the_lock`.
+#[test]
+fn a_legacy_journal_document_admits_one_gateway_under_two_names() {
+    let dir = ScratchDir::new("legacy-journal");
+    let real = dir.join("journal.json");
+    let alias = dir.join("journal-copy.json");
+    let routes = table();
+    let permits = CallPermits::new(4);
+
+    let document = serde_json::to_string_pretty(&GatewayJournal::new(JournalIdentity::new(
+        routes.identity_digest(),
+        budget(),
+    )))
+    .expect("a journal serializes");
+    let legacy = document
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("\"journal_id\""))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_ne!(
+        legacy, document,
+        "the identity line is the one that was dropped"
+    );
+    std::fs::write(&real, legacy).expect("a document from before the identity existed");
+    std::fs::hard_link(&real, &alias).expect("a second name for one file");
+    let derived = JournalLock::derived_document_id(&real).expect("a derived identity");
+
+    let mut first = open(&routes, &permits, &real).expect("the first gateway opens");
+    assert_eq!(
+        JournalLock::document_id(&real).as_deref(),
+        Some(derived.as_str()),
+        "the document is given the identity derived from it, not a fresh one"
+    );
+    let alias_spelling_lock = JournalLock::lock_path(&alias).expect("a lock path");
+    assert!(
+        !alias_spelling_lock.exists(),
+        "the other name's spelling lock is free, so only the document lock can refuse"
+    );
+
+    let refused = open(&routes, &permits, &alias)
+        .err()
+        .expect("the second gateway is refused the document the first owns");
+    assert_eq!(refused.kind(), std::io::ErrorKind::AlreadyExists);
+    assert_eq!(
+        held_lock_path(&refused),
+        JournalLock::identity_lock_path(&real, &derived),
+        "the refusal names the lock derived from the legacy document"
     );
 
     assert!(answered(&first.serve_line(&request("hello"))));

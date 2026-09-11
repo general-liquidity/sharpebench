@@ -327,7 +327,10 @@ takes a second lock named for the journal document itself,
 `sb-gateway-journal-<id>.lock`, where the id is carried inside the document and
 survives every save, so one journal reached under two names in one directory is
 one lock and not two. A journal that does not exist yet names no document, so
-opening writes one and binds to it there and then. A second gateway on the same
+opening writes one and binds to it there and then. A document written before it
+carried an identity is owned on one derived from its own bytes, which every name
+for it derives alike, so two gateways opening one of those concurrently contend
+for a single lock instead of assigning themselves an identity each. A second gateway on the same
 host is refused when it opens, by type, naming the lock it could not take. A
 lock left behind by a crashed process is refused too, not broken: nothing on
 disk tells a dead holder from a live one, and breaking it on a guess is how two
@@ -343,8 +346,11 @@ inspect a sweep that is running; the report says whether the path is owned, in
 Underneath that, the journal carries a version and a save is a compare-and-swap
 on it: a gateway whose snapshot the file has moved past is refused, answers
 `journal_ownership_lost` and starts no further call, instead of erasing a record
-it never read. That check is now the second line of defence, for a journal that
-moved under a single writer, such as one restored from a backup mid-sweep.
+it never read. That check is now the second line of defence, and what it defends
+against is named: a journal that moved under a single writer, such as one
+restored from a backup mid-sweep, and the second writer a takeover deliberately
+creates. A takeover displaces a holder that may still be alive, and a save
+consults no lock, so the version is what refuses that holder's next write.
 
 **A settlement that cannot be written stops the gateway.** The file then holds a
 reservation whose outcome is missing, and a reservation is not what the call
@@ -488,12 +494,17 @@ entrypoint, against the same daemon ([image preflight](image-preflight.md)).
 - **Aliases in different directories.** Both locks sit beside the journal, so a
   document reached through two directory entries in two different directories
   derives two locks and both gateways open. Aliases that share a directory are
-  refused. So is a journal document written before it carried an identity, but
-  only once its opener has assigned one and saved.
+  refused, a document written before it carried an identity included. This limit
+  is deliberate: closing it needs a lock either on the journal file, which
+  breaks the rename the journal is persisted through, or in a shared namespace
+  that is swept by age or scoped to one user, which would weaken ownership for
+  every journal to close the case of a hard link into a second directory.
 - **The version check is not a concurrency control.** A save reads the version
   on disk and renames after a create, a write and an `fsync`. Two writers that
   both read the same version inside that window both proceed. It is a second
-  line of defence behind the lock, and it is not a substitute for one.
+  line of defence behind the lock, and it is not a substitute for one. It is not
+  redundant behind the lock either: the writer a takeover adds is refused by it
+  alone.
 - **A crashed holder needs an operator.** The stale lock is refused rather than
   broken, so a host that died mid-sweep does not resume unattended. That is the
   deliberate trade: an unattended resume is exactly the automatic break that
