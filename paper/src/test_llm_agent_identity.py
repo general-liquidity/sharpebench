@@ -137,6 +137,12 @@ class Client:
         self.answers = list(answers)
         self.requests = []
         self.messages = self
+        # `main` checks the retry setting of every client it is given, supplied
+        # or built, so a stand-in that reports none is refused before the
+        # decision loop runs and these cases would never reach the identity
+        # rule they are about. The call ceiling's own suite
+        # (`test_llm_agent_budget.py`) is where that check is exercised.
+        self.max_retries = 0
 
     def create(self, **kw):
         self.requests.append(kw)
