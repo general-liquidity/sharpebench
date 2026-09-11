@@ -143,6 +143,213 @@ impl SweepContract {
     }
 }
 
+/// The one bound identity a comparison's arms are allowed to differ on.
+///
+/// [`SweepContract`] binds six identities, but binding alone does not say which
+/// of them the experiment is varying on purpose. Two arms that differ in the
+/// entrant are a model comparison; two that differ in the dataset are two
+/// different experiments wearing one table. The axis is declared, so a reader
+/// checks comparability instead of assuming it.
+///
+/// Dataset, cost model, runner artifact and the execution matrix (windows,
+/// seeds, retry budget) are deliberately not declarable: an arm that moves one
+/// of them is measuring something else.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TreatmentAxis {
+    /// A different entrant artifact: another model, or another build of one.
+    Entrant,
+    /// The same entrant launched differently: transport, endpoint or command,
+    /// arguments, and the non-secret environment policy folded into
+    /// `invocation_sha256`. Rotating a credential is not a launch difference and
+    /// never reaches that digest.
+    Invocation,
+    /// The same recorded runs read by a different scorer.
+    ScoreConfig,
+}
+
+impl TreatmentAxis {
+    /// The contract field this axis permits to differ between arms.
+    pub fn field(self) -> &'static str {
+        match self {
+            Self::Entrant => "entrant_sha256",
+            Self::Invocation => "invocation_sha256",
+            Self::ScoreConfig => "score_config_sha256",
+        }
+    }
+}
+
+/// Why two arms cannot be compared, naming the field that decided it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ComparabilityRefusal {
+    /// A bound identity the declared axis does not cover differs.
+    OffAxisIdentity {
+        field: &'static str,
+        baseline: String,
+        treatment: String,
+    },
+    /// The arms did not execute the same matrix: windows, seeds, the
+    /// failed-attempt budget, or the checkpoint schema those are recorded under.
+    ExecutionMatrix { field: &'static str },
+    /// An arm carries no contract, so it binds nothing to compare against.
+    UnboundArm { agent_id: String },
+}
+
+impl std::fmt::Display for ComparabilityRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::OffAxisIdentity {
+                field,
+                baseline,
+                treatment,
+            } => write!(
+                f,
+                "`{field}` differs off the declared treatment axis: baseline {baseline}, treatment {treatment}"
+            ),
+            Self::ExecutionMatrix { field } => {
+                write!(f, "the arms did not execute the same `{field}`")
+            }
+            Self::UnboundArm { agent_id } => {
+                write!(f, "arm `{agent_id}` carries no sweep contract")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ComparabilityRefusal {}
+
+/// A declaration that two sweep arms are comparable, and on which axis.
+///
+/// The receipt states the treatment axis, the digests the arms carry on it, and
+/// every identity checked equal to get there. A reader who disagrees with the
+/// declared axis can see exactly what was held fixed rather than trusting that
+/// anything was.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ComparisonReceipt {
+    pub schema_version: u32,
+    pub axis: TreatmentAxis,
+    pub baseline_agent_id: String,
+    pub treatment_agent_id: String,
+    /// The contract field the axis permits to differ.
+    pub axis_field: String,
+    pub baseline_axis_sha256: String,
+    pub treatment_axis_sha256: String,
+    /// The identities checked equal across both arms, in the order checked.
+    pub held_fixed: Vec<String>,
+}
+
+impl ComparisonReceipt {
+    pub const SCHEMA_VERSION: u32 = 1;
+
+    /// Declare a comparison between two checkpointed arms, or refuse it naming
+    /// the field that made them incomparable.
+    ///
+    /// The axis field is allowed to differ and is recorded either way; every
+    /// other bound identity must match exactly, and so must the execution
+    /// matrix. What the contract deliberately does not bind stays unbound here
+    /// too: a rotated credential leaves `invocation_sha256` untouched, so it
+    /// neither breaks a comparison nor a resume.
+    pub fn declare(
+        axis: TreatmentAxis,
+        baseline: &SweepCheckpoint,
+        treatment: &SweepCheckpoint,
+    ) -> Result<Self, ComparabilityRefusal> {
+        let base = baseline
+            .contract
+            .as_ref()
+            .ok_or_else(|| ComparabilityRefusal::UnboundArm {
+                agent_id: baseline.agent_id.clone(),
+            })?;
+        let treat =
+            treatment
+                .contract
+                .as_ref()
+                .ok_or_else(|| ComparabilityRefusal::UnboundArm {
+                    agent_id: treatment.agent_id.clone(),
+                })?;
+
+        let identities: [(&'static str, &String, &String); 6] = [
+            (
+                "dataset_sha256",
+                &base.dataset_sha256,
+                &treat.dataset_sha256,
+            ),
+            (
+                "cost_model_sha256",
+                &base.cost_model_sha256,
+                &treat.cost_model_sha256,
+            ),
+            (
+                "score_config_sha256",
+                &base.score_config_sha256,
+                &treat.score_config_sha256,
+            ),
+            (
+                "runner_artifact_sha256",
+                &base.runner_artifact_sha256,
+                &treat.runner_artifact_sha256,
+            ),
+            (
+                "entrant_sha256",
+                &base.entrant_sha256,
+                &treat.entrant_sha256,
+            ),
+            (
+                "invocation_sha256",
+                &base.invocation_sha256,
+                &treat.invocation_sha256,
+            ),
+        ];
+
+        let mut held_fixed = Vec::with_capacity(identities.len() - 1);
+        let mut on_axis = None;
+        for (field, baseline_digest, treatment_digest) in identities {
+            if field == axis.field() {
+                on_axis = Some((baseline_digest.clone(), treatment_digest.clone()));
+                continue;
+            }
+            if baseline_digest != treatment_digest {
+                return Err(ComparabilityRefusal::OffAxisIdentity {
+                    field,
+                    baseline: baseline_digest.clone(),
+                    treatment: treatment_digest.clone(),
+                });
+            }
+            held_fixed.push(field.to_string());
+        }
+
+        if base.schema_version != treat.schema_version {
+            return Err(ComparabilityRefusal::ExecutionMatrix {
+                field: "schema_version",
+            });
+        }
+        if base.windows != treat.windows {
+            return Err(ComparabilityRefusal::ExecutionMatrix { field: "windows" });
+        }
+        if base.seeds != treat.seeds {
+            return Err(ComparabilityRefusal::ExecutionMatrix { field: "seeds" });
+        }
+        if base.max_retries != treat.max_retries {
+            return Err(ComparabilityRefusal::ExecutionMatrix {
+                field: "max_retries",
+            });
+        }
+
+        // Unreachable by construction: every axis names one of the six.
+        let (baseline_axis_sha256, treatment_axis_sha256) = on_axis.expect("axis names a field");
+        Ok(Self {
+            schema_version: Self::SCHEMA_VERSION,
+            axis,
+            baseline_agent_id: baseline.agent_id.clone(),
+            treatment_agent_id: treatment.agent_id.clone(),
+            axis_field: axis.field().to_string(),
+            baseline_axis_sha256,
+            treatment_axis_sha256,
+            held_fixed,
+        })
+    }
+}
+
 /// The lifecycle state of one (window, seed) task in the sweep.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "state")]
@@ -942,6 +1149,158 @@ mod tests {
             seeds,
             max_retries,
         )
+    }
+
+    /// Two checkpointed arms of one experiment, identical but for `mutate`.
+    fn two_arms(mutate: impl FnOnce(&mut SweepContract)) -> (SweepCheckpoint, SweepCheckpoint) {
+        let windows = [Window { start: 20, end: 60 }];
+        let seeds = [0u64, 1];
+        let base = contract(&windows, &seeds, 2);
+        let mut treatment = base.clone();
+        mutate(&mut treatment);
+        (
+            SweepCheckpoint::new_bound("baseline", base),
+            SweepCheckpoint::new_bound("treatment", treatment),
+        )
+    }
+
+    #[test]
+    fn comparison_receipt_declares_the_axis_the_arms_differ_on() {
+        let (baseline, treatment) = two_arms(|c| c.entrant_sha256 = "77".repeat(32));
+        let receipt =
+            ComparisonReceipt::declare(TreatmentAxis::Entrant, &baseline, &treatment).unwrap();
+        assert_eq!(receipt.axis_field, "entrant_sha256");
+        assert_eq!(receipt.baseline_axis_sha256, "55".repeat(32));
+        assert_eq!(receipt.treatment_axis_sha256, "77".repeat(32));
+        assert_eq!(
+            receipt.held_fixed,
+            vec![
+                "dataset_sha256",
+                "cost_model_sha256",
+                "score_config_sha256",
+                "runner_artifact_sha256",
+                "invocation_sha256",
+            ],
+            "every identity the axis does not cover is named as held fixed"
+        );
+    }
+
+    #[test]
+    fn treatment_content_off_the_declared_axis_refuses_the_comparison() {
+        // The identical pair of arms: comparable on the entrant axis, refused
+        // the moment the declaration says the treatment was the invocation.
+        let (baseline, treatment) = two_arms(|c| c.entrant_sha256 = "77".repeat(32));
+        assert!(ComparisonReceipt::declare(TreatmentAxis::Entrant, &baseline, &treatment).is_ok());
+        assert_eq!(
+            ComparisonReceipt::declare(TreatmentAxis::Invocation, &baseline, &treatment),
+            Err(ComparabilityRefusal::OffAxisIdentity {
+                field: "entrant_sha256",
+                baseline: "55".repeat(32),
+                treatment: "77".repeat(32),
+            })
+        );
+    }
+
+    #[test]
+    fn changed_data_cost_or_runner_identity_refuses_the_comparison() {
+        type ContractEdit = Box<dyn FnOnce(&mut SweepContract)>;
+        let changed = "77".repeat(32);
+        let cases: [(&str, &str, ContractEdit); 3] = [
+            (
+                "dataset_sha256",
+                "11",
+                Box::new(|c: &mut SweepContract| c.dataset_sha256 = "77".repeat(32)),
+            ),
+            (
+                "cost_model_sha256",
+                "22",
+                Box::new(|c: &mut SweepContract| c.cost_model_sha256 = "77".repeat(32)),
+            ),
+            (
+                "runner_artifact_sha256",
+                "44",
+                Box::new(|c: &mut SweepContract| c.runner_artifact_sha256 = "77".repeat(32)),
+            ),
+        ];
+        for (field, original, mutate) in cases {
+            let (baseline, treatment) = two_arms(mutate);
+            // Declared on the widest axis there is: still refused, because none
+            // of these three is ever declarable.
+            let refusal = ComparisonReceipt::declare(TreatmentAxis::Entrant, &baseline, &treatment)
+                .unwrap_err();
+            assert_eq!(
+                refusal,
+                ComparabilityRefusal::OffAxisIdentity {
+                    field,
+                    baseline: original.repeat(32),
+                    treatment: changed.clone(),
+                }
+            );
+            assert!(refusal.to_string().contains(field), "the reason names it");
+        }
+    }
+
+    #[test]
+    fn a_different_failed_attempt_budget_refuses_the_comparison() {
+        let (baseline, treatment) = two_arms(|c| c.max_retries += 1);
+        assert_eq!(
+            ComparisonReceipt::declare(TreatmentAxis::Entrant, &baseline, &treatment),
+            Err(ComparabilityRefusal::ExecutionMatrix {
+                field: "max_retries"
+            })
+        );
+    }
+
+    #[test]
+    fn credential_rotation_does_not_invalidate_a_resume() {
+        use sha2::{Digest, Sha256};
+
+        // The same launch policy, before and after the token behind it rotates.
+        let invocation = |token: &str| {
+            let identity = sharpebench_sim::agent_env_identity(
+                "OPENAI_API_KEY,SHARPEBENCH_AGENT_POLICY",
+                "",
+                |name| match name {
+                    "OPENAI_API_KEY" => Some(token.to_string()),
+                    "SHARPEBENCH_AGENT_POLICY" => Some("strict".to_string()),
+                    _ => None,
+                },
+            );
+            format!("{:x}", Sha256::digest(identity.as_bytes()))
+        };
+
+        let windows = [Window { start: 20, end: 60 }];
+        let seeds = [0u64, 1];
+        let bind = |token: &str| {
+            let mut bound = contract(&windows, &seeds, 2);
+            bound.invocation_sha256 = invocation(token);
+            bound
+        };
+
+        let before = bind("sk-original");
+        let path = tmp_path("credential-rotation");
+        let mut cp = SweepCheckpoint::new_bound("ext", before.clone());
+        let (w, seed) = cp.claim_next(0, 0).unwrap();
+        cp.complete(w, seed, skilled_run(seed), &untimed_completion());
+        cp.save(&path).unwrap();
+
+        let after = bind("sk-rotated");
+        let reloaded = SweepCheckpoint::load(&path).unwrap();
+        assert!(
+            reloaded.matches_bound("ext", &after),
+            "rotating a credential must leave the bound invocation identity intact"
+        );
+
+        let mut ran = 0u32;
+        let pool = run_resumable_sweep_bound(&path, "ext", &after, &windows, &seeds, 2, |_w, s| {
+            ran += 1;
+            Ok(skilled_run(s))
+        })
+        .unwrap();
+        assert_eq!(ran, 1, "the finished task is not paid for a second time");
+        assert_eq!(pool.submission.runs.len(), 2);
+
+        let _ = std::fs::remove_file(&path);
     }
 
     /// One completed attempt that no clock observed: what a caller recording an
