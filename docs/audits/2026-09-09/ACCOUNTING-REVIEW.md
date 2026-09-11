@@ -24,7 +24,8 @@ and are named for it.
 | A3 | Fixed. The displaced holder's identity is a value this process cannot produce for itself, and the timestamp is asserted |
 | A6 | Fixed. One directory per test, unique and removed on drop, leaks included |
 | A7 | Fixed. A save whose rename landed no longer rewinds its version, so the sole owner's I/O fault is published as `journal_unwritable` rather than as `journal_ownership_lost` |
-| A4, A5 | Not this branch. They are the Python surface and are handled separately |
+| A4 | Fixed, separately from this branch. `main` checks the retry setting of whatever client it will use, so a caller-supplied one is on the same footing as one the run builds, and the ceiling case that drives a real SDK client now runs through the check rather than around it |
+| A5 | Fixed, separately from this branch. The case's recording constructor reports a compliant setting whatever it was built with, so removing the keyword it names fails its own assertion instead of erroring inside the driver |
 
 ## Findings
 
@@ -315,6 +316,34 @@ spawns `python llm_agent.py <model>`, which enters through `if __name__ ==
 uses the bypass deliberately (`test_llm_agent_budget.py:183-193`). Moving the
 assertion into `main` would close the hole without changing that test's shape.
 
+**Disposition: fixed, 2026-09-11.** `main` calls `assert_no_provider_retries`
+on whatever client it will use, supplied or built, so there is no longer a path
+to `client.messages.create` with the retry policy unread. The guarantee, either
+the ceiling bounds provider requests or the run does not start, now covers the
+caller-supplied path as well as the production one.
+
+A supplied client is checked rather than refused. The guarantee is about how the
+client behaves and not about who constructed it, and the case that observes the
+SDK's own retry behaviour has to hand in a real `anthropic.Anthropic` bound to a
+stand-in transport; refusing every supplied client would push that case back
+onto a path with no check on it, which is the shape being removed. Because the
+client it supplies is built with the shim's own setting, that case now passes
+through the check instead of around it, which is what this finding asked for.
+`build_client` keeps its own check: it is reachable on its own, and a new case
+pins it so it cannot be deleted with the suite green.
+
+A new case drives a caller-supplied client that accepts `max_retries` and
+reports two. Four causes could produce a refusal there without the check on that
+path, and each is excluded: a stand-in too thin to dispatch (`Ignoring` answers
+normally, and a compliant client of the same shape completes a run and
+dispatches in the same case), a client the run built for itself (the constructor
+is replaced by one that fails the test if it is called), an exhausted allowance
+(the ledger is asserted empty and the message is the check's), and the supplied
+path refusing anything at all (the compliant control is supplied the same way).
+Deleting the call in `main` fails that case and nothing else, on its own
+`assertRaises`; deleting the call in `build_client` fails the helper's case and
+nothing else. See section 6 of [inherited repairs](INHERITED-REPAIRS.md).
+
 ### A5. `test_the_client_the_run_uses_disables_the_sdk_automatic_retries` does not reach its own assertion when its named cause is broken
 
 Severity: low. The regression gate still holds; the test's stated reason does
@@ -341,6 +370,24 @@ recording constructor so it reports zero regardless, would isolate it.
 Coverage in aggregate is not affected: mutating `PROVIDER_MAX_RETRIES` to 2
 fails three tests, and deleting the guard call fails two others, both for their
 named reasons.
+
+**Disposition: fixed, 2026-09-11.** The case's recording constructor now sets
+the returned stand-in's effective setting to `PROVIDER_MAX_RETRIES` whatever
+keyword it was built with, so the runtime check cannot be what refuses and the
+only thing left to answer the assertion is the keyword the run passed. Removing
+`max_retries=` from `build_client` gives `FAILED (failures=1)` at
+`self.assertEqual(seen[0].get("max_retries"), 0)` with `AssertionError: None !=
+0`, in place of the `ERROR` raised inside `drive` this finding reports. Reading
+the stand-in's setting from the constant rather than writing a literal keeps the
+isolation under a mutation of the constant itself: with `PROVIDER_MAX_RETRIES`
+at 2 the check still passes and the case fails on its own assertion, 2 against
+the literal 0 it asserts.
+
+The suite's default stand-in client now reports the compliant setting, because
+A4's repair means every client `main` is handed is checked; the three classes
+that vary the setting do so deliberately. The same one-line change was needed in
+`test_llm_agent_identity.py`, whose cases are about the model-identity rule and
+would otherwise be refused before reaching it.
 
 ### A6. The gateway regressions are not hermetic, and an inherited journal already produced a misleading failure
 
@@ -590,7 +637,10 @@ The three stated limits are accurate as far as they go:
 - A crashed holder needs an explicit take-over. Correct; there is no automatic
   break anywhere in `JournalLock`.
 - The ceiling's guarantee is conditional on the runtime assertion. Correct for
-  the production entry point; see A4 for the path where the assertion is absent.
+  the production entry point. It was absent on the caller-supplied client path,
+  which A4 records and which is now fixed: `main` checks whatever client it will
+  use, so the assertion covers every path that can reach a provider request from
+  this module's entry point.
 
 Silently unprevented and undocumented:
 

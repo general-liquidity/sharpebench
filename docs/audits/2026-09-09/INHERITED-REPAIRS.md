@@ -1,6 +1,6 @@
 # Inherited repairs: call ceiling, dataset selector, unsupported DSR interval
 
-Date: 2026-09-10, with sections 4 and 5 added 2026-09-11. Scope: defects an
+Date: 2026-09-10, with sections 4, 5 and 6 added 2026-09-11. Scope: defects an
 independent verification confirmed. None of the first three was introduced by
 the 2026-09-09 work, but that work leans on all of them: the readiness
 preflight made the LLM call ceiling a required explicit setting, added the
@@ -20,6 +20,8 @@ regression that fails without it.
 | 5b | An unnamed model was recorded as the requested one | `a7be8d7` | `test_llm_agent_identity.py::ModelIdentityTests` |
 | 5c | The ledger count was read once, at process start | `a7be8d7` | `test_llm_agent_budget.py::LedgerOwnershipTests` |
 | 5d | A malformed reply's cost was not stored on its record | `a7be8d7` | `test_llm_agent_budget.py::MalformedCostTests` |
+| 6a | The retry check was not on the caller-supplied client path | this commit | `test_llm_agent_budget.py::ProviderRequestTests` |
+| 6b | The constructor case errored inside the driver instead of failing its own assertion | this commit | `test_llm_agent_budget.py::ProviderRequestTests` |
 
 Row 4 was found by a later independent review of row 1's repair, and is
 recorded here rather than in a new file because it is the same defect class in
@@ -409,6 +411,122 @@ repository, and no golden, example or `paper/evidence/` value depends on which
 ids the identity check admits, on the ledger's locking, or on a field the
 assembler does not read.
 
+## 6. The retry check was not on the caller-supplied client path
+
+Two findings from the [accounting review](ACCOUNTING-REVIEW.md), A4 and A5, both
+about the section 4 repair rather than about money that moved. Neither is
+reachable from the field producer, which spawns `python llm_agent.py` and so
+enters through `main()` with no client.
+
+### 6a. A supplied client reached the provider unchecked
+
+**Confirmed.** `assert_no_provider_retries` ran inside `build_client`, and
+`main` called `build_client` only when no client was supplied. A client handed
+to `main` reached `client.messages.create` with its retry policy never read.
+What the project publishes is not "the client the shim builds has retries off"
+but "either the ceiling bounds provider requests, or the run does not start",
+and on that path the second half was untrue. The suite made it worse by using
+that path for
+`test_n_units_allow_exactly_n_provider_requests_across_a_retryable_failure`, so
+the case that demonstrates the ceiling was the one case running where the check
+was not.
+
+**Repair.** `main` calls `assert_no_provider_retries` on whatever client it will
+use, supplied or built. `build_client` keeps its own call.
+
+**Checked, not refused, and why.** Refusing a supplied client outright was the
+other option the review names. It was rejected because the guarantee is a
+property of the client's behaviour, not of its provenance: a client that reports
+zero will send one request per `create` whoever constructed it, and one that
+reports two will not, which is exactly what the check reads. The concrete cost
+of refusing is that the load-bearing case cannot exist. That case observes the
+SDK's own retry behaviour by driving a real `anthropic.Anthropic` over an
+`httpx.MockTransport`, which has to be supplied, and refusing supplied clients
+would force it back onto `build_client` or onto a private path, which is the
+shape this repair removes. Checking instead means that case now enters through
+the checked path and passes the check, so the ceiling is demonstrated on the
+same path the guarantee is stated for.
+
+Keeping the check in `build_client` as well is deliberate rather than
+redundancy left in place. The helper is importable and states a property of what
+it returns, and `main` cannot cover a caller that uses the returned client
+directly. Each call site has one case that fails when that call alone is
+deleted, so neither can rot.
+
+**What the guarantee now covers.** Every path from this module to
+`client.messages.create` passes the check before the first observation is read:
+`main()` with no client, `main(client=...)` with any client, and `build_client`
+used on its own. What it does not cover is a caller that imports `call_model` or
+constructs its own client and dispatches without going through `main` at all;
+nothing in this repository does, and the ceiling's reservation is not on that
+path either.
+
+**Regression.** `test_a_client_the_caller_supplies_is_checked_like_one_the_run_builds`
+drives `main` with a supplied `Ignoring`, the stand-in that accepts
+`max_retries` and reports two. Four causes could produce a refusal there without
+the check on that path, and each is excluded rather than assumed:
+
+| Cause that could also refuse | How it is excluded |
+|---|---|
+| The stand-in is too thin to dispatch | `Ignoring` answers normally, and the second half of the case supplies a compliant client of the same shape, which completes the run and dispatches one request |
+| `main` built a client of its own after all | The SDK constructor is replaced by one that fails the test if it is called |
+| The allowance was already spent | The ledger is asserted empty, and the message asserted is the check's, naming `max_retries=2` |
+| The supplied-client path refuses whatever it is handed | The compliant control is supplied through the same parameter and is not refused |
+
+`test_build_client_refuses_to_return_a_client_that_would_retry` pins the
+helper's own call: the stand-in constructor returns normally, so nothing but the
+call inside `build_client` can raise.
+
+### 6b. The constructor case did not reach its own assertion
+
+**Confirmed.** `test_the_client_the_run_uses_disables_the_sdk_automatic_retries`
+names the keyword `build_client` passes its constructor. Removing that keyword
+made the recording stand-in report `max_retries=None`, the runtime check refused
+the run, and the case ended as an `ERROR` raised inside `drive` with its
+assertion never evaluated. The regression gate held in aggregate; the case did
+not demonstrate what it names.
+
+**Repair.** The recording constructor sets the returned stand-in's effective
+setting to `PROVIDER_MAX_RETRIES` whatever keyword it was built with, so the
+check cannot be what refuses and the recorded keyword is the only thing that can
+answer the assertion. Reading the constant rather than writing a literal keeps
+that true under a mutation of the constant: at 2 the check still passes and the
+case fails on its own assertion, 2 against the literal 0 it asserts.
+
+**Consequence for the other cases.** Because `main` now checks every client it
+is handed, a stand-in that reports no setting is refused before the decision
+loop runs. The default stand-in in both shim suites therefore reports the
+compliant setting, and the three classes that vary it keep doing so
+deliberately. Without that, every ceiling, ledger and model-identity case would
+have failed on the check rather than on the thing it names, which is the failure
+mode this section is about.
+
+**Frozen values.** None moved. The shim makes no provider call in this
+repository, and no golden, example or `paper/evidence/` value depends on the
+client's retry policy or on where the check is called from.
+
+**Also audited, not changed.** Two claims in the same file were looked at for
+the same shape, a published guarantee with a path that reaches the guarded
+effect without passing the guard.
+
+- **The model-identity rule is enforced where a decision is written and not
+  where one is replayed.** `effective_model` refuses a served id that is not the
+  requested policy, and every cached record carries `model_effective`.
+  `load_cache` screens a record on three identity fields, `scaffold_version`,
+  `request_sha256` equal to its own key, and `model_requested`, and not on
+  `model_effective`, so a record naming a served model this scaffold would have
+  refused is replayed rather than dropped. This scaffold cannot write such a
+  record, so it takes a cache file from somewhere else, and the digest still has
+  to match a request for the requested model, which bounds what the replayed
+  decision can be. It is reported rather than repaired: it is the same shape as
+  A4, a check on the writing path and not on the reading one, and worth a
+  decision rather than a silent fix.
+- **`price_for` falls back to `(0.0, 0.0)` for a model not in `PRICING`.** A run
+  on an unpriced model reports its calls as free rather than refusing. This is a
+  fail-open default rather than a bypassed check, so it is a different shape, but
+  it is the other place in the file where a stated property (recorded cost
+  describes the call) does not hold on every input.
+
 ## Verification
 
 Run from the worktree on the committed tree with an isolated
@@ -504,3 +622,39 @@ outside one process on one file system. The identity rule is evidenced against
 SDK or a new alias family that expands some other way would be refused rather
 than misread, but the rule would need re-reading. `O_EXCL` over a network file
 system is only as exclusive as the remote server makes it.
+
+## Verification, section 6 (2026-09-11)
+
+Section 6 changes Python and prose only. No Rust file was touched, so
+`cargo fmt` and the workspace suites are unaffected and were not re-run for it.
+The installed SDK is `anthropic` 0.112.0, the version the `llm-shim` job pins.
+
+| Command | Exit |
+|---|---|
+| `python -m unittest paper/src/test_llm_agent_budget.py paper/src/test_llm_agent_identity.py` (40 tests, run five times) | 0 |
+| `python -m unittest paper/src/test_provenance.py` | 0 |
+| `python paper/src/check-provenance.py` | 0 |
+
+Mutations, each applied in place, the suite run, then the file restored from
+`git show HEAD:<path>` and confirmed byte-identical with `cmp` before the next
+one. The suite is the 18 cases of `test_llm_agent_budget.py`; the identity file
+was run alongside the first mutation and is unaffected by all of them.
+
+| Mutation | Result |
+|---|---|
+| `assert_no_provider_retries(client)` deleted from `main` | 1 of 18 fails, the caller-supplied case, as `AssertionError: RuntimeError not raised` on its own `assertRaises`. The 22 identity cases still pass, so nothing incidental is carrying it |
+| `assert_no_provider_retries(client)` deleted from `build_client` | 1 of 18 fails, the helper's case, on the same `assertRaises`. A different case from the one above, so neither call site is pinned by the other |
+| `max_retries=PROVIDER_MAX_RETRIES` removed from the constructor call | 1 of 18 fails, the constructor case, as `AssertionError: None != 0` at `self.assertEqual(seen[0].get("max_retries"), 0)`. Before 6b it was an `ERROR` raised inside `drive`, with that line never reached |
+| the same, with 6b's one line also reverted in the test | 1 of 18 errors, `RuntimeError ... does not report a readable max_retries (got None)` raised at `build_client`, inside `drive`. This is the finding's own observation, reproduced, and it is what 6b changes |
+
+The first two mutations are the point of 6a: the guarantee is now pinned on the
+path the caller takes and on the helper separately, and deleting either call is
+caught by the case named for that path rather than by a case that happens to run
+through it.
+
+**Not established.** No provider was called. What the check reads is an
+attribute on the client object, so a future SDK that reports zero and retries
+anyway would pass it; that is the same limit the check has always had, and the
+load-bearing case is what observes real behaviour, for `anthropic` 0.112.0 only.
+A caller that bypasses `main` entirely, by importing `call_model` or dispatching
+on a client of its own, is outside what any of this covers.
