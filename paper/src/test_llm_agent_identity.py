@@ -28,6 +28,13 @@ Two more were added after a later review of the identity check itself:
   * a response carrying no model at all returned the requested id, claiming the
     requested policy answered when the API had not said so. `Message.model` is
     required on this API, so absence now refuses.
+
+A third review found the rule enforced where a decision is written and not where
+one is replayed: `load_cache` screened a record on `scaffold_version`, the
+request digest and `model_requested`, and not on `model_effective`, so a cached
+record naming a served model this scaffold would refuse was replayed rather than
+dropped. Both paths now consult one function, `is_requested_policy`, so the
+replay screen cannot drift from the rule that admits a fresh reply.
 """
 
 from __future__ import annotations
@@ -377,7 +384,11 @@ class CacheIdentityTests(ShimCase):
     def test_a_record_whose_digest_is_not_its_key_is_not_replayed(self):
         """The stored digest is what lets a replay check the record against the
         configuration it claims, so a record that disagrees with itself is
-        dropped rather than trusted."""
+        dropped rather than trusted.
+
+        Every other identity field is correct, the served one included, so the
+        digest is the only clause of the screen this record can fail.
+        """
         self.shim.CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
         self.shim.CACHE_PATH.write_text(
             json.dumps(
@@ -386,6 +397,7 @@ class CacheIdentityTests(ShimCase):
                     "request_sha256": "0" * 64,
                     "scaffold_version": self.shim.SCAFFOLD_VERSION,
                     "model_requested": self.shim.REQUESTED_MODEL,
+                    "model_effective": self.shim.REQUESTED_MODEL,
                     "orders": [],
                 }
             )
@@ -394,6 +406,75 @@ class CacheIdentityTests(ShimCase):
         )
         self.assertEqual(self.shim.load_cache(), {})
         self.assertEqual(self.shim.STATS["cache_records_ignored"], 1)
+
+    def replayable(self, drop=(), **overrides):
+        """A record this scaffold wrote, with named fields rewritten or removed.
+
+        Built through `record_decision`, so the scaffold version, the digest and
+        `model_requested` are right by construction and cannot be what the
+        screen rejects. Only what `drop` and `overrides` name differs.
+        """
+        key = self.key()
+        record = dict(
+            self.shim.record_decision({}, key, self.shim.REQUESTED_MODEL, {"orders": []})
+        )
+        record.update(overrides)
+        for field in drop:
+            record.pop(field)
+        self.shim.CACHE_PATH.write_text(
+            json.dumps(record, sort_keys=True) + chr(10), encoding="utf-8"
+        )
+        return key
+
+    def test_a_record_naming_a_served_model_the_run_would_refuse_is_not_replayed(self):
+        """The replay screen, on the record's own terms.
+
+        Three other causes could empty the cache here, and the record is built
+        by the shim itself so none of them can: its `scaffold_version` is this
+        one, its `request_sha256` is its key, and its `model_requested` is the
+        requested id. The only field that differs is the served identity, and it
+        is one `effective_model` refuses on a fresh reply.
+        """
+        self.replayable(model_effective=self.shim.REQUESTED_MODEL + "-mini")
+        self.assertEqual(self.shim.load_cache(), {})
+        self.assertEqual(self.shim.STATS["cache_records_ignored"], 1)
+
+    def test_a_record_naming_no_served_model_is_not_replayed(self):
+        """Absence refuses on the replaying path as it does on the writing one:
+        a record stating no identity is not evidence the requested policy
+        answered."""
+        for described, make in (
+            ("null", lambda: self.replayable(model_effective=None)),
+            ("absent", lambda: self.replayable(drop=("model_effective",))),
+        ):
+            with self.subTest(model_effective=described):
+                self.shim.STATS["cache_records_ignored"] = 0
+                make()
+                self.assertEqual(self.shim.load_cache(), {})
+                self.assertEqual(self.shim.STATS["cache_records_ignored"], 1)
+
+    def test_a_served_snapshot_of_the_requested_alias_is_still_replayed(self):
+        """The control the three cases above rest on: the screen admits exactly
+        what the fresh path admits, so it is not simply rejecting everything
+        with a served id in it."""
+        alias = tempfile.TemporaryDirectory()
+        self.addCleanup(alias.cleanup)
+        shim = load_shim(alias.name, model="claude-haiku-4-5")
+        key = shim.cache_key(shim.REQUESTED_MODEL, "prompt")
+        shim.record_decision({}, key, "claude-haiku-4-5-20251001", {"orders": []})
+        self.assertIn(key, shim.load_cache())
+        self.assertEqual(shim.STATS["cache_records_ignored"], 0)
+
+    def test_the_replay_screen_is_the_rule_the_fresh_path_uses(self):
+        """One rule, not two copies. Replacing the shared predicate moves both
+        paths together, which is what stops the replay screen drifting from the
+        check that governs a fresh answer."""
+        key = self.replayable()
+        self.assertIn(key, self.shim.load_cache())
+        self.shim.is_requested_policy = lambda served: False
+        with self.assertRaises(RuntimeError):
+            self.shim.effective_model(Response(self.shim.REQUESTED_MODEL))
+        self.assertEqual(self.shim.load_cache(), {})
 
     def test_an_unreadable_record_is_counted_not_silently_skipped(self):
         self.shim.CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
