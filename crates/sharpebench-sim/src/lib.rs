@@ -27,7 +27,10 @@ pub use external::{
     agent_env_identity, effective_agent_env_identity, is_credential_name, ExternalAgent, HttpAgent,
     AGENT_ENV_PASSTHROUGH, AGENT_ENV_SECRET,
 };
-pub use trajectory::{replay_run, replay_submission, run_backtest_capture};
+pub use trajectory::{
+    regrade_submission, replay_run, replay_submission, run_backtest_capture, EvaluatorIdentity,
+    RegradeDisposition, RegradeReceipt, RegradeRefusal, RegradeRequest,
+};
 pub use transport::{
     decide_with_retry, CircuitBreaker, DecideError, TransportDiagnostics, TransportHealth,
 };
