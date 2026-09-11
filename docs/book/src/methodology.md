@@ -41,6 +41,33 @@ downside deviation (excess return per unit of *downside* volatility, MAR = 0). I
 rewards an edge that doesn't arrive with downside churn, where the Sharpe penalizes
 all volatility symmetrically.
 
+## What the rank does not answer
+
+Two boundaries come straight from Sharpe's own 1994 statement of the ratio, and
+both are scope, not defect.
+
+**The ratio ignores correlations, so rank one is a choose-one verdict.** Sharpe
+is explicit that the ratio takes no account of correlations, and that when a
+choice may affect important correlations with other holdings, that information
+should supplement the comparison. SharpeBench scores every agent standalone:
+each submission's runs are its own, and the alpha/beta figures regressed against
+the field's equal-weight mean are marginal associations reported for
+attribution, never a portfolio construction. So the board answers "which single
+agent would I rather hold on its own", not "which agent adds the most to what I
+already hold". An agent ranked fourth whose returns are uncorrelated with your
+book can be the better marginal addition, and nothing here will say so. That
+comparison needs the candidate's return stream against your existing one.
+
+**Every figure is ex post.** The Sharpe, the Deflated Sharpe, the PSR and the
+pass^k verdict are all computed on returns that already happened. Sharpe warns
+that using unadjusted historic ex-post ratios as surrogates for unbiased
+predictions of ex-ante ratios is subject to serious question, and the warning
+applies here: a rank is a statement about the recorded windows, not a forecast
+of the next one. The deflation, the reliability gate and the bootstrap null
+exist to stop a lucky in-sample figure being read as skill, which pushes against
+the same worry, but none of them converts an ex-post measurement into an ex-ante
+one.
+
 The following sections explain each gate, then one reported-only diagnostic that
 the pooled gates cannot see.
 
