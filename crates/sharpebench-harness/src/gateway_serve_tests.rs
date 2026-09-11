@@ -595,7 +595,10 @@ fn a_budget_refusal_reaches_the_entrant_as_a_typed_error() {
         assert!(!answer.ok);
         let error = answer.error.as_ref().expect("a refusal carries its kind");
         assert_eq!(error.kind, GatewayErrorKind::BudgetExhausted);
-        assert_eq!(error.detail, GatewayErrorKind::BudgetExhausted.detail());
+        // The literal, for the reason recorded beside the same comparison in
+        // `gateway.rs`: the field and `GatewayErrorKind::detail()` are the same
+        // value, so that form pins nothing.
+        assert_eq!(error.detail, "the sweep money budget is exhausted");
     }
     assert_eq!(provider.calls(), 2);
     assert_eq!(refused.host_observed.calls_started, 2);

@@ -861,7 +861,14 @@ mod tests {
             )
         };
         let ryw = vec![ContractRelaxation::ReadYourWrites];
-        assert!(FaultPlan::new(1, ryw.clone(), vec![]).is_err());
+        // A plan with no faults arms no relaxation, so it declares none either:
+        // otherwise the declared-versus-armed rule refuses it and the fault
+        // count is never what is tested. The diagnostic is asserted for the
+        // same reason.
+        assert_eq!(
+            FaultPlan::new(1, vec![], vec![]).expect_err("a plan carries at least one fault"),
+            FaultPlanError::Invalid(format!("a plan carries 1..={MAX_FAULTS} faults"))
+        );
         assert!(FaultPlan::new(1, ryw.clone(), vec![lag(0)]).is_err());
         assert!(FaultPlan::new(1, ryw.clone(), vec![lag(COHORT_SCALE + 1)]).is_err());
         assert!(FaultPlan::new(1, ryw.clone(), vec![lag(1), lag(1)]).is_err());

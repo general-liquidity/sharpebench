@@ -2054,6 +2054,32 @@ mod tests {
         assert_eq!(spend.committed_usd_nanos(), 0);
         assert_eq!(spend.calls_started, 2);
         assert_eq!(spend.released_calls, 2);
+
+        // A rate-limit rejection and any other client-side rejection release
+        // the same way, so the money assertions above hold with the 429 arm
+        // deleted and the entrant told only that the provider was unreachable.
+        // One 429, no retry, so the kind the entrant reads is the 429's own.
+        let mut limited = ModelGateway::new(
+            &routes,
+            &permits,
+            FakeProvider::new(vec![ProviderOutcome::Answered {
+                status: 429,
+                body: Vec::new(),
+            }]),
+            budget(u128::MAX, 8),
+            GatewayLimits {
+                max_retries_per_request: 0,
+                ..GatewayLimits::default()
+            },
+        );
+        let refused = parse(&limited.serve_line(&request("hello", 16)));
+        assert_eq!(
+            refused.error.expect("error").kind,
+            GatewayErrorKind::ProviderRateLimited
+        );
+        let spend = limited.journal().spend();
+        assert_eq!(spend.released_calls, 1);
+        assert_eq!(spend.committed_usd_nanos(), 0);
     }
 
     /// A server-side failure might have done billable work, so it settles as
@@ -2236,6 +2262,40 @@ mod tests {
         assert!(!clean.contains(KEY), "{clean}");
         assert!(!clean.contains("sk_other_credential_value"), "{clean}");
         assert!(clean.contains("<redacted>"));
+        // `KEY` is bearer-shaped, so the generic scrub removes it whether or not
+        // the host's own table is consulted: the assertions above hold with the
+        // exact-value pass deleted. A credential that does not look like a token
+        // is what isolates that pass, and the control below is the same text
+        // under a gateway that does not hold it, which the generic scrub leaves
+        // alone.
+        const OPAQUE: &str = "opaque-host-credential-0123456789";
+        let opaque_routes = RouteTable::new(vec![ModelRoute::new(
+            "fake.v1",
+            "https://provider.invalid/v1/messages",
+            Secret::new(OPAQUE),
+            card(1, 1, "2026-01-01"),
+            4096,
+            TEST_OVERHEAD,
+        )
+        .expect("a valid route")])
+        .expect("a valid table");
+        let opaque_gateway = ModelGateway::new(
+            &opaque_routes,
+            &permits,
+            FakeProvider::answering(0),
+            budget(u128::MAX, 8),
+            GatewayLimits::default(),
+        );
+        let opaque_leak = format!("provider said: 401 for {OPAQUE}");
+        let cleaned = opaque_gateway.redact_for_evidence(&opaque_leak);
+        assert!(!cleaned.contains(OPAQUE), "{cleaned}");
+        assert!(cleaned.contains("<redacted>"), "{cleaned}");
+        assert_eq!(
+            gateway.redact_for_evidence(&opaque_leak),
+            opaque_leak,
+            "nothing but the host's own table can remove an opaque credential"
+        );
+
         // The Secret type cannot leak through a derived format either.
         assert_eq!(format!("{:?}", Secret::new(KEY)), "<redacted>");
         assert_eq!(format!("{}", Secret::new(KEY)), "<redacted>");
@@ -2269,7 +2329,11 @@ mod tests {
         let response = parse(&line);
         let error = response.error.expect("an error body");
         assert_eq!(error.kind, GatewayErrorKind::ProviderUnavailable);
-        assert_eq!(error.detail, GatewayErrorKind::ProviderUnavailable.detail());
+        // The literal, not `GatewayErrorKind::detail()`: comparing the field
+        // against the function that filled it is the same value on both sides,
+        // so every explanation could go empty and this would still hold. The
+        // entrant reads this text and nothing else about the failure.
+        assert_eq!(error.detail, "the provider could not be reached");
     }
 
     /// The answer an entrant sees carries no provider identifier, so two
