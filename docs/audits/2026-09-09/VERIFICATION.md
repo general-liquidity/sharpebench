@@ -1,5 +1,38 @@
 # Verification record
 
+## Making the stated facts checkable, 2026-09-11
+
+Both pull requests merged with every check green on the exact pushed head, main
+unmoved since that head was tested, and the merged tree identical to the tested
+tree.
+
+| PR | Work | Main after merge |
+|---|---|---|
+| Bench #91 | The gateway chapter's test evidence recounted and gated | `d367096` |
+| Bench #92 | One rate card behind the shim and the assembler | `360964d` |
+
+Neither closed a live defect. The pricing tables agreed when they were checked,
+and the chapter's stale counts misled a reader rather than mispricing a run.
+What both closed is the same weakness the round kept finding in a different
+register: a fact the project asserts that nothing compares against the code, so
+it is true only until someone edits one side.
+
+Two details are worth keeping. A drift gate must name which side moved, because
+"the two disagree" is an outcome either side produces, so both gates classify
+against a baseline revision and were demonstrated by mutating each side alone.
+And a number belongs in a document only where it is a well-defined measure: the
+arena sandbox holds two gateway tests among thirty-eight, so counting that file
+would have placed a silently different measure in the same column, and those two
+tests are named instead.
+
+### Not established
+
+Nothing changed here about what the gateway has actually done. No provider has
+been served, no concurrent or paid run has happened, and the limits recorded in
+the preceding rows still stand: cross-directory aliases, two byte-identical
+journals in one directory deriving one identity, and a version check that
+remains read-then-write.
+
 ## Closing the fail-open paths, 2026-09-11
 
 Every pull request below merged with all checks green on its exact pushed head,
