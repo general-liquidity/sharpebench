@@ -222,23 +222,81 @@ both assign the same ordinals and the later save will erase the earlier record,
 with no write-time race needed for it: two sequential dispatches after two opens
 are enough.
 
-The journal therefore carries a `version`, and `GatewayJournal::save` is a
+A journal that is spent from is therefore owned exclusively. `ModelGateway::open`
+and `run_gateway_sweep` take a `JournalLock` on `<journal>.lock` before they read
+anything, and hold it until the gateway drops. The lock file is created with
+`OpenOptions::new().create_new(true)`, which is `O_EXCL | O_CREAT` on Unix and
+`CREATE_NEW` on Windows: the file system decides the winner, in one operation,
+with no dependency outside `std`. A second holder is refused immediately as
+`JournalLockError::Held`, reaching the caller as an `io::Error` of kind
+`AlreadyExists` carrying that typed value as its source. There is no wait and no
+timeout: two gateways over one budget is not a situation that improves by
+waiting.
+
+A stale lock is refused, not broken. Nothing on disk distinguishes a holder that
+crashed from one that is running, so an automatic break is a guess, and a wrong
+guess puts two writers back on the same budget: exactly the defect the lock
+exists to prevent. The refusal names the lock file and says what to check.
+Clearing it is `JournalLock::take_over(path, reason)`, a deliberate operator act
+that records the displaced pid and the stated reason inside the lock that
+replaces it, so the decision is visible afterwards rather than invisible. The
+cost of this choice is stated plainly: a host that died mid-sweep does not
+resume unattended.
+
+The lock is not a journal and cannot be read as one. It sits at a different path,
+carries `sharpebench.gateway-journal-lock.v1`, is refused by
+`GatewayJournal::load_bound` like any other foreign document, and matches no
+pattern in the provenance manifest scope (`crates/**/*.rs`, `arena/**/*.json` and
+the rest name no `.lock`). It holds a pid and a millisecond timestamp, and no
+path, destination or credential.
+
+Reading is never blocked. `sharpebench gateway` only reads the journal, so it
+takes no lock and can inspect a sweep in flight; whether the path is owned is
+reported as a fact, `journal_lock_held`, and never as a refusal.
+
+The journal still carries a `version`, and `GatewayJournal::save` is still a
 compare-and-swap on it: a save from a snapshot the file has moved past is
 refused as a typed `JournalSaveError::Conflict` instead of replacing a record
 this process never read. A refusal before dispatch releases its reservation and
 answers `journal_ownership_lost`, starting no call; a refusal at settlement
 latches the same flag. Either way the gateway stops spending against a file it
 no longer owns, and the records it appended stay in memory, reachable through
-`ModelGateway::into_journal`, rather than being dropped.
+`ModelGateway::into_journal`, rather than being dropped. That check is now the
+second line of defence rather than the only one: what it catches is a journal
+that moved under a single writer, such as a file restored from a backup or
+edited by hand mid-sweep.
 
-The check has a residual window: the version is read, then a temporary is
-renamed into place, and a second writer landing between those two steps is not
-caught. Closing that needs a lease with an expiry or a lock whose stale state an
-operator can clear, and a plain exclusive lock file would turn a crash into a
-sweep that cannot resume. What the compare-and-swap removes is the far larger
-window this defect actually lived in: two long-lived gateways spending, for
-their whole lifetime, from the snapshot each read at open. Concurrency permits
-do not help here, because they are per process.
+What none of this covers is two hosts sharing one journal path over a network
+file system. The lock's exclusivity is the local file system's `create_new`, and
+a remote server need not honour it; NFS in particular does not. One host per
+journal path is a deployment rule, not something this code can enforce.
+
+### A settlement that cannot be written
+
+`settle_and_persist` used to latch only on `JournalSaveError::Conflict` and drop
+`JournalSaveError::Io`, on the stated ground that a lost write can only
+over-report spend, because the record it would have replaced is a reservation
+and a reservation folds as consumed. That reasoning holds only while observed
+usage stays at or under its reservation, and this gateway deliberately records
+usage above a reservation: a price the provider reported above what the host
+authorized is written at the observed amount. When such a settlement fails to
+persist, a restart folds the smaller reservation and under-reports real spend.
+
+The path now fails closed. Both failure modes latch: a refused write means
+another writer owns the file, an I/O failure means the record cannot be
+completed at all. A gateway in either state starts no further call, refusing
+every later request as `journal_ownership_lost` or `journal_unwritable` before
+anything is reserved or dispatched. The answer whose settlement did not land is
+refused rather than handed back, because handing back a success over a record
+that no longer says what it cost is what let this stay silent. The settled
+records remain in memory through `ModelGateway::into_journal`, and
+`HostObservedUsage` carries `journal_unwritable` beside `journal_ownership_lost`,
+so a sweep's own output says its figures and its file disagree.
+
+The reservation path is deliberately different: an I/O failure there is refused
+per call without latching. Nothing was dispatched, the release stays in memory,
+and the file still holds exactly what it held before, so no amount can be lost
+by trying again.
 
 ## Identity
 
@@ -253,7 +311,7 @@ alongside the G08 rate-card binding; the journal binds it directly.
 
 Hermetic fakes only. No API key, no network call, no model installation.
 
-`crates/sharpebench-harness/src/gateway.rs` (30 tests) covers: forbidden fields
+`crates/sharpebench-harness/src/gateway.rs` (33 tests) covers: forbidden fields
 by name for twelve host-owned names; exact alias resolution; the host supplying
 destination, credential, revision and every bound; the request envelope bounds;
 the output-length bound against host and route; oversized, truncated,
@@ -270,7 +328,17 @@ errors carrying no provider material; responses carrying no shared identifier;
 the response line bound; cancellation starting no new call and leaving nothing
 outstanding; rank neutrality; and route-table validation.
 
-Four of those thirty are the regressions for the defects repaired on 2026-09-10:
+Three of those thirty-three are the regressions for the defects repaired on
+2026-09-11: `a_second_gateway_cannot_open_the_journal_the_first_owns` (the
+second gateway never opens, the refusal is typed and names the lock file, and a
+released path opens again), `only_one_of_many_racing_gateways_owns_the_journal`
+(eight threads released together by a barrier, exactly one admitted, every other
+refusal typed, and the admitted writer's record whole on disk), and
+`a_settlement_that_cannot_be_persisted_stops_the_gateway` (the settlement write
+fails, the answer is refused rather than returned, the flag latches and the next
+request starts no call).
+
+Four more are the regressions for the defects repaired on 2026-09-10:
 `a_reservation_covers_framing_the_entrant_never_wrote` (an empty request under a
 one-unit budget refuses before the wire rather than committing what the provider
 reports), `usage_above_the_reservation_is_recorded_and_stops_the_sweep` (the
@@ -281,19 +349,25 @@ record is what remains on disk), and
 `an_answer_returned_after_the_deadline_is_refused_and_charged` (a fake that
 sleeps past a 1 ms call deadline is refused and charged, not accepted).
 
-`crates/sharpebench-harness/src/gateway_journal.rs` (10 tests) covers the fold:
+`crates/sharpebench-harness/src/gateway_journal.rs` (14 tests) covers the fold:
 unsettled reservations charged rather than refunded, unknown cost keeping the
 whole reservation, released reservations still counting as calls, resume folding
 recorded amounts, refusal of a journal bound elsewhere, refusal of a journal
 that erases or double-settles an attempt, partial totals labelled partial,
-missing usage unavailable rather than zero, the `host_observed` label, and
-(added 2026-09-10) a sweep-bound journal resuming only under its own sweep.
+missing usage unavailable rather than zero, the `host_observed` label,
+(added 2026-09-10) a sweep-bound journal resuming only under its own sweep, and
+(added 2026-09-11) ownership of the path: a second holder refused by type, a
+stale lock refused rather than broken and still on disk afterwards, a takeover
+refused where nothing is held and recording the displaced pid and reason where
+something is, and a lock document refused by the journal reader.
 
-`crates/sharpebench-cli/src/gateway_cli.rs` (6 tests) covers the operator
+`crates/sharpebench-cli/src/gateway_cli.rs` (7 tests) covers the operator
 surface: the effective configuration report, a missing credential, missing and
 zero budgets, malformed route manifests (wrong schema, empty, inline key
-material), a journal bound to another route table, and (added 2026-09-10) a
-sweep-bound journal reported with its sweep.
+material), a journal bound to another route table, (added 2026-09-10) a
+sweep-bound journal reported with its sweep, and (added 2026-09-11) a journal a
+sweep holds still reporting, with `journal_lock_held` true, rather than being
+refused.
 
 ### Mutation results
 
@@ -314,6 +388,14 @@ restored from `git show HEAD:<path>`, verified byte identical with `cmp`.
 | The reservation covers framing the entrant never wrote | `dispatch_once` reserves `request.content_bytes()` alone, dropping the route's `input_token_overhead` | killed: `a_reservation_covers_framing_the_entrant_never_wrote` and 5 others failed |
 | A breached ceiling starts no further call | the `ceiling_breached` guard in `dispatch_once` is made unreachable | killed: `usage_above_the_reservation_is_recorded_and_stops_the_sweep` failed |
 | A stale snapshot cannot replace the journal | the version comparison in `GatewayJournal::save` is made unreachable, so every save writes | killed: `a_second_gateway_cannot_spend_the_journal_the_first_owns` failed |
+
+`a_second_gateway_cannot_spend_the_journal_the_first_owns` was restaged on
+2026-09-11. The lock now refuses the second gateway at open, so the test can no
+longer reach the version check by opening twice; its second writer is built
+without a lock, standing in for whatever moved the file under a single owner.
+The lock refusal it used to cover is now
+`a_second_gateway_cannot_open_the_journal_the_first_owns`, so both properties
+keep a test rather than one silently replacing the other.
 | An over-deadline answer is not accepted | the elapsed-time check after `transport.call` is made unreachable | killed: `an_answer_returned_after_the_deadline_is_refused_and_charged` failed |
 
 The ceiling guard survived its first mutation, because a route whose reservation

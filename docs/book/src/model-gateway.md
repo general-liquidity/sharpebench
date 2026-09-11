@@ -320,10 +320,32 @@ the work happened, and suppressing it would not unspend the money.
 A total that contains any unmeasured amount is not published as a total at all.
 It becomes `unavailable`, with a separately named `known_subtotal_usd_nanos`.
 
-The journal carries a version, and a save is a compare-and-swap on it: a
-gateway whose snapshot the file has moved past is refused, answers
+**One writer per journal.** A gateway that spends a journal owns its path
+exclusively. Opening takes a lock file, `<journal>.lock`, created with
+`create_new` so the file system picks the winner, and holds it until the gateway
+drops. A second gateway on the same host is refused when it opens, by type,
+naming the lock file. A lock left behind by a crashed process is refused too,
+not broken: nothing on disk tells a dead holder from a live one, and breaking it
+on a guess is how two writers end up on one budget again. Clearing it is
+`JournalLock::take_over`, which an operator performs deliberately and which
+records the displaced holder and the stated reason inside the new lock. Reading
+takes no lock, so `sharpebench gateway` can inspect a sweep that is running; the
+report says whether the path is owned, in `journal_lock_held`.
+
+Underneath that, the journal carries a version and a save is a compare-and-swap
+on it: a gateway whose snapshot the file has moved past is refused, answers
 `journal_ownership_lost` and starts no further call, instead of erasing a record
-it never read.
+it never read. That check is now the second line of defence, for a journal that
+moved under a single writer, such as one restored from a backup mid-sweep.
+
+**A settlement that cannot be written stops the gateway.** The file then holds a
+reservation whose outcome is missing, and a reservation is not what the call
+cost: this gateway records an observed price above its reservation, so a restart
+that folded the reservation instead would under-report real spend. Both a
+refused write and an I/O failure therefore latch, the answer is refused rather
+than handed back over a record that no longer says what it cost, every later
+request is refused as `journal_unwritable` or `journal_ownership_lost`, and the
+sweep's `HostObservedUsage` carries the flag beside the figures.
 
 ## Identity and resume
 
@@ -358,7 +380,8 @@ attempt accounting) exactly as any external sweep does, and beside it a
 `HostObservedUsage` record, `sharpebench.host-observed-usage.v1`: the route-table
 and sweep digests, the host-observed monetary summary, the priced, unknown and
 released call counts, any overspend, whether the ceiling was breached, whether
-journal ownership was lost, and `rank_neutral: true`.
+journal ownership was lost, whether a settlement could not be written
+(`journal_unwritable`), and `rank_neutral: true`.
 `attach_host_observed_usage` puts it on the entrant's row of a JSON board under
 `host_observed_usage`. The board stays an array, no score field moves, and
 removing that key gives back the unattached board exactly.
@@ -431,9 +454,15 @@ entrypoint, against the same daemon ([image preflight](image-preflight.md)).
   response-body bound are the adapter's to honour. The broker can refuse a late
   or oversized answer after the fact; it cannot stop an adapter that blocks or
   over-allocates.
-- **Journal ownership.** The compare-and-swap reads the version and then renames
-  a temporary into place, and a second writer landing between those two steps
-  is not caught.
+- **Journal ownership across hosts.** The lock is one host's file system. Two
+  hosts reaching the same journal path over a network file system are not
+  separated by it: `create_new` is only as exclusive as the remote server makes
+  it, and NFS does not guarantee that. One host per journal path is a deployment
+  rule, not something this code enforces.
+- **A crashed holder needs an operator.** The stale lock is refused rather than
+  broken, so a host that died mid-sweep does not resume unattended. That is the
+  deliberate trade: an unattended resume is exactly the automatic break that
+  would put two writers back on one budget.
 - **No CLI sweep.** No `sharpebench` subcommand runs a gateway sweep; an
   operator's own binary has to.
 
