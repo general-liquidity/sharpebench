@@ -1,5 +1,65 @@
 # Verification record
 
+## Money-accounting repairs, 2026-09-11
+
+Both pull requests merged with every check green on the exact pushed head, main
+unmoved since that head was tested, and the merged tree identical to the tested
+tree.
+
+| PR | Work | Main after merge |
+|---|---|---|
+| Bench #81 | One writer per money journal; settlement fails closed | `1018445` |
+| Bench #80 | Call ceiling bounds provider requests | `d46d2e6` |
+
+The journal lock is evidenced by eight real threads released together by a
+barrier, all opening one path: exactly one succeeds, seven receive typed
+refusals, and the admitted writer's call is afterwards whole on disk. The
+assertion is winner-independent, so it rests on no scheduling assumption.
+
+### Three tests that would have passed while the thing they name was not what refused
+
+This round produced one finding worth more than the three repairs. In three
+separate cases a test asserted an outcome that several independent causes could
+produce, so the assertion said nothing about the cause it was named for until
+that cause was isolated.
+
+- **The settlement latch.** The regression sabotaged the write by leaving a
+  directory at the journal path. A gateway with no latch was then refused anyway
+  by its next reservation's write, so deleting the latch left the suite green.
+  Isolated by restoring the journal byte for byte before the second request, so
+  only the latch can refuse it.
+- **The retry setting.** A test asserted the setting on a client it built by
+  calling the helper directly, so reverting the run to a bare client survived:
+  nothing pinned the client the run actually constructs. Isolated by driving the
+  entry point with no client of its own and asserting on the constructor's
+  arguments.
+- **The runtime guard.** The first stand-ins for a client that accepts the
+  retry setting and ignores it had no `messages.create`, so deleting the guard
+  was caught by an incidental attribute error from the un-refused run rather
+  than by the guard failing to fire. Isolated by subclassing the working
+  stand-in so both answer normally and the guard is the only thing that can
+  raise.
+
+Two of the three were self-reported at staging by the agents that wrote them;
+the third was found on a re-run. None was caught by a gate.
+
+The same lesson in another register: two mutated constants sat on disk inside a
+worktree that two processes were driving, and neither reached a commit. What
+stopped them was explicit-path staging, and checking the committed tree
+afterwards rather than trusting the working copy. That is also why every commit
+on a branch was checked for the mutated construction rather than only its head.
+
+### Not established
+
+No gateway has served a real provider, and no concurrent or paid run has
+happened. The lock is exercised by threads in one process against one file
+system, which does not cover two hosts sharing a journal over a network file
+system, where `create_new` is only as exclusive as the remote server makes it.
+The call ceiling's guarantee is conditional: either the retry setting binds on
+the client the run built, or the run refuses to start. It is not a claim about
+any SDK version, and the semantics of the next major version were not read and
+must not be assumed from the evidenced one.
+
 ## Remaining gaps, 2026-09-11
 
 Every pull request below merged with all checks green on its exact pushed head,
