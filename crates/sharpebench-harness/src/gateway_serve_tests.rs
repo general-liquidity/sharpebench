@@ -3,7 +3,6 @@
 //! provider, no key and no network anywhere.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use sharpebench_protocol::{Action, Order};
@@ -13,6 +12,7 @@ use crate::gateway::{
     GatewayRequest, GatewayResponse, Message, MessageRole, ModelRoute, ProviderBody, ProviderCall,
     ProviderOutcome, ProviderUsage, Secret, GATEWAY_PROTOCOL,
 };
+use crate::scratch::ScratchDir;
 
 const KEY: &str = "sk-live-serve-test-do-not-log-0123456789";
 const ALIAS: &str = "fake.v1";
@@ -44,16 +44,8 @@ fn budget(max_usd_nanos: u128, max_calls: u32) -> GatewayBudget {
     }
 }
 
-static DIRS: AtomicU64 = AtomicU64::new(0);
-
-fn temp_dir(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "sb-gateway-serve-{tag}-{}-{}",
-        std::process::id(),
-        DIRS.fetch_add(1, Ordering::Relaxed)
-    ));
-    std::fs::create_dir_all(&dir).expect("temp dir");
-    dir
+fn temp_dir(tag: &str) -> ScratchDir {
+    ScratchDir::new(&format!("gateway-serve-{tag}"))
 }
 
 /// A scripted provider. It cannot open a socket; it records the credential it
@@ -236,7 +228,7 @@ const SEEDS: [u64; 2] = [0, 1];
 const STEPS: usize = 6;
 
 struct Fixture {
-    dir: PathBuf,
+    dir: ScratchDir,
     data: Dataset,
     routes: RouteTable,
     permits: CallPermits,
@@ -311,12 +303,6 @@ impl Fixture {
                 )
             },
         )
-    }
-}
-
-impl Drop for Fixture {
-    fn drop(&mut self) {
-        std::fs::remove_dir_all(&self.dir).ok();
     }
 }
 
@@ -426,7 +412,6 @@ fn host_material_in_an_answer_never_reaches_the_entrant() {
         assert_eq!(provider.calls(), 1);
         assert_eq!(gateway.journal().spend().priced_calls, 1, "still charged");
     }
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 /// The whole path: a real sweep, an entrant making a model call on every
@@ -893,7 +878,7 @@ fn a_spawned_entrant_process_reaches_the_model_through_its_stdio() {
         budget(1_000_000, 3),
         GatewayLimits::default(),
     );
-    let launch = scripted_process(&dir);
+    let launch = scripted_process(dir.path());
     let pipes = launch.spawn(&routes).expect("the scripted entrant spawns");
     let observed = gateway_backtest(
         &Dataset::synthetic(4, 60, 7),
@@ -904,7 +889,6 @@ fn a_spawned_entrant_process_reaches_the_model_through_its_stdio() {
         CostModel::default(),
         None,
     );
-    std::fs::remove_dir_all(&dir).ok();
     let run = match observed.result {
         Ok(run) => run,
         Err(kind) => panic!("the scripted process run failed: {kind:?}"),

@@ -15,6 +15,8 @@ pub mod fault_plan;
 pub mod gateway;
 pub mod gateway_journal;
 pub mod perturb;
+#[cfg(test)]
+mod scratch;
 
 pub use checkpoint::{
     run_resumable_sweep, run_resumable_sweep_bound, run_resumable_sweep_bound_with_policy,
