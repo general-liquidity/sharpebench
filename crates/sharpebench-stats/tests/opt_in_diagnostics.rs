@@ -11,7 +11,7 @@
 //! eq. 18 summed directly with `(1 + x) ** (1 - rho)`.
 
 use sharpebench_stats::deflated_sharpe::deflated_sharpe_ratio_against_null;
-use sharpebench_stats::stats::{kurtosis, mean, skewness, std_dev};
+use sharpebench_stats::stats::{kurtosis, mean, norm_cdf, skewness, std_dev};
 use sharpebench_stats::{
     expected_max_sharpe, first_order_autocorrelation, manipulation_proof_performance,
     probabilistic_sharpe_ratio, probabilistic_sharpe_ratio_autocorrelated, sharpe_ratio,
@@ -272,6 +272,49 @@ fn null_and_observed_standard_errors_coincide_at_the_benchmark() {
         sharpe_standard_error_autocorrelated(&r, 0.0, rho_hat, StandardErrorAt::Observed),
         Ok(bracket.sqrt() / ((r.len() - 1) as f64).sqrt())
     );
+}
+
+/// Under the null evaluation at `SR_0 = 0` the skewness and kurtosis terms
+/// vanish, whatever the sample moments are: eq. 2's bracket multiplies `g3` by
+/// `SR` and `(g4 - 1)/4` by `SR^2`, so at `SR = 0` only the autocorrelation
+/// weight `(1 + rho)/(1 - rho)` survives. This is why "the PSR penalizes
+/// negative skew and fat tails" is a statement about the kernel's evaluation
+/// at the observed Sharpe (eq. 3) and not about the PSR in general.
+///
+/// The moments here are the deflated-Sharpe worked example's, `g3 = -3` and
+/// `g4 = 10`, which are nowhere near the values that would make the bracket 1
+/// by coincidence: at a Sharpe of 0.2 the same moments give 1.69.
+#[test]
+fn the_null_evaluation_at_zero_drops_the_skewness_and_kurtosis_terms() {
+    let (g3, g4) = (-3.0, 10.0);
+    for rho in [0.0, 0.4, -0.4] {
+        let want = (1.0 + rho) / (1.0 - rho);
+        assert_eq!(
+            sharpe_variance_factor(0.0, g3, g4, rho),
+            Ok(want),
+            "rho {rho}"
+        );
+        // Nothing else about the moments is being asserted: away from zero the
+        // same call does depend on them.
+        assert_ne!(sharpe_variance_factor(0.2, g3, g4, rho), Ok(want));
+    }
+    assert_eq!(
+        sharpe_variance_factor(0.2, g3, g4, 0.0),
+        Ok(1.0 - g3 * 0.2 + ((g4 - 1.0) / 4.0) * 0.2 * 0.2)
+    );
+
+    // Consequence for the statistic: on a sharply skewed, fat-tailed series the
+    // null-evaluated PSR at a zero benchmark is the plain Phi(SR sqrt(T - 1))
+    // a Normal sample would give, while the kernel's PSR is moved by the
+    // moments and is not.
+    let mut r = vec![0.004_f64; 99];
+    r.push(-0.3);
+    assert!(skewness(&r) < -3.0 && kurtosis(&r) > 10.0);
+    let null = probabilistic_sharpe_ratio_autocorrelated(&r, 0.0, 0.0, StandardErrorAt::Benchmark)
+        .unwrap();
+    let z = sharpe_ratio(&r) * ((r.len() - 1) as f64).sqrt();
+    assert_eq!(null.to_bits(), norm_cdf(z).to_bits());
+    assert!(!close(probabilistic_sharpe_ratio(&r, 0.0), null, 1e-6));
 }
 
 /// A zero benchmark with Normal returns does not make the two coincide: under

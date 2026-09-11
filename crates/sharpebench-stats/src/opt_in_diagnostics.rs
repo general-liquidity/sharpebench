@@ -255,6 +255,11 @@ fn checked_inputs(
 /// their simulations and recommend as consistent with the market portfolio
 /// (working paper p. 18: "We have used a relative risk aversion of 3"; they
 /// also report 2 and 4 as a sensitivity range).
+///
+/// It is that paper's calibration choice, not a universal constant: `rho` is a
+/// utility parameter and should be chosen for the benchmark and investor whose
+/// certainty equivalent is being measured. It is the value this crate's
+/// diagnostic reports under, and every report stamps the `rho` it used.
 pub const DEFAULT_MPPM_RISK_AVERSION: f64 = 3.0;
 
 /// The manipulation-proof performance measure of Goetzmann, Ingersoll,
@@ -267,7 +272,21 @@ pub const DEFAULT_MPPM_RISK_AVERSION: f64 = 3.0;
 ///
 /// with the per-period risk-free rate `r_f = 0`, the benchmark's zero-rate
 /// cash convention, so each term is `(1 + x_t)^(1 - rho)` for the per-period
-/// (not annualized) return `x_t`. `dt = 1 / periods_per_year` is the time
+/// (not annualized) return `x_t`. GISW's `x_t` is an **excess** return: the
+/// numerator inside the power is `1 + r_f + x_t` and the denominator the gross
+/// risk-free return, so the ratio is a gross portfolio return deflated by cash.
+/// Under the zero-rate convention the excess return and the portfolio return
+/// coincide, which is why passing a portfolio return series here is correct for
+/// this benchmark; a caller whose cash earns a non-zero rate must subtract it
+/// first, because passing an absolute return `R` computes `(1 + R)^(1 - rho)`
+/// and scores a different quantity.
+///
+/// The paper's own introductory worked example is not usable as a fixture: its
+/// stated excess returns -0.10, 0.05, 0.17 and -0.02 against a risk-free rate
+/// of 0.01 at `dt = 1` give approximately 0.0154044 at `rho = 2` and 0.0109728
+/// at `rho = 3`, not the printed 1.036 and 1.109. The tests pin closed forms
+/// (a riskless stream scores its own log return, the `rho = 1` limit, concavity
+/// under a mean-preserving spread) and an independent implementation instead. `dt = 1 / periods_per_year` is the time
 /// between observations in years, so the result is, in the paper's words, the
 /// annualized continuously compounded excess-return certainty equivalent: a
 /// riskless return of `exp(Theta dt) - 1` every period scores the same.

@@ -36,6 +36,22 @@ pub fn sharpe_ratio(returns: &[f64]) -> f64 {
 /// **not** the probability that the true Sharpe exceeds `sr_benchmark`: that is
 /// a posterior, and it needs a prior this statistic does not have. Returns a
 /// probability in [0, 1].
+///
+/// The standard error is the **plug-in one at the observed Sharpe**, López de
+/// Prado, Lipton and Zoonekynd (2026), eq. 3 (p. 9), not the one evaluated
+/// under the null at `sr_benchmark`, their eqs. 4 and 5 (p. 10). That is the
+/// convention of Bailey and López de Prado (2012, 2014), it is what the gate
+/// and the rank read, and changing it is a methodology version bump, not a
+/// fix. The eq.-5 evaluation ships as the opt-in
+/// [`crate::opt_in_diagnostics::probabilistic_sharpe_ratio_autocorrelated`]
+/// with [`crate::opt_in_diagnostics::StandardErrorAt::Benchmark`].
+///
+/// One consequence of the convention: because the skewness and kurtosis terms
+/// multiply `SR` and `SR^2`, negative skew and fat tails lower this PSR for a
+/// given positive observed Sharpe. Under the eq.-5 evaluation those terms
+/// multiply `sr_benchmark` instead and vanish at `sr_benchmark = 0`, so "the
+/// PSR penalizes tail selling" is a statement about this convention, not about
+/// the PSR in general.
 pub fn probabilistic_sharpe_ratio(returns: &[f64], sr_benchmark: f64) -> f64 {
     let n = returns.len();
     if n < 2 {
@@ -84,8 +100,15 @@ fn checked_psr(returns: &[f64], sr_benchmark: f64) -> Result<f64, StatisticalErr
 /// module is computed in: `annualized / sqrt(periods_per_year)`.
 ///
 /// A Sharpe ratio scales with the square root of the number of periods, so a
-/// dispersion of Sharpes does too. This is the one place the conversion is
-/// written; `sharpebench_core::per_period_sr_std` and the `sharpebench-edge`
+/// dispersion of Sharpes does too. That scaling is exact for i.i.d. returns
+/// and, for aggregation across periods, for log returns, which add; on simple
+/// returns it ignores compounding, and off independence the factor is not
+/// `sqrt(periods_per_year)` at all (Lo 2002; Benhamou 2021, p. 3, calls the
+/// square-root rule questionable as soon as there is autocorrelation). A
+/// converted quantity is therefore an approximation on any autocorrelated
+/// series, and the callers that convert a deflation prior say so where they
+/// convert it (`sharpebench_core::per_period_sr_std`). This is the one place
+/// the conversion is written; `sharpebench_core::per_period_sr_std` and the `sharpebench-edge`
 /// verdict both read it from here. It does not validate `periods_per_year`:
 /// `+inf` would return a zero dispersion, the most favorable bar there is, so a
 /// caller taking the frequency from a user checks it is finite and positive
