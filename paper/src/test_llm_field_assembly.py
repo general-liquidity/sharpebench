@@ -6,9 +6,12 @@ importable module, so every case here runs it the way an operator does: a copy
 in a temporary directory with a fabricated `final/` beside it and the shared
 rate card it imports.
 
-Four findings are pinned, all of them the same shape: a published property that
+Six findings are pinned, all of them the same shape: a published property that
 quietly did not hold on some input, so the assembler produced a plausible field
-instead of refusing.
+instead of refusing. The last two survived the first four: an independent
+re-check found each of them still live while all thirteen cases written for the
+first four passed, which is why each is reproduced here as a failing case before
+it is closed.
 
   * The field is the Cartesian product of its models and its datasets, and two
     separate memberships were checked instead: the set of models against the
@@ -28,6 +31,16 @@ instead of refusing.
   * The statistics files had no stated denominator: nothing said how many were
     read into the counters they feed, so a reader could not tell whether any had
     been dropped. The meta record now states the count.
+  * The pricing refusal was applied to a missing model and not to a missing
+    usage record. `rec.get("tokens_in", 0)` costed a cache record that states no
+    usage at zero, so a call that was billed was published as free -- the same
+    fail-open one level below where it had just been closed. Usage evidence is
+    now required per record, and an empty cache is decided on its own terms.
+  * Uniqueness was enforced on (dataset, agent_id), and completeness on the SET
+    of (model, dataset) cells. A cell filed twice under two agent ids passed
+    both: the set collapses the duplicate and the pairing is a different
+    identity. The cell is now held unique as well, and the pairing is kept
+    because it also covers the reference-field and luck-floor rows.
 
 The corrupt-statistics half of that third finding did not reproduce: a stats
 file that does not parse has always raised `SystemExit` naming the file, one
@@ -99,9 +112,13 @@ class AssemblerCase(unittest.TestCase):
         )
 
     def write_cache(self, model, tokens_in=1_000_000, tokens_out=100_000):
+        self.write_cache_records(
+            model, [{"tokens_in": tokens_in, "tokens_out": tokens_out}]
+        )
+
+    def write_cache_records(self, model, records):
         (self.final / f"llm-cache-{model}.jsonl").write_text(
-            json.dumps({"tokens_in": tokens_in, "tokens_out": tokens_out}) + "\n",
-            encoding="utf-8",
+            "".join(json.dumps(r) + "\n" for r in records), encoding="utf-8"
         )
 
     def write_stats(self, name, payload):
@@ -209,6 +226,124 @@ class PairUniquenessTests(AssemblerCase):
         self.write_records(rows)
         output = self.refusal()
         self.assertIn("us-indices-1d/buy-and-hold", output)
+
+
+    def test_a_cell_recorded_twice_under_two_agent_ids_is_refused_and_named(self):
+        """The cell is the submission; the agent id is not.
+
+        Completeness above is a membership test over the SET of observed cells,
+        so a cell carried twice collapses into one member and passes it. The
+        (dataset, agent_id) guard is keyed on a different identity, and a second
+        row for the same cell under a different agent id satisfies that one too.
+        Both gates passed and the field published two score rows for one
+        submission, which every per-cell reader counts twice.
+
+        The added row deliberately does not repeat a (dataset, agent_id) pair.
+        If it did, this case would assert an outcome two rules produce and would
+        pass with the cell guard absent.
+        """
+        rows = [record(m, d) for m in MODELS for d in DATASETS]
+        rerun = record("claude-fable-5", "us-indices-1d")
+        rerun["agent_id"] = "llm-claude-fable-5-rerun"
+        rows.append(rerun)
+        self.write_records(rows)
+        pairs = [(r["dataset"], r["agent_id"]) for r in rows]
+        self.assertEqual(
+            len(pairs),
+            len(set(pairs)),
+            "the added row must not also repeat a (dataset, agent_id) pair, or "
+            "the refusal under test has two possible causes",
+        )
+        self.assertEqual(
+            {(r["model"], r["dataset"]) for r in rows},
+            {(m, d) for m in MODELS for d in DATASETS},
+            "the duplicate must leave the set of observed cells unchanged",
+        )
+        output = self.refusal()
+        self.assertIn("claude-fable-5/us-indices-1d", output)
+        self.assertIn("llm-claude-fable-5-rerun", output)
+        self.assertNotIn("(dataset, agent_id)", output)
+
+
+class UsageEvidenceTests(AssemblerCase):
+    """A call whose token counts are unknown has no cost this field can state.
+
+    The rule `price_for` applies to a model no rate card names, one level down.
+    `rec.get("tokens_in", 0)` costed a cache record carrying no usage at zero,
+    so calls that were billed were published as free.
+    """
+
+    def test_a_cache_record_with_no_usage_is_refused_and_named(self):
+        """The exact defect: three calls, no usage evidence, $0.00 published."""
+        self.write_cache_records(
+            "claude-fable-5",
+            [{"malformed": False}, {"malformed": False}, {"refusal": False}],
+        )
+        output = self.refusal()
+        self.assertIn("llm-cache-claude-fable-5.jsonl", output)
+        self.assertIn("no usage evidence", output)
+
+    def test_the_refusal_names_the_record_inside_the_cache(self):
+        """Which call is unmeasured, not merely that one is: a cache is one line
+        per call and an operator has to be able to find it."""
+        self.write_cache_records(
+            "claude-opus-5",
+            [
+                {"tokens_in": 10, "tokens_out": 5},
+                {"tokens_in": 10, "tokens_out": 5},
+                {"tokens_in": 10},
+            ],
+        )
+        output = self.refusal()
+        self.assertIn("line 3", output)
+        self.assertIn("tokens_out", output)
+
+    def test_a_value_that_is_not_a_token_count_is_refused(self):
+        """Present is not measured. A null, a string, a negative count or a
+        boolean is not a number of tokens, and defaulting it to zero publishes
+        the same free call."""
+        for value in (None, "1000", -5, True):
+            with self.subTest(value=value):
+                self.write_cache_records(
+                    "claude-haiku-4-5-20251001",
+                    [{"tokens_in": value, "tokens_out": 5}],
+                )
+                self.assertIn("no usage evidence", self.refusal())
+
+    def test_an_empty_cache_is_refused(self):
+        """The decision on the record: a cache with no records is refused.
+
+        It is not the same input as a record with no usage, so it is decided
+        separately rather than reached by falling through the per-record rule. A
+        cache accumulates one line per fresh call across resumes, and every
+        model the field publishes carries score rows the harness produced by
+        calling it. A cache with zero lines therefore does not measure a model
+        that spent nothing: it is the absence of any evidence about a model that
+        certainly called, and `cost_usd: 0.0` derived from it is a number nobody
+        measured. Refused under the model's own cause so an operator can tell an
+        empty file from an unmeasured record.
+        """
+        self.write_cache_records("claude-opus-5", [])
+        output = self.refusal()
+        self.assertIn("llm-cache-claude-opus-5.jsonl", output)
+        self.assertIn("no calls recorded", output)
+
+    def test_a_measured_cache_is_still_costed(self):
+        """The control: usage that is present and well formed still prices, so
+        the cases above are about missing evidence and not about caches."""
+        self.write_cache_records(
+            "claude-fable-5",
+            [
+                {"tokens_in": 1_000_000, "tokens_out": 0},
+                {"tokens_in": 0, "tokens_out": 100_000},
+            ],
+        )
+        meta = self.assemble()
+        row = meta["per_model"]["claude-fable-5"]
+        self.assertEqual(row["llm_calls"], 2)
+        self.assertEqual(row["tokens_in"], 1_000_000)
+        self.assertEqual(row["tokens_out"], 100_000)
+        self.assertGreater(row["cost_usd"], 0.0)
 
 
 class StatisticsAccountingTests(AssemblerCase):
@@ -335,7 +470,7 @@ class OneRefusalRuleTests(AssemblerCase):
             "the refusal is stated twice; a later edit can repair one copy only",
         )
         self.assertEqual(source.count("def refuse_unaccountable("), 1)
-        self.assertEqual(source.count("refuse_unaccountable("), 3)
+        self.assertEqual(source.count("refuse_unaccountable("), 5)
 
 
 if __name__ == "__main__":

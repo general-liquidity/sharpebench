@@ -15,11 +15,13 @@ recounted). The per-process stats files supply the secondary counters
 (observations, stride holds, cache hits).
 
 What it refuses to publish: a field whose (model, dataset) cells are not all
-present, one recording a (dataset, agent_id) submission twice, a model whose
-calls it cannot cost -- because no rate card names it, or because no accounting
-row was built for it -- a statistics file it cannot parse, and a run reporting
-API errors, an exhausted budget or a refused model identity. Each is an
-incompleteness whose only plausible alternative is a number nobody measured.
+present, one recording a (dataset, agent_id) submission twice or a (model,
+dataset) cell twice, a model whose calls it cannot cost -- because no rate card
+names it, because no accounting row was built for it, because one of its cache
+records states no usage, or because its cache records no call at all -- a
+statistics file it cannot parse, and a run reporting API errors, an exhausted
+budget or a refused model identity. Each is an incompleteness whose only
+plausible alternative is a number nobody measured.
 
 Run from the repo root after the field run:
   python paper/evidence/assemble_llm_field.py
@@ -53,13 +55,16 @@ if not RECORDS.exists() or not RECORDS.read_text(encoding="utf-8").strip():
 def refuse_unaccountable(model, cause, detail):
     """Refuse the field: `model`'s spend cannot be stated, so it is not published.
 
-    The single statement of that rule. Two causes reach it, and they are the
-    same unavailability seen from two sides: no rate card names the model, so
-    its calls cannot be costed, and no per-model accounting row was built for
-    it, so there are no calls to cost. Zero is the tempting answer to each and
-    is a plausible wrong number where the project records an unavailability.
+    The single statement of that rule. Four causes reach it, and they are the
+    same unavailability seen from four sides: no rate card names the model, so
+    its calls cannot be costed; no per-model accounting row was built for it, so
+    there are no calls to cost; one of its cache records carries no usage, so
+    that call's tokens are unknown; and its cache records no call at all, so the
+    score rows it published rest on calls this field has no evidence of. Zero is
+    the tempting answer to each and is a plausible wrong number where the
+    project records an unavailability.
 
-    Stated once because the two are one rule. Restated, a later edit could
+    Stated once because the four are one rule. Restated, a later edit could
     repair the refusal on one path and leave the other reporting a billed model
     as free, which is the shape this file exists to refuse.
     """
@@ -92,19 +97,58 @@ def price_for(model):
     )
 
 
+def usage(cache, lineno, rec, field):
+    """One call's count of `field`, or a refusal to assemble the field.
+
+    `rec.get(field, 0)` is the same fail-open one level below `price_for`: a
+    record carrying no usage was costed at zero, so a call that was billed was
+    published as free. A model whose rate card is unknown has no cost this field
+    can state, and neither has a call whose token counts are unknown, so both
+    refuse through the one rule.
+
+    Present is not measured. A null, a string, a negative count or a boolean is
+    not a number of tokens, and a count that cannot be read is not a count of
+    zero.
+    """
+    n = rec.get(field)
+    if isinstance(n, int) and not isinstance(n, bool) and n >= 0:
+        return n
+    refuse_unaccountable(
+        cache.stem.removeprefix("llm-cache-"),
+        "no usage evidence",
+        f"{cache.name} line {lineno} states {field}={n!r}, which is not a count "
+        "of tokens",
+    )
+
+
 per_model = {}
 for cache in sorted(FINAL.glob("llm-cache-*.jsonl")):
     model = cache.stem.removeprefix("llm-cache-")
     calls = malformed = refusals = tin = tout = 0
-    for line in cache.read_text(encoding="utf-8").splitlines():
+    for lineno, line in enumerate(cache.read_text(encoding="utf-8").splitlines(), 1):
         if not line.strip():
             continue
         rec = json.loads(line)
         calls += 1
         malformed += 1 if rec.get("malformed") else 0
         refusals += 1 if rec.get("refusal") else 0
-        tin += rec.get("tokens_in", 0)
-        tout += rec.get("tokens_out", 0)
+        tin += usage(cache, lineno, rec, "tokens_in")
+        tout += usage(cache, lineno, rec, "tokens_out")
+    # Decided here rather than left to the loop, because an empty cache is a
+    # different input from a record with no usage and the two deserve different
+    # causes. A cache accumulates one line per fresh call across resumes, and
+    # every model this field publishes carries score rows the harness produced
+    # by calling it, so a cache with no lines is not a measurement that a model
+    # spent nothing: it is the absence of any evidence about a model that
+    # certainly called. Publishing `cost_usd: 0.0` from it states a number
+    # nobody measured, which is the same zero the rule below refuses.
+    if not calls:
+        refuse_unaccountable(
+            model,
+            "no calls recorded",
+            f"{cache.name} carries no records, so the score rows this field "
+            "publishes for the model rest on calls it has no evidence of",
+        )
     pin, pout = price_for(model)
     per_model[model] = {
         "llm_calls": calls,
@@ -205,6 +249,34 @@ if duplicates:
     raise SystemExit(
         "refusing to assemble: one (dataset, agent_id) is one submission and "
         f"these are recorded more than once: {duplicates}"
+    )
+
+# The cell is the submission; the agent id is not. Neither gate above can see a
+# cell recorded twice under two agent ids. `observed_cells` is a set, so the
+# second row collapses into the member already there and the product stays
+# complete; the pairing just checked is keyed on a different identity, so a
+# rerun filed under a second agent id satisfies it. Both passed, and two score
+# rows for one cell is what every per-cell reader of the published field counts
+# twice. Kept beside the pairing rather than replacing it: the two are different
+# invariants, and the pairing is the one that covers the reference-field and
+# luck-floor rows, which carry no model. The refusal names the cell and the
+# agent ids that filed it, because which row to withdraw is the next question.
+cell_agents = {}
+for r in records:
+    if not r.get("agent_id", "").startswith("llm-"):
+        continue
+    cell_agents.setdefault((r.get("model"), r.get("dataset")), []).append(
+        r.get("agent_id")
+    )
+repeated = sorted(
+    f"{m}/{d} filed by {sorted(agents)}"
+    for (m, d), agents in cell_agents.items()
+    if len(agents) > 1
+)
+if repeated:
+    raise SystemExit(
+        "refusing to assemble: the LLM field is one submission per model per "
+        f"dataset and these cells carry more than one score row: {repeated}"
     )
 
 observed_datasets = {r.get("dataset") for r in records}
