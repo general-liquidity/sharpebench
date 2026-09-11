@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "d988bdcb835528c4803d8ca369a881cd908d3637",
+  "generated_at_head": "2651eba8661d0d0f91f6f48ece243890a2dbe137",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -611,15 +611,15 @@
     },
     {
       "path": "crates/sharpebench-harness/src/gateway.rs",
-      "sha256": "b27d8ba4be725e1b2b2668cafb703459fd18256f0db4e1706c7ad23670ee69c3"
+      "sha256": "4ceaf60ad0c44acc26ca0cdcf349175bf7c94ebc47c6fc46dc28c61ff641ba88"
     },
     {
       "path": "crates/sharpebench-harness/src/gateway_journal.rs",
-      "sha256": "509564aa48039746009dae8d3c529da7761881aeaed949a37e50e8fd82ecf2b7"
+      "sha256": "ca7e848f8ff8da781ec8519210f2798fd2c5f714176186f6775d42234414037c"
     },
     {
       "path": "crates/sharpebench-harness/src/gateway_serve.rs",
-      "sha256": "9a08642d2ded6df8287381210c261a167d6b7ada8c9526a2b9f751575b58d4b1"
+      "sha256": "3a2abeb2826c4330772e01cabf99e633cdc250f1aa9deaa20bb1f9b8bfdd728b"
     },
     {
       "path": "crates/sharpebench-harness/src/gateway_serve_tests.rs",
@@ -663,7 +663,7 @@
     },
     {
       "path": "crates/sharpebench-harness/tests/journal_ownership_review.rs",
-      "sha256": "10b6a72df46253058d21ddddaea0ed1689f1c5961d239728a4e49bb8bc8acccb"
+      "sha256": "20307918b90c5b6c235753e8f58b6285897d5a9efb1353187ae1854ad7099229"
     },
     {
       "path": "crates/sharpebench-harness/tests/producer_declared_support.rs",
@@ -1099,11 +1099,11 @@
     },
     {
       "path": "paper/src/test_llm_agent_budget.py",
-      "sha256": "83669ae524a0135a69ce92402bd6b2092ae032df1e7dccfe397adde58a41f73e"
+      "sha256": "bb6cc0aa77efbdd1b80d79e233271678a0f7e0b263a8f170483ce1e1359aaf71"
     },
     {
       "path": "paper/src/test_llm_agent_identity.py",
-      "sha256": "ba5324ec4036a632c6cc3b3a8c6f0d2ca03506d85883ac9ce3c1bdde9b7c9ed4"
+      "sha256": "f2220829588369c3fa094be95d2dbe4773b75874f29674a24c50ae6ac9cedd23"
     },
     {
       "path": "paper/src/test_provenance.py",
@@ -1135,5 +1135,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "197003eb11d966e7df513fb33190f258f56632003423f5784d270486df5c94ce"
+  "source_snapshot_sha256": "1874721b44c379cceb593765cd578e82b9edf52de3270a6aa37fa2e8438ea242"
 }

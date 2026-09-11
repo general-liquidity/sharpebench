@@ -657,7 +657,24 @@ def build_client():
 def main(client=None):
     # The client is a parameter so the decision loop can be exercised against a
     # stand-in; nothing but a test passes one.
+    #
+    # The retry check runs here and not only in `build_client`, because this is
+    # the narrowest point every provider request passes through. A caller that
+    # supplies a client would otherwise reach `client.messages.create` with its
+    # retry policy never read, and the ceiling's published guarantee, that
+    # either the setting binds on the client the run uses or the run does not
+    # start, would hold on one path and not on the other.
+    #
+    # A supplied client is checked rather than refused, because the guarantee is
+    # about how the client behaves and not about who constructed it, and the
+    # case that observes the SDK's own retry policy has to hand in a client
+    # built over a stand-in transport. Refusing every supplied client would push
+    # that case back onto a path with no check on it, which is the shape this
+    # removes. `build_client` keeps its own check: it is reachable on its own
+    # and states the property of what it returns, and reading a compliant
+    # client's setting a second time costs one attribute lookup.
     client = client if client is not None else build_client()
+    assert_no_provider_retries(client)
     cache = load_cache()
     STATS["calls_reserved"] = load_attempt_count()
     step = 0
