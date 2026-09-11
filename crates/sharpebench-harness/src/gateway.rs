@@ -782,28 +782,11 @@ impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
             }
             Err(error) => return Err(error),
         };
-        // A lock can only name the document once the document is on disk, so a
-        // journal that does not exist yet, or one written before it had an
-        // identity, is written here rather than at the first call. Until then
+        // A journal that does not exist yet names no document, so it is written
+        // here rather than at the first call: until there is a document,
         // ownership is keyed on this path's spelling alone, which is what lets
         // a second name for one journal open it.
-        if !journal_lock.covers_document() {
-            let journal_id = match JournalLock::document_id(path) {
-                Some(journal_id) => journal_id,
-                None => {
-                    let journal_id = journal.ensure_journal_id();
-                    journal.save(path).map_err(|error| match error {
-                        JournalSaveError::Io(error) | JournalSaveError::Unsynced(error) => error,
-                        conflict => std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            conflict.to_string(),
-                        ),
-                    })?;
-                    journal_id
-                }
-            };
-            journal_lock.bind_journal_id(path, &journal_id)?;
-        }
+        journal_lock.bind_document(path, &mut journal)?;
         Ok(Self {
             routes,
             permits,

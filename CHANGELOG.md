@@ -12,6 +12,12 @@ and links the commits it was built from.
 
 ## [Unreleased]
 
+### Breaking
+- harness: a money journal written before it carried a `journal_id` is now owned on an identity derived from its own bytes, so a second gateway opening one under another name in the same directory is refused where both used to open. `JournalLock::document_id` reports that derived identity for such a document instead of `None`, `JournalLock::acquire` binds it, and a gateway that opens one writes it into the document. Before this, each opener assigned itself a fresh identity and saved, so two of them took two different identity locks and both spent the full budget; only the version check stood between them, and it is a read then a write. `JournalLock::bind_document(path, &mut journal)` replaces the assign-then-bind sequence callers had to perform by hand, and `JournalLock::derived_document_id` exposes the derived value. Two byte-identical journals that are genuinely separate and share a directory now derive one identity, and the second is refused rather than admitted: that is the direction this is allowed to be wrong in. See A2 in the [accounting review](docs/audits/2026-09-09/ACCOUNTING-REVIEW.md).
+
+### Changed
+- harness: the journal's version check is documented for what it defends against now that the lock serialises the writers that go through it, rather than as a general second line of defence. A `JournalLock::take_over` deliberately puts a second writer on a journal whose first holder may still be alive, and `GatewayJournal::save` consults no lock, so the version is what refuses the displaced holder's next write; the other case is a journal that moved under its sole owner. It stays a read then a write, and is not a concurrency control: no portable file-system operation renames a file only if its target still carries a given version, and the per-version claim file that would make it atomic turns a crashed writer into a journal its own owner cannot advance without an operator. Cross-directory aliases are documented as a deliberate limit rather than as unfinished work: a lock on the journal file itself breaks the rename the journal is persisted through, and a lock in a shared namespace is swept by age or scoped to one user.
+
 ## [0.23.0] - 2026-09-11
 
 ### Breaking

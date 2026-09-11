@@ -246,6 +246,19 @@ document, so `ModelGateway::open` and `run_gateway_sweep` now write one and bind
 to it at open rather than waiting for the first call: opening a persisted
 journal creates the file.
 
+A document written before `journal_id` existed names none, and is owned on the
+identity derived from its own bytes (added 2026-09-11): a digest of the file,
+truncated to the same fixed width a fresh identity uses. Every name for one such
+document derives the same value, and the lock on it is taken before anything is
+written, so two gateways opening one legacy document concurrently contend for
+one lock and exactly one proceeds, where an identity assigned fresh per opener
+would have given two locks and two spenders. The gateway that wins writes the
+derived value into the document, which is what keeps the lock's name correct
+once the save changes the bytes it came from. The direction this is allowed to
+be wrong in is refusal: two genuinely separate journals that are byte for byte
+identical and share a directory derive one identity, and the second gateway is
+refused rather than admitted.
+
 A stale lock is refused, not broken. Nothing on disk distinguishes a holder that
 crashed from one that is running, so an automatic break is a guess, and a wrong
 guess puts two writers back on the same budget: exactly the defect the lock
@@ -285,9 +298,16 @@ answers `journal_ownership_lost`, starting no call; a refusal at settlement
 latches the same flag. Either way the gateway stops spending against a file it
 no longer owns, and the records it appended stay in memory, reachable through
 `ModelGateway::into_journal`, rather than being dropped. That check is now the
-second line of defence rather than the only one: what it catches is a journal
-that moved under a single writer, such as a file restored from a backup or
-edited by hand mid-sweep.
+second line of defence rather than the only one, and what it defends against is
+named rather than left to inference. Two writers are outside the lock's reach by
+design or by deployment, and the version check is what refuses the second of
+them. The first is a takeover: `JournalLock::take_over` deliberately puts a new
+holder on a journal whose previous holder may be alive and may still be
+spending, and nothing in `save` consults a lock, so the displaced holder's next
+write is refused on the version and on nothing else. The second is a journal
+that moved under its sole owner, such as a file restored from a backup or edited
+by hand mid-sweep. Removing the check would leave the takeover's displaced
+holder free to overwrite the taker's records.
 
 What none of this covers, stated as narrowly as the evidence allows:
 
@@ -299,14 +319,29 @@ What none of this covers, stated as narrowly as the evidence allows:
   are siblings of the journal, so two parents give two lock files. Measured with
   a hard link across two directories: both gateways still open. Aliases that
   share a directory, which is the hard link and the symlink to the file, are
-  refused.
-- A journal document written before `journal_id` existed names none. Its opener
-  assigns one and saves before binding, so until that save ownership is keyed on
-  the spelling alone.
+  refused. This is a deliberate limit rather than unfinished work. Closing it
+  needs one lock per document wherever the document is reached from, which means
+  either a lock on the journal file itself or a lock in a shared namespace.
+  `std::fs::File::lock` on the journal was measured and is incompatible with the
+  way the journal persists: with it held, `save`'s own read of the on-disk
+  version fails (`os error 33` on Windows), and the rename that follows replaces
+  the entry with a different file, so the lock protects nothing past the first
+  save. A shared namespace, a system temp or a per-user state directory, would
+  leak nothing, because the lock's name is the identity token alone, but a
+  system temp is swept by age on many hosts, so a long sweep's lock could be
+  removed while it is held, and a per-user directory does not separate two
+  users. Either would weaken ownership for every journal to close the case of an
+  operator hard linking a money journal into a second directory. It is not paid.
 - The compare-and-swap is a read then a write, not an atomic swap: `save` reads
   the version on disk and renames after a create, a write and an `fsync`. Two
   writers that both read the same version inside that window both proceed. It is
-  a second line of defence, and it is not a concurrency control.
+  a second line of defence, and it is not a concurrency control. It is not
+  redundant either, for the reason above: a takeover's displaced holder is
+  refused by it and by nothing else. Making it atomic has no portable primitive:
+  a rename cannot be made conditional on the target's content, so the swap would
+  have to be a per-version claim file, which a crashed writer leaves behind and
+  which an operator then has to clear before the journal's own owner can
+  continue.
 
 ### A settlement that cannot be written
 
@@ -475,6 +510,9 @@ restored from the committed file, verified byte identical with `cmp`.
 | Ownership is keyed on the document, not the spelling | the identity lock's name carries the journal's file name again | killed: `two_names_for_one_journal_document_admit_one_gateway`, `a_second_name_for_one_journal_document_is_refused_the_lock` and `a_journal_identity_is_the_documents_and_survives_every_save` failed |
 | An open binds the document it found | `JournalLock::acquire` takes the spelling lock and binds no document | killed: `a_second_name_for_one_journal_document_is_refused_the_lock` failed; the gateway-level test survives, because `ModelGateway::open` binds the document itself |
 | A document keeps one identity across saves | `save` assigns a fresh `journal_id` before every write | killed: `a_journal_identity_is_the_documents_and_survives_every_save` failed |
+| A document that names no identity is owned on one derived from its bytes | ownership keyed on the named identity alone, so a legacy document is owned on its spelling | killed: `a_second_name_for_one_legacy_journal_document_is_refused_the_lock`, `a_legacy_journal_document_is_bound_to_the_identity_derived_from_its_bytes` and `a_legacy_journal_document_admits_one_gateway_under_two_names` failed (`151 passed; 2 failed` and `2 passed; 1 failed`) |
+| The identity written into a legacy document is the one its lock was taken on | the lock still taken on the derived identity, a fresh one written into the document | killed: the two assignment tests failed and the lock test stayed green (`152 passed; 1 failed`) |
+| The version check refuses a takeover's displaced holder | the version comparison in `save` removed | killed: `a_displaced_holder_is_refused_by_the_version_check_once_the_taker_writes` and `a_second_gateway_cannot_spend_the_journal_the_first_owns` failed (`151 passed; 2 failed`), where removing it used to fail the second alone |
 | A takeover records who it displaced | `take_over` writes `std::process::id()` in place of `document.pid`, and separately zeroes `acquired_unix_ms` | killed: `a_takeover_is_explicit_and_records_who_it_displaced` failed for each, where before the restaging of its assertions the whole suite stayed green |
 | A partly landed save is an I/O fault, not another writer | the landed arm of `save` rewinds the version and reports `Io`, the behaviour before this repair | killed: `a_save_whose_rename_landed_is_unsynced_rather_than_a_later_conflict` and `a_reservation_whose_durability_is_unconfirmed_is_not_published_as_lost_ownership` failed. Latching `journal_conflict` on `Unsynced` instead, which is the misdiagnosis itself, kills the second alone |
 
