@@ -382,7 +382,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # Full history: the test-evidence gate isolates a drift against
+      # `origin/main`, which a shallow checkout cannot resolve.
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - name: Install mdBook
         run: |
           mkdir -p "$HOME/.local/bin"
@@ -390,6 +394,11 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Build the book
         run: mdbook build docs/book
+      # The gateway chapter publishes how many tests cover each gateway file.
+      # Nothing recounted it, so it went stale twice. This recounts it from the
+      # tree and names which side moved when the two disagree.
+      - name: The gateway chapter's test evidence matches the tree
+        run: python scripts/check-gateway-test-evidence.py --baseline origin/main
 
   paper-provenance:
     name: paper evidence provenance
