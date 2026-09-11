@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "4bb5fbf46f97b9ce2b4597191c9e5ac08b2d71d4",
+  "generated_at_head": "ce0ad7b36ca027bc54a3d147fa15f24076fc8f25",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -387,7 +387,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/budget_curve.rs",
-      "sha256": "d1907e93c30bf27aff81ac7624f7e6e1cc6093b017d17439ab44d81104786bbc"
+      "sha256": "dbf8dd87c603b482b366f8fdf4719936172a4ce4492f0ca7cf52ab5b9b80d413"
     },
     {
       "path": "crates/sharpebench-core/src/calibration.rs",
@@ -407,7 +407,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/composite.rs",
-      "sha256": "5e1ae9477c87005b34aeee0f45de582e77dccd9681d1d9db1077ddc48c8fddea"
+      "sha256": "86a2330cb7a3f65dc6777c131a63af815fb0f992d2f4f1be4c2fce8622326c94"
     },
     {
       "path": "crates/sharpebench-core/src/correlation.rs",
@@ -831,7 +831,7 @@
     },
     {
       "path": "crates/sharpebench-stats/src/deflated_sharpe.rs",
-      "sha256": "e09089f148aa6e853b6bf20b072889b2faad7265a72043549241d6f661ba84b5"
+      "sha256": "7db1384793327e7c07a66b5cf479609641d05338d749e4550a0d99723fc9b176"
     },
     {
       "path": "crates/sharpebench-stats/src/dissent.rs",
@@ -847,7 +847,7 @@
     },
     {
       "path": "crates/sharpebench-stats/src/opt_in_diagnostics.rs",
-      "sha256": "e3c18aca82a111775876761034409215eecd7065d4dd7cd8def30b259cd79ae6"
+      "sha256": "609578eda10ba900cf39b4025747a3a79e184c50e446db7cf86cfcc1e01bd0f3"
     },
     {
       "path": "crates/sharpebench-stats/src/paired_randomization.rs",
@@ -879,7 +879,7 @@
     },
     {
       "path": "crates/sharpebench-stats/tests/opt_in_diagnostics.rs",
-      "sha256": "0b9dcffdf627a8a19b43773299ba485f4328096ec157274e7bb99cecd62e145e"
+      "sha256": "25d8229a0cf4bf9eeadec1cc2e6be0cecc8b8d3bc51a73eccd12bac06c4cccbe"
     },
     {
       "path": "crates/sharpebench-stats/tests/r02_statistical_boundaries.rs",
@@ -995,7 +995,7 @@
     },
     {
       "path": "paper/sections/03-benchmark.tex",
-      "sha256": "2a6c423425d8fccda53f2a7b89b8f4d2530a3cbdd582ca5af09995fb03d782ff"
+      "sha256": "09b453c9839932b1796ca50ac72bff0e8f3d7ebfe22f30586192531284c81853"
     },
     {
       "path": "paper/sections/04-integrity.tex",
@@ -1151,5 +1151,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "faad1e9ed95adac77b9b55e9d89387fe0a8deb98eab23c3ef40416f36268f15e"
+  "source_snapshot_sha256": "a36440158c04a61a23cd07c0eb4058602c192e82ac6e275edee22bf8f74a1c58"
 }
