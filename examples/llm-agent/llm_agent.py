@@ -19,11 +19,14 @@ default. Per-model request shape:
 Model identity: the requested id is the policy identity, and substitution is
 refused rather than absorbed. An unknown-model error is a failure of this
 run, not a cue to retry a different model, and the id the API reports back is
-checked against the request: the same id, or a versioned expansion of a
-requested alias (`claude-haiku-4-5` served as `claude-haiku-4-5-20251001`),
-is the requested policy; anything else is a different policy answering under
-the requested name and fails the subprocess. Both identities are recorded on
-every cached decision, so a replay states which model actually answered.
+checked against the request: the same id, or the requested alias followed by a
+hyphen and a dated snapshot of exactly eight digits (`claude-haiku-4-5` served
+as `claude-haiku-4-5-20251001`), is the requested policy; anything else is a
+different policy answering under the requested name and fails the subprocess.
+A reply that names no model at all fails too, because `Message.model` is a
+required field of this API and an identity that was never stated cannot be
+published as the requested one. Both identities are recorded on every cached
+decision, so a replay states which model actually answered.
 
 Determinism and cost controls:
   - temperature 0 where the API accepts it; the summarization is a pure
@@ -47,7 +50,10 @@ Determinism and cost controls:
     its unit, and the harness retrying the subprocess cannot re-spend it. The
     ledger lives beside the response cache and survives the process the same
     way, which is what makes the cap hold across the many subprocesses the
-    harness spawns, which the producer starts one at a time. The client is
+    harness spawns. The count is re-read from the ledger inside an exclusive
+    lock at each reservation rather than advanced from a value read at startup,
+    so a second shim sharing the ledger cannot spend a unit another already
+    took, whatever order the harness starts them in. The client is
     built with the SDK's own automatic retries off, and the effective setting
     is read back off the constructed client before the run starts, so one
     reservation is exactly one HTTP request to the provider and the ceiling
@@ -79,6 +85,7 @@ Environment:
                       provider requests reserved, not as results cached
 """
 
+import contextlib
 import hashlib
 import json
 import math
@@ -124,7 +131,16 @@ CACHE_PATH = CACHE_DIR / f"llm-cache-{MODEL}.jsonl"
 # before the request. Separate from the cache because a call that fails leaves
 # no cache record and must still count against the allowance.
 ATTEMPTS_PATH = CACHE_DIR / f"llm-attempts-{MODEL}.jsonl"
+# Exclusive ownership of the ledger for the length of one reservation, so the
+# read of the count and the append that spends against it are one step.
+LEDGER_LOCK_PATH = CACHE_DIR / f"llm-attempts-{MODEL}.jsonl.lock"
 STATS_DIR = Path(os.environ.get("LLM_STATS_DIR", HERE / "stats"))
+# The separator and the width of a dated snapshot the provider expands a
+# requested alias into. Every alias/pinned pair the SDK's own `Message.model`
+# literal enumerates has this shape: claude-haiku-4-5-20251001,
+# claude-opus-4-5-20251101, claude-sonnet-4-5-20250929, claude-opus-4-1-20250805.
+SNAPSHOT_SEPARATOR = "-"
+SNAPSHOT_DIGITS = 8
 
 # First-party API pricing, USD per token (input, output).
 PRICING = {
@@ -271,14 +287,116 @@ def record_decision(cache, key, effective, fields):
 def load_attempt_count():
     """Dispatches already reserved against this model's allowance.
 
-    One line per reservation, so the count is the line count. Read at startup
-    the way the cache is, because the harness runs each window in its own
-    subprocess and the allowance is per model, not per process.
+    One line per reservation, so the count is the line count. Read from disk at
+    every reservation, and again at startup for the statistics, because the
+    harness runs each window in its own subprocess and the allowance is per
+    model, not per process.
     """
     if not ATTEMPTS_PATH.exists():
         return 0
     with ATTEMPTS_PATH.open("r", encoding="utf-8") as f:
         return sum(1 for line in f if line.strip())
+
+
+class BudgetExhausted(RuntimeError):
+    """The allowance is spent. Raised where that can be established, which is
+    inside the reservation: only a count read under the lock is current."""
+
+
+class LedgerBusy(RuntimeError):
+    """The ledger is owned by someone else, so this process cannot reserve.
+
+    Either another shim is reserving right now, or one died holding the lock.
+    Neither is broken automatically: a lock nobody can prove is dead puts two
+    writers back on one allowance, which is what it exists to prevent.
+    """
+
+
+def describe_ledger_holder():
+    """An operator-facing description of whoever holds the lock. Never raises:
+    an unreadable or foreign document still has to produce a refusal message."""
+    try:
+        document = json.loads(LEDGER_LOCK_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return "a holder whose lock document could not be read"
+    if not isinstance(document, dict) or "pid" not in document:
+        return "a holder whose lock document is not a ledger lock"
+    return f"pid {document['pid']} started at ns {document.get('started_ns')}"
+
+
+class LedgerLockStranded(RuntimeError):
+    """The lock was taken and could not be released, so it is still on disk."""
+
+
+# Releasing races with a refused shim describing the holder: that read has the
+# lock file open for a moment, and Windows refuses to delete a file another
+# handle holds (WinError 32), which eight contending threads reproduced here.
+# The holder retries briefly rather than stranding a lock that would refuse
+# every later reservation, and says so if it cannot, because a lock left behind
+# is an operator action rather than something to discover a run later.
+LOCK_RELEASE_ATTEMPTS = 100
+LOCK_RELEASE_PAUSE_S = 0.01
+
+
+def release_ledger_lock():
+    for remaining in range(LOCK_RELEASE_ATTEMPTS - 1, -1, -1):
+        try:
+            LEDGER_LOCK_PATH.unlink()
+            return
+        except FileNotFoundError:
+            return
+        except PermissionError:
+            if remaining == 0:
+                raise LedgerLockStranded(
+                    f"the call ledger lock {LEDGER_LOCK_PATH} was taken by this "
+                    "process and could not be released; every later reservation "
+                    "will be refused until an operator removes that file"
+                ) from None
+            time.sleep(LOCK_RELEASE_PAUSE_S)
+
+
+@contextlib.contextmanager
+def ledger_lock():
+    """Exclusive ownership of the ledger while one unit is reserved.
+
+    A sibling file named after the ledger with `.lock` appended, created with
+    `O_CREAT | O_EXCL` so the file system picks one winner and a second holder
+    is refused rather than queued. The same shape the money journal uses
+    (`crates/sharpebench-harness/src/gateway_journal.rs`), for the same reason:
+    read-then-append is a check-then-act race, and two shims that each read the
+    same count each believe the same unit is theirs.
+
+    Held only across the read and the append, not for the run, so a killed shim
+    can strand it for one reservation rather than for a whole field. A stranded
+    lock is still refused rather than removed. Two hosts sharing one directory
+    over a network file system are not separated by this: `O_EXCL` is only as
+    exclusive as the remote server makes it.
+    """
+    LEDGER_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        fd = os.open(LEDGER_LOCK_PATH, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except (FileExistsError, PermissionError):
+        # `PermissionError` is the same answer on Windows, where a lock whose
+        # holder is deleting it is refused as access denied rather than as
+        # already existing. Either way this process does not own the ledger.
+        raise LedgerBusy(
+            f"the call ledger for {REQUESTED_MODEL} is held by "
+            f"{describe_ledger_holder()}; its lock file is {LEDGER_LOCK_PATH}. "
+            "Another shim is reserving a call, or one died holding the lock. A "
+            "lock is never broken automatically, because two writers on one "
+            "allowance is the defect it prevents; if no such process is "
+            "running, an operator must remove that file."
+        ) from None
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(
+                json.dumps(
+                    {"pid": os.getpid(), "started_ns": _START_NS}, sort_keys=True
+                )
+            )
+        yield
+    finally:
+        release_ledger_lock()
 
 
 def reserve_call(key):
@@ -295,10 +413,12 @@ def reserve_call(key):
     billable request under a unit already spent; a transient failure is raised
     to the harness, whose respawn takes a fresh unit from this ledger.
 
-    Reservations are serialized by the producer, which runs one model against
-    one window at a time. The count is read at startup and advanced in memory,
-    so concurrent processes sharing one ledger would each start from the same
-    base; the ceiling assumes the sequential spawn the harness performs.
+    The ceiling is enforced here, on a count re-read from the ledger under the
+    lock, rather than on a number carried from process start. A count read at
+    startup is only current while nothing else writes, which was true of the
+    one caller and asserted of every future one; a second shim reading the same
+    base would have spent units a first had already taken, and nothing would
+    have said so. Returns the number of units spent including this one.
     """
     ATTEMPTS_PATH.parent.mkdir(parents=True, exist_ok=True)
     record = {
@@ -308,10 +428,18 @@ def reserve_call(key):
         "pid": os.getpid(),
         "started_ns": _START_NS,
     }
-    with ATTEMPTS_PATH.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(record, sort_keys=True) + "\n")
-        f.flush()
-        os.fsync(f.fileno())
+    with ledger_lock():
+        spent = load_attempt_count()
+        if spent >= MAX_CALLS:
+            raise BudgetExhausted(
+                f"LLM call budget exhausted for {MODEL} "
+                f"({spent} of {MAX_CALLS} dispatches reserved); field incomplete"
+            )
+        with ATTEMPTS_PATH.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, sort_keys=True) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        return spent + 1
 
 
 def write_stats():
@@ -401,18 +529,59 @@ def hold(reason, cost=None):
     return d
 
 
+def is_dated_snapshot_of(requested, served):
+    """Whether `served` is `requested` pinned to a dated snapshot of itself.
+
+    The rule is taken from what the provider returns, not from what a served id
+    happens to start with. An alias expands into the same alias followed by one
+    hyphen and an eight-digit date, and that is the only remainder the API
+    appends: `claude-haiku-4-5` -> `claude-haiku-4-5-20251001`,
+    `claude-opus-4-5` -> `claude-opus-4-5-20251101`, `claude-sonnet-4-5` ->
+    `claude-sonnet-4-5-20250929`, `claude-opus-4-1` -> `claude-opus-4-1-20250805`.
+    Those four pairs are the alias/pinned pairs the installed SDK's own
+    `Message.model` literal enumerates.
+
+    So any other continuation is a different model, not a more precise name for
+    the requested one: `-mini` is not a date, and neither is a truncated or
+    padded one. The rule is deliberately narrower than the provider's whole
+    namespace. Two deprecated aliases rebind rather than expand
+    (`claude-sonnet-4-0` is served as `claude-sonnet-4-20250514`), and this
+    refuses those; refusing a policy that is arguably the requested one costs a
+    run, while accepting one that is not publishes the wrong identity.
+    """
+    prefix = requested + SNAPSHOT_SEPARATOR
+    if not served.startswith(prefix):
+        return False
+    snapshot = served[len(prefix):]
+    return (
+        len(snapshot) == SNAPSHOT_DIGITS and snapshot.isascii() and snapshot.isdigit()
+    )
+
+
 def effective_model(response):
     """The id the API says answered, and whether it is the policy requested.
 
-    A provider may expand a requested alias into the pinned version it served;
+    A provider may expand a requested alias into the dated snapshot it served;
     that names the same policy more precisely and is recorded. Any other id is
     a different policy answering under the requested name, which is the one
     thing this benchmark must not publish, so it fails the subprocess.
+
+    A reply that names no model fails the same way. `Message.model` is a
+    required field of this API, so absence is not a normal answer this run
+    should absorb; it leaves the identity unverifiable, and returning the
+    requested id would state that the requested policy answered on the strength
+    of the API not having said so. That is the accepting-on-absence shape the
+    reservation ledger and the retry guard both refuse.
     """
     served = getattr(response, "model", None)
     if served is None:
-        return REQUESTED_MODEL
-    if served == REQUESTED_MODEL or served.startswith(REQUESTED_MODEL):
+        raise RuntimeError(
+            f"model identity unverifiable: requested {REQUESTED_MODEL} and the "
+            "response names no model. This API always states the model that "
+            "answered, so an absent id is not evidence that the requested "
+            "policy did, and the field pins policy identity to the requested model"
+        )
+    if served == REQUESTED_MODEL or is_dated_snapshot_of(REQUESTED_MODEL, served):
         return served
     raise RuntimeError(
         f"model substitution: requested {REQUESTED_MODEL}, served {served}; "
@@ -490,8 +659,7 @@ def main(client=None):
     # stand-in; nothing but a test passes one.
     client = client if client is not None else build_client()
     cache = load_cache()
-    attempts = load_attempt_count()
-    STATS["calls_reserved"] = attempts
+    STATS["calls_reserved"] = load_attempt_count()
     step = 0
     for line in sys.stdin:
         line = line.strip()
@@ -512,7 +680,10 @@ def main(client=None):
                     # Deliberately violate the wire schema: ExternalAgent records
                     # an agent protocol fault and the resilient harness inserts a
                     # failing sentinel run. Replaying a cached malformed response
-                    # must not resurrect the old masked-hold behavior.
+                    # must not resurrect the old masked-hold behavior. The cost
+                    # of the call that produced it rides on the cache record,
+                    # not here: this decision has to stay unparseable, so it can
+                    # carry no accounting a reader would trust.
                     decision = {"protocol_error": "cached malformed model output"}
                 else:
                     decision = {
@@ -524,24 +695,22 @@ def main(client=None):
                         # benchmark's efficiency column describes the model call
                         # that produced this frozen decision, not the replay cost.
                         decision["cost"] = cache[key]["cost"]
-            elif attempts >= MAX_CALLS:
-                # Reserved dispatches, not cached results: a failed call spent
-                # the money and must count. An incomplete model run is not
-                # evidence either way. Failing the subprocess makes the harness
-                # record a transport failure and the Rust driver refuses to
-                # publish the field.
-                STATS["budget_exhausted"] += 1
-                write_stats()
-                raise RuntimeError(
-                    f"LLM call budget exhausted for {MODEL} "
-                    f"({attempts} of {MAX_CALLS} dispatches reserved); field incomplete"
-                )
             else:
                 valid = {s["symbol"] for s in obs.get("symbols", [])}
                 try:
-                    reserve_call(key)
-                    attempts += 1
-                    STATS["calls_reserved"] = attempts
+                    # Reserved dispatches, not cached results: a failed call
+                    # spent the money and must count. The reservation refuses
+                    # when the ledger is out, which is the only place the
+                    # current count is known. An incomplete model run is not
+                    # evidence either way. Failing the subprocess makes the
+                    # harness record a transport failure and the Rust driver
+                    # refuses to publish the field.
+                    STATS["calls_reserved"] = reserve_call(key)
+                except BudgetExhausted:
+                    STATS["budget_exhausted"] += 1
+                    write_stats()
+                    raise
+                try:
                     STATS["llm_calls"] += 1
                     resp = call_model(client, prompt)
                     effective = effective_model(resp)
@@ -574,10 +743,16 @@ def main(client=None):
                         if orders is None:
                             STATS["malformed"] += 1
                             decision = {"protocol_error": "malformed model output"}
+                            # The call is billed whether or not its reply parsed,
+                            # so the record carries what it cost, as the refusal
+                            # and success records do. Without it a replayed
+                            # malformed decision reported no cost at all, and a
+                            # reader adding up the cache read a real call as free.
                             record_decision(
                                 cache, key, effective,
                                 {"orders": [], "malformed": True,
-                                 "tokens_in": tin, "tokens_out": tout},
+                                 "tokens_in": tin, "tokens_out": tout,
+                                 "cost": cost},
                             )
                         else:
                             decision = {

@@ -15,11 +15,26 @@ Two findings are pinned:
     summarizer/parser version were all outside cache identity, and changing any
     of them silently replayed decisions taken under a different policy
     configuration.
+
+Two more were added after a later review of the identity check itself:
+
+  * `effective_model` accepted any served id with the requested id as a prefix,
+    so `claude-opus-5-mini` answered as `claude-opus-5`. The served id must now
+    be the requested id, or the requested id followed by one hyphen and an
+    eight-digit dated snapshot, which is the only expansion the provider makes:
+    the alias/pinned pairs the installed SDK's own `Message.model` literal
+    enumerates are `claude-haiku-4-5-20251001`, `claude-opus-4-5-20251101`,
+    `claude-sonnet-4-5-20250929` and `claude-opus-4-1-20250805`;
+  * a response carrying no model at all returned the requested id, claiming the
+    requested policy answered when the API had not said so. `Message.model` is
+    required on this API, so absence now refuses.
 """
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import sys
@@ -64,6 +79,55 @@ class Response:
         self.model = model
         self.content = []
         self.stop_reason = None
+
+
+class Usage:
+    def __init__(self):
+        self.input_tokens = 10
+        self.output_tokens = 5
+
+
+class Block:
+    def __init__(self, text):
+        self.type = "text"
+        self.text = text
+
+
+class WorkingResponse(Response):
+    """A reply the shim can use all the way through, under a given identity.
+
+    Everything but the model id is valid: parseable orders, a normal stop
+    reason, usage. That is what makes the identity the only thing that can
+    refuse a run driven with it, so deleting the identity check shows up as a
+    run that completed rather than as an incidental failure somewhere else.
+    """
+
+    def __init__(self, model):
+        super().__init__(model)
+        self.content = [Block('{"orders":[]}')]
+        self.stop_reason = "end_turn"
+        self.usage = Usage()
+
+
+OBSERVATION = {
+    "symbols": [{"symbol": "AAA", "close_history": [100.0, 101.0, 102.0]}],
+    "cash": 1000.0,
+    "portfolio": [],
+}
+
+
+def drive(shim, client):
+    """Run the decision loop over one observation, as the harness would."""
+    stdin = io.StringIO(json.dumps(OBSERVATION) + chr(10))
+    stdout = io.StringIO()
+    real_stdin = sys.stdin
+    sys.stdin = stdin
+    try:
+        with contextlib.redirect_stdout(stdout):
+            shim.main(client=client)
+    finally:
+        sys.stdin = real_stdin
+    return stdout.getvalue()
 
 
 class Client:
@@ -145,6 +209,83 @@ class ModelIdentityTests(ShimCase):
         shim = load_shim(alias.name, model="claude-haiku-4-5")
         served = shim.effective_model(Response("claude-haiku-4-5-20251001"))
         self.assertEqual(served, "claude-haiku-4-5-20251001")
+
+    def test_a_longer_id_that_is_not_a_dated_snapshot_is_refused(self):
+        """The reported hole: prefix acceptance took any continuation.
+
+        `claude-opus-5-mini` starts with `claude-opus-5` and is a different
+        policy, so a rule that accepts any continuation of the requested id
+        publishes it under the requested name.
+        """
+        frontier = tempfile.TemporaryDirectory()
+        self.addCleanup(frontier.cleanup)
+        shim = load_shim(frontier.name, model=FRONTIER)
+        with self.assertRaises(RuntimeError) as caught:
+            shim.effective_model(Response(FRONTIER + "-mini"))
+        self.assertIn("model substitution", str(caught.exception))
+
+    def test_only_an_eight_digit_snapshot_counts_as_the_same_policy(self):
+        """The expansion the provider performs, and nothing shaped loosely like
+        it. Every alias/pinned pair the SDK's `Message.model` literal lists is
+        the alias, one hyphen, and eight digits."""
+        alias = tempfile.TemporaryDirectory()
+        self.addCleanup(alias.cleanup)
+        shim = load_shim(alias.name, model="claude-haiku-4-5")
+        self.assertEqual(
+            shim.effective_model(Response("claude-haiku-4-5-20251001")),
+            "claude-haiku-4-5-20251001",
+        )
+        for served in (
+            "claude-haiku-4-5-2025100",  # seven digits
+            "claude-haiku-4-5-202510011",  # nine digits
+            "claude-haiku-4-5-20251001-preview",  # a date and then more
+            "claude-haiku-4-520251001",  # no separator
+            "claude-haiku-4-5-2025100x",  # not all digits
+            "claude-haiku-4-5-mini",
+        ):
+            with self.subTest(served=served):
+                with self.assertRaises(RuntimeError):
+                    shim.effective_model(Response(served))
+
+    def test_a_reply_that_names_no_model_is_refused(self):
+        """Absence is not evidence that the requested policy answered.
+
+        `Message.model` is a required field of this API, so a reply carrying
+        none leaves the identity unverifiable; returning the requested id would
+        state an identity the API never stated.
+        """
+        with self.assertRaises(RuntimeError) as caught:
+            self.shim.effective_model(Response(None))
+        self.assertIn("unverifiable", str(caught.exception))
+
+    def test_the_stand_in_reply_is_otherwise_usable(self):
+        """The control the two on-path cases below rest on.
+
+        Under the requested identity the same stand-in drives a run to
+        completion and emits a decision, so when the identity is changed and
+        the run fails, the identity check is what refused it and not a thin
+        stand-in failing somewhere else.
+        """
+        out = drive(self.shim, Client([WorkingResponse(self.shim.REQUESTED_MODEL)]))
+        self.assertEqual(json.loads(out.strip())["orders"], [])
+        self.assertEqual(self.shim.STATS["model_effective"], self.shim.REQUESTED_MODEL)
+
+    def test_the_run_refuses_a_substituted_model_on_the_path_it_takes(self):
+        client = Client([WorkingResponse(self.shim.REQUESTED_MODEL + "-mini")])
+        with self.assertRaises(RuntimeError) as caught:
+            drive(self.shim, client)
+        self.assertIn("model substitution", str(caught.exception))
+        self.assertEqual(len(client.requests), 1, "the reply was the refused thing")
+        self.assertEqual(
+            self.shim.load_cache(), {}, "a refused identity records no decision"
+        )
+
+    def test_the_run_refuses_an_unnamed_model_on_the_path_it_takes(self):
+        client = Client([WorkingResponse(None)])
+        with self.assertRaises(RuntimeError) as caught:
+            drive(self.shim, client)
+        self.assertIn("unverifiable", str(caught.exception))
+        self.assertEqual(self.shim.load_cache(), {})
 
     def test_both_identities_travel_with_every_cached_decision(self):
         key = self.shim.cache_key(self.shim.REQUESTED_MODEL, "prompt")
