@@ -860,7 +860,10 @@ pub struct CompositeScore {
     /// it as return drift.
     pub edge_half_life: Option<f64>,
     /// Field-wide data-snooping p-value (White's Reality Check), filled by [`rank`]:
-    /// the probability the *leader's* edge is luck given how many agents were tried.
+    /// under the null that no agent beats the benchmark, the probability that the
+    /// *leader* would look at least this good given how many agents were tried. It
+    /// is not the probability that the leader's edge is luck: that is a posterior
+    /// and needs a prior this test does not have.
     /// Same value across the field. 1.0 from `score_agent` alone.
     pub field_reality_check_p: f64,
     /// Maximum drawdown over the pooled track, in [0, 1].

@@ -106,7 +106,10 @@ pub struct BudgetPoint {
     /// Raw (per-period, non-annualized) Sharpe on the held-out returns, reported
     /// for context alongside the deflated figure, never a gate.
     pub oos_sharpe: f64,
-    /// `oos_sharpe` scaled by `sqrt(periods_per_year)`; legibility only.
+    /// `oos_sharpe` scaled by `sqrt(periods_per_year)`; legibility only. The
+    /// square-root-of-time scaling is exact for i.i.d. returns and approximate on
+    /// any autocorrelated simple-return series (Lo 2002), which is why this is a
+    /// display figure and `oos_dsr` is computed from `oos_sharpe` per period.
     pub oos_sharpe_annualized: f64,
     /// Bootstrap p-value that this point's held-out edge is real (not luck).
     pub oos_p_value: f64,

@@ -10,7 +10,14 @@ López de Prado, Lipton and Zoonekynd, *How to Use the Sharpe Ratio* (2026),
 single out reading a p-value that way as a recurring error (their eq. 9
 defines PSR as `1 - p`). Fat tails and negative skew, the signatures of
 strategies that "work until they don't", lower the PSR for the same headline
-Sharpe.
+Sharpe. That holds under the convention the kernel uses, where the standard
+error is the plug-in one at the *observed* Sharpe (the 2026 paper's eq. 3): the
+skew and kurtosis terms multiply `SR` and `SR^2`. Under the paper's eq. 5, which
+evaluates the standard error under the null at `SR_0`, those terms multiply
+`SR_0` instead and vanish at `SR_0 = 0`, so this is not a property of the PSR in
+general. Both evaluations ship; the gate keeps the observed-Sharpe one and the
+eq.-5 evaluation is an
+[opt-in diagnostic](#opt-in-diagnostics-the-gate-does-not-use).
 
 The PSR variance the kernel uses is the 2014 one, and it **assumes serially
 independent returns**. Positive autocorrelation makes the true sampling variance
