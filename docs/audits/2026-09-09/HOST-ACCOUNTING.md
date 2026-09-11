@@ -398,6 +398,25 @@ The lock refusal it used to cover is now
 keep a test rather than one silently replacing the other.
 | An over-deadline answer is not accepted | the elapsed-time check after `transport.call` is made unreachable | killed: `an_answer_returned_after_the_deadline_is_refused_and_charged` failed |
 
+Five more for the 2026-09-11 repairs, mutated in place on a clean tree and
+restored from the committed file, verified byte identical with `cmp`.
+
+| Invariant | Mutation | Result |
+|---|---|---|
+| A journal path admits one writer | `JournalLock::create` opens the lock with `create(true).truncate(true)` instead of `create_new(true)` | killed: `a_second_holder_of_one_journal_is_refused`, `a_second_gateway_cannot_open_the_journal_the_first_owns`, `only_one_of_many_racing_gateways_owns_the_journal` and `a_stale_lock_is_refused_rather_than_broken` failed |
+| A stale lock is refused, not broken | the `AlreadyExists` arm removes the lock and retries instead of returning `Held` | killed: the same four failed |
+| A takeover is a takeover, not an acquire | `take_over` falls back to `create` when no lock is there instead of returning `NotHeld` | killed: `a_takeover_is_explicit_and_records_who_it_displaced` failed |
+| An unwritable settlement latches | the `JournalSaveError::Io` arm of `settle_and_persist` returns success and sets no flag, the behaviour before this repair | killed: `a_settlement_that_cannot_be_persisted_stops_the_gateway` failed |
+| A latched gateway starts no further call | the `journal_unwritable` guard in `dispatch_once` is made unreachable | killed: `a_settlement_that_cannot_be_persisted_stops_the_gateway` failed |
+
+The last mutant would have survived the regression as first written: the
+sabotage transport left a directory at the journal path, so a gateway with no
+latch would have been refused anyway by its next reservation's own failed write.
+The test now restores the journal byte for byte before the second request, so
+the path is writable and only the latch can refuse it. That is recorded here for
+the same reason the surviving ceiling mutant below was: a mutant that lives says
+the test was weaker than the invariant it claimed.
+
 The ceiling guard survived its first mutation, because a route whose reservation
 is positive is already refused by the available-money check once committed money
 has saturated it. The guard is load bearing only for a call that reserves
