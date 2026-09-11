@@ -185,9 +185,11 @@ the ledger and takes a fresh unit, so a retried window is bounded by the same
 allowance as any other call. The module docstring states this as the policy.
 
 **Regression.** `ProviderRequestTests` in `paper/src/test_llm_agent_budget.py`,
-two cases. The constructor case records the keyword arguments `build_client`
-hands the SDK, so the setting the shim ships is pinned rather than the
-constant. The load-bearing case drives `main` with a real
+two cases. The constructor case drives `main` with no client of its own, the
+way the harness runs it, and records the keyword arguments the SDK constructor
+receives, so what is pinned is the client the run actually builds rather than
+the constant or `build_client` in isolation. The load-bearing case drives
+`main` with a real
 `anthropic.Anthropic` bound to an `httpx.MockTransport`, under a ceiling of
 two: the first process is answered 429, the exact status the SDK retries, and
 exactly one HTTP request reaches the transport where the old client would have
@@ -195,8 +197,12 @@ sent three; the respawn spends exactly one more; the third process is refused
 with "budget exhausted" and sends nothing. Two units bought two provider
 requests.
 
-**Mutations** (in place, restored from a byte copy of the pre-mutation file and
-confirmed with `cmp`): see the section 4 verification table below.
+**Mutations.** Four, in the section 4 verification table below. One of them is
+worth naming here: reverting `main` to a bare `anthropic.Anthropic()` survived
+the first version of these tests, because every case either called
+`build_client()` directly or supplied its own client, so the repair was pinned
+everywhere except on the path the harness uses. The constructor case now drives
+`main` with no client of its own.
 
 **Also audited, not changed.** Three claims in the same file were checked and
 hold as written: the cache-identity gate (`load_cache`) drops a record whose
@@ -255,6 +261,12 @@ with `cmp`:
 
 | Mutation | Result |
 |---|---|
-| `PROVIDER_MAX_RETRIES` 0 to 2, the SDK default the defect inherited | 2 of 7 fail: the constructor case, and the transport case, which then sees three HTTP requests where the ceiling allowed one |
+| `PROVIDER_MAX_RETRIES` 0 to 2, the SDK default the defect inherited | 2 of 7 fail: the constructor case, and the transport case, where the SDK retried the 429, the second attempt was answered, and no failure was raised at all |
+| `main` reverted to a bare `anthropic.Anthropic()`, `build_client` left defined but unused | 1 of 7 fails. It survived at first: the constructor case called `build_client()` directly and the transport case supplied its own client, so nothing pinned the client the run builds. The case now drives `main` with no client and asserts on the constructor's keyword arguments |
 | ceiling gate back to `len(cache) >= MAX_CALLS` | 3 of 7 fail: the two section 1 cases and the new transport case |
 | reservation write made a no-op | 6 of 7 fail (5 failures, 1 error) |
+
+Each mutation was applied to the working file, the suite run, and the file
+restored from `git show HEAD:examples/llm-agent/llm_agent.py` written to a
+temporary path, then confirmed byte-identical with `cmp` and an empty `git
+diff` before the next mutation.

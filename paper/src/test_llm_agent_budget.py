@@ -272,24 +272,28 @@ class CallCeilingTests(CallCeilingCase):
 class ProviderRequestTests(CallCeilingCase):
     """The unit is a provider request, not a dispatch from this process."""
 
-    def test_the_provider_client_disables_the_sdk_automatic_retries(self):
+    def test_the_client_the_run_uses_disables_the_sdk_automatic_retries(self):
         """The ceiling reserves once per `create`, so `create` must send once.
 
-        Recorded at the constructor rather than asserted on the constant, so
-        the setting the shim actually hands the SDK is what is pinned.
+        Recorded at the constructor and driven through `main` with no client of
+        its own, which is how the harness runs it. Asserting on
+        `PROVIDER_MAX_RETRIES`, or calling `build_client` directly, would leave
+        the run free to construct its client some other way.
         """
         shim = load_shim(self.tmp.name)
-        seen = {}
+        seen = []
 
         def recording_constructor(**kw):
-            seen.update(kw)
+            seen.append(kw)
             return object()
 
         with unittest.mock.patch.object(
             shim.anthropic, "Anthropic", recording_constructor
         ):
-            shim.build_client()
-        self.assertEqual(seen.get("max_retries"), 0)
+            # No observations: the client is built, nothing is dispatched.
+            drive(shim, None, observations=0)
+        self.assertEqual(len(seen), 1, "the run builds exactly one client")
+        self.assertEqual(seen[0].get("max_retries"), 0)
 
     def test_n_units_allow_exactly_n_provider_requests_across_a_retryable_failure(self):
         """Two units, a 429 and an answer, and exactly two HTTP requests.
