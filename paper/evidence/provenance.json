@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "be93ae4f8c097219eb0860ef9b7338066aaca743",
+  "generated_at_head": "dcfba03c11359c340c010cbe1e40311ec9b4604b",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -611,27 +611,31 @@
     },
     {
       "path": "crates/sharpebench-harness/src/gateway.rs",
-      "sha256": "e62fea96ad1d896fa77a9cc6ef47bcc4855e484dbeec2981e77128c2f4c5afb5"
+      "sha256": "4ceaf60ad0c44acc26ca0cdcf349175bf7c94ebc47c6fc46dc28c61ff641ba88"
     },
     {
       "path": "crates/sharpebench-harness/src/gateway_journal.rs",
-      "sha256": "f17bfa6bbad7b8490fff9219bf6670c266bdbff22535c9c64a7bd43a9a8f95a8"
+      "sha256": "ca7e848f8ff8da781ec8519210f2798fd2c5f714176186f6775d42234414037c"
     },
     {
       "path": "crates/sharpebench-harness/src/gateway_serve.rs",
-      "sha256": "07f8dd59dd454d17340164af449a46d4d3b0fed28625331b4fefccb17ce3e847"
+      "sha256": "3a2abeb2826c4330772e01cabf99e633cdc250f1aa9deaa20bb1f9b8bfdd728b"
     },
     {
       "path": "crates/sharpebench-harness/src/gateway_serve_tests.rs",
-      "sha256": "003c1186c3163cb01e322f078a5f0ef181aaaf34defbebaf8e2a978feee7e017"
+      "sha256": "ac26c404bba717d702de93463987bd209fa2e115bfb7cc408a76d09a85d308c6"
     },
     {
       "path": "crates/sharpebench-harness/src/lib.rs",
-      "sha256": "b053ee0878da917db07dac1aba39045c5941a3439f0413adaf6a7a8b0d9e092e"
+      "sha256": "e37a074d5b7a287ab2a43be718f5502625beb9eba61c19772ff7d5d56788bce3"
     },
     {
       "path": "crates/sharpebench-harness/src/perturb.rs",
       "sha256": "4a0a02a9e6ca88fb3ba31c8b3ceebc155cf043afee698d61a90e3b9f4bc406e7"
+    },
+    {
+      "path": "crates/sharpebench-harness/src/scratch.rs",
+      "sha256": "09107964eb82c71c81443cc59823202a879246cda73662cb8215217e3091c2b3"
     },
     {
       "path": "crates/sharpebench-harness/tests/artifact_scan.rs",
@@ -659,7 +663,7 @@
     },
     {
       "path": "crates/sharpebench-harness/tests/journal_ownership_review.rs",
-      "sha256": "d353f1320a454bdfb2db5c6f0768ec72abcb74a8e091f97f5fa90171c5a7de4d"
+      "sha256": "20307918b90c5b6c235753e8f58b6285897d5a9efb1353187ae1854ad7099229"
     },
     {
       "path": "crates/sharpebench-harness/tests/producer_declared_support.rs",
@@ -1131,5 +1135,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "b2296da5010f71cb09b67946c0fc25e8e57cf370dc6ae1dbe77937e9e4311f3a"
+  "source_snapshot_sha256": "660ea8573a4c59bed20f935e233fcb1a34e9b2c25cd98ae1a9c111849ea79de3"
 }
