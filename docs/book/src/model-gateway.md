@@ -517,13 +517,40 @@ entrypoint, against the same daemon ([image preflight](image-preflight.md)).
 Hermetic fakes only: no API key, no network call, no model installation. The one
 live leg is the Docker run above, whose provider is also a fake.
 
+Every number here is recounted from the tree by
+`scripts/check-gateway-test-evidence.py`, which fails when this table and the
+tree disagree and reports which of the two moved. The CI job that runs it is
+`docs`, beside the book build.
+
+Each file below exists only for the gateway, so the count is every test function
+in the file and all of it is gateway evidence. None of those tests is
+`#[ignore]`, so `cargo nextest run --workspace --exclude xtask` runs all of them;
+the gate checks that claim too.
+
 | Where | Tests | Covers |
 |---|---|---|
-| `crates/sharpebench-harness/src/gateway.rs` | 30 | forbidden fields by name, exact alias resolution, the host supplying destination, credential, revision and every bound, the envelope bounds, oversized, truncated, unparseable and unknown-field provider bodies, the shared permit pool, the reservation reaching disk before dispatch, hard money and call refusals starting no request, retries reconciled exactly once, absent usage as unknown rather than zero, framing overhead in the reservation, overspend stopping the sweep, a second gateway refused the journal the first owns, a late answer refused and charged, resume without repricing, credential rotation excluded from identity, redaction and rank neutrality |
-| `crates/sharpebench-harness/src/gateway_journal.rs` | 10 | the fold, partial and unavailable totals, the `host_observed` label, and a sweep-bound journal resuming only under its sweep |
+| `crates/sharpebench-harness/src/gateway.rs` | 34 | forbidden fields by name, exact alias resolution, the host supplying destination, credential, revision and every bound, the envelope bounds, oversized, truncated, unparseable and unknown-field provider bodies, the shared permit pool, the reservation reaching disk before dispatch, hard money and call refusals starting no request, retries reconciled exactly once, absent usage as unknown rather than zero, framing overhead in the reservation, overspend stopping the sweep, one owner among racing gateways and a second gateway refused the journal the first owns, a settlement that cannot be persisted stopping the gateway, an unconfirmed durability published as unwritable rather than as lost ownership, a late answer refused and charged, resume without repricing, credential rotation excluded from identity, redaction and rank neutrality |
+| `crates/sharpebench-harness/src/gateway_journal.rs` | 22 | the fold, partial and unavailable totals, the `host_observed` label, an unsettled reservation charged rather than refunded, a released reservation still consuming a call, a sweep-bound journal resuming only under its sweep, and the ownership family: one holder per journal document, a second name for that document refused, a document written before it carried an identity owned on the identity derived from its bytes, a stale lock refused rather than broken, a takeover recording who it displaced, and the version check refusing the displaced holder's next write |
 | `crates/sharpebench-harness/src/gateway_serve_tests.rs` | 12 | the serving loop on real OS pipes and one real child process: a call through the entrant's own pipe, a scored sweep with usage on the entrant's row, resume making no new calls, an interrupted sweep rerunning only unfinished cells, typed budget refusals, the checkpoint and journal pair, gateway lines never read as decisions, the per-decision ceiling, host serving time excluded from the entrant clock, no credential in any launch, and host material withheld |
-| `crates/sharpebench-cli/src/gateway_cli.rs` | 6 | the operator report, including `limits.max_requests_per_decision` |
-| `crates/sharpebench-arena/src/sandbox.rs` | 2 | the gateway launch is the hardened `--network none` launch; live, a gateway sweep served over a real container's stdio with no network, journaled, and the container removed |
+| `crates/sharpebench-harness/tests/journal_ownership_review.rs` | 3 | the two journal-ownership findings of the [accounting review](https://github.com/general-liquidity/sharpebench/blob/main/docs/audits/2026-09-09/ACCOUNTING-REVIEW.md), through the public surface only: a holder releases the lock it holds and no other, and one journal document admits one gateway under either of two names, a document written before it carried an identity included |
+| `crates/sharpebench-cli/src/gateway_cli.rs` | 7 | the operator report, including `limits.max_requests_per_decision` and `journal_lock_held`, a sweep-bound journal reported with its sweep, and the refusals: a malformed manifest, a missing credential, a missing or zero budget, and a journal bound to another route table |
+
+The arena's sandbox is not one of those files. Most of its tests are the
+sandbox's own and two concern the gateway, so a count of the file would be a
+different measure in the same column. The two are named instead, and the same
+gate checks that each exists in that file and still runs the way this table
+says:
+
+| Test | Where | Runs | Covers |
+|---|---|---|---|
+| `a_gateway_launch_is_the_hardened_network_disabled_launch` | `crates/sharpebench-arena/src/sandbox.rs` | always | the gateway launch is the hardened `--network none` launch |
+| `live_gateway_launch_serves_model_calls_over_stdio_with_no_network` | `crates/sharpebench-arena/src/sandbox.rs` | `#[ignore]` | live, a gateway sweep served over a real container's stdio with no network, journaled, and the container removed |
+
+A count of tests is not a measure of coverage and is not offered as one. It says
+how many assertions stand behind the row's description, not what fraction of any
+file they reach, and a file can be covered from outside itself: that is why
+`tests/journal_ownership_review.rs` has a row of its own for tests that exercise
+`gateway_journal.rs`.
 
 Each invariant of the serving loop (host serving time, the checkpoint binding,
 the missing-journal refusal, the per-decision ceiling, the credential refusal at
