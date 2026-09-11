@@ -416,6 +416,39 @@ jobs:
       - name: Every recorded source and artifact matches the committed scope
         run: python paper/src/check-provenance.py
 
+  llm-shim:
+    name: LLM field shim (call ceiling, model identity)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Its own job rather than a step in `paper-provenance`, which installs nothing:
+    # these regressions need the Anthropic SDK on the path because the load-bearing
+    # case drives a real SDK client over a stand-in HTTP transport to observe the
+    # SDK's own retry policy. No credential and no provider are involved; the
+    # transport answers every request locally.
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install the SDK the ceiling claim was evidenced against
+        # Pinned, not floating. The load-bearing regression asserts this SDK's
+        # own retry policy (0.112.0: DEFAULT_MAX_RETRIES 2, and `_base_client`
+        # looping `range(max_retries + 1)` over 408, 409, 429, 5xx, connection
+        # faults and timeouts), so the claim and the dependency have to travel
+        # together. An unpinned install resolved to anthropic 1.5.0, which
+        # depends on httpx2 rather than httpx and is a different SDK from the
+        # one the reading was taken from. Nothing else in this repository pins
+        # `anthropic`; this is the only pin. Supporting 1.x needs its own
+        # evidence and is not assumed from the 0.x source. The shim does not
+        # rely on this pin at run time: `assert_no_provider_retries` reads the
+        # effective setting back off the constructed client and refuses to run
+        # if it is not zero, whatever version the operator installed.
+        run: python -m pip install "anthropic==0.112.0"
+      - name: A ceiling of N buys exactly N provider requests
+        run: python -m unittest paper/src/test_llm_agent_budget.py
+      - name: The requested model is the only policy that can answer
+        run: python -m unittest paper/src/test_llm_agent_identity.py
+
   # --- packaged consumers: usability, not identity ----------------------------------
   # Every other packaging guard in this repository checks that the right version, commit
   # and registry are involved. None of them checks that the artifact a consumer actually

@@ -5,17 +5,34 @@ the LLM field. Nothing here calls a provider: the module is imported with a
 temporary cache and statistics directory and driven with a stand-in client
 through the `client` parameter of `main`.
 
-One finding is pinned. The ceiling was `len(cache) >= MAX_CALLS`, evaluated
-against the response cache, while the billable request was sent further down
-and the cache was appended only after a usable reply came back. A call that
-failed therefore left the cache unchanged, so the harness retrying the
-subprocess dispatched again under the same allowance, and a field could spend
-an unbounded multiple of its declared ceiling. The ceiling now counts
-reservations written before each dispatch, in a ledger that survives the
-process the way the cache does.
+Two findings are pinned.
 
-What the ledger cannot see is stated rather than implied: retries inside the
-provider client are additional billable requests under one reservation.
+The ceiling was `len(cache) >= MAX_CALLS`, evaluated against the response
+cache, while the billable request was sent further down and the cache was
+appended only after a usable reply came back. A call that failed therefore left
+the cache unchanged, so the harness retrying the subprocess dispatched again
+under the same allowance, and a field could spend an unbounded multiple of its
+declared ceiling. The ceiling now counts reservations written before each
+dispatch, in a ledger that survives the process the way the cache does.
+
+The reservation then bounded dispatches from this process rather than provider
+requests, because the client was a bare `anthropic.Anthropic()` and the SDK
+retries some failures itself (two by default), billing each one under the one
+reservation. The client now sets `max_retries=0`. The load-bearing case is
+driven through a real SDK client over a stand-in HTTP transport, so it is the
+SDK's own retry behaviour being observed and not a restatement of the setting.
+
+The SDK behaviour asserted here is `anthropic` 0.112.0's, the version the
+retry reading was taken from and the version CI pins for this file:
+`DEFAULT_MAX_RETRIES` is 2, and `_base_client` loops `range(max_retries + 1)`
+over 408, 409, 429, every 5xx, connection faults and timeouts. anthropic 1.x is
+a different SDK (it depends on httpx2) and its retry semantics are not assumed
+from this reading.
+
+The pin protects CI, not a paid run, which imports whatever the operator has.
+That is what `assert_no_provider_retries` is for, and two cases here drive the
+refusal rather than the happy path: a client that accepts `max_retries` and
+ignores it, and one that exposes no readable setting at all.
 """
 
 from __future__ import annotations
@@ -28,7 +45,10 @@ import os
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
+
+import httpx
 
 ROOT = Path(__file__).resolve().parents[2]
 SHIM = ROOT / "examples/llm-agent/llm_agent.py"
@@ -109,6 +129,68 @@ def connection_error(shim):
 
     request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
     return shim.anthropic.APIConnectionError(request=request)
+
+
+def message_payload(text):
+    """A Messages response body, so the real SDK parses it rather than a mock."""
+    return {
+        "id": "msg_test",
+        "type": "message",
+        "role": "assistant",
+        "model": MODEL,
+        "content": [{"type": "text", "text": text}],
+        "stop_reason": "end_turn",
+        "stop_sequence": None,
+        "usage": {"input_tokens": 10, "output_tokens": 5},
+    }
+
+
+# The three stand-in SDKs the runtime check is exercised against. All of them
+# answer normally, so a run that is not refused completes and records a
+# reservation. That is deliberate: removing the check must make these cases fail
+# because nothing refused, not because the stand-in was too thin to dispatch.
+
+
+class Honouring(Client):
+    """Takes `max_retries` and reports it back, as `anthropic` 0.112.0 does."""
+
+    def __init__(self, **kw):
+        super().__init__([Response('{"orders":[]}')])
+        self.max_retries = kw.get("max_retries")
+
+
+class Ignoring(Client):
+    """Accepts `max_retries` and does not honour it.
+
+    The shape a future SDK takes if it renames the knob, or drops it from the
+    constructor's effect while still tolerating the keyword. Without the check
+    the ceiling is back to billing several requests per reserved unit, and
+    nothing says so.
+    """
+
+    def __init__(self, **kw):
+        super().__init__([Response('{"orders":[]}')])
+        self.max_retries = 2
+
+
+class Opaque(Client):
+    """Exposes no readable retry setting at all, and answers anyway."""
+
+    def __init__(self, **kw):
+        super().__init__([Response('{"orders":[]}')])
+
+
+def sdk_client(shim, http_client):
+    """The shim's own client, over a stand-in transport and a dummy key.
+
+    Built through `build_client`'s setting rather than around it: the retry
+    policy under test is the one the shim ships.
+    """
+    return shim.anthropic.Anthropic(
+        api_key="test-key-not-a-credential",
+        max_retries=shim.PROVIDER_MAX_RETRIES,
+        http_client=http_client,
+    )
 
 
 def bar(index, tag):
@@ -232,6 +314,102 @@ class CallCeilingTests(CallCeilingCase):
         client = Client([Response('{"orders":[]}')])
         drive(shim, client)
         self.assertTrue(shim.ATTEMPTS_PATH.exists() and shim.CACHE_PATH.exists())
+
+
+class ProviderRequestTests(CallCeilingCase):
+    """The unit is a provider request, not a dispatch from this process."""
+
+    def test_the_client_the_run_uses_disables_the_sdk_automatic_retries(self):
+        """The ceiling reserves once per `create`, so `create` must send once.
+
+        Recorded at the constructor and driven through `main` with no client of
+        its own, which is how the harness runs it. Asserting on
+        `PROVIDER_MAX_RETRIES`, or calling `build_client` directly, would leave
+        the run free to construct its client some other way.
+        """
+        shim = load_shim(self.tmp.name)
+        seen = []
+
+        def recording_constructor(**kw):
+            seen.append(kw)
+            return Honouring(**kw)
+
+        with unittest.mock.patch.object(
+            shim.anthropic, "Anthropic", recording_constructor
+        ):
+            # No observations: the client is built, nothing is dispatched.
+            drive(shim, None, observations=0)
+        self.assertEqual(len(seen), 1, "the run builds exactly one client")
+        self.assertEqual(seen[0].get("max_retries"), 0)
+
+    def test_a_client_that_accepts_the_setting_and_ignores_it_refuses_the_run(self):
+        """The failure the check exists for, not the happy path.
+
+        A later SDK may keep taking `max_retries` and stop honouring it. The
+        stand-in does exactly that: the keyword is accepted, the effective
+        setting is two. Nothing may be dispatched under a client that will
+        retry, so the run must refuse before the first observation.
+        """
+        shim = load_shim(self.tmp.name)
+        with unittest.mock.patch.object(shim.anthropic, "Anthropic", Ignoring):
+            with self.assertRaises(RuntimeError) as caught:
+                drive(shim, None, observations=1)
+        message = str(caught.exception)
+        self.assertIn("max_retries=2", message)
+        self.assertIn("Refusing to start", message)
+        self.assertEqual(self.ledger_lines(shim), [], "nothing was reserved")
+
+    def test_a_client_whose_setting_cannot_be_read_refuses_the_run(self):
+        """"Cannot be determined" is a refusal, not an assumption.
+
+        A client that has dropped the attribute entirely, which is what a rename
+        or a move looks like from here, leaves the ceiling unprovable. The run
+        must not proceed on the hope that it binds anyway.
+        """
+        shim = load_shim(self.tmp.name)
+        with unittest.mock.patch.object(shim.anthropic, "Anthropic", Opaque):
+            with self.assertRaises(RuntimeError) as caught:
+                drive(shim, None, observations=1)
+        message = str(caught.exception)
+        self.assertIn("does not report a readable max_retries", message)
+        self.assertEqual(self.ledger_lines(shim), [], "nothing was reserved")
+
+    def test_n_units_allow_exactly_n_provider_requests_across_a_retryable_failure(self):
+        """Two units, a 429 and an answer, and exactly two HTTP requests.
+
+        A 429 is what the SDK retries on its own: under the default of two
+        retries the first process alone would have sent three requests and
+        billed three under one reserved unit. The client here is the real SDK
+        over a stand-in transport, so the count is the SDK's behaviour.
+        """
+        requests = []
+
+        def transport(count_only_after):
+            def handle(request):
+                requests.append(request.url.path)
+                if len(requests) <= count_only_after:
+                    return httpx.Response(429, json={"type": "error"})
+                return httpx.Response(200, json=message_payload('{"orders":[]}'))
+
+            return httpx.Client(transport=httpx.MockTransport(handle))
+
+        first = load_shim(self.tmp.name, max_calls="2")
+        with self.assertRaises(RuntimeError) as caught:
+            drive(first, sdk_client(first, transport(1)))
+        self.assertIn("API failure", str(caught.exception))
+        self.assertEqual(len(requests), 1, "the SDK must not retry the 429")
+        self.assertEqual(len(self.ledger_lines(first)), 1)
+
+        second = load_shim(self.tmp.name, max_calls="2")
+        drive(second, sdk_client(second, transport(1)), observations=1, tag=1)
+        self.assertEqual(len(requests), 2, "the respawn spends exactly one more")
+        self.assertEqual(len(self.ledger_lines(second)), 2)
+
+        third = load_shim(self.tmp.name, max_calls="2")
+        with self.assertRaises(RuntimeError) as caught:
+            drive(third, sdk_client(third, transport(1)), observations=1, tag=2)
+        self.assertIn("budget exhausted", str(caught.exception))
+        self.assertEqual(len(requests), 2, "a ceiling of two bought two requests")
 
 
 if __name__ == "__main__":

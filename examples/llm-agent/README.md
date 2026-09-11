@@ -15,9 +15,26 @@ cargo run --release -p sharpebench-harness --example llm_field_eval -- \
 python paper/evidence/assemble_llm_field.py
 ```
 
-The adapter caches each paid response by model and prompt. Provider errors,
-authentication or credit failures, and an exhausted call budget terminate the
-subprocess. The Rust driver writes to a `.partial` file and publishes the
+The adapter caches each paid response under the whole effective request: the
+model, the system prompt, the message, the token and thinking settings, and the
+scaffold version that will interpret the reply. Provider errors, authentication
+or credit failures, and an exhausted call budget terminate the subprocess.
+
+`LLM_MAX_CALLS` is a ceiling on provider requests per model, not on cached
+results. Each fresh call reserves one unit in `llm-attempts-<model>.jsonl`
+beside the response cache, fsynced before the request is sent, so a call that
+fails or times out still spends its unit and a respawned subprocess cannot
+re-spend it. The client disables the SDK's own automatic retries, so one
+reserved unit is exactly one HTTP request to the provider. That is checked, not
+assumed: the effective retry setting is read back off the constructed client
+before the run starts, and a client that reports a non-zero setting, or none
+that can be read, refuses the run rather than risking several billable requests
+per reserved unit. So the ceiling holds whatever SDK version is installed, or
+the run does not start. Nothing is retried
+inside the adapter: a rate limit or a timeout fails the subprocess, and the
+harness respawn takes a fresh unit from the same ledger.
+
+The Rust driver writes to a `.partial` file and publishes the
 requested score file only after every model and dataset completes. The
 assembler independently requires all three models, both datasets, and zero API
 or budget errors before it can produce `llm-field.jsonl`.
