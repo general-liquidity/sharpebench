@@ -1,5 +1,50 @@
 # Verification record
 
+## Verifying the repairs, 2026-09-11
+
+Every pull request below merged with all checks green on its exact pushed head,
+main unmoved since that head was tested, and the merged tree identical to the
+tested tree. Two branches were brought up to date and tested again before
+merging, one because main had moved and one because its base had been merged as
+a merge commit, so main was not an ancestor of it.
+
+| PR | Work | Main after merge |
+|---|---|---|
+| Bench #83 | Model identity, call ledger, malformed cost | `183a457` |
+| Bench #84 | Adversarial review of the G22 repairs | `cf943c3` |
+| Bench #85 | Journal owned by its document; misdiagnosis and hermeticity | `50da2cc` |
+
+The review was commissioned because work called done had twice been shown
+defective by an independent read, so the same was assumed here. It found two
+medium defects in repairs that had merged hours earlier, and a fourth instance
+of the pattern recorded above: `a_takeover_is_explicit_and_records_who_it_displaced`
+asserted that a takeover records who it displaced by comparing the recorded
+process id against this process's own, which the taker satisfies by writing its
+own id. Mutating the recorded value left the library suite green. It is isolated
+now by writing a displaced document whose process id is asserted to differ from
+this one, and by asserting the recorded timestamp as well.
+
+Two repairs in this round rejected the obvious approach on measurement rather
+than on argument. Canonicalizing a journal path does not resolve hard links,
+produces verbatim paths on Windows, and fails for a journal that does not exist
+yet; ownership keys on an identity inside the document instead. And the first
+ledger exclusivity test asserted an outcome three causes could produce: it
+passed against a build with the ceiling removed and failed only four runs in six
+against a build with the exclusivity removed, so it was replaced with a case
+where nothing is short of budget and exclusivity is the only thing that can
+refuse.
+
+### Not established
+
+No gateway has served a real provider, and no concurrent or paid run has
+happened. Every crashed holder in these tests is simulated rather than a real
+crash, no second host and no network file system was involved, and the
+concurrency evidence is threads within one process on one file system. Three
+aliasing routes remain open and are stated in the type documentation: two
+directory entries for one document in different directories, journals written
+before the document identity existed, and a version check that is still
+read-then-write rather than an atomic swap.
+
 ## Money-accounting repairs, 2026-09-11
 
 Both pull requests merged with every check green on the exact pushed head, main
