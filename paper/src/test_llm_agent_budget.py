@@ -37,9 +37,13 @@ malformed reply's record carried its tokens but not its cost, so replaying that
 decision reported a billed call as free.
 
 The pin protects CI, not a paid run, which imports whatever the operator has.
-That is what `assert_no_provider_retries` is for, and two cases here drive the
+That is what `assert_no_provider_retries` is for, and three cases here drive the
 refusal rather than the happy path: a client that accepts `max_retries` and
-ignores it, and one that exposes no readable setting at all.
+ignores it, one that exposes no readable setting at all, and one handed to
+`main` by a caller instead of built by the run. The check sits on `main` as
+well as in `build_client`, so a caller-supplied client is on the same footing as
+one the run constructs; every case here drives the entry point rather than the
+helper.
 """
 
 from __future__ import annotations
@@ -122,6 +126,12 @@ class Client:
         self.answers = list(answers)
         self.requests = []
         self.messages = self
+        # Every client `main` is given is checked, supplied or built, so a
+        # stand-in that reports nothing is refused before the decision loop
+        # runs. The cases about the ceiling and the ledger are not about the
+        # check, so the default stand-in reports the compliant setting; the
+        # three classes below vary it deliberately.
+        self.max_retries = 0
 
     def create(self, **kw):
         self.requests.append(kw)
@@ -186,6 +196,7 @@ class Opaque(Client):
 
     def __init__(self, **kw):
         super().__init__([Response('{"orders":[]}')])
+        del self.max_retries
 
 
 def sdk_client(shim, http_client):
@@ -479,13 +490,22 @@ class ProviderRequestTests(CallCeilingCase):
         its own, which is how the harness runs it. Asserting on
         `PROVIDER_MAX_RETRIES`, or calling `build_client` directly, would leave
         the run free to construct its client some other way.
+
+        The named cause is the keyword the run passes its constructor, so the
+        stand-in reports a compliant setting whatever it was constructed with.
+        Otherwise the runtime guard refuses first and this case ends as an error
+        raised inside `drive` rather than as its own assertion: dropping the
+        keyword would then be caught by the guard, which two other cases already
+        pin, and nothing here would say what the constructor was given.
         """
         shim = load_shim(self.tmp.name)
         seen = []
 
         def recording_constructor(**kw):
             seen.append(kw)
-            return Honouring(**kw)
+            client = Honouring(**kw)
+            client.max_retries = shim.PROVIDER_MAX_RETRIES
+            return client
 
         with unittest.mock.patch.object(
             shim.anthropic, "Anthropic", recording_constructor
@@ -527,6 +547,60 @@ class ProviderRequestTests(CallCeilingCase):
         self.assertIn("does not report a readable max_retries", message)
         self.assertEqual(self.ledger_lines(shim), [], "nothing was reserved")
 
+    def test_build_client_refuses_to_return_a_client_that_would_retry(self):
+        """The helper states a property of what it returns, so it is pinned.
+
+        `main` checks every client it is given, which covers the run. It does
+        not cover a caller that imports `build_client` and uses the client some
+        other way, and it would leave the helper's own check unpinned, free to
+        be deleted with the suite green. The stand-in constructor returns
+        normally, so the refusal can only come from inside `build_client`.
+        """
+        shim = load_shim(self.tmp.name)
+        with unittest.mock.patch.object(shim.anthropic, "Anthropic", Ignoring):
+            with self.assertRaises(RuntimeError) as caught:
+                shim.build_client()
+        self.assertIn("max_retries=2", str(caught.exception))
+
+    def test_a_client_the_caller_supplies_is_checked_like_one_the_run_builds(self):
+        """The check is on the path to the provider, not on the constructor.
+
+        `main` takes a client so the decision loop can be driven against a
+        stand-in, and that parameter used to reach `client.messages.create` with
+        the retry policy never read, which is the one path where the ceiling's
+        stated guarantee did not hold.
+
+        Four causes could make a refusal appear here without the check on this
+        path, and each is excluded. A stand-in too thin to dispatch: `Ignoring`
+        answers normally, and the control below drives the same shape of client
+        to completion. A client the run built for itself after all: the
+        constructor fails the test if it is called. An exhausted allowance: the
+        ledger is asserted empty, and the message is the guard's. And the
+        supplied-client path refusing whatever it is handed: the control is
+        supplied the same way and is not refused.
+        """
+        shim = load_shim(self.tmp.name)
+
+        def refuses_to_be_built(**kw):
+            raise AssertionError("the run built a client although one was supplied")
+
+        supplied = Ignoring()
+        with unittest.mock.patch.object(
+            shim.anthropic, "Anthropic", refuses_to_be_built
+        ):
+            with self.assertRaises(RuntimeError) as caught:
+                drive(shim, supplied, observations=1)
+        message = str(caught.exception)
+        self.assertIn("max_retries=2", message)
+        self.assertIn("Refusing to start", message)
+        self.assertEqual(supplied.requests, [], "nothing was dispatched")
+        self.assertEqual(self.ledger_lines(shim), [], "nothing was reserved")
+
+        honouring = Honouring(max_retries=shim.PROVIDER_MAX_RETRIES)
+        drive(shim, honouring, observations=1)
+        self.assertEqual(len(honouring.requests), 1, "a compliant client dispatches")
+        self.assertEqual(len(self.ledger_lines(shim)), 1)
+
     def test_n_units_allow_exactly_n_provider_requests_across_a_retryable_failure(self):
         """Two units, a 429 and an answer, and exactly two HTTP requests.
 
@@ -534,6 +608,10 @@ class ProviderRequestTests(CallCeilingCase):
         retries the first process alone would have sent three requests and
         billed three under one reserved unit. The client here is the real SDK
         over a stand-in transport, so the count is the SDK's behaviour.
+
+        It is supplied to `main`, which is a path the runtime check covers: the
+        client is built with the shim's own setting, so the check passes and the
+        case runs through the guard rather than around it.
         """
         requests = []
 
