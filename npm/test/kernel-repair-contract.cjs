@@ -43,10 +43,27 @@ module.exports = function assertKernelRepairContract(sb, version) {
   assert.equal(full.pbo, null);
   assert.equal(full.hlz.passed, false);
   assert.equal(full.hlz.tStat, null);
+  // The shipped module's own sentence, not the wrapper's: the string is compiled
+  // into pkg/sharpebench_bg.wasm, so this fails against a module built before the
+  // sentence was corrected. A `|t|` below the bar is a failure to clear the bar;
+  // it licenses no statement about how probable an artifact is.
+  assert.equal(
+    full.hlz.explanation,
+    "FAIL: |t| NaN is below the Harvey-Liu-Zhu (2016) 3.00 factor bar; " +
+      "the factor is not significant at that multiple-testing-adjusted bar.",
+  );
 
   const ordinary = sb.isMySharpeRealFull([returns, returns.map((x) => x - 0.0001)], 0, { nTrials: 2 });
   assert.equal(ordinary.snoopingError, undefined);
   assert.equal(ordinary.honesty.statisticsError, undefined);
   assert.equal(ordinary.hlz.tThreshold, 3);
-  assert.equal(typeof ordinary.hlz.explanation, "string");
+  assert.equal(
+    ordinary.hlz.explanation,
+    "PASS: |t| 37.63 clears the Harvey-Liu-Zhu (2016) 3.00 factor bar.",
+  );
+  for (const posterior of ["likely", "artifact", "probability", "luck"]) {
+    for (const sentence of [full.hlz.explanation, ordinary.hlz.explanation]) {
+      assert.ok(!sentence.includes(posterior), sentence);
+    }
+  }
 };

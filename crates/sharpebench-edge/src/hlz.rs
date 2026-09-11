@@ -66,7 +66,7 @@ impl HarveyLiuZhu {
             )
         } else {
             format!(
-                "FAIL: |t| {:.2} is below the Harvey-Liu-Zhu (2016) {:.2} factor bar; likely a multiple-testing artifact.",
+                "FAIL: |t| {:.2} is below the Harvey-Liu-Zhu (2016) {:.2} factor bar; the factor is not significant at that multiple-testing-adjusted bar.",
                 t_stat.abs(),
                 self.t_threshold
             )
@@ -83,6 +83,33 @@ impl HarveyLiuZhu {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The sentences state what the t-statistic does against the bar, not how
+    /// probable an artifact is. "Likely a multiple-testing artifact" was a
+    /// posterior reading of a frequentist test: a `|t|` below a threshold is a
+    /// failure to clear that threshold and licenses no statement about how
+    /// probable the hypothesis is, which is the misreading the deflated-Sharpe
+    /// surfaces were already corrected for (see
+    /// `verdict::tests::explanations_state_a_significance_level_not_a_probability_of_skill`).
+    #[test]
+    fn explanations_state_the_bar_not_how_probable_an_artifact_is() {
+        let pass = HarveyLiuZhu::default().evaluate(3.5).explanation;
+        let fail = HarveyLiuZhu::default().evaluate(2.0).explanation;
+        assert_eq!(
+            pass,
+            "PASS: |t| 3.50 clears the Harvey-Liu-Zhu (2016) 3.00 factor bar."
+        );
+        assert_eq!(
+            fail,
+            "FAIL: |t| 2.00 is below the Harvey-Liu-Zhu (2016) 3.00 factor bar; \
+             the factor is not significant at that multiple-testing-adjusted bar."
+        );
+        for sentence in [&pass, &fail] {
+            for posterior in ["likely", "artifact", "probability", "luck", "probably"] {
+                assert!(!sentence.contains(posterior), "{sentence}");
+            }
+        }
+    }
 
     #[test]
     fn passes_above_default_bar() {
