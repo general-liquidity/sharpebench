@@ -29,6 +29,13 @@ over 408, 409, 429, every 5xx, connection faults and timeouts. anthropic 1.x is
 a different SDK (it depends on httpx2) and its retry semantics are not assumed
 from this reading.
 
+A later review added two more. The reservation advanced a count read once at
+process start, so the ceiling held only because the producer spawns shims one
+at a time; the count is now re-read from the ledger inside an exclusive lock,
+and a second reservation is refused rather than silently sharing a unit. And a
+malformed reply's record carried its tokens but not its cost, so replaying that
+decision reported a billed call as free.
+
 The pin protects CI, not a paid run, which imports whatever the operator has.
 That is what `assert_no_provider_retries` is for, and two cases here drive the
 refusal rather than the happy path: a client that accepts `max_retries` and
@@ -44,6 +51,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -314,6 +322,151 @@ class CallCeilingTests(CallCeilingCase):
         client = Client([Response('{"orders":[]}')])
         drive(shim, client)
         self.assertTrue(shim.ATTEMPTS_PATH.exists() and shim.CACHE_PATH.exists())
+
+
+class LedgerOwnershipTests(CallCeilingCase):
+    """One unit cannot be spent twice, whoever else shares the ledger."""
+
+    def test_a_unit_another_shim_spent_is_seen_at_reservation_time(self):
+        """The defect: the count was read once, at process start.
+
+        This process starts with an empty ledger under a ceiling of one, so its
+        startup reading says a unit is free. Another shim then takes it. The
+        reservation must read the ledger again and refuse, rather than dispatch
+        on a number that was true when the process began.
+        """
+        shim = load_shim(self.tmp.name, max_calls="1")
+        self.assertEqual(shim.load_attempt_count(), 0, "the run began with a free unit")
+        shim.ATTEMPTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with shim.ATTEMPTS_PATH.open("a", encoding="utf-8") as f:
+            f.write(json.dumps({"key": "taken-by-another-shim"}) + chr(10))
+
+        client = Client([Response('{"orders":[]}')])
+        with self.assertRaises(RuntimeError) as caught:
+            drive(shim, client)
+        self.assertIn("budget exhausted", str(caught.exception))
+        self.assertEqual(client.requests, [], "the unit was already spent")
+        self.assertEqual(shim.STATS["budget_exhausted"], 1)
+        self.assertEqual(len(self.ledger_lines(shim)), 1, "nothing was appended")
+
+    def test_a_reservation_is_refused_while_another_holds_the_ledger(self):
+        """Two shims cannot be between the count and the append at once.
+
+        The allowance is eight and one unit is spent, so nothing here is short
+        of budget and the reservation attempted under the held lock is one that
+        otherwise succeeds, as the second half of the case shows. Exclusive
+        ownership is therefore the only thing that can refuse it.
+
+        Deterministic on purpose. A threaded version of this assertion, eight
+        reservations released together against a ceiling of one, was tried
+        first and discarded: with the ceiling still in place, "exactly one
+        unit" is produced by the lock, by the ceiling, or by threads that
+        happened not to interleave, and it caught a build with `O_EXCL`
+        removed in four runs out of six.
+        """
+        shim = load_shim(self.tmp.name, max_calls="8")
+        with shim.ledger_lock():
+            with self.assertRaises(shim.LedgerBusy) as caught:
+                shim.reserve_call("while-held")
+            self.assertIn(str(os.getpid()), str(caught.exception))
+            self.assertEqual(self.ledger_lines(shim), [], "nothing was appended")
+        self.assertEqual(
+            shim.reserve_call("while-held"), 1, "the same reservation then works"
+        )
+        self.assertEqual(len(self.ledger_lines(shim)), 1)
+
+    def test_a_lock_left_behind_refuses_rather_than_being_broken(self):
+        """A lock nobody can prove is dead is refused, not removed.
+
+        Breaking it puts two writers back on one allowance, which is what it
+        exists to prevent, so the refusal names the holder and the file an
+        operator has to clear.
+        """
+        shim = load_shim(self.tmp.name, max_calls="1")
+        shim.LEDGER_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+        shim.LEDGER_LOCK_PATH.write_text(
+            json.dumps({"pid": 4242, "started_ns": 1}), encoding="utf-8"
+        )
+        with self.assertRaises(shim.LedgerBusy) as caught:
+            shim.reserve_call("key")
+        message = str(caught.exception)
+        self.assertIn("pid 4242", message)
+        self.assertIn(str(shim.LEDGER_LOCK_PATH), message)
+        self.assertEqual(self.ledger_lines(shim), [], "nothing was reserved")
+        self.assertTrue(shim.LEDGER_LOCK_PATH.exists(), "the lock was not broken")
+
+    def test_the_release_outlasts_a_refused_shim_reading_the_holder(self):
+        """Releasing must not be defeated by the refusal it races with.
+
+        A refused shim reads the holder document, and Windows refuses to delete
+        a file another handle holds (WinError 32). The holder retries rather
+        than stranding a lock that would refuse every later reservation, which
+        eight contending threads reproduced before the retry existed. The
+        reader here is closed on a timer while the release is in flight, so the
+        case is deterministic rather than timing-dependent.
+
+        On a platform that allows an unlinked file to stay open, the first
+        attempt succeeds and this asserts the same end state for free.
+        """
+        shim = load_shim(self.tmp.name, max_calls="8")
+        with shim.ledger_lock():
+            reader = open(shim.LEDGER_LOCK_PATH, encoding="utf-8")
+            self.addCleanup(reader.close)
+            threading.Timer(0.15, reader.close).start()
+        self.assertFalse(
+            shim.LEDGER_LOCK_PATH.exists(), "the lock was released, not stranded"
+        )
+        self.assertEqual(shim.reserve_call("after-release"), 1)
+
+    def test_the_lock_is_released_when_the_reservation_returns(self):
+        """Strictness must not defeat the ledger: a reservation that completed
+        leaves nothing behind for the next one to trip over."""
+        shim = load_shim(self.tmp.name, max_calls="2")
+        shim.reserve_call("first")
+        self.assertFalse(shim.LEDGER_LOCK_PATH.exists())
+        self.assertEqual(shim.reserve_call("second"), 2)
+
+
+class MalformedCostTests(CallCeilingCase):
+    def test_a_malformed_reply_records_what_the_call_cost(self):
+        """A billed call whose reply did not parse is not a free call.
+
+        The decision has to stay unparseable, so the cost rides on the cache
+        record, which is what the accounting reads. It used to carry tokens but
+        no cost, so replaying the decision reported none.
+        """
+        shim = load_shim(self.tmp.name, max_calls="1")
+        drive(shim, Client([Response("not json at all")]))
+        self.assertEqual(shim.STATS["malformed"], 1)
+        records = [
+            json.loads(line)
+            for line in shim.CACHE_PATH.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        self.assertEqual(len(records), 1)
+        record = records[0]
+        self.assertTrue(record["malformed"])
+        pin, pout = shim.price_for(shim.REQUESTED_MODEL)
+        expected = record["tokens_in"] * pin + record["tokens_out"] * pout
+        self.assertGreater(expected, 0.0, "the fixture must price above zero")
+        self.assertEqual(
+            record.get("cost"),
+            {
+                "cost_usd": expected,
+                "tokens_in": record["tokens_in"],
+                "tokens_out": record["tokens_out"],
+            },
+        )
+
+    def test_a_replay_of_a_malformed_decision_still_fails_the_protocol(self):
+        """The recorded cost must not turn the replay back into a usable
+        decision: it stays a protocol fault."""
+        shim = load_shim(self.tmp.name, max_calls="1")
+        drive(shim, Client([Response("not json at all")]))
+        replay = load_shim(self.tmp.name, max_calls="1")
+        out = drive(replay, Client([]))
+        self.assertIn("protocol_error", json.loads(out.strip()))
+        self.assertEqual(replay.STATS["cache_hits"], 1)
 
 
 class ProviderRequestTests(CallCeilingCase):

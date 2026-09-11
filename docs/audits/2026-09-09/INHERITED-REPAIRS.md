@@ -1,6 +1,6 @@
 # Inherited repairs: call ceiling, dataset selector, unsupported DSR interval
 
-Date: 2026-09-10, with section 4 added 2026-09-11. Scope: defects an
+Date: 2026-09-10, with sections 4 and 5 added 2026-09-11. Scope: defects an
 independent verification confirmed. None of the first three was introduced by
 the 2026-09-09 work, but that work leans on all of them: the readiness
 preflight made the LLM call ceiling a required explicit setting, added the
@@ -16,10 +16,16 @@ regression that fails without it.
 | 2 | Unknown local dataset selector published an empty field as complete | `a8a9fd6` | `local_open_weight_field_eval.rs` tests |
 | 3 | Zero bootstrap support reported as a zero-width DSR interval | `39f98c2` | `significance.rs`, `composite.rs` tests |
 | 4 | The repaired ceiling still counted dispatches, not provider requests | this commit | `paper/src/test_llm_agent_budget.py::ProviderRequestTests` |
+| 5a | The model-identity check accepted a different policy under the requested name | `a7be8d7` | `test_llm_agent_identity.py::ModelIdentityTests` |
+| 5b | An unnamed model was recorded as the requested one | `a7be8d7` | `test_llm_agent_identity.py::ModelIdentityTests` |
+| 5c | The ledger count was read once, at process start | `a7be8d7` | `test_llm_agent_budget.py::LedgerOwnershipTests` |
+| 5d | A malformed reply's cost was not stored on its record | `a7be8d7` | `test_llm_agent_budget.py::MalformedCostTests` |
 
 Row 4 was found by a later independent review of row 1's repair, and is
 recorded here rather than in a new file because it is the same defect class in
-the same function: a stated ceiling that the code did not enforce.
+the same function: a stated ceiling that the code did not enforce. Section 5
+holds three findings reported during that repair and left unfixed, plus one
+defect found while fixing them.
 
 ## 1. The hosted field's call ceiling
 
@@ -271,6 +277,138 @@ evidence.
 repository, and no golden, example or `paper/evidence/` value depends on the
 client's retry policy.
 
+## 5. Three reported findings, and one found while repairing them
+
+Section 4 reported two of these as audited and not changed, and a third came
+with them. All three were verified against source before anything changed.
+
+### 5a. The identity check accepted a different policy
+
+**Confirmed.** `effective_model` returned the served id whenever
+`served.startswith(REQUESTED_MODEL)`, so a run requesting `claude-opus-5`
+accepted `claude-opus-5-mini`: a different policy answering under the requested
+name, which the function's own docstring calls the one thing this benchmark
+must not publish. The intent stated there is narrower, a provider expanding an
+alias into the pinned version it served, and prefix acceptance is not that.
+
+**The rule, and where it comes from.** The served id is the requested policy
+when it is the requested id exactly, or the requested id followed by one hyphen
+and a dated snapshot of exactly eight ASCII digits. That is read off what the
+provider returns rather than invented: the `Message.model` literal in the
+pinned SDK enumerates the aliases and their pinned ids, and every pair in it is
+the alias plus `-` plus eight digits.
+
+```
+$ python -c "import anthropic; from anthropic.types import Message; \
+    print(anthropic.__version__); print(Message.model_fields['model'])"
+0.112.0
+annotation=Union[Literal['claude-fable-5', ..., 'claude-haiku-4-5',
+ 'claude-haiku-4-5-20251001', 'claude-opus-4-5', 'claude-opus-4-5-20251101',
+ 'claude-sonnet-4-5', 'claude-sonnet-4-5-20250929', 'claude-opus-4-1',
+ 'claude-opus-4-1-20250805'], str] required=True
+```
+
+The four alias/pinned pairs there are `claude-haiku-4-5` ->
+`claude-haiku-4-5-20251001`, `claude-opus-4-5` -> `claude-opus-4-5-20251101`,
+`claude-sonnet-4-5` -> `claude-sonnet-4-5-20250929` and `claude-opus-4-1` ->
+`claude-opus-4-1-20250805`. Nothing else is appended, so `-mini` is refused,
+and so is a snapshot of seven or nine digits, one with a trailing word, one
+with no separator and one that is not all digits.
+
+The rule is deliberately narrower than the provider's whole namespace. Two
+deprecated aliases rebind rather than expand (`claude-sonnet-4-0` is served as
+`claude-sonnet-4-20250514`, which is not the alias plus a suffix at all) and
+this refuses them; prefix acceptance refused them too. Refusing a policy that
+is arguably the requested one costs a run, while accepting one that is not
+publishes the wrong identity. The Vertex form of the same expansion uses `@`
+rather than `-`; the shim runs against the first-party API, which does not, and
+admitting a separator it never returns would only widen the hole.
+
+**Elsewhere.** Nothing else accepts a model id by prefix. The Rust field runner
+(`crates/sharpebench-harness/examples/llm_field_eval.rs`) does not compare
+served ids at all: it hands the requested id to the shim as `argv[1]` and
+records it as both requested and effective, because the shim refuses any gap.
+`grep -rn starts_with --include=*.rs crates/` returns no model or policy
+comparison anywhere, the Arena included. Two prefix matches on model ids remain
+and are not identity checks: `price_for` and `request_kwargs` in the shim, and
+`price_for` in `paper/evidence/assemble_llm_field.py`, select a pricing family
+and a request shape. They now only ever see an id the identity check admitted.
+
+### 5b. A reply naming no model was recorded as the requested one
+
+**Confirmed, and it now refuses.** `effective_model` returned `REQUESTED_MODEL`
+when the response carried no model, which states that the requested policy
+answered on the strength of the API not having said so. That is the
+accepting-on-absence shape the retry guard refuses.
+
+Absence is not normal for this API: the command above shows `Message.model` as
+`required=True` in the pinned SDK, so a parsed response always carries one.
+Fail closed, therefore, rather than record an unverified identity: the run
+raises and the field is incomplete, which the driver already refuses to
+publish. Recording it as unverified was the alternative, and it is the wrong
+one here, because the value would still be written into a cached decision that
+a replay reports as the policy that answered.
+
+### 5c. The ledger count was read once, at process start
+
+**Confirmed.** `reserve_call` advanced a count read at import. That holds only
+while nothing else writes the ledger, which was true of the one caller and
+named in the docstring as an assumption rather than enforced. Two shims sharing
+a ledger would each start from the same base and each believe the same unit was
+free.
+
+**Repair.** Both halves of the suggestion, because neither alone is enough. The
+count is re-read from the ledger at reservation time, and the read and the
+append happen under exclusive ownership of the ledger: a sibling
+`llm-attempts-<model>.jsonl.lock` created with `O_CREAT | O_EXCL`, the shape
+`crates/sharpebench-harness/src/gateway_journal.rs` uses for the money journal.
+Re-reading alone leaves check-then-act between the read and the append; the
+lock alone leaves a stale startup count. A second shim reserving at that moment
+is refused with a typed `LedgerBusy` naming the holder and the lock file, and a
+lock left behind by a killed shim is refused rather than broken, for the reason
+the journal gives: a lock nobody can prove is dead puts two writers back on one
+allowance. The ceiling itself moved into the reservation, which is the only
+place the count is current; the loop's stale pre-check is gone.
+
+The lock is held across one reservation rather than for the run, so a shim the
+harness kills (it kills them at the end of a run, which is why statistics are
+rewritten after every decision) can strand a lock for one reservation rather
+than for a whole field. Two hosts sharing one directory over a network file
+system are still not separated, exactly as recorded for the journal.
+
+### 5d. A malformed reply's cost was not stored
+
+**Confirmed.** The refusal and success records carried a `cost` block; the
+malformed record carried `tokens_in` and `tokens_out` but no cost, so replaying
+that decision reported a billed call as free. It now carries the same block.
+
+The replayed wire decision still carries no cost, and cannot: a replayed
+malformed decision has to stay unparseable so the transport records an agent
+protocol fault, so nothing on it would be read as accounting. The cost lives on
+the cache record, which is what the accounting reads, and the code says so
+where a reader would otherwise wonder. `paper/evidence/assemble_llm_field.py`
+priced malformed calls correctly before and after, because it prices the tokens
+on the record rather than the cost field, so no published number moves.
+
+### 5e. Releasing the new lock stranded it on Windows
+
+**Found while repairing 5c, by the regression for it.** A refused shim reads
+the holder document to name it, and Windows refuses to delete a file another
+handle holds. Eight contending threads reproduced it on the first run: the
+winner reserved its unit and then failed to release, with `PermissionError:
+[WinError 32] The process cannot access the file because it is being used by
+another process`. A stranded lock refuses every later reservation, which would
+have taken the field down rather than overspent it. The release now retries for
+up to a second and raises a typed `LedgerLockStranded` naming the file if it
+still cannot, rather than leaving one behind quietly. Acquiring treats
+`PermissionError` as busy for the same reason: on Windows a lock whose holder
+is deleting it is refused as access denied rather than as already existing.
+
+**Frozen values.** None moved. The shim makes no provider call in this
+repository, and no golden, example or `paper/evidence/` value depends on which
+ids the identity check admits, on the ledger's locking, or on a field the
+assembler does not read.
+
 ## Verification
 
 Run from the worktree on the committed tree with an isolated
@@ -315,3 +453,54 @@ Each mutation was applied to the working file, the suite run, and the file
 restored from `git show HEAD:examples/llm-agent/llm_agent.py` written to a
 temporary path, then confirmed byte-identical with `cmp` and an empty `git
 diff` before the next mutation.
+
+## Verification, section 5 (2026-09-11)
+
+Section 5 changes Python and prose only. No Rust file was touched.
+
+| Command | Exit |
+|---|---|
+| `python -m unittest paper/src/test_llm_agent_budget.py paper/src/test_llm_agent_identity.py` (38 tests, run ten times) | 0 |
+| `python -m unittest paper/src/test_provenance.py` | 0 |
+| `python paper/src/check-provenance.py` | 0 |
+
+Mutations, each applied in place to `examples/llm-agent/llm_agent.py`, the
+suite run, then the file restored from `git show
+HEAD:examples/llm-agent/llm_agent.py` and confirmed byte-identical with `cmp`
+before the next one:
+
+| Mutation | Result |
+|---|---|
+| the snapshot rule back to `served.startswith(REQUESTED_MODEL)` | 8 of 38 fail. The refused-continuation case, six of the seven shapes the rule rejects, and the on-path case where the run is driven with a reply that is usable apart from its identity |
+| absence back to `return REQUESTED_MODEL` | 2 of 38 fail, the unit case and the on-path case |
+| the ceiling inside the reservation made unreachable | 4 of 38 fail: the two section 1 cases, the transport case, and the new one where another shim spent the last unit after this process read the ledger |
+| `O_EXCL` dropped from the lock, everything else intact | 2 of 38 fail, both ledger-ownership cases, in six runs out of six |
+| the malformed record's `cost` removed | 1 of 38 fails |
+| the release retry removed (first `PermissionError` raises) | 1 of 38 fails, as an error carrying `LedgerLockStranded`, in three runs out of three |
+
+The exclusivity case took two attempts, and the first one is the finding worth
+recording. It released eight reservations together against a ceiling of one and
+asserted that exactly one came back with a unit. That assertion has three
+causes: the lock, the ceiling refusing a thread that arrives after the winner
+released, and threads that simply do not interleave. Against a build with
+`O_EXCL` removed it failed in four runs out of six and passed in two, and
+against the build with the ceiling removed it passed, so it was not pinning
+either. It is replaced by a deterministic case with the allowance set to eight,
+where nothing is short of budget, a reservation is attempted while the test
+holds the lock, and the same reservation then succeeds once the lock is
+released. That leaves exclusive ownership as the only thing that can refuse the
+first, and it catches the mutant every run.
+
+Dropping the threaded case then left the release retry (5e) unpinned: the
+mutant that removes it passed the whole suite, because nothing else contends
+for the lock file. The case that pins it holds a reader open across the release
+and closes it on a timer, so the retry rather than the timing is what is
+exercised. On a platform where an open file can be unlinked, the first attempt
+succeeds and the case asserts the same end state.
+
+**Not established.** No provider was called and no shim ran concurrently
+outside one process on one file system. The identity rule is evidenced against
+`anthropic` 0.112.0's declared response type and the ids it enumerates; a later
+SDK or a new alias family that expands some other way would be refused rather
+than misread, but the rule would need re-reading. `O_EXCL` over a network file
+system is only as exclusive as the remote server makes it.

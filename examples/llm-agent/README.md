@@ -30,7 +30,12 @@ assumed: the effective retry setting is read back off the constructed client
 before the run starts, and a client that reports a non-zero setting, or none
 that can be read, refuses the run rather than risking several billable requests
 per reserved unit. So the ceiling holds whatever SDK version is installed, or
-the run does not start. Nothing is retried
+the run does not start. The count is re-read from the ledger under an exclusive
+`llm-attempts-<model>.jsonl.lock` at each reservation, not carried from process
+start, so two shims sharing one ledger cannot spend the same unit; a second one
+reserving at that moment is refused, and a lock left by a killed shim is
+refused rather than broken, naming the file an operator must clear. Nothing is
+retried
 inside the adapter: a rate limit or a timeout fails the subprocess, and the
 harness respawn takes a fresh unit from the same ledger.
 
