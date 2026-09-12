@@ -14,14 +14,25 @@ response was malformed or a refusal. That makes the accounting restart-proof
 recounted). The per-process stats files supply the secondary counters
 (observations, stride holds, cache hits).
 
+A run leaves three kinds of evidence and this file reconciles all three. The
+attempt ledger (llm-attempts-<model>.jsonl) takes one line under a lock before
+each request leaves, so it is the ceiling and the only record written before the
+money is spent. The response cache records the requests that returned an answer,
+so it is a subset of the ledger. The per-process statistics count each request in
+the process that issued it, so they partition the ledger. In a field this file
+will publish the three counts are equal, and a disagreement is calls at least one
+of them cannot see.
+
 What it refuses to publish: a field whose (model, dataset) cells are not all
 present, one recording a (dataset, agent_id) submission twice or a (model,
 dataset) cell twice, a model whose calls it cannot cost -- because no rate card
 names it, because no accounting row was built for it, because one of its cache
-records states no usage, or because its cache records no call at all -- a
-statistics file it cannot parse, and a run reporting API errors, an exhausted
-budget or a refused model identity. Each is an incompleteness whose only
-plausible alternative is a number nobody measured.
+records states no usage, or because its cache records no call at all -- a scored
+model with no response cache, an accounting row with no score row, a model whose
+attempt ledger is absent or empty, a model whose three evidence kinds disagree
+about how many calls it made, a statistics file it cannot parse, and a run
+reporting API errors, an exhausted budget or a refused model identity. Each is an
+incompleteness whose only plausible alternative is a number nobody measured.
 
 Run from the repo root after the field run:
   python paper/evidence/assemble_llm_field.py
@@ -55,14 +66,18 @@ if not RECORDS.exists() or not RECORDS.read_text(encoding="utf-8").strip():
 def refuse_unaccountable(model, cause, detail):
     """Refuse the field: `model`'s spend cannot be stated, so it is not published.
 
-    The single statement of that rule. Four causes reach it, and they are the
-    same unavailability seen from four sides: no rate card names the model, so
-    its calls cannot be costed; no per-model accounting row was built for it, so
-    there are no calls to cost; one of its cache records carries no usage, so
-    that call's tokens are unknown; and its cache records no call at all, so the
-    score rows it published rest on calls this field has no evidence of. Zero is
-    the tempting answer to each and is a plausible wrong number where the
-    project records an unavailability.
+    The single statement of that rule. Every cause reaches it, and they are the
+    same unavailability seen from several sides: no rate card names the model,
+    so its calls cannot be costed; no per-model accounting row was built for it,
+    so there are no calls to cost; one of its cache records carries no usage, so
+    that call's tokens are unknown; its cache records no call at all, or no cache
+    exists for a model the field scores, or no ledger records the requests, so
+    the score rows it published rest on calls this field has no evidence of; an
+    accounting row carries no score row, so its spend is summed into totals no
+    published row explains; and the three evidence kinds disagree, so at least
+    one of them cannot see calls the provider was asked to make. Zero is the
+    tempting answer to each and is a plausible wrong number where the project
+    records an unavailability.
 
     Stated once because the four are one rule. Restated, a later edit could
     repair the refusal on one path and leave the other reporting a billed model
@@ -164,6 +179,14 @@ secondary_keys = ["observations", "stride_holds", "cache_hits",
                   "budget_exhausted", "api_errors", "identity_refusals"]
 stats_files_read = 0
 unaccounted = {}
+# The third evidence kind, kept out of `per_model` because it is not published:
+# how many dispatches the per-process statistics counted for each model, and
+# over how many files. `llm_calls` in a statistics file counts the dispatches
+# that process made; `llm_calls` in `per_model` counts the records its response
+# cache holds. They are different measurements of the same calls and are
+# reconciled below rather than summed into one another.
+stats_calls = {}
+stats_files_naming = {}
 for f in sorted(STATS_DIR.glob("stats-*.json")):
     stats_files_read += 1
     try:
@@ -182,6 +205,8 @@ for f in sorted(STATS_DIR.glob("stats-*.json")):
     if m not in per_model:
         unaccounted[m] = unaccounted.get(m, 0) + 1
         continue
+    stats_calls[m] = stats_calls.get(m, 0) + rec.get("llm_calls", 0)
+    stats_files_naming[m] = stats_files_naming.get(m, 0) + 1
     for k in secondary_keys:
         per_model[m][k] = per_model[m].get(k, 0) + rec.get(k, 0)
 
@@ -285,6 +310,121 @@ if observed_datasets != required_datasets:
         f"refusing to assemble: datasets {sorted(observed_datasets)}; "
         f"required {sorted(required_datasets)}"
     )
+# Which models must be accounted for, decided by the field rather than by the
+# directory. Every gate above this point reads a roster off the files that
+# happen to be on disk: `per_model` is whatever `llm-cache-*.jsonl` globbed, and
+# the missing-model refusal fires only from the loop over `stats-*.json`, so a
+# run with no cache files and no statistics files had nothing to check anything
+# against. A complete six-cell score grid then published `per_model: {}`,
+# `llm_calls_total: 0` and `cost_usd_total: 0`, and every gate passed: the
+# score rows were never reconciled against the accounting table at all. The
+# roster is the models the field publishes scores for, taken from the score rows
+# and from the cells this file requires, and it exists whether or not a single
+# evidence file does.
+accounting_roster = sorted(
+    required_models
+    | {r.get("model") for r in records if r.get("agent_id", "").startswith("llm-")}
+)
+
+unpublished = [m for m in accounting_roster if m not in per_model]
+if unpublished:
+    refuse_unaccountable(
+        ", ".join(unpublished),
+        "no response cache",
+        f"the field publishes score rows for {accounting_roster} and the "
+        f"per-model accounting table names {sorted(per_model)}. The table is "
+        "built by globbing llm-cache-*.jsonl, so a model with no cache file is "
+        "absent from per_model and from llm_calls_total and cost_usd_total "
+        "while its score rows are published regardless. Absent the statistics "
+        "file that would otherwise have named it, nothing reconciled the two, "
+        "and the field would state a complete score grid it reports no calls "
+        "and no dollars for",
+    )
+
+# The other direction of the same reconciliation. A cache file for a model the
+# field does not score builds an accounting row nothing publishes a score for,
+# and its calls and dollars are summed into the totals: the field would then
+# report spend on a model no reader can find a row for.
+unscored = [m for m in sorted(per_model) if m not in accounting_roster]
+if unscored:
+    refuse_unaccountable(
+        ", ".join(unscored),
+        "no score row",
+        f"the per-model accounting table names {sorted(per_model)} and the "
+        f"field scores {accounting_roster}; the calls, tokens and spend of a "
+        "model the field does not publish would still be summed into "
+        "llm_calls_total and cost_usd_total",
+    )
+
+
+def dispatches_reserved(model):
+    """Provider requests `model` reserved, or a refusal to assemble the field.
+
+    The attempt ledger is the first of the three evidence kinds and the only one
+    written before the money is spent: the shim appends one line under an
+    exclusive lock before each request leaves, so a call that fails, times out
+    or returns something uncacheable has a ledger line and no cache record. It
+    is therefore the ceiling on what the field can have spent, and the response
+    cache alone cannot establish it -- a cache is what survived, not what was
+    dispatched.
+
+    Absent and empty are separate causes for the reason the empty cache is:
+    a ledger with no lines is not a measurement that a model reserved nothing,
+    because the score rows this field publishes were produced by calling it.
+    """
+    path = FINAL / f"llm-attempts-{model}.jsonl"
+    if not path.exists():
+        refuse_unaccountable(
+            model,
+            "no attempt ledger",
+            f"{path.name} does not exist, so the field has no record of the "
+            "provider requests the model's score rows were produced by; the "
+            "response cache records only the calls that came back",
+        )
+    reserved = sum(
+        1 for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
+    )
+    if not reserved:
+        refuse_unaccountable(
+            model,
+            "no dispatch reserved",
+            f"{path.name} carries no records, and one line is appended before "
+            "every request, so the score rows this field publishes rest on "
+            "dispatches it has no evidence of",
+        )
+    return reserved
+
+
+# The three evidence kinds, reconciled as three measurements of one set of
+# calls rather than one of them taken for the whole run. The ledger reserves a
+# line before each request; the response cache records the answer to each
+# request that returned one; the per-process statistics count each request in
+# the process that issued it. So the ledger is the ceiling, the cache is a
+# subset of it, and the statistics are a partition of it by process. A field
+# this file will publish has no API errors, no exhausted budget and no refused
+# identity -- each is refused below -- so every reserved dispatch of a
+# publishable field returned a recorded answer inside a process whose statistics
+# survived, and the three counts are equal. They disagree in three ways, all of
+# them the finding this gate exists for: fewer cache records than reservations
+# is spend with no answer recorded, fewer counted dispatches than reservations
+# is a process whose statistics are missing, and more of either than the ledger
+# reserved is a count of calls nothing reserved.
+for model in accounting_roster:
+    reserved = dispatches_reserved(model)
+    cached = per_model[model]["llm_calls"]
+    counted = stats_calls.get(model, 0)
+    if not reserved == cached == counted:
+        refuse_unaccountable(
+            model,
+            "evidence disagrees",
+            f"the attempt ledger reserves {reserved} dispatches, the response "
+            f"cache records {cached} and the {stats_files_naming.get(model, 0)} "
+            f"statistics files naming the model count {counted}. These are "
+            "three measurements of one set of calls and a publishable field "
+            "has them equal; where they differ, at least one of the three is "
+            "missing calls the provider was asked to make",
+        )
+
 # An identity refusal is a call the provider answered under a model this field
 # does not name. It fails the shim, so it is the same kind of incompleteness as
 # an API error or an exhausted budget, and it is refused with them.
