@@ -151,6 +151,10 @@ pub enum ControlShortfall {
     /// The comparator did not produce the return series it was asked for, so it
     /// is not comparable to anything. Independent of the series' sign.
     ComparatorSeriesIncomplete { expected: usize, observed: usize },
+    /// The comparator's realized mean return is not a finite number, so no
+    /// usable comparable series was established. Also independent of sign: a
+    /// negative mean is a number and this is not one.
+    ComparatorReturnNotFinite { mean_return: f64 },
 }
 
 /// The verdict on one control.
@@ -303,16 +307,24 @@ fn shortfalls_of(observation: &ControlObservation) -> Vec<ControlShortfall> {
         // and its size are reported and deliberately not conditions: an
         // unprofitable comparator is a working apparatus running a policy that
         // lost money, which is a fact about the market, not a broken control.
+        // Finiteness is a different question from sign: a negative or zero mean
+        // is a number a reader can compare against, and a NaN or an infinity is
+        // the arithmetic saying it produced none, which establishes no
+        // comparable series at all. The accounting control above refuses a
+        // non-finite residual for the same reason.
         ControlObservation::EconomicComparator {
             periods_expected,
             periods_observed,
-            mean_return: _,
+            mean_return,
         } => {
             if periods_observed != periods_expected || periods_expected == 0 {
                 out.push(ControlShortfall::ComparatorSeriesIncomplete {
                     expected: periods_expected,
                     observed: periods_observed,
                 });
+            }
+            if !mean_return.is_finite() {
+                out.push(ControlShortfall::ComparatorReturnNotFinite { mean_return });
             }
         }
     }
@@ -579,6 +591,46 @@ mod tests {
                 observed: 12,
             }]
         );
+    }
+
+    /// Sign is not a condition and finiteness is. A mean that is not a number
+    /// establishes no comparable series, and the arm that only counted periods
+    /// reported one as held.
+    #[test]
+    fn a_non_finite_comparator_return_does_not_establish_the_comparator() {
+        for mean in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let evidence = evaluate_controls(&[comparator(mean)]).expect("evaluates");
+            let verdict = evidence.control("buy-and-hold").expect("declared");
+            assert!(
+                !verdict.held,
+                "mean {mean} is not a series anything can be compared against: {verdict:?}"
+            );
+            assert_eq!(
+                verdict.shortfalls.len(),
+                1,
+                "the series itself is complete, so finiteness is the only shortfall: {verdict:?}"
+            );
+            assert!(
+                matches!(
+                    verdict.shortfalls[0],
+                    ControlShortfall::ComparatorReturnNotFinite { .. }
+                ),
+                "{verdict:?}"
+            );
+            assert!(!evidence.all_held);
+        }
+
+        // The control on the control: a comparator that lost money is a working
+        // apparatus, and must keep holding, or the check above would be passing
+        // by refusing every comparator it is shown.
+        let losing = evaluate_controls(&[comparator(-0.1)]).expect("evaluates");
+        let verdict = losing.control("buy-and-hold").expect("declared");
+        assert!(
+            verdict.held,
+            "a finite losing mean is a fact about the market, not a broken control: {verdict:?}"
+        );
+        assert!(verdict.shortfalls.is_empty());
+        assert!(losing.all_held);
     }
 
     #[test]

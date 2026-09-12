@@ -82,11 +82,38 @@ impl std::error::Error for CensusError {}
 /// report reads in the order the operator wrote the roster. The cell axes are
 /// sorted into canonical order, because a cell is an identity and not a
 /// position.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct TrialRoster {
     agents: Vec<String>,
     windows: Vec<String>,
     seeds: Vec<u64>,
+}
+
+/// The wire shape of a roster, and the only way one is read back.
+///
+/// A derived `Deserialize` on [`TrialRoster`] writes the private fields
+/// directly, which is the whole declaration check skipped: a roster with an
+/// empty axis expects no trials, and [`census`] would then report a suite
+/// complete having counted nothing. The fields are the same three, so nothing
+/// serialized by an earlier version parses differently, but every parse now
+/// goes through [`TrialRoster::declare`] and is refused on the same terms a
+/// declaration is.
+#[derive(Deserialize)]
+#[serde(rename = "TrialRoster")]
+struct RosterWire {
+    agents: Vec<String>,
+    windows: Vec<String>,
+    seeds: Vec<u64>,
+}
+
+impl<'de> Deserialize<'de> for TrialRoster {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let wire = RosterWire::deserialize(deserializer)?;
+        Self::declare(&wire.agents, &wire.windows, &wire.seeds).map_err(serde::de::Error::custom)
+    }
 }
 
 impl TrialRoster {
@@ -743,5 +770,34 @@ mod tests {
             (c.expected, c.completed, c.failed, c.unreported),
             (12, 12, 0, 0)
         );
+    }
+
+    /// A roster arriving as data is refused on the axis it left empty. The
+    /// declaration path was already correct; what this defends is that the JSON
+    /// path, which is a public entry of its own, cannot skip it and hand
+    /// `census` a roster that expects nothing.
+    #[test]
+    fn a_roster_deserialized_with_an_empty_axis_is_refused() {
+        let err =
+            serde_json::from_str::<TrialRoster>(r#"{"agents":["a"],"windows":[],"seeds":[1]}"#)
+                .expect_err("an empty declared axis expects no trials and must be refused");
+        assert!(
+            err.to_string().contains("window axis is empty"),
+            "the refusal must name the axis it refused on: {err}"
+        );
+    }
+
+    /// The companion the refusal needs: a declared roster still survives the
+    /// round trip and still counts, so the parser cannot hold by refusing
+    /// everything.
+    #[test]
+    fn a_declared_roster_survives_the_json_round_trip() {
+        let declared = roster();
+        let json = serde_json::to_string(&declared).expect("serializes");
+        let parsed: TrialRoster = serde_json::from_str(&json).expect("a declared roster parses");
+        assert_eq!(parsed, declared);
+        assert_eq!(parsed.expected(), 12);
+        let c = census(&parsed, &all_completed());
+        assert!(c.suite_complete(), "{c:?}");
     }
 }
