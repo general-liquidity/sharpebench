@@ -95,6 +95,44 @@ def _literal_toml_version(root: Path, path: str) -> str:
     return str(data["project"]["version"] if "project" in data else data["package"]["version"])
 
 
+def committed_bundle_problems(root: Path, expected: str) -> list[str]:
+    """The committed wasm bundle carries the version compiled into it.
+
+    Every other version this release checks is a literal in a metadata file that
+    the bump rewrites. The bundle's comes from `CARGO_PKG_VERSION` at compile
+    time, so bumping the crate updates `npm/pkg/package.json` and leaves the
+    `.wasm` reporting the previous release.
+
+    This release publishes a fresh build rather than the committed bundle, so a
+    stale one does not block the publish; it fails the npm workflow on main
+    afterwards instead, which is how 0.25.0 left main red. The sibling product
+    binds publication to the committed artifact and fails the release itself.
+    Either way the bump has to rebuild it, so this runs the gate that knows,
+    `scripts/check-wasm-bundle.mjs`, rather than restating its rule here.
+    """
+    gate = root / "scripts" / "check-wasm-bundle.mjs"
+    if not gate.is_file():
+        return [f"{gate} is missing: the committed bundle cannot be checked"]
+    completed = subprocess.run(
+        ["node", str(gate)],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode == 0:
+        return []
+    detail = (completed.stdout + completed.stderr).strip().splitlines()
+    tail = detail[-6:] if detail else ["no output"]
+    return [
+        f"the committed wasm bundle does not answer like this tree "
+        f"(release requires {expected}); rebuild and commit it with "
+        "`wasm-pack build crates/sharpebench-wasm --target nodejs "
+        "--out-dir ../../npm/pkg --out-name sharpebench`",
+        *(f"    {line}" for line in tail),
+    ]
+
+
 def surface_version_problems(root: Path, expected: str) -> list[str]:
     """Return every published surface that does not report ``expected``.
 
@@ -218,6 +256,7 @@ def verify_tag(
         if checked.returncode != 0:
             problems.append("tagged provenance check failed: " + (checked.stdout + checked.stderr).strip())
         problems.extend(surface_version_problems(root, expected))
+        problems.extend(committed_bundle_problems(root, expected))
     return problems, commit
 
 
