@@ -3,7 +3,13 @@ name: Mutation
 # Deferred item 5 of the 2026-09-07 audit checklist, "full mutation and
 # paired-boundary gates as a standing CI leg", in its bounded form. Mutation:
 # cargo-mutants runs only the mutants the pull request's own diff introduces,
-# only in the four pure crates, under a hard 30 minute budget. Paired-boundary:
+# only in the four pure crates. That population is split across four parallel
+# shards, each shard running the same command with its own `--shard i/4`, each
+# using every core the runner reports, under a 20 minute per-shard budget. The
+# shards partition the population exactly: `--shard` is 0 based, every mutant
+# lands in exactly one shard, and an out of range index is a hard error rather
+# than a silent drop, so nothing the diff introduces escapes the gate. A missed
+# mutant in any shard fails that shard and so fails the check. Paired-boundary:
 # a static scan that every public kernel function documenting a numeric domain
 # is named by a boundary test. Both run on every pull request; ci.yml is
 # untouched and stays the release gate.
@@ -13,6 +19,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  MUTANT_SHARDS: 4
 
 concurrency:
   group: mutation-${{ github.ref }}
@@ -20,9 +27,16 @@ concurrency:
 
 jobs:
   mutants-in-diff:
-    name: cargo-mutants (PR diff · pure crates)
+    name: cargo-mutants (PR diff · pure crates · shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
+    strategy:
+      # Every shard reports: a failure in one must not cancel the others, or
+      # their reports and counts are lost exactly when they are wanted.
+      fail-fast: false
+      matrix:
+        # 0 based, and MUTANT_SHARDS above must equal this list's length.
+        shard: [0, 1, 2, 3]
     steps:
       # Full history so the merge base with the target branch is present.
       - uses: actions/checkout@v6
@@ -53,8 +67,14 @@ jobs:
       # mutants fail the job. A timeout is a mutant the suite did not pass either;
       # it is surfaced as a warning rather than a failure because it is runner
       # dependent, and the report artifact names it.
+      #
+      # `--jobs` is the core count the runner itself reports, echoed here so the
+      # log records it. cargo-mutants builds a whole tree per job, so going past
+      # the real core count makes the run slower rather than faster.
       - name: Every mutant this diff introduces must be caught
         run: |
+          cores=$(nproc)
+          echo "runner reports $cores cores; shard ${{ matrix.shard }}/$MUTANT_SHARDS"
           set +e
           cargo mutants \
             --in-diff "$RUNNER_TEMP/pr.diff" \
@@ -63,7 +83,8 @@ jobs:
             --package sharpebench-protocol \
             --package sharpebench-attest \
             --timeout-multiplier 3 \
-            --jobs 2 \
+            --jobs "$cores" \
+            --shard "${{ matrix.shard }}/$MUTANT_SHARDS" \
             --output "$RUNNER_TEMP/mutants"
           code=$?
           set -e
@@ -80,11 +101,12 @@ jobs:
             *) echo "::error::cargo-mutants exited $code"; exit "$code" ;;
           esac
 
+      # One artifact per shard: upload-artifact@v4 rejects a repeated name.
       - name: Keep the mutants report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: mutants-out
+          name: mutants-out-shard-${{ matrix.shard }}
           path: ${{ runner.temp }}/mutants/mutants.out
           if-no-files-found: ignore
 
