@@ -33,7 +33,7 @@ pub use failure::{
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use sharpebench_core::{AgentSubmission, MandateVerdict};
+use sharpebench_core::{AgentSubmission, MandateVerdict, TrialReport};
 use sharpebench_protocol::{
     AgentTrajectory, Decision, DecisionCost, MarketObservation, RunTrajectory, TrajectoryContract,
     TrajectoryWindow,
@@ -548,7 +548,7 @@ pub fn luck_floor(
         .map(|k| {
             let base = 0xF100_0000_0000_0000 ^ (k as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
             run_seeded_agent(
-                &format!("luck-floor-{k:02}"),
+                &luck_floor_agent_id(k),
                 data,
                 windows,
                 seeds,
@@ -557,6 +557,82 @@ pub fn luck_floor(
             )
         })
         .collect()
+}
+
+/// The agent id of the `k`-th luck-floor monkey. A producer that declares its
+/// roster before the run needs the same ids [`luck_floor`] will assemble under,
+/// and two places formatting the same id independently is how a declaration
+/// drifts from the field it is supposed to be a declaration of.
+pub fn luck_floor_agent_id(k: usize) -> String {
+    format!("luck-floor-{k:02}")
+}
+
+/// The published identity of one evaluation window: its `start-end` index pair
+/// over the dataset axis, which is what a [`Window`] *is* here. Used as the
+/// window axis of a declared [`sharpebench_core::TrialRoster`] and of the trial
+/// reports counted against it, so both name a cell the same way.
+pub fn window_label(window: Window) -> String {
+    format!("{}-{}", window.start, window.end)
+}
+
+/// Why a declared cell did not complete, as the census reports it: the
+/// harness/agent split first, then the taxonomy variant.
+///
+/// The split is load-bearing and is not recoverable from the variant alone once
+/// the reason is a string, so it is stated: a runtime failure is the harness's
+/// and contributes no run at all, while an agent fault is the entrant's and
+/// contributes a failing sentinel run that keeps the cell geometry intact. Both
+/// are non-completions of a declared trial, which is the census's question.
+fn failure_reason(record: &FailureRecord) -> String {
+    let kind = match record.kind {
+        FailureKind::SpawnError => "spawn_error",
+        FailureKind::TransportError => "transport_error",
+        FailureKind::Timeout => "timeout",
+        FailureKind::AgentProtocolViolation => "agent_protocol_violation",
+        FailureKind::ResourceLimitExceeded => "resource_limit_exceeded",
+    };
+    let origin = if record.runtime {
+        "runtime"
+    } else {
+        "agent_fault"
+    };
+    format!("{origin}: {kind}")
+}
+
+/// One trial report per declared cell of one entrant's sweep.
+///
+/// `window_ids` is the declared window axis in the sweep's own window order, so
+/// `window_index` in the [`FailureLog`] indexes it directly. A cell the log
+/// names is reported as failed with the producer's reason; every other declared
+/// cell is reported as completed.
+///
+/// A cell that ended in an agent fault is a failure here even though a failing
+/// sentinel run was pooled for pass^k. The sentinel exists so the scored pool
+/// keeps the declared geometry; it is not the trial completing. Reporting it as
+/// a completion would put the census back in the business of counting rows,
+/// which is the defect it exists to prevent.
+pub fn trial_reports(
+    agent_id: &str,
+    window_ids: &[String],
+    seeds: &[u64],
+    failures: &FailureLog,
+) -> Vec<TrialReport> {
+    let mut out = Vec::with_capacity(window_ids.len() * seeds.len());
+    for (index, window) in window_ids.iter().enumerate() {
+        for &seed in seeds {
+            let failed = failures
+                .records
+                .iter()
+                .find(|record| record.window_index == index && record.seed == seed);
+            out.push(match failed {
+                Some(record) => {
+                    TrialReport::failed(agent_id, window, seed, &failure_reason(record))
+                }
+                None => TrialReport::completed(agent_id, window, seed),
+            });
+        }
+    }
+    out
 }
 
 /// Elicit dominance choices from a live agent to feed
@@ -2319,5 +2395,118 @@ mod tests {
         assert_eq!(res.attempts.attempts, 4);
         assert_eq!(res.attempts.backoff_ns_total, 1_000_000_000);
         assert_eq!(res.submission.runs.len(), 2);
+    }
+
+    #[test]
+    fn a_window_is_named_by_its_index_pair() {
+        assert_eq!(
+            window_label(Window {
+                start: 20,
+                end: 100
+            }),
+            "20-100"
+        );
+        assert_eq!(window_label(Window { start: 0, end: 1 }), "0-1");
+    }
+
+    #[test]
+    fn the_luck_floor_ids_are_the_ones_the_field_is_assembled_under() {
+        let data = Dataset::synthetic(2, 60, 7);
+        let windows = [Window { start: 10, end: 40 }];
+        let field = luck_floor(&data, &windows, &[1], CostModel::default(), 3);
+        let declared: Vec<String> = (0..3).map(luck_floor_agent_id).collect();
+        let assembled: Vec<String> = field.iter().map(|s| s.agent_id.clone()).collect();
+        assert_eq!(declared, assembled);
+        assert_eq!(declared[0], "luck-floor-00");
+    }
+
+    /// Every declared cell gets exactly one report, and a clean sweep reports
+    /// every one of them as completed. The control that stops the reporter from
+    /// passing by emitting nothing.
+    #[test]
+    fn a_clean_sweep_reports_every_declared_cell_as_completed() {
+        let windows = ["0-10".to_string(), "10-20".to_string()];
+        let reports = trial_reports("entrant", &windows, &[1, 2, 3], &FailureLog::default());
+        assert_eq!(reports.len(), 6);
+        assert!(reports
+            .iter()
+            .all(|r| r.outcome == sharpebench_core::TrialOutcome::Completed));
+    }
+
+    /// The reason names the harness/agent split and the taxonomy variant, and
+    /// the cell it names is the one the log named.
+    #[test]
+    fn a_failed_cell_is_reported_failed_with_the_producers_reason() {
+        let mut failures = FailureLog::default();
+        failures.push(FailureRecord {
+            window_index: 1,
+            seed: 2,
+            kind: FailureKind::AgentProtocolViolation,
+            attempts: 1,
+            runtime: false,
+        });
+        failures.push(FailureRecord {
+            window_index: 0,
+            seed: 3,
+            kind: FailureKind::Timeout,
+            attempts: 3,
+            runtime: true,
+        });
+        let windows = ["0-10".to_string(), "10-20".to_string()];
+        let reports = trial_reports("entrant", &windows, &[1, 2, 3], &failures);
+        assert_eq!(reports.len(), 6);
+        let failed: Vec<(&str, u64, String)> = reports
+            .iter()
+            .filter_map(|r| match &r.outcome {
+                sharpebench_core::TrialOutcome::Failed { reason } => {
+                    Some((r.key.window.as_str(), r.key.seed, reason.clone()))
+                }
+                sharpebench_core::TrialOutcome::Completed => None,
+            })
+            .collect();
+        assert_eq!(
+            failed,
+            vec![
+                ("0-10", 3, "runtime: timeout".to_string()),
+                (
+                    "10-20",
+                    2,
+                    "agent_fault: agent_protocol_violation".to_string()
+                ),
+            ]
+        );
+    }
+
+    /// The reason strings restate the taxonomy's own serialized names. A variant
+    /// renamed on the wire without being renamed here would publish two names
+    /// for one failure.
+    #[test]
+    fn every_reason_restates_the_taxonomys_serialized_name() {
+        for kind in [
+            FailureKind::SpawnError,
+            FailureKind::TransportError,
+            FailureKind::Timeout,
+            FailureKind::AgentProtocolViolation,
+            FailureKind::ResourceLimitExceeded,
+        ] {
+            let serialized = serde_json::to_value(&kind).expect("the taxonomy serializes");
+            let record = FailureRecord {
+                window_index: 0,
+                seed: 0,
+                kind: kind.clone(),
+                attempts: 1,
+                runtime: kind.is_runtime(),
+            };
+            let reason = failure_reason(&record);
+            let origin = if kind.is_runtime() {
+                "runtime"
+            } else {
+                "agent_fault"
+            };
+            assert_eq!(
+                reason,
+                format!("{origin}: {}", serialized.as_str().expect("a unit variant")),
+            );
+        }
     }
 }
