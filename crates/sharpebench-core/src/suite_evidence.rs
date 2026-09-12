@@ -26,7 +26,9 @@
 use serde::Serialize;
 
 use crate::composite::CompositeScore;
-use crate::suite_controls::{bind_to_suite, ControlError, ControlRun, SuiteControlEvidence};
+use crate::suite_controls::{
+    bind_to_suite, ControlBinding, ControlError, ControlRun, SuiteControlEvidence,
+};
 use crate::trial_census::{census, TrialCensus, TrialReport, TrialRoster};
 
 /// The apparatus record of one suite: its trial counts against the roster it
@@ -44,6 +46,11 @@ pub struct SuiteEvidence {
     pub trials: TrialCensus,
     /// One verdict per declared control, kept apart from the entrant rankings.
     pub controls: SuiteControlEvidence,
+    /// The `run_provenance` digest over those controls, with the statement of
+    /// which of their fields it covers and which it does not. Reporting an
+    /// identity beside a result and binding it are different things, and this
+    /// is the second one.
+    pub control_binding: ControlBinding,
 }
 
 /// Assemble the evidence a suite publishes beside its board.
@@ -60,10 +67,14 @@ pub fn suite_evidence(
     board: &[CompositeScore],
 ) -> Result<SuiteEvidence, ControlError> {
     let controls = bind_to_suite(controls, board)?;
+    let control_binding = controls
+        .binding()
+        .map_err(|detail| ControlError::ControlBindingIncomplete { detail })?;
     Ok(SuiteEvidence {
         used_by_gate: false,
         trials: census(roster, reports),
         controls,
+        control_binding,
     })
 }
 

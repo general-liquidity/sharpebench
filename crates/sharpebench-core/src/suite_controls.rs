@@ -38,7 +38,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::composite::CompositeScore;
-use crate::evidence_coverage::{Coverage, DigestId, EvidenceInventory};
+use crate::evidence_coverage::{Coverage, DigestId, EvidenceInventory, PreimageError};
 
 /// How far a closed accounting identity may sit from zero and still be closed.
 /// A residual is a sum of signed cash movements that should cancel exactly; this
@@ -204,6 +204,49 @@ impl SuiteControlEvidence {
         Some(declared.all(|c| c.held))
     }
 
+    /// The `run_provenance` digest over these controls, with the statement of
+    /// what it covers.
+    ///
+    /// The suite digest is taken over the ordered per-control preimages, so
+    /// reordering the controls, dropping one, or changing any covered field of
+    /// any one of them moves it. The excluded `detail` line moves nothing.
+    pub fn binding(&self) -> Result<ControlBinding, PreimageError> {
+        use sha2::{Digest, Sha256};
+
+        let mut suite = Sha256::new();
+        let mut per_control = Vec::with_capacity(self.controls.len());
+        for verdict in &self.controls {
+            let preimage = control_preimage(verdict)?;
+            suite.update(&preimage);
+            let digest = Sha256::digest(&preimage);
+            per_control.push(ControlDigest {
+                control_id: verdict.control_id.clone(),
+                sha256: format!("{digest:x}"),
+            });
+        }
+        let suite = suite.finalize();
+        Ok(ControlBinding {
+            used_by_gate: false,
+            document: SUITE_CONTROL_INVENTORY.document.to_string(),
+            digest: DigestId::RunProvenance,
+            covered_fields: SUITE_CONTROL_INVENTORY
+                .fields_for(DigestId::RunProvenance)
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            unbound_fields: SUITE_CONTROL_INVENTORY
+                .exclusions()
+                .into_iter()
+                .map(|(field, reason)| UnboundField {
+                    field: field.to_string(),
+                    reason: reason.to_string(),
+                })
+                .collect(),
+            sha256: format!("{suite:x}"),
+            per_control,
+        })
+    }
+
     /// The identities of the controls that did not hold, in declared order.
     pub fn failed(&self) -> Vec<&str> {
         self.controls
@@ -232,6 +275,11 @@ pub enum ControlError {
     /// A control identity also appears as a ranked entrant. Apparatus evidence
     /// and competitive results are different records and must not share a row.
     ControlRankedAsEntrant { control_id: String },
+    /// [`SUITE_CONTROL_INVENTORY`] and [`control_preimage`] disagree about which
+    /// fields the `run_provenance` digest covers, so the digest would bind
+    /// something other than what the record declares. Refused rather than
+    /// published under a coverage statement it does not satisfy.
+    ControlBindingIncomplete { detail: PreimageError },
 }
 
 impl fmt::Display for ControlError {
@@ -259,6 +307,12 @@ impl fmt::Display for ControlError {
                 f,
                 "suite controls: `{control_id}` is a control and also a ranked entrant. \
                  A control is validation of the apparatus, not an attainable score"
+            ),
+            Self::ControlBindingIncomplete { detail } => write!(
+                f,
+                "suite controls: the run_provenance binding does not cover exactly what \
+                 SUITE_CONTROL_INVENTORY declares ({detail:?}); a digest that binds a different \
+                 field set from the one published beside it is not published"
             ),
         }
     }
@@ -452,6 +506,166 @@ pub const SUITE_CONTROL_INVENTORY: EvidenceInventory = EvidenceInventory {
         ),
     ],
 };
+
+/// A field the binding deliberately does not cover, with the inventory's stated
+/// reason carried along so a reader does not have to go and find it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnboundField {
+    pub field: String,
+    pub reason: String,
+}
+
+/// The digest of one control's covered fields.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ControlDigest {
+    pub control_id: String,
+    pub sha256: String,
+}
+
+/// The digest binding a suite's controls, published with the statement of what
+/// it covers.
+///
+/// [`SUITE_CONTROL_INVENTORY`] declares which [`ControlVerdict`] fields the
+/// `run_provenance` digest covers, and declaring is not binding: a reader
+/// holding the evidence JSON could still not tell whether the row in front of
+/// them is the row that ran. This record closes that gap. It carries the digest
+/// itself beside the fields it was computed over and the fields it was not, so
+/// the statement of coverage and the coverage travel together.
+///
+/// `used_by_gate` is recorded here for the reason [`crate::SharpeDiagnostics`]
+/// records it: this is provenance, and a reader of the JSON alone must not
+/// mistake it for a board column. Nothing here reaches the gate, eligibility or
+/// the rank.
+///
+/// Serialize only, for the reason [`crate::SuiteEvidence`] is: a deserializable
+/// `used_by_gate` would be a field an input document could set to true, and a
+/// deserializable digest would be one an input document could assert rather than
+/// one this crate computed.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ControlBinding {
+    /// Always `false`.
+    pub used_by_gate: bool,
+    /// The document the inventory describes, by type name.
+    pub document: String,
+    /// The digest identity, as the inventory names it.
+    pub digest: DigestId,
+    /// The fields whose values entered the preimage, in inventory order.
+    pub covered_fields: Vec<String>,
+    /// The fields that entered nothing, each with the inventory's reason.
+    pub unbound_fields: Vec<UnboundField>,
+    /// SHA-256 over the ordered per-control preimages.
+    pub sha256: String,
+    /// One digest per control, in declared order, so a reader can tell which
+    /// row moved rather than only that one did.
+    pub per_control: Vec<ControlDigest>,
+}
+
+/// Shortest round-trip rendering, with the three non-finite values named rather
+/// than collapsed. `serde_json` writes every one of them as `null`, so a digest
+/// taken over JSON could not tell a NaN residual from an infinite one, and both
+/// are outcomes a control reports.
+fn render_f64(value: f64) -> String {
+    if value.is_nan() {
+        "nan".to_string()
+    } else if value == f64::INFINITY {
+        "inf".to_string()
+    } else if value == f64::NEG_INFINITY {
+        "-inf".to_string()
+    } else {
+        format!("{value:?}")
+    }
+}
+
+fn render_observation(observation: &ControlObservation) -> String {
+    match *observation {
+        ControlObservation::ProtocolAndAccounting {
+            decisions_expected,
+            decisions_round_tripped,
+            accounting_residual,
+        } => format!(
+            "protocol_and_accounting(decisions_expected={decisions_expected},\
+             decisions_round_tripped={decisions_round_tripped},accounting_residual={})",
+            render_f64(accounting_residual)
+        ),
+        ControlObservation::RefusalOfInvalidOrder {
+            invalid_orders_submitted,
+            refusals_observed,
+        } => format!(
+            "refusal_of_invalid_order(invalid_orders_submitted={invalid_orders_submitted},\
+             refusals_observed={refusals_observed})"
+        ),
+        ControlObservation::EconomicComparator {
+            periods_expected,
+            periods_observed,
+            mean_return,
+        } => format!(
+            "economic_comparator(periods_expected={periods_expected},\
+             periods_observed={periods_observed},mean_return={})",
+            render_f64(mean_return)
+        ),
+    }
+}
+
+fn render_shortfall(shortfall: &ControlShortfall) -> String {
+    match *shortfall {
+        ControlShortfall::ProtocolIncomplete {
+            expected,
+            round_tripped,
+        } => format!("protocol_incomplete(expected={expected},round_tripped={round_tripped})"),
+        ControlShortfall::AccountingDidNotClose { residual } => {
+            format!(
+                "accounting_did_not_close(residual={})",
+                render_f64(residual)
+            )
+        }
+        ControlShortfall::RefusalNotExercised => "refusal_not_exercised()".to_string(),
+        ControlShortfall::InvalidOrderAccepted { submitted, refused } => {
+            format!("invalid_order_accepted(submitted={submitted},refused={refused})")
+        }
+        ControlShortfall::ComparatorSeriesIncomplete { expected, observed } => {
+            format!("comparator_series_incomplete(expected={expected},observed={observed})")
+        }
+        ControlShortfall::ComparatorReturnNotFinite { mean_return } => format!(
+            "comparator_return_not_finite(mean_return={})",
+            render_f64(mean_return)
+        ),
+    }
+}
+
+/// The bytes [`SUITE_CONTROL_INVENTORY`] says are bound, for one verdict.
+///
+/// The destructure is load-bearing: a field added to [`ControlVerdict`] fails to
+/// compile here, so a new field cannot join the published record while the
+/// digest silently keeps covering the old set.
+pub fn control_preimage(verdict: &ControlVerdict) -> Result<Vec<u8>, PreimageError> {
+    let ControlVerdict {
+        control_id,
+        property,
+        observation,
+        held,
+        shortfalls,
+        // Declared excluded, and deliberately not supplied below: the inventory
+        // refuses a value for a field it does not bind, so offering the prose
+        // here would be an error rather than a silent inclusion.
+        detail: _,
+    } = verdict;
+    let observation = render_observation(observation);
+    let shortfalls = shortfalls
+        .iter()
+        .map(render_shortfall)
+        .collect::<Vec<_>>()
+        .join(",");
+    SUITE_CONTROL_INVENTORY.preimage(
+        DigestId::RunProvenance,
+        &[
+            ("control_id", control_id.as_str()),
+            ("property", property.identifier()),
+            ("observation", observation.as_str()),
+            ("held", if *held { "true" } else { "false" }),
+            ("shortfalls", shortfalls.as_str()),
+        ],
+    )
+}
 
 #[cfg(test)]
 mod tests {
@@ -789,6 +1003,181 @@ mod tests {
                 "shortfalls"
             ],
             "identity, intent and outcome are all bound"
+        );
+    }
+
+    /// The passing control for the whole binding group. Without it, a `binding`
+    /// that returned an empty digest, or refused everything, would satisfy every
+    /// "this moves the digest" assertion below by emitting nothing.
+    #[test]
+    fn a_binding_is_a_digest_over_the_fields_the_inventory_declares() {
+        let evidence = evaluate_controls(&[cash(0.0), refusal(3, 3)]).expect("evaluates");
+        let binding = evidence.binding().expect("the controls bind");
+
+        assert!(!binding.used_by_gate);
+        assert_eq!(binding.digest, DigestId::RunProvenance);
+        assert_eq!(
+            binding.document,
+            "sharpebench_core::suite_controls::ControlVerdict"
+        );
+        assert_eq!(
+            binding.covered_fields,
+            SUITE_CONTROL_INVENTORY.fields_for(DigestId::RunProvenance),
+            "the published coverage statement is the inventory's, not a second list"
+        );
+        assert_eq!(
+            binding
+                .unbound_fields
+                .iter()
+                .map(|u| u.field.as_str())
+                .collect::<Vec<_>>(),
+            vec!["detail"],
+            "every field that enters nothing is named with its reason"
+        );
+        assert!(!binding.unbound_fields[0].reason.is_empty());
+
+        assert_eq!(binding.sha256.len(), 64, "{}", binding.sha256);
+        assert!(binding
+            .sha256
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
+        assert_eq!(
+            binding
+                .per_control
+                .iter()
+                .map(|c| c.control_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["cash", "invalid-order"],
+            "one digest per control, in declared order"
+        );
+        assert_ne!(
+            binding.per_control[0].sha256, binding.per_control[1].sha256,
+            "two different controls cannot share a digest"
+        );
+
+        // Deterministic: the same evidence binds to the same bytes.
+        let again = evaluate_controls(&[cash(0.0), refusal(3, 3)])
+            .expect("evaluates")
+            .binding()
+            .expect("binds");
+        assert_eq!(binding.sha256, again.sha256);
+    }
+
+    /// The point of binding rather than only reporting: an outcome that moves
+    /// moves the digest, so a reader can tell the row in front of them is the
+    /// row that ran.
+    #[test]
+    fn a_changed_control_outcome_moves_the_binding() {
+        let held = evaluate_controls(&[cash(0.0), refusal(3, 3)])
+            .expect("evaluates")
+            .binding()
+            .expect("binds");
+
+        // The refusal path let one invalid order through: `held`, `shortfalls`
+        // and `observation` all move, and so must the digest.
+        let withheld = evaluate_controls(&[cash(0.0), refusal(3, 2)])
+            .expect("evaluates")
+            .binding()
+            .expect("binds");
+        assert_ne!(held.sha256, withheld.sha256);
+        assert_eq!(
+            held.per_control[0].sha256, withheld.per_control[0].sha256,
+            "the control that did not change keeps its digest, so the reader sees which row moved"
+        );
+        assert_ne!(held.per_control[1].sha256, withheld.per_control[1].sha256);
+
+        // A residual inside the tolerance still holds its control, and is still
+        // a different observation from a residual of exactly zero.
+        let nudged = evaluate_controls(&[cash(1e-13), refusal(3, 3)])
+            .expect("evaluates")
+            .binding()
+            .expect("binds");
+        assert!(nudged.per_control[0].sha256 != held.per_control[0].sha256);
+
+        // Order is part of the suite digest: the same two controls declared the
+        // other way round are a different declaration.
+        let reordered = evaluate_controls(&[refusal(3, 3), cash(0.0)])
+            .expect("evaluates")
+            .binding()
+            .expect("binds");
+        assert_ne!(held.sha256, reordered.sha256);
+
+        // Dropping a control cannot leave the digest where it was.
+        let one = evaluate_controls(&[cash(0.0)])
+            .expect("evaluates")
+            .binding()
+            .expect("binds");
+        assert_ne!(held.sha256, one.sha256);
+    }
+
+    /// The three non-finite values are outcomes a control reports, and JSON
+    /// writes all three as `null`. A digest that could not tell them apart would
+    /// bind less than the record shows.
+    #[test]
+    fn the_three_non_finite_residuals_bind_to_three_different_digests() {
+        let digest = |residual: f64| {
+            evaluate_controls(&[cash(residual)])
+                .expect("evaluates")
+                .binding()
+                .expect("binds")
+                .sha256
+        };
+        let nan = digest(f64::NAN);
+        let infinite = digest(f64::INFINITY);
+        let negative_infinite = digest(f64::NEG_INFINITY);
+        assert_ne!(nan, infinite);
+        assert_ne!(infinite, negative_infinite);
+        assert_ne!(nan, negative_infinite);
+        // And none of them is the digest of a control that closed.
+        assert_ne!(nan, digest(0.0));
+    }
+
+    /// The excluded field is excluded: a wording edit to the prose line must not
+    /// break a digest over unchanged evidence, which is the reason the inventory
+    /// states for excluding it.
+    #[test]
+    fn the_unbound_detail_line_moves_no_digest() {
+        let mut evidence = evaluate_controls(&[cash(0.0)]).expect("evaluates");
+        let before = evidence.binding().expect("binds");
+        evidence.controls[0].detail = "reworded, and binding nothing".to_string();
+        let after = evidence.binding().expect("binds");
+        assert_eq!(before.sha256, after.sha256);
+        assert_eq!(before.per_control, after.per_control);
+    }
+
+    /// What actually enters the hash, read rather than inferred from the digest
+    /// moving. A renderer that dropped a covered field would still produce a
+    /// digest that moves for the other four.
+    #[test]
+    fn the_preimage_carries_every_covered_field_and_no_excluded_one() {
+        let evidence = evaluate_controls(&[refusal(3, 2)]).expect("evaluates");
+        let verdict = &evidence.controls[0];
+        let preimage = control_preimage(verdict).expect("the inventory and the renderer agree");
+        let text = String::from_utf8(preimage).expect("the preimage is text here");
+
+        for field in SUITE_CONTROL_INVENTORY.fields_for(DigestId::RunProvenance) {
+            assert!(
+                text.contains(field),
+                "`{field}` is bound but absent: {text:?}"
+            );
+        }
+        assert!(text.contains("invalid-order"), "{text:?}");
+        assert!(text.contains("refusal_of_invalid_order"), "{text:?}");
+        assert!(
+            text.contains("false"),
+            "the withheld verdict is bound: {text:?}"
+        );
+        assert!(
+            text.contains("invalid_order_accepted(submitted=3,refused=2)"),
+            "the shortfall's own numbers are bound: {text:?}"
+        );
+        assert!(
+            !text.contains("detail"),
+            "the excluded prose line must not enter the preimage: {text:?}"
+        );
+        assert!(
+            !text.contains("was run to establish"),
+            "nor its rendering: {text:?}"
         );
     }
 }
