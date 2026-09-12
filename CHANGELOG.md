@@ -12,6 +12,27 @@ and links the commits it was built from.
 
 ## [Unreleased]
 
+### Fixed
+
+- npm: the committed wasm bundle is rebuilt for 0.25.0. Every other version the
+  release checks is a literal in a metadata file that the version bump rewrites;
+  the one inside the wasm binary comes from `CARGO_PKG_VERSION` at compile time,
+  so the bump left the committed bundle reporting 0.24.0 and the npm workflow
+  went red on main at the release commit. The published v0.25.0 is unaffected:
+  this release builds a fresh bundle before publishing, so what shipped was
+  never the stale one and all seven release jobs passed.
+
+### Known
+
+- release: nothing in `scripts/release.py` rebuilds the committed wasm bundle as
+  part of the version bump, so the next release repeats this unless the bundle
+  is rebuilt by hand first. A pre-tag check was written and removed again: the
+  committed bundle cannot name a version the bump has not yet chosen, so
+  checking alone refuses every release. The fix is a rebuild step inside the
+  release tree after the bump; that is not done here. The sibling product
+  publishes its committed bundle rather than a rebuild, so the same gap fails
+  its release outright instead of surfacing afterwards.
+
 ## [0.25.0] - 2026-09-12
 
 ### Breaking
