@@ -20,6 +20,7 @@ use csv_columns::read_returns_column;
 mod analysis_cmd;
 mod arena_cmd;
 mod artifact_preflight;
+mod compare_cmd;
 mod csv_columns;
 mod external_capture;
 mod forecast_cmd;
@@ -59,6 +60,7 @@ fn main() -> ExitCode {
         Some("capture") => run_capture(&args, json),
         Some("verify-trajectory") => run_verify_trajectory(&args, json),
         Some("rescore") => ExitCode::from(rescore_cmd::run(&args, json).clamp(0, 255) as u8),
+        Some("compare") => ExitCode::from(compare_cmd::run(&args, json).clamp(0, 255) as u8),
         Some("audit-briefing") => run_audit_briefing(&args, json),
         Some("canary") => run_canary(&args, json),
         Some("sandbox-check") => run_sandbox_check(&args, json),
@@ -620,6 +622,10 @@ fn help() {
     );
     println!("                       --envelope <envelope.json>: judge the declared compute budget against the field's; a budget difference refuses, environment metadata is disclosed");
     println!("                       --reexecute [--scan-policy <policy.json> [--runtime-allowlist <list.json>]]: also re-run every captured run from the bundle's own pinned image in a network-disabled container");
+    println!(
+        "  sharpebench compare --axis <entrant|invocation|score-config> --baseline <checkpoint.json> --treatment <checkpoint.json>  declare the one identity two sweep arms may differ on, or refuse naming the field that decided it"
+    );
+    println!("                       reads the checkpoints the resumable sweep wrote and writes neither; the receipt is reporting surface and never a rank input");
     println!("  sharpebench audit-briefing <briefing.json>  audit a shared briefing for input-side salience bias");
     println!("  sharpebench canary <seed>             derive a do-not-train contamination tripwire token");
     println!("  sharpebench sandbox-check <image@sha256:digest>  run live hostile field-readiness checks (never skips)");
@@ -1769,6 +1775,15 @@ fn print_suite_evidence(board: &[CompositeScore], evidence: &sharpebench_core::S
             if control.held { "held" } else { "withheld" },
             control.detail
         );
+    }
+    let binding = &evidence.control_binding;
+    println!(
+        "control binding: run_provenance {} over {}",
+        binding.sha256,
+        binding.covered_fields.join(", ")
+    );
+    for unbound in &binding.unbound_fields {
+        println!("  not bound: {} ({})", unbound.field, unbound.reason);
     }
 }
 

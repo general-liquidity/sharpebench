@@ -105,6 +105,87 @@ fn a_clean_run_publishes_a_complete_census_and_held_controls() {
     );
 }
 
+/// Reporting a control's identity beside a result and binding it are different
+/// things. This is the second one, through the real binary: the envelope carries
+/// the `run_provenance` digest over the controls, the statement of which of their
+/// fields it covers, and the statement of which it does not.
+#[test]
+fn the_emitted_controls_carry_the_digest_that_binds_them() {
+    let output = cli(&["run", "--json", "--suite-evidence"]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let doc: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("the run emits JSON");
+    let binding = &doc["suite_evidence"]["control_binding"];
+
+    // Provenance beside a result, never a board column.
+    assert_eq!(binding["used_by_gate"], serde_json::Value::Bool(false));
+    assert_eq!(binding["digest"], "run_provenance");
+    assert_eq!(
+        binding["document"],
+        "sharpebench_core::suite_controls::ControlVerdict"
+    );
+    let covered: Vec<&str> = binding["covered_fields"]
+        .as_array()
+        .expect("the coverage statement is a list")
+        .iter()
+        .map(|f| f.as_str().unwrap())
+        .collect();
+    assert_eq!(
+        covered,
+        vec![
+            "control_id",
+            "property",
+            "observation",
+            "held",
+            "shortfalls"
+        ]
+    );
+    let unbound = binding["unbound_fields"].as_array().expect("a list");
+    assert_eq!(unbound.len(), 1);
+    assert_eq!(unbound[0]["field"], "detail");
+    assert!(!unbound[0]["reason"].as_str().unwrap().is_empty());
+
+    let suite = binding["sha256"].as_str().expect("a suite digest");
+    assert_eq!(suite.len(), 64, "{suite}");
+    assert!(suite
+        .bytes()
+        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)));
+
+    // One digest per control, in the order the controls are published.
+    let per_control = binding["per_control"].as_array().expect("a list");
+    let controls = doc["suite_evidence"]["controls"]["controls"]
+        .as_array()
+        .unwrap();
+    assert_eq!(per_control.len(), controls.len());
+    for (bound, control) in per_control.iter().zip(controls) {
+        assert_eq!(bound["control_id"], control["control_id"]);
+        assert_eq!(bound["sha256"].as_str().unwrap().len(), 64);
+    }
+    assert_ne!(per_control[0]["sha256"], per_control[1]["sha256"]);
+
+    // The binding is the same on a second run of the same suite: it is a digest
+    // over what the controls observed, not over anything that varies per process.
+    let again = cli(&["run", "--json", "--suite-evidence"]);
+    assert_eq!(again.status.code(), Some(0));
+    let again: serde_json::Value = serde_json::from_slice(&again.stdout).expect("JSON");
+    assert_eq!(&again["suite_evidence"]["control_binding"], binding);
+
+    // And it moves nothing: the board under the envelope is byte-identical to
+    // the board the default invocation emits.
+    let plain = cli(&["run", "--json"]);
+    assert_eq!(plain.status.code(), Some(0));
+    let plain: serde_json::Value = serde_json::from_slice(&plain.stdout).expect("JSON");
+    assert_eq!(
+        serde_json::to_string(&doc["board"]).unwrap(),
+        serde_json::to_string(&plain).unwrap()
+    );
+}
+
 /// A decision that parses and is refused by the closed contract, so every cell
 /// of the sweep ends in an agent protocol fault.
 const INVALID_DECISION: &str = r#"{"orders":[{"symbol":"__no_such_symbol__","action":"buy","target_weight":0.1,"confidence":0.5,"rationale":""}],"reasoning":""}"#;

@@ -147,9 +147,10 @@ pub use sharpe_diagnostics::{
     sharpe_diagnostics, MppmDiagnostic, PsrDiagnostic, SharpeDiagnostic, SharpeDiagnostics,
 };
 pub use suite_controls::{
-    bind_to_suite, evaluate_controls, ControlError, ControlObservation, ControlProperty,
-    ControlRun, ControlShortfall, ControlVerdict, SuiteControlEvidence,
-    ACCOUNTING_RESIDUAL_TOLERANCE, SUITE_CONTROL_INVENTORY,
+    bind_to_suite, control_preimage, evaluate_controls, ControlBinding, ControlDigest,
+    ControlError, ControlObservation, ControlProperty, ControlRun, ControlShortfall,
+    ControlVerdict, SuiteControlEvidence, UnboundField, ACCOUNTING_RESIDUAL_TOLERANCE,
+    SUITE_CONTROL_INVENTORY,
 };
 pub use suite_evidence::{suite_evidence, SuiteEvidence};
 pub use trial_census::{

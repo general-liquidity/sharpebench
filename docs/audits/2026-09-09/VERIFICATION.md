@@ -65,7 +65,7 @@ brought up to date and tested again, because each merge invalidated the next.
 | PR | Work | Main after merge |
 |---|---|---|
 | Bench #101 | Usage evidence required per record; the published cell held unique | `c4e3f9e` |
-| Bench #102 | The comparison axis declared; every regrade linked to its source | `a99c0b7` |
+| Bench #102 | Library types for a declared comparison axis and for a regrade receipt | `a99c0b7` |
 | Bench #103 | Three claims narrowed to what the sources license | `781880c` |
 | Bench #104 | An operator rescore over a declared bundle | `79e8b80` |
 | Bench #105 | The trial census and the typed suite controls | `d4165ec` |
@@ -676,6 +676,57 @@ book was checked by link script and the CI leg remains the real gate; and the
 frozen paper evidence was neither regenerated nor reproduced, since the current
 tree already diverges from that snapshot for reasons that predate this work and
 sit in the simulator rather than in the statistics.
+
+## Producer paths for the transfer boundaries, 2026-09-12
+
+A third reviewer accepted the census and suite-control wiring and named three
+types with no caller outside their own tests. Two are now wired and the third is
+described as what it is rather than left as a claim.
+
+`sharpebench compare` is the producer for `ComparisonReceipt::declare`. Five
+cases run through the real binary against checkpoints written by
+`SweepCheckpoint::save`: two arms differing only in the entrant declare a
+comparison and the receipt names the five identities held fixed to reach it, an
+off-axis dataset difference refuses naming the field and both digests and emits
+no receipt, an undeclarable axis is a usage error that emits nothing, an arm with
+no contract refuses and names itself, and three declared axes over the same pair
+leave both checkpoint files byte-identical.
+
+`SuiteControlEvidence::binding` is the producer for the coverage
+`SUITE_CONTROL_INVENTORY` declares. Six cases: the coverage statement published
+is the inventory's own rather than a second list, a changed outcome moves the
+suite digest while the control that did not change keeps its own, the three
+non-finite residuals bind to three different digests, reordering or dropping a
+control moves the suite digest, the excluded prose line moves none of them, and
+the preimage itself is read rather than inferred from a digest moving. The CLI
+leg drives `run --json --suite-evidence` through the binary and checks the digest
+is published beside what it covers and what it does not, is stable across two
+runs, and leaves the board under the envelope byte-identical to the plain
+board's.
+
+Eight isolated mutations are caught, each mutated in place on the line it
+defends, run, restored with `git show HEAD:<path>` and compared with `cmp`:
+collapsing negative infinity onto infinity in the number renderer; dropping the
+shortfall values from the preimage; hashing the control identity instead of its
+preimage into the suite digest; binding the excluded prose line in place of the
+control identity; recording the binding as used by the gate; accepting an
+undeclarable axis as the entrant axis; exiting zero on a refused comparison; and
+declaring the two arms the other way round. Each run leaves a passing control in
+the same file, so nothing passes by emitting nothing. The restored sources are
+byte-identical to the committed tree.
+
+Not established by this round. `regrade_submission` still has no production
+caller and is not wired: a rescore's published figure comes from
+`verify_trajectory_strict`, whose per-run decision-count check is exactly the
+condition `RegradeRefusal::FabricatedDecisions` names, so composing the two would
+either recompute the submission a second time and discard it or move the number
+onto a second replay path, and the receipt's `original_evaluator` is historical,
+so a bundle that does not record it could only have it supplied by the operator,
+which replaces one trusted input with another. The source digest
+`RegradeRequest` takes on trust is still the value a rescore verifies, and the
+two still compose only by hand. The 2026-09-09 row that read "every regrade
+linked to its source" is corrected above. No empirical field was run and the
+frozen paper evidence was neither regenerated nor reproduced.
 
 ## Initial review and isolation
 
