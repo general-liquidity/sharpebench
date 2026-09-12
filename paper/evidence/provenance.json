@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "ac7214597e11cf2c81d9b0caca13c9902fab9393",
+  "generated_at_head": "2345381383e63e2cdb1a53c31668ca34b4e22188",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -179,11 +179,11 @@
   "source_files": [
     {
       "path": "Cargo.lock",
-      "sha256": "35c54e54d3645aeb30f84d4291fa47cee0bbf8ecc1dd2121644bf15b9da49302"
+      "sha256": "da8437e5efa21b83db37800479cca154a1bd549b9df8c56d5f2a926384802ed8"
     },
     {
       "path": "Cargo.toml",
-      "sha256": "3806303eb523a8ad0d1b8242c67a25ce4f0afe7baed5afad2c75735b09d9e3d2"
+      "sha256": "a48c6b905be1f3a626785ec0eb935e4dfac621bd75a35d5e6f4a7e597c088817"
     },
     {
       "path": "arena/state.json",
@@ -203,7 +203,7 @@
     },
     {
       "path": "crates/sharpebench-arena/Cargo.toml",
-      "sha256": "7479b07598c5b06457447d749ca7984f3812023067c44abb3721c3233942b0b3"
+      "sha256": "0922c615d85427cd31995d9ff8d5e7c4721884c1211de0f899bff1b72fb6839d"
     },
     {
       "path": "crates/sharpebench-arena/src/lib.rs",
@@ -271,7 +271,7 @@
     },
     {
       "path": "crates/sharpebench-cli/Cargo.toml",
-      "sha256": "df307e830344b48d58b7bcdda7810ab34c8141376440cfd482394121f04b1e38"
+      "sha256": "2eab48d1440fb809ee22d71776308ef81e581772dc52a6b11dc541aa5ed0e6f7"
     },
     {
       "path": "crates/sharpebench-cli/release.toml",
@@ -379,7 +379,7 @@
     },
     {
       "path": "crates/sharpebench-core/Cargo.toml",
-      "sha256": "d77275017e0dc6001fe9a3eb255a07cd226e0079d53a8b8b8e1faee266eb2a5b"
+      "sha256": "0d831e3a6513ff7a100b8e18f67a19cc846c2081668e4360c579b45540c8abcc"
     },
     {
       "path": "crates/sharpebench-core/src/allocation.rs",
@@ -531,7 +531,7 @@
     },
     {
       "path": "crates/sharpebench-edge/Cargo.toml",
-      "sha256": "0a9b97c2d0dca67925344d4b50d79f8799ee4c743d66059198c27f4fb33cf31f"
+      "sha256": "1be71501e9042186753586d6c2f6f39732e8e9527db8b288a776079598d97ffd"
     },
     {
       "path": "crates/sharpebench-edge/src/hlz.rs",
@@ -555,7 +555,7 @@
     },
     {
       "path": "crates/sharpebench-harness/Cargo.toml",
-      "sha256": "c92d54750b15dc5f2d1707d4b09dc374d116a96d87ec179d0f806be4e0839bf9"
+      "sha256": "ae23640bfeb2191ac72a3dae4baaa99bc705e1c7033bff18cbfe4f3faef27db7"
     },
     {
       "path": "crates/sharpebench-harness/examples/evidence_sweep.rs",
@@ -703,7 +703,7 @@
     },
     {
       "path": "crates/sharpebench-leaderboard/Cargo.toml",
-      "sha256": "1666d46828928b1140feebf19cdd27316411c8dcdd0340ae9f8b069738058acd"
+      "sha256": "17226ffa5a61b667dfc7045ab4101b2b8cb4e95eb45dabe2ec99b185ea0251a1"
     },
     {
       "path": "crates/sharpebench-leaderboard/src/lib.rs",
@@ -715,7 +715,7 @@
     },
     {
       "path": "crates/sharpebench-memory/Cargo.toml",
-      "sha256": "5c2e8b4c0482853716fde68ea46aa87320ce7a5b03d226c3889c274a38f63859"
+      "sha256": "386ef9bb70fa24e91610085bb4a0993c163027db2e959bd6c2702e379dfaab36"
     },
     {
       "path": "crates/sharpebench-memory/src/confabulation.rs",
@@ -783,11 +783,11 @@
     },
     {
       "path": "crates/sharpebench-py/Cargo.toml",
-      "sha256": "b3e521d913b27af2fd3efd710ba1b46e53cf927f63fa84883a5268cfdd1ebf6b"
+      "sha256": "109ab4235bf132cf221eab821231c204ff4d8c20ea5582e374880798c7c4fe17"
     },
     {
       "path": "crates/sharpebench-py/pyproject.toml",
-      "sha256": "e3a8bcfc67342dc096ad79b1e97deb22e9b2f1160cdf9cd1697a6ff4404a8b39"
+      "sha256": "7b6f95c482b1319c83cf8113b4b23c15e4f3d0a590b31c542ce590b1610f2d0e"
     },
     {
       "path": "crates/sharpebench-py/src/lib.rs",
@@ -795,7 +795,7 @@
     },
     {
       "path": "crates/sharpebench-sim/Cargo.toml",
-      "sha256": "0e165f57a9fd6b922d2291fd86d22c1b63c998cafb948ead65924f0cd1b7c02e"
+      "sha256": "38da92dde88808a79f3a9b68daba02655319a109260db4af62bdc735a358364c"
     },
     {
       "path": "crates/sharpebench-sim/src/agent.rs",
@@ -915,7 +915,7 @@
     },
     {
       "path": "crates/sharpebench-wasm/Cargo.toml",
-      "sha256": "19e28d45889a94b08a20a8c8400de37d0aae327c0a290a354b7b2df47379cbda"
+      "sha256": "b2ec191b19e95ed64fe1eeb9714c78a6de4109417563a418e9c5150f3a37378f"
     },
     {
       "path": "crates/sharpebench-wasm/src/lib.rs",
@@ -1171,5 +1171,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "83375630bbef359b1763934fc68ee453643c77f7dc8c0bd799db664f0f38a1dc"
+  "source_snapshot_sha256": "f450b8456f1d42253ad143e7b4a41b0c5d57e84cea8e6c58b863bd8199f7a223"
 }
