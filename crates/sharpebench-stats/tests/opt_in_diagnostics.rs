@@ -439,6 +439,89 @@ fn short_volatility_raises_the_sharpe_but_not_the_mppm() {
     }
 }
 
+/// The risk aversion at which the MPPM stops ordering the tail-selling stream of
+/// [`mppm_does_not_order_tail_selling_last_at_every_rho_or_sample`] above the
+/// symmetric one, bisected on this kernel to the last double on the tail
+/// seller's side.
+const FLIP_RHO: f64 = 1.644_367_729_837_862_7;
+
+/// The bound of the test above. GISW's property 2 is that an uninformed
+/// investor cannot *expect* to raise his *estimated* score, at a `rho` chosen so
+/// that holding the benchmark is optimal (their eq. 19), which this kernel does
+/// not solve for. On a realized finite sample at an off-the-shelf `rho`, the
+/// same tail-selling stream beats the symmetric one two ways, so the book must
+/// not claim the measure cannot be raised by selling tail risk.
+///
+/// 1. Below [`FLIP_RHO`] the ordering is reversed even with the tail realized,
+///    including at `rho = 1`, the geometric-average measure GISW list as
+///    unmanipulable against dynamic manipulation (p. 17).
+/// 2. `Theta` is a sample average, so a tail that does not land in the sample is
+///    invisible to it at every `rho`.
+#[test]
+fn mppm_does_not_order_tail_selling_last_at_every_rho_or_sample() {
+    let mut short_vol = vec![0.015; 99];
+    short_vol.push(-0.5);
+    let symmetric: Vec<f64> = (0..100)
+        .map(|i| if i % 2 == 0 { 0.058 } else { -0.042 })
+        .collect();
+
+    // The root itself, bisected to the last double that still orders the tail
+    // seller first. Pinned rather than bracketed so that a change to the measure
+    // moves a number a reader has to account for instead of silently widening a
+    // range: the two sides below are 1e-6 away, where the gap is about 2e-9 and
+    // a hundred million times the arithmetic's own error.
+    let flip = |rho: f64| {
+        manipulation_proof_performance(&short_vol, rho, 1.0).unwrap()
+            - manipulation_proof_performance(&symmetric, rho, 1.0).unwrap()
+    };
+    assert!(
+        flip(FLIP_RHO).abs() < 1e-11,
+        "at the root: {}",
+        flip(FLIP_RHO)
+    );
+    assert!(flip(FLIP_RHO - 1e-6) > 0.0, "{}", flip(FLIP_RHO - 1e-6));
+    assert!(flip(FLIP_RHO + 1e-6) < 0.0, "{}", flip(FLIP_RHO + 1e-6));
+
+    for (rho, sv_want, sym_want) in [
+        (1.0, 0.007_808_254_563_213_695, 0.006_736_416_212_415_563),
+        (1.5, 0.006_410_991_723_567_494_5, 0.006_120_349_841_980_698),
+    ] {
+        let sv = manipulation_proof_performance(&short_vol, rho, 1.0).unwrap();
+        let sym = manipulation_proof_performance(&symmetric, rho, 1.0).unwrap();
+        assert!(close(sv, sv_want, 1e-12), "short vol at {rho}: {sv}");
+        assert!(close(sym, sym_want, 1e-12), "symmetric at {rho}: {sym}");
+        assert!(sv > sym, "rho {rho}: short vol {sv} <= symmetric {sym}");
+    }
+    let sv_18 = manipulation_proof_performance(&short_vol, 1.8, 1.0).unwrap();
+    let sym_18 = manipulation_proof_performance(&symmetric, 1.8, 1.0).unwrap();
+    assert!(close(sv_18, 0.005_400_176_121_709_164, 1e-12), "{sv_18}");
+    assert!(
+        close(sym_18, 0.005_750_867_847_539_066_5, 1e-12),
+        "{sym_18}"
+    );
+    assert!(sv_18 < sym_18);
+
+    // The same 99 collecting periods with the loss outside the sample.
+    let unrealized = vec![0.015; 99];
+    for rho in [0.5, 1.0, 3.0, 4.0] {
+        let sv = manipulation_proof_performance(&unrealized, rho, 1.0).unwrap();
+        let sym = manipulation_proof_performance(&symmetric, rho, 1.0).unwrap();
+        assert!(
+            close(sv, 0.014_888_612_493_750_552, 1e-12),
+            "rho {rho}: {sv}"
+        );
+        assert!(sv > sym, "rho {rho}: {sv} <= {sym}");
+    }
+
+    // A fatter premium flips the ordering at the recommended risk aversion.
+    let mut richer = vec![0.025; 99];
+    richer.push(-0.5);
+    let sv_3 = manipulation_proof_performance(&richer, 3.0, 1.0).unwrap();
+    let sym_3 = manipulation_proof_performance(&symmetric, 3.0, 1.0).unwrap();
+    assert!(close(sv_3, 0.008_931_166_804_293_074, 1e-12), "{sv_3}");
+    assert!(sv_3 > sym_3, "{sv_3} <= {sym_3}");
+}
+
 /// Concavity (GISW p. 17): a mean-preserving spread cannot raise the measure,
 /// and more return in any one period always raises it ("arbitrage is good").
 #[test]
