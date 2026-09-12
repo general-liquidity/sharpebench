@@ -14,6 +14,7 @@ sharpebench sign <subs.json> <key> <out.json>         score + sign a board to a 
 sharpebench verify <board.json> <key> verify a signed board's chain
 sharpebench capture <agent> <out.json>                capture an agent's raw-decision trajectory
 sharpebench verify-trajectory <traj.json>             replay a trajectory → recompute its score
+sharpebench rescore <bundle.json>                     recompute a declared submission bundle from its frozen files
 sharpebench audit-briefing <briefing.json>            audit a shared briefing for salience bias
 sharpebench canary <seed>                             derive a do-not-train contamination tripwire
 sharpebench sandbox-check <image@sha256:digest>       run the live Docker-boundary acceptance checks
@@ -441,6 +442,85 @@ the same conditions. A spawn, transport, protocol or resource failure during a
 capture exits 1 with `capture_transport_failure` and writes nothing, because a
 degraded transport would otherwise put the harness's holds into the trajectory
 as the entrant's decisions.
+
+## `rescore`
+
+`verify-trajectory` recomputes a score from one artifact the operator points it
+at. `rescore` recomputes it from a **declared submission bundle**: a JSON
+document that names, by content digest, every file the evaluator is allowed to
+read.
+
+```json
+{
+  "schema_version": "sharpebench.submission-bundle.v1",
+  "agent_id": "momentum",
+  "trajectory": "trajectory.json",
+  "dataset": "prices.csv",
+  "costs": "costs.json",
+  "runner_artifact_sha256": "<the capture binary's digest>",
+  "image": "registry/agent@sha256:<digest>",
+  "frozen_files": [
+    { "path": "prices.csv", "sha256": "..." },
+    { "path": "costs.json", "sha256": "..." },
+    { "path": "trajectory.json", "sha256": "..." }
+  ],
+  "resources": {
+    "cpu_millis": 2000,
+    "memory_bytes": 2147483648,
+    "wall_clock_seconds": 900,
+    "disclosed": { "host_kernel": "6.8.0-generic" }
+  },
+  "claimed": { "deflated_sharpe": 0.41 }
+}
+```
+
+`frozen_files` is the whole read set. Paths are relative to the bundle
+document's own directory and may not be absolute or reach upward. Nothing
+outside the manifest is opened, so agent state sitting beside the bundle, a
+workspace, a cache or a results file the entrant wrote about itself, is not an
+input and cannot move the recomputed score. Every declared file is read once
+and held to its declared digest; bytes that do not hash to it refuse with the
+path, the declared digest and the digest on disk. `claimed` is published beside
+the recomputation as `claim_matches_recomputation` and is never scored.
+
+An absent `frozen_files` manifest is a refusal, not a warning. A verifier that
+imports its scoring code from a separate protected copy can afford to warn when
+a manifest is missing, because its scorer is out of the entrant's reach either
+way. This command has no second copy, so the manifest is the only thing between
+the recompute and the entrant's disk and it is required.
+
+```bash
+sharpebench rescore bundle.json --envelope field-envelope.json --json
+sharpebench rescore bundle.json --reexecute --scan-policy policy.json
+```
+
+`--reexecute` runs the `run --image` image preflight (`--scan-policy` and
+`--runtime-allowlist`, documented above) on the bundle's own pinned image, refuses unless every scan leg, the runtime allowlist, the
+functional probe and the cleanup completed clean, and then re-executes every
+captured run in the hardened, network-disabled container through
+`verify_trajectory_reexecuted`. The image comes from the bundle and never from
+a flag: an operator flag that could name a different image would let the
+rescore verify something other than what was submitted.
+
+What `--reexecute` offers is deterministic policy re-execution, not recorded
+provider-response replay. Every report says so under `not_established`: for an
+entrant whose decisions depend on a sampled model response, a divergence is not
+evidence of tampering and agreement is not evidence that the recorded responses
+were the ones the entrant received.
+
+`--envelope` supplies the field's declared compute budget. A difference in
+`cpu_millis`, `memory_bytes` or `wall_clock_seconds` refuses and names the
+field, the declared value and the envelope's: those bound what the agent could
+have computed, so two scores under different budgets answer different
+questions. Everything in `resources.disclosed` is environment description that
+the envelope does not constrain, and is published beside the score as
+`comparability.disclosed` rather than refused. Without `--envelope` the budget
+is recorded and not judged, and the report says that too.
+
+The report carries the bundle digest, the frozen-manifest digest, every
+verified file with its role, the runner artifact, the semantic dataset and
+cost-model digests, the recomputed score, and two prose lists: `verified` and
+`not_established`.
 
 ## `regime`
 

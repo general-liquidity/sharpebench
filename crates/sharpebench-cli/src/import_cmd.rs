@@ -22,8 +22,20 @@ const IMPORT_NOTE: &str =
     "Imported from a foreign benchmark: returns only. No audit trace (process \
      gate trivially passes), no per-decision confidences (calibration absent), \
      in_sample_trials declared by the importer rather than measured (0 \
-     understates deflation). Comparison is on deflation, reliability and the \
-     bootstrap only; any demotion is a lower bound.";
+     understates deflation). Option-like and short-volatility payoffs are \
+     unconstrained here: what rules them out for a harness-run agent is that \
+     the simulator executes linear target-weight orders only, and an imported \
+     series never passed through it, so a track that sells tail risk is \
+     scored like any other and its skew is not flagged. The \
+     manipulation-proof performance measure (`score --diagnostics mppm`) is \
+     the shipped statistic that speaks to payoff shape, and it is a \
+     certainty equivalent at the risk aversion it is handed: this kernel \
+     takes that risk aversion from the caller and defaults it to 3 rather \
+     than solving GISW eq. 19 against a benchmark, and a sample average \
+     cannot see a tail that did not land in the sample. Read it as a \
+     description of the payoff at one evaluation point, never as a warrant \
+     that the series was not manipulated. Comparison is on deflation, reliability \
+     and the bootstrap only; any demotion is a lower bound.";
 
 /// The loud human-facing version of the same caveat, printed to stderr on
 /// every import so it cannot be missed even when stdout is piped.
@@ -35,6 +47,17 @@ fn print_notice(trials: u32) {
          - in_sample_trials={trials} is your declaration, not a measurement;\n\
            0 understates deflation, so any demotion the re-score shows is a\n\
            LOWER BOUND on how much the source ranking overstates skill.\n\
+         - option-like and short-volatility payoffs are unconstrained: what\n\
+           rules them out for a harness-run agent is that the simulator\n\
+           executes linear target-weight orders only, and an imported series\n\
+           never passed through it. Large negative skew is not flagged here.\n\
+           The manipulation-proof measure speaks to payoff shape, as a\n\
+           certainty equivalent at the risk aversion it is handed, which\n\
+           defaults to 3 here rather than being solved against a benchmark;\n\
+           a sample average cannot see a tail that did not land. Read it as\n\
+           a description at one evaluation point, never as a warrant that\n\
+           the series was not manipulated. Ask for it:\n\
+             sharpebench score <out.json> --diagnostics mppm\n\
          The comparison is on deflation, per-run reliability (pass^k) and the\n\
          bootstrap only. An `_import_note` field restating this is embedded in\n\
          every submission; the scorer ignores it on read.\n"
@@ -658,6 +681,48 @@ mod tests {
     fn import_note_text_carries_the_caveats() {
         for needle in ["process", "calibration", "lower bound", "deflation"] {
             assert!(IMPORT_NOTE.contains(needle), "note lost caveat: {needle}");
+        }
+    }
+
+    /// The exposure the integrity section names is the one the notice used to
+    /// omit. `paper/sections/04-integrity.tex` records that what prevents
+    /// option-based Sharpe manipulation is the simulator's linear
+    /// target-weight execution, and that an imported return series has no such
+    /// protection; the notice now says so on the surface that has none.
+    #[test]
+    fn import_note_names_the_payoff_shape_exposure_it_cannot_rule_out() {
+        for needle in [
+            "Option-like",
+            "short-volatility",
+            "linear target-weight orders",
+            "manipulation-proof",
+            "--diagnostics mppm",
+            // The narrowed reading the book settled on: a certainty
+            // equivalent at one risk aversion, defaulted rather than solved,
+            // and blind to a tail outside the sample.
+            "risk aversion it is handed",
+            "defaults it to 3",
+            "tail that did not land",
+        ] {
+            assert!(IMPORT_NOTE.contains(needle), "note lost caveat: {needle}");
+        }
+        // The measure is evidence about the shape of a payoff, not immunity.
+        // On this repository's own streams a tail seller wins outright below a
+        // risk aversion of about 1.8, and in any sample where the tail has not
+        // yet landed it wins at every risk aversion, so a notice promising the
+        // measure cannot be raised by selling tail risk would be false.
+        for overclaim in [
+            "cannot be raised",
+            "immune",
+            "guarantee",
+            "proof against",
+            "protects against",
+            "resists",
+        ] {
+            assert!(
+                !IMPORT_NOTE.contains(overclaim),
+                "note overclaims what the measure establishes: {overclaim}"
+            );
         }
     }
 

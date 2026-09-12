@@ -731,7 +731,9 @@ pub fn parse_preflight_args(args: &[String]) -> Result<Option<PreflightRequest>,
     }))
 }
 
-fn validate_pinned_reference(image: &str) -> Result<(), String> {
+/// `pub(crate)` so the rescore command binds an image reference to the same
+/// pinning rule the preflight applies, rather than restating it.
+pub(crate) fn validate_pinned_reference(image: &str) -> Result<(), String> {
     let Some((repository, digest)) = image.rsplit_once("@sha256:") else {
         return Err(
             "a scanned image must be pinned as <repository>@sha256:<64 lowercase hex>".into(),

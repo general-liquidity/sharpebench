@@ -26,6 +26,7 @@ mod forecast_cmd;
 mod gateway_cli;
 mod import_cmd;
 mod lineage_cmd;
+mod rescore_cmd;
 #[cfg(feature = "self-update")]
 mod update;
 
@@ -57,6 +58,7 @@ fn main() -> ExitCode {
         Some("verify") => run_verify(&args, json),
         Some("capture") => run_capture(&args, json),
         Some("verify-trajectory") => run_verify_trajectory(&args, json),
+        Some("rescore") => ExitCode::from(rescore_cmd::run(&args, json).clamp(0, 255) as u8),
         Some("audit-briefing") => run_audit_briefing(&args, json),
         Some("canary") => run_canary(&args, json),
         Some("sandbox-check") => run_sandbox_check(&args, json),
@@ -611,6 +613,11 @@ fn help() {
     );
     println!("                       --allow-unbound-trajectory: explicit legacy or cross-version regrade; never the default");
     println!("                       --reexecute [--cmd \"<prog>\"|--http <addr>|--image <ref>]: also re-run every captured run with a fresh agent and refuse the first divergent decision");
+    println!(
+        "  sharpebench rescore <bundle.json>     recompute a declared submission bundle's quality from its frozen, digest-bound files only"
+    );
+    println!("                       --envelope <envelope.json>: judge the declared compute budget against the field's; a budget difference refuses, environment metadata is disclosed");
+    println!("                       --reexecute [--scan-policy <policy.json> [--runtime-allowlist <list.json>]]: also re-run every captured run from the bundle's own pinned image in a network-disabled container");
     println!("  sharpebench audit-briefing <briefing.json>  audit a shared briefing for input-side salience bias");
     println!("  sharpebench canary <seed>             derive a do-not-train contamination tripwire token");
     println!("  sharpebench sandbox-check <image@sha256:digest>  run live hostile field-readiness checks (never skips)");
