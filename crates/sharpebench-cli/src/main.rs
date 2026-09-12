@@ -568,6 +568,8 @@ fn help() {
     println!("                       --periods-per-year N: bars per year of the dataset (default 252; 1h crypto 8760, 4h 2190, 1d crypto 365, 1w 52)");
     println!("                       --pass-mode all|any|at-least:N|relative-to-benchmark: reliability verdict (default all)");
     println!("                       --benchmark-agent <id>: benchmark for relative-to-benchmark (default buy-and-hold)");
+    println!("                       --suite-evidence: with --json, wrap the board as {{board, suite_evidence}} and");
+    println!("                         carry the trial census and the control verdicts; the plain table always prints them");
     println!(
         "  sharpebench score <submissions.json>  rank a JSON field of pre-computed submissions"
     );
@@ -1567,6 +1569,209 @@ fn print_fault_injection(label: &str, report: &serde_json::Value) {
     }
 }
 
+/// How many luck-floor monkeys a `run` field carries. Named because the roster
+/// is declared before the field is assembled and both must read one number.
+const LUCK_FLOOR_AGENTS: usize = 3;
+
+/// The suite's protocol and accounting control: a no-op policy over the same
+/// cells the field is scored on.
+const HOLD_CONTROL_ID: &str = "pipeline-hold";
+
+/// The suite's refusal control: deliberately invalid orders presented to the
+/// closed decision contract.
+const REFUSAL_CONTROL_ID: &str = "invalid-order-refusal";
+
+/// The entrant id an external transport flag will be ranked under, resolved
+/// from the arguments before anything runs.
+///
+/// The roster is declared before the run, so the id the board will carry has to
+/// be known before the run. The three transport branches take their label from
+/// here, so a declaration and its board row cannot name one entrant two ways.
+/// The order matches the branches: `--http`, then `--image`, then `--cmd`.
+fn external_entrant_label(args: &[String]) -> Option<String> {
+    if let Some(addr) = flag_value(args, "--http") {
+        return Some(format!("http:{addr}"));
+    }
+    if let Some(image) = flag_value(args, "--image") {
+        return Some(format!("sandbox:{image}"));
+    }
+    flag_value(args, "--cmd")?
+        .split_whitespace()
+        .next()
+        .map(|prog| format!("cmd:{prog}"))
+}
+
+/// A no-op policy that counts the decisions the driver asked it for. It takes no
+/// position, so anything it moves is apparatus rather than market.
+struct CountedHold {
+    inner: sharpebench_sim::HoldAgent,
+    decisions: usize,
+}
+
+impl sharpebench_sim::Agent for CountedHold {
+    fn decide(
+        &mut self,
+        observation: &sharpebench_protocol::MarketObservation,
+    ) -> sharpebench_protocol::Decision {
+        self.decisions += 1;
+        self.inner.decide(observation)
+    }
+}
+
+/// Run the no-op control over the declared cells: does the protocol round-trip,
+/// and does the accounting close?
+///
+/// `decisions_expected` comes from the declared window geometry and
+/// `decisions_round_tripped` from the calls the driver actually made, so the two
+/// sides are counted by independent routes and a driver that skipped a bar shows
+/// up as a shortfall rather than agreeing with itself.
+///
+/// The residual is the compounded NAV drift of a policy that never trades,
+/// summed over the cells. A book that takes no position pays no fee, no
+/// financing and receives no dividend, so every cell must land back on its
+/// opening NAV exactly; anything else is cash moving with no order behind it.
+fn protocol_and_accounting_control(
+    data: &sharpebench_sim::Dataset,
+    windows: &[sharpebench_sim::Window],
+    seeds: &[u64],
+    costs: sharpebench_sim::CostModel,
+) -> sharpebench_core::ControlRun {
+    let mut decisions_expected = 0usize;
+    let mut decisions_round_tripped = 0usize;
+    let mut accounting_residual = 0.0_f64;
+    for &window in windows {
+        // The driver stops at the dataset's end, so the bars it will ask for are
+        // the window's own, clipped the same way it clips them.
+        let bars = window.end.min(data.len()).saturating_sub(window.start);
+        for &seed in seeds {
+            decisions_expected += bars;
+            let mut agent = CountedHold {
+                inner: sharpebench_sim::HoldAgent,
+                decisions: 0,
+            };
+            let run = sharpebench_sim::run_backtest(data, &mut agent, window, seed, costs);
+            decisions_round_tripped += agent.decisions;
+            accounting_residual += run
+                .returns
+                .iter()
+                .fold(1.0_f64, |nav, ret| nav * (1.0 + ret))
+                - 1.0;
+        }
+    }
+    sharpebench_core::ControlRun {
+        control_id: HOLD_CONTROL_ID.to_string(),
+        property: sharpebench_core::ControlProperty::ProtocolAndAccounting,
+        observation: sharpebench_core::ControlObservation::ProtocolAndAccounting {
+            decisions_expected,
+            decisions_round_tripped,
+            accounting_residual,
+        },
+    }
+}
+
+/// Decisions the closed contract must refuse, built against the observation
+/// they answer: an order for a symbol the observation does not carry, two orders
+/// for one symbol, and a target weight outside the admissible range.
+fn invalid_orders(
+    observation: &sharpebench_protocol::MarketObservation,
+) -> Vec<sharpebench_protocol::Decision> {
+    use sharpebench_protocol::{Action, Decision, Order};
+    let order = |symbol: &str, target_weight: f64| Order {
+        symbol: symbol.to_string(),
+        action: Action::Buy,
+        target_weight,
+        confidence: 0.5,
+        rationale: String::new(),
+    };
+    let decision = |orders: Vec<Order>| Decision {
+        orders,
+        reasoning: String::new(),
+        cost: None,
+    };
+    let mut out = vec![decision(vec![order("__no_such_symbol__", 0.1)])];
+    if let Some(known) = observation.symbols.first() {
+        out.push(decision(vec![
+            order(&known.symbol, 0.1),
+            order(&known.symbol, 0.2),
+        ]));
+        out.push(decision(vec![order(&known.symbol, 1.01)]));
+    }
+    out
+}
+
+/// Run the refusal control: present deliberately invalid orders to the same
+/// closed contract the live transports validate every external decision against,
+/// on an observation drawn from the run's own dataset and window.
+fn refusal_control(
+    data: &sharpebench_sim::Dataset,
+    window: sharpebench_sim::Window,
+    seed: u64,
+    costs: sharpebench_sim::CostModel,
+) -> sharpebench_core::ControlRun {
+    let mut env = sharpebench_sim::TradingEnv::new(data.clone(), window, costs, seed);
+    let observation = env.reset();
+    let submitted = invalid_orders(&observation);
+    let refusals_observed = submitted
+        .iter()
+        .filter(|decision| decision.validate_for(&observation).is_err())
+        .count();
+    sharpebench_core::ControlRun {
+        control_id: REFUSAL_CONTROL_ID.to_string(),
+        property: sharpebench_core::ControlProperty::RefusalOfInvalidOrder,
+        observation: sharpebench_core::ControlObservation::RefusalOfInvalidOrder {
+            invalid_orders_submitted: submitted.len(),
+            refusals_observed,
+        },
+    }
+}
+
+/// The census and the controls as a table after the board.
+///
+/// The census rows come from [`sharpebench_core::attach_census`], which walks
+/// the declared roster rather than the board, so a declared entrant the board
+/// carries no row for still appears with its counts and its gates instead of
+/// vanishing from the record.
+fn print_suite_evidence(board: &[CompositeScore], evidence: &sharpebench_core::SuiteEvidence) {
+    let census = &evidence.trials;
+    println!("\nSuite evidence. Not used by the gate, eligibility or the rank.");
+    println!(
+        "trial census: {} declared entrants x {} windows x {} seeds = {} declared trials; \
+         {} completed, {} failed, {} unreported",
+        census.cohort.agents.len(),
+        census.cohort.windows.len(),
+        census.cohort.seeds.len(),
+        census.expected,
+        census.completed,
+        census.failed,
+        census.unreported,
+    );
+    println!(
+        "{:<18} {:>9} {:>10} {:>7} {:>11} {:>7}",
+        "agent", "expected", "completed", "failed", "unreported", "scored"
+    );
+    for row in sharpebench_core::attach_census(board, census) {
+        println!(
+            "{:<18} {:>9} {:>10} {:>7} {:>11} {:>7}",
+            truncate(&row.agent_id, 18),
+            row.trials.expected,
+            row.trials.completed,
+            row.trials.failed,
+            row.trials.unreported,
+            row.score.is_some(),
+        );
+        for gate in &row.trials.gates {
+            println!("  gate: {gate:?}");
+        }
+    }
+    for control in &evidence.controls.controls {
+        println!(
+            "control [{}] {}",
+            if control.held { "held" } else { "withheld" },
+            control.detail
+        );
+    }
+}
+
 fn run_demo(args: &[String], json: bool) -> ExitCode {
     use sharpebench_sim::{
         Agent, BuyAndHold, CostModel, Dataset, ExternalAgent, HttpAgent, Momentum, Window,
@@ -1722,6 +1927,40 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
     let costs = CostModel::default();
     cfg.execution_seeds_per_window = seeds.len();
 
+    // The roster is declared here, before anything runs, out of this
+    // invocation's own configuration: the entrants it will field, the windows
+    // the dataset resolver fixed above, and the seeds. Assembling it afterwards
+    // out of whichever rows came back is the defect the census exists to
+    // prevent, so the declaration cannot be allowed to depend on the run.
+    let declared_entrant = external_entrant_label(args);
+    let entrant_ids: Vec<String> = declared_entrant
+        .iter()
+        .cloned()
+        .chain(["buy-and-hold".to_string(), "momentum".to_string()])
+        .chain((0..LUCK_FLOOR_AGENTS).map(sharpebench_harness::luck_floor_agent_id))
+        .collect();
+    let window_ids: Vec<String> = windows
+        .iter()
+        .map(|window| sharpebench_harness::window_label(*window))
+        .collect();
+    let roster = match sharpebench_core::TrialRoster::declare(&entrant_ids, &window_ids, &seeds) {
+        Ok(roster) => roster,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    // The closed-loop driver cannot fail a cell: `run_backtest` returns a run for
+    // every bar it is handed. The in-process entrants therefore report every
+    // declared cell completed, through the same reporter the external sweep's
+    // failure log goes through, rather than through a second code path.
+    let clean = sharpebench_harness::FailureLog::default();
+    let mut reports: Vec<sharpebench_core::TrialReport> = entrant_ids
+        .iter()
+        .filter(|id| Some(*id) != declared_entrant.as_ref())
+        .flat_map(|id| sharpebench_harness::trial_reports(id, &window_ids, &seeds, &clean))
+        .collect();
+
     let bh = sharpebench_harness::run_agent("buy-and-hold", &data, &windows, &seeds, costs, || {
         Box::new(BuyAndHold) as Box<dyn Agent>
     });
@@ -1732,7 +1971,11 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
     let mut field = vec![bh, mo];
     let mut external_accounting = None;
     field.extend(sharpebench_harness::luck_floor(
-        &data, &windows, &seeds, costs, 3,
+        &data,
+        &windows,
+        &seeds,
+        costs,
+        LUCK_FLOOR_AGENTS,
     ));
 
     // Optionally drive a real external agent (yours) through the *same* sim and
@@ -1771,7 +2014,9 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
     }
     if let Some(addr) = flag_value(args, "--http") {
         let addr = addr.to_string();
-        let label = format!("http:{addr}");
+        let label = declared_entrant
+            .clone()
+            .expect("--http is present in this branch, so the roster declared its entrant");
         let http_attempt = |wi: usize, seed: u64| {
             let mut agent = HttpAgent::new(addr.clone());
             sharpebench_harness::fault_plan::modes::run_faulted_backtest_observed(
@@ -1855,6 +2100,12 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
         ) {
             return ExitCode::FAILURE;
         }
+        reports.extend(sharpebench_harness::trial_reports(
+            &label,
+            &window_ids,
+            &seeds,
+            &res.failures,
+        ));
         external_accounting = Some((label, res.attempts, res.monetary_cost));
         field.insert(0, res.submission);
     } else if let Some(image) = flag_value(args, "--image") {
@@ -1898,7 +2149,9 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
             eprintln!("error: cannot start the sandboxed agent `{image}`: {error}");
             return ExitCode::FAILURE;
         }
-        let label = format!("sandbox:{image}");
+        let label = declared_entrant
+            .clone()
+            .expect("--image is present in this branch, so the roster declared its entrant");
         // One attempt = spawn, run, then `finish` for the post-exit resource
         // verdict: a container the kernel OOM-killed for exceeding the published
         // `--memory` budget surfaces as `ResourceLimitExceeded` (an agent fault),
@@ -2039,6 +2292,12 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
         ) {
             return ExitCode::FAILURE;
         }
+        reports.extend(sharpebench_harness::trial_reports(
+            &label,
+            &window_ids,
+            &seeds,
+            &res.failures,
+        ));
         external_accounting = Some((label, res.attempts, res.monetary_cost));
         field.insert(0, res.submission);
     } else if let Some(cmd) = flag_value(args, "--cmd") {
@@ -2066,7 +2325,9 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
             eprintln!("error: cannot spawn agent `{cmd}`");
             return ExitCode::FAILURE;
         }
-        let label = format!("cmd:{prog}");
+        let label = declared_entrant
+            .clone()
+            .expect("--cmd names a program in this branch, so the roster declared its entrant");
         let cmd_attempt = |wi: usize, seed: u64| {
             let rest_refs: Vec<&str> = rest.iter().map(String::as_str).collect();
             match ExternalAgent::spawn(&prog, &rest_refs) {
@@ -2163,6 +2424,12 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
         ) {
             return ExitCode::FAILURE;
         }
+        reports.extend(sharpebench_harness::trial_reports(
+            &label,
+            &window_ids,
+            &seeds,
+            &res.failures,
+        ));
         external_accounting = Some((label, res.attempts, res.monetary_cost));
         field.insert(0, res.submission);
     }
@@ -2183,8 +2450,24 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
         }
     }
     let board = rank(&field, &cfg);
+    // The controls run over the same dataset, windows and seeds the field was
+    // scored on, and are bound to the board through `suite_evidence`, whose only
+    // construction path refuses a control that is also a ranked entrant. The
+    // suite declares no economic comparator: `buy-and-hold` is a ranked
+    // reference entrant here, and a row cannot be both.
+    let controls = [
+        protocol_and_accounting_control(&data, &windows, &seeds, costs),
+        refusal_control(&data, windows[0], seeds[0], costs),
+    ];
+    let evidence = match sharpebench_core::suite_evidence(&roster, &reports, &controls, &board) {
+        Ok(evidence) => evidence,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
     if json {
-        emit_json(&run_board_json(
+        let board_json = run_board_json(
             &board,
             external_accounting
                 .as_ref()
@@ -2195,7 +2478,19 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                     artifact_preflight: preflight_row.clone(),
                     fault_injection: fault_row.clone(),
                 }),
-        ));
+        );
+        // The board stays the whole document unless the evidence is asked for.
+        // Wrapping it unconditionally would rename the top level of a machine
+        // output every existing reader parses as an array, and the evidence is
+        // reporting surface beside the board rather than part of it.
+        if args.iter().any(|arg| arg == "--suite-evidence") {
+            emit_json(&serde_json::json!({
+                "board": board_json,
+                "suite_evidence": evidence,
+            }));
+        } else {
+            emit_json(&board_json);
+        }
     } else {
         if let Some((label, attempts, cost)) = external_accounting {
             print_attempt_accounting(&label, attempts, &cost);
@@ -2204,6 +2499,7 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
             }
         }
         print_board(&board);
+        print_suite_evidence(&board, &evidence);
     }
     ExitCode::SUCCESS
 }

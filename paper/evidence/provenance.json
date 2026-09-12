@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "42270ffdac3397b78c4d9aef3e9c7bb082b84b55",
+  "generated_at_head": "1d09efc4973242f3914a94c293405df05c18d800",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -315,7 +315,7 @@
     },
     {
       "path": "crates/sharpebench-cli/src/main.rs",
-      "sha256": "ad8c3316ad541cdece659795d85a998af9453caea87b34b6861c9052351d6cc6"
+      "sha256": "f2923f020d572337cc8374342045d87fad3a636a0102cfeed8b237a122b5f3d2"
     },
     {
       "path": "crates/sharpebench-cli/src/rescore_cmd.rs",
@@ -372,6 +372,10 @@
     {
       "path": "crates/sharpebench-cli/tests/sharpe_diagnostics_cli.rs",
       "sha256": "318545888d93b3ab15c381f443da1faafe3494a44a108f0031760c7da05cbb9d"
+    },
+    {
+      "path": "crates/sharpebench-cli/tests/suite_evidence_cli.rs",
+      "sha256": "a47bcb94fdf228c68ca93e92188a0ea186bb1a9a19f921fbef731167dcee6b21"
     },
     {
       "path": "crates/sharpebench-core/Cargo.toml",
@@ -451,7 +455,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/lib.rs",
-      "sha256": "112653c0be4ef09953907b6fa0a08ab902b413103c597fcdd75e35c3a4b37566"
+      "sha256": "8e03049c44e16b5c379485cc0cfbc41417dc21fe9e3b156db086f10542c9b859"
     },
     {
       "path": "crates/sharpebench-core/src/oos.rs",
@@ -500,6 +504,10 @@
     {
       "path": "crates/sharpebench-core/src/suite_controls.rs",
       "sha256": "81f8e01f6c203a2597771a6fc278132cdfd0169a84441b9452208d337502e661"
+    },
+    {
+      "path": "crates/sharpebench-core/src/suite_evidence.rs",
+      "sha256": "9ceaaa7d08b15bacfab615e74b788d02c72f880827e302e4bf770d996bbb9a79"
     },
     {
       "path": "crates/sharpebench-core/src/trial_census.rs",
@@ -639,7 +647,7 @@
     },
     {
       "path": "crates/sharpebench-harness/src/lib.rs",
-      "sha256": "e37a074d5b7a287ab2a43be718f5502625beb9eba61c19772ff7d5d56788bce3"
+      "sha256": "b6b81331a0f3f926793d1e953c48ed02d140a31626403073eced8395a00e4637"
     },
     {
       "path": "crates/sharpebench-harness/src/perturb.rs",
@@ -1163,5 +1171,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "b8ed3639ec7d486ba82400b0f2738352c76d69f892198a7b0baac8c8c7721387"
+  "source_snapshot_sha256": "83375630bbef359b1763934fc68ee453643c77f7dc8c0bd799db664f0f38a1dc"
 }

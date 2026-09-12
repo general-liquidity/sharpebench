@@ -62,6 +62,7 @@ pub mod run_identity;
 pub mod selfaudit;
 pub mod sharpe_diagnostics;
 pub mod suite_controls;
+pub mod suite_evidence;
 pub mod trial_census;
 
 pub use allocation::{
@@ -150,6 +151,7 @@ pub use suite_controls::{
     ControlRun, ControlShortfall, ControlVerdict, SuiteControlEvidence,
     ACCOUNTING_RESIDUAL_TOLERANCE, SUITE_CONTROL_INVENTORY,
 };
+pub use suite_evidence::{suite_evidence, SuiteEvidence};
 pub use trial_census::{
     attach_census, census, AgentCensus, CensusError, CensusGate, CensusedScore, CohortIdentity,
     TrialCensus, TrialOutcome, TrialReport, TrialRoster,
