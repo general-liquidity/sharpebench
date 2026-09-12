@@ -1,5 +1,61 @@
 # Verification record
 
+## Current status
+
+This record is append-only and its sections are timestamped checkpoints, not a
+queue. A "Not established" list states what was true when its round closed, and
+a later round may have closed an item without editing the earlier text: the
+entry below dated 2026-09-11 says nothing in SharpeBench compares its committed
+module against a fresh build, and Bench PR #100 added exactly that gate hours
+later. Read the latest round first, and treat an earlier limit as open only if
+no later round names it.
+
+## Verifying the verification, 2026-09-12
+
+Five pull requests, each merged with every check green on its exact pushed head
+and the merged tree identical to the tested tree.
+
+| PR | Work | Main after merge |
+|---|---|---|
+| Bench #109 | A scored model must have accounting evidence, whatever files exist | `1045e82` |
+| Bench #110 | The roster validated on every path; a comparator's number required finite | `bb8de43` |
+| Arena #62 | The blocking-event contract derived from the engine, not restated | `89af7fa` |
+| Bench #111 | The census and the controls wired into the producing path | `0faa698` |
+
+The round is worth recording for where the defects were. All four were in code
+this project wrote to prevent exactly that class of defect, and three of them
+were added in the two rounds immediately before. The accounting reconciliation
+that published nothing, the roster that validated one path and not the other,
+the control that refused a bad residual while ignoring a bad mean, and the event
+table kept by hand next to the enum it was supposed to mirror. Every one passed
+its own suite: nineteen assembler tests, twelve census tests, thirteen control
+tests, all green while the defect held.
+
+Two claims in this record were also wrong and are corrected in place rather than
+quietly edited. G26 said an outside review read the reference repositories in
+full, when that review's own coverage ledger marks most of its inventory unread,
+and said every finding was closed, when the sibling product's open items were
+recorded as open in the row immediately below it. A record that overstates its
+own completeness is the same failure as a test that passes for the wrong reason.
+
+The reviewer's remaining observation is also recorded and is not closed: the
+sections of this file are timestamped checkpoints rather than a queue, and one
+of them still says SharpeBench has no gate comparing its committed module
+against a fresh build, which a pull request added hours after that section was
+written. A note at the top of this file now says how to read it.
+
+### Not established
+
+No gateway has served a real provider and no field has completed, so the
+accounting repairs are established against fabricated inputs and a read-only
+inventory rather than against a bill. The economic comparator control is
+deliberately undeclared, because the only buy-and-hold in this field is a ranked
+entrant and binding it as a control would be the bypass the refusal exists to
+prevent. The published packages still predate every repair in this round and the
+two before it. The momentum style remains sampled and ungraded. The mutation
+gate's four-way split is delivered and its speedup remains projected rather than
+measured against a population.
+
 ## Reading the sources directly, 2026-09-11
 
 Five pull requests, each merged with every check green on its exact pushed head
