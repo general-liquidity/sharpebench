@@ -250,6 +250,8 @@ class AssemblerReadsTheSharedTableTests(unittest.TestCase):
         (final / "llm-field-records-all.jsonl").write_text(
             "".join(json.dumps(r) + "\n" for r in records), encoding="utf-8"
         )
+        stats = final / "llm-stats"
+        stats.mkdir(exist_ok=True)
         for model in models:
             (final / f"llm-cache-{model}.jsonl").write_text(
                 json.dumps(
@@ -257,6 +259,16 @@ class AssemblerReadsTheSharedTableTests(unittest.TestCase):
                 )
                 + "\n",
                 encoding="utf-8",
+            )
+            # The assembler reconciles the three kinds of evidence a run leaves
+            # and refuses a model missing any of them, so one call has to be
+            # recorded in all three or these cases would refuse for a reason
+            # that has nothing to do with the rate card.
+            (final / f"llm-attempts-{model}.jsonl").write_text(
+                json.dumps({"key": "k0", "pid": 1}) + "\n", encoding="utf-8"
+            )
+            (stats / f"stats-{model}.json").write_text(
+                json.dumps({"model": model, "llm_calls": 1}), encoding="utf-8"
             )
 
     def run_assembler(self, root):

@@ -6,12 +6,12 @@ importable module, so every case here runs it the way an operator does: a copy
 in a temporary directory with a fabricated `final/` beside it and the shared
 rate card it imports.
 
-Six findings are pinned, all of them the same shape: a published property that
+Seven findings are pinned, all of them the same shape: a published property that
 quietly did not hold on some input, so the assembler produced a plausible field
-instead of refusing. The last two survived the first four: an independent
-re-check found each of them still live while all thirteen cases written for the
-first four passed, which is why each is reproduced here as a failing case before
-it is closed.
+instead of refusing. The last three survived the ones before them: an
+independent re-check found each still live while every case written for the
+earlier ones passed, which is why each is reproduced here as a failing case
+before it is closed.
 
   * The field is the Cartesian product of its models and its datasets, and two
     separate memberships were checked instead: the set of models against the
@@ -41,6 +41,17 @@ it is closed.
     both: the set collapses the duplicate and the pairing is a different
     identity. The cell is now held unique as well, and the pairing is kept
     because it also covers the reference-field and luck-floor rows.
+
+  * Every reconciliation between the score rows and the spend read its roster
+    off the files on disk. `per_model` was whatever `llm-cache-*.jsonl` globbed
+    and the missing-model refusal fired only from the loop over `stats-*.json`,
+    so with neither kind of file present there was no roster and nothing checked
+    anything: a complete six-cell score grid published zero accounted models,
+    zero calls and $0.00 and exited 0, while the nineteen cases written for the
+    six findings above all passed. The roster now comes from the score rows and
+    the required cells, and the three kinds of evidence a run leaves -- the
+    attempt ledger, the response cache and the per-process statistics -- are
+    required to exist and to agree on how many calls each model made.
 
 The corrupt-statistics half of that third finding did not reproduce: a stats
 file that does not parse has always raised `SystemExit` naming the file, one
@@ -116,9 +127,42 @@ class AssemblerCase(unittest.TestCase):
             model, [{"tokens_in": tokens_in, "tokens_out": tokens_out}]
         )
 
-    def write_cache_records(self, model, records):
+    def write_cache_records(self, model, records, *, evidence=True):
+        """One model's response cache, and by default the other two evidence
+        kinds counting the same calls.
+
+        A run leaves a ledger line before each request, a cache record for each
+        answer and a per-process statistics count of each request, and the
+        assembler requires the three to agree. So a fixture that writes a cache
+        alone is a fixture with two disagreements in it, and every case built on
+        it would refuse for a reason it did not choose. `evidence=False` is for
+        the cases that mean to leave one kind out.
+        """
         (self.final / f"llm-cache-{model}.jsonl").write_text(
             "".join(json.dumps(r) + "\n" for r in records), encoding="utf-8"
+        )
+        if evidence:
+            self.write_attempts(model, len(records))
+            self.write_model_stats(model, len(records))
+
+    def write_attempts(self, model, dispatches):
+        (self.final / f"llm-attempts-{model}.jsonl").write_text(
+            "".join(
+                json.dumps({"key": f"k{i}", "pid": 1}) + "\n"
+                for i in range(dispatches)
+            ),
+            encoding="utf-8",
+        )
+
+    def write_model_stats(self, model, llm_calls):
+        """The statistics file the setUp fixture writes for each model.
+
+        Named after the model so a case can overwrite exactly this one, and
+        distinct from the `stats-<n>.json` names the cases add, which carry no
+        `llm_calls` and so leave the reconciled totals where they were.
+        """
+        self.write_stats(
+            f"stats-base-{model}.json", {"model": model, "llm_calls": llm_calls}
         )
 
     def write_stats(self, name, payload):
@@ -384,7 +428,9 @@ class StatisticsAccountingTests(AssemblerCase):
             self.write_stats(f"stats-{i}.json", {"model": orphan, "observations": 1})
         self.write_stats("stats-9.json", {"model": "claude-fable-5"})
         output = self.refusal()
-        self.assertIn("3 of 4 statistics files", output)
+        # Three orphan files, one naming a model with an accounting row, and the
+        # three the fixture writes to keep each model's evidence kinds agreeing.
+        self.assertIn("3 of 7 statistics files", output)
         self.assertIn(f"{orphan} (3)", output)
         self.assertIn("cost_usd_total", output)
 
@@ -408,7 +454,7 @@ class StatisticsAccountingTests(AssemblerCase):
                 f"stats-{i}.json", {"model": "claude-opus-5", "observations": 1}
             )
         meta = self.assemble()
-        self.assertEqual(meta["stats_files_read"], 3)
+        self.assertEqual(meta["stats_files_read"], 3 + len(MODELS))
         self.assertEqual(meta["per_model"]["claude-opus-5"]["observations"], 3)
 
     def test_a_corrupt_stats_file_refuses_and_names_the_file(self):
@@ -431,6 +477,173 @@ class StatisticsAccountingTests(AssemblerCase):
         )
         output = self.refusal()
         self.assertIn("refused model identities", output)
+
+
+class ScoredModelRosterTests(AssemblerCase):
+    """A scored model published with no accounting evidence at all.
+
+    Every gate that reconciled score rows against spend read its roster off the
+    files on disk. `per_model` was whatever `llm-cache-*.jsonl` globbed, and the
+    missing-model refusal fired only from the loop over `stats-*.json`. With
+    neither kind of file present there was no roster and nothing to check
+    against, so a complete six-cell score grid published `per_model: {}`,
+    `llm_calls_total: 0` and `cost_usd_total: 0` and exited 0. The four cases
+    below are the reviewer's reproduction table, run against the same fixture:
+    only the last of them refused before this change.
+    """
+
+    def drop_evidence(self, *models):
+        """Remove every evidence kind for `models`, the way an absent run leaves
+        the directory: no cache, no ledger, no statistics file."""
+        for model in models:
+            (self.final / f"llm-cache-{model}.jsonl").unlink()
+            (self.final / f"llm-attempts-{model}.jsonl").unlink()
+            (self.final / "llm-stats" / f"stats-base-{model}.json").unlink()
+
+    def test_the_complete_control_publishes_the_accounting_it_scores(self):
+        """Row 1, and the control the other three are read against.
+
+        Without it, every case below could pass because the fixture refuses for
+        some reason nobody named. It also pins the numbers the reviewer's table
+        states, so a field that stops accounting for its models is a change in
+        these and not only a change in an exit code.
+        """
+        meta = self.assemble()
+        self.assertEqual(len(meta["per_model"]), len(MODELS))
+        self.assertEqual(meta["llm_calls_total"], len(MODELS))
+        self.assertEqual(meta["cost_usd_total"], 24.0)
+
+    def test_one_model_with_no_evidence_of_any_kind_is_refused(self):
+        """Row 2: one cache absent and no statistics file to notice it.
+
+        The score grid is complete and every other gate passes. Before this
+        change the field published two accounted models against six scored
+        rows, and 2 calls and $9.00 against three models that ran.
+        """
+        self.drop_evidence("claude-fable-5")
+        output = self.refusal()
+        self.assertIn("no response cache", output)
+        self.assertIn("claude-fable-5", output)
+
+    def test_a_field_with_no_evidence_at_all_is_refused(self):
+        """Row 3, the limit of row 2: six scored rows, zero accounted models,
+        zero calls and $0.00 published, and 19 assembler tests passing."""
+        self.drop_evidence(*MODELS)
+        output = self.refusal()
+        self.assertIn("no response cache", output)
+        for model in MODELS:
+            self.assertIn(model, output)
+
+    def test_one_model_with_no_cache_but_a_statistics_file_is_refused(self):
+        """Row 4, which refused before this change and still does.
+
+        It is the row that shows the defect was a roster read off the
+        directory rather than a missing rule: the same absent cache was caught
+        here only because a statistics file happened to name the model. The
+        cause is the older one, so this case asserts that refusal and not the
+        roster's.
+        """
+        self.drop_evidence("claude-fable-5")
+        self.write_stats("stats-1.json", {"model": "claude-fable-5"})
+        output = self.refusal()
+        self.assertIn("no accounting row", output)
+        self.assertIn("claude-fable-5", output)
+
+    def test_an_accounted_model_the_field_does_not_score_is_refused(self):
+        """The reconciliation in the other direction.
+
+        A cache file for a model with no score row builds an accounting row and
+        sums its calls and dollars into the totals, so the field reports spend
+        against a model no published row explains. The model named is one the
+        rate card prices and its three evidence kinds agree, so neither the
+        pricing gate nor the reconciliation below can be the cause.
+        """
+        self.write_cache("claude-haiku-4-5")
+        output = self.refusal()
+        self.assertIn("no score row", output)
+        self.assertIn("claude-haiku-4-5;", output)
+        self.assertNotIn("no rate card", output)
+
+
+class EvidenceReconciliationTests(AssemblerCase):
+    """The three evidence kinds a run leaves, held to one count.
+
+    The ledger takes a line under a lock before each request leaves, so it is
+    the ceiling and the only record written before the money is spent. The cache
+    records the requests that returned an answer. The statistics count each
+    request in the process that issued it. A publishable field has no API error,
+    no exhausted budget and no refused identity, so all three see the same calls.
+    """
+
+    def test_a_model_with_no_attempt_ledger_is_refused(self):
+        """A cache and a statistics file that agree still do not say what the
+        provider was asked to do: both record what came back."""
+        (self.final / "llm-attempts-claude-opus-5.jsonl").unlink()
+        output = self.refusal()
+        self.assertIn("no attempt ledger", output)
+        self.assertIn("llm-attempts-claude-opus-5.jsonl", output)
+
+    def test_a_model_with_an_empty_attempt_ledger_is_refused(self):
+        """Empty is its own cause, as an empty cache is: a ledger with no lines
+        is the absence of evidence about a model that certainly dispatched, not
+        a measurement that it dispatched nothing. Named separately so the
+        operator can tell a truncated ledger from one that disagrees."""
+        self.write_attempts("claude-opus-5", 0)
+        output = self.refusal()
+        self.assertIn("no dispatch reserved", output)
+
+    def test_fewer_cache_records_than_reservations_is_refused(self):
+        """Spend with no answer recorded. Two requests left, one came back, so
+        the published `llm_calls` and `cost_usd` count one of the two calls the
+        provider was asked to make and billed for.
+
+        The statistics are moved with the ledger, so the cache is the only kind
+        out of step and the refusal has one cause.
+        """
+        self.write_attempts("claude-opus-5", 2)
+        self.write_model_stats("claude-opus-5", 2)
+        output = self.refusal()
+        self.assertIn("evidence disagrees", output)
+        self.assertIn("reserves 2 dispatches", output)
+        self.assertIn("cache records 1", output)
+
+    def test_statistics_counting_fewer_dispatches_than_the_ledger_is_refused(self):
+        """A process whose statistics file did not survive. The ledger and the
+        cache agree on two calls and the statistics account for one, so the
+        secondary counters the field publishes describe half the run."""
+        self.write_cache_records(
+            "claude-opus-5",
+            [{"tokens_in": 10, "tokens_out": 5}, {"tokens_in": 10, "tokens_out": 5}],
+        )
+        self.write_model_stats("claude-opus-5", 1)
+        output = self.refusal()
+        self.assertIn("evidence disagrees", output)
+        self.assertIn("count 1", output)
+
+    def test_statistics_counting_more_dispatches_than_the_ledger_is_refused(self):
+        """The other direction: a count of calls nothing reserved. The ledger is
+        written under a lock before each request, so a process claiming more
+        dispatches than it reserved is counting requests the ceiling never
+        admitted."""
+        self.write_model_stats("claude-opus-5", 2)
+        output = self.refusal()
+        self.assertIn("evidence disagrees", output)
+        self.assertIn("count 2", output)
+
+    def test_three_agreeing_evidence_kinds_still_assemble(self):
+        """The control for this class. Three ledger lines, three cache records
+        and statistics counting three, spread over two files to show the
+        statistics are summed rather than read from one."""
+        self.write_cache_records(
+            "claude-opus-5",
+            [{"tokens_in": 10, "tokens_out": 5}] * 3,
+            evidence=False,
+        )
+        self.write_attempts("claude-opus-5", 3)
+        self.write_model_stats("claude-opus-5", 1)
+        self.write_stats("stats-1.json", {"model": "claude-opus-5", "llm_calls": 2})
+        meta = self.assemble()
+        self.assertEqual(meta["per_model"]["claude-opus-5"]["llm_calls"], 3)
 
 
 class OneRefusalRuleTests(AssemblerCase):
@@ -470,7 +683,9 @@ class OneRefusalRuleTests(AssemblerCase):
             "the refusal is stated twice; a later edit can repair one copy only",
         )
         self.assertEqual(source.count("def refuse_unaccountable("), 1)
-        self.assertEqual(source.count("refuse_unaccountable("), 5)
+        # One definition and nine causes that reach it. The number is pinned so
+        # that a cause added later is added to the one rule and not beside it.
+        self.assertEqual(source.count("refuse_unaccountable("), 10)
 
 
 if __name__ == "__main__":
