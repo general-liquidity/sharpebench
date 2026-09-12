@@ -1,5 +1,57 @@
 # Verification record
 
+## Reading the sources directly, 2026-09-11
+
+Five pull requests, each merged with every check green on its exact pushed head
+and the merged tree identical to the tested tree. Four of the five had to be
+brought up to date and tested again, because each merge invalidated the next.
+
+| PR | Work | Main after merge |
+|---|---|---|
+| Bench #101 | Usage evidence required per record; the published cell held unique | `c4e3f9e` |
+| Bench #102 | The comparison axis declared; every regrade linked to its source | `a99c0b7` |
+| Bench #103 | Three claims narrowed to what the sources license | `781880c` |
+| Bench #104 | An operator rescore over a declared bundle | `79e8b80` |
+| Bench #105 | The trial census and the typed suite controls | `d4165ec` |
+
+What distinguishes this round from the one before it is that the reading was
+done here rather than accepted. That changed the answers. Of the paper-derived
+concerns carried into it, most were already correct in the code and the useful
+output was an anchor saying so. One was a defect in the review's own framing:
+the differential-return question does not arise, because under the zero-rate
+cash convention the benchmark series is constant zero, so the differential is
+the raw series and the implemented ratio is Sharpe's ex-post definition exactly
+rather than an approximation of it. Every call site was traced to establish that
+no risky benchmark reaches the scalar form.
+
+Four printed formulas in one supplied paper and one uniqueness claim in another
+were confirmed wrong by independent arithmetic, and none had ever been
+transcribed into either product. A source error is only a defect here if
+somebody copied it, and nobody did. One paper is recorded as consulted and
+correctly not adopted, its objective being an expected-utility ranking of known
+distributions rather than an inferential statement about an observed track.
+
+Three failures this round were in the checking rather than in the code, which is
+the reason the isolated-cause rule keeps earning its place. A mutation that
+replaced a documented scope with an overclaim failed a presence check rather
+than the guard meant to catch overclaims, so it was evidence for the wrong
+thing and was replaced by one that keeps every required phrase and only adds the
+overclaim. A fixture tripped two rules at once and was split so each rule is
+asserted alone. And a test asserting that a control refuses was rewritten to
+assert which refusal it returns, because four of those refusals have a second
+available cause and mere refusal proves none of them.
+
+### Not established
+
+No gateway has served a real provider and the field has still never completed,
+so the accounting repairs remain established against synthetic inputs. The
+rescore command's re-execution path has no test, since it needs a live container
+daemon, though its delegates are covered. A rescore bundle binds content and not
+an author, so it is not signed, and pairing it with the attestation chain is not
+done. The regrade receipt takes the source digest on trust without reading a
+byte, which is the value a rescore verifies, so the two compose only by hand.
+The momentum style remains sampled and ungraded until its producer is rerun.
+
 ## Acting on the independent assessment, 2026-09-11
 
 Seven pull requests, four in SharpeBench and three in SharpeArena, each merged
