@@ -677,6 +677,39 @@ frozen paper evidence was neither regenerated nor reproduced, since the current
 tree already diverges from that snapshot for reasons that predate this work and
 sit in the simulator rather than in the statistics.
 
+## The remaining three exports' cross-runtime evidence, 2026-09-12
+
+`contract/attestation/kernel-goldens.json` pins `walk_forward`, `stress_suite` and
+`tag_regime` output bytes, read by the native suite, the wasm32 suite and the npm suite
+against the committed bundle, exactly as `backtest-goldens.json` does for the backtest
+path. Those three were named in T1 alongside `run_baseline` and `replay_run` and were the
+part the 2026-09-11 round deliberately left open. What covered them was a shape assertion:
+array lengths, the first stress panel's name, and that the regime label is one of three
+strings, none of which moves when the numbers behind it differ between runtimes.
+
+Nothing numerical moved. All nine entries reproduce byte for byte on the host build, on a
+freshly compiled wasm32 build and through the shipped `pkg/sharpearena_bg.wasm`, all 52
+recorded artifact digests are unchanged, and `SPEC_HASH` is unchanged because nothing
+touched here is a `SPEC_FILES` input. `node scripts/check-wasm-bundle.mjs` reports the
+committed bundle answering identically to this tree's build across 44 calls, and byte
+identical as well on this host.
+
+The mutation check was run in an isolated copy of the worktree, one export path at a time:
+the `end` field `walk_forward` reports, the seed `Dataset::stress_suite` is called with,
+and the `Regime::Bull` / `Regime::Bear` label mapping. Each round failed the new fixtures
+in all three runtimes, including the npm leg driven through a bundle rebuilt from the
+perturbed source, and left every pre-existing test in all three suites green, which is what
+shows the new fixtures cover something the old ones did not. Each round was restored from
+`git show HEAD:<path>`, confirmed with `cmp`, and re-run green.
+
+### Not established
+
+No cross-runtime arithmetic mismatch was demonstrated for these three exports, before or
+after. This round closed an evidence gap and repaired no number. Nine entries are nine
+inputs rather than these exports' whole domain. `tag_regime` is the weakest of the three,
+because its output is one of three short strings: an arithmetic difference that does not
+cross a classification boundary on the four committed inputs does not move its fingerprint.
+
 ## Producer paths for the transfer boundaries, 2026-09-12
 
 A third reviewer accepted the census and suite-control wiring and named three
