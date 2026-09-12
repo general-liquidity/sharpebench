@@ -349,17 +349,24 @@ def resolve_base(root: Path, base_ref: str) -> str:
 
 
 def bundle_version(root: Path) -> str:
-    """Ask the committed module for the crate version compiled into it."""
+    """Ask the committed module for the methodology version compiled into it.
+
+    This kernel exposes no `crate_version` export; the version it reports rides
+    on a scored result, which is how `scripts/check-wasm-bundle.mjs` reads it.
+    The first version of this function assumed the sibling product's API and
+    read an empty string back, so it is taken from the same place the gate takes
+    it rather than from a second guess about the surface.
+    """
     entry = root / "npm" / "pkg" / "sharpebench.js"
+    script = (
+        "const k = require(process.argv[1]);"
+        "const r = JSON.parse(k.is_my_sharpe_real("
+        "JSON.stringify([0.01,-0.02,0.03,0.005,-0.01,0.02,0.015,-0.005]),"
+        "'{\"n_trials\":2}'));"
+        "process.stdout.write(String(r.methodology_version ?? ''));"
+    )
     completed = subprocess.run(
-        [
-            "node",
-            "-e",
-            "const k = require(process.argv[1]);"
-            "process.stdout.write(typeof k.crate_version === 'function'"
-            " ? String(k.crate_version()) : '');",
-            str(entry),
-        ],
+        ["node", "-e", script, str(entry)],
         cwd=root,
         capture_output=True,
         text=True,
@@ -411,9 +418,12 @@ def rebuild_committed_bundle(root: Path, target: str) -> None:
         "sharpebench",
     )
     reported = bundle_version(root)
-    if reported != target:
+    # The stamp is a qualified name, `sharpebench-stats/0.25.0`, not a bare
+    # version. Compare the version it carries rather than the whole string.
+    carried = reported.rsplit("/", 1)[-1] if reported else ""
+    if carried != target:
         raise ReleaseError(
-            f"the rebuilt wasm bundle reports {reported}, expected {target}"
+            f"the rebuilt wasm bundle reports {reported!r}, expected {target}"
         )
     if not git(root, "status", "--porcelain", "--", str(pkg)).strip():
         return
