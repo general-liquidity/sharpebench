@@ -61,6 +61,8 @@ pub mod rolling;
 pub mod run_identity;
 pub mod selfaudit;
 pub mod sharpe_diagnostics;
+pub mod suite_controls;
+pub mod trial_census;
 
 pub use allocation::{
     check_weights, score_allocation, turnover, AllocationPolicy, AllocationReport, AllocationStep,
@@ -142,4 +144,13 @@ pub use selection::{selection_robustness, SelectionRobustness};
 pub use selfaudit::{run_self_audit, SelfAuditReport};
 pub use sharpe_diagnostics::{
     sharpe_diagnostics, MppmDiagnostic, PsrDiagnostic, SharpeDiagnostic, SharpeDiagnostics,
+};
+pub use suite_controls::{
+    bind_to_suite, evaluate_controls, ControlError, ControlObservation, ControlProperty,
+    ControlRun, ControlShortfall, ControlVerdict, SuiteControlEvidence,
+    ACCOUNTING_RESIDUAL_TOLERANCE, SUITE_CONTROL_INVENTORY,
+};
+pub use trial_census::{
+    attach_census, census, AgentCensus, CensusError, CensusGate, CensusedScore, CohortIdentity,
+    TrialCensus, TrialOutcome, TrialReport, TrialRoster,
 };
