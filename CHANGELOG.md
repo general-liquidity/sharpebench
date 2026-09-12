@@ -8,9 +8,11 @@ are the twelve listed in [RELEASING.md](RELEASING.md), and `xtask` and
 `examples/reference-agent` are `publish = false`. Each section is one `v*` tag
 and links the commits it was built from.
 
-[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.25.0...HEAD
 
 ## [Unreleased]
+
+## [0.25.0] - 2026-09-12
 
 ### Breaking
 - harness: `ModelGateway::open` refuses a money journal that holds a reservation with no settlement beside it, with `std::io::ErrorKind::InvalidData`, where it used to resume one. That record is what a gateway leaves when a settlement could not be written, and what a process that died mid-call leaves too. The condition that stops such a gateway, `journal_unwritable`, was a flag in memory initialised to `false` by `open`, so the operator action a stopped gateway invites, restart it, cleared it: the reopened gateway believed the journal writable and re-reserved budget against a total the file is known to understate, since the settlement that went missing may have priced above its reservation. The published spend was then lower than the real spend. Persisting the flag is not the alternative, because the condition is defined by a write to that journal having failed; what is already durable is the record, so that is what is read. An operator whose journal is refused reads it with `sharpebench gateway --journal <path>`, which reports `outstanding_usd_nanos` and `partial`, and runs what is left under a fresh journal. A journal whose records are complete resumes exactly as before.
@@ -654,6 +656,7 @@ First published release.
 ### Fixed
 - Constant-time HMAC verification and bounded, timed agent HTTP reads ([6c3d174](https://github.com/general-liquidity/sharpebench/commit/6c3d174)).
 
+[0.25.0]: https://github.com/general-liquidity/sharpebench/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/general-liquidity/sharpebench/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/general-liquidity/sharpebench/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/general-liquidity/sharpebench/compare/v0.21.0...v0.22.0
