@@ -255,7 +255,11 @@ class AssemblerReadsTheSharedTableTests(unittest.TestCase):
         for model in models:
             (final / f"llm-cache-{model}.jsonl").write_text(
                 json.dumps(
-                    {"tokens_in": self.TOKENS_IN, "tokens_out": self.TOKENS_OUT}
+                    {
+                        "key": "k0",
+                        "tokens_in": self.TOKENS_IN,
+                        "tokens_out": self.TOKENS_OUT,
+                    }
                 )
                 + "\n",
                 encoding="utf-8",
@@ -263,12 +267,40 @@ class AssemblerReadsTheSharedTableTests(unittest.TestCase):
             # The assembler reconciles the three kinds of evidence a run leaves
             # and refuses a model missing any of them, so one call has to be
             # recorded in all three or these cases would refuse for a reason
-            # that has nothing to do with the rate card.
+            # that has nothing to do with the rate card. Each kind carries what
+            # the shim stamps on it: the ledger names the request, the model it
+            # was requested under, the scaffold and the process that reserved
+            # it, the cache answers that same request, and the statistics state
+            # every counter, because the assembler reads the records rather
+            # than counting the lines.
             (final / f"llm-attempts-{model}.jsonl").write_text(
-                json.dumps({"key": "k0", "pid": 1}) + "\n", encoding="utf-8"
+                json.dumps(
+                    {
+                        "key": "k0",
+                        "model_requested": model,
+                        "scaffold_version": "summarize-v1/parse-v1",
+                        "pid": 1,
+                        "started_ns": 1,
+                    },
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
             )
             (stats / f"stats-{model}.json").write_text(
-                json.dumps({"model": model, "llm_calls": 1}), encoding="utf-8"
+                json.dumps(
+                    {
+                        "model": model,
+                        "llm_calls": 1,
+                        "observations": 0,
+                        "stride_holds": 0,
+                        "cache_hits": 0,
+                        "budget_exhausted": 0,
+                        "api_errors": 0,
+                        "identity_refusals": 0,
+                    }
+                ),
+                encoding="utf-8",
             )
 
     def run_assembler(self, root):

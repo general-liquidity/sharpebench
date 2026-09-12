@@ -14,6 +14,31 @@ and links the commits it was built from.
 
 ### Fixed
 
+- llm field: the assembler reads the evidence it counts. `paper/evidence/assemble_llm_field.py`
+  reconciles three kinds of accounting evidence and took each of the three
+  counts off its file without reading a record: the attempt ledger's count was
+  its nonblank lines, the statistics count was `rec.get("llm_calls", 0)` where
+  `0 + True == 1`, and the comparison was over the totals. So a model's entire
+  ledger replaced by `{` and a newline, or by `{}` and a newline, or its
+  dispatch count stated as a JSON `true`, each reconciled against a real call
+  and published the same field at exit 0 while all thirty assembler cases
+  passed. Every ledger line is now parsed and required to be the record
+  `reserve_call` writes, naming the request digest it was taken for, the model
+  it was requested under, the scaffold version and the process identity, and a
+  line reserving another model's request is refused rather than costed at this
+  model's rate card. Every statistics counter is required to be present and to
+  be a count, through the same `is_count` rule the token counts already went
+  through, so a file that never stated `api_errors` no longer publishes a run
+  as free of them. Equal counts are then held to be counts of the same calls:
+  the ledger and the response cache both carry the request digest, so they are
+  matched request by request, and an answer to a request nothing reserved no
+  longer cancels against a reservation nothing answered. A retried request is a
+  second reservation under one digest, which parts the counts, and the refusal
+  there names the repeated digests so a retry is distinguishable from spend
+  that bought nothing. These are false acceptances and not an observed
+  undercharge: the LLM field has never completed, no `llm-field.jsonl` is
+  published, and the 40 artifact digests in `paper/evidence/provenance.json` are
+  unchanged.
 - npm: the committed wasm bundle is rebuilt for 0.25.0. Every other version the
   release checks is a literal in a metadata file that the version bump rewrites;
   the one inside the wasm binary comes from `CARGO_PKG_VERSION` at compile time,
