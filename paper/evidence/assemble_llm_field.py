@@ -30,9 +30,17 @@ names it, because no accounting row was built for it, because one of its cache
 records states no usage, or because its cache records no call at all -- a scored
 model with no response cache, an accounting row with no score row, a model whose
 attempt ledger is absent or empty, a model whose three evidence kinds disagree
-about how many calls it made, a statistics file it cannot parse, and a run
-reporting API errors, an exhausted budget or a refused model identity. Each is an
-incompleteness whose only plausible alternative is a number nobody measured.
+about how many calls it made or about which calls they were, an evidence line
+that does not parse, a ledger line that is not a reservation or is one taken
+under another model, a statistics file it cannot parse or one whose counters are
+absent or are not counts, and a run reporting API errors, an exhausted budget or
+a refused model identity. Each is an incompleteness whose only plausible
+alternative is a number nobody measured.
+
+Every count it compares is read out of a record rather than off a file. Line
+counts and `rec.get(field, 0)` state a number for evidence nobody validated: a
+ledger holding one `{`, an empty object, or a statistics file stating
+`llm_calls: true` each reconciled against a real call and published the field.
 
 Run from the repo root after the field run:
   python paper/evidence/assemble_llm_field.py
@@ -90,6 +98,49 @@ def refuse_unaccountable(model, cause, detail):
     )
 
 
+def is_count(n):
+    """Whether `n` is a measurement of how many, rather than something else.
+
+    The one statement of the rule, because the three evidence kinds state
+    counts and each of them was read by a different line. `usage` had it and
+    the statistics did not: `rec.get("llm_calls", 0)` summed a JSON `true` as
+    one dispatch, since `bool` subclasses `int` and `0 + True` is 1, so a
+    statistics file could state a boolean and reconcile against one cached call
+    and one reservation. Restating the rule beside each reader is how that
+    happened; there is now one of it and every count goes through it.
+
+    A null, a string, a float, a negative number and a boolean are not counts.
+    """
+    return isinstance(n, int) and not isinstance(n, bool) and n >= 0
+
+
+def evidence_record(model, path, lineno, line):
+    """One line of `path` as the JSON object an evidence record is.
+
+    A line that does not parse records nothing. The ledger count was the file's
+    nonblank lines, so a ledger holding a single `{` stated one dispatch and
+    reconciled against one cached call and one counted one: the assembly
+    compared three numbers without reading what any of them counted.
+    """
+    try:
+        rec = json.loads(line)
+    except json.JSONDecodeError as exc:
+        refuse_unaccountable(
+            model,
+            "unreadable evidence",
+            f"{path.name} line {lineno} is not JSON ({exc.msg}), so it records "
+            "no provider request and cannot be counted as one",
+        )
+    if not isinstance(rec, dict):
+        refuse_unaccountable(
+            model,
+            "unreadable evidence",
+            f"{path.name} line {lineno} is a {type(rec).__name__} and every "
+            "evidence record is an object",
+        )
+    return rec
+
+
 def price_for(model):
     """The rate card for `model`, or a refusal to assemble the field.
 
@@ -126,7 +177,7 @@ def usage(cache, lineno, rec, field):
     zero.
     """
     n = rec.get(field)
-    if isinstance(n, int) and not isinstance(n, bool) and n >= 0:
+    if is_count(n):
         return n
     refuse_unaccountable(
         cache.stem.removeprefix("llm-cache-"),
@@ -136,14 +187,40 @@ def usage(cache, lineno, rec, field):
     )
 
 
+def answered_key(model, cache, lineno, rec):
+    """The request a cache record answers, or a refusal to assemble the field.
+
+    `record_decision` in the shim stamps every cached decision with the digest
+    of the request it was taken for, which is the key the ledger reserved the
+    dispatch under. A record carrying no key answers no request this field can
+    name, so it cannot be reconciled against the ledger by anything but its
+    position in a count.
+    """
+    key = rec.get("key")
+    if isinstance(key, str) and key:
+        return key
+    refuse_unaccountable(
+        model,
+        "no request identity",
+        f"{cache.name} line {lineno} states key={key!r}, so the call it "
+        "records cannot be matched to the dispatch that reserved it",
+    )
+
+
 per_model = {}
+# The request keys each model's cache answers, kept beside `per_model` for the
+# identity reconciliation below and not published: what the field states is how
+# many calls a model made, not which ones.
+answered_keys = {}
 for cache in sorted(FINAL.glob("llm-cache-*.jsonl")):
     model = cache.stem.removeprefix("llm-cache-")
     calls = malformed = refusals = tin = tout = 0
+    keys = []
     for lineno, line in enumerate(cache.read_text(encoding="utf-8").splitlines(), 1):
         if not line.strip():
             continue
-        rec = json.loads(line)
+        rec = evidence_record(model, cache, lineno, line)
+        keys.append(answered_key(model, cache, lineno, rec))
         calls += 1
         malformed += 1 if rec.get("malformed") else 0
         refusals += 1 if rec.get("refusal") else 0
@@ -165,6 +242,7 @@ for cache in sorted(FINAL.glob("llm-cache-*.jsonl")):
             "publishes for the model rest on calls it has no evidence of",
         )
     pin, pout = price_for(model)
+    answered_keys[model] = keys
     per_model[model] = {
         "llm_calls": calls,
         "malformed_outputs": malformed,
@@ -177,6 +255,36 @@ for cache in sorted(FINAL.glob("llm-cache-*.jsonl")):
 
 secondary_keys = ["observations", "stride_holds", "cache_hits",
                   "budget_exhausted", "api_errors", "identity_refusals"]
+
+
+def statistic(model, path, rec, field):
+    """One statistics file's count of `field`, or a refusal to assemble.
+
+    `rec.get(field, 0)` is the fail-open `usage` closed one evidence kind over,
+    reached twice here. A file that does not state `llm_calls` counted zero
+    dispatches into a reconciliation whose whole purpose is to notice a process
+    whose calls nobody can see; a file that does not state `api_errors` or
+    `identity_refusals` published a run as free of both. Neither counter was
+    written by the shim, which stamps every one of them on every write, so an
+    absent one is a file this assembler cannot read rather than a run that
+    measured nothing. The count rule is `is_count`, the same one the token
+    counts go through: a boolean is not a count of dispatches.
+    """
+    if field not in rec:
+        refuse_unaccountable(
+            model,
+            "no statistic",
+            f"{path.name} does not state {field}, and a counter the run never "
+            "wrote is not a counter that read zero",
+        )
+    n = rec[field]
+    if is_count(n):
+        return n
+    refuse_unaccountable(
+        model,
+        "no statistic",
+        f"{path.name} states {field}={n!r}, which is not a count",
+    )
 stats_files_read = 0
 unaccounted = {}
 # The third evidence kind, kept out of `per_model` because it is not published:
@@ -205,10 +313,10 @@ for f in sorted(STATS_DIR.glob("stats-*.json")):
     if m not in per_model:
         unaccounted[m] = unaccounted.get(m, 0) + 1
         continue
-    stats_calls[m] = stats_calls.get(m, 0) + rec.get("llm_calls", 0)
+    stats_calls[m] = stats_calls.get(m, 0) + statistic(m, f, rec, "llm_calls")
     stats_files_naming[m] = stats_files_naming.get(m, 0) + 1
     for k in secondary_keys:
-        per_model[m][k] = per_model[m].get(k, 0) + rec.get(k, 0)
+        per_model[m][k] = per_model[m].get(k, 0) + statistic(m, f, rec, k)
 
 if unaccounted:
     counted = ", ".join(f"{m} ({n})" for m, n in sorted(unaccounted.items()))
@@ -357,6 +465,123 @@ if unscored:
     )
 
 
+def dispatch_record(model, path, lineno, line):
+    """One ledger line as the reservation it must be, or a refusal.
+
+    What `reserve_call` in `examples/llm-agent/llm_agent.py` writes, read back
+    field by field: the digest of the request the unit was taken for, the model
+    it was requested under, the scaffold version that built the request, and
+    the process identity (`pid`, `started_ns`) that took it. Nothing else is a
+    reservation. `{}` parses and records no request; a line naming another
+    model's request is that model's spend and not this one's.
+
+    The fields are required rather than defaulted for the reason `usage`
+    requires token counts: a reservation this file cannot read is not a
+    reservation that was never taken, and it is the ceiling on what the field
+    can have spent.
+    """
+    rec = evidence_record(model, path, lineno, line)
+    absent = [
+        field
+        for field in ("key", "model_requested", "scaffold_version", "pid",
+                      "started_ns")
+        if field not in rec
+    ]
+    if absent:
+        refuse_unaccountable(
+            model,
+            "not a dispatch record",
+            f"{path.name} line {lineno} states none of {absent}; a reservation "
+            "names the request it was taken for, the model it was requested "
+            "under, the scaffold that built it and the process that took it",
+        )
+    for field in ("key", "scaffold_version"):
+        if not (isinstance(rec[field], str) and rec[field]):
+            refuse_unaccountable(
+                model,
+                "not a dispatch record",
+                f"{path.name} line {lineno} states {field}={rec[field]!r}, "
+                "which does not identify the request the unit was spent on",
+            )
+    for field in ("pid", "started_ns"):
+        if not is_count(rec[field]):
+            refuse_unaccountable(
+                model,
+                "not a dispatch record",
+                f"{path.name} line {lineno} states {field}={rec[field]!r}, "
+                "which does not identify the process that reserved the unit",
+            )
+    if rec["model_requested"] != model:
+        refuse_unaccountable(
+            model,
+            "reserved under another model",
+            f"{path.name} line {lineno} reserves a request for "
+            f"{rec['model_requested']!r}; the ledger is named for the model "
+            "whose allowance it spends, and a dispatch counted here would "
+            "cost another model's call at this model's rate card",
+        )
+    return rec
+
+
+def listed(keys):
+    """Request digests a refusal names, bounded so the refusal stays readable.
+
+    A field's ledger runs to hundreds of lines, so the count comes first and a
+    handful of examples after it: an operator greps the files for one of these
+    and the rest are the same query.
+    """
+    if not keys:
+        return "none"
+    shown = ", ".join(keys[:5])
+    return f"{len(keys)} ({shown}{', and more' if len(keys) > 5 else ''})"
+
+
+def reconcile_identities(model, dispatched, answered):
+    """The ledger and the cache matched request by request, or a refusal.
+
+    The counts above establish that three numbers are equal, which is not that
+    they count the same calls: a cache answering a request no ledger line
+    reserved and a reservation no cache answers cancel out in any total. The
+    two kinds carry the same identity -- `reserve_call` writes the request
+    digest it is about to dispatch and `record_decision` stamps the same digest
+    on the answer -- so the sets are comparable and this compares them.
+
+    Retries are why the ledger is a multiset and the cache is not. A request
+    that fails, times out or is killed is reserved again under the same digest
+    by the respawned shim, and the second reservation is legitimate: the unit
+    was spent. Such a field has more reservations than answers, which the count
+    gate above refuses before reaching this, so the refusal there names the
+    repeated keys -- a repeated key is a retried request, and a key reserved
+    once with no answer is spend that bought nothing. Here, where the counts
+    already agree, a mismatch cannot be a retry: it is two sets of calls the
+    same size.
+    """
+    reserved_keys = [rec["key"] for rec in dispatched]
+    if sorted(answered) == sorted(reserved_keys):
+        return
+    # One refusal rather than a branch per direction. Reached only with the
+    # counts already equal, and the three disagreements are then the same
+    # disagreement seen from three sides: an answer with no reservation is
+    # cancelling against a reservation with no answer, and an answer recorded
+    # twice is what makes room for both. Which requests they are is the whole
+    # content of the refusal, so all of them are named.
+    refuse_unaccountable(
+        model,
+        "evidence names different calls",
+        f"the attempt ledger reserves {len(reserved_keys)} dispatches and the "
+        f"response cache records {len(answered)}, and they are not the same "
+        "requests. Answers no reservation carries: "
+        f"{listed(sorted(set(answered) - set(reserved_keys)))}. Reservations "
+        "no answer carries: "
+        f"{listed(sorted(set(reserved_keys) - set(answered)))}. Answers "
+        "recorded more than once: "
+        f"{listed(sorted({k for k in answered if answered.count(k) > 1}))}. "
+        "Requests reserved more than once, which is a retried request rather "
+        "than a second call: "
+        f"{listed(sorted({k for k in reserved_keys if reserved_keys.count(k) > 1}))}"
+    )
+
+
 def dispatches_reserved(model):
     """Provider requests `model` reserved, or a refusal to assemble the field.
 
@@ -371,6 +596,12 @@ def dispatches_reserved(model):
     Absent and empty are separate causes for the reason the empty cache is:
     a ledger with no lines is not a measurement that a model reserved nothing,
     because the score rows this field publishes were produced by calling it.
+
+    Returns the reservations themselves rather than how many there are. The
+    count was taken off the file as its nonblank lines, so a ledger holding a
+    single `{` stated one dispatch; what makes a line a dispatch is decided by
+    `dispatch_record`, and the identities it reads are what the cache is
+    reconciled against.
     """
     path = FINAL / f"llm-attempts-{model}.jsonl"
     if not path.exists():
@@ -381,9 +612,13 @@ def dispatches_reserved(model):
             "provider requests the model's score rows were produced by; the "
             "response cache records only the calls that came back",
         )
-    reserved = sum(
-        1 for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
-    )
+    reserved = [
+        dispatch_record(model, path, lineno, line)
+        for lineno, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), 1
+        )
+        if line.strip()
+    ]
     if not reserved:
         refuse_unaccountable(
             model,
@@ -408,12 +643,27 @@ def dispatches_reserved(model):
 # them the finding this gate exists for: fewer cache records than reservations
 # is spend with no answer recorded, fewer counted dispatches than reservations
 # is a process whose statistics are missing, and more of either than the ledger
-# reserved is a count of calls nothing reserved.
+# reserved is a count of calls nothing reserved. Equal counts are then held to
+# be counts of the same calls: the ledger and the cache both carry the request
+# digest a dispatch was reserved under, so the identities are reconciled request
+# by request rather than accepting a total in which an unanswered reservation
+# and an unreserved answer cancel.
 for model in accounting_roster:
-    reserved = dispatches_reserved(model)
+    dispatched = dispatches_reserved(model)
+    reserved = len(dispatched)
     cached = per_model[model]["llm_calls"]
     counted = stats_calls.get(model, 0)
     if not reserved == cached == counted:
+        keys = [rec["key"] for rec in dispatched]
+        retried = sorted({k for k in keys if keys.count(k) > 1})
+        retries = (
+            f"{len(keys) - len(set(keys))} of the reservations repeat a request "
+            f"already reserved ({retried}), which is a retried request rather "
+            "than a second call"
+            if retried
+            else "no request is reserved twice, so none of the difference is a "
+            "retry"
+        )
         refuse_unaccountable(
             model,
             "evidence disagrees",
@@ -422,8 +672,9 @@ for model in accounting_roster:
             f"statistics files naming the model count {counted}. These are "
             "three measurements of one set of calls and a publishable field "
             "has them equal; where they differ, at least one of the three is "
-            "missing calls the provider was asked to make",
+            f"missing calls the provider was asked to make. {retries}",
         )
+    reconcile_identities(model, dispatched, answered_keys[model])
 
 # An identity refusal is a call the provider answered under a model this field
 # does not name. It fails the shim, so it is the same kind of incompleteness as

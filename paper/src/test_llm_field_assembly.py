@@ -75,6 +75,35 @@ SHARED = ROOT / "paper/evidence/llm_pricing.py"
 MODELS = ("claude-fable-5", "claude-opus-5", "claude-haiku-4-5-20251001")
 DATASETS = ("us-indices-1d", "crypto-majors-1d")
 
+# What `examples/llm-agent/llm_agent.py` stamps on the evidence it writes: the
+# scaffold version on every reservation and every cached decision, and the
+# counters the statistics carry on every write. The fixtures below emit the
+# same shape, because a fixture the assembler accepts is the only thing that
+# makes a refusal attributable to the one field its case changed.
+SCAFFOLD_VERSION = "summarize-v1/parse-v1"
+STATS_COUNTERS = (
+    "llm_calls",
+    "observations",
+    "stride_holds",
+    "cache_hits",
+    "budget_exhausted",
+    "api_errors",
+    "identity_refusals",
+)
+
+
+def stats_payload(model, **counters):
+    """A statistics file stating every counter the shim writes.
+
+    The assembler requires each one rather than defaulting it to zero, so a
+    case that means to add observations states the dispatches it counted too --
+    zero, where the point of the file is the secondary counters.
+    """
+    payload = {"model": model}
+    payload.update({k: 0 for k in STATS_COUNTERS})
+    payload.update(counters)
+    return payload
+
 
 def record(model, dataset):
     return {
@@ -138,18 +167,50 @@ class AssemblerCase(unittest.TestCase):
         it would refuse for a reason it did not choose. `evidence=False` is for
         the cases that mean to leave one kind out.
         """
+        stamped = [
+            r if "key" in r else dict(r, key=self.request_key(model, i))
+            for i, r in enumerate(records)
+        ]
         (self.final / f"llm-cache-{model}.jsonl").write_text(
-            "".join(json.dumps(r) + "\n" for r in records), encoding="utf-8"
+            "".join(json.dumps(r) + "\n" for r in stamped), encoding="utf-8"
         )
         if evidence:
             self.write_attempts(model, len(records))
             self.write_model_stats(model, len(records))
 
-    def write_attempts(self, model, dispatches):
+    def request_key(self, model, i):
+        """The digest a cache record answers and the ledger reserved.
+
+        The shim derives it from the request, so its value carries no meaning
+        here; what matters is that the two kinds of evidence name the same one,
+        which is what the assembler reconciles them by.
+        """
+        return f"{model}-request-{i}"
+
+    def write_attempts(self, model, dispatches, keys=None):
+        """The ledger, in the shape `reserve_call` writes it.
+
+        One line per reservation, each naming the request it was taken for, the
+        model it was requested under, the scaffold that built it and the
+        process that took it. `keys` overrides which requests were reserved,
+        for the cases about identity rather than about count.
+        """
+        if keys is None:
+            keys = [self.request_key(model, i) for i in range(dispatches)]
         (self.final / f"llm-attempts-{model}.jsonl").write_text(
             "".join(
-                json.dumps({"key": f"k{i}", "pid": 1}) + "\n"
-                for i in range(dispatches)
+                json.dumps(
+                    {
+                        "key": key,
+                        "model_requested": model,
+                        "scaffold_version": SCAFFOLD_VERSION,
+                        "pid": 1,
+                        "started_ns": 1,
+                    },
+                    sort_keys=True,
+                )
+                + "\n"
+                for key in keys
             ),
             encoding="utf-8",
         )
@@ -162,7 +223,7 @@ class AssemblerCase(unittest.TestCase):
         `llm_calls` and so leave the reconciled totals where they were.
         """
         self.write_stats(
-            f"stats-base-{model}.json", {"model": model, "llm_calls": llm_calls}
+            f"stats-base-{model}.json", stats_payload(model, llm_calls=llm_calls)
         )
 
     def write_stats(self, name, payload):
@@ -426,7 +487,7 @@ class StatisticsAccountingTests(AssemblerCase):
         orphan = "claude-fable-5-20260101"
         for i in range(3):
             self.write_stats(f"stats-{i}.json", {"model": orphan, "observations": 1})
-        self.write_stats("stats-9.json", {"model": "claude-fable-5"})
+        self.write_stats("stats-9.json", stats_payload("claude-fable-5"))
         output = self.refusal()
         # Three orphan files, one naming a model with an accounting row, and the
         # three the fixture writes to keep each model's evidence kinds agreeing.
@@ -439,7 +500,7 @@ class StatisticsAccountingTests(AssemblerCase):
         and not about statistics files in general."""
         self.write_stats(
             "stats-1.json",
-            {"model": "claude-fable-5", "observations": 40, "cache_hits": 3},
+            stats_payload("claude-fable-5", observations=40, cache_hits=3),
         )
         meta = self.assemble()
         self.assertEqual(meta["per_model"]["claude-fable-5"]["observations"], 40)
@@ -451,7 +512,7 @@ class StatisticsAccountingTests(AssemblerCase):
         dropped on the way."""
         for i in range(3):
             self.write_stats(
-                f"stats-{i}.json", {"model": "claude-opus-5", "observations": 1}
+                f"stats-{i}.json", stats_payload("claude-opus-5", observations=1)
             )
         meta = self.assemble()
         self.assertEqual(meta["stats_files_read"], 3 + len(MODELS))
@@ -473,7 +534,7 @@ class StatisticsAccountingTests(AssemblerCase):
         `cost_usd`. It is the same kind of incompleteness as an API error, and
         is refused with them rather than published as a complete field."""
         self.write_stats(
-            "stats-1.json", {"model": "claude-opus-5", "identity_refusals": 1}
+            "stats-1.json", stats_payload("claude-opus-5", identity_refusals=1)
         )
         output = self.refusal()
         self.assertIn("refused model identities", output)
@@ -641,7 +702,7 @@ class EvidenceReconciliationTests(AssemblerCase):
         )
         self.write_attempts("claude-opus-5", 3)
         self.write_model_stats("claude-opus-5", 1)
-        self.write_stats("stats-1.json", {"model": "claude-opus-5", "llm_calls": 2})
+        self.write_stats("stats-1.json", stats_payload("claude-opus-5", llm_calls=2))
         meta = self.assemble()
         self.assertEqual(meta["per_model"]["claude-opus-5"]["llm_calls"], 3)
 
@@ -663,7 +724,7 @@ class OneRefusalRuleTests(AssemblerCase):
         self.write_stats("stats-1.json", {"model": "claude-fable-5-20260101"})
         self.assertIn(shared, self.refusal())
 
-        self.write_stats("stats-1.json", {"model": "claude-fable-5"})
+        self.write_stats("stats-1.json", stats_payload("claude-fable-5"))
         self.write_cache("claude-opus-5-1")
         self.write_records(
             [record(m, d) for m in MODELS for d in DATASETS]
@@ -683,9 +744,289 @@ class OneRefusalRuleTests(AssemblerCase):
             "the refusal is stated twice; a later edit can repair one copy only",
         )
         self.assertEqual(source.count("def refuse_unaccountable("), 1)
-        # One definition and nine causes that reach it. The number is pinned so
-        # that a cause added later is added to the one rule and not beside it.
-        self.assertEqual(source.count("refuse_unaccountable("), 10)
+        # One definition and nineteen causes that reach it. The number is
+        # pinned so that a cause added later is added to the one rule and not
+        # beside it. It grew by ten when the evidence each count is taken from
+        # was validated rather than counted: an unreadable line, a ledger line
+        # that is not a reservation or is one taken under another model, a
+        # statistics counter that is absent or is not a count, a cache record
+        # with no request identity, and two evidence kinds counting the same
+        # number of different calls.
+        self.assertEqual(source.count("refuse_unaccountable("), 20)
+
+
+class EvidenceValidityTests(AssemblerCase):
+    """The reconciliation counts three numbers; it did not read what it counted.
+
+    Each of the three counts was taken off its file without reading a record:
+    the ledger count was its nonblank lines, the statistics count was
+    `rec.get("llm_calls", 0)` with `0 + True == 1`, and the comparison was over
+    the totals alone. So a model's entire attempt ledger could be replaced by a
+    single brace, or its dispatch count stated as a JSON `true`, and the field
+    published the same six rows, three models, three calls and $24.00 at exit 0
+    while all thirty cases written before this one passed.
+
+    These are false acceptances. None is an observed undercharge and none is a
+    provider-backed publication: the LLM field has never completed, so no
+    published number rests on any of them.
+    """
+
+    def ledger_path(self, model):
+        return self.final / f"llm-attempts-{model}.jsonl"
+
+    def test_the_accepted_control_is_unchanged(self):
+        """Row 1 of the reviewer's table, and the reference the rest are read
+        against: without it a probe could pass on a fixture that refuses for a
+        reason nobody named."""
+        meta = self.assemble()
+        self.assertEqual(len(meta["per_model"]), len(MODELS))
+        self.assertEqual(meta["llm_calls_total"], len(MODELS))
+        self.assertEqual(meta["cost_usd_total"], 24.0)
+
+    def test_a_ledger_line_that_is_not_json_is_not_a_dispatch(self):
+        """Row 2: the ledger replaced by `{` and a newline.
+
+        One nonblank line, so the count the reconciliation compares is 1 and
+        every total matches. A line that does not parse is not a record of a
+        provider request, and the shim writes each one as a complete JSON
+        object under an exclusive lock before the request leaves.
+        """
+        self.ledger_path("claude-fable-5").write_text("{\n", encoding="utf-8")
+        output = self.refusal()
+        self.assertIn("llm-attempts-claude-fable-5.jsonl", output)
+        self.assertIn("line 1", output)
+
+    def test_an_empty_object_is_not_a_dispatch_record(self):
+        """Row 3: the ledger replaced by `{}` and a newline.
+
+        It parses, which is why parsing alone does not close row 2. The shim
+        stamps every reservation with the request key it was taken for, the
+        requested model, the scaffold version and the process identity, and an
+        object carrying none of them records no request.
+        """
+        self.ledger_path("claude-opus-5").write_text("{}\n", encoding="utf-8")
+        output = self.refusal()
+        self.assertIn("llm-attempts-claude-opus-5.jsonl", output)
+        self.assertIn("line 1", output)
+
+    def test_a_boolean_dispatch_count_is_not_a_count(self):
+        """Row 4: the statistics `llm_calls` replaced by JSON `true`.
+
+        `bool` is a subclass of `int`, so `0 + True` is 1 and a file stating
+        `true` reconciled against one cached call and one reservation. The
+        sibling rule on token counts already refuses a boolean; this is the
+        same rule applied to the dispatch counts.
+        """
+        self.write_stats(
+            "stats-base-claude-haiku-4-5-20251001.json",
+            stats_payload("claude-haiku-4-5-20251001", llm_calls=True),
+        )
+        output = self.refusal()
+        self.assertIn("llm_calls=True", output)
+
+    def test_a_ledger_line_missing_one_identity_field_is_not_a_dispatch(self):
+        """Row 3 carried none of the fields, which a check for any one of them
+        would have caught. Each is required on its own: a line naming the
+        request but not the process that took it, or the process but not the
+        request, is not the record `reserve_call` writes."""
+        full = {
+            "key": "k0",
+            "model_requested": "claude-opus-5",
+            "scaffold_version": SCAFFOLD_VERSION,
+            "pid": 1,
+            "started_ns": 1,
+        }
+        for field in full:
+            with self.subTest(field=field):
+                partial = {k: v for k, v in full.items() if k != field}
+                self.ledger_path("claude-opus-5").write_text(
+                    json.dumps(partial, sort_keys=True) + "\n", encoding="utf-8"
+                )
+                output = self.refusal()
+                self.assertIn("not a dispatch record", output)
+                self.assertIn(field, output)
+
+    def test_a_ledger_identity_that_is_not_one_is_not_a_dispatch(self):
+        """Present is not measured, one level below the field being there. A
+        null key names no request and a boolean pid names no process, and
+        `bool` subclasses `int`, so the same rule the token counts go through
+        is the one that refuses it."""
+        for field, value in (
+            ("key", None),
+            ("key", ""),
+            ("scaffold_version", 1),
+            ("pid", True),
+            ("started_ns", -1),
+        ):
+            with self.subTest(field=field, value=value):
+                rec = {
+                    "key": "k0",
+                    "model_requested": "claude-opus-5",
+                    "scaffold_version": SCAFFOLD_VERSION,
+                    "pid": 1,
+                    "started_ns": 1,
+                }
+                rec[field] = value
+                self.ledger_path("claude-opus-5").write_text(
+                    json.dumps(rec, sort_keys=True) + "\n", encoding="utf-8"
+                )
+                output = self.refusal()
+                self.assertIn("not a dispatch record", output)
+                self.assertIn(field, output)
+
+    def test_a_reservation_taken_under_another_model_is_refused(self):
+        """The ledger is named for the model whose allowance it spends. A line
+        reserving another model's request, counted here, costs that model's
+        call at this model's rate card and leaves the other model's ledger
+        short of a dispatch it made."""
+        self.write_attempts("claude-opus-5", 1)
+        rec = json.loads(
+            self.ledger_path("claude-opus-5").read_text(encoding="utf-8")
+        )
+        rec["model_requested"] = "claude-haiku-4-5-20251001"
+        self.ledger_path("claude-opus-5").write_text(
+            json.dumps(rec, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        output = self.refusal()
+        self.assertIn("reserved under another model", output)
+        self.assertIn("claude-haiku-4-5-20251001", output)
+
+    def test_a_statistics_counter_that_is_absent_is_refused_and_named(self):
+        """A missing measurement is a policy question, and the policy is to
+        refuse. `rec.get(field, 0)` answered it with a number: a file that
+        never stated `api_errors` published a run as free of them, and one that
+        never stated `llm_calls` counted zero dispatches into the
+        reconciliation that exists to notice a process nobody can see. The shim
+        writes every counter on every write, so an absent one is a file this
+        assembler cannot read.
+        """
+        for field in STATS_COUNTERS:
+            with self.subTest(field=field):
+                payload = stats_payload("claude-fable-5", llm_calls=1)
+                del payload[field]
+                self.write_stats("stats-base-claude-fable-5.json", payload)
+                output = self.refusal()
+                self.assertIn("no statistic", output)
+                self.assertIn(field, output)
+
+    def test_a_statistics_counter_that_is_not_a_count_is_refused(self):
+        """The same rule the token counts go through, applied to the counters.
+        A null, a string, a float and a negative number are not counts of
+        anything the run did."""
+        for value in (None, "1", 1.0, -1):
+            with self.subTest(value=value):
+                self.write_stats(
+                    "stats-base-claude-fable-5.json",
+                    stats_payload("claude-fable-5", llm_calls=1, api_errors=value),
+                )
+                output = self.refusal()
+                self.assertIn("no statistic", output)
+                self.assertIn("api_errors", output)
+
+    def test_a_cache_record_with_no_request_identity_is_refused(self):
+        """The other side of the identity the reconciliation needs. A cached
+        decision carries the digest of the request it answers, and a record
+        without one can be matched to the ledger by nothing but its position in
+        a count."""
+        self.write_cache_records(
+            "claude-fable-5", [{"tokens_in": 10, "tokens_out": 5, "key": None}]
+        )
+        output = self.refusal()
+        self.assertIn("no request identity", output)
+        self.assertIn("llm-cache-claude-fable-5.jsonl line 1", output)
+
+    def test_an_evidence_line_that_is_not_an_object_is_refused(self):
+        """A JSON array parses and records nothing. Named separately from the
+        line that does not parse at all, because the two are different files to
+        go and look at."""
+        self.ledger_path("claude-fable-5").write_text("[]\n", encoding="utf-8")
+        output = self.refusal()
+        self.assertIn("unreadable evidence", output)
+        self.assertIn("list", output)
+
+
+class IdentityReconciliationTests(AssemblerCase):
+    """Equal counts are not counts of the same calls.
+
+    The ledger reserves a request under the digest the shim is about to
+    dispatch and the cache stamps the same digest on the answer, so the two
+    kinds name their calls and can be compared request by request. Compared
+    only as totals, an answer to a request nothing reserved cancels exactly
+    against a reservation nothing answered, and both directions publish.
+    """
+
+    def test_an_answer_to_an_unreserved_request_is_refused_and_named(self):
+        """Two reservations, two answers, two counted dispatches, and one of
+        the answers is to a request the ledger never carried. Every total the
+        published field states is the one the control states."""
+        model = "claude-opus-5"
+        self.write_cache_records(
+            model, [{"tokens_in": 10, "tokens_out": 5}] * 2, evidence=False
+        )
+        self.write_attempts(
+            model, 2, keys=[self.request_key(model, 0), "never-dispatched"]
+        )
+        self.write_model_stats(model, 2)
+        output = self.refusal()
+        self.assertIn("evidence names different calls", output)
+        self.assertIn(f"{model}-request-1", output)
+        self.assertIn("never-dispatched", output)
+        self.assertNotIn("evidence disagrees", output)
+
+    def test_one_answer_recorded_twice_against_two_reservations_is_refused(self):
+        """What makes room for the case above inside equal totals: the same
+        request answered twice. The shim appends a cache record only on a fresh
+        call, so a repeated digest counts one request's tokens and dollars
+        twice in the published row."""
+        model = "claude-opus-5"
+        key = self.request_key(model, 0)
+        self.write_cache_records(
+            model,
+            [{"tokens_in": 10, "tokens_out": 5, "key": key}] * 2,
+            evidence=False,
+        )
+        self.write_attempts(model, 2)
+        self.write_model_stats(model, 2)
+        output = self.refusal()
+        self.assertIn("evidence names different calls", output)
+        self.assertIn("Answers recorded more than once: 1", output)
+
+    def test_a_retried_request_is_named_where_the_counts_part(self):
+        """A retry is legitimate spend and the field still refuses, so the
+        refusal has to say which it is.
+
+        A request that fails or is killed is reserved again under the same
+        digest by the respawned shim: two reservations, one answer. That parts
+        the counts, so the count gate refuses first, and it names the repeated
+        request rather than leaving an operator to decide between a retry and a
+        call that bought nothing.
+        """
+        model = "claude-opus-5"
+        key = self.request_key(model, 0)
+        self.write_attempts(model, 2, keys=[key, key])
+        self.write_model_stats(model, 2)
+        output = self.refusal()
+        self.assertIn("evidence disagrees", output)
+        self.assertIn("reserves 2 dispatches", output)
+        self.assertIn("retried request", output)
+        self.assertIn(key, output)
+
+    def test_matching_identities_still_assemble(self):
+        """The control for this class: three reservations and three answers
+        naming the same three requests, in different order, still publish. The
+        reconciliation is over which requests, not over the order they were
+        written in."""
+        model = "claude-opus-5"
+        keys = [self.request_key(model, i) for i in range(3)]
+        self.write_cache_records(
+            model,
+            [{"tokens_in": 10, "tokens_out": 5, "key": k} for k in reversed(keys)],
+            evidence=False,
+        )
+        self.write_attempts(model, 3, keys=keys)
+        self.write_model_stats(model, 3)
+        meta = self.assemble()
+        self.assertEqual(meta["per_model"][model]["llm_calls"], 3)
 
 
 if __name__ == "__main__":
