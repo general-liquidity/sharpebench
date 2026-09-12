@@ -28,9 +28,13 @@ const IMPORT_NOTE: &str =
      series never passed through it, so a track that sells tail risk is \
      scored like any other and its skew is not flagged. The \
      manipulation-proof performance measure (`score --diagnostics mppm`) is \
-     the shipped statistic that speaks to payoff shape; it is evidence about \
-     that shape at the risk aversion it is evaluated at, not a warrant that \
-     the series was not manipulated. Comparison is on deflation, reliability \
+     the shipped statistic that speaks to payoff shape, and it is a \
+     certainty equivalent at the risk aversion it is handed: this kernel \
+     takes that risk aversion from the caller and defaults it to 3 rather \
+     than solving GISW eq. 19 against a benchmark, and a sample average \
+     cannot see a tail that did not land in the sample. Read it as a \
+     description of the payoff at one evaluation point, never as a warrant \
+     that the series was not manipulated. Comparison is on deflation, reliability \
      and the bootstrap only; any demotion is a lower bound.";
 
 /// The loud human-facing version of the same caveat, printed to stderr on
@@ -47,9 +51,12 @@ fn print_notice(trials: u32) {
            rules them out for a harness-run agent is that the simulator\n\
            executes linear target-weight orders only, and an imported series\n\
            never passed through it. Large negative skew is not flagged here.\n\
-           The manipulation-proof measure speaks to payoff shape; it is\n\
-           evidence about that shape at the risk aversion it is evaluated at,\n\
-           not a warrant that the series was not manipulated. Ask for it:\n\
+           The manipulation-proof measure speaks to payoff shape, as a\n\
+           certainty equivalent at the risk aversion it is handed, which\n\
+           defaults to 3 here rather than being solved against a benchmark;\n\
+           a sample average cannot see a tail that did not land. Read it as\n\
+           a description at one evaluation point, never as a warrant that\n\
+           the series was not manipulated. Ask for it:\n\
              sharpebench score <out.json> --diagnostics mppm\n\
          The comparison is on deflation, per-run reliability (pass^k) and the\n\
          bootstrap only. An `_import_note` field restating this is embedded in\n\
@@ -690,6 +697,12 @@ mod tests {
             "linear target-weight orders",
             "manipulation-proof",
             "--diagnostics mppm",
+            // The narrowed reading the book settled on: a certainty
+            // equivalent at one risk aversion, defaulted rather than solved,
+            // and blind to a tail outside the sample.
+            "risk aversion it is handed",
+            "defaults it to 3",
+            "tail that did not land",
         ] {
             assert!(IMPORT_NOTE.contains(needle), "note lost caveat: {needle}");
         }
@@ -698,7 +711,14 @@ mod tests {
         // risk aversion of about 1.8, and in any sample where the tail has not
         // yet landed it wins at every risk aversion, so a notice promising the
         // measure cannot be raised by selling tail risk would be false.
-        for overclaim in ["cannot be raised", "immune", "guarantee", "proof against"] {
+        for overclaim in [
+            "cannot be raised",
+            "immune",
+            "guarantee",
+            "proof against",
+            "protects against",
+            "resists",
+        ] {
             assert!(
                 !IMPORT_NOTE.contains(overclaim),
                 "note overclaims what the measure establishes: {overclaim}"

@@ -90,11 +90,15 @@ SharpeBench's five eligibility conjuncts are only partially observable:
   simulator, so nothing on this path constrains an option-like or
   short-volatility track, and nothing flags large negative skew. The
   manipulation-proof performance measure is the shipped statistic that speaks
-  to payoff shape; it is opt-in, `sharpebench score <out.json> --diagnostics
-  mppm`, and what it reads depends on the risk aversion it is evaluated at, so
-  it is evidence about the shape of a payoff rather than a warrant that the
-  series was not manipulated. It is a diagnostic beside the board: it never
-  reaches the gate, eligibility or the rank.
+  to payoff shape. It is opt-in, `sharpebench score <out.json> --diagnostics
+  mppm`, and it is a certainty equivalent at the risk aversion it is handed;
+  this kernel takes that from the caller and defaults it to 3 rather than
+  solving GISW eq. 19 against a benchmark, and a sample average cannot see a
+  tail that did not land in the sample. Read it as a description of the payoff
+  at one evaluation point, never as a warrant that the series was not
+  manipulated; see [the scope of the measure](methodology-deflated-sharpe.md).
+  It is a diagnostic beside the board: it never reaches the gate, eligibility
+  or the rank.
 
 The comparison that remains is real but narrower: deflation (deflated Sharpe
 and PSR against the declared search footprint), per-run reliability
