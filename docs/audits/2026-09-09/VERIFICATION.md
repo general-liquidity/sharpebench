@@ -65,7 +65,7 @@ brought up to date and tested again, because each merge invalidated the next.
 | PR | Work | Main after merge |
 |---|---|---|
 | Bench #101 | Usage evidence required per record; the published cell held unique | `c4e3f9e` |
-| Bench #102 | The comparison axis declared; every regrade linked to its source | `a99c0b7` |
+| Bench #102 | Library types for a declared comparison axis and for a regrade receipt | `a99c0b7` |
 | Bench #103 | Three claims narrowed to what the sources license | `781880c` |
 | Bench #104 | An operator rescore over a declared bundle | `79e8b80` |
 | Bench #105 | The trial census and the typed suite controls | `d4165ec` |

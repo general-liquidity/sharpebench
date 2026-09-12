@@ -282,6 +282,28 @@ refused under a changed schedule or under none. Agent faults never wait.
 Without the flag, or with an all-zero schedule, retries are immediate, nothing
 is recorded and every output is byte-identical.
 
+### Suite evidence
+
+`--suite-evidence` with `--json` wraps the board as `{board, suite_evidence}`.
+The board under the envelope is byte-identical to the board the plain
+invocation emits; the plain table always prints the evidence.
+
+`suite_evidence.trials` is the census against the roster the run declared
+before the first entrant ran, and `suite_evidence.controls` is one verdict per
+declared control. `suite_evidence.control_binding` is the digest that binds
+those verdicts. It carries the `run_provenance` digest over the ordered
+per-control preimages, the list of verdict fields whose values entered it, and
+the list of fields that entered nothing with the reason each is excluded. One
+digest per control is published alongside the suite digest, so a reader can see
+which row moved rather than only that one did.
+
+The `detail` line is excluded by declaration: it is a rendering of fields that
+are already bound, and binding the prose would let a wording edit break a digest
+over unchanged evidence. Everything here carries `used_by_gate: false`. The
+census does not move a score, the controls carry no score field, and the binding
+is provenance beside a result; none of them reaches the gate, eligibility or the
+rank.
+
 ## `score`
 
 Ranks a JSON field of pre-computed submissions (see
@@ -521,6 +543,41 @@ The report carries the bundle digest, the frozen-manifest digest, every
 verified file with its role, the runner artifact, the semantic dataset and
 cost-model digests, the recomputed score, and two prose lists: `verified` and
 `not_established`.
+
+## `compare`
+
+```bash
+sharpebench compare --axis <entrant|invocation|score-config> --baseline <checkpoint.json> --treatment <checkpoint.json> [--json]
+```
+
+Declares that two sweep arms are comparable and on which axis, or refuses and
+names the field that decided it.
+
+Every checkpoint the resumable sweep writes binds six identities: dataset, cost
+model, score configuration, runner artifact, entrant and invocation. Binding
+them never said which one the experiment varies on purpose. Two arms that
+differ in the entrant are a model comparison; two that differ in the dataset are
+two experiments printed in one table, and the checkpoint files do not
+distinguish them for a reader.
+
+The axis is the one identity the arms are allowed to differ on. Only three are
+declarable. The dataset, the cost model and the runner artifact are not, and
+neither is the execution matrix: an arm that moves one of those is measuring
+something else, so naming one as the axis is a usage error and nothing is
+emitted. What the contract deliberately does not bind stays unbound here too: a
+rotated credential never reaches `invocation_sha256`, so it neither refuses a
+comparison nor invalidates a resume.
+
+A declared comparison exits 0 and names the axis field, the digest each arm
+carries on it, and every identity checked equal to get there, so a reader who
+disagrees with the declared axis can see what was held fixed instead of assuming
+anything was. A refusal exits 1 and names the off-axis identity, the differing
+element of the execution matrix, or the arm that carries no contract. Under
+`--json` the refusal is emitted as a document rather than written to stderr.
+
+The command reads both checkpoints and writes to neither. The receipt carries
+`used_by_gate: false`: it is reporting surface beside a result and no score,
+gate, eligibility or rank sees it.
 
 ## `regime`
 
