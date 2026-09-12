@@ -656,8 +656,14 @@ class AssemblerPricingTests(unittest.TestCase):
             + "\n",
             encoding="utf-8",
         )
+        # The record carries the digest of the request it answers, as
+        # `record_decision` writes it: the assembler reconciles the response
+        # cache against the attempt ledger by that identity and refuses a
+        # record without one, which would refuse this fixture before it reached
+        # the rate card these cases are about.
         (final / f"llm-cache-{cache_model}.jsonl").write_text(
-            json.dumps({"tokens_in": 10, "tokens_out": 5}) + "\n", encoding="utf-8"
+            json.dumps({"key": "k0", "tokens_in": 10, "tokens_out": 5}) + "\n",
+            encoding="utf-8",
         )
         done = subprocess.run(
             [sys.executable, str(script)], capture_output=True, text=True
