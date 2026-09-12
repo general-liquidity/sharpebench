@@ -14,8 +14,8 @@ serde = { version = "1", features = ["derive"] }
 # feature. The isolated scorer must read exactly the same f64s as the harness.
 serde_json = { version = "1", features = ["float_roundtrip"] }
 sha2 = "0.10"
-sharpebench-protocol = { path = "../sharpebench-protocol", version = "0.24.0" }
-sharpebench-stats = { path = "../sharpebench-stats", version = "0.24.0" }
+sharpebench-protocol = { path = "../sharpebench-protocol", version = "0.25.0" }
+sharpebench-stats = { path = "../sharpebench-stats", version = "0.25.0" }
 
 [dev-dependencies]
 
