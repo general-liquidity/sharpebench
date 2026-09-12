@@ -348,6 +348,89 @@ def resolve_base(root: Path, base_ref: str) -> str:
     return completed.stdout.strip()
 
 
+def bundle_version(root: Path) -> str:
+    """Ask the committed module for the methodology version compiled into it.
+
+    This kernel exposes no `crate_version` export; the version it reports rides
+    on a scored result, which is how `scripts/check-wasm-bundle.mjs` reads it.
+    The first version of this function assumed the sibling product's API and
+    read an empty string back, so it is taken from the same place the gate takes
+    it rather than from a second guess about the surface.
+    """
+    entry = root / "npm" / "pkg" / "sharpebench.js"
+    script = (
+        "const k = require(process.argv[1]);"
+        "const r = JSON.parse(k.is_my_sharpe_real("
+        "JSON.stringify([0.01,-0.02,0.03,0.005,-0.01,0.02,0.015,-0.005]),"
+        "'{\"n_trials\":2}'));"
+        "process.stdout.write(String(r.methodology_version ?? ''));"
+    )
+    completed = subprocess.run(
+        ["node", "-e", script, str(entry)],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip().splitlines()
+        raise ReleaseError(
+            "could not read the rebuilt bundle's version: "
+            + (detail[-1] if detail else "no output")
+        )
+    return completed.stdout.strip()
+
+
+def rebuild_committed_bundle(root: Path, target: str) -> None:
+    """Rebuild the committed wasm bundle so it names the version being released.
+
+    The bundle carries its own version, compiled in from `CARGO_PKG_VERSION`, and
+    the version bump cannot rewrite it the way it rewrites a literal in a
+    manifest. v0.25.0 was published correctly because this release builds a fresh
+    bundle before publishing to npm, so the stale committed one never shipped,
+    but it left the committed bundle reporting 0.24.0 and the npm workflow went
+    red on main at the release commit.
+
+    A pre-tag check cannot close this: before the bump there is no version for
+    the bundle to name, so checking alone refuses every release. The rebuild has
+    to happen after the bump and inside the release tree, which is here. It is
+    folded into the version-bump commit so the tag still points at a
+    provenance-only rebind.
+    """
+    pkg = root / "npm" / "pkg"
+    if not (pkg / "sharpebench.js").is_file():
+        return
+    if shutil.which("wasm-pack") is None:
+        raise ReleaseError(
+            "wasm-pack is required to cut a release: the committed wasm bundle "
+            "must be rebuilt for the release version or main goes red behind it"
+        )
+    run(
+        root,
+        "wasm-pack",
+        "build",
+        "crates/sharpebench-wasm",
+        "--target",
+        "nodejs",
+        "--out-dir",
+        "../../npm/pkg",
+        "--out-name",
+        "sharpebench",
+    )
+    reported = bundle_version(root)
+    # The stamp is a qualified name, `sharpebench-stats/0.25.0`, not a bare
+    # version. Compare the version it carries rather than the whole string.
+    carried = reported.rsplit("/", 1)[-1] if reported else ""
+    if carried != target:
+        raise ReleaseError(
+            f"the rebuilt wasm bundle reports {reported!r}, expected {target}"
+        )
+    if not git(root, "status", "--porcelain", "--", str(pkg)).strip():
+        return
+    git(root, "add", "--", str(pkg))
+    git(root, "commit", "--amend", "--no-edit")
+
+
 def cut_release(root: Path, bump: str, current: str, target: str, branch: str) -> str:
     prepare_changelog(root, current, target)
     run(
@@ -364,6 +447,8 @@ def cut_release(root: Path, bump: str, current: str, target: str, branch: str) -
     actual = workspace_version((root / "Cargo.toml").read_bytes())
     if actual != target:
         raise ReleaseError(f"cargo-release produced {actual}, expected {target}")
+
+    rebuild_committed_bundle(root, target)
 
     run(root, sys.executable, "paper/src/make-provenance.py")
     git(root, "add", "--", "paper/evidence/provenance.json")
