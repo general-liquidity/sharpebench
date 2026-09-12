@@ -37,6 +37,7 @@ pub mod attribution;
 pub mod briefing;
 pub mod budget_curve;
 pub mod calibration;
+pub mod mutation_probe;
 pub mod candidate_lineage;
 pub mod certification;
 pub mod comparison_sets;
