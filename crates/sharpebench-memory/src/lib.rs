@@ -78,6 +78,7 @@ pub mod confabulation;
 pub mod multisession;
 pub mod pit;
 pub mod poisoning;
+pub mod transition;
 
 pub use confabulation::{confabulation_report, BeliefEvent, ConfabulationReport};
 pub use multisession::{

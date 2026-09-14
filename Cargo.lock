@@ -903,6 +903,8 @@ dependencies = [
 name = "sharpebench-memory"
 version = "0.25.0"
 dependencies = [
+ "serde",
+ "serde_json",
  "sharpebench-stats",
 ]
 
