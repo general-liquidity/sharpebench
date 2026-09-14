@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "30843e4dd0ddc79d27313dbf07a70125899538e8",
+  "generated_at_head": "f13ef89c655c2fbe0dd98bf9e2cbae49db775237",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -187,7 +187,7 @@
     },
     {
       "path": "arena/state.json",
-      "sha256": "2a7e992ee8f0b91a3061fd69572d225691025e7000e233154af7716b353660d0"
+      "sha256": "f07ef768af38f7147f9972d40d3661cb77e2ec823a456e85962c5263c3c93818"
     },
     {
       "path": "arena/windows/window-001/window.json",
@@ -319,11 +319,15 @@
     },
     {
       "path": "crates/sharpebench-cli/src/main.rs",
-      "sha256": "b7bc926101218abdb639249fac0496c8c3825b8ab02cb9654cfe02a68e145c8f"
+      "sha256": "beab514e88e74b83c528a1fd0e0d726a67c8ed1058a0540cfe4f010c6381e3d5"
+    },
+    {
+      "path": "crates/sharpebench-cli/src/regrade_cmd.rs",
+      "sha256": "e91a8d4d508c87aab5663aaadc18234969d6b68b451509defed2f3104addb235"
     },
     {
       "path": "crates/sharpebench-cli/src/rescore_cmd.rs",
-      "sha256": "7220e38d03c127199fa2a28ec41e0fe82bbf45346ba3e4b877f38eaa50454424"
+      "sha256": "e62ee66ae8c591751ba04b2ef2f3c8865b469f420307c76592248088a37bb6cf"
     },
     {
       "path": "crates/sharpebench-cli/src/update.rs",
@@ -835,7 +839,7 @@
     },
     {
       "path": "crates/sharpebench-sim/src/trajectory.rs",
-      "sha256": "2f6946d1f8b5d789a8cb7a34cbd9801754464a90db7da9e585debc67e5b7894b"
+      "sha256": "f37d458b70fcf5de9c0084eb3f25c2535b899c2614121bd7be081590a15ad5eb"
     },
     {
       "path": "crates/sharpebench-sim/src/transport.rs",
@@ -1179,5 +1183,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "50035b467b71ca83586997216d6a0d19153763fde0d79abe0e64cc3d938fe768"
+  "source_snapshot_sha256": "e59f09a9d2b0dfc3bc14afb268441f92ddc88ac78ccdc1ae3bee766cc8e8f933"
 }

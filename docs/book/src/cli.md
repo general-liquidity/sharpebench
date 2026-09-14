@@ -15,6 +15,7 @@ sharpebench verify <board.json> <key> verify a signed board's chain
 sharpebench capture <agent> <out.json>                capture an agent's raw-decision trajectory
 sharpebench verify-trajectory <traj.json>             replay a trajectory → recompute its score
 sharpebench rescore <bundle.json>                     recompute a declared submission bundle from its frozen files
+sharpebench regrade <bundle.json> --original-evaluator <json> --replacement-evaluator <json> --reason <text>   link an artifact to the evaluator superseding the one that graded it
 sharpebench audit-briefing <briefing.json>            audit a shared briefing for salience bias
 sharpebench canary <seed>                             derive a do-not-train contamination tripwire
 sharpebench sandbox-check <image@sha256:digest>       run the live Docker-boundary acceptance checks
@@ -543,6 +544,66 @@ The report carries the bundle digest, the frozen-manifest digest, every
 verified file with its role, the runner artifact, the semantic dataset and
 cost-model digests, the recomputed score, and two prose lists: `verified` and
 `not_established`.
+
+## `regrade`
+
+```bash
+sharpebench regrade <bundle.json> --original-evaluator <evaluator.json> --replacement-evaluator <evaluator.json> --reason <text> [--frozen-published <digests.json>] [--json]
+```
+
+Emits the receipt that links a frozen submission artifact to the evaluator
+superseding the one that graded it, or refuses.
+
+When an evaluator fails, its grade has to be replaced, and a replacement grade
+with nothing linking it to the artifact and to the evaluator it replaces is an
+assertion. The receipt is that link: the source artifact by digest, the
+evaluator identity on both sides including the wall-clock and memory ceilings a
+grade was produced under, every evaluator input that differs between them, the
+stated reason, the number of recorded decisions read back out of the artifact,
+and the number of agents invoked to produce them, which is always zero.
+
+**It publishes no figure.** This repository has one path from which a score is
+published, `rescore` recomputing through the strict verifier, and a regrade does
+not add a second. A regrade's job is the link; the superseding grade is a
+rescore's to produce, and the emitted document says so under
+`not_established`.
+
+The bundle is the same declared read set `rescore` takes, and it is validated
+and read the same way: every declared path is held to its declared digest before
+anything is parsed. The digest the receipt names is then hashed from the
+trajectory bytes the command is holding rather than read off the declaration, so
+a trajectory that changed under its declaration refuses as a changed bound file
+before a receipt exists.
+
+The replacement evaluator is the one that would do the grading, so its two
+derivable fields are checked rather than believed: `verifier_artifact_sha256`
+must be this binary's own digest and `score_config_sha256` must be the digest of
+the configuration this binary scores with. A declaration naming any other binary
+or configuration refuses and prints both values, for the reason a bundle's
+declared runner identity is checked against the verifier's own: a grade
+attributed to an evaluator that is not the one present is not a grade anybody
+can check.
+
+The original evaluator is historical. A bundle records the capture binary and
+the entrant's compute, never the identity of whatever graded it, so that
+identity is the operator's declaration and the document reports it as one under
+`not_established`.
+
+An artifact that does not carry a decision for every step of one of its windows
+is refused, naming the run and both counts, rather than replayed into holds the
+agent never made. A regrade with no stated reason is refused: a regrade nobody
+gave a reason for is not auditable.
+
+`--frozen-published` names, as a JSON array of digests, the artifacts whose
+grades are frozen published evidence. A source that matches yields an
+operational-only disposition: the superseding grade is reportable, and the
+published record keeps its own number. Without the flag no source is treated as
+published, which the document reports as an omission rather than a finding.
+
+An emitted receipt exits 0, a refusal exits 1, and under `--json` the refusal is
+emitted as a document rather than written to stderr. The document carries
+`used_by_gate: false`: it is provenance surface, and no score, gate, eligibility
+or rank sees it.
 
 ## `compare`
 

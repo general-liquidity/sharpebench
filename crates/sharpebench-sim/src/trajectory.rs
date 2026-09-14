@@ -290,6 +290,11 @@ impl RegradeReceipt {
 /// repeated when only the evaluator failed. The one way an agent's judgement
 /// could sneak back in is a short artifact, where the replay would fall back to
 /// holds it was never told to make; that is refused rather than graded.
+///
+/// The production caller is the `sharpebench regrade` command, which reads the
+/// source digest out of a declared submission bundle's verified bytes rather
+/// than taking it on trust, and emits the receipt without publishing a figure:
+/// the superseding grade stays `sharpebench rescore`'s to produce.
 pub fn regrade_submission(
     data: &Dataset,
     traj: &AgentTrajectory,

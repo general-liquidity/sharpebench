@@ -27,6 +27,7 @@ mod forecast_cmd;
 mod gateway_cli;
 mod import_cmd;
 mod lineage_cmd;
+mod regrade_cmd;
 mod rescore_cmd;
 #[cfg(feature = "self-update")]
 mod update;
@@ -60,6 +61,7 @@ fn main() -> ExitCode {
         Some("capture") => run_capture(&args, json),
         Some("verify-trajectory") => run_verify_trajectory(&args, json),
         Some("rescore") => ExitCode::from(rescore_cmd::run(&args, json).clamp(0, 255) as u8),
+        Some("regrade") => ExitCode::from(regrade_cmd::run(&args, json).clamp(0, 255) as u8),
         Some("compare") => ExitCode::from(compare_cmd::run(&args, json).clamp(0, 255) as u8),
         Some("audit-briefing") => run_audit_briefing(&args, json),
         Some("canary") => run_canary(&args, json),
@@ -622,6 +624,11 @@ fn help() {
     );
     println!("                       --envelope <envelope.json>: judge the declared compute budget against the field's; a budget difference refuses, environment metadata is disclosed");
     println!("                       --reexecute [--scan-policy <policy.json> [--runtime-allowlist <list.json>]]: also re-run every captured run from the bundle's own pinned image in a network-disabled container");
+    println!(
+        "  sharpebench regrade <bundle.json> --original-evaluator <json> --replacement-evaluator <json> --reason <text>  link a frozen submission artifact to the evaluator that supersedes the one which graded it"
+    );
+    println!("                       --frozen-published <digests.json>: artifacts whose grades are frozen published evidence; a match is reportable and never a replacement");
+    println!("                       emits the receipt and no figure: the score stays `rescore`'s, and the receipt is reporting surface, never a rank input");
     println!(
         "  sharpebench compare --axis <entrant|invocation|score-config> --baseline <checkpoint.json> --treatment <checkpoint.json>  declare the one identity two sweep arms may differ on, or refuse naming the field that decided it"
     );
