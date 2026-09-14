@@ -392,6 +392,11 @@ pub struct FrozenIndex {
 }
 
 impl FrozenIndex {
+    /// How many files the manifest declares, which is how many were read.
+    pub fn declared_file_count(&self) -> usize {
+        self.files.len()
+    }
+
     pub fn manifest_sha256(&self) -> String {
         let mut preimage = String::new();
         for file in &self.files {
@@ -562,7 +567,7 @@ pub fn assess_resources(
 /// cost profile. Every other field is the cost model's own, so a frozen model
 /// that declares turnover costs or execution noise keeps them and is hashed
 /// bit for bit by [`sharpebench_harness::cost_model_digest`].
-fn frozen_cost_model(bytes: &[u8]) -> Result<CostModel, RescoreRefusal> {
+pub fn frozen_cost_model(bytes: &[u8]) -> Result<CostModel, RescoreRefusal> {
     let mut value: serde_json::Value = serde_json::from_slice(bytes)
         .map_err(|error| refuse("frozen cost model", error.to_string()))?;
     let unlimited = matches!(
@@ -747,12 +752,19 @@ pub fn rescore(
 const USAGE: &str = "usage: sharpebench rescore <bundle.json> [--envelope <envelope.json>] \
                      [--reexecute [--scan-policy <policy.json> [--runtime-allowlist <list.json>]]] [--json]";
 
-/// The operator entry point.
-pub fn run(args: &[String], json: bool) -> i32 {
-    let Some(path) = args.get(2).filter(|value| !value.starts_with("--")) else {
-        eprintln!("{USAGE}");
-        return 2;
-    };
+/// A bundle read off disk: its declaration, its own digest, and the directory
+/// every declared path resolves against.
+pub struct LoadedBundle {
+    pub bundle: SubmissionBundle,
+    pub bundle_sha256: String,
+    pub root: PathBuf,
+}
+
+/// Read a bundle document and bind it to its own bytes. Shared with
+/// `sharpebench regrade`, which declares the same read set and so must apply
+/// the same size ceiling, encoding rule and parser rather than a second copy
+/// of them.
+pub fn load_bundle(path: &str) -> Result<LoadedBundle, String> {
     let bundle_path = Path::new(path);
     let raw = match std::fs::File::open(bundle_path).and_then(|file| {
         use std::io::Read as _;
@@ -762,30 +774,39 @@ pub fn run(args: &[String], json: bool) -> i32 {
     }) {
         Ok(bytes) if bytes.len() as u64 <= MAX_BUNDLE_BYTES => bytes,
         Ok(_) => {
-            eprintln!("error: {path} is larger than the {MAX_BUNDLE_BYTES} bytes a bundle declaration may occupy");
-            return 1;
+            return Err(format!(
+                "{path} is larger than the {MAX_BUNDLE_BYTES} bytes a bundle declaration may occupy"
+            ))
         }
-        Err(error) => {
-            eprintln!("error: cannot read {path}: {error}");
-            return 1;
-        }
+        Err(error) => return Err(format!("cannot read {path}: {error}")),
     };
-    let text = match std::str::from_utf8(&raw) {
-        Ok(text) => text,
-        Err(error) => {
-            eprintln!("error: {path} is not UTF-8: {error}");
-            return 1;
-        }
+    let text =
+        std::str::from_utf8(&raw).map_err(|error| format!("{path} is not UTF-8: {error}"))?;
+    let bundle = parse_bundle(text)?;
+    Ok(LoadedBundle {
+        bundle_sha256: sharpebench_attest::content_digest(&raw),
+        bundle,
+        root: bundle_path.parent().unwrap_or(Path::new(".")).to_path_buf(),
+    })
+}
+
+/// The operator entry point.
+pub fn run(args: &[String], json: bool) -> i32 {
+    let Some(path) = args.get(2).filter(|value| !value.starts_with("--")) else {
+        eprintln!("{USAGE}");
+        return 2;
     };
-    let bundle = match parse_bundle(text) {
-        Ok(bundle) => bundle,
+    let LoadedBundle {
+        bundle,
+        bundle_sha256,
+        root,
+    } = match load_bundle(path) {
+        Ok(loaded) => loaded,
         Err(error) => {
             eprintln!("error: {error}");
             return 1;
         }
     };
-    let bundle_sha256 = sharpebench_attest::content_digest(&raw);
-    let root = bundle_path.parent().unwrap_or(Path::new(".")).to_path_buf();
 
     let envelope = match crate::flag_value(args, "--envelope") {
         Some(envelope_path) if !envelope_path.starts_with("--") => {
