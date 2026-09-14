@@ -106,6 +106,8 @@ daemon, though its delegates are covered. A rescore bundle binds content and not
 an author, so it is not signed, and pairing it with the attestation chain is not
 done. The regrade receipt takes the source digest on trust without reading a
 byte, which is the value a rescore verifies, so the two compose only by hand.
+(Closed on 2026-09-14: `sharpebench regrade` hashes the digest from the
+trajectory bytes the frozen manifest verified.)
 The momentum style remains sampled and ungraded until its producer is rerun.
 
 ## Acting on the independent assessment, 2026-09-11
@@ -710,6 +712,70 @@ inputs rather than these exports' whole domain. `tag_regime` is the weakest of t
 because its output is one of three short strings: an arithmetic difference that does not
 cross a classification boundary on the four committed inputs does not move its fingerprint.
 
+## The last transfer boundary, 2026-09-14
+
+`sharpebench regrade` is the producer for `sharpebench_sim::regrade_submission`.
+It takes a declared submission bundle, the evaluator identity that graded it and
+the one that supersedes that evaluator, and emits the receipt linking them, or
+refuses.
+
+Three integrations were considered. Folding a regrade into `sharpebench rescore`
+was rejected for the reason the previous round gave, restated in the section
+below and unchanged by this one: a rescore's published figure comes from
+`verify_trajectory_strict`, whose per-run `steps.len() == end - start` check is
+exactly the condition `RegradeRefusal::FabricatedDecisions` names, so composing
+the two would either recompute the submission a second time and discard it, or
+move the published number onto a second replay path. Emitting a receipt where a
+regrade already happens implicitly was rejected because no such path exists: the
+only supersession the repository performs is `Arena::supersede_window`, which
+replaces an empty pre-entry window before any commitment and grades nothing, and
+its `replacement_score_config_sha256` is a window's frozen config digest rather
+than an evaluator regrading an artifact. The standalone command was built.
+
+It publishes no figure. This repository has one path from which a score is
+published, and a regrade does not add a second, so the submission
+`regrade_submission` returns is dropped and what the command takes from it is
+the receipt and the refusals computed on the way to it. The superseding grade
+remains a rescore's to produce.
+
+The seam the previous round named is closed. The source digest `RegradeRequest`
+took on trust is now read: the bundle's frozen manifest is validated and read by
+the rescore command's `verify_frozen`, which holds every declared path to its
+declared digest, and the digest the receipt names is hashed from the trajectory
+bytes the command is holding. A trajectory changed under its declaration refuses
+as a changed bound file before a receipt exists. The replacement evaluator's two
+derivable fields are checked rather than believed, the way a bundle's runner
+identity is checked against the verifier's own: a replacement naming another
+binary, or another scoring configuration, refuses and prints both values.
+
+Nine isolated mutations are caught, each mutated in place on the line it
+defends, run, restored with `git show HEAD:<path>` and compared with `cmp`:
+hashing the dataset instead of the trajectory into the source digest; comparing
+the verifier identity with itself; comparing the score configuration with
+itself; recording the document as used by the gate; substituting a fixed string
+for the operator's reason; dropping the frozen-published list on the way to the
+disposition; hardcoding the replacement permission true; swapping the two
+evaluator sides; and accepting a bound file whose bytes changed. Each run leaves
+at least eight of the ten cases passing in the same file, so nothing passes by
+refusing everything. The restored sources are byte-identical to the committed
+tree.
+
+Nothing published moves. The document carries `used_by_gate: false` and reaches
+no gate, eligibility or rank. The committed golden leaderboard fixture matches
+byte for byte, `sharpebench run --json` and `sharpebench score --json` are
+byte-identical to a binary built from the previous head, and the 40 artifact
+digests in `paper/evidence/provenance.json` are unchanged.
+
+Not established by this round. The original evaluator identity is historical and
+stays the operator's declaration: a bundle records the capture binary and the
+entrant's compute, never the identity of whatever graded it, so this round
+removed one trusted input and not two, and the emitted document says which one
+remains. The command has no test that drives the real binary end to end; its
+`run` wrapper reads the two evaluator documents and derives this binary's own
+identities, and only the function beneath it is covered by cases. No empirical
+field was run and the frozen paper evidence was neither regenerated nor
+reproduced.
+
 ## Producer paths for the transfer boundaries, 2026-09-12
 
 A third reviewer accepted the census and suite-control wiring and named three
@@ -758,7 +824,10 @@ so a bundle that does not record it could only have it supplied by the operator,
 which replaces one trusted input with another. The source digest
 `RegradeRequest` takes on trust is still the value a rescore verifies, and the
 two still compose only by hand. The 2026-09-09 row that read "every regrade
-linked to its source" is corrected above. No empirical field was run and the
+linked to its source" is corrected above. That reasoning was checked and kept
+by the 2026-09-14 round in the section above, which rules out the same
+composition and builds the standalone producer instead, so `regrade_submission`
+has had a production caller since then. No empirical field was run and the
 frozen paper evidence was neither regenerated nor reproduced.
 
 ## Initial review and isolation
