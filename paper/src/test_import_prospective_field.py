@@ -45,6 +45,14 @@ def _git(root: Path, *arguments: str) -> str:
             "user.name=Prospective fixture",
             "-c",
             "user.email=fixture@example.invalid",
+            # git commit spawns `git maintenance run --auto --detach`. Once two
+            # loose objects share the objects/17 shard (the fixture always puts
+            # one tree there, so a commit hash landing there is enough) the
+            # detached child repacks into .git/objects/pack while
+            # TemporaryDirectory is already removing the tree, and rmtree fails
+            # with ENOTEMPTY. A hermetic fixture needs no maintenance.
+            "-c",
+            "maintenance.auto=false",
             *arguments,
         ],
         check=True,
