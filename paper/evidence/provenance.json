@@ -171,7 +171,7 @@
       "sha256": "855d060b41892a89c8a5d85b0cd219456ab38960103e7d10f574496181e90339"
     }
   ],
-  "generated_at_head": "0b174a6cc04b975a7f8f1538b496601a3ba53396",
+  "generated_at_head": "4ed390f534df739089fdc65c0d0e2162325c2036",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -323,7 +323,7 @@
     },
     {
       "path": "crates/sharpebench-cli/src/regrade_cmd.rs",
-      "sha256": "e91a8d4d508c87aab5663aaadc18234969d6b68b451509defed2f3104addb235"
+      "sha256": "5128a0da8a8184b1da22c0633ae92b470bddc7e5fb15e6aff223cd519c31e3d1"
     },
     {
       "path": "crates/sharpebench-cli/src/rescore_cmd.rs",
@@ -379,7 +379,7 @@
     },
     {
       "path": "crates/sharpebench-cli/tests/regrade_cli.rs",
-      "sha256": "f3d230681dc7d644a2c84f0e2226496a386be5e2551735b35d3dd8aedcbed4da"
+      "sha256": "487f24da3333c1825b953972be7564263e7844d5728b47704b3354207f48e8a4"
     },
     {
       "path": "crates/sharpebench-cli/tests/run_identity_cli.rs",
@@ -1203,5 +1203,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "9ac535536ce33b83fe9181b92db3e75d98a66e2313b39061a1c1f23384d3a498"
+  "source_snapshot_sha256": "e4d6d29f2f307df26670d54cdaca9b59e364ba1e3eb60e558a671aef37349ae9"
 }
