@@ -385,7 +385,9 @@ fn a_trajectory_changed_under_its_declaration_is_refused_as_a_changed_bound_file
 }
 
 /// A declared evaluator file that does not exist is refused naming the path it
-/// could not read.
+/// could not read. In JSON mode the refusal is the result, so it is the same
+/// refusal document a regrade refusal emits, on stdout; in text mode it is an
+/// error on stderr.
 #[test]
 fn a_missing_evaluator_file_is_refused_naming_the_unreadable_path() {
     let bundle = Bundle::new();
@@ -393,6 +395,25 @@ fn a_missing_evaluator_file_is_refused_naming_the_unreadable_path() {
     let mut args = bundle.full_args();
     args[3] = missing.clone();
 
+    let output = bundle.run(&args);
+    assert_eq!(output.status.code(), Some(1), "stderr: {}", stderr(&output));
+    let document = stdout_json(&output);
+    assert!(
+        document.get("receipt").is_none(),
+        "a refusal carries no receipt: {document}"
+    );
+    assert_eq!(document["used_by_gate"], json!(false));
+    assert_eq!(
+        field(&document, "/schema_version"),
+        "sharpebench.regrade-document.v1"
+    );
+    assert_eq!(field(&document, "/bundle"), bundle.arg("bundle.json"));
+    assert!(
+        field(&document, "/refusal").starts_with(&format!("cannot read {missing}: ")),
+        "the refusal must name the unreadable evaluator file: {document}"
+    );
+
+    args.retain(|arg| arg != "--json");
     let output = bundle.run(&args);
     assert_eq!(output.status.code(), Some(1), "stderr: {}", stderr(&output));
     assert!(
@@ -418,14 +439,14 @@ fn a_malformed_evaluator_file_is_refused_as_not_an_evaluator_identity() {
     args[3] = bundle.arg("original-not-json.json");
     let output = bundle.run(&args);
     assert_eq!(output.status.code(), Some(1), "stderr: {}", stderr(&output));
-    assert!(output.stdout.is_empty(), "no receipt is emitted");
+    let document = stdout_json(&output);
+    assert!(document.get("receipt").is_none(), "no receipt is emitted");
     assert!(
-        stderr(&output).starts_with(&format!(
-            "error: --original-evaluator {} is not an evaluator identity: ",
+        field(&document, "/refusal").starts_with(&format!(
+            "--original-evaluator {} is not an evaluator identity: ",
             args[3]
         )),
-        "the refusal must name the malformed original evaluator: {}",
-        stderr(&output)
+        "the refusal must name the malformed original evaluator: {document}"
     );
 
     bundle.write(
@@ -438,11 +459,12 @@ fn a_malformed_evaluator_file_is_refused_as_not_an_evaluator_identity() {
     args[5] = bundle.arg("replacement-partial.json");
     let output = bundle.run(&args);
     assert_eq!(output.status.code(), Some(1), "stderr: {}", stderr(&output));
-    assert!(output.stdout.is_empty(), "no receipt is emitted");
-    let message = stderr(&output);
+    let document = stdout_json(&output);
+    assert!(document.get("receipt").is_none(), "no receipt is emitted");
+    let message = field(&document, "/refusal");
     assert!(
         message.starts_with(&format!(
-            "error: --replacement-evaluator {} is not an evaluator identity: ",
+            "--replacement-evaluator {} is not an evaluator identity: ",
             args[5]
         )) && message.contains("missing field `score_config_sha256`"),
         "the refusal must name the malformed replacement evaluator and what it lacks: {message}"
@@ -514,5 +536,156 @@ fn a_replacement_evaluator_that_is_not_this_binary_is_refused() {
             binary_sha256()
         )),
         "the refusal must name the declared and derived verifier: {refusal}"
+    );
+}
+
+/// Asserts a usage error naming `flag` as the one given without a value: exit
+/// 2, no document on stdout, and that flag named on stderr. Several causes exit
+/// 2, so the exit code alone would pass for the wrong flag.
+fn assert_flag_without_value(output: &Output, flag: &str, what: &str) {
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "{flag} without a value is a usage error; stdout: {} stderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr(output)
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "{flag} without a value emits no receipt: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(
+        stderr(output).starts_with(&format!("error: {flag} requires {what}\n{USAGE_PREFIX}")),
+        "the usage error must name {flag}: {}",
+        stderr(output)
+    );
+}
+
+/// Writes a `--frozen-published` list into the bundle directory and returns
+/// its path argument.
+fn frozen_published_list(bundle: &Bundle, name: &str, digests: &[String]) -> String {
+    bundle.write(
+        name,
+        &serde_json::to_vec(digests).expect("a digest list serializes"),
+    );
+    bundle.arg(name)
+}
+
+/// `--frozen-published` as the last argument names no list. Read as an omitted
+/// list it would let the receipt replace the published evidence the operator
+/// named the flag to protect.
+#[test]
+fn a_frozen_published_flag_as_the_last_argument_is_a_usage_error() {
+    let bundle = Bundle::new();
+    let mut args = bundle.full_args();
+    args.retain(|arg| arg != "--json");
+    args.push("--frozen-published".to_string());
+
+    assert_flag_without_value(&bundle.run(&args), "--frozen-published", "a JSON file path");
+}
+
+/// `--json` is stripped before parsing, so `--frozen-published --json` leaves
+/// the flag last: the same usage error, and no JSON receipt.
+#[test]
+fn a_frozen_published_flag_followed_only_by_json_is_a_usage_error() {
+    let bundle = Bundle::new();
+    let mut args = bundle.full_args();
+    args.retain(|arg| arg != "--json");
+    args.push("--frozen-published".to_string());
+    args.push("--json".to_string());
+
+    assert_flag_without_value(&bundle.run(&args), "--frozen-published", "a JSON file path");
+}
+
+/// `--original-evaluator` followed directly by `--replacement-evaluator`, with
+/// everything else in the invocation valid.
+#[test]
+fn an_original_evaluator_flag_followed_by_another_flag_is_a_usage_error() {
+    let bundle = Bundle::new();
+    let mut args = bundle.full_args();
+    assert_eq!(args[2], "--original-evaluator");
+    args.remove(3);
+
+    assert_flag_without_value(
+        &bundle.run(&args),
+        "--original-evaluator",
+        "a JSON file path",
+    );
+}
+
+/// `--replacement-evaluator` followed directly by `--reason`, with everything
+/// else in the invocation valid.
+#[test]
+fn a_replacement_evaluator_flag_followed_by_another_flag_is_a_usage_error() {
+    let bundle = Bundle::new();
+    let mut args = bundle.full_args();
+    assert_eq!(args[4], "--replacement-evaluator");
+    args.remove(5);
+
+    assert_flag_without_value(
+        &bundle.run(&args),
+        "--replacement-evaluator",
+        "a JSON file path",
+    );
+}
+
+/// `--reason --frozen-published <list>` must not record the literal
+/// `--frozen-published` as the reason and silently drop the list. The list is
+/// readable and valid, so the reason is the only cause.
+#[test]
+fn a_reason_flag_followed_by_another_flag_is_a_usage_error() {
+    let bundle = Bundle::new();
+    let list = frozen_published_list(
+        &bundle,
+        "published.json",
+        &[digest(&bundle.read("trajectory.json"))],
+    );
+    let mut args = bundle.full_args();
+    assert_eq!(args[6], "--reason");
+    args[7] = "--frozen-published".to_string();
+    args.insert(8, list);
+
+    assert_flag_without_value(&bundle.run(&args), "--reason", "a text");
+}
+
+/// The control for the usage errors above: a list that was actually read
+/// decides the disposition, in both directions. A list naming the source
+/// forbids replacement and one that does not name it permits it, so neither a
+/// binary refusing every `--frozen-published` nor one forbidding replacement
+/// whenever the flag appears passes.
+#[test]
+fn a_frozen_published_list_that_was_read_decides_whether_the_receipt_may_replace() {
+    let bundle = Bundle::new();
+    let source = digest(&bundle.read("trajectory.json"));
+
+    let naming = frozen_published_list(&bundle, "names-source.json", std::slice::from_ref(&source));
+    let mut args = bundle.full_args();
+    args.push("--frozen-published".to_string());
+    args.push(naming);
+    let output = bundle.run(&args);
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let document = stdout_json(&output);
+    assert_eq!(document["may_replace_published"], json!(false));
+    assert_eq!(
+        document["receipt"]["disposition"],
+        json!({ "disposition": "operational_only", "frozen_record": source })
+    );
+
+    let other = frozen_published_list(
+        &bundle,
+        "names-other.json",
+        &["00".repeat(32), digest(&bundle.read("costs.json"))],
+    );
+    let mut args = bundle.full_args();
+    args.push("--frozen-published".to_string());
+    args.push(other);
+    let output = bundle.run(&args);
+    assert_eq!(output.status.code(), Some(0), "stderr: {}", stderr(&output));
+    let document = stdout_json(&output);
+    assert_eq!(document["may_replace_published"], json!(true));
+    assert_eq!(
+        document["receipt"]["disposition"],
+        json!({ "disposition": "replaces_source" })
     );
 }

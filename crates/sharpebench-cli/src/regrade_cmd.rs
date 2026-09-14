@@ -263,6 +263,61 @@ fn read_frozen_published(path: &str) -> Result<Vec<String>, String> {
         .map_err(|error| format!("--frozen-published {path} is not a list of digests: {error}"))
 }
 
+/// A value flag's argument, with presence decided apart from the value.
+/// `Ok(None)` is a flag that was never given; a flag given as the last argument
+/// or followed by another `--flag` is a usage error naming it. `flag_value`
+/// cannot tell those apart, and for `--frozen-published` the difference is
+/// between an omitted list and permission to replace published evidence.
+fn value_flag<'a>(args: &'a [String], flag: &str, what: &str) -> Result<Option<&'a str>, String> {
+    let Some(index) = args.iter().position(|arg| arg == flag) else {
+        return Ok(None);
+    };
+    match args.get(index + 1) {
+        Some(value) if !value.starts_with("--") => Ok(Some(value)),
+        _ => Err(format!("error: {flag} requires {what}")),
+    }
+}
+
+type ValueFlags<'a> = (
+    Option<&'a str>,
+    Option<&'a str>,
+    Option<&'a str>,
+    Option<&'a str>,
+);
+
+/// `--original-evaluator`, `--replacement-evaluator`, `--reason` and
+/// `--frozen-published`, in that order, each checked for a value before any
+/// input is read.
+fn value_flags(args: &[String]) -> Result<ValueFlags<'_>, String> {
+    Ok((
+        value_flag(args, "--original-evaluator", "a JSON file path")?,
+        value_flag(args, "--replacement-evaluator", "a JSON file path")?,
+        value_flag(args, "--reason", "a text")?,
+        value_flag(args, "--frozen-published", "a JSON file path")?,
+    ))
+}
+
+/// The refusal document. A refusal raised while loading inputs and one raised
+/// by the regrade share it, so a machine reader finds every refusal on stdout.
+fn refusal_document(path: &str, refusal: &str) -> serde_json::Value {
+    serde_json::json!({
+        "used_by_gate": false,
+        "schema_version": DOCUMENT_VERSION,
+        "bundle": path,
+        "refusal": refusal,
+    })
+}
+
+/// Refuse before a receipt exists.
+fn refuse_input(path: &str, error: &str, json: bool) -> i32 {
+    if json {
+        crate::emit_json(&refusal_document(path, error));
+    } else {
+        eprintln!("error: {error}");
+    }
+    1
+}
+
 /// The operator entry point. `0` emits the receipt, `1` refuses it, `2` is a
 /// usage error.
 pub fn run(args: &[String], json: bool) -> i32 {
@@ -270,11 +325,16 @@ pub fn run(args: &[String], json: bool) -> i32 {
         eprintln!("{USAGE}");
         return 2;
     };
-    let (Some(original_path), Some(replacement_path), Some(reason)) = (
-        crate::flag_value(args, "--original-evaluator"),
-        crate::flag_value(args, "--replacement-evaluator"),
-        crate::flag_value(args, "--reason"),
-    ) else {
+    let (original_path, replacement_path, reason, frozen_published_path) = match value_flags(args) {
+        Ok(flags) => flags,
+        Err(error) => {
+            eprintln!("{error}\n{USAGE}");
+            return 2;
+        }
+    };
+    let (Some(original_path), Some(replacement_path), Some(reason)) =
+        (original_path, replacement_path, reason)
+    else {
         eprintln!("{USAGE}");
         return 2;
     };
@@ -285,52 +345,30 @@ pub fn run(args: &[String], json: bool) -> i32 {
         root,
     } = match load_bundle(path) {
         Ok(loaded) => loaded,
-        Err(error) => {
-            eprintln!("error: {error}");
-            return 1;
-        }
+        Err(error) => return refuse_input(path, &error, json),
     };
     let original = match read_evaluator("--original-evaluator", original_path) {
         Ok(identity) => identity,
-        Err(error) => {
-            eprintln!("error: {error}");
-            return 1;
-        }
+        Err(error) => return refuse_input(path, &error, json),
     };
     let replacement = match read_evaluator("--replacement-evaluator", replacement_path) {
         Ok(identity) => identity,
-        Err(error) => {
-            eprintln!("error: {error}");
-            return 1;
-        }
+        Err(error) => return refuse_input(path, &error, json),
     };
-    let frozen_published = match crate::flag_value(args, "--frozen-published") {
-        Some(list_path) if !list_path.starts_with("--") => match read_frozen_published(list_path) {
+    let frozen_published = match frozen_published_path {
+        Some(list_path) => match read_frozen_published(list_path) {
             Ok(list) => list,
-            Err(error) => {
-                eprintln!("error: {error}");
-                return 1;
-            }
+            Err(error) => return refuse_input(path, &error, json),
         },
-        Some(_) => {
-            eprintln!("error: --frozen-published requires a JSON file path");
-            return 2;
-        }
         None => Vec::new(),
     };
     let verifier = match crate::current_executable_sha256() {
         Ok(digest) => digest,
-        Err(error) => {
-            eprintln!("error: {error}");
-            return 1;
-        }
+        Err(error) => return refuse_input(path, &error, json),
     };
     let score_config = match this_score_config_sha256() {
         Ok(digest) => digest,
-        Err(error) => {
-            eprintln!("error: {error}");
-            return 1;
-        }
+        Err(error) => return refuse_input(path, &error, json),
     };
 
     match regrade(
@@ -352,12 +390,7 @@ pub fn run(args: &[String], json: bool) -> i32 {
             if json {
                 // The refusal is the result, so it is emitted as a document
                 // rather than printed to stderr and lost by a machine reader.
-                crate::emit_json(&serde_json::json!({
-                    "used_by_gate": false,
-                    "schema_version": DOCUMENT_VERSION,
-                    "bundle": path,
-                    "refusal": refusal.to_string(),
-                }));
+                crate::emit_json(&refusal_document(path, &refusal.to_string()));
             } else {
                 eprintln!("refused: {refusal}");
             }
