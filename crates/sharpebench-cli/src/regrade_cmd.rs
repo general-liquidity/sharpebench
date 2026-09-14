@@ -272,6 +272,11 @@ fn value_flag<'a>(args: &'a [String], flag: &str, what: &str) -> Result<Option<&
     let Some(index) = args.iter().position(|arg| arg == flag) else {
         return Ok(None);
     };
+    // Only the first occurrence would be read, so a repeated flag would silently
+    // drop every later value, including a published list that names the source.
+    if args.iter().filter(|arg| *arg == flag).count() > 1 {
+        return Err(format!("error: {flag} given more than once"));
+    }
     match args.get(index + 1) {
         Some(value) if !value.starts_with("--") => Ok(Some(value)),
         _ => Err(format!("error: {flag} requires {what}")),

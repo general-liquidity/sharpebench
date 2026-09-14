@@ -649,6 +649,44 @@ fn a_reason_flag_followed_by_another_flag_is_a_usage_error() {
     assert_flag_without_value(&bundle.run(&args), "--reason", "a text");
 }
 
+/// A repeated value flag is a usage error. Only the first occurrence would be
+/// read, so without the refusal a second `--frozen-published` list naming the
+/// source is silently ignored and the receipt permits replacing published
+/// evidence. The first list here names nothing relevant and the second names
+/// the source, which is exactly the order that fails open.
+#[test]
+fn a_repeated_frozen_published_flag_is_a_usage_error() {
+    let bundle = Bundle::new();
+    let source = digest(&bundle.read("trajectory.json"));
+    let other = frozen_published_list(&bundle, "names-other.json", &["0".repeat(64)]);
+    let naming = frozen_published_list(&bundle, "names-source.json", std::slice::from_ref(&source));
+    let mut args = bundle.full_args();
+    args.extend(["--frozen-published".to_string(), other]);
+    args.extend(["--frozen-published".to_string(), naming]);
+
+    let output = bundle.run(&args);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "a repeated flag is a usage error; stdout: {} stderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr(&output)
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "a repeated flag emits no receipt: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(
+        stderr(&output).starts_with(&format!(
+            "error: --frozen-published given more than once
+{USAGE_PREFIX}"
+        )),
+        "the usage error must name the repeated flag: {}",
+        stderr(&output)
+    );
+}
+
 /// The control for the usage errors above: a list that was actually read
 /// decides the disposition, in both directions. A list naming the source
 /// forbids replacement and one that does not name it permits it, so neither a
