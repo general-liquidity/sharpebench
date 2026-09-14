@@ -60,11 +60,59 @@ and floors the second.
   future information.
 - **Confabulation:** regret from reinforced beliefs that were never retested and
   later resolved false.
+- **Treatment activation and placebo control:** receipts showing that memory
+  reached a decision boundary, and a length-matched placebo arm under the same
+  model, tasks and budget. See the contract below.
 
 The crate uses deterministic reductions and explicit resampling seeds, with
 `#![forbid(unsafe_code)]`. Because it accepts outcome vectors rather
 than executing an agent, any store or agent framework can feed it without becoming
 a dependency of the benchmark.
+
+## Treatment activation and placebo control
+
+"Memory enabled" does not show that retrieved content reached a trading decision,
+and a lift over baseline can come from the retrieved content, from extra prompt
+bytes, or from extra compute. The `activation` module separates those readings.
+It does not replace the oracle ceiling of `ablation_report`.
+
+An `ActivationReceipt` covers one decision where memory was offered. It records the
+SHA-256 and byte length of the exact offered content, when that content became
+available, when the decision was taken, and the SHA-256 of every segment of the
+decision-boundary input as the host framed it. The content counts as exposed only
+when one whole segment has the same digest. That is structured evidence, not a
+substring search over a log: bytes buried inside a larger segment are not exposure.
+Exposure is derived from the digests and is never carried as a separate flag.
+
+Every receipt constructor, including deserialization, refuses an empty decision id,
+a malformed digest, and content available after the decision time. The last is
+`PointInTimeViolation`, the same no-lookahead rule the PIT leg scores; availability
+equal to the decision time is allowed.
+
+`activation_status` classifies an arm as `Activated` (at least one receipt shows
+exposure), `NotActivated` (receipts exist and none shows exposure, so memory was
+written or offered but never reached a decision), or `Unavailable`. An opaque agent
+that cannot produce receipts supplies `ActivationEvidence::Unavailable`. That is
+diagnostic, not invalidating: the comparison is still computed, the arm is never
+treated as activated, and the lift is labeled a proxy.
+
+`placebo_controlled_report` compares a retrieval arm with a placebo arm. Both carry a
+`TreatmentIdentity` of model id, task ids in scoring order, and declared budget, and
+the report refuses a comparison whose identities differ with `ModelMismatch`,
+`TaskMismatch` or `BudgetMismatch`. When both arms carry receipts, the placebo must
+be exposed at exactly the retrieval arm's exposed decisions, at the same decision
+time, with the same byte length and different bytes; each departure is its own
+typed refusal. The report then keeps three claims apart:
+
+1. **Activation established:** `activation_established` and `retrieval_activation`.
+2. **Placebo-controlled lift:** `placebo_controlled_lift` (retrieval mean minus
+   placebo mean), its paired stationary-bootstrap p-value, and `lift_evidence`,
+   which is `PlaceboControlled` only when retrieval activated and the placebo
+   matched, and a named proxy otherwise.
+3. **Causal trading improvement:** never claimed. `not_established` always says so,
+   together with what receipts cannot show: that the model used the exposed bytes,
+   that the host framed and hashed the input honestly, and that the placebo carries
+   no task information, which stays the caller's contract.
 
 ## Multi-session credit
 

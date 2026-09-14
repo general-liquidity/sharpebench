@@ -53,6 +53,11 @@
 //!   cross-session dependency-satisfaction rate.
 //! - [`pit`] (E3) - point-in-time correctness: a no-lookahead compliance score per
 //!   arm, and whether the retrieval arm leaked future data.
+//! - [`activation`] - treatment-activation receipts (content digest, availability
+//!   time, decision-boundary exposure) and a placebo arm of matched byte length
+//!   under identical model, task and budget identities. Separates "memory reached
+//!   a decision" from "placebo-controlled lift" and states that causal trading
+//!   improvement is not established.
 //! - [`confabulation`] (E6) - the self-reinforcing-error ("honest lying") metric: the
 //!   fraction of beliefs that were reinforced but never re-tested and later proved
 //!   wrong.
@@ -74,6 +79,7 @@
 //! ```
 #![forbid(unsafe_code)]
 
+pub mod activation;
 pub mod confabulation;
 pub mod multisession;
 pub mod pit;
