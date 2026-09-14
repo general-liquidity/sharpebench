@@ -51,8 +51,19 @@
 //!   session's credit is conditioned on whether the memory an earlier session wrote
 //!   was actually retained (not a flat per-task vector). Per-session lift plus a
 //!   cross-session dependency-satisfaction rate.
+//! - [`transition`] - scenario-transition manifests over that session DAG: a
+//!   declared carryover mode (fresh episode with memory, or continuous portfolio),
+//!   the allowed carryover set, strictly increasing effective dates and
+//!   preservation obligations. A stage observes only facts dated on or before its
+//!   own effective date, and an earlier stage's failure stays on its own row after
+//!   later success.
 //! - [`pit`] (E3) - point-in-time correctness: a no-lookahead compliance score per
 //!   arm, and whether the retrieval arm leaked future data.
+//! - [`activation`] - treatment-activation receipts (content digest, availability
+//!   time, decision-boundary exposure) and a placebo arm of matched byte length
+//!   under identical model, task and budget identities. Separates "memory reached
+//!   a decision" from "placebo-controlled lift" and states that causal trading
+//!   improvement is not established.
 //! - [`confabulation`] (E6) - the self-reinforcing-error ("honest lying") metric: the
 //!   fraction of beliefs that were reinforced but never re-tested and later proved
 //!   wrong.
@@ -74,10 +85,12 @@
 //! ```
 #![forbid(unsafe_code)]
 
+pub mod activation;
 pub mod confabulation;
 pub mod multisession;
 pub mod pit;
 pub mod poisoning;
+pub mod transition;
 
 pub use confabulation::{confabulation_report, BeliefEvent, ConfabulationReport};
 pub use multisession::{

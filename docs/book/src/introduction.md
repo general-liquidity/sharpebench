@@ -52,4 +52,4 @@ higher raw return get demoted below a steadily skilled one, run
 | `sharpebench-arena` | Forward-window lifecycle and the Docker containment boundary for untrusted entrants. |
 | `sharpebench-wasm` | The identical kernel compiled to WASM, embeddable in any host. |
 | `sharpebench-cli` | `sharpebench`: run / score / stress / audit / commit / sign / verify. |
-| `sharpebench-memory` | Deterministic three-arm retrieval ablations, poisoning, PIT, multi-session, and confabulation metrics. |
+| `sharpebench-memory` | Deterministic three-arm retrieval ablations, poisoning, PIT, multi-session, confabulation, and treatment-activation/placebo metrics. |
