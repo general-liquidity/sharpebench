@@ -259,6 +259,12 @@ fn fresh_and_continuous_modes_score_the_same_dag_differently() {
     // Fresh resets to the declared 100 cash; continuous opens on stage 1's close.
     assert_eq!(fresh_2.opening_portfolio, book(100.0, &[]));
     assert_eq!(continuous_2.opening_portfolio, book(40.0, &[("BTC", 70.0)]));
+    assert_eq!(continuous_2.opening_portfolio.cash(), 40.0);
+    assert_eq!(
+        continuous_2.opening_portfolio.positions(),
+        &BTreeMap::from([("BTC".to_string(), 70.0)])
+    );
+    assert!(fresh_2.opening_portfolio.positions().is_empty());
     assert_eq!(fresh.stages[1].stage_pnl, 20.0);
     assert_eq!(continuous.stages[1].stage_pnl, 10.0);
     assert_eq!(
@@ -293,6 +299,14 @@ fn a_valid_manifest_scores_successfully() {
     assert!(report.failed_stages.is_empty());
     let ids: Vec<_> = report.stages.iter().map(|s| s.stage_id).collect();
     assert_eq!(ids, [1, 2]);
+    let declared: Vec<_> = manifest.stages().iter().map(|s| s.stage_id).collect();
+    assert_eq!(declared, [1, 2]);
+    let edges: Vec<_> = manifest
+        .transitions()
+        .iter()
+        .map(|t| (t.from, t.to))
+        .collect();
+    assert_eq!(edges, [(1, 2)]);
     assert_eq!(report.stages[0].stage_pnl, 10.0);
     assert_eq!(report.chain.dependency_satisfaction_rate, 1.0);
     assert!((report.stages[1].conditioned_lift - 0.6).abs() < 1e-12);
@@ -439,6 +453,24 @@ fn a_dag_edge_without_a_transition_is_refused() {
         scenario_transition_report(&two_session_dag(), &manifest, &recs, &facts("98000"), 0.05)
             .unwrap_err();
     assert_eq!(error, TransitionError::MissingTransition { from: 1, to: 2 });
+
+    // A sibling edge from the same source must not stand in for the missing one.
+    let manifest = ScenarioManifest::declare(
+        vec![
+            stage(1, D1, Some(book(100.0, &[]))),
+            stage(2, D2, None),
+            stage(3, D2, Some(book(100.0, &[]))),
+        ],
+        vec![transition(1, 2, CarryoverMode::ContinuousPortfolio)],
+    )
+    .unwrap();
+    let mut sessions = two_session_dag();
+    sessions.push(SessionScores::new(3, vec![0.0], vec![0.1], vec![1]));
+    let mut recs = records(book(30.0, &[("BTC", 90.0)]), "ok");
+    recs.push(StageRecord::new(3, book(100.0, &[])));
+    let error =
+        scenario_transition_report(&sessions, &manifest, &recs, &facts("98000"), 0.05).unwrap_err();
+    assert_eq!(error, TransitionError::MissingTransition { from: 1, to: 3 });
 }
 
 #[test]
@@ -534,7 +566,10 @@ fn declaration_bookkeeping_errors_are_refused_by_their_own_variant() {
             name: "cap".to_string()
         }
     );
-    for bad in [-1.0, f64::NAN, f64::INFINITY] {
+    let mut zero_cap = root();
+    zero_cap.invariants = vec![exposure_cap("flat", 0.0)];
+    assert!(ScenarioManifest::declare(vec![zero_cap], vec![]).is_ok());
+    for bad in [-1.0, -f64::MIN_POSITIVE, f64::NAN, f64::INFINITY] {
         let mut capped = root();
         capped.invariants = vec![exposure_cap("cap", bad)];
         assert_eq!(
@@ -601,6 +636,8 @@ fn record_and_fact_errors_are_refused_by_their_own_variant() {
         "0000-01-01",
         "2026-1-05",
         "2026/01/05",
+        "2026-01+05",
+        "2026+01-05",
     ] {
         assert_eq!(
             EffectiveDate::parse(text).unwrap_err(),
