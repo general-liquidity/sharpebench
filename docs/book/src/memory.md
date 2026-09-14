@@ -56,6 +56,10 @@ and floors the second.
 - **Multi-session dependency:** conditioned lift and dependency satisfaction when
   later sessions declare dependencies on earlier sessions. See the scoring and
   inference contract below.
+- **Scenario transitions:** a manifest that declares, per DAG edge, whether a
+  later stage is a fresh episode with memory or a continuous portfolio, what may
+  cross, each stage's effective date, and which earlier invariants must survive.
+  See the manifest contract below.
 - **Point-in-time correctness:** recall-audit counts and a hard leak flag for
   future information.
 - **Confabulation:** regret from reinforced beliefs that were never retested and
@@ -136,6 +140,45 @@ their task counts. Output rows retain input order; reductions use session-ID ord
 One graph is one chain, not an independent sample of its tasks or sessions. Its
 report sets `inference_unavailable = IndependentReplicatesRequired`. It does not
 concatenate tasks into a stationary-bootstrap series.
+
+## Scenario-transition manifests
+
+`sharpebench_memory::transition` binds a `ScenarioManifest` to the same session
+DAG. `scenario_transition_report` runs `multi_session_report` unchanged and adds
+one row per stage in effective-date order.
+
+Each stage declares an effective date (`YYYY-MM-DD`), optional scripted fact
+references and named invariants: a gross exposure cap or a point-in-time cutoff
+on the fact versions the stage used. Each transition declares a carryover mode,
+the memory artifacts allowed to cross, and the earlier stage's invariants it must
+preserve. There is no default mode.
+
+- `fresh_episode_with_memory`: the later stage opens on its own declared initial
+  portfolio. Only allowed memory artifacts cross.
+- `continuous_portfolio`: the later stage opens on the earlier stage's closing
+  cash and positions, and allowed memory artifacts cross. It must not declare an
+  initial portfolio, and a stage may have at most one continuous predecessor.
+
+`ScenarioManifest::declare`, and JSON deserialization through it, refuse an
+undeclared mode, effective dates that do not strictly increase along an edge, a
+stage referencing a fact version dated after its own effective date, and a
+preserved obligation the earlier stage does not declare. Scoring additionally
+refuses a manifest whose stages or transitions are not exactly the DAG's sessions
+and edges, a memory read that no incoming edge allows, and an allowed read no
+predecessor wrote. Each cause has its own `TransitionError` variant.
+
+`observe_stage` builds stage k's observation from the manifest, the records of
+its declared predecessors, and the latest version of each fact available on or
+before stage k's effective date. Changing a later stage's facts or record
+therefore cannot change an earlier observation.
+
+A stage row lists its own failures (caller-reported safety failures, violated own
+invariants, and use of a fact version dated after the stage) separately from
+preservation violations, which are charged to the later stage that broke an
+earlier stage's invariant. The earlier row is never rewritten.
+`failed_stages` keeps every stage that failed, so a later success or credited
+lift cannot hide an earlier safety failure. Safety failures do not change the
+chain's memory credit; both are reported side by side.
 
 ## Independent chain comparisons
 
