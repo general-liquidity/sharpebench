@@ -712,6 +712,60 @@ inputs rather than these exports' whole domain. `tag_regime` is the weakest of t
 because its output is one of three short strings: an arithmetic difference that does not
 cross a classification boundary on the four committed inputs does not move its fingerprint.
 
+## Closing the build gaps of the completion verification, 2026-09-14
+
+A fourth review audited whether the completion claim held rather than whether
+the products worked. It accepted the repairs as merged and green and named five
+qualifications. This round closes the three that are build work and records the
+other two as open.
+
+| PR | Work | Main after merge |
+|---|---|---|
+| Bench #125 | `sharpebench regrade` driven through the built binary | `30453a6` |
+| Bench #127 | Activation receipts, scenario-transition manifests, teardown race (integrates #122, #123, #124) | `de16833` |
+| Bench #126 | Regrade value flags: absent, dangling and repeated are distinguished | `93d22b9` |
+
+Each was merged with every check green on its exact pushed head and main
+unmoved since that head was tested. #122, #123 and #124 were integrated rather
+than merged one at a time because each changed the source set the provenance
+manifest covers, and the manifest can be regenerated only at a clean tip: one
+regeneration and one CI run over the combined tree replaced three that would
+each have invalidated the next.
+
+The regrade test was written to verify a command, and it found a defect in it.
+Presence of a flag was inferred from whether a value followed it, so a
+`--frozen-published` with nothing after it read as no list, and the receipt
+permitted replacing published evidence. That is the direction the command
+exists to prevent. A mutation reinstating the old reading makes the two new
+last-argument tests exit 0 with `may_replace_published: true`; the repeated-flag
+test, mutated the same way in an isolated copy, exits 0 and issues a receipt
+from the first list.
+
+The teardown failure had been attributed to temporary-directory cleanup, which
+described the symptom. The failed attempt's log showed `ENOTEMPTY` on `.git`
+and `.git/objects`, and a trace showed `git commit` starting
+`git maintenance run --auto --detach`. The fixture writes a tree whose digest
+begins with `17`, the directory git samples to estimate loose objects, so about
+one commit in 256 crossed the repack threshold. The natural rate did not
+reproduce in 1,000 local runs; forcing the repack on every commit reproduced it
+at 31 of 200 serial and 90 of 400 parallel runs, and with auto maintenance
+disabled at 0 of each.
+
+### Not established
+
+The seven Arena evidence artifacts F1 to F6 and F8 have still not been
+reproduced with today's producers, and the figure producers still write PDF
+creation dates, so figure bytes are not reproducible from the JSON alone. Both
+are paper-evidence work and deliberately outside this round. Nothing here is
+released: Bench 0.25.0 and Arena 0.28.0 predate this round and the two before
+it, and a release requires its own authorization. Activation receipts carry
+digests the host reports and do not attest the host's honesty, an opaque agent
+yields an explicit unavailable status rather than an activated one, and neither
+construct claims a causal trading improvement. In continuous-portfolio mode the
+carried state is the cash and signed notionals this module defines, because the
+existing session scores carry no portfolio; whether a safety failure should zero
+later memory credit is left open.
+
 ## Closing A9 at the version boundary, 2026-09-14
 
 A9 was deferred across four rounds because both candidate repairs move published
