@@ -712,6 +712,182 @@ inputs rather than these exports' whole domain. `tag_regime` is the weakest of t
 because its output is one of three short strings: an arithmetic difference that does not
 cross a classification boundary on the four committed inputs does not move its fingerprint.
 
+## Closing A9 at the version boundary, 2026-09-14
+
+A9 was deferred across four rounds because both candidate repairs move published
+evidence. This round takes the boundary, removes the momentum style from the
+sampled set, and reruns the F7 producer. The reasoning behind the choice was not
+re-opened: `mandate_breach` sees per-bar portfolio weights and a pooled return
+series and never per-symbol returns, so the momentum constraint is not gradeable
+from what the grader is given, and the repair is therefore a sampling decision and
+not a missing rule. The alternative, writing a rule against what the grader does
+see, would be a rule about something other than momentum, chosen for resembling a
+constraint rather than for being one.
+
+### The count the ledger carried was wrong
+
+The A9 disposition, the G27 row in `IMPLEMENTATION.md` and the `v0.26.0`
+`CHANGELOG.md` entry all said the failure record carries `momentum` on 217 of its
+384 episodes. It carries it on **168**. The full committed distribution is
+`long_only` 48, `market_neutral` 48, `momentum` 168, `pairs_convergence` 72,
+`unconstrained` 48.
+
+168 was established three independent ways before anything was changed. Counting
+`mandate_style` straight out of the committed artifact gives 168. Reimplementing
+the `SplitMix64` draw outside the crate, in Python, and replaying the 16 seeds
+reproduces all five counts exactly, which also confirms the reimplementation is
+faithful before it is used to predict the new distribution. Rerunning the producer
+at the parent commit leaves the style column byte-identical, so no intervening
+change had moved it. 217 appears in no artifact; it entered as a restatement and
+was carried forward. It is corrected in all three places.
+
+### What moved, established by diffing
+
+Three artifacts were compared field by field: the bytes committed on `main`, a
+regeneration at the parent commit with no code change, and a regeneration with the
+change. The middle one exists because the committed artifact was already stale, so
+a two-way diff would have charged this change with movement it did not cause.
+
+Committed to parent-commit regeneration, caused by changes already on `main`:
+`effective_config` appears, the rollup schema gains the `invalid_evidence` and
+`execution_failed` counters, 30 episode `mode` values move and 5 `n_bars` values
+move. `mandate_style` does not move at all, on any episode.
+
+Parent-commit regeneration to the change: `mandate_style` moves on 192 of 384
+episodes, `mode` on 74, and the rollups follow. `config`, `finding`, and the
+per-episode `tier`, `policy`, `seed` and `n_bars` fields do not move. The style
+distribution becomes `long_only` 72, `market_neutral` 120, `pairs_convergence` 72,
+`unconstrained` 120. Eight of the 16 seeds change style, not the seven that drew
+`momentum`: the draw indexes a list of four instead of five, so seed 14 moves
+`market_neutral` to `long_only` without ever having been `momentum`.
+
+This is not a loss of coverage. Episodes graded against a structural rule rise from
+168 to 264, and episodes drawing a style with no structural rule fall from 216 to
+120. All 120 of those are the declared permissive control, which says it is
+permissive in its own prompt text, where the 168 momentum episodes presented a
+constraint and were scored by nothing.
+
+Published numbers that move with it: the F7 table and prose in
+`paper/sections/07-findings.tex`. Per-tier clean rates become 0.40 / 0.38 / 0.34
+from 0.56 / 0.53 / 0.39; the overall rollup becomes clean 143, stopped out 10,
+structural 143, drawdown 65, inventory 23. One reading had to be withdrawn rather
+than re-pointed: the old prose read the Calm-to-Extreme drop as the one tier step
+clearing the stated binomial width, and at 0.40 versus 0.34 no step clears it, so
+the ordering is now reported as describing these 16 seeds.
+
+`SPEC_HASH` moves from `460811a8d810c454` to `bbaaff0cf9b9e1f4` with no
+`SPEC_EPOCH` change, because `src/mandate.rs` is one of the seven spec files. The
+attestation record, `_spec_hash.py`, `specHash.ts` and the committed wasm bundle
+are rebound in the same commit. Only `sharpearena_bg.wasm` differs in the rebuilt
+bundle; `package.json`, `sharpearena.js`, `sharpearena.d.ts` and
+`sharpearena_bg.wasm.d.ts` are byte-identical, and `check-wasm-bundle.mjs` reports
+the committed bundle and a fresh build byte-identical across all five files and
+identical on 44 calls across every export.
+
+No artifact outside `paper/evidence/f7-failures.json` and
+`paper/figures/f7-failures.pdf` moved. The producer is deterministic where the
+project assumes it is: two runs at each revision give byte-identical JSON. The
+figure is the one exception and it is a pre-existing one, not a property of this
+change: matplotlib stamps a wall-clock `CreationDate` into the PDF, so two runs
+differ in exactly those three bytes and in nothing else. The figure's digest
+therefore cannot be reproduced by a rerun, only its content.
+
+### Mutation evidence
+
+Run in an isolated copy of the committed tree, one line at a time, each restored
+from `git show HEAD:crates/sharpearena/src/mandate.rs` and confirmed with `cmp`
+before the next.
+
+| Mutation | Line | Result |
+|---|---|---|
+| A | `sample_mandate` draws from `MandateStyle::SAMPLED` | changed to `ALL`: `a_sampled_mandate_never_draws_an_ungradeable_style` fails, the other 21 pass |
+| B | the `Momentum \| Unconstrained => {}` arm in `mandate_breach` | `Momentum` given the long-only rule: `only_the_sampled_styles_are_gradeable` fails, the other 21 pass |
+| C | the `SAMPLED` constant | `Unconstrained` replaced by `Momentum`: both tests fail, the other 20 pass |
+
+Control: 22 of 22 pass on the unmutated copy, and again after each restore.
+Mutation A leaves `only_the_sampled_styles_are_gradeable` green and mutation B
+leaves `a_sampled_mandate_never_draws_an_ungradeable_style` green, so neither test
+is standing in for the other.
+
+The pinning test was updated rather than deleted. Its predecessor asserted the
+ungraded set over the whole vocabulary was exactly `{Momentum, Unconstrained}`.
+That assertion is still true and is kept, because `Momentum` remains a label a
+replayed trace may carry and must still parse; what changed is which labels a
+scenario can be given, so the test now also asserts the ungraded set over the draw
+set is exactly `{Unconstrained}`. Deleting it would have removed the guard that a
+sixth style cannot join without a rule.
+
+### Checks run on this head
+
+`cargo fmt --all --check`, `cargo clippy --all-targets --all-features -D warnings`,
+`cargo doc --workspace --no-deps` with `RUSTDOCFLAGS=-Dwarnings`, `cargo test
+--workspace` (180 lib plus every integration target), `cargo test --workspace
+--release`, `scripts/check-packaged-spec.py`, `scripts/check-packaged-consumer.py`,
+`scripts/check-lean-scope.py`, `cargo build -p sharpearena-wasm --target
+wasm32-unknown-unknown --release`, `wasm-pack test --node crates/sharpearena-wasm`,
+`node scripts/check-wasm-bundle.mjs`, `npm ci && npm run build && npm test && npm
+run smoke-install` (30 tests), `cargo fmt`/`cargo clippy` inside
+`crates/sharpearena-py`, `maturin develop` plus `pytest` (1648 passed, 2 skipped),
+`python -O scripts/check-optimized-guards.py`, and `python
+paper/src/check-provenance.py`. This change adds no new refusal path, so the `-O`
+leg is a regression check here rather than a new guarantee being validated.
+
+### Merging the concurrent round
+
+PR #70 landed on `main` while this branch was open, adding
+`crates/sharpearena/src/vocabulary.rs` to the published crate, routing
+`build_agent` through `BaselineAgent::parse`, adding a `BaselineAgent` entry to
+`contract/engine-enums.v1.json`, and making `regime_label` the one site the
+contract generator and the export layer both read. It established that `SPEC_HASH`
+did not move for its change and deliberately did not rebuild the bundle.
+
+One conflict, `paper/evidence/provenance.json`, resolved to the incoming side and
+then regenerated at the tip on a clean tree in its own commit, so the manifest is a
+fresh snapshot rather than a three-way splice. The bundle was rebuilt after the
+merge rather than resolved to either side, so it carries both changes.
+
+The post-merge fingerprint was established rather than inherited.
+`committed_spec_hash_record_is_current` compares the committed record against the
+value `build.rs` computes on the merged tree and passes at `bbaaff0cf9b9e1f4`, so
+`src/vocabulary.rs` does not enter the seven spec inputs and no second rebind was
+needed. That test is not vacuous: it failed with `left: 460811a8d810c454 / right:
+bbaaff0cf9b9e1f4` before the pins were rebound.
+
+A stale branch and a branch that reverts a file produce the same diff, so #70's
+work is asserted present rather than assumed: `vocabulary.rs` exists,
+`engine-enums.v1.json` carries exactly one `BaselineAgent` entry, `grep -c
+'Regime::Bull => "bull"'` across tracked Rust sources is 1 and it is in
+`vocabulary.rs`, #70's `Breaking` changelog entry survives, and its third A15
+disposition survives alongside the first two. One reconciling sentence was added to
+that Breaking entry: its claim that `SPEC_HASH` is unaffected by `src/vocabulary.rs`
+is true and stands, and the sentence records that the fingerprint has since moved
+elsewhere in the same unreleased cycle, so the two entries do not read as
+disagreeing about the current value.
+
+All checks were re-run on the merged head rather than inherited from the
+pre-merge run, and the F7 artifact reproduces byte for byte at the merged tip. The
+provenance manifest moves exactly two of its 52 artifact digests, with none added
+and none removed.
+
+### Not established
+
+The ledger under `docs/audits/2026-09-09/` is mirrored byte for byte into
+SharpeBench. This round edits `ARENA-REVIEW.md`, `IMPLEMENTATION.md` and this file
+on the SharpeArena side only, so the mirror is out of date until it is restored
+there. Nothing in the sibling repository was touched from here.
+
+The pre-existing staleness of the other seven evidence artifacts is an unverified
+observation, deliberately not investigated here. The evidence for it is indirect
+but specific: rerunning `make-f7-failures.py` at the parent commit, with no code
+change in the tree, produced an artifact differing from the committed bytes in an
+added `effective_config` block, two added rollup counters, 30 `mode` values and 5
+`n_bars` values. That is drift accumulated since `70fb02c`, where all eight
+artifacts were generated in one run, and F1 through F6 and F8 come from that same
+run and have not been regenerated since. `03-environment.tex` already records that
+the committed evidence predates `effective_config` for several of them, which is
+consistent. No other producer was run, so nothing here is claimed as established;
+it is recorded so it is not lost and is being taken separately.
+
 ## The last transfer boundary, 2026-09-14
 
 `sharpebench regrade` is the producer for `sharpebench_sim::regrade_submission`.
