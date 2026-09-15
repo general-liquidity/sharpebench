@@ -2703,6 +2703,31 @@ mod tests {
             score.mandate_verdict_label().as_deref(),
             Some("ineligible under declared verdict (relative to buy-and-hold); host-board ineligible")
         );
+
+        // Rule 2 still carries weight the checked PSR does not: a one-bar cell
+        // has no excess dispersion, and the checked PSR's 0.0 for fewer than two
+        // returns would clear a bar of zero if the rule did not refuse it first.
+        let one_bar = |id: &str, r: f64| {
+            agent(
+                id,
+                vec![Run {
+                    returns: vec![r],
+                    ..Run::default()
+                }],
+            )
+        };
+        let zero_bar = ScoreConfig {
+            per_run_psr_bar: 0.0,
+            ..cfg
+        };
+        assert_eq!(
+            per_run_passes(
+                &one_bar("entrant", 0.02),
+                Some(&one_bar("buy-and-hold", 0.01)),
+                &zero_bar
+            ),
+            vec![false]
+        );
     }
 
     /// A candidate is scored like a track: a constant candidate has no deflated
