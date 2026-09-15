@@ -940,7 +940,9 @@ pub struct CompositeScore {
     /// Deflated Sharpe is computed against this, so over-searching raises the bar.
     pub effective_n_trials: u32,
     /// Percentile (0..=100) of the Deflated Sharpe within the frozen reference
-    /// population. `None` when no reference population is configured.
+    /// population. `None` when no reference population is configured, and when
+    /// the pooled track has no Sharpe ratio (it is constant, or its Sharpe is
+    /// not finite), whose deflated Sharpe is the refused floor, not an estimate.
     pub dsr_percentile: Option<f64>,
     /// Deflated Sharpe of the median submitted candidate. `None` if none reported.
     pub selection_median_dsr: Option<f64>,
@@ -952,13 +954,18 @@ pub struct CompositeScore {
     pub rank_ordinal: usize,
     /// Worst (minimum) per-window Sharpe over the pooled track (non-annualized),
     /// using `cfg.rolling_window`. Low/negative = the edge collapses in some
-    /// stretch. `None` when the pooled track is shorter than one window.
+    /// stretch. `None` when the pooled track is shorter than one window, and
+    /// when it has no Sharpe ratio (it is constant, or its Sharpe is not
+    /// finite): the window Sharpes of such a track are the zero-variance
+    /// sentinel, not estimates.
     pub rolling_min_sharpe: Option<f64>,
     /// Fraction of rolling windows whose Sharpe is positive, in [0, 1]. Near 1 =
     /// the edge is everywhere; low = the deflated edge lives in a few lucky
-    /// windows. `None` when the track is too short.
+    /// windows. `None` when the track is too short or has no Sharpe ratio.
     pub rolling_frac_positive: Option<f64>,
-    /// Overlapping windows behind the rolling fraction and minimum Sharpe.
+    /// Overlapping windows behind the rolling fraction and minimum Sharpe: the
+    /// windows the pooled track spans, still counted when those two are `None`
+    /// because the track has no Sharpe ratio.
     #[serde(default)]
     pub rolling_windows: usize,
     /// Sortino ratio over the pooled track (excess mean return per unit of
@@ -969,7 +976,9 @@ pub struct CompositeScore {
     /// `sortino`, reported so the figure is legible.
     pub downside_deviation: f64,
     /// Budget-normalized Deflated Sharpe: `deflated_sharpe / cost` — luck-robust
-    /// skill per unit of compute/token spend. `None` when cost is unreported.
+    /// skill per unit of compute/token spend. `None` when cost is unreported, and
+    /// when the pooled track has no Sharpe ratio, whose deflated Sharpe is the
+    /// refused floor.
     pub dsr_per_cost: Option<f64>,
     /// Whether the realized return was floored to a no-skill baseline because the
     /// agent has a block-severity process violation (cheating shouldn't pay).
@@ -1070,7 +1079,9 @@ pub struct CompositeScore {
     /// per-period Sharpe (see [`crate::econrationality`]). 1.0 = the pick
     /// respected first-order dominance, 0.0 = a declared candidate strictly
     /// dominated it. `None` when the submission declared no comparable
-    /// candidates. Reported, never gating.
+    /// candidates, and when the submitted pooled track has no Sharpe ratio (it
+    /// is constant, or its Sharpe is not finite) to value the choice by.
+    /// Reported, never gating.
     #[serde(default)]
     pub econ_rationality_score: Option<f64>,
     /// Count of first-order-dominance violations in the recorded selection
@@ -1273,7 +1284,25 @@ fn score_agent_with(
 
     // A pooled track with no PSR (a constant one) reports the 0.0 floor; the
     // deflated Sharpe below is refused on the same track and names the cause.
-    let psr = checked_probabilistic_sharpe_ratio(&pooled, 0.0).unwrap_or(0.0);
+    let pooled_psr = checked_probabilistic_sharpe_ratio(&pooled, 0.0);
+    // The refusals that say the pooled track has no Sharpe ratio at all: it is
+    // constant, or its Sharpe does not stay finite (a computed standard
+    // deviation that underflows to zero). Every reported figure read off that
+    // Sharpe (the rolling summary, the revealed-selection valuation) or off the
+    // floored deflated Sharpe (per cost, percentile) is then absent, not the
+    // number the zero-variance sentinel or the floor would produce. Any other
+    // refusal (a non-finite observation, an overflowing moment, an invalid
+    // configuration) is outside this rule and leaves those fields as they were.
+    let sharpe_undefined = matches!(
+        pooled_psr,
+        Err(StatisticalError::InvalidParameter {
+            name: "returns",
+            ..
+        } | StatisticalError::NonFiniteComputation {
+            quantity: "Sharpe ratio"
+        })
+    );
+    let psr = pooled_psr.unwrap_or(0.0);
     // Fold the agent's declared in-sample search budget into the deflation trial
     // footprint: an agent that tried 5000 configs to find this strategy faces a
     // higher bar than one that tried none (front-end data-snooping control).
@@ -1422,8 +1451,9 @@ fn score_agent_with(
     };
 
     // Legibility: percentile of the Deflated Sharpe within the frozen reference
-    // population (e.g. real fund track records). None when unconfigured.
-    let dsr_percentile = if cfg.reference_dsr_population.is_empty() {
+    // population (e.g. real fund track records). None when unconfigured, and
+    // when the pooled track has no Sharpe ratio to deflate.
+    let dsr_percentile = if cfg.reference_dsr_population.is_empty() || sharpe_undefined {
         None
     } else {
         Some(percentile_of(dsr, &cfg.reference_dsr_population))
@@ -1454,10 +1484,13 @@ fn score_agent_with(
     };
 
     // Rolling-Sharpe stability over the pooled track: is the deflated edge one
-    // lucky window, or present across the whole track?
+    // lucky window, or present across the whole track? On a track with no
+    // Sharpe ratio the summary is absent, like the Sharpe it summarizes, while
+    // the window count still says how many windows the track spans.
     let rolling = rolling_sharpe(&pooled, cfg.rolling_window);
-    let rolling_min_sharpe = rolling.map(|r| r.min_sharpe);
-    let rolling_frac_positive = rolling.map(|r| r.frac_positive);
+    let rolling_summary = rolling.filter(|_| !sharpe_undefined);
+    let rolling_min_sharpe = rolling_summary.map(|r| r.min_sharpe);
+    let rolling_frac_positive = rolling_summary.map(|r| r.frac_positive);
     let rolling_windows = rolling.map_or(0, |r| r.n_windows);
 
     // Downside-risk view: the Sortino rewards an edge that doesn't arrive with
@@ -1466,7 +1499,11 @@ fn score_agent_with(
     let downside_deviation = crate::stats::downside_deviation(&pooled, 0.0);
 
     // Budget-normalized Deflated Sharpe: luck-robust skill per unit of spend.
-    let dsr_per_cost = if cost > 0.0 { Some(dsr / cost) } else { None };
+    let dsr_per_cost = if cost > 0.0 && !sharpe_undefined {
+        Some(dsr / cost)
+    } else {
+        None
+    };
 
     // Process floor: a block-severity violation forfeits any realized return —
     // it is floored to the no-skill baseline (0.0) so cheating never pays, even
@@ -1504,8 +1541,13 @@ fn score_agent_with(
     // Economic rationality, elicited from the one choice a frozen submission
     // records: submitting this track out of the declared candidate set (see
     // [`crate::econrationality::elicit_revealed_selection`]). Reported, never
-    // gating; `None` when the submission declared nothing comparable.
-    let econ_choice = elicit_revealed_selection(&sub.candidates, &pooled);
+    // gating; `None` when the submission declared nothing comparable, and when
+    // the submitted track has no Sharpe ratio to value the choice by.
+    let econ_choice = if sharpe_undefined {
+        None
+    } else {
+        elicit_revealed_selection(&sub.candidates, &pooled)
+    };
     let (econ_rationality_score, econ_dominance_violations) = match econ_choice {
         Some(choice) => {
             let violations = usize::from(choice.is_dominated());
@@ -2623,6 +2665,225 @@ mod tests {
             assert!(!score.passed_k && !score.rank_eligible);
             let report = serde_json::to_value(&score).expect("serialize the score");
             assert_eq!(report["deflation_error"], CONSTANT_TRACK);
+        }
+    }
+
+    /// The refusal a non-constant track whose standard deviation underflows to
+    /// zero carries.
+    const NON_FINITE_SHARPE: &str = "Sharpe ratio is not finite";
+
+    /// Six 60-bar runs of `track`, each with a reported cost, and two dispersed
+    /// candidates: on this submission, scored under [`exercised_config`], every
+    /// figure read off the pooled Sharpe or the deflated Sharpe is live whenever
+    /// the track has a Sharpe ratio. The default 21-bar rolling window fits.
+    fn exercised(track: impl Fn(usize) -> f64) -> AgentSubmission {
+        let mut sub = agent(
+            "exercised",
+            (0..6)
+                .map(|_| Run {
+                    returns: (0..60).map(&track).collect(),
+                    cost: 0.25,
+                    ..Run::default()
+                })
+                .collect(),
+        );
+        sub.candidates = vec![
+            (0..30).map(|i| 0.001 * (i % 3) as f64).collect(),
+            (0..30)
+                .map(|i| 0.0004 * ((i * 7) % 5) as f64 - 0.0003)
+                .collect(),
+        ];
+        sub
+    }
+
+    /// The default configuration with a reference population, so the
+    /// deflated-Sharpe percentile is live.
+    fn exercised_config() -> ScoreConfig {
+        ScoreConfig {
+            reference_dsr_population: vec![0.1, 0.5, 0.9],
+            ..ScoreConfig::default()
+        }
+    }
+
+    /// Pooled tracks with no Sharpe ratio and the refusal each carries: all
+    /// zero (`hold`), constant at a value whose rounded mean leaves a residual
+    /// variance (a Sharpe near 2.25e15 under the zero-variance sentinel),
+    /// constant and negative, and a non-constant track whose squared deviations
+    /// underflow, so its computed standard deviation is exactly zero. Each is
+    /// scored alone and as a one-entry board.
+    fn no_sharpe_scores() -> Vec<(String, CompositeScore, &'static str)> {
+        let cfg = exercised_config();
+        let subs = [
+            ("all zero", exercised(|_| 0.0), CONSTANT_TRACK),
+            ("constant 0.001", exercised(|_| 0.001), CONSTANT_TRACK),
+            ("constant -0.002", exercised(|_| -0.002), CONSTANT_TRACK),
+            (
+                "underflowing",
+                exercised(|i| (i % 2) as f64 * 1e-170),
+                NON_FINITE_SHARPE,
+            ),
+        ];
+        let mut scores = Vec::new();
+        for (label, sub, reason) in subs {
+            scores.push((format!("{label} scored"), score_agent(&sub, &cfg), reason));
+            scores.push((
+                format!("{label} ranked"),
+                rank(std::slice::from_ref(&sub), &cfg).remove(0),
+                reason,
+            ));
+        }
+        scores
+    }
+
+    /// Assert that every named field serializes as `null`: present, as an
+    /// optional field of this record always is, and carrying no number.
+    fn assert_null_in_report(score: &CompositeScore, fields: &[&str], label: &str) {
+        let report = serde_json::to_value(score).expect("serialize the score");
+        for field in fields {
+            assert_eq!(
+                report.get(*field),
+                Some(&serde_json::Value::Null),
+                "{label} {field}"
+            );
+        }
+    }
+
+    /// Paper audit 2026-09-14, the constant-track refusal carried through the
+    /// record: a pooled track with no Sharpe ratio has no deflated Sharpe, so
+    /// the figures read off it are absent, not computed from the 0.0 floor.
+    ///
+    /// Isolated: cost is reported and a reference population is configured, so
+    /// the refusal is the only reason either figure can be absent. Before, an
+    /// all-zero or constant track reported `dsr_per_cost` 0.0 and
+    /// `dsr_percentile` 0.0 beside its `deflation_error`.
+    #[test]
+    fn a_track_with_no_sharpe_ratio_reports_no_deflated_sharpe_per_cost_or_percentile() {
+        let cfg = exercised_config();
+        assert!(!cfg.reference_dsr_population.is_empty());
+        for (label, score, reason) in no_sharpe_scores() {
+            assert_eq!(score.deflation_error.as_deref(), Some(reason), "{label}");
+            assert!(score.cost > 0.0, "{label}");
+            assert_eq!(
+                (score.dsr_per_cost, score.dsr_percentile),
+                (None, None),
+                "{label}"
+            );
+            assert_eq!(
+                (score.dsr_ci_low, score.dsr_ci_high, score.dsr_se),
+                (None, None, None),
+                "{label}"
+            );
+            assert_null_in_report(&score, &["dsr_per_cost", "dsr_percentile"], &label);
+        }
+    }
+
+    /// The rolling-Sharpe summary of a track with no Sharpe ratio is absent:
+    /// each window's Sharpe is the zero-variance sentinel. Before, an all-zero
+    /// track reported a worst window of 0.0 and no positive window, and a
+    /// constant 0.001 track a worst window near 2.25e15 and every window
+    /// positive.
+    ///
+    /// Isolated: the track spans 340 windows, so its length is not the reason,
+    /// and that count is still reported.
+    #[test]
+    fn a_track_with_no_sharpe_ratio_reports_no_rolling_sharpe_summary() {
+        for (label, score, reason) in no_sharpe_scores() {
+            assert_eq!(score.deflation_error.as_deref(), Some(reason), "{label}");
+            assert_eq!(score.rolling_windows, 340, "{label}");
+            assert_eq!(
+                (score.rolling_min_sharpe, score.rolling_frac_positive),
+                (None, None),
+                "{label}"
+            );
+            assert_null_in_report(
+                &score,
+                &["rolling_min_sharpe", "rolling_frac_positive"],
+                &label,
+            );
+        }
+    }
+
+    /// The revealed-selection score values the submitted track by its Sharpe
+    /// ratio, so a submitted track with none has no score. Before, a constant
+    /// nonzero track was valued at its sentinel Sharpe and reported a score
+    /// and a violation count.
+    ///
+    /// Isolated: the same candidates beside a dispersed track are comparable
+    /// and elicit a score, and the candidates' own deflation, which does not
+    /// read the submitted track, is still reported.
+    #[test]
+    fn a_track_with_no_sharpe_ratio_reports_no_revealed_selection_score() {
+        let control = score_agent(
+            &exercised(|i| 0.002 + 0.0005 * (i as f64 * 0.7).sin()),
+            &exercised_config(),
+        );
+        assert!(control.econ_rationality_score.is_some());
+        for (label, score, reason) in no_sharpe_scores() {
+            assert_eq!(score.deflation_error.as_deref(), Some(reason), "{label}");
+            assert_eq!(
+                (
+                    score.econ_rationality_score,
+                    score.econ_dominance_violations
+                ),
+                (None, None),
+                "{label}"
+            );
+            assert!(score.selection_median_dsr.is_some(), "{label}");
+            assert_null_in_report(
+                &score,
+                &["econ_rationality_score", "econ_dominance_violations"],
+                &label,
+            );
+        }
+    }
+
+    /// The control: a track with a Sharpe ratio, however small its volatility
+    /// or dispersion and however sparse, reports every gated figure exactly as
+    /// the ungated computation gives it, so its serialized record is the one
+    /// the kernel produced before the refusal reached these fields. The sparse
+    /// track keeps even the sentinel Sharpes of its flat windows: it has a
+    /// Sharpe ratio, so the refusal does not apply to it.
+    #[test]
+    fn a_track_with_a_sharpe_ratio_reports_its_figures_unchanged() {
+        let cfg = exercised_config();
+        let dispersed = |i: usize| 0.002 + 0.0005 * (i as f64 * 0.7).sin();
+        let tracks: [(&str, AgentSubmission); 4] = [
+            ("dispersed", exercised(dispersed)),
+            ("low volatility", exercised(move |i| dispersed(i) * 1e-9)),
+            (
+                "tiny dispersion",
+                exercised(|i| 0.001 + 1e-12 * ((i % 5) as f64 - 2.0)),
+            ),
+            ("sparse", exercised(|i| if i == 59 { 1e-9 } else { 0.0 })),
+        ];
+        for (label, sub) in tracks {
+            let score = score_agent(&sub, &cfg);
+            assert_eq!(score.deflation_error, None, "{label}");
+            let pooled = pooled_returns(&sub, 1);
+            let rolling = rolling_sharpe(&pooled, cfg.rolling_window).expect("spans windows");
+            let choice = elicit_revealed_selection(&sub.candidates, &pooled);
+            let mut ungated = score.clone();
+            ungated.rolling_min_sharpe = Some(rolling.min_sharpe);
+            ungated.rolling_frac_positive = Some(rolling.frac_positive);
+            ungated.dsr_per_cost = Some(score.deflated_sharpe / score.cost);
+            ungated.dsr_percentile = Some(percentile_of(
+                score.deflated_sharpe,
+                &cfg.reference_dsr_population,
+            ));
+            ungated.econ_rationality_score = choice.clone().map(|c| rationality_score(&[c]));
+            ungated.econ_dominance_violations = choice.map(|c| usize::from(c.is_dominated()));
+            assert_eq!(
+                serde_json::to_string(&score).expect("serialize the score"),
+                serde_json::to_string(&ungated).expect("serialize the control"),
+                "{label}"
+            );
+            assert!(
+                score.rolling_min_sharpe.is_some()
+                    && score.dsr_per_cost.is_some()
+                    && score.dsr_percentile.is_some()
+                    && score.econ_rationality_score.is_some(),
+                "{label}"
+            );
         }
     }
 
