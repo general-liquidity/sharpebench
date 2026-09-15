@@ -11,20 +11,55 @@ public import Std
 /-!
 # Forecast-quality report invariants
 
-This module formalizes exact common support, the separation between forecast reporting and
-trading rank, the monotone Holm adjustment step, and the finite-bootstrap plus-one correction
-used by SharpeBench.
+This module is a small Lean model of rules SharpeBench declares for its forecast-quality report:
+exact common support, the separation between forecast reporting and trading rank, one step of the
+Holm adjustment, and the finite-bootstrap plus-one correction. The theorems are proved about this
+model.
 
-The executable Rust implementation is linked to this model by conformance tests. This module
-is not a proof-producing extraction of that Rust program.
+The model is not mechanically linked to the Rust implementation. No Rust, Python or TOML file
+references a declaration in this module, and there is no extraction or refinement proof relating
+the two. Separate executable Rust tests cover the same rules independently of this model: the unit
+tests in `crates/sharpebench-core/src/forecast.rs` and the integration tests in
+`crates/sharpebench-core/tests/forecast_settlement_and_support.rs` exercise common support, the
+Holm adjustment, the bootstrap p-value and rank isolation on the implementation.
 
 ## Main results
 
-- `mem_commonSupport`: every common-support contract occurs for both agents.
-- `attachForecast_rankProjection`: attaching a forecast report cannot change trading rank.
-- `holmStep_monotone`: sorted fixed-point Holm adjusted values cannot decrease.
-- `holmStep_bounded`: fixed-point Holm adjusted values remain capped.
-- `correctedBootstrapPValue_positive`: the plus-one counts are strictly positive.
+- `mem_commonSupport`: every contract on modelled common support occurs in both agents' lists.
+- `attachForecast_rankProjection`: the model's rank projection of an entry paired with a report is
+  that entry; this holds by definition for any pair and is not a result about the Rust rank path.
+- `holmStep_monotone`: one modelled Holm step never lowers a prior adjusted value within the cap.
+- `holmStep_bounded`: one modelled Holm step never exceeds the cap.
+- `correctedBootstrapPValue_positive`: the plus-one numerator and denominator are strictly
+  positive.
+- `correctedBootstrapPValue_bounded`: when the extreme count is at most the sample count, the
+  plus-one numerator is at most the denominator.
+
+## Scope
+
+Covers: rules declared in `crates/sharpebench-core/src/forecast.rs`: exact common support as the
+intersection of resolved contract digests in `analyze_forecast_quality` (`commonSupport`); one
+ordered step of `holm_adjust`, which takes the larger of the prior adjusted value and the candidate
+and caps it at 1.0 (`holmStep`); and the plus-one p-value in `compare_agents`, whose numerator is
+the extreme count plus one and whose denominator is the bootstrap sample count plus one
+(`correctedBootstrapCounts`). It also records the projection trading rank consumes
+(`rankProjection`), standing for the separation between the forecast report and the trading rank
+in `crates/sharpebench-core/src/composite.rs`, whose submission type carries no forecast field.
+
+Assumes: natural-number fixed-point values in place of the Rust `f64` values, with no
+floating-point semantics; a generic cap in place of 1.0; a prior adjusted value already within the
+cap; an extreme count no greater than the sample count; two agents in place of a field of any
+size; and lists over a type with lawful boolean equality in place of the Rust set of digest
+strings.
+
+Not modelled: sorting the raw p-values before the Holm steps, the family-size multiplier that forms
+each Holm candidate, the withheld comparisons that stay in the family size without an adjusted
+value, the division that turns the plus-one counts into a p-value, and the Rust rank functions
+themselves.
+
+Check: the CI scope check (scripts/check-lean-scope.py) proves only that at least one repository
+path named in backticks in this block exists. It does not prove that the rules described here still
+correspond to the code at that path.
 -/
 
 public section
@@ -61,16 +96,24 @@ def attachForecast (entry : TradingEntry) (report : ForecastReport) :
     TradingEntry × ForecastReport :=
   (entry, report)
 
-/-- The only projection consumed by trading rank. -/
+/-- In this model, trading rank consumes only the first component of the pair. -/
 def rankProjection (value : TradingEntry × ForecastReport) : TradingEntry :=
   value.1
 
-/-- Forecast reporting is rank-isolated by construction in the formal model. -/
+/-- The projection rank consumes returns the entry that was paired with a report.
+
+This holds by `rfl`: it unfolds to `(entry, report).1 = entry`, which is true for a pair of any
+two types. The theorem records which projection rank consumes in this model. It does not establish
+that the Rust rank path ignores forecast data.
+-/
 theorem attachForecast_rankProjection (entry : TradingEntry) (report : ForecastReport) :
     rankProjection (attachForecast entry report) = entry := by
   rfl
 
-/-- One ordered Holm step on fixed-point values, matching `max(prior, candidate).min(cap)`. -/
+/-- One ordered Holm step on natural-number fixed-point values, `min cap (max prior candidate)`.
+
+It has the shape of the `f64` step in `holm_adjust`; floating-point semantics are not modelled.
+-/
 def holmStep (prior candidate cap : Nat) : Nat :=
   Nat.min cap (Nat.max prior candidate)
 
