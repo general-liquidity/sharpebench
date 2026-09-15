@@ -10,8 +10,9 @@ description = "SharpeBench dev tasks: offline data ingestion (frozen, checksumme
 # native-tls uses the OS TLS (schannel / Security.framework / system OpenSSL), so no
 # `ring` — keeps the supply-chain (deny.toml) clean. These deps are dev-only:
 # publish = false, so they never reach the CLI or the published library crates.
-ureq = { version = "2", default-features = false, features = ["native-tls"] }
-native-tls = "0.2"
+# ureq 3 constructs the native-tls connector from `TlsConfig`, so the crate is no
+# longer named here directly.
+ureq = { version = "3", default-features = false, features = ["native-tls"] }
 serde_json = "1"
 sha2 = "0.11"
 

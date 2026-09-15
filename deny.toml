@@ -28,6 +28,13 @@ allow = [
     # not add a copyleft obligation.
     "Apache-2.0 WITH LLVM-exception",
     "BSD-3-Clause",
+    # webpki-root-certs, brought in by ureq 3: its `native-tls` feature enables
+    # `native-tls-webpki-roots` unconditionally, so the Mozilla CA bundle is in
+    # the graph even when the agent is configured for the OS trust store, which
+    # is what both call sites do. A permissive data licence over that bundle: it
+    # governs the certificate data, requires no notice in the binary and adds no
+    # copyleft obligation. Removable only if ureq splits the feature.
+    "CDLA-Permissive-2.0",
     "Unicode-3.0",
     "Unlicense",
 ]

@@ -21,21 +21,25 @@ use sha2::{Digest, Sha256};
 /// symbol -> (date -> close).
 type Series = BTreeMap<String, BTreeMap<String, f64>>;
 
-/// A ureq agent wired to the OS TLS backend (native-tls). ureq 2.x does not
-/// auto-select a backend once its rustls default is disabled, so we set it here.
-fn build_agent() -> Result<ureq::Agent, String> {
-    let tls = native_tls::TlsConnector::new().map_err(|e| format!("native-tls init: {e}"))?;
-    Ok(ureq::builder()
-        .tls_connector(std::sync::Arc::new(tls))
-        .build())
+/// A ureq agent wired to the OS TLS backend (native-tls). ureq does not
+/// auto-select a backend once its rustls default is disabled, so we set it here;
+/// `RootCerts::PlatformVerifier` keeps the OS trust store in use, because ureq 3
+/// otherwise defaults to its bundled Mozilla roots.
+fn build_agent() -> ureq::Agent {
+    let tls = ureq::tls::TlsConfig::builder()
+        .provider(ureq::tls::TlsProvider::NativeTls)
+        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+        .build();
+    ureq::Agent::config_builder().tls_config(tls).build().into()
 }
 
 fn http_get(agent: &ureq::Agent, url: &str) -> Result<String, String> {
-    agent
+    let mut resp = agent
         .get(url)
         .call()
-        .map_err(|e| format!("GET {url}: {e}"))?
-        .into_string()
+        .map_err(|e| format!("GET {url}: {e}"))?;
+    resp.body_mut()
+        .read_to_string()
         .map_err(|e| format!("read {url}: {e}"))
 }
 
@@ -160,7 +164,7 @@ fn write_dataset(name: &str, series: &Series, decimals: usize) -> Result<(), Str
 fn run() -> Result<(), String> {
     let task = std::env::args().nth(1).unwrap_or_default();
     let agent = match task.as_str() {
-        "crypto" | "indices" | "all" => build_agent()?,
+        "crypto" | "indices" | "all" => build_agent(),
         _ => return Err("usage: cargo run -p xtask -- <crypto|indices|all>".to_string()),
     };
     match task.as_str() {
