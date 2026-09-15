@@ -183,3 +183,46 @@ fn a_sparse_track_keeps_its_interval_when_a_resample_is_constant() {
         "standard error moved"
     );
 }
+
+/// The edges of the checked PSR's documented domain. A non-finite return is
+/// refused at its index and a non-finite benchmark by name; the largest finite
+/// benchmark is inside the domain but overflows the z numerator, which is
+/// refused rather than saturated, while a large benchmark that stays finite is
+/// scored. Fewer than two returns keep the 0.0 floor.
+#[test]
+fn checked_probabilistic_sharpe_ratio_finite_domain_boundary() {
+    let returns = [0.01, -0.02, 0.03, -0.005, 0.012];
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut track = returns.to_vec();
+        track[3] = bad;
+        assert_eq!(
+            checked_probabilistic_sharpe_ratio(&track, 0.0),
+            Err(StatisticalError::NonFiniteObservation { index: 3 }),
+            "{bad}"
+        );
+        assert_eq!(
+            checked_probabilistic_sharpe_ratio(&returns, bad),
+            Err(StatisticalError::InvalidParameter {
+                name: "sr_benchmark",
+                requirement: "must be finite",
+            }),
+            "{bad}"
+        );
+    }
+    for edge in [f64::MAX, -f64::MAX] {
+        assert_eq!(
+            checked_probabilistic_sharpe_ratio(&returns, edge),
+            Err(StatisticalError::NonFiniteComputation {
+                quantity: "PSR numerator",
+            }),
+            "{edge}"
+        );
+    }
+    assert_eq!(checked_probabilistic_sharpe_ratio(&returns, 1e300), Ok(0.0));
+    assert_eq!(
+        checked_probabilistic_sharpe_ratio(&returns, -1e300),
+        Ok(1.0)
+    );
+    assert_eq!(checked_probabilistic_sharpe_ratio(&[], 0.0), Ok(0.0));
+    assert_eq!(checked_probabilistic_sharpe_ratio(&[0.01], 0.0), Ok(0.0));
+}
