@@ -316,24 +316,76 @@ class CommittedEvidence(unittest.TestCase):
             with self.subTest(dataset=dataset):
                 self.assertEqual(cells, expected)
 
-    def test_prose_numbers_match_the_curve_summaries(self):
+    # Decimals the prose may state that are not read from the evidence: the
+    # gate bars, the shipped prior, the MC error bound and closeness margins the
+    # text quotes as bounds, and the two measured wall times of the committed run.
+    DECLARED = {"0.90", "0.95", "0.5", "0.01", "0.02", "0.0012", "313.2", "53.6"}
+
+    def evidence_numbers(self):
+        """Every decimal the prose is allowed to print, as it would print it."""
         curves = {r["geometry"]: r for r in self.rows if r["record"] == "curve_summary"}
-        witness = {r["geometry"]: r for r in self.rows if r["record"] == "witness_construction_summary"}
-        expected = []
-        for name in ("daily", "weekly"):
-            c = curves[name]
-            expected += [
+        witness = {
+            r["geometry"]: r for r in self.rows if r["record"] == "witness_construction_summary"
+        }
+        meta = next(r for r in self.rows if r["record"] == "meta")
+        allowed = set(self.DECLARED) | {f"{meta['dsr_z_threshold']:.4f}"}
+        for c in curves.values():
+            allowed |= {
                 f"{c['sharpe_at_5pct']:.2f}",
                 f"{c['sharpe_at_95pct']:.2f}",
+                f"{c['sharpe_at_95pct']:.1f}",
                 f"{100 * c['pass_probability_at_1p0']:.1f}",
                 f"{100 * c['pass_probability_at_2p0']:.1f}",
                 f"{c['sharpe_at_95pct'] - c['sharpe_at_5pct']:.2f}",
-            ]
-        for name in ("witness-daily", "witness-weekly"):
-            expected += [f"{witness[name]['sharpe_at_5pct']:.2f}", f"{witness[name]['sharpe_at_95pct']:.2f}"]
-        numbers = set(re.findall(r"\d+\.\d+", self.fragment))
-        for value in expected:
-            self.assertIn(value, numbers)
+            }
+        for w in witness.values():
+            allowed |= {f"{w['sharpe_at_5pct']:.2f}", f"{w['sharpe_at_95pct']:.2f}"}
+        for p in (r for r in self.rows if r["record"] == "panel"):
+            legs = p["legs"]
+            allowed |= {
+                f"{p['deflation_bar_annualized_equivalent']:.4f}",
+                f"{p['dsr_min_admissible_sharpe_annualized']:.2f}",
+                f"{p['dsr_min_admissible_sharpe_annualized'] - p['deflation_bar_annualized_equivalent']:.2f}",
+                f"{legs['dsr']['sharpe_at_95pct']:.2f}",
+                f"{legs['pass_k']['sharpe_at_95pct']:.2f}",
+                f"{legs['both']['sharpe_at_5pct']:.2f}",
+                f"{legs['both']['sharpe_at_95pct']:.2f}",
+            }
+        return allowed, curves, witness
+
+    def prose(self):
+        text = self.fragment.split("\\begin{figure}")[0]
+        return "\n".join(line for line in text.splitlines() if not line.startswith("%"))
+
+    def test_every_prose_decimal_is_read_from_the_evidence(self):
+        """Both directions: a stated number must come from the evidence, so a
+        drifted value is caught even when the correct one appears elsewhere."""
+        allowed, _, _ = self.evidence_numbers()
+        stray = sorted(set(re.findall(r"\d+\.\d+", self.prose())) - allowed)
+        self.assertEqual(stray, [])
+
+    def test_the_headline_crossings_are_stated_where_they_are_claimed(self):
+        _, curves, witness = self.evidence_numbers()
+        text = self.prose()
+        d, w = curves["daily"], curves["weekly"]
+        self.assertIn(
+            f"It reaches 5 percent at ${d['sharpe_at_5pct']:.2f}$ and 95 percent at "
+            f"${d['sharpe_at_95pct']:.2f}$.", text
+        )
+        self.assertIn(
+            f"the same four values are ${100 * w['pass_probability_at_1p0']:.1f}$ percent, "
+            f"${100 * w['pass_probability_at_2p0']:.1f}$ percent, ${w['sharpe_at_5pct']:.2f}$ "
+            f"and ${w['sharpe_at_95pct']:.2f}$.", text
+        )
+        wd, ww = witness["witness-daily"], witness["witness-weekly"]
+        self.assertIn(
+            f"at ${wd['sharpe_at_5pct']:.2f}$ and ${wd['sharpe_at_95pct']:.2f}$ on the "
+            "witness's daily geometry", text
+        )
+        self.assertIn(
+            f"at ${ww['sharpe_at_5pct']:.2f}$ and ${ww['sharpe_at_95pct']:.2f}$ on its "
+            "weekly geometry", text
+        )
 
 
 if __name__ == "__main__":
