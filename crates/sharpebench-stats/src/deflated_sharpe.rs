@@ -428,7 +428,7 @@ mod tests {
     /// question: it hands back a finite 0.0 on zero variance and a finite ~1e15
     /// on a constant nonzero series.
     #[test]
-    fn the_observed_sharpe_predicate_matches_the_refusals_it_is_taken_from() {
+    fn observed_sharpe_ratio_boundaries_match_the_refusals_they_are_taken_from() {
         let dispersed: Vec<f64> = (0..60).map(|i| 0.002 + 0.0005 * (i as f64).sin()).collect();
         assert_eq!(
             observed_sharpe_ratio(&dispersed)
