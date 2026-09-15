@@ -108,6 +108,24 @@ class ClosedFormThreshold(unittest.TestCase):
             self.assertTrue(kernel_passes(s + 1e-9 + series, bar, 0.95))
             self.assertFalse(kernel_passes(s - 1e-7 + series, bar, 0.95))
 
+    def test_a_simulated_chunk_agrees_with_the_kernel_on_its_own_draws(self):
+        """End to end: regenerate a chunk's noise from its documented seed and
+        check both legs' thresholds against the kernel on those very series."""
+        window_len, runs, bar, reps = 30, 1, 0.1, 6
+        passk, dsr = pc.simulate_chunk((window_len, runs, [bar], 0, reps))
+        seq = np.random.SeedSequence(
+            entropy=pc.SEED, spawn_key=(pc.N_WINDOWS, window_len, runs, 0)
+        )
+        rng = np.random.Generator(np.random.PCG64(seq))
+        noise = rng.standard_normal((reps, pc.N_WINDOWS * runs, window_len))
+        for rep in range(reps):
+            for s, expect in ((passk[rep] + 1e-9, True), (passk[rep] - 1e-7, False)):
+                every = all(kernel_passes(s + w, 0.0, 0.90) for w in noise[rep])
+                self.assertEqual(every, expect, rep)
+            pooled = noise[rep].reshape(-1)
+            self.assertTrue(kernel_passes(dsr[0][rep] + 1e-9 + pooled, bar, 0.95))
+            self.assertFalse(kernel_passes(dsr[0][rep] - 1e-7 + pooled, bar, 0.95))
+
     def test_an_infeasible_kurtosis_is_refused_rather_than_solved(self):
         with self.assertRaises(pc.PowerSupportError):
             pc.min_passing_sharpe(20, 0.0, 400.0, k.norm_cdf_inverse(0.9), 0.0)
