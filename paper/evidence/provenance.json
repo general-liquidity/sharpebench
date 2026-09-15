@@ -179,7 +179,7 @@
       "sha256": "1e025ac30099de23ae8455f20ae5441b557e924870d0e1475c7508512908ec0d"
     }
   ],
-  "generated_at_head": "6575a7eada1efea167fe10ee82dcfc1eb6a70e07",
+  "generated_at_head": "3caeabb5ee61083deac4a0b7b78219f3620de387",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -439,11 +439,11 @@
     },
     {
       "path": "crates/sharpebench-core/src/composite.rs",
-      "sha256": "66b801d5e5a2a29535bbc4e59edf2b3c1608f3b9daf649fab5622bf72ee11128"
+      "sha256": "bc4528947d7a77dc11fc6f11fd48e8c3a0727b88050484d18769fd6c8ce038b2"
     },
     {
       "path": "crates/sharpebench-core/src/correlation.rs",
-      "sha256": "6cb29824c9ee22473e060386152b83908d03b366ea6a53c2bf908a53a49ec0b3"
+      "sha256": "2311d118136e2fd59669cd084630eb192d96808c338c6a8aac010f32dfee3178"
     },
     {
       "path": "crates/sharpebench-core/src/decay.rs",
@@ -455,7 +455,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/econrationality.rs",
-      "sha256": "25e895ec57b40e02d815d76b90673348374b868c67e423d5112eca3127006424"
+      "sha256": "3a73f5e985eecc5d2930e18bceafb6b10e0790786613f1cf4135b8837dae11fd"
     },
     {
       "path": "crates/sharpebench-core/src/entrant_visibility.rs",
@@ -695,7 +695,7 @@
     },
     {
       "path": "crates/sharpebench-harness/tests/evidence_fields_no_clone_merges.rs",
-      "sha256": "4f474b6a2e32b46b4a27c9489d61cb25bc853aacac75a417f0985a91b7a6691e"
+      "sha256": "461a67e3e76fcaff576eff8148fe1c722322a678c3453af0841150cd644e6c29"
     },
     {
       "path": "crates/sharpebench-harness/tests/fault_injection.rs",
@@ -891,7 +891,7 @@
     },
     {
       "path": "crates/sharpebench-stats/src/deflated_sharpe.rs",
-      "sha256": "6e415f74f4c49e1bd31fb293a6230ec0f3b734172fae83331970bcedac818592"
+      "sha256": "3c0c94d53428f1005f421a5c005f823390bc8c4000517988008ccc9207aa790f"
     },
     {
       "path": "crates/sharpebench-stats/src/dissent.rs",
@@ -903,7 +903,7 @@
     },
     {
       "path": "crates/sharpebench-stats/src/lib.rs",
-      "sha256": "b5307a3ab72959f146f61732e33267111a455b30c2428753e12175e12e1888db"
+      "sha256": "c6bfa71c5d7992fb1c0b12fcbdccfe3754f073465302948182b9e7dcec5a5e9a"
     },
     {
       "path": "crates/sharpebench-stats/src/opt_in_diagnostics.rs",
@@ -1055,7 +1055,7 @@
     },
     {
       "path": "paper/sections/03-benchmark.tex",
-      "sha256": "e33c2527f94d0fbd009be8fb936a6a1f5715cece955cea1d77b6a7de16dd4e24"
+      "sha256": "786d665305c996ec1067bcae483079b0ab2ea98adb790797ac8a132d5f8b7882"
     },
     {
       "path": "paper/sections/04-integrity.tex",
@@ -1063,7 +1063,7 @@
     },
     {
       "path": "paper/sections/05-experiments.tex",
-      "sha256": "4e7dec60922ea30ca757cbcb0b78063331b5a5c655307e5a13638df95dc0b69e"
+      "sha256": "338e464e3b749def138d3ca501fa127dae8012ff83ac819e02bbfdd9fb762111"
     },
     {
       "path": "paper/sections/06-related.tex",
@@ -1071,7 +1071,7 @@
     },
     {
       "path": "paper/sections/07-limitations.tex",
-      "sha256": "3a94d50e0dc7ae201440c379b482bf80f34381caa5e69610955dbc5e24249028"
+      "sha256": "42a5ed3516f66450f9a0de09a9405ddfc786d5d9a892120332cff5f8c4d33f08"
     },
     {
       "path": "paper/sections/08-reproducibility.tex",
@@ -1103,7 +1103,7 @@
     },
     {
       "path": "paper/sections/E-repairs.tex",
-      "sha256": "d7b711f534e4bfbe954648f16e877056f41118d48451415ff0102e3c04ceac21"
+      "sha256": "34bd14a416c60ccf9301a2fe1d6c5f90a65952e62fe15735806ee156d6b6a824"
     },
     {
       "path": "paper/sections/F-mechanism.tex",
@@ -1119,7 +1119,7 @@
     },
     {
       "path": "paper/sections/mandate-declaration-fragment.tex",
-      "sha256": "5c93d7b0b3dd90ad07dbca6c277b916152db016ea0fd4aa0c69af32b6cbbf1c4"
+      "sha256": "81817f0a61966b82f80945e11f3f4ba9767d3da0dd3aa20b76d8cd31d373982e"
     },
     {
       "path": "paper/sections/power-fragment.tex",
@@ -1243,5 +1243,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "755a594e0197961532a63b48ba20d95c04934d7bd7e0ac8f2715b3be3011eb7a"
+  "source_snapshot_sha256": "56b00cd6520e992596580758065de6c792869866a166a17cdfe7f5da0b173da7"
 }

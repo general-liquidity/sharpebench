@@ -69,7 +69,6 @@ ALLOWLIST: frozenset[str] = frozenset(
         "core::calibration::epistemic_uncertainty",
         "core::composite::reliability_never_catastrophic",
         "core::decay::crowding_half_life",
-        "core::econrationality::elicit_revealed_selection",
         "core::percentile::percentile_of",
         "core::percentile::reference_dsr_population",
         "core::rolling::rolling_sharpe",

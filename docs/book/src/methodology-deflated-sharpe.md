@@ -84,10 +84,19 @@ the windows. Eight executions of a 409-bar window therefore contribute 409
 temporally distinct observations, not 3,272 pseudo-independent ones. Incomplete
 or unequal seed blocks are rejected rather than truncated.
 
-When `rank` has a field of at least `min_field_for_measured_sr_std` agents it
-*measures* the dispersion of per-period Sharpes across the field instead of using
-the prior. That measurement is already per-period and is used as-is;
-`trials_sr_std_source` reads `measured`, while
+When `rank` has a field of at least `min_field_for_measured_sr_std` agents whose
+pooled track **has a Sharpe ratio** it *measures* the dispersion of per-period
+Sharpes across the field instead of using the prior. Qualification is
+`observed_sharpe_ratio`, the same refusal the kernel applies to a track's own
+deflation, so a constant track does not vote at any value: `sharpe_ratio` would
+hand an all-zero track the zero-variance sentinel 0.0 and a constant nonzero
+track the roughly 1e15 its rounded mean leaves, and one such entrant could set
+the deflation bar for the whole panel. An excluded agent is still scored, still
+ranked and still refused on its own terms. The exclusion runs before the clone
+collapse and before the field-size test, so a field that drops below
+`min_field_for_measured_sr_std` once such tracks are removed falls back to the
+configured prior and stamps `configured`. That measurement is already per-period
+and is used as-is; `trials_sr_std_source` reads `measured`, while
 `trials_sr_std_annualized_equivalent` reports the same quantity multiplied by
 the square root of periods per year for interpretation. Before measuring,
 near-clone streams

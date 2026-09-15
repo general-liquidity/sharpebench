@@ -33,8 +33,7 @@
 
 use serde::Serialize;
 
-use crate::deflated_sharpe::sharpe_ratio;
-use crate::stats::std_dev;
+use crate::deflated_sharpe::observed_sharpe_ratio;
 
 /// A single choice among options with known scalar value (e.g. expected return,
 /// already net of stated risk). `chosen` indexes into `options`.
@@ -98,23 +97,24 @@ pub fn has_money_pump(prefs: &[(usize, usize)], n_items: usize) -> bool {
 /// respected as rational.
 ///
 /// Returns `None` when nothing is elicitable: no declared candidates, no
-/// candidate with a finite Sharpe (a constant stream has none), or a submitted
-/// stream too short/degenerate for a finite Sharpe. Deterministic: candidate
-/// order is preserved and the submitted track is always the final (chosen)
-/// option.
+/// candidate whose stream has a Sharpe ratio, or a submitted stream that has
+/// none. "Has a Sharpe ratio" is [`observed_sharpe_ratio`], the
+/// same refusal the kernel applies to a track's own deflation, so a constant
+/// stream is excluded at any value rather than only where its sample variance
+/// computes to exactly zero. Deterministic: candidate order is preserved and the
+/// submitted track is always the final (chosen) option.
 pub fn elicit_revealed_selection(
     candidates: &[Vec<f64>],
     submitted: &[f64],
 ) -> Option<DominanceChoice> {
-    // A Sharpe is comparable only on a stream with real dispersion:
-    // `sharpe_ratio` returns a sentinel 0.0 on zero variance, which would
-    // misvalue a riskless drift, so degenerate streams are excluded outright.
+    // A Sharpe is comparable only on a stream that has one. `sharpe_ratio`
+    // returns a sentinel 0.0 on zero variance, which would misvalue a riskless
+    // drift, and a constant nonzero stream returns a finite ~1e15 around its
+    // rounded mean, which valued a degenerate declared candidate above every
+    // real one and made the submitted track look dominated. `observed_sharpe_ratio`
+    // is the predicate the kernel refuses a track's own deflation on.
     fn comparable_sharpe(returns: &[f64]) -> Option<f64> {
-        if returns.len() < 2 || std_dev(returns) == 0.0 {
-            return None;
-        }
-        let s = sharpe_ratio(returns);
-        s.is_finite().then_some(s)
+        observed_sharpe_ratio(returns).ok()
     }
     let submitted_sharpe = comparable_sharpe(submitted)?;
     let mut options: Vec<f64> = candidates
@@ -238,6 +238,31 @@ mod tests {
         assert!(elicit_revealed_selection(&[vec![0.5; 60]], &submitted).is_none());
         // A degenerate submitted stream is likewise not elicitable.
         assert!(elicit_revealed_selection(std::slice::from_ref(&submitted), &[0.5; 60]).is_none());
+    }
+
+    /// The constant candidate above is refused because 0.5 is binary exact. A
+    /// constant candidate whose value is not, and whose rounded mean therefore
+    /// leaves a residual variance, used to be valued at the ~1e15 that residual
+    /// divides to, which dominated every real option and reported the submitted
+    /// track as a dominance violation.
+    ///
+    /// Isolated: the same submission with the constant candidate dropped elicits
+    /// exactly the same options, so the constant candidate is the whole cause.
+    #[test]
+    fn a_constant_nonzero_candidate_is_not_a_comparable_option() {
+        let submitted = stream(0.002, 0.002, 60);
+        let real = stream(0.001, 0.002, 60);
+        assert!(elicit_revealed_selection(&[vec![0.001; 60]], &submitted).is_none());
+
+        let with_constant = elicit_revealed_selection(&[real.clone(), vec![0.001; 60]], &submitted)
+            .expect("elicitable");
+        let without = elicit_revealed_selection(&[real], &submitted).expect("elicitable");
+        assert_eq!(with_constant.chosen, without.chosen);
+        assert_eq!(with_constant.options.len(), without.options.len());
+        for (x, y) in with_constant.options.iter().zip(&without.options) {
+            assert_eq!(x.to_bits(), y.to_bits());
+        }
+        assert!(!with_constant.is_dominated());
     }
 
     #[test]

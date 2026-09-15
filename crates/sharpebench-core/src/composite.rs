@@ -24,7 +24,7 @@ use crate::comparison_sets::{comparison_set, restrict_to_shared, TaggedRun, Tagg
 use crate::decay::return_drift_half_life;
 use crate::deflated_sharpe::{
     checked_probabilistic_sharpe_ratio, deflated_sharpe_ratio_against_null, expected_max_sharpe,
-    per_period_from_annualized, sharpe_ratio,
+    observed_sharpe_ratio, per_period_from_annualized,
 };
 use crate::econrationality::{elicit_revealed_selection, rationality_score};
 use crate::pass_k::{pass_k, PassMode};
@@ -477,11 +477,15 @@ pub struct ScoreConfig {
     /// could outrank one scored on all of them.
     #[serde(default = "default_shared_run_set")]
     pub shared_run_set: bool,
-    /// Minimum number of agents with a finite pooled Sharpe before [`rank`]
-    /// *measures* `trials_sr_std` from the field instead of using the configured
-    /// value. The relative standard error of a sample standard deviation is about
-    /// `1 / sqrt(2 (n - 1))`: 50% at three agents, 35% at five. Below five the
-    /// estimate is noisier than the prior it would replace, so five is the floor.
+    /// Minimum number of agents whose pooled track **has a Sharpe ratio** before
+    /// [`rank`] *measures* `trials_sr_std` from the field instead of using the
+    /// configured value. The relative standard error of a sample standard
+    /// deviation is about `1 / sqrt(2 (n - 1))`: 50% at three agents, 35% at
+    /// five. Below five the estimate is noisier than the prior it would replace,
+    /// so five is the floor. It is counted after agents with no Sharpe ratio are
+    /// removed, because they are not observations of the dispersion that error
+    /// is claimed for; a field that falls below the floor only once they are
+    /// removed uses the configured prior and says so.
     #[serde(default = "default_min_field_for_measured_sr_std")]
     pub min_field_for_measured_sr_std: usize,
     /// Collapse near-clone submissions to one vote each before [`rank`] measures
@@ -1760,9 +1764,27 @@ pub(crate) fn restrict_to_shared_positions(subs: &[AgentSubmission]) -> Vec<Agen
 }
 
 /// The field-measured `trials_sr_std`: the sample standard deviation of pooled
-/// per-period Sharpe ratios across agents with a finite Sharpe, or `None` when
-/// fewer than `min_field` agents qualify. Sharpes are sorted before summing so
-/// the submission order of the field cannot move the deflation bar by an ULP.
+/// per-period Sharpe ratios across agents **whose pooled track has a Sharpe
+/// ratio**, or `None` when fewer than `min_field` agents qualify. Sharpes are
+/// sorted before summing so the submission order of the field cannot move the
+/// deflation bar by an ULP.
+///
+/// Qualification is [`observed_sharpe_ratio`], the same predicate the kernel
+/// refuses a track's own deflation on, not `sharpe_ratio().is_finite()`. The
+/// two differ exactly on the tracks that have no Sharpe: an all-zero track took
+/// the zero-variance sentinel and voted 0, and a constant nonzero track voted
+/// the ~1e15 its rounded mean produces, which on its own drove a field's
+/// measured dispersion to ~6e14 and every other agent's deflated Sharpe to
+/// zero. An excluded agent is still scored, still ranked and still refused on
+/// its own terms; it just does not vote on anybody else's bar.
+///
+/// The exclusion runs **before** the clone collapse, so the partition and each
+/// cluster's median are taken over the streams that actually vote, and
+/// **before** the `min_field` test, so the field size checked against the floor
+/// is the size of the dispersion sample the standard error is claimed for. A
+/// field that falls below `min_field` only after the exclusion therefore falls
+/// back to the configured prior and records `TrialsSrStdSource::Configured`,
+/// rather than measuring from the rump.
 ///
 /// With `dedup_clones` the qualifying streams are first partitioned by
 /// [`clone_clusters`] at [`CLONE_COLLAPSE_COSINE`], and each cluster votes once
@@ -1778,9 +1800,7 @@ fn measured_trials_sr_std(
 ) -> Option<f64> {
     let qualifying: Vec<(&[f64], f64)> = pooled
         .iter()
-        .filter(|p| p.len() >= 2)
-        .map(|p| (p.as_slice(), sharpe_ratio(p)))
-        .filter(|(_, sr)| sr.is_finite())
+        .filter_map(|p| Some((p.as_slice(), observed_sharpe_ratio(p).ok()?)))
         .collect();
     let mut sharpes: Vec<f64> = if dedup_clones {
         let streams: Vec<Vec<f64>> = qualifying.iter().map(|(p, _)| p.to_vec()).collect();
@@ -1813,8 +1833,10 @@ fn measured_trials_sr_std(
 ///   Process judgments still include every original submitted trace.
 /// - **Measured deflation** (`cfg.min_field_for_measured_sr_std`): with enough
 ///   agents, `trials_sr_std` is the measured Sharpe dispersion of the field rather
-///   than the configured prior. Smaller fields use the configured value, byte for
-///   byte as before. Which applied is stamped on every score.
+///   than the configured prior. An agent whose pooled track has no Sharpe ratio
+///   is not one of those agents: it is scored and ranked on its own terms but
+///   does not vote on anybody else's bar. Smaller fields use the configured
+///   value, byte for byte as before. Which applied is stamped on every score.
 /// - **Clone collapse** (`cfg.dedup_clones_for_measured_sr_std`, default on):
 ///   near-duplicate streams (`|cosine| >= CLONE_COLLAPSE_COSINE`) vote once
 ///   on that measurement, so a sock-puppet flood cannot shrink the dispersion and
@@ -2228,7 +2250,7 @@ fn ci_overlap(a: &CompositeScore, b: &CompositeScore) -> bool {
 mod tests {
     use super::*;
     use crate::deflated_sharpe::{
-        deflated_sharpe_ratio, expected_max_sharpe, probabilistic_sharpe_ratio,
+        deflated_sharpe_ratio, expected_max_sharpe, probabilistic_sharpe_ratio, sharpe_ratio,
     };
     use crate::process::ProcessEvent;
 
@@ -3619,6 +3641,263 @@ mod tests {
             s.trials_sr_std_source == TrialsSrStdSource::MeasuredFloored
                 && s.trials_sr_std.to_bits() == floor.to_bits()
         }));
+    }
+
+    /// `n` agents with distinct drifts and distinct phases: no two are clone
+    /// connected, and every pooled track has a Sharpe ratio. The measured
+    /// dispersion of this field is what an entrant must not be able to move.
+    fn dispersed_field(n: usize) -> Vec<AgentSubmission> {
+        (0..n)
+            .map(|i| {
+                let m = 0.0002 + 0.0003 * i as f64;
+                let phase = 0.6 * i as f64;
+                agent(
+                    &format!("a{i}"),
+                    (0..5)
+                        .map(|_| Run {
+                            returns: (0..60)
+                                .map(|t| m + 0.003 * (t as f64 * 0.7 + phase).sin())
+                                .collect(),
+                            ..Run::default()
+                        })
+                        .collect(),
+                )
+            })
+            .collect()
+    }
+
+    /// An entrant whose pooled track is constant at `value`, so it has no
+    /// Sharpe ratio. Same shape as a [`dispersed_field`] member.
+    fn flat_entrant(id: &str, value: f64) -> AgentSubmission {
+        agent(
+            id,
+            (0..5)
+                .map(|_| Run {
+                    returns: vec![value; 60],
+                    ..Run::default()
+                })
+                .collect(),
+        )
+    }
+
+    /// Everything on a score that the field-measured deflation bar determines,
+    /// as bits, so an assert fails on 1-ULP drift.
+    fn bar_dependent(s: &CompositeScore) -> Vec<String> {
+        let bits = |v: Option<f64>| format!("{:?}", v.map(f64::to_bits));
+        vec![
+            format!("{}", s.trials_sr_std.to_bits()),
+            format!("{:?}", s.trials_sr_std_source),
+            bits(s.trials_sr_std_annualized),
+            format!("{}", s.trials_sr_std_annualized_equivalent.to_bits()),
+            format!("{}", s.deflation_bar_per_period.to_bits()),
+            format!("{}", s.deflation_bar_annualized_equivalent.to_bits()),
+            format!("{}", s.deflated_sharpe.to_bits()),
+            format!("{}", s.composite.to_bits()),
+            format!("{}", s.psr.to_bits()),
+            bits(s.dsr_ci_low),
+            bits(s.dsr_ci_high),
+            bits(s.dsr_se),
+            bits(s.dsr_per_cost),
+            bits(s.dsr_percentile),
+            bits(s.selection_median_dsr),
+            bits(s.selection_gap),
+            format!("{:?}", s.deflation_error),
+            format!("{}", s.rank_eligible),
+            format!("{}", s.rank_ordinal),
+        ]
+    }
+
+    fn by_id<'a>(board: &'a [CompositeScore], id: &str) -> &'a CompositeScore {
+        board
+            .iter()
+            .find(|s| s.agent_id == id)
+            .expect("agent on the board")
+    }
+
+    /// A track with no Sharpe ratio must not vote on anybody else's deflation
+    /// bar. It used to: `sharpe_ratio` hands an all-zero track the zero-variance
+    /// sentinel 0.0, and a constant nonzero track the ~1e15 its rounded mean
+    /// leaves, and both are finite, so both entered the field's dispersion
+    /// sample. One constant 0.001 entrant beside five dispersed agents pushed
+    /// the measured dispersion to 6.265e14 and every other agent's deflated
+    /// Sharpe to 0; one all-zero entrant moved the dispersion from 0.17999 to
+    /// 0.22405 and the leader's deflated Sharpe from 0.99978 to 0.96288.
+    ///
+    /// Isolated: the five dispersed agents are unchanged between the two boards,
+    /// the field stays above the measurement floor with the entrant removed from
+    /// the sample, and the bar is still measured, so the exclusion is the only
+    /// thing that can move these bytes.
+    #[test]
+    fn an_undefined_sharpe_entrant_cannot_move_another_agents_bar() {
+        let cfg = ScoreConfig::default();
+        let field = dispersed_field(5);
+        let baseline = rank(&field, &cfg);
+        assert!(baseline
+            .iter()
+            .all(|s| s.trials_sr_std_source == TrialsSrStdSource::Measured));
+        assert!(baseline.iter().any(|s| s.rank_eligible));
+
+        for (label, value) in [("all zero", 0.0), ("constant nonzero", 0.001)] {
+            let mut with_entrant = field.clone();
+            with_entrant.push(flat_entrant("flat", value));
+            let board = rank(&with_entrant, &cfg);
+            assert_eq!(board.len(), 6, "{label}");
+            for base in &baseline {
+                let after = by_id(&board, &base.agent_id);
+                assert_eq!(
+                    bar_dependent(after),
+                    bar_dependent(base),
+                    "{label} moved {}",
+                    base.agent_id
+                );
+            }
+            assert!(
+                board
+                    .iter()
+                    .any(|s| s.agent_id != "flat" && s.deflated_sharpe > 0.0),
+                "{label} drove the whole field to a zero deflated Sharpe"
+            );
+        }
+    }
+
+    /// The excluded entrant is still scored and still refused on its own terms:
+    /// exclusion is from the dispersion sample, not from the board.
+    #[test]
+    fn an_excluded_entrant_is_still_scored_and_refused_on_its_own_terms() {
+        let cfg = ScoreConfig::default();
+        let mut field = dispersed_field(5);
+        field.push(flat_entrant("flat", 0.001));
+        let board = rank(&field, &cfg);
+        let flat = by_id(&board, "flat");
+        assert_eq!(flat.deflation_error.as_deref(), Some(CONSTANT_TRACK));
+        assert_eq!((flat.deflated_sharpe, flat.psr), (0.0, 0.0));
+        assert!(!flat.rank_eligible && flat.runs_scored == 5);
+        assert_eq!(
+            flat.trials_sr_std.to_bits(),
+            by_id(&board, "a0").trials_sr_std.to_bits(),
+            "an excluded agent is deflated against the same field bar as everyone else"
+        );
+    }
+
+    /// If removing the undefined-Sharpe tracks takes the field below the
+    /// measurement floor, the panel falls back to the configured prior and the
+    /// record says `Configured`, rather than measuring a dispersion from the
+    /// rump field.
+    ///
+    /// Isolated: the same six submissions measure when the floor is lowered to
+    /// the four that qualify, so field size after the exclusion, not the field
+    /// itself, is what sends this board down the configured path.
+    #[test]
+    fn a_field_below_the_floor_after_exclusion_falls_back_to_the_configured_prior() {
+        let cfg = ScoreConfig::default();
+        let mut field = dispersed_field(4);
+        field.push(flat_entrant("flat-zero", 0.0));
+        field.push(flat_entrant("flat-nonzero", 0.001));
+        let board = rank(&field, &cfg);
+        assert_eq!(board.len(), 6);
+        for s in &board {
+            assert_eq!(s.trials_sr_std_source, TrialsSrStdSource::Configured);
+            assert_eq!(s.trials_sr_std.to_bits(), per_period_sr_std(&cfg).to_bits());
+            assert_eq!(s.trials_sr_std_annualized, Some(cfg.trials_sr_std));
+        }
+        let lowered = rank(
+            &field,
+            &ScoreConfig {
+                min_field_for_measured_sr_std: 4,
+                ..cfg.clone()
+            },
+        );
+        assert!(lowered
+            .iter()
+            .all(|s| s.trials_sr_std_source != TrialsSrStdSource::Configured));
+    }
+
+    /// Control: on a field where every pooled track has a Sharpe ratio, the new
+    /// qualification predicate selects the same agents and the same f64s the old
+    /// `sharpe_ratio` / `is_finite` filter selected, so the measured bar and
+    /// every figure read off it are the bytes they were. The two committed
+    /// golden fields (`golden/*.scores.json`) are the file-level half of this
+    /// control.
+    #[test]
+    fn a_field_with_no_undefined_sharpe_track_measures_the_same_bytes() {
+        let cfg = ScoreConfig::default();
+        let field = dispersed_field(6);
+        let board = rank(&field, &cfg);
+        // The pre-fix rule, reproduced: every pooled Sharpe, sorted, sample std.
+        let mut sharpes: Vec<f64> = field
+            .iter()
+            .map(|a| sharpe_ratio(&pooled_returns(a, cfg.execution_seeds_per_window)))
+            .collect();
+        assert!(sharpes.iter().all(|sr| sr.is_finite()));
+        sharpes.sort_by(|a, b| a.partial_cmp(b).expect("finite"));
+        let expected = std_dev(&sharpes);
+        for s in &board {
+            assert_eq!(s.trials_sr_std_source, TrialsSrStdSource::Measured);
+            assert_eq!(s.trials_sr_std.to_bits(), expected.to_bits());
+            assert_eq!(s.deflation_error, None);
+        }
+    }
+
+    /// The crowdedness neighbour: a constant nonzero stream is not a peer. Its
+    /// deviations around its rounded mean are near 1e-19, so the Pearson
+    /// denominator was a residual rather than zero and the stream counted as a
+    /// correlated peer of every agent, at a noise correlation near 2e-17.
+    ///
+    /// Isolated: an all-zero entrant was already refused as a peer (its sum of
+    /// squared deviations is exactly zero), so only the constant nonzero case
+    /// can move these bytes.
+    #[test]
+    fn a_constant_entrant_is_not_a_crowdedness_peer() {
+        let cfg = ScoreConfig::default();
+        let field = dispersed_field(5);
+        let baseline = rank(&field, &cfg);
+        let mut with_entrant = field.clone();
+        with_entrant.push(flat_entrant("flat", 0.001));
+        let board = rank(&with_entrant, &cfg);
+        for base in &baseline {
+            let after = by_id(&board, &base.agent_id);
+            assert_eq!(
+                after.field_crowdedness.map(f64::to_bits),
+                base.field_crowdedness.map(f64::to_bits),
+                "{}",
+                base.agent_id
+            );
+            assert_eq!(after.field_crowdedness_peers, base.field_crowdedness_peers);
+        }
+        let flat = by_id(&board, "flat");
+        assert_eq!(
+            (flat.field_crowdedness, flat.field_crowdedness_peers),
+            (None, 0)
+        );
+    }
+
+    /// The revealed-selection neighbour: a declared candidate with no Sharpe
+    /// ratio is not an option. A constant nonzero candidate was valued at its
+    /// ~1e15 sentinel, which dominated every real option and reported the
+    /// submitted track as an economic-dominance violation.
+    ///
+    /// Isolated: the same submission with only the dispersed candidate scores
+    /// the same, so the constant candidate is the only thing that moved.
+    #[test]
+    fn a_constant_candidate_is_not_a_revealed_selection_option() {
+        let cfg = ScoreConfig::default();
+        let dispersed_candidate: Vec<f64> = (0..30).map(|i| 0.0001 * (i % 3) as f64).collect();
+        let mut sub = agent("skilled", (0..5).map(|_| run(0.002, 0.0005, 60)).collect());
+        sub.candidates = vec![dispersed_candidate.clone(), vec![0.001; 30]];
+        let mut control = sub.clone();
+        control.candidates = vec![dispersed_candidate];
+
+        let scored = score_agent(&sub, &cfg);
+        let control = score_agent(&control, &cfg);
+        assert_eq!(scored.econ_dominance_violations, Some(0));
+        assert_eq!(
+            scored.econ_rationality_score.map(f64::to_bits),
+            control.econ_rationality_score.map(f64::to_bits)
+        );
+        assert_eq!(
+            scored.econ_dominance_violations,
+            control.econ_dominance_violations
+        );
     }
 
     /// A deterministic, roughly Gaussian return series with *exactly* the
