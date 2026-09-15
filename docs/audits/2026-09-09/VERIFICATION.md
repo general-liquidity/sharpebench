@@ -712,6 +712,81 @@ inputs rather than these exports' whole domain. `tag_regime` is the weakest of t
 because its output is one of three short strings: an arithmetic difference that does not
 cross a classification boundary on the four committed inputs does not move its fingerprint.
 
+## Acting on a structural audit of both papers, 2026-09-15
+
+Two independent reviews audited the manuscripts rather than the products,
+against the 67 benchmark papers in `bench-papers/`. Eleven parallel readings
+produced the claim list. Every high-severity finding was re-checked against the
+committed evidence, the source or the code before it was acted on.
+
+| PR | Work | Main after merge |
+|---|---|---|
+| Bench #129 | The paper audit, and a constant track refused rather than scored | `0b7cce1` |
+| Bench #130 | A refused record omits the figures read off its undefined Sharpe | `8e8604d` |
+| Bench #131 | Every dependency to its latest release | `8560afd` |
+| Arena #74 | The paper audit, and the same refusal at Arena's own boundary | `082605c` |
+| Arena #75 | The SharpeBench pin to 0.26.0, and every dependency to latest | `9cf7918` |
+
+Each merged with every check green on its exact pushed head and main unmoved
+since that head was tested.
+
+### What the audit found in the code
+
+The kernel substituted a Sharpe ratio of zero whenever the computed standard
+deviation was zero, which is how `hold` came to carry a probabilistic Sharpe of
+0.5000000005 on all 576 of its frozen records. The constant nonzero case is
+worse and was found while repairing the first: a constant series' rounded mean
+sits a few units in the last place off the value, so 0.001 repeated 408 times
+has a computed standard deviation near 6.5e-19 and a Sharpe near 1.5e15, and it
+scored a deflated Sharpe and probabilistic Sharpe of 1.0. Six such runs were
+rank-eligible under the shipped configuration. That is why the predicate is
+exact value equality rather than a test on the computed variance, and why a
+dispersed track of any volatility keeps bit-identical numbers.
+
+No frozen eligibility verdict changes: `hold` fails its reliability test and its
+bootstrap on every panel. The frozen tables are not regenerated, and the papers
+say which version produced them.
+
+### What was checked rather than assumed
+
+The 72-verdict restatement was recomputed from the committed records: in every
+one of the 72 agent-dataset pairs the reliability, bootstrap, process and
+probabilistic Sharpe legs are identical across all 64 host configurations, and
+only the deflated Sharpe varies. Three rows of the eligibility table are
+eight-way ties in the printed configuration. The power figures were reproduced
+independently before the producer was written. The Sullivan, Timmermann and
+White characterisation was checked against the paper itself, which reverses the
+claim the manuscript made about it. Arena's pin bump was checked by driving the
+previously committed wasm bundle and a fresh build through the cross-runtime
+battery: one difference in 44 calls, the spec-hash stamp itself.
+
+### Upgrades refused with evidence
+
+Two of the four would have shipped a defect that a compile-only check passes.
+`ureq` 3's alternative TLS feature compiles, and panics on the first HTTPS
+request. The Anthropic SDK 1.x depends on a transport the billing-ceiling
+regressions cannot drive, so the ceiling would have gone untested. TypeScript 7
+moves the compiler API behind an explicitly unstable entry point, which breaks
+the gate that transpiles the real spec-hash source, and `mcp` 2.x cannot
+co-install with the pinned `verifiers`.
+
+### Not established
+
+No experiment was run in this round, so the papers gain no empirical result. The
+witness still rests on one common-random-number draw, and its replication over
+independent noise draws is planned rather than done. No deflated-Sharpe interval
+is displayed on the frozen tables, because the frozen records carry none. The
+frozen evidence is not rescored under the repaired moment estimators, and the
+execution-delay sensitivity is not run. Neither paper has a human, practitioner
+or recognition validation study. Both remain long-form preprints: their main
+text runs to about 51 pages before references, where the median of the 67
+reference papers is 10 and 56 of them are 12 or fewer, so a submission-length
+cut is deferred until there are results to lead with. The deflation dispersion a
+field measures still counts a constant track's substituted Sharpe, which a
+single constant nonzero entrant could use to push every other agent's deflated
+Sharpe to zero; that is recorded as open rather than repaired, because the fix
+moves the bar on panels the frozen evidence reports.
+
 ## Closing the build gaps of the completion verification, 2026-09-14
 
 A fourth review audited whether the completion claim held rather than whether
