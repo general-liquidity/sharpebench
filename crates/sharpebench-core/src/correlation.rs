@@ -8,6 +8,7 @@
 //! Reported, not gating — the third sibling of `decay` and `calibration`. Pure
 //! and deterministic: pairwise Pearson with a fixed (field-order) reduction.
 
+use crate::deflated_sharpe::is_constant_track;
 use crate::stats::mean;
 
 /// An agent's crowdedness against the rest of the field.
@@ -25,7 +26,7 @@ pub struct Crowdedness {
 
 /// Pearson correlation of two series, paired by index (extra tail entries on the
 /// longer side are ignored). `None` — never `NaN` — when there are fewer than 2
-/// pairs or either series has zero variance (correlation is undefined there).
+/// pairs or either series is constant (correlation is undefined there).
 pub fn pearson(a: &[f64], b: &[f64]) -> Option<f64> {
     let n = a.len().min(b.len());
     if n < 2 {
@@ -46,7 +47,12 @@ pub fn pearson(a: &[f64], b: &[f64]) -> Option<f64> {
         va += da * da;
         vb += db * db;
     }
-    if va == 0.0 || vb == 0.0 {
+    // A constant series is recognised by value as well as by its computed sum of
+    // squares. An all-zero one sums to exactly zero and was already refused; a
+    // constant nonzero one leaves a residual near 1e-37 around its rounded mean,
+    // which divides to a noise "correlation" near 1e-17 and counted the stream
+    // as a peer of every agent on the board.
+    if va == 0.0 || vb == 0.0 || is_constant_track(a) || is_constant_track(b) {
         return None;
     }
     Some((cov / (va.sqrt() * vb.sqrt())).clamp(-1.0, 1.0))
@@ -54,7 +60,7 @@ pub fn pearson(a: &[f64], b: &[f64]) -> Option<f64> {
 
 /// Score an agent's crowdedness: its mean and max Pearson correlation against
 /// each member of `field` (the other agents' aligned return series). Peers that
-/// yield an undefined correlation (too short / zero-variance) are skipped.
+/// yield an undefined correlation (too short / constant) are skipped.
 pub fn crowdedness(agent: &[f64], field: &[&[f64]]) -> Crowdedness {
     let mut corrs: Vec<f64> = Vec::with_capacity(field.len());
     for peer in field {
@@ -121,6 +127,31 @@ mod tests {
         let a = [1.0, 2.0, 3.0, 4.0];
         let flat = [2.0, 2.0, 2.0, 2.0];
         assert!(pearson(&a, &flat).is_none());
+    }
+
+    /// A constant series whose value is not exactly representable leaves a
+    /// residual sum of squared deviations around its rounded mean, so the
+    /// zero-variance guard alone did not catch it: `pearson` returned a noise
+    /// correlation near 2e-17 and the stream counted as a peer.
+    ///
+    /// Isolated: the same series at a value the mean rounds exactly (2.0 above)
+    /// was already refused, so the residual is the whole cause.
+    #[test]
+    fn a_constant_nonzero_series_is_undefined_not_a_noise_correlation() {
+        let a: Vec<f64> = (0..60).map(|i| 0.002 + 0.0005 * (i as f64).sin()).collect();
+        let flat = vec![0.001_f64; 60];
+        assert_ne!(
+            flat.iter()
+                .map(|x| x - mean(&flat))
+                .map(|d| d * d)
+                .sum::<f64>(),
+            0.0,
+            "the residual this test is about must exist"
+        );
+        assert!(pearson(&a, &flat).is_none());
+        assert!(pearson(&flat, &a).is_none());
+        let c = crowdedness(&a, &[&flat]);
+        assert_eq!((c.mean_corr, c.max_corr, c.n_peers), (None, None, 0));
     }
 
     #[test]

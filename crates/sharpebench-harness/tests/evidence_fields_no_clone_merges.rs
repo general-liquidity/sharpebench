@@ -203,15 +203,18 @@ fn committed_evidence_fields_have_no_clone_merges() {
 /// averaged: the five luck-floor agents converge toward the same
 /// market-average exposure. This test reproduces the live clustering, counts
 /// post-collapse dispersion votes the way `measured_trials_sr_std` does
-/// (finite-Sharpe qualifiers, clusters vote once, `min_field` five), and
-/// asserts current-engine support. The commodities field no longer reproduces
-/// its historical measured stamp: only two current streams have finite Sharpe.
-/// This test records the incompatibility; neither successful CSV parsing nor a
-/// dispersion fallback validates percentage returns across a negative raw quote.
+/// (qualifiers whose stream has a Sharpe ratio, clusters vote once, `min_field`
+/// five), and asserts current-engine support. The qualification predicate is
+/// `observed_sharpe_ratio`, the engine's own: `hold`, whose seed-averaged stream
+/// is identically zero, no longer qualifies and no longer votes. The commodities
+/// field no longer reproduces its historical measured stamp: only one current
+/// stream has a Sharpe ratio. This test records the incompatibility; neither
+/// successful CSV parsing nor a dispersion fallback validates percentage returns
+/// across a negative raw quote.
 #[test]
 fn current_seed_averaged_streams_have_expected_dispersion_support() {
     use sharpebench_core::composite::pooled_returns;
-    use sharpebench_core::deflated_sharpe::sharpe_ratio;
+    use sharpebench_core::deflated_sharpe::observed_sharpe_ratio;
 
     /// Current support, not a relabelling of the frozen artifact stamps.
     const CONFIGURED_FALLBACK: &[&str] = &[
@@ -245,13 +248,18 @@ fn current_seed_averaged_streams_have_expected_dispersion_support() {
             LUCK_FLOOR_AGENTS,
         ));
 
-        // Mirror `measured_trials_sr_std`: seed-averaged streams, finite-Sharpe
-        // qualifiers, one vote per clone cluster at the collapse threshold.
+        // Mirror `measured_trials_sr_std`: seed-averaged streams, qualifiers
+        // whose stream has a Sharpe ratio, one vote per clone cluster at the
+        // collapse threshold.
         let averaged: Vec<(String, Vec<f64>)> = sweep
             .iter()
             .map(|s| (s.agent_id.clone(), pooled_returns(s, EXEC_SEEDS.len())))
-            .filter(|(_, p)| p.len() >= 2 && sharpe_ratio(p).is_finite())
+            .filter(|(_, p)| observed_sharpe_ratio(p).is_ok())
             .collect();
+        assert!(
+            !averaged.iter().any(|(id, _)| id == "hold"),
+            "{name}: a track with no Sharpe ratio must not qualify to vote"
+        );
         let streams: Vec<Vec<f64>> = averaged.iter().map(|(_, p)| p.clone()).collect();
         let clusters = clone_clusters(&streams, CLONE_COLLAPSE_COSINE, false);
         let votes = clusters.len();
@@ -281,9 +289,11 @@ fn current_seed_averaged_streams_have_expected_dispersion_support() {
 
         let expect_configured = CONFIGURED_FALLBACK.contains(name);
         if *name == "commodities-1d" {
+            // One, not two: the second of the two streams that used to qualify
+            // here was `hold`, which has no Sharpe ratio.
             assert_eq!(
                 averaged.len(),
-                2,
+                1,
                 "review the documented nonfinite-support limitation if this changes"
             );
             let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -336,17 +346,25 @@ const PERIODS_PER_YEAR: &[(&str, f64)] = &[
 ];
 
 /// `tab:eligibility` and `tab:mandate` print different deflated Sharpes for
-/// buy-and-hold on us-indices-1d and crypto-majors-4h. The cause is field
-/// composition, not a scoring inconsistency: `tab:eligibility` scores the
-/// eight-agent evidence-sweep field and `tab:mandate` the nine-agent field that
-/// adds the risk-managed agent. Three panels sit one vote short of the five-vote
-/// measurement minimum after clone collapse, so the eight-agent field falls back
-/// to the configured prior there; the ninth agent supplies the missing vote and
-/// the measurement runs. On us-indices-1d and crypto-majors-4h the measured
-/// dispersion is above the annualized floor, so the bar rises and the leader's
-/// DSR falls to zero. On crypto-majors-1w it is below the floor, so the floor
-/// applies, the bar is the same 1.1382 the configured prior gives, and both
-/// tables print the same DSR. Everywhere else the two fields agree outright.
+/// buy-and-hold on us-indices-1d and crypto-majors-4h. The manuscript explains
+/// that by field composition, not by a scoring inconsistency: `tab:eligibility`
+/// scores the eight-agent evidence-sweep field and `tab:mandate` the nine-agent
+/// field that adds the risk-managed agent, three panels sat one vote short of
+/// the five-vote measurement minimum after clone collapse, and the ninth agent
+/// supplied the missing vote. That explanation is a property of the kernel the
+/// frozen evidence was produced under, and this test now pins what the current
+/// engine does instead.
+///
+/// `hold` never trades, so its seed-averaged pooled stream is identically zero
+/// and has no Sharpe ratio. The frozen kernel let it qualify at the
+/// zero-variance sentinel and vote; the current one excludes it from the
+/// dispersion sample on every panel (`measured_trials_sr_std`). Each of the
+/// three panels therefore loses a vote in both fields, all three sit below the
+/// minimum in both, and the ninth agent changes the dispersion source on no
+/// panel at all. The three panels that measure in the eight-agent field
+/// (crypto-majors-1h, fx-majors-1d, rates-1d) still measure in both. No frozen
+/// number is restated here: this test asserts which path the current engine
+/// takes, and `paper/sections/E-repairs.tex` records the divergence.
 ///
 /// Ignored by default: reconstructing both fields on all nine datasets takes
 /// about six and a half minutes, and the workspace test binaries run crate by
@@ -355,14 +373,20 @@ const PERIODS_PER_YEAR: &[(&str, f64)] = &[
 /// job of `.github/workflows/ci.yml`, in parallel with the OS matrix.
 #[test]
 #[ignore = "about 6.5 minutes; runs in the ubuntu-only slow-harness CI job"]
-fn mandate_field_changes_dispersion_source_on_three_panels() {
+fn the_mandate_field_no_longer_changes_the_dispersion_source_on_any_panel() {
     use sharpebench_core::{rank, ScoreConfig, TrialsSrStdSource};
 
-    /// The panels where the ninth vote lifts the bar: measured above the floor.
-    const RAISES_BAR: &[&str] = &["us-indices-1d", "crypto-majors-4h"];
-    /// The panel where the ninth vote enables a measurement the floor then
-    /// overrides, leaving the bar and the printed DSR unchanged.
-    const FLOORED: &[&str] = &["crypto-majors-1w"];
+    /// The panels the manuscript names, where the ninth agent used to supply the
+    /// fifth vote and now cannot, because `hold`'s vote is withdrawn from both
+    /// fields. Both fields take the configured path on each.
+    const WAS_LIFTED_BY_THE_NINTH_AGENT: &[&str] =
+        &["us-indices-1d", "crypto-majors-4h", "crypto-majors-1w"];
+    /// The panels that keep enough votes to measure in both fields.
+    const MEASURES_IN_BOTH: &[&str] = &["crypto-majors-1h", "fx-majors-1d", "rates-1d"];
+
+    // Every panel is reconstructed before anything is asserted, so one run of
+    // this six-minute test reports all nine rows rather than the first failure.
+    let mut observed: Vec<(&str, TrialsSrStdSource, f64, TrialsSrStdSource, f64)> = Vec::new();
 
     for (name, ppy) in PERIODS_PER_YEAR {
         let data = load(name);
@@ -414,29 +438,35 @@ fn mandate_field_changes_dispersion_source_on_three_panels() {
             "{name}: eight-agent {sweep_source:?} (sigma_ann {sweep_sigma:.4}), \
              nine-agent {mandate_source:?} (sigma_ann {mandate_sigma:.4})"
         );
+        observed.push((
+            *name,
+            sweep_source,
+            sweep_sigma,
+            mandate_source,
+            mandate_sigma,
+        ));
+    }
 
-        if RAISES_BAR.contains(name) {
-            assert_eq!(sweep_source, TrialsSrStdSource::Configured, "{name}");
-            assert_eq!(mandate_source, TrialsSrStdSource::Measured, "{name}");
-            assert!(
-                mandate_sigma > sweep_sigma,
-                "{name}: the measured dispersion must exceed the configured prior, \
-                 which is what raises the bar and zeroes the leader's DSR"
+    assert_eq!(observed.len(), PERIODS_PER_YEAR.len());
+    for &(name, sweep_source, sweep_sigma, mandate_source, mandate_sigma) in &observed {
+        let name = &name;
+        assert_eq!(
+            sweep_source, mandate_source,
+            "{name}: the ninth agent changed the dispersion source, which the \
+             current engine no longer lets it do on any panel"
+        );
+        if WAS_LIFTED_BY_THE_NINTH_AGENT.contains(name) {
+            assert_eq!(
+                sweep_source,
+                TrialsSrStdSource::Configured,
+                "{name}: without `hold`'s vote both fields sit below the minimum"
             );
-        } else if FLOORED.contains(name) {
-            assert_eq!(sweep_source, TrialsSrStdSource::Configured, "{name}");
-            assert_eq!(mandate_source, TrialsSrStdSource::MeasuredFloored, "{name}");
             assert!(
                 (mandate_sigma - sweep_sigma).abs() < 1e-12,
-                "{name}: the floor must leave the bar exactly where the configured \
-                 prior put it, which is why both tables print the same DSR"
+                "{name}: both fields must read the same configured prior"
             );
-        } else {
-            assert_eq!(
-                sweep_source, mandate_source,
-                "{name}: the ninth agent changed the dispersion source on a panel \
-                 the manuscript does not name"
-            );
+        } else if MEASURES_IN_BOTH.contains(name) {
+            assert_eq!(sweep_source, TrialsSrStdSource::Measured, "{name}");
         }
     }
 }

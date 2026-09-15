@@ -156,11 +156,12 @@ jobs:
 
   slow-harness:
     name: slow harness (clone-merge regression)
-    # `mandate_field_changes_dispersion_source_on_three_panels` reconstructs two
-    # nine-dataset fields with the current engine and takes about 6.5 minutes on
-    # its own, which used to floor all three OS legs of `test`. It is `#[ignore]`d
-    # there and runs here, on one OS, in parallel with the matrix. `--ignored`
-    # runs only that test so this job fails for one reason only.
+    # `the_mandate_field_no_longer_changes_the_dispersion_source_on_any_panel`
+    # reconstructs two nine-dataset fields with the current engine and takes about
+    # 6.5 minutes on its own, which used to floor all three OS legs of `test`.
+    # It is `#[ignore]`d there and runs here, on one OS, in parallel with the
+    # matrix. `--ignored` runs only that test so this job fails for one reason
+    # only.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

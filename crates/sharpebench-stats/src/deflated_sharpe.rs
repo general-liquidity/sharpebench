@@ -97,6 +97,57 @@ pub(crate) enum Track {
     Resample,
 }
 
+/// Whether every observation of `xs` is the same value. A one-observation slice
+/// is constant; an empty one is not (it has no observations to agree).
+///
+/// This is the *by value* recognition the deflation family refuses a track on.
+/// The computed sample variance cannot stand in for it: the rounded mean of a
+/// constant nonzero series sits a few units in the last place off that value, so
+/// its computed variance is a residual near 1e-37 rather than zero.
+pub fn is_constant_track(xs: &[f64]) -> bool {
+    match xs.split_first() {
+        Some((first, rest)) => rest.iter().all(|x| x == first),
+        None => false,
+    }
+}
+
+/// The Sharpe ratio of an **observed** track, or the error the deflation family
+/// refuses that track with. This is the single statement of "this track has no
+/// Sharpe ratio", and the one the whole benchmark reads when the answer decides
+/// whether a stream participates in some other agent's statistic.
+///
+/// [`sharpe_ratio`] cannot answer it: on zero variance it returns a sentinel
+/// 0.0, and on a constant nonzero series it returns a finite value near 1e15
+/// (see [`is_constant_track`]). Both look like measurements to `is_finite`.
+///
+/// Fewer than two observations is an error here. The checked PSR keeps its own
+/// 0.0 convention for a short track by checking the length before it asks.
+pub fn observed_sharpe_ratio(returns: &[f64]) -> Result<f64, StatisticalError> {
+    if returns.len() < 2 {
+        return Err(StatisticalError::InsufficientObservations {
+            required: 2,
+            actual: returns.len(),
+        });
+    }
+    let center = finite_computation(mean(returns), "return mean")?;
+    let scale = finite_computation(std_dev(returns), "return standard deviation")?;
+    // A constant series has a sample variance of exactly zero, so its Sharpe
+    // ratio is 0/0 or c/0. It is recognised by value, not by the computed
+    // variance: the rounded mean of a constant nonzero series is a few ULPs off
+    // its value, which leaves a computed standard deviation near 1e-18 and a
+    // Sharpe near 1e15 that clears every gate. A computed standard deviation of
+    // exactly zero on a non-constant series (squared deviations below the
+    // smallest subnormal) divides to a non-finite Sharpe and is refused under
+    // that name.
+    if is_constant_track(returns) {
+        return Err(StatisticalError::InvalidParameter {
+            name: "returns",
+            requirement: "must not be constant: a constant series has no Sharpe ratio",
+        });
+    }
+    finite_computation(center / scale, "Sharpe ratio")
+}
+
 /// Checked counterpart for Result-returning deflation. Validate before a
 /// numerical floor or CDF saturation can conceal an overflowing computation.
 /// The legacy scalar PSR above retains its API and operation order.
@@ -105,30 +156,16 @@ fn checked_psr(returns: &[f64], sr_benchmark: f64, track: Track) -> Result<f64, 
     if n < 2 {
         return Ok(0.0);
     }
-    let center = finite_computation(mean(returns), "return mean")?;
-    let scale = finite_computation(std_dev(returns), "return standard deviation")?;
     let sr = match track {
-        // A constant series has a sample variance of exactly zero, so its
-        // Sharpe ratio is 0/0 or c/0. It is recognised by value, not by the
-        // computed variance: the rounded mean of a constant nonzero series is a
-        // few ULPs off its value, which leaves a computed standard deviation
-        // near 1e-18 and a Sharpe near 1e15 that clears every gate. A computed
-        // standard deviation of exactly zero on a non-constant series (squared
-        // deviations below the smallest subnormal) divides to a non-finite
-        // Sharpe and is refused under that name.
-        Track::Observed => {
-            if returns.iter().all(|&x| x == returns[0]) {
-                return Err(StatisticalError::InvalidParameter {
-                    name: "returns",
-                    requirement: "must not be constant: a constant series has no Sharpe ratio",
-                });
-            }
-            finite_computation(center / scale, "Sharpe ratio")?
+        Track::Observed => observed_sharpe_ratio(returns)?,
+        Track::Resample => {
+            let center = finite_computation(mean(returns), "return mean")?;
+            let scale = finite_computation(std_dev(returns), "return standard deviation")?;
+            finite_computation(
+                if scale == 0.0 { 0.0 } else { center / scale },
+                "Sharpe ratio",
+            )?
         }
-        Track::Resample => finite_computation(
-            if scale == 0.0 { 0.0 } else { center / scale },
-            "Sharpe ratio",
-        )?,
     };
     let g3 = finite_computation(skewness(returns), "return skewness")?;
     let g4 = finite_computation(kurtosis(returns), "return kurtosis")?;
@@ -382,6 +419,45 @@ mod tests {
         assert_eq!(per_period_from_annualized(0.5, 0.0), f64::INFINITY);
         assert!(per_period_from_annualized(0.5, -1.0).is_nan());
         assert!(per_period_from_annualized(0.5, f64::NAN).is_nan());
+    }
+
+    /// `observed_sharpe_ratio` is the deflation family's own refusal, exposed:
+    /// it answers `Err` on exactly the tracks `checked_probabilistic_sharpe_ratio`
+    /// and `deflated_sharpe_ratio` refuse, and returns `sharpe_ratio`'s bits on
+    /// every track that has one. `sharpe_ratio` cannot be used to ask the
+    /// question: it hands back a finite 0.0 on zero variance and a finite ~1e15
+    /// on a constant nonzero series.
+    #[test]
+    fn the_observed_sharpe_predicate_matches_the_refusals_it_is_taken_from() {
+        let dispersed: Vec<f64> = (0..60).map(|i| 0.002 + 0.0005 * (i as f64).sin()).collect();
+        assert_eq!(
+            observed_sharpe_ratio(&dispersed)
+                .expect("defined")
+                .to_bits(),
+            sharpe_ratio(&dispersed).to_bits()
+        );
+
+        for flat in [vec![0.0_f64; 60], vec![0.001_f64; 60], vec![-0.002_f64; 60]] {
+            assert!(is_constant_track(&flat));
+            assert!(
+                sharpe_ratio(&flat).is_finite(),
+                "the sentinel this replaces"
+            );
+            assert!(observed_sharpe_ratio(&flat).is_err());
+            assert!(deflated_sharpe_ratio(&flat, 50, 0.03).is_err());
+            assert!(checked_probabilistic_sharpe_ratio(&flat, 0.0).is_err());
+        }
+
+        // Too short, and non-finite, are refused under their own names.
+        assert!(observed_sharpe_ratio(&[]).is_err());
+        assert!(observed_sharpe_ratio(&[0.01]).is_err());
+        assert!(observed_sharpe_ratio(&[0.01, f64::NAN, 0.02]).is_err());
+        assert!(observed_sharpe_ratio(&[0.01, f64::INFINITY, 0.02]).is_err());
+        // A non-constant series whose squared deviations underflow divides to a
+        // non-finite Sharpe and is refused there, not by the constant rule.
+        let underflowing: Vec<f64> = (0..60).map(|i| (i % 2) as f64 * 1e-170).collect();
+        assert!(!is_constant_track(&underflowing));
+        assert!(observed_sharpe_ratio(&underflowing).is_err());
     }
 
     /// A series whose sample Sharpe is `sr`, built as `c + b * x` over the
