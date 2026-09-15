@@ -190,6 +190,19 @@ def probabilistic_sharpe_ratio(xs, sr_benchmark: float) -> float:
     )
 
 
+CONSTANT_TRACK_REFUSAL = "returns must not be constant: a constant series has no Sharpe ratio"
+
+
+def checked_probabilistic_sharpe_ratio(xs, sr_benchmark: float) -> float:
+    """The kernel's checked PSR (`checked_probabilistic_sharpe_ratio`): a track whose
+    observations all equal the first has no Sharpe ratio and is refused, where the
+    unchecked form substitutes a Sharpe of zero. The pooled `psr` in a score record
+    comes from this form; a refused record prints 0.0 beside a `deflation_error`."""
+    if len(xs) >= 2 and all(x == xs[0] for x in xs):
+        raise ValueError(CONSTANT_TRACK_REFUSAL)
+    return probabilistic_sharpe_ratio(xs, sr_benchmark)
+
+
 def expected_max_sharpe(trials_sr_std: float, n_trials: int) -> float:
     """Expected maximum Sharpe of `n_trials` zero-skill trials (eq:deflation, mu0 = 0)."""
     if not math.isfinite(trials_sr_std) or trials_sr_std < 0.0:

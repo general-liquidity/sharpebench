@@ -45,9 +45,17 @@ class GoldenKernelAgreement(unittest.TestCase):
             track = pooled_track(submission)
             self.assertEqual(len(track), score["pooled_observations"])
             with self.subTest(agent=score["agent_id"]):
-                self.assertEqual(
-                    k.probabilistic_sharpe_ratio(track, 0.0).hex(), score["psr"].hex()
-                )
+                if "deflation_error" in score:
+                    # The kernel refuses a constant track; the record prints 0.0.
+                    self.assertEqual(score["deflation_error"], k.CONSTANT_TRACK_REFUSAL)
+                    self.assertEqual(score["psr"], 0.0)
+                    with self.assertRaisesRegex(ValueError, "must not be constant"):
+                        k.checked_probabilistic_sharpe_ratio(track, 0.0)
+                else:
+                    self.assertEqual(
+                        k.checked_probabilistic_sharpe_ratio(track, 0.0).hex(),
+                        score["psr"].hex(),
+                    )
             interior += 0.0 < score["psr"] < 1.0
         # Saturated PSRs of 0 or 1 would agree with almost any formula.
         self.assertGreaterEqual(interior, 2)
