@@ -12,4 +12,29 @@ Every decision in the benchmark traces to one of seven principles.
 \item[Judge-free.] No model grades another, and every gate is an assertion over numbers, which is what makes the self-audit executable.
 \end{description}
 
+\Cref{tab:design-constraints} restates each principle as the requirement the artifact enforces and the failure a violation would permit.
+
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\caption{Design constraints. Each principle is stated as the requirement the kernel or protocol enforces and the failure mode a benchmark that violated it would exhibit. The requirement column names mechanisms; whether each is exercised by the frozen evidence is stated in the section that describes it.}
+\label{tab:design-constraints}
+\begin{tabular}{>{\raggedright\arraybackslash}p{0.15\linewidth}>{\raggedright\arraybackslash}p{0.4\linewidth}>{\raggedright\arraybackslash}p{0.38\linewidth}}
+\toprule
+Principle & Requirement & Failure mode if violated \\
+\midrule
+Luck-robust & DSR gate at an effective trial count no smaller than the observed field, raised by each agent's declared trials (\cref{sec:stats}) & the best overfitter of a large search ranks first \\
+Reliability-gated & every run, on every seed and every window, clears the per-run PSR bar under the configured verdict (\cref{sec:predicate}) & an agent that is safe on average or in one regime ranks as safe \\
+Process-gated & one block-severity event in any run makes the entry ineligible (\cref{sec:predicate}) & a return earned by bypassing a risk control buys rank \\
+Point-in-time & the observation holds only bars at or before the decision index (\cref{sec:integrity}) & look-ahead inflates returns without any visible defect \\
+Deterministic & the score is a pure function of field and configuration, with golden fixtures checked on three operating systems (\cref{sec:integrity}) & two operators disagree about one submission and tampering is undetectable \\
+Forward-attested & a salted commitment to the artifact digest before a declared deadline, on a chained signed board (\cref{sec:attest}) & a strategy tuned after its evaluation window was seen is scored as if it had not been \\
+Judge-free & every gate is an assertion over numbers (\cref{sec:selfaudit}) & scores inherit a grader's biases and the self-audit cannot be executed \\
+\bottomrule
+\end{tabular}
+\end{table}
+
 Two consequences bear on the experiments. First, what determinism buys and what it does not. A deterministic kernel supports replicability and auditability: anyone can recompute every score, and tampering within the declared digest coverage of \cref{sec:integrity} is detectable by a verifier holding the manifest. It guarantees nothing about validity: the first finding shows the benchmark shipping with a deflation prior off by up to a factor of $\sqrt{8760}$ while the eight-attack self-audit stayed green, because a reproducible scorer is wrong in exactly the same way everywhere. The self-audit tests gate evasion, not gate calibration. A PSR near one beside a DSR near zero is mathematically possible because the statistics test different thresholds; when it appeared we inspected the implied annualized DSR threshold, whose dimensional scale revealed the error. \Cref{sec:units} states that calibration check explicitly. Second, the reliability and process principles together mean the benchmark can decline to certify any agent at all on a dataset, including the market itself. Whether universal refusal is the right outcome on a given history is a question \cref{sec:experiments} puts to the data.
+
+\paragraph{What validates the instrument, and what does not.} There is no prior trading-agent benchmark for SharpeBench to agree with, and no human or practitioner rating study has been run (\cref{sec:limitations}), so the construct-validity evidence here is discriminative: entrants whose properties are known by construction must land where the construct says they should. Four checks of that kind are reported. Seeded zero-skill agents never beat a reference agent (\cref{sec:falsify,sec:luck1000}); a synthetic agent with an injected edge becomes eligible above a sampled boundary and not below it (\cref{sec:witness}); nine constructed attacks are demoted on every commit (\cref{sec:selfaudit}); and a deliberately fragile agent separates from buy-and-hold under perturbation in a unit test (\cref{sec:perturb}). None of them validates the gates' calibration on real agents. The witness is one common-random-number draw; the committed perturbation report on a real panel separates nothing; no real or third-party agent has been admitted; the refusal has low power at the shipped window geometry (\cref{sec:power}); and the self-audit tests evasion rather than calibration, as the first finding shows. The protocol is therefore validated as a procedure that behaves correctly on known entrants, not as a measurement whose verdicts on unknown agents have been checked against anything external.
