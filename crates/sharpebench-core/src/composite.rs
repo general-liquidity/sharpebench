@@ -2721,6 +2721,95 @@ mod tests {
         assert!(s.deflation_error.is_none() && s.rank_eligible);
     }
 
+    /// Paper audit 2026-09-14, Tier 1 #11: declared-mandate eligibility keeps
+    /// the availability conjunct of the host predicate, so a declared agent
+    /// cannot be eligible on a deflated Sharpe or a bootstrap that was never
+    /// estimated.
+    ///
+    /// `dsr_bar = 0` lets the floor a refused deflation reports clear the
+    /// deflated-Sharpe conjunct, and `alpha = 2` lets the 1.0 sentinel of a
+    /// refused bootstrap clear the significance conjunct, so availability is the
+    /// only term left that can refuse. The same agent is declared-eligible with
+    /// both statistics available and declared-ineligible when either is
+    /// refused, on the single-score and board paths, under every declaration
+    /// that needs no benchmark and under a relative one.
+    #[test]
+    fn declared_eligibility_requires_available_statistics() {
+        let skilled = agent("skilled", (0..5).map(|_| run(0.002, 0.0005, 60)).collect());
+        let bench = agent("bench", (0..5).map(|_| run(0.0005, 0.001, 60)).collect());
+        let base = ScoreConfig {
+            dsr_bar: 0.0,
+            alpha: 2.0,
+            ..ScoreConfig::default()
+        };
+        let cases = [
+            (skilled.clone(), base.clone(), None, None),
+            (
+                skilled.clone(),
+                ScoreConfig {
+                    trials_sr_std: -1.0,
+                    ..base.clone()
+                },
+                Some("trials_sr_std must be finite and non-negative"),
+                None,
+            ),
+            (
+                skilled,
+                ScoreConfig {
+                    n_boot: 0,
+                    ..base.clone()
+                },
+                Some("n_boot must be positive"),
+                Some("n_boot must be positive"),
+            ),
+            (
+                offsetting_seeds(),
+                ScoreConfig {
+                    execution_seeds_per_window: 2,
+                    ..base
+                },
+                Some(CONSTANT_TRACK),
+                None,
+            ),
+        ];
+        let absolute = [
+            DeclaredMandate::AbsoluteReturn,
+            DeclaredMandate::DrawdownCapped {
+                max_per_run_drawdown: 0.2,
+            },
+        ];
+        for (sub, cfg, deflation_error, bootstrap_error) in cases {
+            let available = deflation_error.is_none() && bootstrap_error.is_none();
+            let mut scores = Vec::new();
+            for mandate in &absolute {
+                scores.push(score_agent_declared(&sub, Some(mandate), &cfg));
+                let declarations =
+                    MandateDeclarations::from([(sub.agent_id.clone(), mandate.clone())]);
+                scores.extend(rank_declared(
+                    std::slice::from_ref(&sub),
+                    &declarations,
+                    &cfg,
+                ));
+            }
+            if sub.runs.len() == bench.runs.len() {
+                let relative = DeclaredMandate::RelativeTo {
+                    benchmark_id: "bench".to_string(),
+                };
+                let declarations = MandateDeclarations::from([(sub.agent_id.clone(), relative)]);
+                let board = rank_declared(&[sub.clone(), bench.clone()], &declarations, &cfg);
+                scores.extend(board.into_iter().filter(|s| s.agent_id == sub.agent_id));
+            }
+            for score in scores {
+                let label = format!("{:?} {:?}", score.declared_mandate, deflation_error);
+                assert_eq!(score.deflation_error.as_deref(), deflation_error, "{label}");
+                assert_eq!(score.bootstrap_error.as_deref(), bootstrap_error, "{label}");
+                assert_eq!(score.declared_passed_k, Some(true), "{label}");
+                assert_eq!(score.declared_mandate_eligible, Some(available), "{label}");
+                assert_eq!(score.rank_eligible, available, "{label}");
+            }
+        }
+    }
+
     /// The headline property: a lucky agent with a *higher raw return* ranks
     /// BELOW a skilled agent, because it can't clear the luck-robust gates.
     #[test]
