@@ -179,7 +179,7 @@
       "sha256": "1e025ac30099de23ae8455f20ae5441b557e924870d0e1475c7508512908ec0d"
     }
   ],
-  "generated_at_head": "f179ff0967e387733fea0f61f991bf1dd1b44c37",
+  "generated_at_head": "d534c93b48b839850489e1e96b25b5ed06027566",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -187,7 +187,7 @@
   "source_files": [
     {
       "path": "Cargo.lock",
-      "sha256": "6aa8cc3cd46e77def7948d04251db64f6e905e04a2dae85a98aaa92264167b6d"
+      "sha256": "e4b18ce18aecb6c38743b2e9e654da04f13dda438e08174d3eb0a497ab92946d"
     },
     {
       "path": "Cargo.toml",
@@ -279,7 +279,7 @@
     },
     {
       "path": "crates/sharpebench-cli/Cargo.toml",
-      "sha256": "289bd24d9eedc90707a727fce8b80fcccf455f08775a48282a2d4ac8aca87dca"
+      "sha256": "fdfbdcd694992b7227deeeb06ec1f6c0875fc0bb07fba1bbb2cd6e547f0b9eb6"
     },
     {
       "path": "crates/sharpebench-cli/release.toml",
@@ -339,7 +339,7 @@
     },
     {
       "path": "crates/sharpebench-cli/src/update.rs",
-      "sha256": "e1198cb46bc009ddf0f63d8b1aeaa5e3fc89de4ad828c149d7af0c3b7040214b"
+      "sha256": "c275e1cb507dd3e8bc275ecc90d0e68f4e480ae3f4ec0f30c4b8cec7eded0045"
     },
     {
       "path": "crates/sharpebench-cli/tests/analysis_support.rs",
@@ -1243,5 +1243,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "29a5481ec643cf20b6464262d713e429931df0125adb7d16ed8eb3724fd888ce"
+  "source_snapshot_sha256": "3f38a3a25c87b4ddd4c7d62813a973fc418f143463fdbcad717c0b654c1e8cff"
 }

@@ -28,7 +28,6 @@
 //! gh attestation verify sharpebench-x86_64-linux-musl --repo general-liquidity/sharpebench
 //! ```
 
-use std::io::Read as _;
 use std::process::ExitCode;
 use std::time::Duration;
 
@@ -44,13 +43,22 @@ fn current_version() -> &'static str {
 
 /// A ureq agent on the OS TLS backend (native-tls) with tight timeouts — a version
 /// check must never make the CLI hang. Mirrors `xtask`'s `build_agent`.
-fn agent() -> Result<ureq::Agent, String> {
-    let tls = native_tls::TlsConnector::new().map_err(|e| format!("native-tls init: {e}"))?;
-    Ok(ureq::builder()
-        .tls_connector(std::sync::Arc::new(tls))
-        .timeout_connect(Duration::from_millis(1500))
-        .timeout(Duration::from_secs(8))
-        .build())
+///
+/// `RootCerts::PlatformVerifier` is explicit because ureq 3 defaults to the
+/// bundled Mozilla roots even under native-tls; the OS trust store is what this
+/// updater used before, and it is the store an operator behind a corporate TLS
+/// proxy has already been told to trust.
+fn agent() -> ureq::Agent {
+    let tls = ureq::tls::TlsConfig::builder()
+        .provider(ureq::tls::TlsProvider::NativeTls)
+        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+        .build();
+    ureq::Agent::config_builder()
+        .tls_config(tls)
+        .timeout_connect(Some(Duration::from_millis(1500)))
+        .timeout_global(Some(Duration::from_secs(8)))
+        .build()
+        .into()
 }
 
 /// Parse `"a.b.c"` (optionally `v`-prefixed, ignoring any `-pre`/`+build` suffix)
@@ -75,12 +83,8 @@ fn is_newer(candidate: &str, current: &str) -> bool {
 /// Newest non-yanked version from the crates.io sparse index (one JSON object per
 /// line, oldest→newest). Returns `None` on any network/parse failure (fail-soft).
 fn latest_crate_version(agent: &ureq::Agent) -> Option<String> {
-    let body = agent
-        .get(SPARSE_INDEX_URL)
-        .call()
-        .ok()?
-        .into_string()
-        .ok()?;
+    let mut resp = agent.get(SPARSE_INDEX_URL).call().ok()?;
+    let body = resp.body_mut().read_to_string().ok()?;
     let mut newest: Option<String> = None;
     for line in body.lines().filter(|l| !l.trim().is_empty()) {
         let v: serde_json::Value = serde_json::from_str(line).ok()?;
@@ -129,7 +133,7 @@ pub fn notify_if_outdated(json: bool, subcommand: Option<&str>) {
     if suppressed || !due_for_check() {
         return;
     }
-    let Ok(agent) = agent() else { return };
+    let agent = agent();
     if let Some(latest) = latest_crate_version(&agent) {
         if is_newer(&latest, current_version()) {
             eprintln!(
@@ -164,17 +168,19 @@ fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 fn download_bytes(agent: &ureq::Agent, url: &str) -> Result<Vec<u8>, String> {
-    let resp = agent
+    let mut resp = agent
         .get(url)
-        .set("User-Agent", "sharpebench-self-update")
+        .header("User-Agent", "sharpebench-self-update")
         .call()
         .map_err(|e| format!("GET {url}: {e}"))?;
-    let mut buf = Vec::new();
-    resp.into_reader()
-        .take(64 * 1024 * 1024)
-        .read_to_end(&mut buf)
-        .map_err(|e| format!("read {url}: {e}"))?;
-    Ok(buf)
+    // ureq 3's bare `read_to_vec` caps at 10 MB. The published binary is under
+    // that today, but the ceiling here is the download guard, not an accident of
+    // current size, so restate the 64 MB the ureq 2 reader had.
+    resp.body_mut()
+        .with_config()
+        .limit(64 * 1024 * 1024)
+        .read_to_vec()
+        .map_err(|e| format!("read {url}: {e}"))
 }
 
 /// Atomically replace the running executable with `bytes`: write a sibling temp
@@ -207,17 +213,19 @@ fn self_update() -> Result<String, String> {
                 .to_string(),
         );
     };
-    let agent = agent()?;
+    let agent = agent();
 
     // Latest release tag via the GitHub API (User-Agent is mandatory).
-    let meta = agent
-        .get(&format!(
+    let mut resp = agent
+        .get(format!(
             "https://api.github.com/repos/{REPO}/releases/latest"
         ))
-        .set("User-Agent", "sharpebench-self-update")
+        .header("User-Agent", "sharpebench-self-update")
         .call()
-        .map_err(|e| format!("querying latest release: {e}"))?
-        .into_string()
+        .map_err(|e| format!("querying latest release: {e}"))?;
+    let meta = resp
+        .body_mut()
+        .read_to_string()
         .map_err(|e| e.to_string())?;
     let meta: serde_json::Value = serde_json::from_str(&meta).map_err(|e| e.to_string())?;
     let tag = meta
