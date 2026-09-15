@@ -22,10 +22,11 @@ reservation. The client now sets `max_retries=0`. The load-bearing case is
 driven through a real SDK client over a stand-in HTTP transport, so it is the
 SDK's own retry behaviour being observed and not a restatement of the setting.
 
-The SDK behaviour asserted here is `anthropic` 0.112.0's, the version the
-retry reading was taken from and the version CI pins for this file:
-`DEFAULT_MAX_RETRIES` is 2, and `_base_client` loops `range(max_retries + 1)`
-over 408, 409, 429, every 5xx, connection faults and timeouts. anthropic 1.x is
+The SDK behaviour asserted here is `anthropic` 0.125.0's, the version CI pins
+for this file. The retry reading was taken from 0.112.0 and re-read unchanged
+on 0.125.0: `DEFAULT_MAX_RETRIES` is 2, and `_base_client` loops
+`range(max_retries + 1)` over 408, 409, 429, every 5xx, connection faults and
+timeouts. anthropic 1.x is
 a different SDK (it depends on httpx2) and its retry semantics are not assumed
 from this reading.
 
@@ -202,7 +203,7 @@ def message_payload(text):
 
 
 class Honouring(Client):
-    """Takes `max_retries` and reports it back, as `anthropic` 0.112.0 does."""
+    """Takes `max_retries` and reports it back, as `anthropic` 0.125.0 does."""
 
     def __init__(self, **kw):
         super().__init__([Response('{"orders":[]}')])

@@ -20,7 +20,7 @@ table at run time and not merely that the file mentions it.
 No provider SDK is involved. The shared module imports nothing, the assembler
 imports `json`, `sys` and `pathlib`, and this file never imports the shim, so
 it runs in the `paper-provenance` job, which installs nothing. The `llm-shim`
-job pins `anthropic==0.112.0` for the ceiling and identity regressions that
+job pins `anthropic==0.125.0` for the ceiling and identity regressions that
 need a real SDK client; a check that two files agree about a price list has no
 use for it.
 """
