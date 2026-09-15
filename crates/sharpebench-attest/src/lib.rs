@@ -45,7 +45,7 @@ pub use sealed::{
 
 use std::fmt::Write as _;
 
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 

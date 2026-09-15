@@ -94,7 +94,10 @@ fn document(neutral_threshold: f64, digest: impl Fn(&Value) -> String) -> Value 
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 /// The current digest: SHA-256 over the versioned `canonical-json/v1` frame.

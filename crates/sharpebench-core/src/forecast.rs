@@ -802,8 +802,8 @@ fn contract_digests(contract: &ForecastContract) -> Result<ContractDigests, Fore
     let mut legacy = String::new();
     legacy_canonical_json(&value, &mut legacy)?;
     Ok(ContractDigests {
-        canonical_json_v1: format!("{:x}", Sha256::digest(&framed)),
-        legacy: format!("{:x}", Sha256::digest(legacy.as_bytes())),
+        canonical_json_v1: crate::lower_hex(&Sha256::digest(&framed)),
+        legacy: crate::lower_hex(&Sha256::digest(legacy.as_bytes())),
     })
 }
 
@@ -817,7 +817,7 @@ fn contract_digests(contract: &ForecastContract) -> Result<ContractDigests, Fore
 fn outcome_sha256(outcome: &Value) -> Result<String, ForecastError> {
     let preimage = versioned_preimage(outcome)
         .map_err(|error| reject(format!("cannot encode forecast outcome: {error}")))?;
-    Ok(format!("{:x}", Sha256::digest(&preimage)))
+    Ok(crate::lower_hex(&Sha256::digest(&preimage)))
 }
 
 fn number_outcome(outcome: &Value) -> Result<f64, ForecastError> {
@@ -1808,7 +1808,7 @@ mod tests {
     ) -> ForecastQualityReport {
         let manifest: Value = serde_json::from_str(manifest).unwrap();
         for (name, payload) in [("agent-alpha.json", alpha), ("agent-beta.json", beta)] {
-            let digest = format!("{:x}", Sha256::digest(payload.as_bytes()));
+            let digest = crate::lower_hex(&Sha256::digest(payload.as_bytes()));
             assert_eq!(manifest["files"][name].as_str(), Some(digest.as_str()));
         }
 

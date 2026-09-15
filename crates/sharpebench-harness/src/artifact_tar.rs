@@ -121,7 +121,7 @@ pub fn scan_tar_snapshot_until(
         archive_bytes: bounded.bytes,
         archive_sha256: scan
             .completed
-            .then(|| format!("{:x}", bounded.hash.finalize())),
+            .then(|| crate::lower_hex(&bounded.hash.finalize())),
         scan,
     }
 }

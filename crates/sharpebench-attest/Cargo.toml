@@ -10,8 +10,8 @@ categories = ["cryptography", "science"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
-sha2 = "0.10"
-hmac = "0.12"
+sha2 = "0.11"
+hmac = "0.13"
 # Versioned held-out seals use an AEAD, not a hand-built repeated keystream.
 # Entropy is obtained through the existing target-gated getrandom dependency.
 aes-gcm-siv = { version = "0.12.1", default-features = false, features = ["aes", "alloc", "zeroize"] }

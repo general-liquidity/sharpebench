@@ -221,7 +221,7 @@ impl SuiteControlEvidence {
             let digest = Sha256::digest(&preimage);
             per_control.push(ControlDigest {
                 control_id: verdict.control_id.clone(),
-                sha256: format!("{digest:x}"),
+                sha256: crate::lower_hex(&digest),
             });
         }
         let suite = suite.finalize();
@@ -242,7 +242,7 @@ impl SuiteControlEvidence {
                     reason: reason.to_string(),
                 })
                 .collect(),
-            sha256: format!("{suite:x}"),
+            sha256: crate::lower_hex(&suite),
             per_control,
         })
     }

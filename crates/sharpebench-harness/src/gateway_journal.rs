@@ -440,7 +440,7 @@ fn fresh_token() -> String {
             .unwrap_or(0)
             .to_le_bytes(),
     );
-    format!("{:x}", hash.finalize())[..32].to_string()
+    crate::lower_hex(&hash.finalize())[..32].to_string()
 }
 
 /// Where a journal's siblings live: its own parent, or the working directory
@@ -775,7 +775,7 @@ fn derived_identity_of(bytes: &[u8]) -> String {
     let mut hash = Sha256::new();
     hash.update(b"sharpebench.gateway-journal-derived-identity.v1");
     hash.update(bytes);
-    format!("{:x}", hash.finalize())[..32].to_string()
+    crate::lower_hex(&hash.finalize())[..32].to_string()
 }
 
 /// A short operator-facing description of whoever holds a lock. Never fails:
@@ -1941,7 +1941,7 @@ mod tests {
         hash.update(&bytes);
         assert_eq!(
             resolved,
-            format!("{:x}", hash.finalize())[..32],
+            crate::lower_hex(&hash.finalize())[..32],
             "and it is the digest of exactly those bytes"
         );
     }

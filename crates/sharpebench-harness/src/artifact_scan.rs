@@ -330,7 +330,7 @@ impl RawScanner {
         if read != size {
             return self.fail(IncompleteReason::SizeMismatch);
         }
-        let digest = format!("{:x}", hash.finalize());
+        let digest = crate::lower_hex(&hash.finalize());
         let mut hits = Vec::new();
         for (rule_index, known) in self.policy.file_sha256.iter().enumerate() {
             if known == &digest {
@@ -369,7 +369,7 @@ impl RawScanner {
         }
         if self.report.incomplete_reason.is_none() {
             self.report.completed = true;
-            self.report.inventory_sha256 = Some(format!("{:x}", self.inventory.finalize()));
+            self.report.inventory_sha256 = Some(crate::lower_hex(&self.inventory.finalize()));
         }
         self.report
     }

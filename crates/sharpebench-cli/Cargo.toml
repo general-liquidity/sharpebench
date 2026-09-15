@@ -36,7 +36,7 @@ tar = { version = "0.4", default-features = false }
 # (native-tls = OS TLS), so it adds no new crates to the workspace supply chain.
 ureq = { version = "2", default-features = false, features = ["native-tls"], optional = true }
 native-tls = { version = "0.2", optional = true }
-sha2 = { version = "0.10", optional = true }
+sha2 = { version = "0.11", optional = true }
 
 [features]
 self-update = ["dep:ureq", "dep:native-tls", "dep:sha2"]

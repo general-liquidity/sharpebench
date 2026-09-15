@@ -965,7 +965,7 @@ fn canonical_sha256(value: &Value) -> Result<String, CandidateLineageError> {
     let mut canonical = String::new();
     write_python_canonical_json(value, &mut canonical)?;
     let digest = Sha256::digest(canonical.as_bytes());
-    Ok(format!("{digest:x}"))
+    Ok(crate::lower_hex(&digest))
 }
 
 fn write_python_canonical_json(
