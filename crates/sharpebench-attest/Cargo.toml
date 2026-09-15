@@ -17,10 +17,10 @@ hmac = "0.13"
 aes-gcm-siv = { version = "0.12.1", default-features = false, features = ["aes", "alloc", "zeroize"] }
 # Public verifiability of the result chain (see `public.rs`). Pure Rust, no
 # unsafe in its public surface, and Ed25519 is deterministic by construction
-# (RFC 8032) so it keeps the kernel reproducible. Pinned to the 2.x line so it
-# shares the crate's existing `sha2 0.10` / `digest 0.10` instead of pulling a
+# (RFC 8032) so it keeps the kernel reproducible. On the 3.x line so it
+# shares the crate's existing `sha2 0.11` / `digest 0.11` instead of pulling a
 # duplicate hash stack.
-ed25519-dalek = "2"
+ed25519-dalek = "3"
 
 [dev-dependencies]
 serde_json = "1"
