@@ -1,136 +1,188 @@
 #!/usr/bin/env python3
-"""Generate the SVG assets for the SharpeBench blog post — a luck-demotion bar
-chart and the methodology equations (LaTeX via matplotlib mathtext).
+"""The two panels of the demonstration figure (fig:demotion, fig:deflation).
 
-Run from the repo root:  python scripts/blog/gen-sharpebench-assets.py
-Outputs vector SVGs to public/blog/ (the site is light-only, so black math on a
-transparent background renders correctly without any KaTeX dependency).
+Panel (a), sharpebench-luck-demotion.pdf, is the shipped three-agent board. Every
+bar height and every status label is read from
+crates/sharpebench-core/golden/example_submissions.scores.json, the kernel's
+score of suites/example_submissions.json, which the golden test
+crates/sharpebench-core/tests/golden_scores.rs holds byte-identical to the
+kernel's current output. No value is typed into this script.
+
+Panel (b), sharpebench-deflation-curve.pdf, is one synthetic track (per-period
+Sharpe 0.85 over 150 returns, normal moments) deflated against a growing trial
+count at a cross-trial dispersion of 0.30 per period. It is computed through
+kernel_stats, the kernel's PSR, expected-maximum-Sharpe and normal-quantile
+functions transcribed in Python; test_kernel_stats.py pins that transcription to
+the kernel's golden PSRs, to the Bailey and Lopez de Prado (2014) worked example
+and to the committed tab:units bars.
+
+Run from the repository root:
+
+    python paper/src/make-figures.py
 """
+
+import json
 import os
+import sys
 
 import matplotlib
 
 matplotlib.use("pdf")
-matplotlib.rcParams["mathtext.fontset"] = "cm"   # Computer Modern → classic LaTeX look
-matplotlib.rcParams["pdf.fonttype"] = 42  # TrueType, embeds fonts, arXiv-safe     # embed glyphs as paths; no font dependency
+matplotlib.rcParams["mathtext.fontset"] = "cm"
+matplotlib.rcParams["pdf.fonttype"] = 42
+matplotlib.rcParams["ps.fonttype"] = 42
+matplotlib.rcParams["hatch.linewidth"] = 0.9
 import matplotlib.pyplot as plt
 
-OUT = "figures"
-os.makedirs(OUT, exist_ok=True)
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import kernel_stats  # noqa: E402
 
-INK = "#0b1220"     # near-black, for math + axis text (site background is white)
-GREEN = "#098551"   # General Liquidity brand green
-RED = "#dc2626"
-GRAY = "#6b7280"
+ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
+OUT = os.path.join(ROOT, "paper", "figures")
+GOLDEN = os.path.join(
+    ROOT, "crates", "sharpebench-core", "golden", "example_submissions.scores.json"
+)
+
+# Okabe-Ito.
+INK = "#000000"
+BLUE = "#0072B2"
+VERMILLION = "#D55E00"
+PURPLE = "#CC79A7"
+RULE = "#bdbdbd"
+DASH = (0, (5, 4))
+
+DEMO_AGENTS = ("skilled-momentum", "lucky-yolo", "ungated-bot")
+
+SR, TRACK, SIGMA = 0.85, 150, 0.30
+TRIALS = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048]
+DSR_BAR = 0.95
 
 
-def render_eq(name: str, tex: str, fontsize: int = 24) -> None:
-    fig = plt.figure(figsize=(0.1, 0.1))
-    fig.text(0, 0, f"${tex}$", fontsize=fontsize, color=INK)
-    fig.savefig(f"{OUT}/{name}.pdf", bbox_inches="tight", pad_inches=0.08, )
+class GoldenSupportError(ValueError):
+    """The golden score record does not support the demonstration panel."""
+
+
+def save(fig, name):
+    fig.savefig(
+        os.path.join(OUT, name),
+        bbox_inches="tight",
+        metadata={"CreationDate": None, "ModDate": None},
+    )
     plt.close(fig)
+    print(f"wrote {name}")
 
 
-# ── equations ─────────────────────────────────────────────────────────────────
-# pass^k and the eligibility gate are described in prose in the essay — mathtext's
-# \left...\right parser is fussy about spacing there, and two display equations
-# (the PSR and the deflation benchmark) carry the methodology visually.
-
-# ── luck-demotion bar chart (real SharpeBench scores) ─────────────────────────
-agents = ["skilled-momentum", "lucky-yolo", "ungated-bot"]
-vals = [0.00202, 0.00411, 0.00202]
-colors = [GREEN, RED, GRAY]
-status = ["ranked #1", "fails pass$^{k}$", "risk-gate bypass"]
-
-fig, ax = plt.subplots(figsize=(7.8, 4.7))
-ax.bar(range(3), vals, color=colors, width=0.58, zorder=3)
-ax.set_ylim(0, 0.0058)
-# status + value stacked ABOVE each bar; agent names on the x-axis — nothing overlaps
-for i, (v, s, c) in enumerate(zip(vals, status, colors)):
-    ax.text(i, v + 0.00042, s, ha="center", va="bottom", fontsize=12, fontweight="bold", color=c)
-    ax.text(i, v + 0.00014, f"{v:.5f}", ha="center", va="bottom", fontsize=10.5, color=c)
-ax.set_xticks(range(3))
-ax.set_xticklabels(agents, fontsize=11, color=INK)
-ax.set_ylabel("raw return  /  period", fontsize=11.5, color=INK)
-ax.tick_params(colors=INK, length=0)
-for sp in ("top", "right"):
-    ax.spines[sp].set_visible(False)
-ax.spines["left"].set_color("#cbd5e1")
-ax.spines["bottom"].set_color("#cbd5e1")
-ax.set_axisbelow(True)
-ax.grid(axis="y", color="#e8edf3", linewidth=0.9)
-ax.margins(x=0.06)
-fig.tight_layout()
-fig.savefig(f"{OUT}/sharpebench-luck-demotion.pdf", bbox_inches="tight")
-plt.close(fig)
-
-# ── deflation curve: the SAME track's deflated Sharpe vs. how many strategies were
-# tried (N). Computed with the exact sharpebench-core formulas (stats.rs + deflated_sharpe.rs).
-import math
-
-GAMMA = 0.577_215_664_901_532_9
+def style(ax):
+    for sp in ("top", "right"):
+        ax.spines[sp].set_visible(False)
+    ax.spines["left"].set_color(RULE)
+    ax.spines["bottom"].set_color(RULE)
+    ax.set_axisbelow(True)
+    ax.tick_params(colors=INK)
 
 
-def _norm_cdf(x):
-    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+def demo_status(score):
+    """The one gate outcome that decides a demonstration agent's row.
+
+    Each agent of the demonstration is meant to isolate one gate, so a record
+    that fails more than one, or that is ineligible without failing either of
+    the two named here, is refused rather than labelled with a guess.
+    """
+    failed = [
+        name
+        for name, ok in (("pass^k", score["passed_k"]), ("process", score["process_ok"]))
+        if not ok
+    ]
+    agent = score["agent_id"]
+    if score["rank_eligible"]:
+        if failed:
+            raise GoldenSupportError(f"{agent} is eligible yet fails {failed}")
+        return "ranked", f"ranked #{score['rank_ordinal']}"
+    if len(failed) != 1:
+        raise GoldenSupportError(
+            f"{agent} is ineligible and fails {failed or 'no named gate'}; "
+            "expected exactly one of pass^k or the process gate"
+        )
+    if failed[0] == "pass^k":
+        return "fails", "fails pass$^{k}$"
+    return "zeroed", "zeroed by the process gate"
 
 
-def _norm_ppf(p):  # Acklam's rational approximation — matches stats.rs::norm_ppf
-    a = [-3.969683028665376e1, 2.209460984245205e2, -2.759285104469687e2,
-         1.38357751867269e2, -3.066479806614716e1, 2.506628277459239e0]
-    b = [-5.447609879822406e1, 1.615858368580409e2, -1.556989798598866e2,
-         6.680131188771972e1, -1.328068155288572e1]
-    c = [-7.784894002430293e-3, -3.223964580411365e-1, -2.400758277161838e0,
-         -2.549732539343734e0, 4.374664141464968e0, 2.938163982698783e0]
-    d = [7.784695709041462e-3, 3.224671290700398e-1, 2.445134137142996e0, 3.754408661907416e0]
-    plow, phigh = 0.02425, 1 - 0.02425
-    if p < plow:
-        q = math.sqrt(-2 * math.log(p))
-        return (((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) / ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1)
-    if p <= phigh:
-        q = p - 0.5; r = q*q
-        return (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*q / (((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1)
-    q = math.sqrt(-2 * math.log(1 - p))
-    return -(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5]) / ((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1)
+def load_demo():
+    with open(GOLDEN, encoding="utf-8") as h:
+        scores = json.load(h)
+    rows = []
+    for agent in DEMO_AGENTS:
+        match = [s for s in scores if s["agent_id"] == agent]
+        if len(match) != 1:
+            raise GoldenSupportError(
+                f"{len(match)} golden scores for {agent}; expected one"
+            )
+        rows.append(match[0])
+    return rows
 
 
-def _expected_max_sharpe(sigma, n_trials):
-    if n_trials <= 1 or sigma <= 0:
-        return 0.0
-    return sigma * ((1-GAMMA)*_norm_ppf(1-1/n_trials) + GAMMA*_norm_ppf(1-1/(n_trials*math.e)))
+# ---- Panel (a): the shipped demonstration --------------------------------------
+def fig_demotion():
+    rows = load_demo()
+    vals = [r["raw_mean_return"] for r in rows]
+    kind, status = zip(*(demo_status(r) for r in rows))
+    colors = {"ranked": BLUE, "fails": VERMILLION, "zeroed": PURPLE}
+    hatches = {"ranked": "", "fails": "///", "zeroed": "xxx"}
+
+    fig, ax = plt.subplots(figsize=(7.8, 4.7))
+    for i, (v, k) in enumerate(zip(vals, kind)):
+        ax.bar(i, v, width=0.58, color=colors[k], hatch=hatches[k],
+               edgecolor=INK, linewidth=0.8, zorder=3)
+    top = max(vals)
+    ax.set_ylim(0, top * 1.41)
+    for i, (v, s, k) in enumerate(zip(vals, status, kind)):
+        ax.text(i, v + top * 0.10, s, ha="center", va="bottom", fontsize=12,
+                fontweight="bold", color=INK)
+        ax.text(i, v + top * 0.034, f"{v:.5f}", ha="center", va="bottom",
+                fontsize=10.5, color=INK)
+    ax.set_xticks(range(len(rows)))
+    ax.set_xticklabels([r["agent_id"] for r in rows], fontsize=11, color=INK)
+    ax.set_ylabel("raw mean return per period", fontsize=11.5, color=INK)
+    style(ax)
+    ax.tick_params(length=0)
+    ax.grid(axis="y", color="#e6e6e6", linewidth=0.9)
+    ax.margins(x=0.06)
+    fig.tight_layout()
+    save(fig, "sharpebench-luck-demotion.pdf")
 
 
-def _dsr(sr, track_len, n_trials, sigma_trials):
-    sr_star = _expected_max_sharpe(sigma_trials, n_trials)
-    denom = math.sqrt(max(1 - 0.0*sr + (3.0-1)/4*sr*sr, 1e-12))  # normal skew/kurt
-    z = (sr - sr_star) * math.sqrt(track_len - 1) / denom
-    return _norm_cdf(z)
+# ---- Panel (b): one track against a growing trial count ------------------------
+def deflation_curve():
+    return [kernel_stats.deflated_sharpe_from_moments(SR, TRACK, n, SIGMA) for n in TRIALS]
 
 
-SR, TRACK, SIGMA = 0.85, 150, 0.30   # an observed track strong enough to survive a few trials
-Ns = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048]
-dsrs = [_dsr(SR, TRACK, n, SIGMA) for n in Ns]
-print("deflation curve (N, DSR):", [(n, round(v, 3)) for n, v in zip(Ns, dsrs)])
+def fig_deflation():
+    dsrs = deflation_curve()
+    fig, ax = plt.subplots(figsize=(7.8, 4.3))
+    ax.plot(TRIALS, dsrs, color=BLUE, linewidth=2.4, marker="o", markersize=4.5,
+            zorder=3, label="deflated Sharpe of the track")
+    ax.axhline(DSR_BAR, color=INK, linewidth=1.3, linestyle=DASH, zorder=2)
+    ax.text(TRIALS[-1], DSR_BAR + 0.01, "rank-eligibility bar (0.95)", ha="right",
+            va="bottom", fontsize=10.5, color=INK)
+    ax.set_xscale("log", base=2)
+    ax.set_xticks(TRIALS)
+    ax.set_xticklabels([str(n) for n in TRIALS], fontsize=9.5)
+    ax.set_xlabel("strategies tried before this one was selected (N)", fontsize=11,
+                  color=INK)
+    ax.set_ylabel("deflated Sharpe", fontsize=11.5, color=INK)
+    ax.set_ylim(0, 1.03)
+    style(ax)
+    ax.grid(color="#e6e6e6", linewidth=0.9)
+    fig.tight_layout()
+    save(fig, "sharpebench-deflation-curve.pdf")
 
-fig, ax = plt.subplots(figsize=(7.8, 4.3))
-ax.plot(Ns, dsrs, color=GREEN, linewidth=2.4, marker="o", markersize=4.5, zorder=3)
-ax.axhline(0.95, color=RED, linewidth=1.3, linestyle=(0, (5, 4)), zorder=2)
-ax.text(Ns[-1], 0.96, "rank-eligibility bar", ha="right", va="bottom", fontsize=10.5, color=RED)
-ax.set_xscale("log", base=2)
-ax.set_xticks(Ns)
-ax.set_xticklabels([str(n) for n in Ns], fontsize=9.5)
-ax.set_xlabel("strategies / agents tried before this one was selected  (N)", fontsize=11, color=INK)
-ax.set_ylabel("deflated Sharpe", fontsize=11.5, color=INK)
-ax.set_ylim(0, 1.03)
-ax.tick_params(colors=INK)
-for sp in ("top", "right"):
-    ax.spines[sp].set_visible(False)
-ax.spines["left"].set_color("#cbd5e1")
-ax.spines["bottom"].set_color("#cbd5e1")
-ax.set_axisbelow(True)
-ax.grid(color="#e8edf3", linewidth=0.9)
-fig.tight_layout()
-fig.savefig(f"{OUT}/sharpebench-deflation-curve.pdf", bbox_inches="tight")
-plt.close(fig)
 
-print("wrote", sorted(f for f in os.listdir(OUT) if f.endswith(".pdf")))
+if __name__ == "__main__":
+    os.makedirs(OUT, exist_ok=True)
+    try:
+        fig_demotion()
+    except GoldenSupportError as exc:
+        sys.exit(str(exc))
+    fig_deflation()

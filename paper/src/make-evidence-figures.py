@@ -6,12 +6,23 @@ Every plotted result and data-dependent crossing is reduced from records written
 by the sweep, risk-managed evaluation, pass witness, or thousand-agent floor.
 The horizontal 0.95 line is the protocol's declared eligibility bar, not an
 estimated result; the records span a configuration grid, and the thousand-agent
-diagnostic is scored at its observable field size of 1,000. Run from the paper/
-directory:
+diagnostic is scored at its observable field size of 1,000.
 
-    python src/make-evidence-figures.py                 # all four figures
-    python src/make-evidence-figures.py pass-witness    # one figure
-    python src/make-evidence-figures.py luck-floor-1000
+Uncertainty is drawn wherever the records carry a spread. Only the
+luck-deflation figure has one: each trial count holds five luck-floor agents,
+and their range is drawn beside the best of them. The other three plot
+quantities with no spread in the committed records: a worst-window drawdown is
+one maximum over all runs of a panel, the witness is one common-random-number
+draw, and the thousand-agent ECDF is itself the whole field's distribution.
+
+Colours are Okabe-Ito, and every contrast a figure's claim rests on also differs
+by marker, line style or hatching, so it survives greyscale. Fonts are embedded
+as TrueType and the PDF dates are omitted, so a regeneration is byte-identical.
+Run from the repository root:
+
+    python paper/src/make-evidence-figures.py                 # all four figures
+    python paper/src/make-evidence-figures.py pass-witness    # one figure
+    python paper/src/make-evidence-figures.py luck-floor-1000
 
 Figure names: drawdowns, luck-deflation, pass-witness, luck-floor-1000, all.
 """
@@ -23,6 +34,8 @@ import matplotlib
 
 matplotlib.use("pdf")
 matplotlib.rcParams["pdf.fonttype"] = 42
+matplotlib.rcParams["ps.fonttype"] = 42
+matplotlib.rcParams["hatch.linewidth"] = 0.8
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
@@ -30,11 +43,16 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 EV = os.path.join(HERE, "..", "evidence", "final")
 OUT = os.path.join(HERE, "..", "figures")
 
-INK = "#0b1220"
-GREEN = "#098551"
-RED = "#dc2626"
-BLUE = "#1d4ed8"
-GRAY = "#6b7280"
+# Okabe-Ito.
+INK = "#000000"
+BLUE = "#0072B2"
+ORANGE = "#E69F00"
+GREEN = "#009E73"
+VERMILLION = "#D55E00"
+RULE = "#bdbdbd"
+GRID = "#e6e6e6"
+
+PDF_METADATA = {"CreationDate": None, "ModDate": None}
 
 DSR_BAR = 0.95
 DASH = (0, (5, 4))
@@ -181,20 +199,22 @@ def default_cell(recs, dataset=None):
 def style(ax):
     for sp in ("top", "right"):
         ax.spines[sp].set_visible(False)
-    ax.spines["left"].set_color("#cbd5e1")
-    ax.spines["bottom"].set_color("#cbd5e1")
+    ax.spines["left"].set_color(RULE)
+    ax.spines["bottom"].set_color(RULE)
     ax.set_axisbelow(True)
-    ax.grid(axis="y", color="#e8edf3", linewidth=0.9)
+    ax.grid(axis="y", color=GRID, linewidth=0.9)
     ax.tick_params(colors=INK, length=0)
 
 
 def save(fig, name):
-    fig.savefig(os.path.join(OUT, name), bbox_inches="tight")
+    fig.savefig(os.path.join(OUT, name), bbox_inches="tight", metadata=PDF_METADATA)
     plt.close(fig)
     print(f"wrote {name}")
 
 
 # ---- Figure A: worst-run drawdown per dataset, three agents --------------------
+# No spread is drawn: each bar is one maximum over every window and seed of a
+# panel, and the records store only that maximum, not the per-run drawdowns.
 def fig_drawdowns():
     rm = load("risk-managed")
     fig, ax = plt.subplots(figsize=(7.8, 3.9))
@@ -214,51 +234,94 @@ def fig_drawdowns():
             values.append(row["worst_run_drawdown"])
     x = range(len(labels))
     w = 0.27
-    ax.bar([i - w for i in x], bh, w, color=GRAY, label="buy-and-hold", zorder=3)
-    ax.bar(list(x), mo, w, color=RED, label="momentum", zorder=3)
-    ax.bar([i + w for i in x], rmv, w, color=GREEN, label="risk-managed", zorder=3)
-    ax.axhline(0.20, color=INK, linewidth=1.1, linestyle=DASH)
-    ax.text(len(labels) - 0.5, 0.215, "never-catastrophic bound (0.20)", ha="right",
-            va="bottom", fontsize=9.5, color=INK)
+    for offset, values, color, hatch, label in (
+        (-w, bh, BLUE, "", "buy-and-hold"),
+        (0.0, mo, ORANGE, "////", "momentum"),
+        (w, rmv, GREEN, "....", "risk-managed"),
+    ):
+        ax.bar([i + offset for i in x], values, w, color=color, hatch=hatch,
+               edgecolor=INK, linewidth=0.6, label=label, zorder=3)
+    # The bound is named in the legend rather than beside its line, where every
+    # label position overprinted a bar.
+    ax.axhline(0.20, color=INK, linewidth=1.1, linestyle=DASH, zorder=4,
+               label="never-catastrophic bound (0.20)")
     ax.set_xticks(list(x))
     ax.set_xticklabels(labels, fontsize=9.5, color=INK)
     ax.set_ylabel("worst single-window drawdown", fontsize=11, color=INK)
     ax.set_ylim(0, 1.05)
-    ax.legend(frameon=False, fontsize=9.5, ncol=3, loc="upper left")
+    ax.legend(frameon=False, fontsize=9, ncol=4, loc="lower left",
+              bbox_to_anchor=(0.0, 1.0), handlelength=2.4, columnspacing=1.0,
+              borderaxespad=0.2)
     style(ax)
     fig.tight_layout()
     save(fig, "evidence-drawdowns.pdf")
 
 
 # ---- Figure B: best luck-floor DSR vs N on real data ---------------------------
+# The line is the best of the field's luck-floor agents at each effective trial
+# count; the vertical bar beneath each point runs down to the worst of them, so
+# the spread across the zero-skill agents is visible. One agent's DSR is a
+# pooled-track statistic: the records carry no per-seed or per-window spread
+# and no interval for it.
+LUCK_DEFLATION_SERIES = (
+    ("crypto-majors-1w", "crypto 1w", VERMILLION, "s", "-", 1.0 / 1.06),
+    ("rates-1d", "rates 1d", BLUE, "o", DASH, 1.0),
+    ("us-indices-1w", "US eq 1w", INK, "^", (0, (1, 1.6)), 1.06),
+)
+
+
+def luck_floor_range(recs, n, ds):
+    """(best, worst, count) of deflated Sharpe over the luck-floor agents at `n`
+    trials. One record per agent: a repeated identity would let one agent stand
+    for two and move the range the legend attributes to the field."""
+    rows = require(
+        [r for r in recs
+         if r.get("effective_n_trials", r["n_trials"]) == n
+         and r["agent_id"].startswith("luck")],
+        f"{ds} luck-floor agents at {n} effective trials",
+    )
+    if len({r["agent_id"] for r in rows}) != len(rows):
+        raise EvidenceSupportError(
+            f"{ds}: repeated luck-floor agent identity at {n} effective trials"
+        )
+    values = [r["deflated_sharpe"] for r in rows]
+    return max(values), min(values), len(values)
+
+
 def fig_luck_deflation():
     fig, ax = plt.subplots(figsize=(7.8, 3.9))
-    for ds, short, color in [
-        ("crypto-majors-1w", "crypto 1w", RED),
-        ("rates-1d", "rates 1d", BLUE),
-        ("us-indices-1w", "US eq 1w", GRAY),
-    ]:
+    counts = set()
+    for ds, short, color, marker, ls, nudge in LUCK_DEFLATION_SERIES:
         recs = require(
             [r for r in load(ds) if r["sr_std_pinned"] is None and r["dsr_bar"] == DSR_BAR],
             f"{ds} at the {DSR_BAR} bar with no pinned dispersion",
         )
         ns = sorted({r.get("effective_n_trials", r["n_trials"]) for r in recs})
-        ys = [max(require([r["deflated_sharpe"] for r in recs
-                           if r.get("effective_n_trials", r["n_trials"]) == n
-                           and r["agent_id"].startswith("luck")],
-                          f"{ds} luck-floor agents at {n} effective trials"))
-              for n in ns]
-        ax.plot(ns, ys, color=color, linewidth=2.2, marker="o", markersize=4.5,
-                label=f"best random agent, {short}", zorder=3)
+        best, worst, count = zip(*(luck_floor_range(recs, n, ds) for n in ns))
+        counts.update(count)
+        # Series sharing a trial count are nudged apart on the log axis so their
+        # range bars do not overprint; the tick labels stay at the true counts.
+        xs = [n * nudge for n in ns]
+        ax.vlines(xs, worst, best, color=color, linewidth=1.3, zorder=2)
+        ax.plot(xs, best, color=color, linewidth=2.0, linestyle=ls, marker=marker,
+                markersize=5, label=f"best random agent, {short}", zorder=3)
+        ax.scatter(xs, worst, color=color, marker="_", s=60, linewidths=1.3, zorder=3)
     ax.axhline(DSR_BAR, color=INK, linewidth=1.1, linestyle=DASH)
     ax.text(200, 0.905, "eligibility bar", ha="right", va="top", fontsize=9.5, color=INK)
     ax.set_xscale("log")
     ax.set_xticks([8, 10, 50, 200])
     ax.set_xticklabels(["8", "10", "50", "200"], fontsize=10)
     ax.set_xlabel("effective trials deflated for", fontsize=11, color=INK)
-    ax.set_ylabel("deflated Sharpe of the best zero-skill agent", fontsize=10.5, color=INK)
+    ax.set_ylabel("deflated Sharpe of zero-skill agents", fontsize=10.5, color=INK)
     ax.set_ylim(-0.03, 1.05)
-    ax.legend(frameon=False, fontsize=9.5, loc="upper right")
+    if len(counts) != 1:
+        raise EvidenceSupportError(
+            f"luck-deflation: luck-floor field sizes differ across cells: {sorted(counts)}"
+        )
+    handles, labels = ax.get_legend_handles_labels()
+    handles.append(Line2D([], [], color=INK, linewidth=1.3, marker="_", markersize=8))
+    labels.append(f"range over the {counts.pop()} random agents")
+    ax.legend(handles, labels, frameon=False, fontsize=9.5, loc="center right")
     style(ax)
     fig.tight_layout()
     save(fig, "evidence-luck-deflation.pdf")
@@ -268,24 +331,41 @@ def fig_luck_deflation():
 # Top panel: the witness's deflated Sharpe against the injected per-period edge,
 # one curve per window geometry. Bottom panel: the two gate outcomes per edge,
 # filled where the gate passes. On both geometries DSR clears several grid
-# steps before pass^k does, so the two crossings are separated.
+# steps before pass^k does, so the two crossings are separated. The records are
+# one common-random-number draw, so there is no replicate spread to draw.
+WITNESS_SHAPES = (
+    ("weekly-shaped", BLUE, "o", "-"),
+    ("daily-shaped", VERMILLION, "s", "-."),
+)
+
+
+def witness_geometry(rs, shape):
+    """The window geometry one shape's records declare, stated once for all."""
+    geometry = {(r["n_windows"], r["window_len"]) for r in rs}
+    if len(geometry) != 1:
+        raise EvidenceSupportError(
+            f"witness records of shape {shape} declare {len(geometry)} geometries"
+        )
+    return geometry.pop()
+
+
 def fig_pass_witness():
     recs = [r for r in load("pass-witness") if r["agent_id"] == "witness"]
-    shapes = [("weekly-shaped", "weekly-shaped (six 77-bar windows)", BLUE),
-              ("daily-shaped", "daily-shaped (six 409-bar windows)", RED)]
     fig, (ax, ax2) = plt.subplots(
         2, 1, figsize=(7.8, 5.0), sharex=True,
         gridspec_kw={"height_ratios": [3.0, 1.35], "hspace": 0.08})
 
-    rows = []  # (y position, label, color, xs where the gate passes)
-    for i, (shape, label, color) in enumerate(shapes):
+    rows = []  # (y position, label, color, marker, xs where the gate passes, ...)
+    for i, (shape, color, marker, ls) in enumerate(WITNESS_SHAPES):
         rs = require(sorted((r for r in recs if r["shape"] == shape),
                             key=lambda r: r["injected_sharpe_per_period"]),
                      f"witness records of shape {shape}")
+        n_windows, window_len = witness_geometry(rs, shape)
+        label = f"{shape} ({n_windows} windows of {window_len} bars)"
         xs = [r["injected_sharpe_per_period"] for r in rs]
         ys = [r["deflated_sharpe"] for r in rs]
-        ax.plot(xs, ys, color=color, linewidth=2.2, marker="o", markersize=4.5,
-                label=label, zorder=3)
+        ax.plot(xs, ys, color=color, linewidth=2.2, linestyle=ls, marker=marker,
+                markersize=4.5, label=label, zorder=3)
         onset = min(require([r["injected_sharpe_per_period"] for r in rs
                              if r["rank_eligible"]],
                             f"rank-eligible {shape} witness records"))
@@ -296,12 +376,12 @@ def fig_pass_witness():
             a.axvline(onset, color=color, linewidth=1.0, linestyle=(0, (2, 3)), zorder=1)
         ax.annotate(f"eligible from {onset:.2f}", (onset, 0.02), xytext=(4, 0),
                     textcoords="offset points", ha="left", va="bottom",
-                    fontsize=9, color=color)
-        base = 2 * (len(shapes) - 1 - i)
-        rows.append((base + 1, "DSR $\\geq$ 0.95", color,
+                    fontsize=9, color=INK)
+        base = 2 * (len(WITNESS_SHAPES) - 1 - i)
+        rows.append((base + 1, "DSR $\\geq$ 0.95", color, marker,
                      [r["injected_sharpe_per_period"] for r in rs
                       if r["deflated_sharpe"] >= DSR_BAR], xs, dsr_clear))
-        rows.append((base, "pass$^k$ (rank-eligible)", color,
+        rows.append((base, "pass$^k$ (rank-eligible)", color, marker,
                      [r["injected_sharpe_per_period"] for r in rs if r["passed_k"]],
                      xs, onset))
 
@@ -318,13 +398,14 @@ def fig_pass_witness():
     ax.legend(handles, labels, frameon=False, fontsize=9.5, loc="center right")
     style(ax)
 
-    for y, label, color, passing, xs, first in rows:
+    for y, label, color, marker, passing, xs, first in rows:
         failing = [x for x in xs if x not in passing]
-        ax2.scatter(failing, [y] * len(failing), s=28, facecolors="white",
-                    edgecolors=color, linewidths=1.2, zorder=3)
-        ax2.scatter(passing, [y] * len(passing), s=32, color=color, zorder=4)
+        ax2.scatter(failing, [y] * len(failing), s=28, marker=marker,
+                    facecolors="white", edgecolors=color, linewidths=1.2, zorder=3)
+        ax2.scatter(passing, [y] * len(passing), s=32, marker=marker, color=color,
+                    zorder=4)
         ax2.text(xs[-1] + 0.012, y, f"from {first:.2f}", ha="left", va="center",
-                 fontsize=8.5, color=color)
+                 fontsize=8.5, color=INK)
     ax2.set_yticks([r[0] for r in rows])
     ax2.set_yticklabels([r[1] for r in rows], fontsize=9)
     ax2.set_ylim(-0.7, len(rows) - 0.3)
@@ -341,7 +422,9 @@ def fig_pass_witness():
 # measured path is a deliberately unfloored diagnostic; the shipped path applies
 # the precommitted annualized lower bound. Two stacked rows at column width:
 # the full [0, 1] axis with the bar on top, and beneath it the same curves on
-# the range the diagnostic occupies, so the two marked maxima are in frame.
+# the range the diagnostic occupies, so the two marked maxima are in frame. No
+# band is drawn: the ECDF is the whole committed field's distribution, and the
+# two maxima it marks are single order statistics of that field.
 def fig_luck_floor_1000():
     recs = load("luck-floor-1000")
     agents = [r for r in recs if r["record"] == "agent"]
@@ -352,11 +435,16 @@ def fig_luck_floor_1000():
         require([r for r in agents if r["dataset"] == ds],
                 f"luck-floor-1000 agent records for {ds}")
     n_random = luck_floor_field_size(agents, summaries)
+    # Datasets differ by colour and by line style, the shipped path from the
+    # diagnostic by a solid against a broken line, so both contrasts survive
+    # greyscale.
     series = [
-        ("us-indices-1d", "dsr_shipped_floor", "US eq 1d, shipped path", GRAY, "-"),
-        ("us-indices-1d", "dsr_field", "US eq 1d, unfloored diagnostic", GRAY, DASH),
-        ("crypto-majors-1d", "dsr_shipped_floor", "crypto 1d, shipped path", RED, "-"),
-        ("crypto-majors-1d", "dsr_field", "crypto 1d, unfloored diagnostic", RED, DASH),
+        ("us-indices-1d", "dsr_shipped_floor", "US eq 1d, shipped path", BLUE, "-"),
+        ("us-indices-1d", "dsr_field", "US eq 1d, unfloored diagnostic", BLUE, DASH),
+        ("crypto-majors-1d", "dsr_shipped_floor", "crypto 1d, shipped path",
+         VERMILLION, "-."),
+        ("crypto-majors-1d", "dsr_field", "crypto 1d, unfloored diagnostic",
+         VERMILLION, (0, (1, 1.5))),
     ]
     fig, (ax, ax2) = plt.subplots(2, 1, figsize=(5.5, 6.4),
                                   gridspec_kw={"hspace": 0.34})
@@ -395,16 +483,16 @@ def fig_luck_floor_1000():
     style(ax)
 
     zoom_hi = max(five, top) * 1.06
-    ax2.axvline(five, color=RED, linewidth=1.0, linestyle=(0, (2, 3)))
+    ax2.axvline(five, color=VERMILLION, linewidth=1.0, linestyle=(0, (2, 3)))
     ax2.text(five + 0.003, 0.04, f"first-five streams\nmaximum ({five:.3f})", ha="left",
-             va="bottom", fontsize=9, color=RED)
+             va="bottom", fontsize=9, color=INK)
     ax2.annotate("Operational paths remain\nat or near zero",
                  (0.0, 0.55), xytext=(40, 0), textcoords="offset points", ha="left",
                  va="center", fontsize=9, color=INK,
                  arrowprops={"arrowstyle": "-", "color": INK, "linewidth": 0.8})
     ax2.annotate(f"1,000-agent maximum ({top:.3f})", (top, 1.0), xytext=(-88, -14),
                  textcoords="offset points", ha="right", va="top", fontsize=9,
-                 color=RED, arrowprops={"arrowstyle": "-", "color": RED, "linewidth": 0.8})
+                 color=INK, arrowprops={"arrowstyle": "-", "color": INK, "linewidth": 0.8})
     ax2.set_xlim(-0.004, zoom_hi)
     ax2.set_ylim(0, 1.04)
     ax2.set_xlabel("deflated Sharpe, diagnostic range", fontsize=10, color=INK)
