@@ -52,7 +52,7 @@
     },
     {
       "path": "paper/evidence/final/power-curve.jsonl",
-      "sha256": "e5e793f3160b70548ce37e02a3247dfc400e93e15d501e570ab4b5443d901cfc"
+      "sha256": "2450017a9ac05475f7547d0fda7651a97476efff02d4e4168ae72cd78304eff5"
     },
     {
       "path": "paper/evidence/final/rates-1d.jsonl",
@@ -152,34 +152,34 @@
     },
     {
       "path": "paper/figures/evidence-drawdowns.pdf",
-      "sha256": "2e1d05c2c462b42f25722fab0f52b89b4e3d8e382b5c5b5508bb3802daae4389"
+      "sha256": "bab818feea7dfdcb513394b1e99f216f7c51eb604afc60830fffea45114ed246"
     },
     {
       "path": "paper/figures/evidence-luck-deflation.pdf",
-      "sha256": "96a691ad528474b0cd4f7e0aa8278093c3c712a8d49cd93061b5d8bac73280b1"
+      "sha256": "a1cb815ce73b22eda9bcd8910a4997e6b3e9483edee8dec754b0b6d607a807a0"
     },
     {
       "path": "paper/figures/evidence-luck-floor-1000.pdf",
-      "sha256": "c021d6aac352b856e3d219df31851bb8b6fe522a2bdc14871eb876fd2c9afe62"
+      "sha256": "8fc33351b7d01be6dbed253d3dac87d8f08050cf3c6949e75d415b1cff6c32ae"
     },
     {
       "path": "paper/figures/evidence-pass-witness.pdf",
-      "sha256": "1f78a4a6bf26e404b3f334e328d744cca0b567b66933b9ea1e8074febc7537e3"
+      "sha256": "07f41b726d4382988f6bcbbb6641a45b20f56bcda95c8e9da6779eea76e46a1a"
     },
     {
       "path": "paper/figures/power-curve.pdf",
-      "sha256": "39f517ad32e2d73f3afd20349200c7a98aadb5813d14ef8039a9defd106d6f0d"
+      "sha256": "44b0373da860683f3e4e87ec261d14ea4827f1b15e2635c17c9cddf1ee8bb138"
     },
     {
       "path": "paper/figures/sharpebench-deflation-curve.pdf",
-      "sha256": "a5e118d5ca940deccdf0c874d498f0c5e0c4022ee08c65f6ac5a51a5cf489ad3"
+      "sha256": "3a17ec9552773904e079fdfe933e06e35b791be345b49651e70fe255a2832579"
     },
     {
       "path": "paper/figures/sharpebench-luck-demotion.pdf",
-      "sha256": "2a90ec20229337fc94222a1fcab1f036ed9ce8eac7ab80e0e287aecc84fe3ae1"
+      "sha256": "1e025ac30099de23ae8455f20ae5441b557e924870d0e1475c7508512908ec0d"
     }
   ],
-  "generated_at_head": "963fdd41b1b537cacbb8899b51fb6696ac73bf7e",
+  "generated_at_head": "6575a7eada1efea167fe10ee82dcfc1eb6a70e07",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -187,7 +187,7 @@
   "source_files": [
     {
       "path": "Cargo.lock",
-      "sha256": "d7dbc3d63e6a7c2ddfb7df953d503f0e1bd2d087d99330ed9aa21902833086c6"
+      "sha256": "cf16fc846566b522a79aa72e05f1f4edf1e3a7087562ff293283deb364fc9252"
     },
     {
       "path": "Cargo.toml",
@@ -239,7 +239,7 @@
     },
     {
       "path": "crates/sharpebench-attest/Cargo.toml",
-      "sha256": "1c559d096aee52c273626193e0d1449bbd5acf011c6a8e9465da65632d098fcf"
+      "sha256": "419c60efb3ca475100a078c3e2613264c62e0cdd508eaadf28039b910034a3f3"
     },
     {
       "path": "crates/sharpebench-attest/src/canary.rs",
@@ -251,7 +251,7 @@
     },
     {
       "path": "crates/sharpebench-attest/src/lib.rs",
-      "sha256": "f98bb932cbf9d64752be62b1172f47568e9022db6500172cb4a1421b270886b0"
+      "sha256": "a945085da796501fde9afe1fd9f286a59c3076f0c015cf2d134d432e36fde770"
     },
     {
       "path": "crates/sharpebench-attest/src/public.rs",
@@ -279,7 +279,7 @@
     },
     {
       "path": "crates/sharpebench-cli/Cargo.toml",
-      "sha256": "84452184a9348dac89eb4516de09b32a37dc63a4b24a4d2948f392f1d074281f"
+      "sha256": "9d2093c76af23aabc405a0e4650e6f9e710ca7072181965ecdb928af81f20e34"
     },
     {
       "path": "crates/sharpebench-cli/release.toml",
@@ -403,7 +403,7 @@
     },
     {
       "path": "crates/sharpebench-core/Cargo.toml",
-      "sha256": "da030795f5ef253d35664c06a89d8e34f6923f5d87dcb8b3b4af737234002750"
+      "sha256": "69befa2b1739e122d9930b8c3e04aad1fa4a8b13bc14207c22a743b2e7ddd6d3"
     },
     {
       "path": "crates/sharpebench-core/src/allocation.rs",
@@ -427,7 +427,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/candidate_lineage.rs",
-      "sha256": "bbaa4c679df1c79452558d3462dffafbbd7490edc891998bdfb955b38b3e1143"
+      "sha256": "7ff57a06e61119cc65404d271813114b0d28e933f7327c7cdb0907a3902a3dba"
     },
     {
       "path": "crates/sharpebench-core/src/certification.rs",
@@ -471,7 +471,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/forecast.rs",
-      "sha256": "a37e751d98abc7c05d8b2b84ae81b52ef3e013a39d7a2a0840e1826321c4e032"
+      "sha256": "08258d2884b11b2c23c668a07980d9fcdf99e6962f779d9700540381a92faea1"
     },
     {
       "path": "crates/sharpebench-core/src/greeks.rs",
@@ -479,7 +479,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/lib.rs",
-      "sha256": "d8e50419609794126c645e0b94a4877a23f70dd9f1c0e3d303fbb24a28a1fe48"
+      "sha256": "669283d9259b4f72d37fdee8faeb3509e8d272e7488e4b4ddcf8e2a653fd0a15"
     },
     {
       "path": "crates/sharpebench-core/src/oos.rs",
@@ -527,7 +527,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/suite_controls.rs",
-      "sha256": "d91b74717382bc63073e83e5255794ab5e9c077c323b21fffd94e5d04669b80a"
+      "sha256": "fdd2479e1f355579b2c9fd625ebe7b72beda751ceb3f6f6dcd6d75f3eb6869de"
     },
     {
       "path": "crates/sharpebench-core/src/suite_evidence.rs",
@@ -539,11 +539,11 @@
     },
     {
       "path": "crates/sharpebench-core/tests/forecast_contract_digest_versions.rs",
-      "sha256": "cefbe8967e27091fc39eab50713ccb9818c62140cd913ecd39282d804406034c"
+      "sha256": "4c2def00d0949fab7a8e204f5ed7d5f68f8cb3fdf36c1702b56a0dfcffd73f68"
     },
     {
       "path": "crates/sharpebench-core/tests/forecast_settlement_and_support.rs",
-      "sha256": "b0e7a025539048aa7657ad64659f444e7f9bac79ef2645ad3e253b8cde1602e2"
+      "sha256": "8b6b568cb326303b80b39e16ff07d7513132a07bba969106ff1ea72928a84a1c"
     },
     {
       "path": "crates/sharpebench-core/tests/golden_scores.rs",
@@ -579,7 +579,7 @@
     },
     {
       "path": "crates/sharpebench-harness/Cargo.toml",
-      "sha256": "bc73dfbe3ae40b07c723af0c245a3338f9f07a4fb344baeee96503d258bc5045"
+      "sha256": "d6d04d201d50fbdaf5d26cb16d8e72abf3c57ff956b7aec0d17440bfd7df0ea4"
     },
     {
       "path": "crates/sharpebench-harness/examples/evidence_sweep.rs",
@@ -631,15 +631,15 @@
     },
     {
       "path": "crates/sharpebench-harness/src/artifact_scan.rs",
-      "sha256": "b89755bf19021c318e6e608c3e523fab6e735d48eeab6be1dc8caf4df7eed1f0"
+      "sha256": "45c360ae04b70c44ce33e9274af185ce31e49e50e083e46f0aa03508ad9b95db"
     },
     {
       "path": "crates/sharpebench-harness/src/artifact_tar.rs",
-      "sha256": "6b45de940d17edf38f7af8bbdd8e745331ace0f157c816ff028dc18ea8210b26"
+      "sha256": "47357781f1a4f09bf5d4519374739786a863e4e703d05acf68da72b3c2c97688"
     },
     {
       "path": "crates/sharpebench-harness/src/checkpoint.rs",
-      "sha256": "33a9c71c7d55e182b638a2ed5165c74f8c648556560dae89e1f6a6da2062ff38"
+      "sha256": "a6193eaa85912777fde4586d272db02ecc3db19f1d5a7ad278c56c42ab60a254"
     },
     {
       "path": "crates/sharpebench-harness/src/failure.rs",
@@ -659,7 +659,7 @@
     },
     {
       "path": "crates/sharpebench-harness/src/gateway_journal.rs",
-      "sha256": "0d774604b0ee131cb66cc11e8c0ed173ae1911f4aaf77d889d79cdcf6c7fb2d5"
+      "sha256": "b1f6425bfef6000f7e846d13fe67aaaf79476d86368c4773851be697d251232e"
     },
     {
       "path": "crates/sharpebench-harness/src/gateway_serve.rs",
@@ -671,7 +671,7 @@
     },
     {
       "path": "crates/sharpebench-harness/src/lib.rs",
-      "sha256": "b6b81331a0f3f926793d1e953c48ed02d140a31626403073eced8395a00e4637"
+      "sha256": "a0eaff029f5a4830ae5a2b7658513ad2f3ef8b20fee6bbdc2c447e3e1158b471"
     },
     {
       "path": "crates/sharpebench-harness/src/perturb.rs",
@@ -739,7 +739,7 @@
     },
     {
       "path": "crates/sharpebench-memory/Cargo.toml",
-      "sha256": "c2e929f8aaf7420390e2028aef5f7d09a624c0a4157f908e4176ad28164ce36b"
+      "sha256": "5d953695a270756530cbd6a127191f756cc58b42a23c56b1c34f4731b26fd196"
     },
     {
       "path": "crates/sharpebench-memory/src/activation.rs",
@@ -827,7 +827,7 @@
     },
     {
       "path": "crates/sharpebench-py/pyproject.toml",
-      "sha256": "f80b57dbb34d85a9ecc3132d35dbbf226aef608cd3e38a58fadfd4e60201e4dd"
+      "sha256": "7be762148ba2473218413ac9e1d519e01480c70ae2e5b95a95f196bfea237c2e"
     },
     {
       "path": "crates/sharpebench-py/src/lib.rs",
@@ -1191,7 +1191,7 @@
     },
     {
       "path": "paper/src/test_llm_agent_budget.py",
-      "sha256": "0d5f230edf6766397cdeab09fa3ffd8db7851daafebdcfe154e18b45195199fe"
+      "sha256": "5b4f795fd850d005358eb5b7c7c634939052de8776d737fa450c6d12c33283ff"
     },
     {
       "path": "paper/src/test_llm_agent_identity.py",
@@ -1207,7 +1207,7 @@
     },
     {
       "path": "paper/src/test_llm_pricing.py",
-      "sha256": "a5cd47d0dea12aa33539db945dd26578177ab5024e941aa7e0a9b8a92d5da417"
+      "sha256": "edca8a12e5c9e144e1ebceaeca5e98ad2339d086d9a83ba8b68b9f7664a22b68"
     },
     {
       "path": "paper/src/test_power_curve.py",
@@ -1243,5 +1243,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "b32cc8af9612f0a446bb890a6957c4608b9cb43d50f9b9e0127a2e9b6ae1834b"
+  "source_snapshot_sha256": "755a594e0197961532a63b48ba20d95c04934d7bd7e0ac8f2715b3be3011eb7a"
 }

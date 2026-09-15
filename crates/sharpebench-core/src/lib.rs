@@ -157,3 +157,14 @@ pub use trial_census::{
     attach_census, census, AgentCensus, CensusError, CensusGate, CensusedScore, CohortIdentity,
     TrialCensus, TrialOutcome, TrialReport, TrialRoster,
 };
+
+/// Lowercase hex, two digits per byte. `sha2` 0.11 digests no longer implement
+/// `LowerHex`, so every `{:x}` of a digest goes through here instead.
+pub(crate) fn lower_hex(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
+}

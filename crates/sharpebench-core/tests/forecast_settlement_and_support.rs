@@ -128,7 +128,10 @@ fn contract_digests(value: &Value) -> Vec<String> {
         .map(|contract| {
             let mut preimage = String::new();
             canonical(contract, &mut preimage);
-            format!("{:x}", Sha256::digest(preimage.as_bytes()))
+            Sha256::digest(preimage.as_bytes())
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
         })
         .collect()
 }

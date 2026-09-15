@@ -159,7 +159,7 @@ PROVIDER_MAX_RETRIES = 0
 # runtime requirement: `assert_no_provider_retries` checks the knob on the
 # constructed client, so a compatible upgrade passes on behaviour rather than
 # on a version string.
-EVIDENCED_SDK_VERSION = "0.112.0"
+EVIDENCED_SDK_VERSION = "0.125.0"
 HERE = Path(__file__).resolve().parent
 CACHE_DIR = Path(os.environ.get("LLM_CACHE_DIR", HERE))
 CACHE_PATH = CACHE_DIR / f"llm-cache-{MODEL}.jsonl"

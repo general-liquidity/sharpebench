@@ -1266,7 +1266,7 @@ mod tests {
                     _ => None,
                 },
             );
-            format!("{:x}", Sha256::digest(identity.as_bytes()))
+            crate::lower_hex(&Sha256::digest(identity.as_bytes()))
         };
 
         let windows = [Window { start: 20, end: 60 }];
