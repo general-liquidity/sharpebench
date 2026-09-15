@@ -462,8 +462,11 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+      # numpy stays at the version the committed power-curve.jsonl records in its
+      # "numpy" field: a later numpy restamps that field, so it cannot reproduce the
+      # committed bytes even where every computed value is unchanged.
       - name: Install the pinned plotting stack
-        run: python -m pip install "numpy==2.5.1" "matplotlib==3.10.0" "PyMuPDF==1.27.2.2"
+        run: python -m pip install "numpy==2.5.1" "matplotlib==3.11.2" "PyMuPDF==1.28.2"
       # Pins the figures' Python transcription of the kernel's Sharpe statistics to the
       # golden scores and Bailey's worked example; one case loads make-figures.py.
       - name: The figures' Sharpe statistics are the kernel's formulas
