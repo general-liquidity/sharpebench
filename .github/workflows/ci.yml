@@ -21,6 +21,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
+      - name: Check Lean module scope declarations
+        run: python3 scripts/check-lean-scope.py
       - name: Verify selected forecast invariants
         uses: leanprover/lean-action@50fcf42d2e460296f1a34b402e990d1b24f8b596 # v1
         with:
@@ -446,6 +448,30 @@ jobs:
         run: python -m unittest paper/src/test_check_prospective_forecast_report.py
       - name: Every recorded source and artifact matches the committed scope
         run: python paper/src/check-provenance.py
+
+  paper-figures:
+    name: paper figures and power analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Its own job because the figure and power producers need numpy, matplotlib and
+    # PyMuPDF, and `paper-provenance` installs nothing. The tests regenerate staged
+    # copies and compare regenerations with each other, never with committed bytes,
+    # so a platform's rendering cannot fail them.
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install the pinned plotting stack
+        run: python -m pip install "numpy==2.5.1" "matplotlib==3.10.0" "PyMuPDF==1.27.2.2"
+      # Pins the figures' Python transcription of the kernel's Sharpe statistics to the
+      # golden scores and Bailey's worked example; one case loads make-figures.py.
+      - name: The figures' Sharpe statistics are the kernel's formulas
+        run: python -B -m unittest paper/src/test_kernel_stats.py
+      - name: Evidence figures build from committed records and refuse what they cannot draw
+        run: python -B -m unittest paper/src/test_evidence_figures.py
+      - name: The power analysis is deterministic and matches the kernel on its own draws
+        run: python -B -m unittest paper/src/test_power_curve.py
 
   llm-shim:
     name: LLM field shim (call ceiling, model identity)

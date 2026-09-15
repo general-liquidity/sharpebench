@@ -9,7 +9,7 @@
 //! The RNG is a seeded SplitMix64 so a given (data, seed) always yields the same
 //! p-value — a benchmark result must be reproducible.
 
-use crate::deflated_sharpe::deflated_sharpe_ratio_against_null;
+use crate::deflated_sharpe::{deflated_sharpe_ratio_against_null, deflated_sharpe_ratio_of, Track};
 use crate::stats::{mean, norm_ppf};
 use crate::validation::{
     block_probability, bootstrap_inputs, dispersion, field_inputs, finite_computation,
@@ -119,7 +119,8 @@ pub struct DsrConfidence {
 /// given `seed`. Every input the estimator cannot sample returns a typed error
 /// rather than a number: an invalid `ci`, `block_prob`, `trials_sr_std` or
 /// observation, and equally a track of fewer than two points or `n_boot == 0`,
-/// which have no bootstrap support at all. A zero-width interval at the point
+/// which have no bootstrap support at all, and a constant track, which has no
+/// deflated Sharpe to bracket. A zero-width interval at the point
 /// estimate reads as perfect precision, and that is the most favorable reading
 /// of a configuration from which nothing was resampled.
 pub fn bootstrap_dsr_ci(
@@ -183,11 +184,12 @@ pub fn bootstrap_dsr_ci_against_null(
                 idx = (idx + 1) % n;
             }
         }
-        boots.push(deflated_sharpe_ratio_against_null(
+        boots.push(deflated_sharpe_ratio_of(
             &resample,
             n_trials,
             null_mean_sharpe,
             trials_sr_std,
+            Track::Resample,
         )?);
     }
     let m = mean(&boots);

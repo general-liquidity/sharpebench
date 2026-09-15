@@ -1,0 +1,59 @@
+% Power of the default gates: a protocol property, not a measurement. \input from
+% 05-experiments.tex immediately before sec:claims.
+% Evidence: paper/evidence/final/power-curve.jsonl, written by
+% paper/src/make-power-curve.py from the committed default-cell bars. No agent,
+% simulator run, market data or model is involved.
+
+\subsection{What the default gates can detect}\label{sec:power}
+
+Every verdict this section reports on a real panel is a refusal, and a refusal tells a reader something only if the gate could have admitted a skilled agent. This subsection asks how often the shipped gates admit an agent whose skill is known. The answer is a property of the gates' statistics under stated assumptions. It is a new calculation added in this revision, not a measurement of any agent and not a correction of frozen evidence: no agent, simulator run, market data or model is involved, it reads only the committed deflation bars, and no number reported elsewhere in this paper changes.
+
+\paragraph{Assumptions and method.} Per-period returns are serially independent and normal with a known true Sharpe ratio, the same in every window. Two legs of \cref{eq:eligible} are modelled through the kernel's own formulas. The regime-robustness leg, $\passk$ in its default mode, passes when each of six windows reaches a per-run PSR of at least $0.90$ against zero under \cref{eq:psr}: the sample Sharpe over the $n-1$ standard deviation, population-normalized skewness and non-excess kurtosis, the standard error at the observed Sharpe with $\sqrt{n-1}$, and the kernel's normal CDF. On the real panels a window's eight execution seeds differ only by slippage (\cref{sec:stats}), so one run per window is modelled. The deflation leg passes when the pooled six-window track reaches DSR $0.95$ against the panel's committed per-period bar in the default cell of \cref{tab:eligibility}, held fixed. The bootstrap, process and mandate legs are not modelled. They can only refuse more, so the true Sharpe at which the full predicate reaches a given pass probability is at least the value printed below for the two legs together.
+
+Skewness and kurtosis do not change when a constant is added to a series, and for fixed moments the observed Sharpe ratios that pass \cref{eq:psr} form a half-line above one threshold, so each simulated window has one true Sharpe at and above which it passes, solved in closed form. A leg therefore passes at true Sharpe $s$ exactly when $s$ reaches the largest threshold the leg involves. One set of draws then gives the whole curve: the pass probability at every $s$ is the empirical distribution function of those thresholds, and the 5 and 95 percent points are its quantiles, with no interpolation over a grid of Sharpe levels. The producer draws 200{,}000 replications per window geometry from NumPy's PCG64 generator under seed $20260915$, split into 64 fixed seeded chunks, and records every point's binomial standard error and, for every crossing, a 95 percent order-statistic band under the normal approximation to the binomial. A regression test checks the closed-form thresholds against the kernel formula evaluated on the shifted series themselves. The commands are
+\begin{verbatim}
+python paper/src/make-power-curve.py compute --jobs 32
+python paper/src/make-power-curve.py figure
+\end{verbatim}
+The first writes \texttt{paper/evidence/final/power-curve.jsonl}; its bytes do not depend on the worker count, and it took $313.2$ seconds in one process and $53.6$ seconds with 32 worker processes on the machine described above. The second draws \cref{fig:power} from the committed file. Run without an argument, the script does both in one process.
+
+\paragraph{The regime-robustness leg.} On the daily geometry of \cref{fig:power}, the six 408-bar windows of US indices 1d at 252 periods per year, $\passk$ passes $1.4$ percent of the time at a true annualized Sharpe of $1$ and $51.6$ percent at $2$. It reaches 5 percent at $1.23$ and 95 percent at $2.89$. On the weekly geometry, six 77-bar windows at 52 periods per year as in the synthetic witness, the same four values are $1.1$ percent, $43.8$ percent, $1.29$ and $3.03$. The gate therefore moves from rarely passing to reliably passing across $1.66$ annualized Sharpe units on the daily geometry and $1.75$ on the weekly. At a true Sharpe of zero no replication passed on either geometry. Every point of the two curves has a standard error of at most $0.0012$, and the 95 percent band around each of their crossings extends less than $0.01$ to either side. The US indices 1w panel's windows hold 78 bars rather than 77; its $\passk$ leg, recorded in the same evidence file, crosses 5 and 95 percent within $0.02$ of the weekly curve.
+
+\paragraph{The deflation leg, and both legs together.} \Cref{tab:dsr-mde} extends the calculation to all nine default panels, with each panel's own window length, committed bar and pooled length. Its DSR minimum is derived rather than simulated. Under normal moments DSR against a per-period bar $b$ over a pooled track of $n$ returns reaches $0.95$ when $(u-b)\sqrt{n-1} = z\sqrt{1+u^{2}/2}$, where $u$ is the observed per-period Sharpe and $z = 1.6449$ is the point at which the kernel's normal CDF reaches $0.95$. Squaring gives $(n-1-z^{2}/2)\,u^{2} - 2b(n-1)\,u + b^{2}(n-1) - z^{2} = 0$. Its left side equals $-z^{2}(1+b^{2}/2) < 0$ at $u = b$, so $b$ lies between the two roots and the smallest admissible per-period Sharpe is the larger root; the table annualizes it by $\sqrt{P}$, with $P$ periods per year. That minimum is a normal-moment value, not an absolute one. A two-point return distribution has kurtosis equal to one plus its squared skewness, and with skewness $2/u$ it drives the radicand of \cref{eq:psr} toward zero, so for a suitably shaped track the requirement falls toward the bar itself: the committed bar is the lower limit. On the six panels whose bar is the annualized $0.5$ prior or floor, the DSR minimum runs from $1.55$ on commodities to $2.17$ on daily crypto. On the three measured panels it lies $0.41$ to $1.02$ above the bar, at $28.35$ on hourly crypto, $7.25$ on daily FX and $3.85$ on daily rates.
+
+The table's remaining columns are simulated, both legs on the same draws, so the both-legs columns are the exact conjunction under the assumptions. On the six panels at the $1.1382$ bar, $\passk$ sets the 95 percent point of the conjunction to within $0.01$. Among them, daily and 4-hour crypto, whose windows span under half a year, need $5.64$ and $5.46$. On hourly crypto, daily FX and daily rates the measured bar sets it instead, at $29.36$, $7.68$ and $4.26$, where $\passk$ alone would reach 95 percent at $5.44$, $2.23$ and $2.23$.
+
+\paragraph{What this establishes, and what it does not.} Under serially independent normal returns with the same edge in every window, the $\passk$ leg passes an agent with a true annualized Sharpe of $1$ only $1.4$ percent of the time on the daily geometry and $1.1$ percent on the weekly, passes a true Sharpe of $2$ about half the time there, and admits reliably only near $2.9$ to $3.0$. On daily and 4-hour crypto reliable admission needs $5.64$ and $5.46$, and on hourly crypto the measured bar needs $29.36$. Below the 5 percent points, $1.23$ daily and $1.29$ weekly, the $\passk$ leg alone refuses at least 95 percent of the time, so on those geometries a refusal carries almost no information about whether an agent in that range has skill. It does not establish any of the following. Real returns are not independent normal draws: the realism battery documents volatility clustering, and under positive autocorrelation \cref{eq:psr} is too favorable (\cref{sec:stats}), so pass probabilities on real data at a given true Sharpe may differ from these in either direction. A regime-dependent edge, such as the equity beta that \cref{sec:passk} refuses, is not one true Sharpe in every window and is not covered. The bars are held at their committed values, although a different field could move a measured bar or switch a configured panel to a measured one (\cref{sec:external}). Nothing here measures any agent's true Sharpe, so it does not say which, if any, of the refused agents had skill. Finally, the synthetic witness of \cref{sec:witness} uses a different run layout: its eight execution streams per window are independent draws, so its $\passk$ leg asks 48 independent runs to pass rather than six. Under the same assumptions that layout reaches 5 and 95 percent at $2.22$ and $3.42$ on the witness's daily geometry of 409-bar windows and at $2.35$ and $3.60$ on its weekly geometry of 77-bar windows, so the six-window curves of \cref{fig:power} are not the distribution that governs the witness's $\passk$ leg.
+
+\begin{figure}[tbp]
+\centering
+\includegraphics[width=\linewidth]{power-curve.pdf}
+\caption{Probability that the default $\passk$ leg passes, every one of six windows reaching a per-run PSR of at least $0.90$ against zero, against the true annualized Sharpe of serially independent normal returns. Solid with circles: the daily geometry, six 408-bar windows at 252 periods per year. Dashed with squares: the weekly geometry, six 77-bar windows at 52 periods per year. Dotted lines mark 5 and 95 percent, and the short ticks above the axis mark where each curve crosses them. Monte Carlo over 200{,}000 replications per geometry; every point's standard error is at most $0.0012$, narrower than the line. A property of the gate under these assumptions, not a measurement of any agent. Drawn from \texttt{paper/evidence/final/power-curve.jsonl} by \texttt{python paper/src/make-power-curve.py figure}.}
+\label{fig:power}
+\end{figure}
+
+\begin{table}[t]
+\centering
+\small
+\caption{What each leg of the default gate requires, per default panel of \cref{tab:eligibility}. Bars is the window length and Bar (ann.) the panel's committed deflation benchmark. DSR min.\ is derived, not simulated: the smallest observed annualized Sharpe whose DSR against that bar, over the committed pooled length of six windows, reaches $0.95$ under normal moments (\cref{sec:power}). The four right-hand columns are Monte Carlo over 200{,}000 replications per window geometry with serially independent normal returns: the true annualized Sharpe at which the DSR leg, the $\passk$ leg, and both legs together pass with probability 95 percent, and at which both together pass with probability 5 percent. The bootstrap, process and mandate legs are not modelled and can only raise the full predicate's values above the both-legs columns. FX 1d and rates 1d share a window geometry and therefore a $\passk$ column. From \texttt{paper/evidence/final/power-curve.jsonl}.}
+\label{tab:dsr-mde}
+\setlength{\tabcolsep}{3.5pt}
+\footnotesize
+\begin{tabular}{lS[table-format=4.0]S[table-format=2.4]S[table-format=2.2]S[table-format=2.2]S[table-format=1.2]S[table-format=2.2]S[table-format=2.2]}
+\toprule
+ & & & & \multicolumn{4}{c}{True Sharpe (ann.) at pass probability} \\
+\cmidrule(lr){5-8}
+Dataset & {Bars} & {Bar (ann.)} & {DSR min.} & {DSR 95\%} & {$\passk$ 95\%} & {Both 5\%} & {Both 95\%} \\
+\midrule
+US indices 1w & 78 & 1.1382 & 1.69 & 2.25 & 3.01 & 1.35 & 3.01 \\
+US indices 1d & 408 & 1.1382 & 1.67 & 2.20 & 2.89 & 1.32 & 2.89 \\
+Crypto 1w & 46 & 1.1382 & 1.87 & 2.59 & 3.95 & 1.68 & 3.95 \\
+Crypto 1d & 156 & 1.1382 & 2.17 & 3.20 & 5.64 & 2.38 & 5.64 \\
+Crypto 4h & 990 & 1.1382 & 2.14 & 3.14 & 5.46 & 2.31 & 5.46 \\
+Crypto 1h & 3990 & 27.3309 & 28.35 & 29.36 & 5.44 & 27.34 & 29.36 \\
+FX 1d & 682 & 6.8254 & 7.25 & 7.68 & 2.23 & 6.83 & 7.68 \\
+Commodities 1d & 677 & 1.1382 & 1.55 & 1.96 & 2.24 & 1.19 & 2.25 \\
+Rates 1d & 682 & 3.4362 & 3.85 & 4.26 & 2.23 & 3.44 & 4.26 \\
+\bottomrule
+\end{tabular}
+\end{table}

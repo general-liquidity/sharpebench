@@ -131,11 +131,17 @@ fn zero_autocorrelation_reduces_to_the_kernel_psr_bit_for_bit() {
         }
         let sigma = 0.5_f64.sqrt() / 250.0_f64.sqrt();
         let bar = expected_max_sharpe(sigma, 100).unwrap();
-        let dsr = deflated_sharpe_ratio_against_null(r, 100, 0.0, sigma).unwrap();
+        let dsr = deflated_sharpe_ratio_against_null(r, 100, 0.0, sigma);
+        if r.iter().all(|&x| x == r[0]) {
+            // A constant track has no deflated Sharpe; this diagnostic, which
+            // no gate reads, still takes its Sharpe as 0.
+            assert!(dsr.is_err(), "{r:?}");
+            continue;
+        }
         let diag =
             probabilistic_sharpe_ratio_autocorrelated(r, bar, 0.0, StandardErrorAt::Observed)
                 .unwrap();
-        assert_eq!(diag.to_bits(), dsr.to_bits());
+        assert_eq!(diag.to_bits(), dsr.unwrap().to_bits());
     }
 }
 

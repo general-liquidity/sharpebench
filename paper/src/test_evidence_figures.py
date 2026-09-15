@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[2]
 NL = chr(10)
 EVIDENCE = ROOT / "paper/evidence/final"
 PRODUCER = ROOT / "paper/src/make-evidence-figures.py"
+DEMONSTRATION = ROOT / "paper/src/make-figures.py"
 
 SWEEPS = [
     "us-indices-1w",
@@ -105,6 +106,67 @@ class FigureSupportTests(unittest.TestCase):
                 proc = self.run_figure(figure)
                 self.assertEqual(proc.returncode, 0, proc.stderr)
                 self.assertTrue((self.paper / "figures" / OUTPUTS[figure]).exists())
+
+    def test_every_figure_is_byte_reproducible_with_embedded_truetype_fonts(self):
+        """Two regenerations must produce the same bytes, which rules out a
+        creation date, and no glyph may be a Type 3 font, which arXiv and the
+        typesetter both reject."""
+        for figure in INPUTS:
+            with self.subTest(figure=figure):
+                self.stage(figure)
+                output = self.paper / "figures" / OUTPUTS[figure]
+                builds = []
+                for _ in range(2):
+                    proc = self.run_figure(figure)
+                    self.assertEqual(proc.returncode, 0, proc.stderr)
+                    builds.append(output.read_bytes())
+                    output.unlink()
+                self.assertEqual(builds[0], builds[1])
+                self.assertNotIn(b"/Type3", builds[0])
+                self.assertNotIn(b"/CreationDate", builds[0])
+                self.assertIn(b"/FontFile2", builds[0])
+
+    def test_a_repeated_luck_floor_identity_does_not_widen_the_range(self):
+        self.stage("luck-deflation")
+        rows = self.records("rates-1d")
+        duplicate = next(
+            dict(r)
+            for r in rows
+            if r["agent_id"] == "luck-floor-00"
+            and r["sr_std_pinned"] is None
+            and r["dsr_bar"] == 0.95
+            and r["n_trials"] == 50
+        )
+        rows.append(duplicate)
+        self.rewrite("rates-1d", rows)
+        self.assert_refused("luck-deflation", "repeated luck-floor agent identity")
+
+    def test_luck_floor_field_sizes_that_differ_between_cells_are_refused(self):
+        """The legend names one field size for every range bar."""
+        self.stage("luck-deflation")
+        rows = [
+            r
+            for r in self.records("us-indices-1w")
+            if not (
+                r["agent_id"] == "luck-floor-04"
+                and r["sr_std_pinned"] is None
+                and r["dsr_bar"] == 0.95
+                and r["n_trials"] == 10
+            )
+        ]
+        self.rewrite("us-indices-1w", rows)
+        self.assert_refused("luck-deflation", "luck-floor field sizes differ across cells")
+
+    def test_a_witness_shape_with_two_geometries_is_refused(self):
+        """The legend states one window geometry per shape."""
+        self.stage("pass-witness")
+        rows = self.records("pass-witness")
+        first = next(
+            r for r in rows if r["shape"] == "weekly-shaped" and r["agent_id"] == "witness"
+        )
+        first["window_len"] += 1
+        self.rewrite("pass-witness", rows)
+        self.assert_refused("pass-witness", "declare 2 geometries")
 
     def test_missing_dataset_file_is_refused(self):
         self.stage("drawdowns")
@@ -259,6 +321,59 @@ class FigureSupportTests(unittest.TestCase):
         self.assertEqual(removed, 1)
         self.rewrite("luck-floor-1000", kept)
         self.assert_refused("luck-floor-1000", "datasets disagree on field size")
+
+
+def demonstration():
+    spec = importlib.util.spec_from_file_location("make_figures", DEMONSTRATION)
+    loaded = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(loaded)
+    return loaded
+
+
+def demo_score(agent_id, eligible, passed_k, process_ok, ordinal=0):
+    return {
+        "agent_id": agent_id,
+        "rank_eligible": eligible,
+        "passed_k": passed_k,
+        "process_ok": process_ok,
+        "rank_ordinal": ordinal,
+    }
+
+
+class DemonstrationFigureTests(unittest.TestCase):
+    """Panel (a) reads its bars and labels from the kernel's golden scores. A
+    record the three labels cannot describe is refused, never guessed at."""
+
+    def setUp(self):
+        self.figures = demonstration()
+
+    def test_golden_scores_give_the_three_published_labels(self):
+        rows = self.figures.load_demo()
+        self.assertEqual([r["agent_id"] for r in rows], list(self.figures.DEMO_AGENTS))
+        self.assertEqual(
+            [self.figures.demo_status(r)[0] for r in rows], ["ranked", "fails", "zeroed"]
+        )
+        self.assertEqual(rows[1]["raw_mean_return"], max(r["raw_mean_return"] for r in rows))
+
+    def test_an_eligible_score_that_fails_a_gate_is_refused(self):
+        with self.assertRaises(self.figures.GoldenSupportError):
+            self.figures.demo_status(demo_score("a", True, False, True, 1))
+
+    def test_an_ineligible_score_failing_no_named_gate_is_refused(self):
+        with self.assertRaises(self.figures.GoldenSupportError):
+            self.figures.demo_status(demo_score("a", False, True, True))
+
+    def test_an_ineligible_score_failing_both_gates_is_refused(self):
+        with self.assertRaises(self.figures.GoldenSupportError):
+            self.figures.demo_status(demo_score("a", False, False, False))
+
+    def test_each_single_failure_maps_to_its_own_label(self):
+        self.assertEqual(self.figures.demo_status(demo_score("a", True, True, True, 1)),
+                         ("ranked", "ranked #1"))
+        self.assertEqual(self.figures.demo_status(demo_score("a", False, False, True))[0],
+                         "fails")
+        self.assertEqual(self.figures.demo_status(demo_score("a", False, True, False))[0],
+                         "zeroed")
 
 
 def agent(dataset, index, shipped, field):

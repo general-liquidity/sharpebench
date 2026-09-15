@@ -23,8 +23,8 @@ use crate::certification::Certification;
 use crate::comparison_sets::{comparison_set, restrict_to_shared, TaggedRun, TaggedSubmission};
 use crate::decay::return_drift_half_life;
 use crate::deflated_sharpe::{
-    deflated_sharpe_ratio_against_null, expected_max_sharpe, per_period_from_annualized,
-    probabilistic_sharpe_ratio, sharpe_ratio,
+    checked_probabilistic_sharpe_ratio, deflated_sharpe_ratio_against_null, expected_max_sharpe,
+    per_period_from_annualized, sharpe_ratio,
 };
 use crate::econrationality::{elicit_revealed_selection, rationality_score};
 use crate::pass_k::{pass_k, PassMode};
@@ -593,10 +593,18 @@ fn default_benchmark_agent_id() -> String {
 ///    positive standard deviation;
 /// 3. `PSR(e, per_run_psr_benchmark(cfg)) >= cfg.per_run_psr_bar`.
 ///
+/// In every mode the PSR is the checked one
+/// ([`crate::deflated_sharpe::checked_probabilistic_sharpe_ratio`]), and a run
+/// whose PSR is refused fails. A constant run is refused: it has no Sharpe
+/// ratio. The unchecked PSR scored an all-zero run just above 0.5, a pass at a
+/// bar of one half and at higher bars against a negative per-run benchmark, and
+/// a constant positive run whose rounded mean left a residual variance 1.0, a
+/// pass at every bar.
+///
 /// Rule 2 is what stops the benchmark from certifying itself. Its own excess
 /// series is identically zero, and a zero-dispersion series carries no evidence
-/// of outperformance at all: `sharpe_ratio` defines it as 0 and PSR then returns
-/// `norm_cdf(0) = 0.5`, so it already fails any bar above one half, but an
+/// of outperformance at all: `sharpe_ratio` defines it as 0 and the unchecked PSR
+/// returns `norm_cdf(0) = 0.5`, so it already fails any bar above one half, but an
 /// operator who lowered `per_run_psr_bar` to 0.5 would admit it. The rule makes
 /// the refusal unconditional: a run indistinguishable from the benchmark is a
 /// run with no excess edge, and the relative verdict is a claim about excess
@@ -612,7 +620,10 @@ pub fn per_run_passes(
         PassMode::All | PassMode::Any | PassMode::AtLeast(_) => sub
             .runs
             .iter()
-            .map(|r| probabilistic_sharpe_ratio(&r.returns, bar) >= cfg.per_run_psr_bar)
+            .map(|r| {
+                checked_probabilistic_sharpe_ratio(&r.returns, bar)
+                    .is_ok_and(|psr| psr >= cfg.per_run_psr_bar)
+            })
             .collect(),
         PassMode::RelativeToBenchmark => sub
             .runs
@@ -624,7 +635,8 @@ pub fn per_run_passes(
                     .and_then(|b| excess_returns(&r.returns, &b.returns))
                     .is_some_and(|e| {
                         std_dev(&e) > 0.0
-                            && probabilistic_sharpe_ratio(&e, bar) >= cfg.per_run_psr_bar
+                            && checked_probabilistic_sharpe_ratio(&e, bar)
+                                .is_ok_and(|psr| psr >= cfg.per_run_psr_bar)
                     })
             })
             .collect(),
@@ -812,6 +824,10 @@ impl ScoreConfig {
 pub struct CompositeScore {
     pub agent_id: String,
     pub deflated_sharpe: f64,
+    /// PSR of the pooled track against a zero Sharpe. Reported, never a gate.
+    /// 0.0, the no-skill floor rather than an estimate, when the pooled track
+    /// has no PSR (a constant track has no Sharpe ratio); the deflated Sharpe is
+    /// refused on the same track, so `deflation_error` is then present.
     pub psr: f64,
     pub passed_k: bool,
     pub process_ok: bool,
@@ -1255,7 +1271,9 @@ fn score_agent_with(
 ) -> CompositeScore {
     let pooled = pooled_returns(sub, cfg.execution_seeds_per_window);
 
-    let psr = probabilistic_sharpe_ratio(&pooled, 0.0);
+    // A pooled track with no PSR (a constant one) reports the 0.0 floor; the
+    // deflated Sharpe below is refused on the same track and names the cause.
+    let psr = checked_probabilistic_sharpe_ratio(&pooled, 0.0).unwrap_or(0.0);
     // Fold the agent's declared in-sample search budget into the deflation trial
     // footprint: an agent that tried 5000 configs to find this strategy faces a
     // higher bar than one that tried none (front-end data-snooping control).
@@ -2167,7 +2185,9 @@ fn ci_overlap(a: &CompositeScore, b: &CompositeScore) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::deflated_sharpe::{deflated_sharpe_ratio, expected_max_sharpe};
+    use crate::deflated_sharpe::{
+        deflated_sharpe_ratio, expected_max_sharpe, probabilistic_sharpe_ratio,
+    };
     use crate::process::ProcessEvent;
 
     /// Deterministic run: mean drift + a sinusoidal wiggle (no RNG → reproducible).
@@ -2233,8 +2253,10 @@ mod tests {
     fn an_invalid_frequency_disqualifies_on_the_score_and_rank_paths() {
         let skilled = || {
             let mut sub = agent("skilled", (0..5).map(|_| run(0.002, 0.0005, 60)).collect());
+            // Both candidates disperse: a constant one has no deflated Sharpe,
+            // which would refuse the selection diagnostic at every frequency.
             sub.candidates = vec![
-                vec![0.001; 30],
+                (0..30).map(|i| 0.001 + 0.0005 * (i % 2) as f64).collect(),
                 (0..30).map(|i| 0.001 * (i % 3) as f64).collect(),
             ];
             sub
@@ -2510,6 +2532,306 @@ mod tests {
                 report[field].is_f64(),
                 "{field} must be reported when estimated"
             );
+        }
+    }
+
+    /// The refusal a constant track carries, as the score reports it.
+    const CONSTANT_TRACK: &str =
+        "returns must not be constant: a constant series has no Sharpe ratio";
+
+    /// Two execution seeds per window whose returns offset exactly: each seed
+    /// is a steady positive run, and their per-bar average is the constant
+    /// 2^-10, so the pooled track is constant while no run is.
+    fn offsetting_seeds() -> AgentSubmission {
+        let (c, d) = (1.0 / 1024.0, 1.0 / 4096.0);
+        let seed = |sign: f64| Run {
+            returns: (0..60)
+                .map(|t| c + sign * if t % 2 == 0 { d } else { -d })
+                .collect(),
+            ..Run::default()
+        };
+        agent(
+            "offsetting",
+            (0..5).flat_map(|_| [seed(1.0), seed(-1.0)]).collect(),
+        )
+    }
+
+    /// Paper audit 2026-09-14, Tier 1 #10: a pooled track with zero sample
+    /// variance has no Sharpe ratio, so its deflation is unavailable and the
+    /// agent is ineligible for that reason, named.
+    ///
+    /// Isolated: every other conjunct of the eligibility predicate holds. Each
+    /// seed passes its per-run PSR, the bootstrap is significant, the process is
+    /// clean, nothing draws down, and `dsr_bar = 0` lets the deflated-Sharpe
+    /// conjunct hold at the floor. The pooled Sharpe used to be taken as 0, the
+    /// deflated Sharpe came out at 0.1075 and the agent was rank-eligible.
+    #[test]
+    fn a_constant_pooled_track_is_unavailable_and_says_why() {
+        let sub = offsetting_seeds();
+        let cfg = ScoreConfig {
+            execution_seeds_per_window: 2,
+            dsr_bar: 0.0,
+            ..ScoreConfig::default()
+        };
+        assert!(pooled_returns(&sub, 2).iter().all(|&r| r == 1.0 / 1024.0));
+        let thresholds = crate::disqualification::DisqualThresholds::from_score_config(&cfg);
+        for score in [
+            score_agent(&sub, &cfg),
+            rank(std::slice::from_ref(&sub), &cfg).remove(0),
+        ] {
+            assert_eq!(score.deflation_error.as_deref(), Some(CONSTANT_TRACK));
+            assert_eq!(score.bootstrap_error, None);
+            assert!(score.passed_k && score.process_ok && score.mandate_ok);
+            assert!(score.bootstrap_p < cfg.alpha);
+            assert_eq!((score.deflated_sharpe, score.psr), (0.0, 0.0));
+            assert_eq!(
+                (score.dsr_ci_low, score.dsr_ci_high, score.dsr_se),
+                (None, None, None)
+            );
+            assert!(!score.rank_eligible);
+            assert_eq!(
+                crate::disqualification::classify_disqualification(&score, &thresholds, None, None),
+                vec![crate::disqualification::FailReason::DeflationUnavailable]
+            );
+        }
+    }
+
+    /// The audit's own case on the default configuration. All-zero runs (`hold`)
+    /// used to report PSR 0.5000000005 and a deflated Sharpe of 0.0872; constant
+    /// 0.001 runs, whose rounded mean leaves a residual variance, used to report
+    /// PSR and DSR 1.0 and rank. Both now report the refusal, in the serialized
+    /// score too.
+    #[test]
+    fn constant_runs_report_the_refusal_instead_of_a_score() {
+        let cfg = ScoreConfig::default();
+        for value in [0.0, 0.001] {
+            let runs = (0..6)
+                .map(|_| Run {
+                    returns: vec![value; 60],
+                    ..Run::default()
+                })
+                .collect();
+            let sub = agent("flat", runs);
+            let score = score_agent(&sub, &cfg);
+            assert_eq!(
+                score.deflation_error.as_deref(),
+                Some(CONSTANT_TRACK),
+                "{value}"
+            );
+            assert_eq!((score.deflated_sharpe, score.psr), (0.0, 0.0));
+            assert_eq!(per_run_passes(&sub, None, &cfg), vec![false; 6]);
+            assert!(!score.passed_k && !score.rank_eligible);
+            let report = serde_json::to_value(&score).expect("serialize the score");
+            assert_eq!(report["deflation_error"], CONSTANT_TRACK);
+        }
+    }
+
+    /// The per-run half of the refusal, isolated: a constant run among skilled
+    /// runs fails its per-run test while the pooled track, which is not
+    /// constant, keeps its deflation. The unchecked PSR scored a constant 0.001
+    /// run 1.0 and an all-zero run 0.5000000005, so the first passed the default
+    /// bar and the second a bar of 0.5, and both agents were rank-eligible.
+    #[test]
+    fn a_constant_run_fails_its_per_run_test() {
+        for (value, per_run_psr_bar) in [(0.001, 0.90), (0.0, 0.5)] {
+            let mut runs: Vec<Run> = (0..5).map(|_| run(0.002, 0.0005, 60)).collect();
+            runs.push(Run {
+                returns: vec![value; 60],
+                ..Run::default()
+            });
+            let sub = agent("one-flat-run", runs);
+            let cfg = ScoreConfig {
+                per_run_psr_bar,
+                ..ScoreConfig::default()
+            };
+            assert_eq!(
+                checked_probabilistic_sharpe_ratio(&sub.runs[5].returns, 0.0)
+                    .map_err(|e| e.to_string()),
+                Err(CONSTANT_TRACK.to_string())
+            );
+            assert_eq!(
+                per_run_passes(&sub, None, &cfg),
+                vec![true, true, true, true, true, false],
+                "{value}"
+            );
+            let score = score_agent(&sub, &cfg);
+            assert_eq!(score.deflation_error, None);
+            assert!(!score.passed_k && !score.rank_eligible);
+            assert_eq!(
+                crate::disqualification::classify_disqualification(
+                    &score,
+                    &crate::disqualification::DisqualThresholds::from_score_config(&cfg),
+                    None,
+                    None
+                ),
+                vec![crate::disqualification::FailReason::FailedPassK],
+                "{value}"
+            );
+        }
+    }
+
+    /// The relative verdict's zero-excess rule is untouched by the refusal: the
+    /// benchmark's own excess is identically zero and still fails every run, as
+    /// a failure of pass^k, while its deflation, computed on its dispersed raw
+    /// returns, stays available. So the refusal changes neither its verdict nor
+    /// the words that report it.
+    #[test]
+    fn the_zero_excess_refusal_stays_a_failure_not_an_unavailability() {
+        let field = relative_field();
+        let cfg = ScoreConfig::relative_to_benchmark("buy-and-hold");
+        let bench = &field[0];
+        assert_eq!(per_run_passes(bench, Some(bench), &cfg), vec![false; 6]);
+        let board = rank_declared(
+            &field,
+            &MandateDeclarations::from([(
+                "buy-and-hold".to_string(),
+                DeclaredMandate::OutperformBuyAndHold,
+            )]),
+            &cfg,
+        );
+        let score = board.iter().find(|s| s.agent_id == "buy-and-hold").unwrap();
+        assert_eq!(
+            (
+                score.deflation_error.as_deref(),
+                score.bootstrap_error.as_deref()
+            ),
+            (None, None)
+        );
+        assert!(!score.passed_k);
+        assert_eq!(score.declared_passed_k, Some(false));
+        assert_eq!(
+            score.mandate_verdict_label().as_deref(),
+            Some("ineligible under declared verdict (relative to buy-and-hold); host-board ineligible")
+        );
+
+        // Rule 2 still carries weight the checked PSR does not: a one-bar cell
+        // has no excess dispersion, and the checked PSR's 0.0 for fewer than two
+        // returns would clear a bar of zero if the rule did not refuse it first.
+        let one_bar = |id: &str, r: f64| {
+            agent(
+                id,
+                vec![Run {
+                    returns: vec![r],
+                    ..Run::default()
+                }],
+            )
+        };
+        let zero_bar = ScoreConfig {
+            per_run_psr_bar: 0.0,
+            ..cfg
+        };
+        assert_eq!(
+            per_run_passes(
+                &one_bar("entrant", 0.02),
+                Some(&one_bar("buy-and-hold", 0.01)),
+                &zero_bar
+            ),
+            vec![false]
+        );
+    }
+
+    /// A candidate is scored like a track: a constant candidate has no deflated
+    /// Sharpe, so the selection diagnostic is refused and names why. The axis is
+    /// advisory, so the agent's own eligibility does not move.
+    #[test]
+    fn a_constant_candidate_refuses_the_selection_diagnostic() {
+        let mut sub = agent("skilled", (0..5).map(|_| run(0.002, 0.0005, 60)).collect());
+        sub.candidates = vec![
+            (0..30).map(|i| 0.001 * (i % 3) as f64).collect(),
+            vec![0.001; 30],
+        ];
+        let s = score_agent(&sub, &ScoreConfig::default());
+        assert_eq!(s.selection_error.as_deref(), Some(CONSTANT_TRACK));
+        assert_eq!((s.selection_median_dsr, s.selection_gap), (None, None));
+        assert!(s.deflation_error.is_none() && s.rank_eligible);
+    }
+
+    /// Paper audit 2026-09-14, Tier 1 #11: declared-mandate eligibility keeps
+    /// the availability conjunct of the host predicate, so a declared agent
+    /// cannot be eligible on a deflated Sharpe or a bootstrap that was never
+    /// estimated.
+    ///
+    /// `dsr_bar = 0` lets the floor a refused deflation reports clear the
+    /// deflated-Sharpe conjunct, and `alpha = 2` lets the 1.0 sentinel of a
+    /// refused bootstrap clear the significance conjunct, so availability is the
+    /// only term left that can refuse. The same agent is declared-eligible with
+    /// both statistics available and declared-ineligible when either is
+    /// refused, on the single-score and board paths, under every declaration
+    /// that needs no benchmark and under a relative one.
+    #[test]
+    fn declared_eligibility_requires_available_statistics() {
+        let skilled = agent("skilled", (0..5).map(|_| run(0.002, 0.0005, 60)).collect());
+        let bench = agent("bench", (0..5).map(|_| run(0.0005, 0.001, 60)).collect());
+        let base = ScoreConfig {
+            dsr_bar: 0.0,
+            alpha: 2.0,
+            ..ScoreConfig::default()
+        };
+        let cases = [
+            (skilled.clone(), base.clone(), None, None),
+            (
+                skilled.clone(),
+                ScoreConfig {
+                    trials_sr_std: -1.0,
+                    ..base.clone()
+                },
+                Some("trials_sr_std must be finite and non-negative"),
+                None,
+            ),
+            (
+                skilled,
+                ScoreConfig {
+                    n_boot: 0,
+                    ..base.clone()
+                },
+                Some("n_boot must be positive"),
+                Some("n_boot must be positive"),
+            ),
+            (
+                offsetting_seeds(),
+                ScoreConfig {
+                    execution_seeds_per_window: 2,
+                    ..base
+                },
+                Some(CONSTANT_TRACK),
+                None,
+            ),
+        ];
+        let absolute = [
+            DeclaredMandate::AbsoluteReturn,
+            DeclaredMandate::DrawdownCapped {
+                max_per_run_drawdown: 0.2,
+            },
+        ];
+        for (sub, cfg, deflation_error, bootstrap_error) in cases {
+            let available = deflation_error.is_none() && bootstrap_error.is_none();
+            let mut scores = Vec::new();
+            for mandate in &absolute {
+                scores.push(score_agent_declared(&sub, Some(mandate), &cfg));
+                let declarations =
+                    MandateDeclarations::from([(sub.agent_id.clone(), mandate.clone())]);
+                scores.extend(rank_declared(
+                    std::slice::from_ref(&sub),
+                    &declarations,
+                    &cfg,
+                ));
+            }
+            if sub.runs.len() == bench.runs.len() {
+                let relative = DeclaredMandate::RelativeTo {
+                    benchmark_id: "bench".to_string(),
+                };
+                let declarations = MandateDeclarations::from([(sub.agent_id.clone(), relative)]);
+                let board = rank_declared(&[sub.clone(), bench.clone()], &declarations, &cfg);
+                scores.extend(board.into_iter().filter(|s| s.agent_id == sub.agent_id));
+            }
+            for score in scores {
+                let label = format!("{:?} {:?}", score.declared_mandate, deflation_error);
+                assert_eq!(score.deflation_error.as_deref(), deflation_error, "{label}");
+                assert_eq!(score.bootstrap_error.as_deref(), bootstrap_error, "{label}");
+                assert_eq!(score.declared_passed_k, Some(true), "{label}");
+                assert_eq!(score.declared_mandate_eligible, Some(available), "{label}");
+                assert_eq!(score.rank_eligible, available, "{label}");
+            }
         }
     }
 
