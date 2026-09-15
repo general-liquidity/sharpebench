@@ -29,8 +29,9 @@
 
 \sisetup{
   table-format = 1.4,
-  round-mode = places,
-  round-precision = 4,
+  % Print each cell exactly as written: every cell already carries its intended
+  % precision, and rounding to places padded three-decimal values to four.
+  round-mode = none,
   detect-weight = true,
 }
 
