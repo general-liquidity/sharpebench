@@ -154,6 +154,35 @@ mod tests {
         assert_eq!((c.mean_corr, c.max_corr, c.n_peers), (None, None, 0));
     }
 
+    /// The variance guard is not made redundant by the constant-track rule. A
+    /// series can hold distinct values whose deviations are small enough that
+    /// every squared deviation underflows to zero: `[0.0, 1e-200]` has a mean of
+    /// 5e-201 and a sum of squared deviations of exactly 0, and dividing by that
+    /// yields a non-finite ratio rather than a correlation.
+    ///
+    /// Isolated: the series is not constant, so the constant-track rule does not
+    /// fire and only the zero-variance disjunct can refuse it.
+    #[test]
+    fn a_series_whose_squared_deviations_underflow_is_undefined() {
+        let underflowing = [0.0_f64, 1e-200];
+        let dispersed = [0.002_f64, 0.0035];
+        assert_ne!(
+            underflowing[0], underflowing[1],
+            "the series this test is about must not be constant"
+        );
+        assert_eq!(
+            underflowing
+                .iter()
+                .map(|x| x - mean(&underflowing))
+                .map(|d| d * d)
+                .sum::<f64>(),
+            0.0,
+            "the underflow this test is about must occur"
+        );
+        assert!(pearson(&underflowing, &dispersed).is_none());
+        assert!(pearson(&dispersed, &underflowing).is_none());
+    }
+
     #[test]
     fn too_short_is_undefined() {
         assert!(pearson(&[1.0], &[1.0]).is_none());
