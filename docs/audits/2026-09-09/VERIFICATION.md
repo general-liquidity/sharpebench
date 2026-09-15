@@ -712,6 +712,81 @@ inputs rather than these exports' whole domain. `tag_regime` is the weakest of t
 because its output is one of three short strings: an arithmetic difference that does not
 cross a classification boundary on the four committed inputs does not move its fingerprint.
 
+## An undefined Sharpe no longer sets the field's bar, 2026-09-16
+
+The previous round refused a constant track its own score and recorded, as open,
+that such a track still votes on everyone else's. This round closes it and takes
+the two dependency items that round had refused or left standing.
+
+| PR | Work | Main after merge |
+|---|---|---|
+| Bench #133 | A track with no Sharpe ratio no longer votes on the deflation bar | `19965c4` |
+| Bench #134 | ureq 3, with its certificate-bundle licence allowed deliberately | `c8ba04d` |
+| Arena #77 | The exact SharpeBench pin to 0.27.0 | `ebb9f5f` |
+| Arena #78 | The dead `BSD-3-Clause` allowance removed, the other warned one kept | `f63ca39` |
+| Arena #79 | The pin the constant-track repair was found against, dated | `f5a166d` |
+
+Each merged with every check green on its exact pushed head and main unmoved
+since that head was tested. SharpeBench 0.27.0 and SharpeArena 0.30.0 are
+published to crates.io, PyPI and npm; the Arena run's registry check failed once
+on npm propagation and passed on rerun, with all three registries serving the
+version.
+
+### What the repair is, and what it is not
+
+The bar a panel deflates against is measured from the dispersion of the field's
+Sharpe ratios. Membership in that sample was a finiteness test, and both forms
+of an undefined Sharpe evaluate finite: the zero-variance substitute of zero,
+and roughly 1e15 for a constant nonzero track whose rounded mean leaves a
+residual variance. The sample is now drawn through the same predicate the kernel
+refuses a track's own deflation on, shared as `observed_sharpe_ratio` and
+`is_constant_track` so the two cannot drift apart later.
+
+Exclusion happens before clone collapse and before the minimum-field test, so
+the count checked against that floor is the size of the sample it justifies. A
+panel that falls below the floor after exclusion reports `trials_sr_std_source`
+as configured, which is the honest statement that it did not measure a field,
+rather than measuring a rump one. An excluded entrant is still scored, still
+ranked and still refused on its own terms.
+
+It is not a rescoring. `hold` sat in the frozen fields, so the repaired bar
+would move the panels the frozen evidence reports. Those tables are not
+regenerated and the papers say so.
+
+### What was checked rather than assumed
+
+The griefing numbers were measured on the tree before the change, not argued
+from the formula: one entrant submitting 0.001 on every bar beside five
+dispersed agents raised the measured dispersion to 6.3e14 and drove every other
+agent's deflated Sharpe to zero, and an identically zero entrant moved a
+leader's deflated Sharpe from 0.9998 to 0.9629. A board whose every track has a
+Sharpe ratio is byte-identical: both committed golden fields are unchanged and
+`sharpebench score --json` on the example submissions is unchanged. The
+variance guard the constant-track predicate sits beside was kept and given its
+own isolating test, after a mutation survived: a two-point series holding
+distinct values whose squared deviations underflow to exactly zero is not
+constant, so only that guard can refuse it.
+
+ureq 3's alternatives were run rather than read. The no-default-roots feature
+compiles and then panics on the first HTTPS request at
+`src/unversioned/transport/mod.rs:485`, which is a defect a compile-only check
+passes; the rustls route pulls the same certificate crate plus `ring`. Both
+agents were exercised against live endpoints through the repository's own code
+paths, including a refusal of a known-bad certificate, and both golden score
+files and the committed wasm bundle are byte-identical under the upgrade. The
+two licence warnings Arena's dependency gate raised were established per leg
+instead of cleared together: one allowance was dead, the other only looked dead
+because its carrying crate sits in the excluded Python crate's tree.
+
+### Not established
+
+No experiment was run in this round either, so neither paper gains an empirical
+result. The frozen evidence is not rescored under the repaired bar or the
+repaired moment estimators, the witness still rests on one common-random-number
+draw, the execution-delay sensitivity is not run, and neither paper has a human,
+practitioner or recognition validation study. Both remain long-form preprints,
+with the submission-length cut deferred until there are results to lead with.
+
 ## Acting on a structural audit of both papers, 2026-09-15
 
 Two independent reviews audited the manuscripts rather than the products,
@@ -784,8 +859,9 @@ reference papers is 10 and 56 of them are 12 or fewer, so a submission-length
 cut is deferred until there are results to lead with. The deflation dispersion a
 field measures still counts a constant track's substituted Sharpe, which a
 single constant nonzero entrant could use to push every other agent's deflated
-Sharpe to zero; that is recorded as open rather than repaired, because the fix
-moves the bar on panels the frozen evidence reports.
+Sharpe to zero; that is recorded as open rather than repaired here, because the
+fix moves the bar on panels the frozen evidence reports. It was repaired in the
+round that follows this one.
 
 ## Closing the build gaps of the completion verification, 2026-09-14
 
