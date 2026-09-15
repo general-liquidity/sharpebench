@@ -68,20 +68,68 @@ pub fn probabilistic_sharpe_ratio(returns: &[f64], sr_benchmark: f64) -> f64 {
     norm_cdf(z)
 }
 
+/// The Probabilistic Sharpe Ratio behind the checked boundary the deflation
+/// family uses: an `Err` where [`probabilistic_sharpe_ratio`] would return a
+/// number for a statistic that does not exist. That is a non-finite return or
+/// `sr_benchmark`, a constant track (see [`deflated_sharpe_ratio_against_null`]),
+/// or an intermediate that does not stay finite. On every other track the value
+/// is that function's, bit for bit; fewer than two returns keep its 0.0.
+pub fn checked_probabilistic_sharpe_ratio(
+    returns: &[f64],
+    sr_benchmark: f64,
+) -> Result<f64, StatisticalError> {
+    finite_observations(returns)?;
+    finite_parameter(sr_benchmark, "sr_benchmark")?;
+    checked_psr(returns, sr_benchmark, Track::Observed)
+}
+
+/// What the series handed to [`checked_psr`] is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Track {
+    /// A track a reported statistic is computed on. A constant one is refused.
+    Observed,
+    /// A stationary-bootstrap resample of an observed track that was not
+    /// refused. A resample that happens to draw one repeated value (a sparse
+    /// track resampled inside its flat stretches) keeps the convention it has
+    /// always had, a Sharpe of 0 when its computed standard deviation is zero:
+    /// refusing it would withdraw the whole interval of an estimable track, and
+    /// keeping it leaves interval bytes unchanged.
+    Resample,
+}
+
 /// Checked counterpart for Result-returning deflation. Validate before a
 /// numerical floor or CDF saturation can conceal an overflowing computation.
 /// The legacy scalar PSR above retains its API and operation order.
-fn checked_psr(returns: &[f64], sr_benchmark: f64) -> Result<f64, StatisticalError> {
+fn checked_psr(returns: &[f64], sr_benchmark: f64, track: Track) -> Result<f64, StatisticalError> {
     let n = returns.len();
     if n < 2 {
         return Ok(0.0);
     }
     let center = finite_computation(mean(returns), "return mean")?;
     let scale = finite_computation(std_dev(returns), "return standard deviation")?;
-    let sr = finite_computation(
-        if scale == 0.0 { 0.0 } else { center / scale },
-        "Sharpe ratio",
-    )?;
+    let sr = match track {
+        // A constant series has a sample variance of exactly zero, so its
+        // Sharpe ratio is 0/0 or c/0. It is recognised by value, not by the
+        // computed variance: the rounded mean of a constant nonzero series is a
+        // few ULPs off its value, which leaves a computed standard deviation
+        // near 1e-18 and a Sharpe near 1e15 that clears every gate. A computed
+        // standard deviation of exactly zero on a non-constant series (squared
+        // deviations below the smallest subnormal) divides to a non-finite
+        // Sharpe and is refused under that name.
+        Track::Observed => {
+            if returns.iter().all(|&x| x == returns[0]) {
+                return Err(StatisticalError::InvalidParameter {
+                    name: "returns",
+                    requirement: "must not be constant: a constant series has no Sharpe ratio",
+                });
+            }
+            finite_computation(center / scale, "Sharpe ratio")?
+        }
+        Track::Resample => finite_computation(
+            if scale == 0.0 { 0.0 } else { center / scale },
+            "Sharpe ratio",
+        )?,
+    };
     let g3 = finite_computation(skewness(returns), "return skewness")?;
     let g4 = finite_computation(kurtosis(returns), "return kurtosis")?;
     let variance =
@@ -171,11 +219,33 @@ pub fn deflated_sharpe_ratio(
 /// & López de Prado's expected maximum is `E[SR_null] + sigma_SR * k(N)`;
 /// `null_mean_sharpe` is the first term and `expected_max_sharpe` supplies the
 /// second. The zero-mean convenience wrapper above preserves the historic API.
+///
+/// A constant `returns` (every observation equal, at least two of them) is
+/// refused: its sample variance is zero, so it has no Sharpe ratio to deflate.
+/// It used to be scored as a Sharpe of 0, a deflated Sharpe that moved with the
+/// deflation bar alone, or, for a constant nonzero series whose rounded mean
+/// leaves a residual variance, as a Sharpe near 1e15 and a deflated Sharpe of 1.
 pub fn deflated_sharpe_ratio_against_null(
     returns: &[f64],
     n_trials: u32,
     null_mean_sharpe: f64,
     trials_sr_std: f64,
+) -> Result<f64, StatisticalError> {
+    deflated_sharpe_ratio_of(
+        returns,
+        n_trials,
+        null_mean_sharpe,
+        trials_sr_std,
+        Track::Observed,
+    )
+}
+
+pub(crate) fn deflated_sharpe_ratio_of(
+    returns: &[f64],
+    n_trials: u32,
+    null_mean_sharpe: f64,
+    trials_sr_std: f64,
+    track: Track,
 ) -> Result<f64, StatisticalError> {
     finite_observations(returns)?;
     finite_parameter(null_mean_sharpe, "null_mean_sharpe")?;
@@ -183,7 +253,7 @@ pub fn deflated_sharpe_ratio_against_null(
         null_mean_sharpe + expected_max_sharpe(trials_sr_std, n_trials)?,
         "deflation benchmark",
     )?;
-    checked_psr(returns, sr_star)
+    checked_psr(returns, sr_star, track)
 }
 
 #[cfg(test)]
