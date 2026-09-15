@@ -1,10 +1,35 @@
 % Every entry below was checked against its primary source on 2026-08-23;
-% entries added in the revision were checked on 2026-08-24.
+% entries added in the revision were checked on 2026-08-24; entries added or
+% corrected on 2026-09-15 were checked against Crossref, JSTOR, proceedings,
+% arXiv or author records on that date.
 % arXiv entries: title and full author list read from the abstract page.
 % Journal entries: volume, issue, pages and DOI confirmed against the publisher
 % index. Nothing here was generated from memory. Do not cite anything not here.
 
 % ---------- Skill vs luck in finance (the lineage) ----------
+
+@article{sharpe1966mutual,
+  title   = {{Mutual Fund} Performance},
+  author  = {Sharpe, William F.},
+  journal = {The Journal of Business},
+  volume  = {39},
+  number  = {1, Part 2},
+  pages   = {119--138},
+  year    = {1966},
+  doi     = {10.1086/294846},
+  url     = {https://www.jstor.org/stable/2351741}
+}
+
+@article{sharpe1994sharpe,
+  title   = {The {Sharpe} Ratio},
+  author  = {Sharpe, William F.},
+  journal = {The Journal of Portfolio Management},
+  volume  = {21},
+  number  = {1},
+  pages   = {49--58},
+  year    = {1994},
+  doi     = {10.3905/jpm.1994.409501}
+}
 
 @article{barras2010false,
   title   = {False Discoveries in {Mutual Fund} Performance: Measuring Luck in Estimated Alphas},
@@ -58,7 +83,8 @@
   type        = {ADIA Lab Research Paper Series},
   number      = {19},
   month       = mar,
-  year        = {2026}
+  year        = {2026},
+  note        = {Revision of SSRN working paper 5520741 (2025), doi:10.2139/ssrn.5520741}
 }
 
 @article{goetzmann2007manipulation,
@@ -138,6 +164,17 @@
   pages   = {223--236},
   year    = {2001},
   doi     = {10.1080/713665670}
+}
+
+@article{zumbach2009time,
+  author  = {Gilles Zumbach},
+  title   = {Time Reversal Invariance in Finance},
+  journal = {Quantitative Finance},
+  volume  = {9},
+  number  = {5},
+  pages   = {505--515},
+  year    = {2009},
+  doi     = {10.1080/14697680802616712}
 }
 
 % ---------- Published rule specifications used as external entrants ----------
@@ -305,6 +342,16 @@
   doi     = {10.2469/faj.v58.n4.2453}
 }
 
+@techreport{mertens2002comments,
+  title       = {Comments on Variance of the {IID} Estimator in {Lo} (2002)},
+  author      = {Mertens, Elmar},
+  institution = {University of Basel, Wirtschaftswissenschaftliches Zentrum (WWZ), Department of Finance},
+  type        = {Working paper},
+  month       = nov,
+  year        = {2002},
+  url         = {https://www.elmarmertens.com/research/workingpapers}
+}
+
 @article{bailey2012sharpe,
   title   = {The {Sharpe} Ratio Efficient Frontier},
   author  = {Bailey, David H. and L{\'o}pez de Prado, Marcos},
@@ -375,6 +422,9 @@
   title     = {The {Ladder}: A Reliable Leaderboard for Machine Learning Competitions},
   author    = {Blum, Avrim and Hardt, Moritz},
   booktitle = {Proceedings of the 32nd International Conference on Machine Learning},
+  series    = {Proceedings of Machine Learning Research},
+  volume    = {37},
+  pages     = {1006--1014},
   year      = {2015},
   url       = {https://arxiv.org/abs/1502.04585}
 }
@@ -434,11 +484,13 @@
 }
 
 @misc{openfinllm,
-  title        = {Open {Financial} {LLM} Leaderboard},
-  author       = {{FINOS Foundation}},
-  howpublished = {\url{https://huggingface.co/spaces/finosfoundation/Open-Financial-LLM-Leaderboard}},
-  year         = {2025},
-  note         = {Financial-knowledge axis only; no trading-performance axis}
+  title         = {Open {FinLLM} Leaderboard: Towards {Financial} {AI} Readiness},
+  author        = {Lin, Shengyuan Colin and Tian, Felix and Wang, Keyi and Zhao, Xingjian and Huang, Jimin and Xie, Qianqian and Borella, Luca and White, Matt and Wang, Christina Dan and Xiao, Kairong and Yanglet, Xiao-Yang Liu and Deng, Li},
+  year          = {2025},
+  eprint        = {2501.10963},
+  archiveprefix = {arXiv},
+  url           = {https://arxiv.org/abs/2501.10963},
+  note          = {Leaderboard at \url{https://huggingface.co/spaces/finosfoundation/Open-Financial-LLM-Leaderboard}; financial-knowledge axis only; no trading-performance axis}
 }
 
 % ---------- The evaluation-reliability lineage ----------
@@ -541,9 +593,10 @@
   url       = {https://arxiv.org/abs/2310.06770}
 }
 
-@misc{leaderboardillusion2025,
+@inproceedings{leaderboardillusion2025,
   title         = {The {Leaderboard} Illusion},
   author        = {Singh, Shivalika and Nan, Yiyang and Wang, Alex and D'Souza, Daniel and Kapoor, Sayash and {\"U}st{\"u}n, Ahmet and Koyejo, Sanmi and Deng, Yuntian and Longpre, Shayne and Smith, Noah A. and Ermis, Beyza and Fadaee, Marzieh and Hooker, Sara},
+  booktitle     = {Advances in Neural Information Processing Systems 38, Datasets and Benchmarks Track},
   year          = {2025},
   eprint        = {2504.20879},
   archiveprefix = {arXiv},
@@ -553,17 +606,28 @@
 @inproceedings{betterbench2024,
   title     = {{BetterBench}: Assessing {AI} Benchmarks, Uncovering Issues, and Establishing Best Practices},
   author    = {Reuel, Anka and Hardy, Amelia and Smith, Chandler and Lamparth, Max and Hardy, Malcolm and Kochenderfer, Mykel J.},
-  booktitle = {Advances in Neural Information Processing Systems 37},
+  booktitle = {Advances in Neural Information Processing Systems 37, Datasets and Benchmarks Track},
   year      = {2024},
   note      = {Spotlight},
   url       = {https://arxiv.org/abs/2411.12990}
 }
 
-@misc{kapoor2024agents,
+@article{kapoor2024agents,
   title   = {{AI} Agents That Matter},
   author  = {Kapoor, Sayash and Stroebl, Benedikt and Siegel, Zachary S. and Nadgir, Nitya and Narayanan, Arvind},
-  year    = {2024},
+  journal = {Transactions on Machine Learning Research},
+  year    = {2025},
   eprint        = {2407.01502},
   archiveprefix = {arXiv},
-  url     = {https://arxiv.org/abs/2407.01502}
+  url     = {https://openreview.net/forum?id=Zy4uFzMviZ}
+}
+
+% ---------- Companion paper ----------
+
+@misc{toca2026sharpearena,
+  title        = {{SharpeArena: A Deterministic Point-in-Time Evaluation Sandbox and Reinforcement-Learning Environment for Trading Agents}},
+  author       = {Toca, Tiberiu},
+  year         = {2026},
+  howpublished = {Preprint, \url{https://github.com/general-liquidity/sharpearena}},
+  note         = {Version 0.29.0}
 }
