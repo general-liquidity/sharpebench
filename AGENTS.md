@@ -66,7 +66,9 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test --workspace --exclude xtask   # xtask needs OpenSSL dev files
 python -m unittest paper/src/test_provenance.py
 python -m unittest paper/src/test_sweep_grid.py
+python -m unittest paper/src/test_kernel_stats.py
 python paper/src/check-provenance.py
+python scripts/check-lean-scope.py
 ```
 
 The full workspace, `cargo deny`, live Docker, mdBook, the three OS matrices
