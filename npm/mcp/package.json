@@ -31,12 +31,12 @@
   },
   "dependencies": {
     "@general-liquidity/sharpebench": "^0.26.0",
-    "@modelcontextprotocol/sdk": "^1.0.0",
-    "zod": "^4.0.0"
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@types/node": "^24.0.0",
-    "typescript": "^5.6.0"
+    "@types/node": "^26.6.0",
+    "typescript": "^7.0.2"
   },
   "engines": {
     "node": ">=18"
