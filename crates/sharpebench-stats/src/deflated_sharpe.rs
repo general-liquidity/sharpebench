@@ -90,9 +90,10 @@ pub(crate) enum Track {
     Observed,
     /// A stationary-bootstrap resample of an observed track that was not
     /// refused. A resample that happens to draw one repeated value (a sparse
-    /// track resampled inside its flat stretches) keeps the Sharpe of 0 it has
-    /// always been given: refusing it would withdraw the whole interval of an
-    /// estimable track, and it leaves interval bytes unchanged.
+    /// track resampled inside its flat stretches) keeps the convention it has
+    /// always had, a Sharpe of 0 when its computed standard deviation is zero:
+    /// refusing it would withdraw the whole interval of an estimable track, and
+    /// keeping it leaves interval bytes unchanged.
     Resample,
 }
 
