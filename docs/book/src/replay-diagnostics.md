@@ -16,9 +16,12 @@ either, the verification is printed unchanged and the diagnostics follow it:
 under `--json` as a `replay_diagnostics` member beside the verification fields,
 in the human output as a block after the verification. The diagnostics replay
 under the data and cost model the strict path has just bound the trajectory to
-(the typical profile, for trajectories the CLI captures), so they refuse
-`--allow-unbound-trajectory` and `--reexecute`. A malformed flag exits 2 before
-any file is read; a trajectory the diagnostics cannot replay (see below) exits 1.
+(for trajectories the CLI captures, the typical profile with any
+`--short-borrow-bps` rate), so they refuse `--allow-unbound-trajectory` and
+`--reexecute`. They also refuse `--diagnostics sizing-response`, whose output
+nests the verification in a different shape; request the two separately. A
+malformed or contradictory flag exits 2 before any file is read; a trajectory
+the diagnostics cannot replay (see below) exits 1.
 
 The library functions are `timing_null` and `lagged_replay` in
 `sharpebench_sim::replay_nulls`. They take any `CostModel`.

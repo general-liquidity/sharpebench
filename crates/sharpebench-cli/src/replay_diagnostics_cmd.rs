@@ -8,7 +8,9 @@
 //! human output as a block after the verification. The diagnostics replay the
 //! trajectory under the same data and cost model the strict path just bound it
 //! to, and they need that binding, so they refuse `--allow-unbound-trajectory`
-//! and `--reexecute`. A malformed flag is refused before anything is read.
+//! and `--reexecute`. They also refuse `--diagnostics`, whose report nests the
+//! verification under a different shape; request the two separately. A
+//! malformed flag is refused before anything is read.
 
 use std::process::ExitCode;
 
@@ -79,7 +81,7 @@ pub(crate) fn requested(args: &[String]) -> Result<Option<Requested>, String> {
     if timing.is_none() && lags.is_none() {
         return Ok(None);
     }
-    for flag in ["--allow-unbound-trajectory", "--reexecute"] {
+    for flag in ["--allow-unbound-trajectory", "--reexecute", "--diagnostics"] {
         if args.iter().any(|arg| arg == flag) {
             return Err(format!(
                 "--timing-null and --lagged-replay replay the strictly bound trajectory; they cannot be combined with {flag}"

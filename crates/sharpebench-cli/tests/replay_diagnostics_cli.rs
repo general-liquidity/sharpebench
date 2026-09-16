@@ -316,6 +316,14 @@ fn malformed_or_contradictory_flags_are_refused_before_reading() {
             "--timing-null",
             "--reexecute",
         ],
+        vec![
+            "verify-trajectory",
+            "missing.json",
+            "--lagged-replay",
+            "1",
+            "--diagnostics",
+            "sizing-response",
+        ],
     ] {
         let out = fx.cli(&args);
         assert_eq!(out.status.code(), Some(2), "{args:?}: {out:?}");
