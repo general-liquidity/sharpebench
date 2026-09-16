@@ -1,4 +1,9 @@
-//! Economic-rationality litmus tests (after EconEvals).
+//! Economic-rationality litmus tests.
+//!
+//! The name follows EconEvals (Fish et al.), whose litmus tests score an LLM's
+//! choice behaviour together with a reliability score for its coherence. The two
+//! checks here, first-order dominance and the money pump, are standard
+//! revealed-preference tests; EconEvals does not contain either of them.
 //!
 //! A high return can come from a model that is economically *irrational* — one
 //! that pays more for a strictly worse deal, or holds intransitive preferences a
