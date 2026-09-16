@@ -2439,6 +2439,10 @@ mod tests {
             ),
         );
         let elsewhere = entry(7, with_census(search(12, 9), identity_of(12), true, &[], 2));
+        let running = entry(
+            8,
+            json!({"schema_version": 2, "evidence_class": STRATEGY_EVIDENCE_CLASS, "status": "running"}),
+        );
         let journal = [
             first.clone(),
             unconsulted,
@@ -2447,12 +2451,14 @@ mod tests {
             second.clone(),
             consulted_failure.clone(),
             elsewhere,
+            running,
         ];
         let report = verify_test_split_census(&journal).unwrap();
-        assert_eq!(report.records, 7);
+        assert_eq!(report.records, 8);
+        // Neither completed nor failed: counted in neither.
         assert_eq!(report.completed_records, 3);
         assert_eq!(report.failed_records, 3);
-        assert_eq!(report.unidentified_records, 2);
+        assert_eq!(report.unidentified_records, 3);
         assert_eq!(report.declared_censuses_verified, 4);
         let shared = canonical_sha256(&identity_of(10)).unwrap();
         let group = report
@@ -2500,6 +2506,7 @@ mod tests {
                 (5, true, true, 6, true),
                 (6, true, true, 5, true),
                 (7, true, true, 9, true),
+                (8, false, false, 0, false),
             ]
         );
         assert_eq!(report.journal[0].schema_version, Some(2));
