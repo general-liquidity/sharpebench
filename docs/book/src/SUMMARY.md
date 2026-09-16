@@ -11,6 +11,7 @@
   - [Lifecycle-certified rank mode](lifecycle-certified.md)
   - [Regime-conditional comparison](methodology-regime.md)
   - [Candidate lineage diagnostics](candidate-lineage.md)
+  - [Timing-luck floor](timing-luck.md)
 - [Prospective forecast quality](forecast-quality.md)
 - [The simulator](simulator.md)
 - [Options pricing and payoff risk](options-risk.md)
