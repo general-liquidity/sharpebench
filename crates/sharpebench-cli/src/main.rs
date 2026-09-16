@@ -2660,6 +2660,19 @@ fn run_verify_trajectory(args: &[String], json: bool) -> ExitCode {
         return ExitCode::from(2);
     }
     let reexecute = args.iter().any(|arg| arg == "--reexecute");
+    // `--diagnostics sizing-response` is opt-in, as on `score`. Absent, the
+    // output below is the verification alone, byte for byte.
+    let sizing = match sizing_response_request(args) {
+        Ok(request) => request,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    if reexecute && sizing.is_some() {
+        eprintln!("error: --diagnostics reads the strict replay; request it without --reexecute");
+        return ExitCode::from(2);
+    }
     if !reexecute
         && ["--cmd", "--http"]
             .iter()
@@ -2676,19 +2689,6 @@ fn run_verify_trajectory(args: &[String], json: bool) -> ExitCode {
         eprintln!(
             "error: --reexecute requires the strict trajectory contract and cannot be combined with --allow-unbound-trajectory"
         );
-        return ExitCode::from(2);
-    }
-    // `--diagnostics sizing-response` is opt-in, as on `score`. Absent, the
-    // output below is the verification alone, byte for byte.
-    let sizing = match sizing_response_request(args) {
-        Ok(request) => request,
-        Err(error) => {
-            eprintln!("error: {error}");
-            return ExitCode::from(2);
-        }
-    };
-    if reexecute && sizing.is_some() {
-        eprintln!("error: --diagnostics reads the strict replay; request it without --reexecute");
         return ExitCode::from(2);
     }
     let text = match std::fs::read_to_string(&args[2]) {
