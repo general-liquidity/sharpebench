@@ -48,6 +48,7 @@ These are implementation audits and design ledgers, not user instructions.
 | Topic | Document |
 |---|---|
 | Cross-benchmark architecture review | [81 source trees, 94 papers and boards](BENCHMARK_ARCHITECTURE_AUDIT.md) |
+| How trading-method papers evaluate, and what the products took from them | [76 papers](TRADING_LITERATURE_AUDIT.md) |
 | Suite audit and complete repair checklist | [7 September 2026 checkpoint](audits/2026-09-07/README.md) |
 
 Package-specific READMEs remain beside the Rust crates, Python distribution,
