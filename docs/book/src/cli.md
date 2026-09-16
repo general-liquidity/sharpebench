@@ -313,6 +313,21 @@ census does not move a score, the controls carry no score field, and the binding
 is provenance beside a result; none of them reaches the gate, eligibility or the
 rank.
 
+## `timing-luck`
+
+```bash
+sharpebench timing-luck --offsets <k> [--data <csv>] [--periods-per-year N] [--short-borrow-bps <bps>] [--json]
+```
+
+Reruns `run`'s reference rows with every window start shifted by 0 to k-1 bars,
+each shifted window k-1 bars shorter than declared so that it stays inside its
+declared window, and reports how far their Sharpe and deflated Sharpe move, per window and over
+all windows, with the number of offsets and windows behind each figure. It
+measures how much of a result a schedule offset alone can move, without any
+external entrant or model, so it is a property of the protocol and the dataset.
+The report carries `rank_input: false`; `--cmd`, `--image` and `--http` are
+refused, and `run` output is unchanged. See [Timing luck](timing-luck.md).
+
 ## `score`
 
 Ranks a JSON field of pre-computed submissions (see
