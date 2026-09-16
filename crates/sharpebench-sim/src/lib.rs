@@ -14,6 +14,7 @@ pub mod data;
 pub mod engine;
 pub mod env;
 pub mod external;
+pub mod sizing_response;
 pub mod trajectory;
 pub mod transport;
 pub mod windows;
@@ -26,6 +27,11 @@ pub use env::{EnvState, Scenario, StepInfo, StepResult, TradingEnv};
 pub use external::{
     agent_env_identity, effective_agent_env_identity, is_credential_name, ExternalAgent, HttpAgent,
     AGENT_ENV_PASSTHROUGH, AGENT_ENV_SECRET,
+};
+pub use sizing_response::{
+    exposure_volatility_pairs, sizing_response, ExposurePair, PairCensus, QuintileMedians,
+    RankCorrelation, SizingResponse, SizingResponseConfig, SizingResponseError, SizingUnavailable,
+    VolatilityQuintile, SIZING_RESPONSE_ID,
 };
 pub use trajectory::{
     regrade_submission, replay_run, replay_submission, run_backtest_capture, EvaluatorIdentity,
