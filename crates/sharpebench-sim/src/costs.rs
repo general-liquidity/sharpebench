@@ -35,6 +35,22 @@ pub struct CostModel {
     /// byte-identical to the fee/slippage/impact model; see [`ExecutionNoise`].
     #[serde(default)]
     pub noise: Option<ExecutionNoise>,
+    /// Opt-in per-step borrow cost (bps) charged on the full notional of every
+    /// short position, whatever the book's gross exposure. [`financing_bps`]
+    /// only reaches gross exposure above 1x NAV, so without this a fully short,
+    /// unlevered book carries for free. The two charges are separate and add
+    /// up. Zero (the default) charges nothing and leaves every fill, the
+    /// serialized model and its digest exactly as they were before the field
+    /// existed: a zero value is omitted from the JSON and reads back as zero
+    /// when absent.
+    ///
+    /// [`financing_bps`]: CostModel::financing_bps
+    #[serde(default, skip_serializing_if = "is_zero_bps")]
+    pub short_borrow_bps: f64,
+}
+
+fn is_zero_bps(bps: &f64) -> bool {
+    *bps == 0.0
 }
 
 impl Default for CostModel {
@@ -47,6 +63,7 @@ impl Default for CostModel {
             max_participation: f64::INFINITY,
             trf_cost: None,
             noise: None,
+            short_borrow_bps: 0.0,
         }
     }
 }
@@ -131,11 +148,16 @@ impl ExecutionNoise {
 }
 
 impl CostModel {
-    /// Reject malformed optional execution noise at the public simulation
-    /// boundary. A config without noise remains backwards compatible.
+    /// Reject malformed optional execution noise and a malformed short borrow
+    /// rate at the public simulation boundary. A config without noise or borrow
+    /// remains backwards compatible. A negative borrow rate would pay an agent
+    /// for shorting, so it is refused rather than read as a rebate.
     pub fn validate(&self) -> Result<(), String> {
         if let Some(noise) = self.noise {
             noise.validate()?;
+        }
+        if !self.short_borrow_bps.is_finite() || self.short_borrow_bps < 0.0 {
+            return Err("short_borrow_bps must be finite and >= 0".to_string());
         }
         Ok(())
     }
@@ -234,6 +256,7 @@ impl CostProfile {
                     max_participation: f64::INFINITY,
                     trf_cost: None,
                     noise: None,
+                    short_borrow_bps: 0.0,
                 },
                 decision_delay_bars: 0,
             },
@@ -250,6 +273,7 @@ impl CostProfile {
                     max_participation: 0.1,
                     trf_cost: None,
                     noise: None,
+                    short_borrow_bps: 0.0,
                 },
                 decision_delay_bars: 2,
             },
@@ -269,6 +293,14 @@ impl CostProfile {
 /// full investment.
 pub fn financing_cost_frac(financing_bps: f64, gross_exposure: f64) -> f64 {
     financing_bps / 10_000.0 * (gross_exposure - 1.0).max(0.0)
+}
+
+/// Per-step short borrow cost as a fraction of NAV: `short_borrow_bps` applied
+/// to the whole short exposure (the absolute value of every short position,
+/// over NAV). Unlike [`financing_cost_frac`] it has no 1x threshold, so an
+/// unlevered short book pays it. Zero for a book with no short exposure.
+pub fn short_borrow_cost_frac(short_borrow_bps: f64, short_exposure: f64) -> f64 {
+    short_borrow_bps / 10_000.0 * short_exposure.max(0.0)
 }
 
 /// Apply the liquidity cap to a desired trade value: an order is clamped to
@@ -487,6 +519,115 @@ mod tests {
         // The new field is opt-in: the default model is unchanged, and an explicit
         // `None` is indistinguishable from the default for every other field.
         assert_eq!(CostModel::default().trf_cost, None);
+    }
+
+    #[test]
+    fn short_borrow_bites_on_every_short_dollar_without_a_threshold() {
+        assert_eq!(short_borrow_cost_frac(100.0, 0.5), 0.005);
+        assert_eq!(short_borrow_cost_frac(100.0, 1.0), 0.01);
+        assert_eq!(short_borrow_cost_frac(100.0, 0.0), 0.0);
+        assert_eq!(short_borrow_cost_frac(100.0, -0.5), 0.0);
+        assert_eq!(short_borrow_cost_frac(0.0, 0.5), 0.0);
+        // The same unlevered book pays no leverage financing.
+        assert_eq!(financing_cost_frac(100.0, 0.5), 0.0);
+    }
+
+    #[test]
+    fn short_borrow_validation_boundary_refuses_a_rebate_or_a_non_finite_rate() {
+        for bps in [
+            -f64::MIN_POSITIVE,
+            -0.5,
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ] {
+            let costs = CostModel {
+                short_borrow_bps: bps,
+                ..CostModel::default()
+            };
+            assert!(costs.validate().is_err(), "{bps} must be refused");
+        }
+        for bps in [0.0, -0.0, f64::MIN_POSITIVE, 25.0, f64::MAX] {
+            let costs = CostModel {
+                short_borrow_bps: bps,
+                ..CostModel::default()
+            };
+            assert!(costs.validate().is_ok(), "{bps} is a valid rate");
+        }
+    }
+
+    #[test]
+    fn a_negative_zero_borrow_rate_is_written_as_no_rate() {
+        let costs = CostModel {
+            short_borrow_bps: -0.0,
+            ..CostModel::default()
+        };
+        assert_eq!(
+            serde_json::to_string(&costs).unwrap(),
+            serde_json::to_string(&CostModel::default()).unwrap()
+        );
+    }
+
+    #[test]
+    fn named_profiles_charge_no_short_borrow() {
+        for profile in [
+            CostProfile::None,
+            CostProfile::Typical,
+            CostProfile::WorstCase,
+            CostProfile::Realistic,
+        ] {
+            assert_eq!(profile.resolve().costs.short_borrow_bps, 0.0);
+        }
+        assert_eq!(CostModel::default().short_borrow_bps, 0.0);
+    }
+
+    #[test]
+    fn a_zero_borrow_rate_leaves_the_serialized_cost_model_unchanged() {
+        // The exact bytes these models serialized to before the borrow field
+        // existed. A zero rate is omitted, so no cost file, bundle or fixture
+        // written from a default or named profile changes.
+        let pinned = [
+            (
+                CostModel::default(),
+                r#"{"fee_bps":2.0,"slippage_bps":3.0,"impact_bps":50.0,"financing_bps":5.0,"max_participation":null,"trf_cost":null,"noise":null}"#,
+            ),
+            (
+                CostProfile::None.resolve().costs,
+                r#"{"fee_bps":0.0,"slippage_bps":0.0,"impact_bps":0.0,"financing_bps":0.0,"max_participation":null,"trf_cost":null,"noise":null}"#,
+            ),
+            (
+                CostProfile::WorstCase.resolve().costs,
+                r#"{"fee_bps":10.0,"slippage_bps":15.0,"impact_bps":150.0,"financing_bps":20.0,"max_participation":0.1,"trf_cost":null,"noise":null}"#,
+            ),
+            (
+                CostProfile::Realistic.resolve().costs,
+                r#"{"fee_bps":2.0,"slippage_bps":3.0,"impact_bps":50.0,"financing_bps":5.0,"max_participation":null,"trf_cost":null,"noise":{"delay_prob":0.25,"min_fill_frac":0.5,"carry_floor":0.001,"queue_participation_ref":0.1}}"#,
+            ),
+        ];
+        for (costs, bytes) in pinned {
+            assert_eq!(serde_json::to_string(&costs).unwrap(), bytes);
+        }
+        // An absent field reads back as zero. (The derived deserializer cannot
+        // read the `null` an unlimited cap is written as, so this model is capped.)
+        let stressed = serde_json::to_string(&CostProfile::WorstCase.resolve().costs).unwrap();
+        let read: CostModel = serde_json::from_str(&stressed).unwrap();
+        assert_eq!(read.short_borrow_bps, 0.0);
+    }
+
+    #[test]
+    fn a_set_borrow_rate_is_serialized_and_read_back() {
+        let costs = CostModel {
+            max_participation: 0.5,
+            short_borrow_bps: 25.0,
+            ..CostModel::default()
+        };
+        let text = serde_json::to_string(&costs).unwrap();
+        assert!(
+            text.ends_with(r#","noise":null,"short_borrow_bps":25.0}"#),
+            "{text}"
+        );
+        let read: CostModel = serde_json::from_str(&text).unwrap();
+        assert_eq!(read.short_borrow_bps, 25.0);
     }
 
     #[test]

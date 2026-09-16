@@ -36,15 +36,16 @@ shape (it is not market data).
 
 Long format: a header row containing an `agent` (or `agent_id`) column, a
 returns column (`return`, `returns` or `ret`; otherwise the first remaining
-column), and optionally a `run` column. One row per period. Rows group into
-runs per agent; without a `run` column each agent gets a single pooled run.
-Agents and runs keep first-appearance order.
+column), and optionally a `run` column, a `seed` column and a period column
+(`period`, `period_id`, `date` or `timestamp`). One row per period. Rows group
+into runs per agent, run and seed; without a `run` column each agent gets a
+single pooled run per seed. Agents and runs keep first-appearance order.
 
 ```
-agent,run,return
-gpt-x,r0,0.0012
-gpt-x,r0,-0.0004
-claude-y,r0,0.0008
+agent,run,seed,period,return
+gpt-x,r0,0,2025-01-02,0.0012
+gpt-x,r0,0,2025-01-03,-0.0004
+claude-y,r0,0,2025-01-02,0.0008
 ...
 ```
 
@@ -72,6 +73,30 @@ In a wide CSV with a period column, each return retains its own period ID.
 A missing return does not erase the column's date axis. Keyed scoring refuses
 columns whose retained periods differ, even if their lengths happen to match.
 Without period IDs, positional alignment remains the caller's responsibility.
+
+A period ID names one observation of one run, so a period repeated within a
+run is refused rather than counted twice. Counted twice, that period's return
+would enter the mean, the variance, the probabilistic Sharpe sample length and
+the bootstrap as two observations. The import refuses, and writes no output,
+when:
+
+- a long-format row repeats the agent, run, seed and period of an earlier row.
+  This applies with or without a `run` column, because without one the rows
+  still pool into one run per agent and seed;
+- a wide-format row repeats the value in the leading period column, even when
+  the repeated row leaves some returns blank.
+
+The error names the repeating row, the earlier row it repeats and the period.
+An intraday export labelled by date only repeats its dates and is refused:
+label each bar with a timestamp. The same period in a different agent, run or
+seed is part of the grid, not a repeat.
+
+`score --require-run-keys` applies the same rule to a field that did not come
+through the import. A run whose `periods` list names one period twice is
+refused with the agent, the cell, the period and both indices. The check runs
+on each run before periods are compared across agents, so the field is
+refused even when every agent repeats the same period, or when only one agent
+declares periods at all.
 
 ## What the re-score can and cannot claim
 

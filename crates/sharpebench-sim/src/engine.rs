@@ -363,6 +363,18 @@ pub(crate) fn step_once(
             .sum::<f64>()
             / nav_now;
         book.cash -= crate::costs::financing_cost_frac(costs.financing_bps, gross) * nav_now;
+        // Short borrow: the opt-in carry on every short dollar, which the 1x
+        // threshold above never reaches for an unlevered short book. A zero
+        // rate skips this block, so the default path is untouched.
+        if costs.short_borrow_bps != 0.0 {
+            let short = symbols
+                .iter()
+                .map(|s| (-(book.shares[s] * price(data, s, t))).max(0.0))
+                .sum::<f64>()
+                / nav_now;
+            book.cash -=
+                crate::costs::short_borrow_cost_frac(costs.short_borrow_bps, short) * nav_now;
+        }
     }
 
     // daily return = post-trade NAV vs the prior step's NAV (captures the price
@@ -661,6 +673,7 @@ mod tests {
             max_participation: f64::INFINITY,
             trf_cost: None,
             noise: None,
+            short_borrow_bps: 0.0,
         };
         let plain = run_backtest(&base, &mut BuyAndHold, w, 0, no_costs);
         let div = run_backtest(&paying, &mut BuyAndHold, w, 0, no_costs);
@@ -994,6 +1007,7 @@ mod tests {
             max_participation: f64::INFINITY,
             trf_cost: None,
             noise: None,
+            short_borrow_bps: 0.0,
         };
         let decision = Decision {
             orders: vec![
