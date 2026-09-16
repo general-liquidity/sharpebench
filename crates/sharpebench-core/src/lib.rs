@@ -113,10 +113,12 @@ pub use evidence_coverage::{
     COMPOSITE_SCORE_INVENTORY, REDACTED, RUN_PROVENANCE_INVENTORY,
 };
 pub use forecast::{
-    analyze_forecast_quality, parse_forecast_evidence, AgentForecastSummary, BinaryCalibration,
-    CalibrationBin, CommonSupport, ConfidenceCalibration, ContractDigestEncodingMismatch,
-    ContractDigestVersion, DistributionCalibration, ForecastAnalysisConfig, ForecastError,
-    ForecastEvidence, ForecastQualityReport, MetricMean, PairwiseForecastComparison,
+    analyze_forecast_quality, parse_forecast_evidence, AgentForecastSummary,
+    AgentUnresolvedSupport, BinaryCalibration, CalibrationBin, CommonSupport,
+    ConfidenceCalibration, ContractDigestEncodingMismatch, ContractDigestVersion,
+    DistributionCalibration, ForecastAnalysisConfig, ForecastError, ForecastEvidence,
+    ForecastQualityReport, MetricMean, PairwiseForecastComparison, SettlementStatusDisagreement,
+    SupportGap,
 };
 pub use greeks::{
     bs_greeks, bs_price, classify_greeks_risk, classify_payoff_tail, portfolio_greeks, Greeks,
