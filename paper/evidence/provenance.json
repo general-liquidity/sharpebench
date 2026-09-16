@@ -179,7 +179,7 @@
       "sha256": "1e025ac30099de23ae8455f20ae5441b557e924870d0e1475c7508512908ec0d"
     }
   ],
-  "generated_at_head": "6c36f0645e64a7dcfb501795e71e73597c454dc6",
+  "generated_at_head": "a6dbf3db8efdef71c3eb23be0b18533167824259",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -327,7 +327,7 @@
     },
     {
       "path": "crates/sharpebench-cli/src/main.rs",
-      "sha256": "300970cfd407af5a4cb11f1cc6849f79132235d9e8c3ed9ea7e4394d06e7fae5"
+      "sha256": "0bec63f484ae2c192d10710b67e9db924b36b219cd9a82e1691cc27e518e138b"
     },
     {
       "path": "crates/sharpebench-cli/src/regrade_cmd.rs",
@@ -414,6 +414,10 @@
       "sha256": "41aae7cba723b0b37bead09bdcdfff729d173a9b37a8528df1220533b6cbee58"
     },
     {
+      "path": "crates/sharpebench-cli/tests/tail_risk_cli.rs",
+      "sha256": "31c09776123f13739be6670ee18920594e66d8b64a31c8dfcc677ba6b9142fee"
+    },
+    {
       "path": "crates/sharpebench-core/Cargo.toml",
       "sha256": "b1587a0a9099ad3dd4005cf4adf5d5e40df380e296b71451216cf133ffc6e92b"
     },
@@ -451,7 +455,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/composite.rs",
-      "sha256": "bc4528947d7a77dc11fc6f11fd48e8c3a0727b88050484d18769fd6c8ce038b2"
+      "sha256": "8a7682f9b2403848db8aca4ccdecb0f2d7f0bf0b6a6886e71d4443e622ec5b52"
     },
     {
       "path": "crates/sharpebench-core/src/correlation.rs",
@@ -491,7 +495,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/lib.rs",
-      "sha256": "ed2ca9815c078837df96fec6fe249eda137cccb575cea35a74967aeffe1348d8"
+      "sha256": "1e6f3e153a71d374c2866c8648d84216bfb923b4bbae51f53f5c7cc5cec10704"
     },
     {
       "path": "crates/sharpebench-core/src/oos.rs",
@@ -535,7 +539,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/sharpe_diagnostics.rs",
-      "sha256": "1fe3db0dc2e2f1866940555f5b9d7f26974d7263c23af9ab60f44c857bdc7b67"
+      "sha256": "3db6c8d8d7b85e037bb46c60af208dddf07ecfc01625fa7efb743b5e776d9471"
     },
     {
       "path": "crates/sharpebench-core/src/suite_controls.rs",
@@ -568,6 +572,10 @@
     {
       "path": "crates/sharpebench-core/tests/greeks_boundaries.rs",
       "sha256": "9d0d4c5ac8321463435a3f245fe1692e11a1d1dbc4ccd0295397f4a7b9fd7794"
+    },
+    {
+      "path": "crates/sharpebench-core/tests/pareto_refused_tracks.rs",
+      "sha256": "45ba39da22990754b26035fa8a666c0f4d6722002ed54747c3f1105891c64317"
     },
     {
       "path": "crates/sharpebench-edge/Cargo.toml",
@@ -931,7 +939,7 @@
     },
     {
       "path": "crates/sharpebench-stats/src/lib.rs",
-      "sha256": "c6bfa71c5d7992fb1c0b12fcbdccfe3754f073465302948182b9e7dcec5a5e9a"
+      "sha256": "39bd46718692cfd241f3e3b0a59e47916c717bd57c7c9fe47810633e7a85bd00"
     },
     {
       "path": "crates/sharpebench-stats/src/opt_in_diagnostics.rs",
@@ -958,6 +966,10 @@
       "sha256": "d9d0b68706f604e84221f95b5fb5a9cdf69b0a06b47905dcd557c785b4640b2a"
     },
     {
+      "path": "crates/sharpebench-stats/src/tail_risk.rs",
+      "sha256": "19e2e745502afe7b8cf4b81bbb61142b615e9e4b7e575c42e2802a65bec484c8"
+    },
+    {
       "path": "crates/sharpebench-stats/src/validation.rs",
       "sha256": "e4615b3d177fb153482d06355f1cef925d9a2eadaf8a860bff8aa73546582306"
     },
@@ -980,6 +992,10 @@
     {
       "path": "crates/sharpebench-stats/tests/special_function_bits.rs",
       "sha256": "3e30205941f5f8d6fa3ed305938c53bde38f0e24f89e89a45a68a49e9adaac29"
+    },
+    {
+      "path": "crates/sharpebench-stats/tests/tail_risk_boundaries.rs",
+      "sha256": "e315d9c1edcc813c5b5306eef3cb094c8ae56c7ffd524e55eb98889481e28ab6"
     },
     {
       "path": "crates/sharpebench-wasm/Cargo.toml",
@@ -1271,5 +1287,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "8abf3c5eba7f47dd9f1c06e3e98141a93ee13b97d20a4b1dab42076fed8120cb"
+  "source_snapshot_sha256": "384067bc584a1e2ffeb8e6a1e847ced5dd87e894bf7a79d550c9b44768ae82d3"
 }
