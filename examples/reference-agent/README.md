@@ -92,8 +92,8 @@ ordinary hold.
 - `confidence` ∈ `[0, 1]` is your optional stated conviction that the decision
   pays off. It is **scored for calibration** (Brier) against the next step's
   return, the first return the new holdings earn, so report it honestly:
-  claiming 0.9 on coin-flips is penalized. Omit it to state nothing: no value
-  is filled in, and the decision adds no calibration pair.
+  claiming 0.9 on coin-flips is penalized. Omit it to state nothing: the
+  harness fills in no value and the decision adds no calibration pair.
 - `reasoning` is optional and captured for auditability.
 
 Omitted symbols are left untouched. A `Decision` with no orders is a valid hold.

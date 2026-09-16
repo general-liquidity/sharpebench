@@ -221,8 +221,9 @@ pub struct Order {
     pub target_weight: f64,
     /// Stated conviction in [0, 1]; scored for calibration. `None` when the
     /// agent states none: an omitted confidence stays absent on the wire and in
-    /// a captured trajectory, is never replaced by a default value, and adds no
-    /// calibration pair. A present key must carry a number; `null` is refused.
+    /// a captured trajectory, no default value replaces it, and it adds no
+    /// calibration pair. A present key must carry a number; deserialization
+    /// refuses `null`.
     #[serde(
         default,
         deserialize_with = "stated_confidence",

@@ -81,7 +81,7 @@
           "type": "number",
           "minimum": 0,
           "maximum": 1,
-          "description": "Stated conviction in [0, 1]; scored for calibration. Optional: omit it when no conviction is stated. An omitted confidence has no default value; it stays absent and adds no calibration pair. A decision step is paired with its outcome only when at least one of its orders states a confidence, using the mean over the orders that do."
+          "description": "Stated conviction in [0, 1]; scored for calibration. Optional: omit it to state no conviction. An omitted confidence has no default value and adds no calibration pair. The simulator pairs a decision with whether the next step's return is positive only when at least one of its orders states a confidence, using the mean over the orders that do."
         },
         "rationale": {
           "type": "string",

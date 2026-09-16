@@ -432,11 +432,11 @@ pub fn run_backtest(
         let out = step_once(data, &symbols, &mut book, &costs, seed, t, &decision);
         returns.push(out.ret);
         // The return booked at step t is the price move on the holdings decision
-        // t-1 chose; decision t adds only its own trading cost here. A stated
-        // confidence is therefore paired with the next step's return, and the
-        // window's final decision, whose outcome lies outside the window, adds
-        // no pair. A decision that stated no confidence adds none either, so
-        // `confidences` and `outcomes` align with each other, not with `returns`.
+        // t-1 chose, plus decision t's own trading cost. A stated confidence
+        // waits for the next step's return, and the window's final decision,
+        // whose outcome lies outside the window, adds no pair. A decision that
+        // stated no confidence adds none either, so `confidences` and
+        // `outcomes` align with each other and not with `returns`.
         if let Some(confidence) = awaiting_outcome {
             confidences.push(confidence);
             outcomes.push(out.ret > 0.0);
