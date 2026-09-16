@@ -81,6 +81,36 @@ pub enum Settlement {
     Released { reason: ReleaseReason },
 }
 
+/// Why a provider stopped writing one answer, reduced to four classes. The
+/// adapter hands the host a normalized `finish_reason` string; the host keeps
+/// only its class, so no provider-chosen text reaches the journal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FinishClass {
+    /// `"stop"`: the model ended the answer itself.
+    Stop,
+    /// `"length"`: the output token bound cut the answer off.
+    Length,
+    /// Any other reason the adapter reported, such as a content filter or a
+    /// tool call. Not a clean stop.
+    Other,
+    /// The answer carried no reason at all. Unknown, never read as `stop`.
+    Absent,
+}
+
+impl FinishClass {
+    /// Exact matching on the normalized vocabulary. A provider spelling the
+    /// adapter did not normalize, such as `max_tokens`, is `Other`, not a guess.
+    pub fn of(reason: Option<&str>) -> Self {
+        match reason {
+            None => Self::Absent,
+            Some("stop") => Self::Stop,
+            Some("length") => Self::Length,
+            Some(_) => Self::Other,
+        }
+    }
+}
+
 /// One append-only journal record.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "record", rename_all = "snake_case")]
@@ -97,6 +127,12 @@ pub enum JournalRecord {
     },
     Settled {
         ordinal: u32,
+        /// Present on the settlement of an answer the host parsed. Absent on
+        /// every other settlement, and on answers settled by a journal written
+        /// before the field existed, which keeps such records byte for byte
+        /// what they were.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        finish_reason: Option<FinishClass>,
         #[serde(flatten)]
         settlement: Settlement,
     },
@@ -180,6 +216,25 @@ pub struct SpendState {
     pub overspent_usd_nanos: u128,
     /// Calls whose observed price exceeded their reservation.
     pub overspent_calls: u32,
+}
+
+/// Parsed provider answers counted by why they stopped. A fold over the
+/// settlements like [`SpendState`], and rank-neutral like every gateway figure.
+/// Only answers the host parsed are counted, so the total is at most
+/// `priced_calls + unknown_calls`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct FinishReasonCounts {
+    pub stop: u32,
+    /// Answers the output token bound truncated. A truncated answer can still
+    /// parse into a decision, or be read by the entrant as an abstention.
+    pub length: u32,
+    pub other: u32,
+    /// Answers that carried no reason.
+    pub absent: u32,
+    /// Answers, priced or settled as `usage_absent`, whose settlement was
+    /// written before the journal recorded a reason. Their reason is unknown to
+    /// this record, which is different from the provider reporting none.
+    pub unrecorded: u32,
 }
 
 impl SpendState {
@@ -997,6 +1052,7 @@ impl GatewayJournal {
                 JournalRecord::Settled {
                     ordinal,
                     settlement,
+                    ..
                 } => {
                     if !reserved.contains(ordinal) {
                         return Err(invalid("a settlement names no reservation"));
@@ -1034,6 +1090,7 @@ impl GatewayJournal {
                 JournalRecord::Settled {
                     ordinal,
                     settlement,
+                    ..
                 } => {
                     let Some(index) = open.iter().position(|(open, _)| open == ordinal) else {
                         continue;
@@ -1113,8 +1170,51 @@ impl GatewayJournal {
     pub fn settle(&mut self, ordinal: u32, settlement: Settlement) {
         self.records.push(JournalRecord::Settled {
             ordinal,
+            finish_reason: None,
             settlement,
         });
+    }
+
+    /// Settle a call whose provider answer the host parsed, with the class of
+    /// the reason the answer stopped.
+    pub fn settle_answered(&mut self, ordinal: u32, settlement: Settlement, finish: FinishClass) {
+        self.records.push(JournalRecord::Settled {
+            ordinal,
+            finish_reason: Some(finish),
+            settlement,
+        });
+    }
+
+    /// Fold the settlements into counts by stop reason. Like [`Self::spend`],
+    /// nothing is stored: a resumed journal reports the reasons its earlier
+    /// process recorded.
+    pub fn finish_reasons(&self) -> FinishReasonCounts {
+        let mut counts = FinishReasonCounts::default();
+        for record in &self.records {
+            let JournalRecord::Settled {
+                finish_reason,
+                settlement,
+                ..
+            } = record
+            else {
+                continue;
+            };
+            let slot = match finish_reason {
+                Some(FinishClass::Stop) => &mut counts.stop,
+                Some(FinishClass::Length) => &mut counts.length,
+                Some(FinishClass::Other) => &mut counts.other,
+                Some(FinishClass::Absent) => &mut counts.absent,
+                None => match settlement {
+                    Settlement::Priced { .. }
+                    | Settlement::Unknown {
+                        reason: UnknownCostReason::UsageAbsent,
+                    } => &mut counts.unrecorded,
+                    _ => continue,
+                },
+            };
+            *slot = slot.saturating_add(1);
+        }
+        counts
     }
 
     /// Every observed call, priced once, as the rank-neutral summary the rest of
