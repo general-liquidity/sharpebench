@@ -488,6 +488,21 @@ capture exits 1 with `capture_transport_failure` and writes nothing, because a
 degraded transport would otherwise put the harness's holds into the trajectory
 as the entrant's decisions.
 
+## `decision-stability`
+
+```bash
+sharpebench decision-stability <traj.json>... [--data <csv>] [--short-borrow-bps <bps>] [--json]
+```
+
+Runs the strict `verify-trajectory` checks on each capture, replays the recorded
+decisions to recover the observation the engine showed at every step, and
+reports the share of steps at which replicate runs of one window that had seen
+the same observations so far decided differently. Steps whose observation
+history no other replicate shares are excluded and counted. A deterministic
+agent reports exactly zero; a single replicate is reported as unavailable, not
+as zero. The report carries `rank_input: false`. See
+[Decision stability](decision-stability.md).
+
 ## `rescore`
 
 `verify-trajectory` recomputes a score from one artifact the operator points it
