@@ -7,9 +7,17 @@
 use crate::data::Dataset;
 use crate::engine::Window;
 
-/// Generate disjoint-start walk-forward test windows of `test` length, stepping
-/// by `step`, after a `warmup` burn-in (so features have history). Each window is
-/// an out-of-sample slice `[start, start + test)`.
+/// Generate walk-forward test windows of `test` bars after a `warmup` burn-in
+/// (so features have history), moving each start `step` bars on from the last.
+/// Each window is an out-of-sample slice `[start, start + test)`.
+///
+/// The windows are disjoint only when `step >= test`; `step == test` makes them
+/// adjacent. With `step < test`, consecutive windows overlap by `test - step`
+/// bars: `walk_forward(365, 30, 45, 20)` returns `[30, 75)`, `[50, 95)`, and so
+/// on. Overlapping windows are a rolling view, not scoring evidence: strict
+/// trajectory verification (`sharpebench_harness::verify_trajectory_strict`)
+/// and the bound sweep runners (`sharpebench_harness::SweepContract`) refuse
+/// them through [`crate::trajectory::check_window_order`].
 pub fn walk_forward(n_days: usize, warmup: usize, test: usize, step: usize) -> Vec<Window> {
     let mut windows = Vec::new();
     if test == 0 || step == 0 {

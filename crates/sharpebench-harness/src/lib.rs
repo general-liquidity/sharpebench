@@ -948,6 +948,16 @@ pub fn verify_trajectory_strict(
             ));
         }
     }
+    let planned: Vec<Window> = contract
+        .windows
+        .iter()
+        .map(|window| Window {
+            start: window.start,
+            end: window.end,
+        })
+        .collect();
+    sharpebench_sim::trajectory::check_window_order(&planned)
+        .map_err(|refusal| format!("trajectory contract: {refusal}"))?;
     let unique_seeds: std::collections::BTreeSet<u64> = contract.seeds.iter().copied().collect();
     if unique_seeds.len() != contract.seeds.len() {
         return Err("trajectory contract repeats an execution seed".to_string());

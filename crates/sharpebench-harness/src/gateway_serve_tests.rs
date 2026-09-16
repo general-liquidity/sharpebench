@@ -619,6 +619,27 @@ fn a_budget_refusal_reaches_the_entrant_as_a_typed_error() {
     assert_eq!(provider.calls(), 3);
 }
 
+/// Overlapping windows are refused before the pair is admitted, so the refusal
+/// leaves neither a journal nor a checkpoint behind.
+#[test]
+fn overlapping_windows_are_refused_before_a_journal_is_written() {
+    let fixture = Fixture::new("overlap");
+    let checkpoint = fixture.checkpoint();
+    let journal = fixture.journal();
+    let overlapping = [Window { start: 20, end: 26 }, Window { start: 23, end: 29 }];
+    let mut sweep = fixture.sweep(&checkpoint, &journal);
+    sweep.windows = &overlapping;
+    let error = refusal(run_gateway_sweep(
+        sweep,
+        fixture.host(ScriptedProvider::answering("0.25"), budget(1_000_000, 100)),
+        |_, _, _| unreachable!("no cell runs over overlapping windows"),
+    ));
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput, "{error}");
+    assert!(error.to_string().contains("overlap"), "{error}");
+    assert!(!journal.exists(), "the refusal wrote no journal");
+    assert!(!checkpoint.exists(), "the refusal wrote no checkpoint");
+}
+
 /// The journal and the checkpoint are one record. Either one without the
 /// other, a journal from another sweep, and a changed route budget are all
 /// refused before any entrant runs.
