@@ -132,6 +132,12 @@ For every run, the verifier checks:
 - sequential step indices; and
 - observation identity equal to the frozen dataset date for that step.
 
+The declared windows must also be in time order with no bar in two windows;
+adjacent windows (`end` equal to the next `start`) are accepted. An overlap or
+a window listed before an earlier one is refused with a typed
+`WindowOrderError` naming both windows, because the pooled track would count
+the shared bars twice. See [pass^k reliability](methodology-pass-k.md).
+
 The replay score derives `execution_seeds_per_window` from the contract, so
 seed replicates remain replicates instead of becoming extra market-time
 observations. The intact capture and direct score are byte-identical under the

@@ -141,6 +141,31 @@ impl SweepContract {
     fn matches_execution(&self, windows: &[Window], seeds: &[u64], max_retries: u32) -> bool {
         self.matches_windows(windows) && self.seeds == seeds && self.max_retries == max_retries
     }
+
+    /// [`SweepContract::new`], refusing windows that overlap or are out of
+    /// time order (see [`sharpebench_sim::trajectory::WindowOrderError`]).
+    /// `new` itself does not check, but every bound sweep runner refuses such
+    /// a contract before it loads or writes a checkpoint, whichever way the
+    /// contract was built.
+    pub fn try_new(
+        identity: SweepIdentity,
+        windows: &[Window],
+        seeds: &[u64],
+        max_retries: u32,
+    ) -> Result<Self, sharpebench_sim::trajectory::WindowOrderError> {
+        sharpebench_sim::trajectory::check_window_order(windows)?;
+        Ok(Self::new(identity, windows, seeds, max_retries))
+    }
+
+    /// The contract's own windows, checked for order and overlap.
+    pub fn check_window_order(&self) -> Result<(), sharpebench_sim::trajectory::WindowOrderError> {
+        let windows: Vec<Window> = self
+            .windows
+            .iter()
+            .map(|&(start, end)| Window { start, end })
+            .collect();
+        sharpebench_sim::trajectory::check_window_order(&windows)
+    }
 }
 
 /// The one bound identity a comparison's arms are allowed to differ on.
@@ -992,6 +1017,9 @@ where
     // comparing them against the contract would compare them against
     // themselves. `run_resumable_sweep_bound` still makes the real comparison
     // against the values its caller supplied.
+    contract
+        .check_window_order()
+        .map_err(|refusal| std::io::Error::new(std::io::ErrorKind::InvalidInput, refusal))?;
     if !contract.matches_windows(windows) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
