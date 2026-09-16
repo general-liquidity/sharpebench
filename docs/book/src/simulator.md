@@ -36,7 +36,7 @@ the paper; the Rust identifier differs and is given beside it:
 |---|---|---|
 | `frictionless` | `CostProfile::None` | 0 / 0 / 0 / 0, no fill delay |
 | `typical` | `CostProfile::Typical` | 2 / 3 / 50 / 5 |
-| `stressed` | `CostProfile::WorstCase` | 10 / 15 / 150 / 20, 10% participation cap, two-bar delay |
+| `stressed` | `CostProfile::WorstCase` | 10 / 15 / 150 / 20, 10% participation cap; declares a two-bar decision delay that the backtest driver does not apply |
 | `realistic` | `CostProfile::Realistic` | typical, plus seeded fill delay, partial fills and queue-position slippage |
 
 `CostProfile::name()` is the one place that maps a variant to its reported name.
