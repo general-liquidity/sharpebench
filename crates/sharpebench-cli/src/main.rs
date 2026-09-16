@@ -922,7 +922,8 @@ fn run_verify(args: &[String], json: bool) -> ExitCode {
 }
 
 fn run_audit(json: bool) -> ExitCode {
-    let report = sharpebench_core::run_self_audit();
+    let report = sharpebench_core::run_self_audit()
+        .with_case(sharpebench_arena::forward_hindsight_oracle_case());
     if json {
         emit_json(&report);
     } else {

@@ -252,6 +252,8 @@ fn a_faulted_window_binds_its_plan_from_commitment_to_verify() {
         entry("beta", &artifact, "salt-b", &digest),
     ]);
     std::fs::write(fx.path("entries.json"), entries.to_string()).unwrap();
+    // No capture path applies a fault plan, so a faulted window is scored from
+    // supplied returns, under the noncertifying intake.
     let scored = fx.expect(
         0,
         &[
@@ -262,6 +264,7 @@ fn a_faulted_window_binds_its_plan_from_commitment_to_verify() {
             "w1",
             "data.csv",
             "entries.json",
+            "--allow-supplied-returns",
         ],
         None,
     );

@@ -6,8 +6,8 @@
 use std::path::{Path, PathBuf};
 
 use sharpebench_arena::{
-    verify_arena, Arena, RevealedEntry, SigningKey, WindowState, WindowStatus, BOARD_FILE,
-    BOARD_MD_FILE, FAULTED_WINDOW_SCHEMA_VERSION, STATE_FILE, WINDOWS_DIR, WINDOW_FILE,
+    verify_arena, Arena, IntakeOptions, RevealedEntry, SigningKey, WindowState, WindowStatus,
+    BOARD_FILE, BOARD_MD_FILE, FAULTED_WINDOW_SCHEMA_VERSION, STATE_FILE, WINDOWS_DIR, WINDOW_FILE,
     WINDOW_SCHEMA_VERSION,
 };
 use sharpebench_attest::{
@@ -50,9 +50,19 @@ fn open(arena: &mut Arena, id: &str, plan: Option<String>) -> Result<(), String>
     )
 }
 
+/// No capture path applies a fault plan, so these windows are scored from
+/// supplied returns, under the noncertifying intake.
+fn supplied() -> IntakeOptions<'static> {
+    IntakeOptions {
+        allow_supplied_returns: true,
+        reexecute: None,
+    }
+}
+
 fn entry(agent_id: &str, artifact: &str, plan: Option<String>) -> RevealedEntry {
     RevealedEntry {
-        submission: AgentSubmission {
+        agent_id: None,
+        submission: Some(AgentSubmission {
             agent_id: agent_id.to_string(),
             runs: vec![Run {
                 returns: (0..40).map(|i| 0.001 * (i as f64 + 1.0).sin()).collect(),
@@ -60,7 +70,8 @@ fn entry(agent_id: &str, artifact: &str, plan: Option<String>) -> RevealedEntry 
             }],
             in_sample_trials: 0,
             candidates: Vec::new(),
-        },
+        }),
+        capture: None,
         artifact_digest: artifact.to_string(),
         salt: format!("salt-{agent_id}"),
         fault_plan_sha256: plan,
@@ -167,7 +178,7 @@ fn a_plan_less_window_entry_and_header_carry_no_fault_field() {
         .contains("fault_plan"));
 
     arena
-        .reveal_and_score("w1", &write_dataset(&dir), &[plan_less])
+        .reveal_and_score_with("w1", &write_dataset(&dir), &[plan_less], supplied())
         .unwrap();
     let board = arena
         .publish("w1", &SigningKey::derive(b"fault-plan-key"))
@@ -195,10 +206,11 @@ fn a_faulted_window_binds_its_plan_through_to_the_signed_header() {
         Some(plan.as_str())
     );
     let scores = arena
-        .reveal_and_score(
+        .reveal_and_score_with(
             "w1",
             &write_dataset(&dir),
             &[entry("alpha", &artifact, Some(plan.clone()))],
+            supplied(),
         )
         .unwrap();
     assert_eq!(scores.len(), 1);
@@ -427,13 +439,14 @@ fn a_commitment_for_another_plan_is_refused_at_reveal() {
         arena.advance(reveal).unwrap();
 
         let scores = arena
-            .reveal_and_score(
+            .reveal_and_score_with(
                 "w1",
                 &write_dataset(&dir),
                 &[
                     entry("alpha", &artifact, window.clone()),
                     entry("beta", &artifact, window.clone()),
                 ],
+                supplied(),
             )
             .unwrap();
         assert_eq!(scores.len(), 1, "{tag}");
