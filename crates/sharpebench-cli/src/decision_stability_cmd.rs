@@ -10,16 +10,23 @@ use std::path::PathBuf;
 use sharpebench_core::{DecisionStabilityReport, StabilityCounts, StabilityRate};
 use sharpebench_harness::decision_stability::decision_stability_from_trajectories;
 use sharpebench_protocol::AgentTrajectory;
-use sharpebench_sim::CostModel;
 
-const USAGE: &str =
-    "usage: sharpebench decision-stability <traj.json> [<traj.json> ...] [--data <csv>] [--json]";
+const USAGE: &str = "usage: sharpebench decision-stability <traj.json> [<traj.json> ...] [--data <csv>] [--short-borrow-bps <bps>] [--json]";
 
 pub(crate) fn run(args: &[String], json: bool) -> i32 {
     let paths = match trajectory_paths(args) {
         Ok(paths) => paths,
         Err(error) => {
             eprintln!("error: {error}\n{USAGE}");
+            return 2;
+        }
+    };
+    // The replay must use the cost model the trajectories were captured
+    // under; the strict checks refuse any other one by its digest.
+    let costs = match crate::cost_model_from_args(args) {
+        Ok(costs) => costs,
+        Err(error) => {
+            eprintln!("error: {error}");
             return 2;
         }
     };
@@ -54,12 +61,7 @@ pub(crate) fn run(args: &[String], json: bool) -> i32 {
             return 1;
         }
     };
-    match decision_stability_from_trajectories(
-        &data,
-        &trajectories,
-        CostModel::default(),
-        Some(&runner),
-    ) {
+    match decision_stability_from_trajectories(&data, &trajectories, costs, Some(&runner)) {
         Ok(report) => {
             if json {
                 crate::emit_json(&report);
@@ -84,6 +86,9 @@ fn trajectory_paths(args: &[String]) -> Result<Vec<String>, String> {
         if arg == "--data" {
             rest.next()
                 .ok_or_else(|| "--data requires a CSV path".to_string())?;
+        } else if arg == "--short-borrow-bps" {
+            // The value is validated by `cost_model_from_args`.
+            rest.next();
         } else if arg.starts_with("--") {
             return Err(format!("unknown option `{arg}`"));
         } else {

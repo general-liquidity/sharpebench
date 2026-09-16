@@ -29,8 +29,10 @@ Every captured run is a replicate of its window, identified by
 `(window_start, window_end)`. The execution seeds of one capture are replicates
 of each other, and so are the same seeds in a second capture of the same agent.
 All trajectories must name the same agent, and each one must pass the strict
-checks of `verify-trajectory` against the resolved dataset, the default cost
-model and the running binary; the score those checks compute is discarded. A
+checks of `verify-trajectory` against the resolved dataset, the cost model and
+the running binary; the score those checks compute is discarded. The cost model
+is the default one unless `--short-borrow-bps` names the borrow rate the
+trajectories were captured under, as it must for `verify-trajectory`. A
 file named twice is refused, because it would add a replicate that agrees with
 itself by construction.
 

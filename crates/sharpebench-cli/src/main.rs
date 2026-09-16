@@ -626,7 +626,7 @@ fn help() {
     println!("                       --short-borrow-bps <bps>: for capture (reference agents) and verify-trajectory; the rate is bound, so a different one refuses");
     println!("                       --reexecute [--cmd \"<prog>\"|--http <addr>|--image <ref>]: also re-run every captured run with a fresh agent and refuse the first divergent decision");
     println!("                       --diagnostics sizing-response [--vol-lookback N]: also report how gross exposure moved with trailing volatility; never a rank input");
-    println!("  sharpebench decision-stability <traj.json>... [--data <csv>]  rank-neutral share of identical-observation steps where replicate runs decided differently");
+    println!("  sharpebench decision-stability <traj.json>... [--data <csv>] [--short-borrow-bps <bps>]  rank-neutral share of identical-observation steps where replicate runs decided differently");
     println!(
         "  sharpebench rescore <bundle.json>     recompute a declared submission bundle's quality from its frozen, digest-bound files only"
     );

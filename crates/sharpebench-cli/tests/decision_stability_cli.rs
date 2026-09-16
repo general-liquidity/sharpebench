@@ -286,3 +286,37 @@ fn a_field_that_cannot_be_replayed_as_captured_is_refused() {
     assert_eq!(missing.status.code(), Some(1));
     assert!(stderr(&missing).contains("cannot read"));
 }
+
+#[test]
+fn a_capture_under_a_borrow_rate_replays_only_under_that_rate() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = path(dir.path(), "borrowed.json");
+    let captured = cli(&["capture", "momentum", &out, "--short-borrow-bps", "25"]);
+    assert!(captured.status.success(), "{}", stderr(&captured));
+
+    let default_costs = cli(&["decision-stability", &out]);
+    assert_eq!(default_costs.status.code(), Some(1));
+    assert!(
+        stderr(&default_costs).contains("does not match verifier cost model"),
+        "{}",
+        stderr(&default_costs)
+    );
+
+    let report = stdout_json(&cli(&[
+        "decision-stability",
+        &out,
+        "--short-borrow-bps",
+        "25",
+        "--json",
+    ]));
+    assert_eq!(report["replicate_runs"], 16);
+    assert_eq!(report["groups_with_differing_decisions"], 0);
+
+    let invalid = cli(&["decision-stability", &out, "--short-borrow-bps", "-1"]);
+    assert_eq!(invalid.status.code(), Some(2));
+    assert!(
+        stderr(&invalid).contains("--short-borrow-bps"),
+        "{}",
+        stderr(&invalid)
+    );
+}
