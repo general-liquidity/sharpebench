@@ -147,6 +147,7 @@ pub use selection::{selection_robustness, SelectionRobustness};
 pub use selfaudit::{run_self_audit, SelfAuditReport};
 pub use sharpe_diagnostics::{
     sharpe_diagnostics, MppmDiagnostic, PsrDiagnostic, SharpeDiagnostic, SharpeDiagnostics,
+    TailRiskDiagnostic,
 };
 pub use suite_controls::{
     bind_to_suite, control_preimage, evaluate_controls, ControlBinding, ControlDigest,
