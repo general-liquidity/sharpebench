@@ -91,7 +91,14 @@ wrote a confidence on every order, including the 0.5 filled in for an entrant
 that stated none, so a verifier cannot tell its stated values from filled-in
 ones. Strict verification refuses schema 2. An explicit legacy regrade
 (`sharpebench verify-trajectory --allow-unbound-trajectory`) replays it and
-counts every recorded confidence as stated, the filled-in ones included.
+counts every recorded confidence as stated, the filled-in ones included. In the
+other direction, strict verification in a release before this change refuses a
+schema-3 capture as an unsupported schema.
+
+Rust agents that build `Order` values directly migrate by wrapping a stated
+confidence in `Some(..)` and passing `None` to state nothing. Wire JSON needs no
+change: a decision that omits the key still parses, and a decision that states
+it round-trips byte for byte.
 
 ## The wire contract is published, and it is closed
 
