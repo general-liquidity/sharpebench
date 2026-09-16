@@ -1,5 +1,5 @@
 {
-  "schema_version": "sharpebench.forecast-quality.v1",
+  "schema_version": "sharpebench.forecast-quality.v2",
   "rank_effect": "reported_only_never_trading_rank",
   "dependence_unit": "whole resolution-clock block across assets and questions",
   "config": {
@@ -10,6 +10,7 @@
     "calibration_bins": 5
   },
   "common_support": {
+    "rule": "a pair is differenced on the contract digests both agents resolved and receives inference only when each agent resolved every digest the other did",
     "n_contracts": 12,
     "contract_sha256": [
       "4663a264ea71a081e6b5f9c254914718a4494081a8b83b61a46a5afb18f03496",
@@ -25,10 +26,23 @@
       "fa3030d5883958b4317073aea89e32d6aea74e694db431743458482d2086eb44",
       "ffb6353b541d56a43d64cf1c053af2eee343d281529d30ab8636a80cfcbbfc29"
     ],
-    "excluded_resolved_by_agent": {
-      "agent-alpha": 0,
-      "agent-beta": 0
-    }
+    "unresolved_by_agent": {
+      "agent-alpha": {
+        "n_unresolved": 0,
+        "not_claimed": [],
+        "pending": [],
+        "cancelled": [],
+        "rejected": []
+      },
+      "agent-beta": {
+        "n_unresolved": 0,
+        "not_claimed": [],
+        "pending": [],
+        "cancelled": [],
+        "rejected": []
+      }
+    },
+    "settlement_status_disagreements": []
   },
   "contract_digest_versions": {
     "4663a264ea71a081e6b5f9c254914718a4494081a8b83b61a46a5afb18f03496": "sharpebench/canonical-json/v1",

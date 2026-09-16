@@ -3,7 +3,7 @@
 This Lean project models selected invariants of the rules SharpeBench declares
 for its prospective forecast-quality report, and proves them about the model:
 
-- exact common support is an intersection;
+- exact pair support is the intersection of two agents' resolved contracts;
 - the model's rank projection of an entry paired with a forecast report is that
   entry, which holds by definition for any pair and does not show that the Rust
   rank path ignores forecast data;
@@ -38,10 +38,13 @@ block references no existing repository path; it runs as one step of the
 `Lean model` job. The check proves that a named path exists, not that the model
 still corresponds to the code at that path.
 
-`Forecast.lean` covers exact common support in `analyze_forecast_quality`, one
-ordered step of `holm_adjust` and the plus-one bootstrap p-value in
-`compare_agents` (all in `crates/sharpebench-core/src/forecast.rs`), and the
-projection trading rank consumes, standing for the separation from the trading
-rank in `crates/sharpebench-core/src/composite.rs`. It assumes natural-number
+`Forecast.lean` covers exact pair support, the intersection of two agents'
+resolved contract digests that `compare_agents` differences, one ordered step
+of `holm_adjust` and the plus-one bootstrap p-value in `compare_agents` (all in
+`crates/sharpebench-core/src/forecast.rs`), and the projection trading rank
+consumes, standing for the separation from the trading rank in
+`crates/sharpebench-core/src/composite.rs`. It does not model the rule that a
+pair receives inference only when the two agents' resolved sets are equal, nor
+the per-agent gap disclosure in `field_support`. It assumes natural-number
 fixed-point values, no floating-point semantics and two agents rather than a
 field of any size.
