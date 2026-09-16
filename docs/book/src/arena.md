@@ -40,13 +40,17 @@ open -> committed -> scoring -> published
    commitment, so that it binds the plan (see [faulted windows](#faulted-windows));
    without `--fault-plan` both print the same plan-less commitment.
 4. **`arena advance <dir> <epoch>`** advances the clock. See below.
-5. **`arena score <dir> <window> <dataset> <entries.json>`** runs after the
-   data-reveal epoch. Each entry reveals its pre-image (artifact digest plus
-   salt) alongside its scored submission; a reveal that does not match its
-   registered commitment, or that never committed at all, is **refused and
-   recorded**, and the rest of the field is ranked by `sharpebench-core`'s
-   luck-robust `rank` under the config recorded at open time. The dataset
-   bytes are hashed into the window record.
+5. **`arena score <dir> <window> <dataset> <entries.json> [--reexecute]
+   [--allow-supplied-returns]`** runs after the data-reveal epoch. Each entry
+   reveals its pre-image (artifact digest plus salt) and a strict trajectory
+   capture of its decisions over the revealed dataset. A reveal that does not
+   match its registered commitment, or that never committed at all, is
+   **refused and recorded**; so is a capture that does not bind the committed
+   artifact, the revealed dataset and the window's execution matrix (see
+   [returns intake](#returns-intake)). The arena replays each accepted capture
+   into the returns it ranks, with `sharpebench-core`'s luck-robust `rank`
+   under the config recorded at open time, and records how each row's returns
+   were obtained. The dataset bytes are hashed into the window record.
 6. **`arena publish <dir> <window> <key>`** signs the board and writes
    `board.json` (the document of record) and `board.md` (human-readable) into
    the window directory.
@@ -59,6 +63,124 @@ open -> committed -> scoring -> published
 
 All subcommands honor the global `--json` flag and the `env:NAME` /
 `file:PATH` key convention.
+
+## Returns intake
+
+Entries arrive after the data-reveal epoch, so returns computed then can use
+the revealed data. No statistic separates such returns from skill: Gençay's
+planted look-ahead oracle clears deflation with DSR 1.00 ("What survives
+honest evaluation?", arXiv 2608.27734, p. 7), and a next-bar oracle over a
+revealed window clears every gate SharpeBench applies (see
+[the self-audit case](#the-self-audit-case)). The arena therefore ranks
+returns it derives itself.
+
+### What an entry reveals
+
+```json
+{"agent_id": "alpha", "capture": {"agent_id": "sandbox:...", "contract": {}, "runs": []},
+ "artifact_digest": "<64 lowercase hex>", "salt": "..."}
+```
+
+`capture` is the trajectory `sharpebench capture ... --data <revealed dataset>`
+writes. It is accepted only when all of the following hold:
+
+- **It names the committed artifact.** For `sandbox:<repository>@sha256:<digest>`
+  (a `capture --image` trajectory) the artifact is the image digest, the 64 hex
+  characters after `@sha256:`. For `buy-and-hold` or `momentum`, reference
+  agents compiled into the scorer, it is the runner binary the capture's
+  contract records. Either must equal the committed `artifact_digest`. A `cmd:`
+  or `http:` capture names no artifact, because a command line or an address
+  does not identify the bytes behind it, and is refused.
+- **It names the revealed dataset.** Its contract's `dataset_sha256` must equal
+  the identity of the revealed dataset as the simulator parses it, which the
+  window records as `replay_dataset_sha256` beside the byte hash
+  `dataset_hash`.
+- **It runs the window's execution matrix.** The market windows are the two
+  that `capture --data` runs over a revealed dataset of `n` bars, `[w, m)` and
+  `[m, n)` with `w = clamp(n / 10, 10, 30)` and `m = (w + n) / 2`; the seeds are
+  `0..k` for the frozen config's `execution_seeds_per_window` `k`. No entrant
+  chooses which part of the revealed data it is scored on. `sharpebench
+  capture` runs eight seeds, so a window that accepts CLI captures is opened
+  with `execution_seeds_per_window: 8`.
+- **It was made by the window's scorer and verifies strictly.** Its runner must
+  be the window's `scorer_artifact_sha256`, and
+  `sharpebench_harness::verify_trajectory_strict` must accept it (cost model,
+  engine, one aligned decision per bar).
+
+The ranked submission is the capture's replay under the entry's `agent_id`.
+Anything else is refused and recorded against that agent: a capture naming
+another artifact, dataset, matrix or runner; an entry carrying both a capture
+and returns, or neither; an entry whose `agent_id` differs from its supplied
+submission's; and every entry of an agent revealed more than once in one call.
+An entry that reveals a capture must set `agent_id`. An entry that names no
+agent, or a dataset the simulator cannot parse while any entry carries a
+capture, fails the whole call and records nothing.
+
+### What replay proves, and what re-execution adds
+
+Replay establishes that the ranked returns follow from the recorded decisions
+on the revealed data, under the committed artifact identity. It does **not**
+establish that running the committed artifact produced those decisions.
+Anyone holding the revealed data can write a capture of hindsight decisions
+that names the committed image and replays exactly, and the arena ranks it as
+`replayed`.
+
+`arena score --reexecute` checks that part. For every capture it runs
+`sharpebench_harness::verify_trajectory_reexecuted`: the committed entrant runs
+again on the revealed data, window and seed, one fresh instance per run, and
+the first score-bearing decision it does not repeat refuses the entry. A
+reference agent re-executes in process. An image re-executes through the
+hardened launch of [sandboxed entrants](#sandboxed-entrants): `--pull never`,
+`--network none` and a fresh container per run. An image that is not present
+locally is refused for that entry. A failed start, a transport or protocol
+fault, a memory-budget breach or a failed cleanup refuses the entry as well,
+with the failure as the reason. Without a running Docker daemon, a call that
+would re-execute an image fails before anything is recorded. A row that passes
+is `re-executed`.
+
+A re-executed entrant sees only the point-in-time observations the harness
+gives it, so hindsight would have to be inside the artifact, fixed before the
+commit deadline. That rests on the operator's custody of the target data until
+the deadline, which nothing in the files proves. The arena does not
+re-execute unless the operator passes `--reexecute`. A `replayed` row is bound
+to its recorded decisions; it is not evidence that those decisions were made
+without hindsight. To check one capture outside scoring, run
+`sharpebench verify-trajectory <capture.json> --data <revealed dataset>
+--reexecute --image <repository@sha256:...>`.
+
+### Provenance on the board
+
+Each ranked row's `returns_provenance`, one of `supplied`, `replayed` or
+`re-executed`, is recorded in the window file and published on the row's
+signed link beside the kernel's fields. It is rank-neutral: it changes no
+score and no ordering. `board.md` lists it per agent, and `arena score --json`
+returns it as a map from agent id. A row without it has the bytes of the plain
+`CompositeScore`.
+
+### Supplied returns are noncertifying
+
+`--allow-supplied-returns` also ranks an entry that reveals `submission`, a
+set of returns, in place of a capture. The returns are ranked as given, with
+provenance `supplied`. The window then records `supplied_returns_accepted:
+true`, the signed header carries it, `board.md` opens with a noncertifying
+notice, and `arena score --json` reports it. Without the flag such an entry is
+refused and recorded. The flag exists for evidence the simulator cannot
+replay, such as broker returns from a forward paper-trading arm, and for
+[faulted windows](#faulted-windows). A board scored with it certifies nothing
+about the rows it marks `supplied`.
+
+### The self-audit case
+
+`sharpebench audit` runs this as its tenth attack, `forward-hindsight-oracle`.
+It first ranks a next-bar oracle's returns directly and requires them to be
+rank-eligible (DSR 1.000 on its fixture), so the case never credits the
+statistics. It passes only when intake stops the oracle on both routes: its
+supplied returns are refused, and a capture of its decisions naming the
+committed image, which replay alone ranks as `replayed`, is refused on
+re-execution, while the committed image's own capture is ranked
+`re-executed`. An in-process momentum agent stands in for the image's
+container. The case needs the simulator and the arena, so only the CLI runs
+it; the WASM, npm and MCP `self_audit` surfaces report the nine kernel cases.
 
 ## Time: integer epochs, no wall clock
 
@@ -94,8 +216,9 @@ wholesale with a re-signed forgery, its final signature changes and window
 N+1's recorded anchor exposes it. `arena verify` checks both.
 
 The header also binds the window's rules (`ScoreConfig`), the revealed
-dataset's SHA-256, and the list of refused entries, so none of those can be
-quietly rewritten after publication either.
+dataset's SHA-256, the parsed dataset identity captures were replayed against,
+whether supplied returns were accepted, and the list of refused entries, so
+none of those can be quietly rewritten after publication either.
 
 ### The header and the window file
 
@@ -105,10 +228,11 @@ requires the header to record the same identity, field by field:
 `window_id`, `schema_version`, `commit_deadline`, `data_reveal_epoch`,
 `score_config` (compared by the digest recomputed on each side, so a config
 edited under its old digest is caught), `score_config_sha256`,
-`scorer_artifact_sha256`, `sealed_eval_salt_sha256`, `fault_plan_sha256` and
-`dataset_hash`. An optional field present on one side and absent on the other
-is a disagreement like two different values, so a window file that drops or
-invents a fault plan fails. Refusals and scores are outcomes rather than
+`scorer_artifact_sha256`, `sealed_eval_salt_sha256`, `fault_plan_sha256`,
+`dataset_hash`, `replay_dataset_sha256` and `supplied_returns_accepted`. An
+optional field present on one side and absent on the other is a disagreement
+like two different values, so a window file that drops or invents a fault plan
+fails, and so does one that clears or sets `supplied_returns_accepted`. Refusals and scores are outcomes rather than
 identity, and the scores are the signed links themselves; they are not
 compared.
 
@@ -143,6 +267,12 @@ the same thing:
   any entry's declaration differs from the window's, including a declaration
   on an unfaulted window or none on a faulted one, `arena score` refuses the
   whole call and records nothing: the window stays `committed`.
+- No capture path applies a fault plan (`sharpebench capture` takes no
+  `--fault-plan`), so a capture cannot be replayed as a faulted window's
+  experiment. On a faulted window a capture is refused and recorded, and the
+  window can be scored only from supplied returns under
+  `--allow-supplied-returns`, which marks it noncertifying (see
+  [returns intake](#supplied-returns-are-noncertifying)).
 - Each entrant's pre-deadline commitment binds the plan too, so an entrant
   cannot commit under one plan and be scored under another. The plan digest
   is a fifth framed field of the commitment pre-image, after `agent_id`,
@@ -263,6 +393,11 @@ Honestly, quite a lot; deliberately so:
 - **No identity layer.** An agent id is a string. Binding it to a real entity
   is out of band, as is publishing the host's verifying key somewhere
   tamper-resistant so `--pubkey` pinning means something.
+- **No hindsight check without re-execution.** A `replayed` row proves its
+  returns follow from its recorded decisions, not that the committed artifact
+  made them without seeing the revealed data. Only `--reexecute` checks that,
+  and only for artifacts the arena can run again: a digest-pinned image or a
+  reference agent (see [returns intake](#what-replay-proves-and-what-re-execution-adds)).
 
 A complete forward league is therefore: a cron job that advances the epoch, a
 repository that collects commitments before each deadline, one `score` and one
