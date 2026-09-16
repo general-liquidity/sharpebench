@@ -28,6 +28,7 @@ mod gateway_cli;
 mod import_cmd;
 mod lineage_cmd;
 mod regrade_cmd;
+mod replay_diagnostics_cmd;
 mod rescore_cmd;
 #[cfg(feature = "self-update")]
 mod update;
@@ -619,6 +620,8 @@ fn help() {
     );
     println!("                       --allow-unbound-trajectory: explicit legacy or cross-version regrade; never the default");
     println!("                       --reexecute [--cmd \"<prog>\"|--http <addr>|--image <ref>]: also re-run every captured run with a fresh agent and refuse the first divergent decision");
+    println!("                       --timing-null [--null-draws N] [--null-seed S]: also place each run's Sharpe among seeded replays of its own holding periods at random bars (rank-neutral)");
+    println!("                       --lagged-replay <k,k,...>: also report Sharpe and mean return with every decision executed k bars late (rank-neutral)");
     println!(
         "  sharpebench rescore <bundle.json>     recompute a declared submission bundle's quality from its frozen, digest-bound files only"
     );
@@ -2677,6 +2680,13 @@ fn run_verify_trajectory(args: &[String], json: bool) -> ExitCode {
         );
         return ExitCode::from(2);
     }
+    let replay_diagnostics = match replay_diagnostics_cmd::requested(args) {
+        Ok(requested) => requested,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::from(2);
+        }
+    };
     let text = match std::fs::read_to_string(&args[2]) {
         Ok(t) => t,
         Err(e) => {
@@ -2737,6 +2747,9 @@ fn run_verify_trajectory(args: &[String], json: bool) -> ExitCode {
             }
         }
     };
+    if let Some(requested) = replay_diagnostics {
+        return replay_diagnostics_cmd::report(&requested, &data, &traj, costs, &result, json);
+    }
     emit_verification(&result, json, None);
     ExitCode::SUCCESS
 }
