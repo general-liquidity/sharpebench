@@ -10,6 +10,7 @@
   - [Process discipline](methodology-process.md)
   - [Lifecycle-certified rank mode](lifecycle-certified.md)
   - [Regime-conditional comparison](methodology-regime.md)
+  - [Volatility-response sizing](methodology-sizing.md)
   - [Candidate lineage diagnostics](candidate-lineage.md)
   - [Timing-luck floor](timing-luck.md)
 - [Prospective forecast quality](forecast-quality.md)
