@@ -621,6 +621,7 @@ fn help() {
     println!("                       --allow-unbound-trajectory: explicit legacy or cross-version regrade; never the default");
     println!("                       --short-borrow-bps <bps>: for capture (reference agents) and verify-trajectory; the rate is bound, so a different one refuses");
     println!("                       --reexecute [--cmd \"<prog>\"|--http <addr>|--image <ref>]: also re-run every captured run with a fresh agent and refuse the first divergent decision");
+    println!("                       --diagnostics sizing-response [--vol-lookback N]: also report how gross exposure moved with trailing volatility; never a rank input");
     println!(
         "  sharpebench rescore <bundle.json>     recompute a declared submission bundle's quality from its frozen, digest-bound files only"
     );
@@ -2704,11 +2705,24 @@ fn run_verify_trajectory(args: &[String], json: bool) -> ExitCode {
 
     if args.len() < 3 {
         eprintln!(
-            "usage: sharpebench verify-trajectory <trajectory.json> [--data <csv>] [--allow-unbound-trajectory] [--reexecute [--cmd \"<prog>\"|--http <addr>]] [--json]"
+            "usage: sharpebench verify-trajectory <trajectory.json> [--data <csv>] [--allow-unbound-trajectory] [--reexecute [--cmd \"<prog>\"|--http <addr>]] [--diagnostics sizing-response [--vol-lookback N]] [--json]"
         );
         return ExitCode::from(2);
     }
     let reexecute = args.iter().any(|arg| arg == "--reexecute");
+    // `--diagnostics sizing-response` is opt-in, as on `score`. Absent, the
+    // output below is the verification alone, byte for byte.
+    let sizing = match sizing_response_request(args) {
+        Ok(request) => request,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    if reexecute && sizing.is_some() {
+        eprintln!("error: --diagnostics reads the strict replay; request it without --reexecute");
+        return ExitCode::from(2);
+    }
     if !reexecute
         && ["--cmd", "--http"]
             .iter()
@@ -2793,8 +2807,127 @@ fn run_verify_trajectory(args: &[String], json: bool) -> ExitCode {
             }
         }
     };
-    emit_verification(&result, json, None);
+    let Some(sizing) = sizing else {
+        emit_verification(&result, json, None);
+        return ExitCode::SUCCESS;
+    };
+    // Computed before anything is printed, so a refusal leaves no output.
+    let report = match sharpebench_sim::sizing_response(&data, &traj, costs, &sizing) {
+        Ok(report) => report,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if json {
+        let sealed = sharpebench_core::seal(
+            &result,
+            &sharpebench_harness::VERIFICATION_RESULT_VISIBILITY,
+        )
+        .expect("verification results serialize");
+        emit_json(&serde_json::json!({
+            "verification": sealed,
+            "sizing_response": report,
+        }));
+    } else {
+        emit_verification(&result, false, None);
+        print_sizing_response(&report);
+    }
     ExitCode::SUCCESS
+}
+
+/// Parse `verify-trajectory --diagnostics <list> [--vol-lookback N]` the way
+/// `score --diagnostics` is parsed: a missing value or an unknown identifier
+/// is refused by name, never read as no request.
+fn sizing_response_request(
+    args: &[String],
+) -> Result<Option<sharpebench_sim::SizingResponseConfig>, String> {
+    use sharpebench_sim::{SizingResponseConfig, SIZING_RESPONSE_ID};
+    let lookback_given = args.iter().any(|a| a == "--vol-lookback");
+    if !args.iter().any(|a| a == "--diagnostics") {
+        if lookback_given {
+            return Err(format!(
+                "--vol-lookback requires --diagnostics {SIZING_RESPONSE_ID}"
+            ));
+        }
+        return Ok(None);
+    }
+    let Some(list) = flag_value(args, "--diagnostics").filter(|v| !v.starts_with("--")) else {
+        return Err("--diagnostics requires a value".to_string());
+    };
+    for raw in list.split(',') {
+        let id = raw.trim();
+        if id != SIZING_RESPONSE_ID {
+            return Err(format!(
+                "unknown diagnostic `{id}`; verify-trajectory accepts {SIZING_RESPONSE_ID}"
+            ));
+        }
+    }
+    let mut cfg = SizingResponseConfig::default();
+    if lookback_given {
+        if flag_value(args, "--vol-lookback").is_none_or(|v| v.starts_with("--")) {
+            return Err("--vol-lookback requires a value".to_string());
+        }
+        if let Some(lookback) = positive_usize_flag(args, "--vol-lookback")? {
+            cfg.vol_lookback = lookback;
+        }
+    }
+    cfg.validate().map_err(|error| error.to_string())?;
+    Ok(Some(cfg))
+}
+
+/// The opt-in sizing diagnostic as a block after the verification. A figure
+/// that could not be computed prints its reason in its place.
+fn print_sizing_response(report: &sharpebench_sim::SizingResponse) {
+    let census = &report.census;
+    let cfg = &report.config;
+    println!("\nOpt-in sizing-response diagnostic. Not used by the gate, eligibility or the rank.");
+    println!(
+        "  bars paired     : {} of {} across {} runs ({} before a full window, {} without volatility, {} without exposure)",
+        census.pairs,
+        census.bars_replayed,
+        report.runs,
+        census.bars_without_history,
+        census.bars_without_volatility,
+        census.bars_without_exposure
+    );
+    let rank = &report.rank_correlation;
+    match (rank.spearman_rho, rank.unavailable) {
+        (Some(rho), _) => println!(
+            "  Spearman rho    : {rho:.4} (gross exposure vs trailing volatility, {} pairs)",
+            rank.pairs
+        ),
+        (None, reason) => println!(
+            "  Spearman rho    : n/a ({})",
+            reason.map(|r| r.to_string()).unwrap_or_default()
+        ),
+    }
+    let table = &report.by_volatility;
+    if let Some(reason) = table.unavailable {
+        println!("  by volatility   : n/a ({reason})");
+    } else {
+        let cell = |v: Option<f64>, places: usize| {
+            v.map_or_else(|| "n/a".to_string(), |v| format!("{v:.places$}"))
+        };
+        println!("  quintile     pairs  median_vol  median_gross");
+        for q in &table.quintiles {
+            let label = match q.quintile {
+                1 => "1 calmest".to_string(),
+                5 => "5 wildest".to_string(),
+                n => n.to_string(),
+            };
+            println!(
+                "  {label:<10} {:>7} {:>11} {:>13}",
+                q.pairs,
+                cell(q.median_volatility, 6),
+                cell(q.median_gross_exposure, 4)
+            );
+        }
+    }
+    println!(
+        "Gross exposure: post-fill holdings over the pre-fill NAV, resolution {} NAV. Volatility: sample std of the last {} simple returns at or before the bar, mean across symbols.",
+        cfg.exposure_resolution, cfg.vol_lookback
+    );
 }
 
 /// What a passed re-execution adds to the verification output.
