@@ -179,7 +179,7 @@
       "sha256": "1e025ac30099de23ae8455f20ae5441b557e924870d0e1475c7508512908ec0d"
     }
   ],
-  "generated_at_head": "6c36f0645e64a7dcfb501795e71e73597c454dc6",
+  "generated_at_head": "b8796063a804d14539ee25b568f2b820f83f8126",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -327,7 +327,7 @@
     },
     {
       "path": "crates/sharpebench-cli/src/main.rs",
-      "sha256": "300970cfd407af5a4cb11f1cc6849f79132235d9e8c3ed9ea7e4394d06e7fae5"
+      "sha256": "2a4e75c815e9626ea93aeffe2c185b075df140be199dee8581b9d9d0b0e4e281"
     },
     {
       "path": "crates/sharpebench-cli/src/regrade_cmd.rs",
@@ -384,6 +384,10 @@
     {
       "path": "crates/sharpebench-cli/tests/options_boundaries.rs",
       "sha256": "b3d748de2857e52fe3b2cd7fd758c0e17072fc2b1131bbecaed5a5f68d67edef"
+    },
+    {
+      "path": "crates/sharpebench-cli/tests/overlapping_windows_cli.rs",
+      "sha256": "96d67e48b18dd84c899c67223b226fc7c7fd85a9fb111802ad739e30bb83e635"
     },
     {
       "path": "crates/sharpebench-cli/tests/rank_mode_cli.rs",
@@ -655,7 +659,7 @@
     },
     {
       "path": "crates/sharpebench-harness/src/checkpoint.rs",
-      "sha256": "a6193eaa85912777fde4586d272db02ecc3db19f1d5a7ad278c56c42ab60a254"
+      "sha256": "496cb080d0d3fc6ce37e3c34533c2eca8125825ba5abea28651f4c2dd3852e12"
     },
     {
       "path": "crates/sharpebench-harness/src/failure.rs",
@@ -679,15 +683,15 @@
     },
     {
       "path": "crates/sharpebench-harness/src/gateway_serve.rs",
-      "sha256": "9a08642d2ded6df8287381210c261a167d6b7ada8c9526a2b9f751575b58d4b1"
+      "sha256": "8055e1164f2c0ab4076c0e0bac009576c5d2ceec0778fa93f86f76fdf0cbf861"
     },
     {
       "path": "crates/sharpebench-harness/src/gateway_serve_tests.rs",
-      "sha256": "8fcdc9f65601f604ca6a32ca8d3a2138890cb3a9c6adc10707941f0e9d549c77"
+      "sha256": "d916d6c54ac194cd1be49e06b92144f04b0ce115f50f6b080ff2ef627c0b9a88"
     },
     {
       "path": "crates/sharpebench-harness/src/lib.rs",
-      "sha256": "cd6e184227c7f343a480427e786de0e128f7bac8d133bfc794fbc0e0e549f15a"
+      "sha256": "70952c5167171ad17d1fe3f31abe63ad151ac81e6d4180e1c5077080a3c258cb"
     },
     {
       "path": "crates/sharpebench-harness/src/perturb.rs",
@@ -724,6 +728,10 @@
     {
       "path": "crates/sharpebench-harness/tests/journal_ownership_review.rs",
       "sha256": "10b6a72df46253058d21ddddaea0ed1689f1c5961d239728a4e49bb8bc8acccb"
+    },
+    {
+      "path": "crates/sharpebench-harness/tests/overlapping_windows.rs",
+      "sha256": "acf41e4224c7ba57012e891683e511b456b3d2d49082abc519f053ea4af046c3"
     },
     {
       "path": "crates/sharpebench-harness/tests/producer_declared_support.rs",
@@ -891,7 +899,7 @@
     },
     {
       "path": "crates/sharpebench-sim/src/trajectory.rs",
-      "sha256": "f37d458b70fcf5de9c0084eb3f25c2535b899c2614121bd7be081590a15ad5eb"
+      "sha256": "fc83bd009b945948d91ee1af7823d8067792e1d66901c9a512aa66311fbd9e02"
     },
     {
       "path": "crates/sharpebench-sim/src/transport.rs",
@@ -899,7 +907,7 @@
     },
     {
       "path": "crates/sharpebench-sim/src/windows.rs",
-      "sha256": "5abbfb95d13c844304dc4319edfc8d9b6f88e81ccc81aa890209b1ce2f9d2486"
+      "sha256": "ddcc10d9797ee8ef90d4055b1f9adf13bea85d78c1c140aedeb0720f626f278b"
     },
     {
       "path": "crates/sharpebench-sim/tests/golden_input.rs",
@@ -908,6 +916,10 @@
     {
       "path": "crates/sharpebench-sim/tests/short_borrow.rs",
       "sha256": "613402a81a900a541a3217611a5bf6875e007d14f0e97c1443fcabdce6b61ffa"
+    },
+    {
+      "path": "crates/sharpebench-sim/tests/window_order.rs",
+      "sha256": "27f060c3c2a3658745cec56e5078c0a9b7d89ab7bde37fc400c53ae8aff26f79"
     },
     {
       "path": "crates/sharpebench-stats/Cargo.toml",
@@ -1271,5 +1283,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "8abf3c5eba7f47dd9f1c06e3e98141a93ee13b97d20a4b1dab42076fed8120cb"
+  "source_snapshot_sha256": "e10f4224865fe2c0cd83aa3d24200628f6badf58402ebf587b45eae01307c1f4"
 }
