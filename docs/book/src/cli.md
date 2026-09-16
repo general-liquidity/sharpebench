@@ -456,6 +456,14 @@ identifier, a missing value, `--vol-lookback` without the diagnostic, a lookback
 below 2, or a combination with `--reexecute` exits 2 with no output. Without the
 flag the output is unchanged.
 
+`--timing-null [--null-draws N] [--null-seed S]` and `--lagged-replay <k,k,...>`
+add two rank-neutral replay diagnostics beside the verification: where the
+entrant's Sharpe falls among random placements of its own holding periods, and
+how its Sharpe and return move when every recorded decision executes k bars
+late. See [Replay diagnostics](replay-diagnostics.md). They cannot be combined
+with `--allow-unbound-trajectory`, `--reexecute` or `--diagnostics`, and a
+malformed flag exits 2 before any file is read.
+
 `capture` also records an external entrant, over the same transports as `run`:
 
 ```bash

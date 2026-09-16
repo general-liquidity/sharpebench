@@ -32,6 +32,12 @@ citations, and host-derived family grouping, then reports best-versus-median DSR
 inside each family. Those groups never deduplicate trials or enter the composite
 score. See [Candidate lineage diagnostics](candidate-lineage.md).
 
+Two replay diagnostics are reported-only as well: an exposure-matched
+random-timing reference, which asks whether an entrant's timing beats random
+placements of its own holding periods, and a lagged replay, which asks whether
+its result survives decisions executed a few bars late. See
+[Replay diagnostics](replay-diagnostics.md).
+
 The composite also *reports* (without gating, to keep the default behaviour
 stable): alpha/beta attribution vs the field, calibration (Brier), edge half-life (per-window return drift, not information-coefficient decay),
 the field-wide Reality Check p-value, the Romano–Wolf step-down verdict, max
