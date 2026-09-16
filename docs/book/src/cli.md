@@ -60,6 +60,14 @@ Three external-agent transports are explicit rather than interchangeable:
   `SHARPEBENCH_AGENT_ENV=NAME1,NAME2`.
 - `--http <addr>` posts to an endpoint whose isolation the operator owns.
 
+Add `--short-borrow-bps <bps>` to charge an opt-in per-step borrow cost on every
+short dollar, which the leverage financing charge never reaches for a short book
+at or below 1x gross exposure. The rate must be finite and nonnegative, no named
+cost profile sets it, and a zero rate leaves the run and the cost-model digest
+exactly as they are without the flag. A set rate is bound into the cost-model
+digest, so a checkpoint or trajectory written under one rate is refused under
+another. See [the simulator](simulator.md) for the cost terms.
+
 Add `--checkpoint <path>` to resume an external sweep. The checkpoint contract
 binds the dataset, costs, score configuration, running CLI binary, entrant,
 ordered windows, ordered seeds, and retry policy. A checkpointed `--cmd` or
@@ -393,6 +401,11 @@ ordered windows, and exact ordered seeds. Strict verification requires every
 declared cell and every decision step, validates step and observation identity,
 and derives replicate grouping from the contract. Missing, duplicated,
 reordered, shortened, or cross-environment evidence is refused.
+
+`capture` of a reference agent and `verify-trajectory` accept the same
+`--short-borrow-bps <bps>` as `run`, and a trajectory verifies only under the
+rate it was captured with. External `capture` refuses the flag for now, because
+its capture path builds the default cost model.
 
 `--allow-unbound-trajectory` is an explicit legacy or cross-version regrade. It
 does not claim that the artifact reproduces its original execution conditions.
