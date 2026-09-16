@@ -29,7 +29,9 @@ sharpebench score submissions.json
 
 `trace`, `confidences`, `outcomes`, and `cost` are optional (serde-defaulted).
 One `run` per seed × window, which is what makes pass^k and multi-window OOS
-meaningful.
+meaningful. `confidences` and `outcomes` are paired by position with each
+other, not with `returns`: list only confidences the agent stated, each with
+whether that decision paid off. See [Confidence and calibration](#confidence-and-calibration).
 
 A submission object may also carry an optional `declared_mandate`, e.g.
 `{"kind": "drawdown_capped", "max_per_run_drawdown": 0.2}` or
@@ -51,8 +53,46 @@ let board = sharpebench_core::rank(&[sub], &ScoreConfig::default());
 
 The external protocol is a request/response loop: the harness writes a
 point-in-time `MarketObservation` (only data at or before the decision date) and
-reads back a `Decision` (target weights + confidence). The agent never sees a
-future bar: look-ahead is impossible by construction, not by convention.
+reads back a `Decision` (target weights + an optional confidence per order). The
+agent never sees a future bar: look-ahead is impossible by construction, not by
+convention.
+
+## Confidence and calibration
+
+An order's `confidence` is optional. When present it must be a number in
+`[0, 1]`; `null` is refused. When omitted, nothing is filled in: the order
+states no conviction, the key stays absent in the captured trajectory, and it
+adds nothing to calibration. Earlier releases read an omitted confidence as
+0.5.
+
+The simulator turns stated confidences into calibration pairs by two rules:
+
+- **Only stated confidences count.** A decision contributes one pair when at
+  least one of its orders states a confidence, using the mean over the orders
+  that do. A hold, or a decision whose orders all omit the field, contributes
+  none. An agent that states 0.9 on 20 trades and then holds for 230 bars
+  reports 20 pairs, not 250.
+- **A confidence is paired with the step that realizes it.** The return the
+  engine books at step `t` is the price move on the holdings decision `t - 1`
+  chose; decision `t` adds only its own trading cost to it. A confidence
+  stated at step `t` is therefore scored against whether the return at step
+  `t + 1` is positive, and the window's final decision, whose outcome falls
+  outside the window, contributes no pair.
+
+`calibration_brier` is the Brier score over those pairs and
+`calibration_observations` counts them; an agent that never states a
+confidence reports no Brier score and zero observations.
+`confidence_weighted_return` weights each run by the mean of its paired
+confidences; a run with none carries no weight unless no run has any, in which
+case every run weighs the same.
+
+Captured trajectories carry the change in their contract: trajectory contract
+schema 3 marks an optional confidence. A schema-2 capture wrote a confidence
+on every order, including the 0.5 filled in for an entrant that stated none,
+so its stated and unstated values cannot be told apart. Strict verification
+refuses schema 2; an explicit legacy regrade
+(`sharpebench verify-trajectory --allow-unbound-trajectory`) replays it and
+counts every recorded confidence, the filled-in ones included, as stated.
 
 ## The wire contract is published, and it is closed
 
@@ -107,7 +147,8 @@ or from outside the run. If your agent wants randomness, derive it from the
 observations it was given.
 
 **What must repeat.** The score-bearing part of every decision: each order's
-`symbol`, `action`, `target_weight` and `confidence`, and the `cost` report.
+`symbol`, `action`, `target_weight` and `confidence` (including whether it is
+stated at all), and the `cost` report.
 `reasoning` and each order's `rationale` are audit text the scorer never reads;
 they may differ between executions.
 
