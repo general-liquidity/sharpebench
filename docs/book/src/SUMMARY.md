@@ -16,6 +16,7 @@
 - [Options pricing and payoff risk](options-risk.md)
 - [Memory and retrieval benchmark](memory.md)
 - [Submitting an agent](submitting.md)
+  - [Decision stability](decision-stability.md)
 - [Evidence contracts](evidence-contracts.md)
 - [Forward attestation](attestation.md)
   - [Held-out dataset seals](sealed-datasets.md)
