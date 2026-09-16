@@ -178,20 +178,38 @@ fn a_dataset_too_short_for_the_offsets_is_typed_unavailable() {
     );
 }
 
+/// Each refusal names its own cause, so an unknown-command exit cannot pass
+/// for one of them.
 #[test]
 fn usage_errors_and_entrants_are_refused() {
-    for args in [
-        vec!["timing-luck"],
-        vec!["timing-luck", "--offsets", "0"],
-        vec!["timing-luck", "--offsets", "-1"],
-        vec!["timing-luck", "--offsets", "two"],
-        vec!["timing-luck", "--offsets", "2", "--periods-per-year", "0"],
-        vec!["timing-luck", "--offsets", "2", "--cmd", "python agent.py"],
-        vec!["timing-luck", "--offsets", "2", "--http", "127.0.0.1:9"],
+    const OFFSETS: &str = "--offsets must be a whole number of at least 1";
+    const ENTRANT: &str = "runs no external entrant";
+    for (args, says) in [
+        (
+            vec!["timing-luck"],
+            "usage: sharpebench timing-luck --offsets",
+        ),
+        (vec!["timing-luck", "--offsets", "0"], OFFSETS),
+        (vec!["timing-luck", "--offsets", "-1"], OFFSETS),
+        (vec!["timing-luck", "--offsets", "two"], OFFSETS),
+        (
+            vec!["timing-luck", "--offsets", "2", "--periods-per-year", "0"],
+            "--periods-per-year must be a positive number",
+        ),
+        (
+            vec!["timing-luck", "--offsets", "2", "--cmd", "python agent.py"],
+            ENTRANT,
+        ),
+        (
+            vec!["timing-luck", "--offsets", "2", "--http", "127.0.0.1:9"],
+            ENTRANT,
+        ),
     ] {
         let output = cli(&args);
         assert_eq!(output.status.code(), Some(2), "{args:?}");
         assert!(output.stdout.is_empty(), "{args:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(says), "{args:?}: {stderr}");
     }
 }
 
