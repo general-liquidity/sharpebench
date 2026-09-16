@@ -142,9 +142,11 @@ pub struct CrowdingDecayPrior {
 /// The paper's headline calibration, roughly 18-month half-lives at high
 /// adoption against 5 to 7 years pre-AI, is a **model output**, not a
 /// measurement. It comes out of the paper's simulation, not out of a dataset.
-/// The genuinely empirical leg of that work is the 13F portfolio-convergence
-/// study (99.5M holdings, 2013-2024, +42% convergence); the fund return dynamics
-/// and the flash-crash fragility result are simulated. So this crate does not
+/// Its empirical validation is simulated too: the 13F portfolio-convergence
+/// result (+42% over 2013-2024) comes from a simulation calibrated to the
+/// moments of 99.5M 13F holdings, not from the holdings themselves, and the
+/// fund return dynamics and the flash-crash fragility result are simulated
+/// (the paper's abstract and its sections 1 and 4.2). So this crate does not
 /// ship those half-lives as constants, does not default `theta` or `delta_max`
 /// to values implying them, and never describes the output of this function as
 /// measured. It is a prior. Say so wherever you print it.
