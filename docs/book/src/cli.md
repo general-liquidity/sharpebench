@@ -447,6 +447,15 @@ out-of-memory verdict is reported as `reexecution_transport_failure` with
 is started after the first failure. A divergence is `reexecution_diverged`,
 as for the other agents. There is no host fallback.
 
+`--diagnostics sizing-response [--vol-lookback N]` also reports how gross
+exposure moved with trailing volatility, a rank-neutral diagnostic described
+under [Volatility-response sizing](methodology-sizing.md). `--json` prints
+`{"verification": ..., "sizing_response": {...}}`, where `verification` is the
+output without the flag; the text form appends a separate block. An unknown
+identifier, a missing value, `--vol-lookback` without the diagnostic, a lookback
+below 2, or a combination with `--reexecute` exits 2 with no output. Without the
+flag the output is unchanged.
+
 `capture` also records an external entrant, over the same transports as `run`:
 
 ```bash
