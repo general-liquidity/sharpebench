@@ -22,6 +22,7 @@ mod arena_cmd;
 mod artifact_preflight;
 mod compare_cmd;
 mod csv_columns;
+mod decision_stability_cmd;
 mod external_capture;
 mod forecast_cmd;
 mod gateway_cli;
@@ -60,6 +61,9 @@ fn main() -> ExitCode {
         Some("verify") => run_verify(&args, json),
         Some("capture") => run_capture(&args, json),
         Some("verify-trajectory") => run_verify_trajectory(&args, json),
+        Some("decision-stability") => {
+            ExitCode::from(decision_stability_cmd::run(&args, json).clamp(0, 255) as u8)
+        }
         Some("rescore") => ExitCode::from(rescore_cmd::run(&args, json).clamp(0, 255) as u8),
         Some("regrade") => ExitCode::from(regrade_cmd::run(&args, json).clamp(0, 255) as u8),
         Some("compare") => ExitCode::from(compare_cmd::run(&args, json).clamp(0, 255) as u8),
@@ -619,6 +623,7 @@ fn help() {
     );
     println!("                       --allow-unbound-trajectory: explicit legacy or cross-version regrade; never the default");
     println!("                       --reexecute [--cmd \"<prog>\"|--http <addr>|--image <ref>]: also re-run every captured run with a fresh agent and refuse the first divergent decision");
+    println!("  sharpebench decision-stability <traj.json>... [--data <csv>]  rank-neutral share of identical-observation steps where replicate runs decided differently");
     println!(
         "  sharpebench rescore <bundle.json>     recompute a declared submission bundle's quality from its frozen, digest-bound files only"
     );
