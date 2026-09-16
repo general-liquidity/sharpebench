@@ -29,7 +29,7 @@ impl Agent for Steady {
                 symbol: observation.symbols[0].symbol.clone(),
                 action: Action::Buy,
                 target_weight: 0.3,
-                confidence: 0.5,
+                confidence: Some(0.5),
                 rationale: String::new(),
             }],
             reasoning: String::new(),

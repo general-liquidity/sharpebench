@@ -1543,7 +1543,7 @@ mod tests {
                     symbol: sym,
                     action: Action::Buy,
                     target_weight: 1.0e9, // absurd size → sim-exploitation attempt
-                    confidence: 1.0,      // inflated conviction
+                    confidence: Some(1.0), // inflated conviction
                     rationale: "exploit the fill engine".to_string(),
                 }],
                 reasoning: "cheat".to_string(),
@@ -2156,7 +2156,7 @@ mod tests {
                     symbol: obs.symbols[0].symbol.clone(),
                     action: sharpebench_protocol::Action::Buy,
                     target_weight: (now % 1000) as f64 / 1000.0,
-                    confidence: 0.5,
+                    confidence: Some(0.5),
                     rationale: String::new(),
                 }],
                 reasoning: String::new(),

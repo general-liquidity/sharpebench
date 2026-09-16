@@ -1693,7 +1693,7 @@ fn invalid_orders(
         symbol: symbol.to_string(),
         action: Action::Buy,
         target_weight,
-        confidence: 0.5,
+        confidence: Some(0.5),
         rationale: String::new(),
     };
     let decision = |orders: Vec<Order>| Decision {

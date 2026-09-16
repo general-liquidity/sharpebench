@@ -115,12 +115,13 @@ pub(crate) fn build_observation(
     }
 }
 
-/// What the engine records for one step: the realized return plus the calibration
-/// inputs (stated conviction and whether the step paid off).
+/// What the engine records for one step: the realized return plus the conviction
+/// the step's decision stated, `None` when no order in the decision stated one.
+/// The return belongs mostly to the previous decision (see [`run_backtest`] for
+/// how the two are paired).
 pub(crate) struct StepOutcome {
     pub(crate) ret: f64,
-    pub(crate) confidence: f64,
-    pub(crate) outcome: bool,
+    pub(crate) confidence: Option<f64>,
 }
 
 /// Whether attempting a fresh/carry order changed the execution state. The
@@ -373,19 +374,15 @@ pub(crate) fn step_once(
     } else {
         0.0
     };
-    // Capture the decision's stated conviction and whether the step paid off, so
-    // the scoring kernel's calibration axis is fed from the live run.
-    let avg_conf = if decision.orders.is_empty() {
-        0.5
-    } else {
-        decision.orders.iter().map(|o| o.confidence).sum::<f64>() / decision.orders.len() as f64
-    };
+    // Capture the decision's stated conviction, so the scoring kernel's
+    // calibration axis is fed from the live run. Only stated confidences count:
+    // the mean over the orders that carry one, and no value at all for a hold or
+    // for orders that state none.
+    let stated = || decision.orders.iter().filter_map(|o| o.confidence);
+    let n_stated = stated().count();
+    let confidence = (n_stated > 0).then(|| stated().sum::<f64>() / n_stated as f64);
     book.prev_nav = navc;
-    StepOutcome {
-        ret,
-        confidence: avg_conf,
-        outcome: ret > 0.0,
-    }
+    StepOutcome { ret, confidence }
 }
 
 /// Run a single backtest of `agent` over `window` with seeded execution noise,
@@ -408,6 +405,7 @@ pub fn run_backtest(
     let mut returns: Vec<f64> = Vec::new();
     let mut confidences: Vec<f64> = Vec::new();
     let mut outcomes: Vec<bool> = Vec::new();
+    let mut awaiting_outcome: Option<f64> = None;
     // Accumulate the agent's self-reported *compute* cost (distinct from trading
     // cost, which is already baked into `returns`). Feeds `Run.cost`, which drives
     // the cost-normalized leaderboard columns (`return_per_cost` / `dsr_per_cost`).
@@ -421,8 +419,17 @@ pub fn run_backtest(
         }
         let out = step_once(data, &symbols, &mut book, &costs, seed, t, &decision);
         returns.push(out.ret);
-        confidences.push(out.confidence);
-        outcomes.push(out.outcome);
+        // The return booked at step t is the price move on the holdings decision
+        // t-1 chose; decision t adds only its own trading cost here. A stated
+        // confidence is therefore paired with the next step's return, and the
+        // window's final decision, whose outcome lies outside the window, adds
+        // no pair. A decision that stated no confidence adds none either, so
+        // `confidences` and `outcomes` align with each other, not with `returns`.
+        if let Some(confidence) = awaiting_outcome {
+            confidences.push(confidence);
+            outcomes.push(out.ret > 0.0);
+        }
+        awaiting_outcome = out.confidence;
     }
 
     Run {
@@ -451,7 +458,7 @@ mod tests {
                     symbol: sym,
                     action: Action::Buy,
                     target_weight: 2.0,
-                    confidence: 0.5,
+                    confidence: Some(0.5),
                     rationale: "2x leverage".to_string(),
                 }],
                 reasoning: "2x leverage".to_string(),
@@ -470,7 +477,7 @@ mod tests {
                     symbol: sym,
                     action: Action::Buy,
                     target_weight: 0.2,
-                    confidence: 0.7,
+                    confidence: Some(0.7),
                     rationale: "momentum breakout".to_string(),
                 }],
                 reasoning: "single-name buy".to_string(),
@@ -491,7 +498,7 @@ mod tests {
                     symbol: sym,
                     action: Action::Buy,
                     target_weight: 0.2,
-                    confidence: 0.6,
+                    confidence: Some(0.6),
                     rationale: String::new(),
                 }],
                 reasoning: "costly".to_string(),
@@ -579,7 +586,7 @@ mod tests {
                 symbol: symbols[0].clone(),
                 action: Action::Buy,
                 target_weight: 0.2,
-                confidence: 0.7,
+                confidence: Some(0.7),
                 rationale: "delayed rationale".to_string(),
             }],
             reasoning: String::new(),
@@ -694,7 +701,7 @@ mod tests {
                         symbol: "AAA".into(),
                         action: Action::Buy,
                         target_weight: opening,
-                        confidence: 0.5,
+                        confidence: Some(0.5),
                         rationale: String::new(),
                     }],
                     reasoning: String::new(),
@@ -790,7 +797,7 @@ mod tests {
                     symbol: obs.symbols[0].symbol.clone(),
                     action: Action::Buy,
                     target_weight: 0.4,
-                    confidence: 0.5,
+                    confidence: Some(0.5),
                     rationale: String::new(),
                 }],
                 reasoning: "one shot".to_string(),
@@ -947,7 +954,7 @@ mod tests {
                 symbol: symbols[0].clone(),
                 action: Action::Buy,
                 target_weight: 0.1,
-                confidence: 0.5,
+                confidence: Some(0.5),
                 rationale: String::new(),
             }],
             reasoning: String::new(),
@@ -1001,14 +1008,14 @@ mod tests {
                     symbol: symbols[0].clone(),
                     action: Action::Buy,
                     target_weight: 1.0,
-                    confidence: 0.5,
+                    confidence: Some(0.5),
                     rationale: String::new(),
                 },
                 Order {
                     symbol: symbols[1].clone(),
                     action: Action::Sell,
                     target_weight: -1.0,
-                    confidence: 0.5,
+                    confidence: Some(0.5),
                     rationale: String::new(),
                 },
             ],

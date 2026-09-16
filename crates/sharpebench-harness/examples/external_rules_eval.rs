@@ -116,7 +116,7 @@ fn equal_weight_decision(obs: &MarketObservation, long: &[bool], reasoning: &str
             symbol: s.symbol.clone(),
             action: if is_long { Action::Buy } else { Action::Close },
             target_weight: if is_long { w } else { 0.0 },
-            confidence: 0.5,
+            confidence: Some(0.5),
             rationale: reasoning.to_string(),
         })
         .collect();
