@@ -31,7 +31,7 @@ impl Agent for Fixed {
                         Action::Buy
                     },
                     target_weight: *weight,
-                    confidence: 0.5,
+                    confidence: Some(0.5),
                     rationale: String::new(),
                 })
                 .collect(),
