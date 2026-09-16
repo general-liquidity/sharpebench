@@ -26,8 +26,9 @@ The library entry point is `sharpebench_harness::timing_luck::timing_luck`.
 
 ## What it runs
 
-The dataset, the two windows, the eight execution seeds and the default cost
-model are resolved exactly as `sharpebench run` resolves them. The rows are the
+The dataset, the two windows, the eight execution seeds and the cost model are
+resolved exactly as `sharpebench run` resolves them: the default costs, or the
+same `--short-borrow-bps` rate `run` accepts, through the same parser. The rows are the
 reference field `run` ranks when no entrant is named, in its order
 (`buy-and-hold`, `momentum`, `luck-floor-00` to `luck-floor-02`), and the
 `pipeline-hold` suite control. The refusal control is not a row: it produces

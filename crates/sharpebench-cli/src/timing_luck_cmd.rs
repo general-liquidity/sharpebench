@@ -1,7 +1,8 @@
 //! `sharpebench timing-luck`: the timing-luck floor of the `run` protocol.
 //!
-//! Resolves the dataset and windows exactly as `sharpebench run` does, with the
-//! same eight execution seeds, default cost model and reference roster, and
+//! Resolves the dataset, windows and cost model exactly as `sharpebench run`
+//! does (the default costs, or `--short-borrow-bps` through the same parser),
+//! with the same eight execution seeds and reference roster, and
 //! reports how far the reference rows' Sharpe and deflated Sharpe move when
 //! every window's start shifts by 0 to k-1 bars
 //! ([`sharpebench_harness::timing_luck`]). No external entrant is accepted, no
@@ -15,10 +16,9 @@ use sharpebench_harness::timing_luck::{
     timing_luck, Spread, TimingLuckReport, TimingLuckSpec, TimingLuckUnavailable,
     TIMING_LUCK_SCHEMA_VERSION,
 };
-use sharpebench_sim::CostModel;
 
 const USAGE: &str = "usage: sharpebench timing-luck --offsets <k> [--data <csv>] \
-                     [--periods-per-year N] [--json]";
+                     [--periods-per-year N] [--short-borrow-bps <bps>] [--json]";
 
 /// The emitted document. An unavailable report still says what it is and that
 /// it is not a rank input, so a reader holding the JSON alone cannot mistake it
@@ -144,6 +144,13 @@ pub fn run(args: &[String], json: bool) -> i32 {
         },
         None => ScoreConfig::default().periods_per_year,
     };
+    let costs = match crate::cost_model_from_args(args) {
+        Ok(costs) => costs,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return 2;
+        }
+    };
     let (data, windows) = match crate::resolve_dataset(args) {
         Ok(resolved) => resolved,
         Err(error) => {
@@ -158,7 +165,7 @@ pub fn run(args: &[String], json: bool) -> i32 {
         luck_floor_agents: crate::LUCK_FLOOR_AGENTS,
         hold_control_id: crate::HOLD_CONTROL_ID,
     };
-    match timing_luck(&data, &windows, &seeds, CostModel::default(), &cfg, spec) {
+    match timing_luck(&data, &windows, &seeds, costs, &cfg, spec) {
         Ok(report) => {
             if json {
                 crate::emit_json(&Document::Measured { report: &report });

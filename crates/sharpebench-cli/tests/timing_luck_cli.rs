@@ -197,6 +197,10 @@ fn usage_errors_and_entrants_are_refused() {
             "--periods-per-year must be a positive number",
         ),
         (
+            vec!["timing-luck", "--offsets", "2", "--short-borrow-bps", "-1"],
+            "--short-borrow-bps `-1` is refused",
+        ),
+        (
             vec!["timing-luck", "--offsets", "2", "--cmd", "python agent.py"],
             ENTRANT,
         ),
