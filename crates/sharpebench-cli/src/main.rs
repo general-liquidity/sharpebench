@@ -1391,7 +1391,7 @@ fn checkpoint_contract(
         }
         None => sharpebench_attest::content_digest(entrant_material),
     };
-    Ok(sharpebench_harness::SweepContract::new(
+    sharpebench_harness::SweepContract::try_new(
         sharpebench_harness::SweepIdentity {
             dataset_sha256: digest_json("dataset", execution.data)?,
             cost_model_sha256: sharpebench_harness::cost_model_digest(execution.costs),
@@ -1414,7 +1414,8 @@ fn checkpoint_contract(
         execution.windows,
         execution.seeds,
         execution.max_retries,
-    ))
+    )
+    .map_err(|e| e.to_string())
 }
 
 fn invocation_with_rates(material: &[u8], card: Option<&RateCard>) -> Result<String, String> {
