@@ -41,6 +41,19 @@ the paper; the Rust identifier differs and is given beside it:
 
 `CostProfile::name()` is the one place that maps a variant to its reported name.
 
+## Decision delay
+
+`ExecutionProfile::decision_delay_bars` declares how many bars an order waits
+after its decision. The stressed profile declares two, and the backtest driver
+does not apply the delay: a run under the stressed profile executes each
+decision on the bar it was made, which is how the evidence recorded under that
+profile was produced, and that stays so. Decision-delay sensitivity is measured
+by the [lagged replay](replay-diagnostics.md#lagged-replay) instead, which
+replays a captured run's decisions `k` bars late through this engine and
+reports Sharpe and mean return beside the undelayed figures. Passing the
+stressed cost model with lag `decision_delay_bars` measures the declared delay
+without changing the profile.
+
 ## Synthetic data
 
 For tests, calibration, and the luck floor, the engine produces deterministic synthetic
