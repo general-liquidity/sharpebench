@@ -14,6 +14,7 @@ pub mod data;
 pub mod engine;
 pub mod env;
 pub mod external;
+pub mod replay_nulls;
 pub mod trajectory;
 pub mod transport;
 pub mod windows;
