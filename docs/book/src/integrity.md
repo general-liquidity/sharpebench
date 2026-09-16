@@ -8,8 +8,11 @@ claim.
 
 ## The self-audit
 
-The live battery has nine cases, and all nine are claimed defenses that must be
-demoted on every commit. The ninth, the sock-puppet Sybil field, was for a time
+The live battery has ten cases, and all ten are claimed defenses that must be
+demoted on every commit. Nine run against the scoring kernel and are also what
+the WASM, npm and MCP `self_audit` surfaces report; the tenth,
+`forward-hindsight-oracle`, needs the simulator and the forward arena and runs in
+the CLI only (see [returns intake](arena.md#returns-intake)). The ninth, the sock-puppet Sybil field, was for a time
 marked `expected_vulnerable`: on the measured-deflation path `rank` estimates
 `trials_sr_std` from the field, and 200 near-duplicate low-dispersion puppets
 shrank that estimate enough to lower the deflation bar and admit a borderline
@@ -49,6 +52,7 @@ each is demoted:
 [DEFENDED] tail-seller                smooth linear returns earned by selling tail risk (naked short gamma)
 [DEFENDED] adversarial-input          look excellent in-sample with an accurate forecast head, then collapse under a small in-range input perturbation
 [DEFENDED] sybil-sock-puppets         flood the field with near-duplicate agents to shrink measured trials_sr_std and lower the bar
+[DEFENDED] forward-hindsight-oracle   deliver a next-bar oracle's hindsight returns or decisions through the forward arena
 ```
 
 The command exits non-zero if **any** attack is not demoted. That makes the audit
@@ -95,7 +99,7 @@ material.
 
 ## Agreement and dissent, without a judge
 
-The audit above exercises nine fixtures and shows that the current scorer
+The audit above exercises ten fixtures and shows that the current scorer
 demotes those known attacks. A different question
 it could not previously ask is whether the automated gate agrees with the
 **human** who triaged the gold set in the first place. Two deterministic
@@ -118,7 +122,7 @@ or two scorer configurations, which is where it is most useful here.
 Because `sharpebench-core` is pure (no clock, no ambient RNG, fixed float
 reduction order), the audit is reproducible from the same code and fixtures.
 The measured cross-platform evidence is two committed Rust goldens on Linux,
-macOS, and Windows. The audit catches regressions against nine named attacks;
+macOS, and Windows. The audit catches regressions against ten named attacks;
 it does not prove universal resistance to gaming, host neutrality, or identical
 bytes on untested machines and toolchains. The design principle is to verify
 the properties each artifact actually establishes and state the remaining
