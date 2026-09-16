@@ -16,8 +16,12 @@
 //! 3. every agent carries exactly the same key set,
 //! 4. that key set is the complete Cartesian product of the observed windows
 //!    and seeds, with no missing and no unexpected cell, and
-//! 5. declared period identities agree across agents for the same cell and
-//!    match the run's return length.
+//! 5. declared period identities match the run's return length, name no
+//!    period twice within a run, and agree across agents for the same cell.
+//!
+//! A repeated period is refused per run, before any cross-agent comparison, so
+//! a field in which every agent repeats the same period is refused too: the
+//! agents agreeing does not make one period two observations.
 //!
 //! Only then are the runs reordered into one canonical key order, so the
 //! positional reads downstream are keyed reads by construction.
@@ -60,8 +64,8 @@ impl fmt::Display for RunKey {
 /// the run's returns are indexed by.
 ///
 /// `periods` is empty when the submitter declares no period axis. When it is
-/// present it must have one entry per return, and two agents on the same cell
-/// must declare the same periods.
+/// present it must have one entry per return, no entry twice, and two agents
+/// on the same cell must declare the same periods.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunIdentity {
     #[serde(flatten)]
@@ -121,6 +125,16 @@ pub enum RunIdentityError {
         key: RunKey,
         periods: usize,
         returns: usize,
+    },
+    /// One run declared the same period identity at two indices, so that
+    /// period's return would count as two observations in every statistic
+    /// computed from the run.
+    DuplicatePeriod {
+        agent_id: String,
+        key: RunKey,
+        period: String,
+        first: usize,
+        second: usize,
     },
     /// Two agents declared different period identities for the same cell.
     PeriodMismatch {
@@ -188,6 +202,18 @@ impl fmt::Display for RunIdentityError {
                 "run identity: agent `{agent_id}` {key} declared {periods} period \
                  identity/identities for {returns} return(s)"
             ),
+            Self::DuplicatePeriod {
+                agent_id,
+                key,
+                period,
+                first,
+                second,
+            } => write!(
+                f,
+                "run identity: agent `{agent_id}` {key} declares period `{period}` at \
+                 index {first} and again at index {second}; one period cannot contribute \
+                 two returns to a run"
+            ),
             Self::PeriodMismatch {
                 key,
                 agent_id,
@@ -240,11 +266,25 @@ fn check_window(window: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The indices of the first period identity that appears twice, as
+/// `(first, second)`, where `second` is the earliest index that repeats an
+/// earlier entry.
+fn first_repeated_period(periods: &[String]) -> Option<(usize, usize)> {
+    let mut seen: BTreeMap<&str, usize> = BTreeMap::new();
+    for (second, period) in periods.iter().enumerate() {
+        if let Some(first) = seen.insert(period.as_str(), second) {
+            return Some((first, second));
+        }
+    }
+    None
+}
+
 /// Parse a submissions field and require typed run identity throughout.
 ///
-/// Refuses a legacy unkeyed array, a partial grid, a duplicated cell, and
-/// disagreeing period identities. On success the returned submissions are
-/// reordered so positional access downstream is keyed access.
+/// Refuses a legacy unkeyed array, a partial grid, a duplicated cell, a period
+/// repeated within a run, and disagreeing period identities. On success the
+/// returned submissions are reordered so positional access downstream is
+/// keyed access.
 pub fn parse_keyed_field(json: &str) -> Result<KeyedField, RunIdentityError> {
     let (subs, declarations) =
         parse_declared_field(json).map_err(RunIdentityError::InvalidField)?;
@@ -297,6 +337,15 @@ pub fn parse_keyed_field(json: &str) -> Result<KeyedField, RunIdentityError> {
                     key: identity.key.clone(),
                     periods: identity.periods.len(),
                     returns: sub.runs[index].returns.len(),
+                });
+            }
+            if let Some((first, second)) = first_repeated_period(&identity.periods) {
+                return Err(RunIdentityError::DuplicatePeriod {
+                    agent_id: sub.agent_id.clone(),
+                    key: identity.key.clone(),
+                    period: identity.periods[second].clone(),
+                    first,
+                    second,
                 });
             }
         }
@@ -629,6 +678,101 @@ mod tests {
                 agent_id: "b".to_string(),
                 other_agent_id: "a".to_string(),
                 index: 1,
+            }
+        );
+    }
+
+    fn periods_field(entries: &[(&str, &[&str])]) -> String {
+        let docs: Vec<serde_json::Value> = entries
+            .iter()
+            .map(|(agent_id, periods)| {
+                let returns: Vec<f64> = (0..periods.len().max(2))
+                    .map(|i| 0.001 * (i as f64 + 1.0))
+                    .collect();
+                let mut key = serde_json::json!({"window": "w0", "seed": 0});
+                if !periods.is_empty() {
+                    key["periods"] = serde_json::json!(periods);
+                }
+                serde_json::json!({
+                    "agent_id": agent_id,
+                    "runs": [{"returns": returns}],
+                    "run_keys": [key],
+                })
+            })
+            .collect();
+        serde_json::to_string(&docs).expect("serialize field")
+    }
+
+    fn w0() -> RunKey {
+        RunKey {
+            window: "w0".into(),
+            seed: 0,
+        }
+    }
+
+    #[test]
+    fn a_run_repeating_a_period_is_refused_naming_the_period_and_both_indices() {
+        // Distinct periods are the control: the same shape parses.
+        let distinct = periods_field(&[("a", &["d1", "d2", "d3", "d4"])]);
+        assert!(parse_keyed_field(&distinct).is_ok());
+
+        let repeated = periods_field(&[("a", &["d1", "d2", "d3", "d2"])]);
+        let error = parse_keyed_field(&repeated).unwrap_err();
+        assert_eq!(
+            error,
+            RunIdentityError::DuplicatePeriod {
+                agent_id: "a".to_string(),
+                key: w0(),
+                period: "d2".to_string(),
+                first: 1,
+                second: 3,
+            }
+        );
+        assert_eq!(
+            error.to_string(),
+            "run identity: agent `a` (window `w0`, seed 0) declares period `d2` at \
+             index 1 and again at index 3; one period cannot contribute two returns \
+             to a run"
+        );
+    }
+
+    #[test]
+    fn the_first_repeat_is_the_one_reported() {
+        assert_eq!(first_repeated_period(&[]), None);
+        let periods: Vec<String> = ["d1", "d2", "d3", "d3", "d1"]
+            .iter()
+            .map(|p| p.to_string())
+            .collect();
+        assert_eq!(first_repeated_period(&periods), Some((2, 3)));
+    }
+
+    #[test]
+    fn a_repeated_period_is_refused_even_when_every_agent_repeats_it() {
+        // Agreement across agents is the cross-agent check, and it passes
+        // here. The repeat is still one period counted twice.
+        let shared = periods_field(&[("a", &["d1", "d1"]), ("b", &["d1", "d1"])]);
+        assert_eq!(
+            parse_keyed_field(&shared).unwrap_err(),
+            RunIdentityError::DuplicatePeriod {
+                agent_id: "a".to_string(),
+                key: w0(),
+                period: "d1".to_string(),
+                first: 0,
+                second: 1,
+            }
+        );
+
+        // With only one agent declaring periods there is nothing to compare
+        // against, and the repeat is still refused.
+        let one_declares = periods_field(&[("a", &[]), ("b", &["d1", "d1"])]);
+        assert_eq!(
+            parse_keyed_field(&one_declares).unwrap_err(),
+            RunIdentityError::DuplicatePeriod {
+                agent_id: "b".to_string(),
+                key: w0(),
+                period: "d1".to_string(),
+                first: 0,
+                second: 1,
             }
         );
     }

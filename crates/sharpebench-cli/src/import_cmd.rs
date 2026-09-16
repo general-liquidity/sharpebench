@@ -11,6 +11,7 @@
 //! bootstrap only, and any demotion it shows is a lower bound on how much the
 //! rival ranking overstates. See `docs/book/src/importing.md`.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use sharpebench_core::{AgentSubmission, Run, RunIdentity, RunKey};
@@ -91,6 +92,7 @@ fn usage() {
          run identity: a header row names each run (wide format) and a `run`\n\
          column names it (long format); an optional `seed` column and an optional\n\
          `period` (or `date`) column carry the seed and the period identities.\n\
+         A period repeated within one run is refused, naming the row.\n\
          Those become `run_keys` in the output, which\n\
          `sharpebench score --require-run-keys` validates. Without them the import\n\
          is unkeyed and that scorer refuses it: no run identity is inferred from\n\
@@ -343,8 +345,9 @@ fn is_period_column(name: &str) -> bool {
 ///
 /// A header row is also the run identity: each remaining column name becomes a
 /// window id at seed 0. A leading `period` or `date` column is the period axis
-/// rather than a run. Without a header the file declares no identity, so the
-/// runs come back unkeyed.
+/// rather than a run, and a period it names twice is refused with both rows.
+/// Without a header the file declares no identity, so the runs come back
+/// unkeyed.
 fn parse_wide(text: &str) -> Result<Vec<ImportedRun>, String> {
     let mut lines = text.lines().filter(|l| !l.trim().is_empty());
     let Some(first) = lines.next() else {
@@ -370,7 +373,10 @@ fn parse_wide(text: &str) -> Result<Vec<ImportedRun>, String> {
     if body.is_empty() {
         return Err("no data rows".to_string());
     }
-    for line in body {
+    // Period identity to the row that first declared it. A period column only
+    // exists under a header, so the header is row 1 and the body starts at 2.
+    let mut period_rows: BTreeMap<&str, usize> = BTreeMap::new();
+    for (body_idx, line) in body.into_iter().enumerate() {
         let cells: Vec<_> = line.split(',').map(str::trim).collect();
         if cells.len() > n_cols {
             return Err(format!("row has more cells than the first row ({n_cols})"));
@@ -378,6 +384,16 @@ fn parse_wide(text: &str) -> Result<Vec<ImportedRun>, String> {
         let period = period_col.map(|index| cells[index]);
         if period == Some("") {
             return Err("empty period identity in the period column".to_string());
+        }
+        if let Some(period) = period {
+            let row = body_idx + 2;
+            if let Some(first_row) = period_rows.insert(period, row) {
+                return Err(format!(
+                    "row {row}: period `{period}` repeats row {first_row}; one period \
+                     cannot contribute two returns to a run (an intraday export needs \
+                     a timestamp, not a date)"
+                ));
+            }
         }
         for (i, cell) in cells.into_iter().enumerate() {
             if period_col == Some(i) {
@@ -438,6 +454,10 @@ fn parse_wide(text: &str) -> Result<Vec<ImportedRun>, String> {
 /// than discarded. A file without a `run` column declares no identity and its
 /// runs come back unkeyed.
 ///
+/// A second row with the same agent, run, seed and period is refused, naming
+/// both rows, whether or not the file has a `run` column: either way the
+/// parser would pool both rows into one run as two observations.
+///
 /// Returns `Ok(None)` when the file has no agent column (caller falls back to
 /// wide format).
 fn parse_long(text: &str) -> Result<Option<Vec<ImportedAgent>>, String> {
@@ -465,8 +485,14 @@ fn parse_long(text: &str) -> Result<Option<Vec<ImportedAgent>>, String> {
         })
         .ok_or("no returns column beside the agent column")?;
 
-    // (agent, runs as ((run label, seed), periods, returns)) in first-appearance order.
-    type LabeledRun = ((String, u64), Vec<String>, Vec<f64>);
+    // (agent, runs as ((run label, seed), periods, returns, period -> first row))
+    // in first-appearance order.
+    type LabeledRun = (
+        (String, u64),
+        Vec<String>,
+        Vec<f64>,
+        BTreeMap<String, usize>,
+    );
     let mut agents: Vec<(String, Vec<LabeledRun>)> = Vec::new();
     for (row_idx, line) in lines.enumerate() {
         let cells: Vec<&str> = line.split(',').map(str::trim).collect();
@@ -502,14 +528,34 @@ fn parse_long(text: &str) -> Result<Option<Vec<ImportedAgent>>, String> {
             }
         };
         let label = (run_label, seed);
-        let run = match entry.1.iter_mut().find(|(l, _, _)| *l == label) {
+        let run = match entry.1.iter_mut().find(|(l, _, _, _)| *l == label) {
             Some(r) => r,
             None => {
-                entry.1.push((label, Vec::new(), Vec::new()));
+                entry
+                    .1
+                    .push((label, Vec::new(), Vec::new(), BTreeMap::new()));
                 entry.1.last_mut().expect("just pushed")
             }
         };
         if let Some(period) = period {
+            let row = row_idx + 2;
+            if let Some(first_row) = run.3.insert(period.clone(), row) {
+                let (run_label, seed) = &run.0;
+                let (run_name, hint) = if run_col.is_some() {
+                    (format!(", run `{run_label}`"), "")
+                } else {
+                    (
+                        String::new(),
+                        " (the file has no `run` column, so these rows pool into one \
+                         run: name distinct runs in a `run` column)",
+                    )
+                };
+                return Err(format!(
+                    "row {row}: period `{period}` repeats row {first_row} for agent \
+                     `{agent}`{run_name}, seed {seed}; one period cannot contribute two \
+                     returns to a run{hint}"
+                ));
+            }
             run.1.push(period);
         }
         run.2.push(v);
@@ -525,7 +571,7 @@ fn parse_long(text: &str) -> Result<Option<Vec<ImportedAgent>>, String> {
                 agent_id,
                 runs: runs
                     .into_iter()
-                    .map(|((window, seed), periods, returns)| ImportedRun {
+                    .map(|((window, seed), periods, returns, _)| ImportedRun {
                         identity: keyed.then_some(RunIdentity {
                             key: RunKey { window, seed },
                             periods,
@@ -675,6 +721,77 @@ mod tests {
         assert_eq!(code, 1);
         assert!(!out.exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn long_error(csv: &str) -> String {
+        match parse_long(csv) {
+            Err(error) => error,
+            Ok(_) => panic!("expected the long import to be refused"),
+        }
+    }
+
+    fn wide_error(csv: &str) -> String {
+        match parse_wide(csv) {
+            Err(error) => error,
+            Ok(_) => panic!("expected the wide import to be refused"),
+        }
+    }
+
+    #[test]
+    fn a_repeated_long_row_is_refused_naming_the_row_and_the_period() {
+        // Row 5 repeats row 3's (agent, run, seed, period).
+        let keyed = "agent,run,seed,period,return\n\
+                     a,w0,0,d1,0.01\n\
+                     a,w0,0,d2,0.02\n\
+                     a,w0,0,d3,0.03\n\
+                     a,w0,0,d2,0.04\n";
+        assert_eq!(
+            long_error(keyed),
+            "row 5: period `d2` repeats row 3 for agent `a`, run `w0`, seed 0; one \
+             period cannot contribute two returns to a run"
+        );
+
+        // Without a `run` column the rows still pool into one run per agent and
+        // seed, so the repeat is refused there too, with the way out named.
+        let unkeyed = "agent,date,return\na,d1,0.01\na,d1,0.02\n";
+        assert_eq!(
+            long_error(unkeyed),
+            "row 3: period `d1` repeats row 2 for agent `a`, seed 0; one period cannot \
+             contribute two returns to a run (the file has no `run` column, so these \
+             rows pool into one run: name distinct runs in a `run` column)"
+        );
+
+        // The same period in another agent, run or seed is the grid, not a repeat.
+        let grid = "agent,run,seed,period,return\n\
+                    a,w0,0,d1,0.01\n\
+                    a,w0,1,d1,0.02\n\
+                    a,w1,0,d1,0.03\n\
+                    b,w0,0,d1,0.04\n";
+        let agents = parse_long(grid).expect("parse").expect("long format");
+        assert_eq!(agents.len(), 2);
+        assert_eq!(agents[0].runs.len(), 3);
+        assert_eq!(agents[1].runs.len(), 1);
+    }
+
+    #[test]
+    fn a_repeated_wide_date_is_refused_naming_the_row_and_the_period() {
+        // An hourly export labelled by date only: the second bar of d1 is row 3.
+        assert_eq!(
+            wide_error("date,w0,w1\nd1,0.01,0.02\nd1,0.03,0.04\nd2,0.05,0.06\n"),
+            "row 3: period `d1` repeats row 2; one period cannot contribute two returns \
+             to a run (an intraday export needs a timestamp, not a date)"
+        );
+        // A blank return on the repeated row does not hide the repeated date:
+        // the period column is the identity of the row, not of one cell.
+        assert_eq!(
+            wide_error("date,w0,w1\nd1,0.01,0.02\nd2,0.03,0.04\nd2,,0.06\n"),
+            "row 4: period `d2` repeats row 3; one period cannot contribute two returns \
+             to a run (an intraday export needs a timestamp, not a date)"
+        );
+        // Distinct dates are the control.
+        let runs = parse_wide("date,w0\nd1,0.01\nd2,0.02\n").expect("distinct dates");
+        let identity = runs[0].identity.as_ref().expect("keyed");
+        assert_eq!(identity.periods, vec!["d1".to_string(), "d2".to_string()]);
     }
 
     #[test]
