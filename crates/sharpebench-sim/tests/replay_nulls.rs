@@ -67,7 +67,7 @@ fn planted(
                             Action::Close
                         },
                         target_weight: weight,
-                        confidence: 0.5,
+                        confidence: None,
                         rationale: String::new(),
                     })
                     .into_iter()
@@ -658,14 +658,14 @@ fn every_shipped_profile_marks_held_positions_at_the_frozen_close() {
                 symbol: "S0".to_string(),
                 action: Action::Buy,
                 target_weight: 0.6,
-                confidence: 0.5,
+                confidence: None,
                 rationale: String::new(),
             },
             Order {
                 symbol: "S1".to_string(),
                 action: Action::Sell,
                 target_weight: -0.3,
-                confidence: 0.5,
+                confidence: None,
                 rationale: String::new(),
             },
         ],

@@ -516,7 +516,7 @@ fn flat_decision(symbols: &[String]) -> Decision {
                 symbol: symbol.clone(),
                 action: Action::Close,
                 target_weight: 0.0,
-                confidence: 0.5,
+                confidence: None,
                 rationale: String::new(),
             })
             .collect(),
