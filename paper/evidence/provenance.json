@@ -179,7 +179,7 @@
       "sha256": "1e025ac30099de23ae8455f20ae5441b557e924870d0e1475c7508512908ec0d"
     }
   ],
-  "generated_at_head": "c1a9b2d57c04804e89a5a755cefda9411be60e5f",
+  "generated_at_head": "9409071a74833575962a04041eb3bcd9a0283433",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -331,11 +331,11 @@
     },
     {
       "path": "crates/sharpebench-cli/src/lineage_cmd.rs",
-      "sha256": "7d427b65bbad51b02c7296271e124071111cb95e116f1d33489697ebfcffcde7"
+      "sha256": "422778883f96321ec4c0334119f30c8e43ec34de2ae702fc4768a050d3351b15"
     },
     {
       "path": "crates/sharpebench-cli/src/main.rs",
-      "sha256": "9efc75cb6453a33165c36bcd7802636be0699a7e7afee019f925d6dfafd9e49c"
+      "sha256": "e487aa8ffc0722ef93e86c19b404c27e0467e4d3b3044db10430f0b680df9fcc"
     },
     {
       "path": "crates/sharpebench-cli/src/regrade_cmd.rs",
@@ -404,6 +404,10 @@
     {
       "path": "crates/sharpebench-cli/tests/honesty_units.rs",
       "sha256": "5e628339284b5595413ea461a5d0fdfa491b3b3328b34fa380ff5ff783d7a069"
+    },
+    {
+      "path": "crates/sharpebench-cli/tests/lineage_census_cli.rs",
+      "sha256": "7037bb16f835c6b3b545607daf34bd6db7a3d63e7a313abb91d2dcff82b813b2"
     },
     {
       "path": "crates/sharpebench-cli/tests/options_boundaries.rs",
@@ -479,7 +483,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/candidate_lineage.rs",
-      "sha256": "7ff57a06e61119cc65404d271813114b0d28e933f7327c7cdb0907a3902a3dba"
+      "sha256": "8628584edbad3b1cf547db0a3e6090dac0de6fdf57607c9e97b7e160f335b888"
     },
     {
       "path": "crates/sharpebench-core/src/certification.rs",
@@ -1379,5 +1383,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "4af554d9343571ccaa2be70600a0128b31368af5b80866d7dce3ac3f3ff8dcbc"
+  "source_snapshot_sha256": "c0ac5d23f5ffc96f62ba970aa76dc3918c057d8d3d415069e26e4e847c34711c"
 }
