@@ -10,15 +10,18 @@
 //! to, and they need that binding, so they refuse `--allow-unbound-trajectory`
 //! and `--reexecute`. They also refuse `--diagnostics`, whose report nests the
 //! verification under a different shape; request the two separately. A
-//! malformed flag is refused before anything is read.
+//! malformed flag, including a draw count above the cap, is refused before
+//! anything is read; a lag longer than the runs allow is refused with the same
+//! exit code once the trajectory is read.
 
 use std::process::ExitCode;
 
 use serde::Serialize;
 use sharpebench_protocol::AgentTrajectory;
 use sharpebench_sim::replay_nulls::{
-    lagged_replay, timing_null, LaggedReplayReport, RunTimingNull, TimingNullAggregate,
-    TimingNullConfig, TimingNullReport, TimingNullUnavailable, VALID_WHEN,
+    lagged_replay, timing_null, LaggedAggregate, LaggedReplayReport, LaggedRun,
+    LaggedRunUnavailable, ReplayNullRefusal, RunTimingNull, TimingNullAggregate, TimingNullConfig,
+    TimingNullReport, TimingNullUnavailable, MAX_TIMING_NULL_DRAWS, VALID_WHEN,
 };
 use sharpebench_sim::{CostModel, Dataset};
 
@@ -54,8 +57,10 @@ pub(crate) fn requested(args: &[String]) -> Result<Option<Requested>, String> {
         if let Some(draws) = draws {
             config.draws = usize::try_from(draws)
                 .ok()
-                .filter(|&draws| draws > 0)
-                .ok_or("--null-draws needs a positive integer")?;
+                .filter(|&draws| (1..=MAX_TIMING_NULL_DRAWS).contains(&draws))
+                .ok_or_else(|| {
+                    format!("--null-draws needs an integer from 1 to {MAX_TIMING_NULL_DRAWS}")
+                })?;
         }
         if let Some(seed) = seed {
             config.seed = seed;
@@ -124,6 +129,11 @@ pub(crate) fn report(
     let lagged = match &requested.lags {
         Some(lags) => match lagged_replay(data, traj, costs, lags) {
             Ok(report) => Some(report),
+            // A declared lag the runs cannot hold is a usage error.
+            Err(error @ ReplayNullRefusal::LagTooLong { .. }) => {
+                eprintln!("error: lagged replay: {error}");
+                return ExitCode::from(2);
+            }
             Err(error) => {
                 eprintln!("error: lagged replay: {error}");
                 return ExitCode::FAILURE;
@@ -166,17 +176,52 @@ fn reason(reason: TimingNullUnavailable) -> &'static str {
     }
 }
 
+fn lag_reason(why: LaggedRunUnavailable) -> String {
+    match why {
+        LaggedRunUnavailable::NeverFills { lag } => {
+            format!("the lag-{lag} row never holds a position in the window")
+        }
+        LaggedRunUnavailable::TooFewComparedBars {
+            skipped_leading_bars,
+        } => format!(
+            "fewer than two bars remain after the {skipped_leading_bars} bars through the last opening fill"
+        ),
+        LaggedRunUnavailable::NoSharpe { lag } => {
+            format!("the lag-{lag} row has no Sharpe on the compared bars (constant, as when flat)")
+        }
+    }
+}
+
+fn placements(count: u64) -> String {
+    if count == u64::MAX {
+        format!(">= {count}")
+    } else {
+        count.to_string()
+    }
+}
+
 fn print_diagnostics(diagnostics: &ReplayDiagnostics) {
-    println!("\nReplay diagnostics (rank-neutral: the gate and the rank never read them)");
+    println!(
+        "
+Replay diagnostics (rank-neutral: the gate and the rank never read them)"
+    );
     println!("  {}", diagnostics.valid_when);
     if let Some(report) = &diagnostics.timing_null {
         println!(
-            "\n  Exposure-matched random timing: {} draws, seed {}",
+            "
+  Exposure-matched random timing: {} draws, seed {}; runs over one window share placements",
             report.draws, report.seed
         );
         println!(
-            "  {:>4}  {:>11}  {:>9}  {:>8}  {:>11}  {:>10}",
-            "run", "window", "invested", "periods", "entrant SR", "percentile"
+            "  {:>4}  {:>11}  {:>9}  {:>8}  {:>11}  {:>10}  {:>8}  {:>20}",
+            "run",
+            "window",
+            "invested",
+            "periods",
+            "entrant SR",
+            "percentile",
+            "MC s.e.",
+            "distinct placements"
         );
         for run in &report.runs {
             match run {
@@ -187,13 +232,16 @@ fn print_diagnostics(diagnostics: &ReplayDiagnostics) {
                     exposure,
                     entrant_sharpe,
                     reference,
+                    distinct_placements,
                     ..
                 } => println!(
-                    "  {run:>4}  {:>11}  {:>9}  {:>8}  {entrant_sharpe:>11.4}  {:>10.3}",
+                    "  {run:>4}  {:>11}  {:>9}  {:>8}  {entrant_sharpe:>11.4}  {:>10.3}  {:>8.3}  {:>20}",
                     format!("[{window_start}, {window_end})"),
                     format!("{}/{}", exposure.invested_bars, exposure.bars),
                     exposure.holding_periods,
-                    reference.percentile
+                    reference.percentile,
+                    reference.monte_carlo_standard_error,
+                    placements(*distinct_placements)
                 ),
                 RunTimingNull::Unavailable {
                     run, reason: why, ..
@@ -208,8 +256,11 @@ fn print_diagnostics(diagnostics: &ReplayDiagnostics) {
                 entrant_mean_sharpe,
                 reference,
             } => println!(
-                "  across {runs} runs: mean Sharpe {entrant_mean_sharpe:.4} sits at percentile {:.3} of {} draws (reference mean {:.4})",
-                reference.percentile, reference.draws, reference.reference_mean_sharpe
+                "  across {runs} runs: mean Sharpe {entrant_mean_sharpe:.4} sits at percentile {:.3} (MC s.e. {:.3}) of {} draws (reference mean {:.4})",
+                reference.percentile,
+                reference.monte_carlo_standard_error,
+                reference.draws,
+                reference.reference_mean_sharpe
             ),
             TimingNullAggregate::Unavailable { reason: why } => {
                 println!("  across runs: unavailable, {}", reason(*why))
@@ -218,25 +269,54 @@ fn print_diagnostics(diagnostics: &ReplayDiagnostics) {
     }
     if let Some(report) = &diagnostics.lagged_replay {
         println!(
-            "\n  Lagged replay: decisions executed k bars late; the first {} bars of each run are left out of every row",
-            report.skipped_leading_bars
+            "
+  Lagged replay: decisions executed k bars late; each run is compared on the bars after every row's opening fill"
         );
-        println!(
-            "  {:>9}  {:>11}  {:>11}  {:>16}",
-            "lag", "mean SR", "mean return", "Sharpe change"
-        );
-        println!(
-            "  {:>9}  {:>11.4}  {:>11.6}  {:>16}",
-            "undelayed", report.undelayed.mean_sharpe, report.undelayed.mean_return, "-"
-        );
-        for row in &report.lagged {
-            println!(
-                "  {:>9}  {:>11.4}  {:>11.6}  {:>+16.4}",
-                row.lag,
-                row.mean_sharpe,
-                row.mean_return,
-                row.mean_sharpe - report.undelayed.mean_sharpe
-            );
+        println!("  {}", report.end_effect);
+        for run in &report.runs {
+            match run {
+                LaggedRun::Available {
+                    run,
+                    skipped_leading_bars,
+                    compared_bars,
+                    ..
+                } => println!(
+                    "  run {run:>4}: {compared_bars} bars compared after skipping {skipped_leading_bars}"
+                ),
+                LaggedRun::Unavailable { run, why } => {
+                    println!("  run {run:>4}: unavailable, {}", lag_reason(*why))
+                }
+            }
+        }
+        match &report.aggregate {
+            LaggedAggregate::Available {
+                runs,
+                compared_bars,
+                undelayed,
+                lagged,
+            } => {
+                println!("  across {runs} runs and {compared_bars} compared bars:");
+                println!(
+                    "  {:>9}  {:>11}  {:>11}  {:>16}",
+                    "lag", "mean SR", "mean return", "Sharpe change"
+                );
+                println!(
+                    "  {:>9}  {:>11.4}  {:>11.6}  {:>16}",
+                    "undelayed", undelayed.mean_sharpe, undelayed.mean_return, "-"
+                );
+                for row in lagged {
+                    println!(
+                        "  {:>9}  {:>11.4}  {:>11.6}  {:>+16.4}",
+                        row.lag,
+                        row.mean_sharpe,
+                        row.mean_return,
+                        row.mean_sharpe - undelayed.mean_sharpe
+                    );
+                }
+            }
+            LaggedAggregate::Unavailable { .. } => {
+                println!("  across runs: unavailable, no run has comparable rows")
+            }
         }
     }
 }

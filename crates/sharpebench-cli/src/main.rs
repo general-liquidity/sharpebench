@@ -2709,7 +2709,7 @@ fn run_verify_trajectory(args: &[String], json: bool) -> ExitCode {
 
     if args.len() < 3 {
         eprintln!(
-            "usage: sharpebench verify-trajectory <trajectory.json> [--data <csv>] [--allow-unbound-trajectory] [--reexecute [--cmd \"<prog>\"|--http <addr>]] [--diagnostics sizing-response [--vol-lookback N]] [--json]"
+            "usage: sharpebench verify-trajectory <trajectory.json> [--data <csv>] [--allow-unbound-trajectory] [--reexecute [--cmd \"<prog>\"|--http <addr>]] [--diagnostics sizing-response [--vol-lookback N]] [--timing-null [--null-draws N] [--null-seed S]] [--lagged-replay <k,k,...>] [--json]"
         );
         return ExitCode::from(2);
     }

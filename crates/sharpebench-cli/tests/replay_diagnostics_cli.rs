@@ -130,10 +130,20 @@ fn the_diagnostics_add_a_member_and_change_nothing_else() {
         assert_eq!(run["reference"]["draws"], 12);
         let percentile = run["reference"]["percentile"].as_f64().unwrap();
         assert!((0.0..=1.0).contains(&percentile));
+        assert!(run["reference"]["monte_carlo_standard_error"].is_f64());
+        assert!(run["distinct_placements"].as_u64().unwrap() > 12);
         let exposure = &run["exposure"];
         assert_eq!(exposure["bars"], 90);
         assert!(exposure["invested_bars"].as_u64().unwrap() < 90);
     }
+    // The eight seed copies of a window draw the same placements: with the
+    // same decisions, their reference means differ only by slippage.
+    let reference_mean = |index: usize| {
+        runs[index]["reference"]["reference_mean_sharpe"]
+            .as_f64()
+            .unwrap()
+    };
+    assert!((reference_mean(0) - reference_mean(7)).abs() < 0.01);
     // Momentum rides a smooth cycle: its timing beats random timing.
     assert_eq!(timing["aggregate"]["status"], "available");
     assert_eq!(timing["aggregate"]["runs"], 16);
@@ -146,15 +156,28 @@ fn the_diagnostics_add_a_member_and_change_nothing_else() {
 
     let lagged = &diagnostics["lagged_replay"];
     assert_eq!(lagged["lags"], serde_json::json!([1, 2]));
-    assert_eq!(lagged["skipped_leading_bars"], 3);
-    assert_eq!(lagged["runs"], 16);
-    assert_eq!(lagged["undelayed"]["lag"], 0);
-    let rows = lagged["lagged"].as_array().unwrap();
+    assert!(lagged["end_effect"]
+        .as_str()
+        .unwrap()
+        .contains("never executes the run's last k recorded decisions"));
+    let lagged_runs = lagged["runs"].as_array().unwrap();
+    assert_eq!(lagged_runs.len(), 16);
+    for run in lagged_runs {
+        assert_eq!(run["status"], "available", "{run}");
+        let skipped = run["skipped_leading_bars"].as_u64().unwrap();
+        assert!(skipped >= 3, "{run}");
+        assert_eq!(run["compared_bars"].as_u64().unwrap(), 90 - skipped);
+    }
+    let aggregate = &lagged["aggregate"];
+    assert_eq!(aggregate["status"], "available");
+    assert_eq!(aggregate["runs"], 16);
+    assert_eq!(aggregate["undelayed"]["lag"], 0);
+    let rows = aggregate["lagged"].as_array().unwrap();
     assert_eq!(rows.len(), 2);
     // Its edge decays as its decisions arrive later.
     let sharpe = |row: &Value| row["mean_sharpe"].as_f64().unwrap();
     assert!(sharpe(&rows[1]) < sharpe(&rows[0]));
-    assert!(sharpe(&rows[0]) < sharpe(&lagged["undelayed"]));
+    assert!(sharpe(&rows[0]) < sharpe(&aggregate["undelayed"]));
 
     // The human output is the verification, then the block.
     let plain_text = fx.cli(&["verify-trajectory", "momentum.json", "--data", "wave.csv"]);
@@ -181,7 +204,10 @@ fn the_diagnostics_add_a_member_and_change_nothing_else() {
         "{block}"
     );
     assert!(block.contains("Exposure-matched random timing: 5 draws, seed 0"));
+    assert!(block.contains("MC s.e."));
+    assert!(block.contains("distinct placements"));
     assert!(block.contains("Lagged replay"));
+    assert!(block.contains("bars compared after skipping"));
     assert!(block.contains("undelayed"));
 }
 
@@ -293,6 +319,20 @@ fn malformed_or_contradictory_flags_are_refused_before_reading() {
             "verify-trajectory",
             "missing.json",
             "--timing-null",
+            "--null-draws",
+            "100001",
+        ],
+        vec![
+            "verify-trajectory",
+            "missing.json",
+            "--timing-null",
+            "--null-draws",
+            "18446744073709551615",
+        ],
+        vec![
+            "verify-trajectory",
+            "missing.json",
+            "--timing-null",
             "--null-seed",
         ],
         vec!["verify-trajectory", "missing.json", "--lagged-replay"],
@@ -335,22 +375,37 @@ fn malformed_or_contradictory_flags_are_refused_before_reading() {
         );
     }
 
-    // A lag the windows cannot hold is the library's refusal, after reading.
+    // A lag the windows cannot hold is a usage error once the trajectory is
+    // read, including lags whose bar arithmetic would overflow.
+    for lag in ["88", "89", "18446744073709551614", "18446744073709551615"] {
+        let out = fx.cli(&[
+            "verify-trajectory",
+            "momentum.json",
+            "--data",
+            "wave.csv",
+            "--lagged-replay",
+            &format!("1,{lag}"),
+        ]);
+        assert_eq!(out.status.code(), Some(2), "{lag}: {out:?}");
+        assert!(out.stdout.is_empty(), "{lag}");
+        let stderr = String::from_utf8(out.stderr).unwrap();
+        assert!(
+            stderr.contains(&format!(
+                "lagged replay: lag {lag} leaves fewer than two comparable bars"
+            )),
+            "{lag}: {stderr}"
+        );
+    }
+    // The longest lag a 90-bar run holds.
     let out = fx.cli(&[
         "verify-trajectory",
         "momentum.json",
         "--data",
         "wave.csv",
         "--lagged-replay",
-        "89",
+        "87",
     ]);
-    assert_eq!(out.status.code(), Some(1), "{out:?}");
-    assert!(out.stdout.is_empty());
-    let stderr = String::from_utf8(out.stderr).unwrap();
-    assert!(
-        stderr.contains("lagged replay: lag 89 leaves fewer than two comparable bars"),
-        "{stderr}"
-    );
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
 
     // Without the diagnostics, the unbound override still works as before.
     let unbound = fx.cli(&[
@@ -361,4 +416,69 @@ fn malformed_or_contradictory_flags_are_refused_before_reading() {
         "--allow-unbound-trajectory",
     ]);
     assert!(unbound.status.success(), "{unbound:?}");
+}
+
+/// The diagnostics replay under the cost model the trajectory is bound to,
+/// short borrow included: a short book's figures move with the bound rate.
+#[test]
+fn the_diagnostics_replay_under_the_bound_borrow_rate() {
+    let fx = Fixture::new();
+    let shorted = |name: &str, extra: &[&str]| {
+        let mut args = vec!["capture", "momentum", name, "--data", "wave.csv"];
+        args.extend_from_slice(extra);
+        let captured = fx.cli(&args);
+        assert!(captured.status.success(), "{captured:?}");
+        // The contract binds data, costs, windows, seeds and runner, not the
+        // decisions: turn every long target into a short of the same size.
+        let path = fx.0.join(name);
+        let mut traj: Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        for run in traj["runs"].as_array_mut().unwrap() {
+            for step in run["steps"].as_array_mut().unwrap() {
+                for order in step["decision"]["orders"].as_array_mut().unwrap() {
+                    let weight = order["target_weight"].as_f64().unwrap();
+                    order["target_weight"] = serde_json::json!(-weight);
+                }
+            }
+        }
+        std::fs::write(&path, serde_json::to_string(&traj).unwrap()).unwrap();
+    };
+    shorted("free.json", &[]);
+    shorted("borrowed.json", &["--short-borrow-bps", "25"]);
+    let report = |name: &str, extra: &[&str]| {
+        let mut args = vec![
+            "verify-trajectory",
+            name,
+            "--data",
+            "wave.csv",
+            "--timing-null",
+            "--null-draws",
+            "6",
+            "--lagged-replay",
+            "1",
+            "--json",
+        ];
+        args.extend_from_slice(extra);
+        fx.json(&args)["replay_diagnostics"].clone()
+    };
+    let free = report("free.json", &[]);
+    let borrowed = report("borrowed.json", &["--short-borrow-bps", "25"]);
+    let mean_return = |diagnostics: &Value| {
+        diagnostics["lagged_replay"]["aggregate"]["undelayed"]["mean_return"]
+            .as_f64()
+            .unwrap()
+    };
+    // 25 bps per bar on shorts of up to the whole book.
+    assert!(
+        mean_return(&borrowed) < mean_return(&free) - 1e-4,
+        "{} against {}",
+        mean_return(&borrowed),
+        mean_return(&free)
+    );
+    let entrant = |diagnostics: &Value| {
+        diagnostics["timing_null"]["runs"][0]["entrant_sharpe"]
+            .as_f64()
+            .unwrap()
+    };
+    assert!(entrant(&borrowed) < entrant(&free));
 }
