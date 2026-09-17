@@ -7,7 +7,9 @@
 //! selection-axis luck control ([`selection`]). Three estimators the gate does
 //! not use, an autocorrelation-aware PSR, the PSR with its standard error
 //! evaluated under the null, and the manipulation-proof performance measure,
-//! are opt-in diagnostics in [`opt_in_diagnostics`].
+//! are opt-in diagnostics in [`opt_in_diagnostics`]. A historical expected
+//! shortfall and a loss frequency, also unread by the gate, are in
+//! [`tail_risk`].
 //!
 //! Design invariants carried over verbatim from the original modules:
 //! - **Pure.** No I/O, no system clock, no ambient randomness. Any randomness
@@ -61,6 +63,7 @@ pub mod selection;
 pub mod significance;
 pub mod stats;
 pub mod stylized_facts;
+pub mod tail_risk;
 pub mod validation;
 
 pub use validation::StatisticalError;
@@ -89,4 +92,8 @@ pub use selection::{
 pub use stylized_facts::{
     stylized_facts, validate_dataset, validate_dataset_with, RealismFailure, RealismThresholds,
     RealismVerdict, StylizedFactsReport,
+};
+pub use tail_risk::{
+    historical_expected_shortfall, loss_frequency, tail_size, ExpectedShortfall, LossFrequency,
+    DEFAULT_MIN_TAIL_OBSERVATIONS, DEFAULT_TAIL_LEVEL, MIN_TAIL_OBSERVATIONS_FLOOR,
 };

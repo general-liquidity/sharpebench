@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::fs;
 
 use sharpebench_core::{
@@ -59,7 +60,7 @@ pub(crate) fn run(args: &[String], json: bool) -> i32 {
             if json {
                 println!("{serialized}");
             } else {
-                print_report(&report);
+                print!("{}", render_report(&report));
             }
             0
         }
@@ -146,64 +147,119 @@ fn parse_config(args: &[String]) -> Result<ForecastAnalysisConfig, String> {
     Ok(config)
 }
 
-fn print_report(report: &ForecastQualityReport) {
-    println!("FORECAST QUALITY (reported only; never changes trading rank)");
-    println!(
-        "common support: {} exact contract(s); dependence unit: {}",
-        report.common_support.n_contracts, report.dependence_unit
-    );
+fn render_report(report: &ForecastQualityReport) -> String {
+    let mut out = String::new();
+    write_report(&mut out, report).expect("writing to a String cannot fail");
+    out
+}
+
+fn write_report(out: &mut String, report: &ForecastQualityReport) -> std::fmt::Result {
+    let support = &report.common_support;
+    writeln!(
+        out,
+        "FORECAST QUALITY (reported only; never changes trading rank)"
+    )?;
+    writeln!(
+        out,
+        "field support: {} contract digest(s) resolved by at least one agent; dependence unit: {}",
+        support.n_contracts, report.dependence_unit
+    )?;
+    writeln!(out, "pairing: {}", support.rule)?;
     let legacy_digests = report
         .contract_digest_versions
         .values()
         .filter(|version| **version == ContractDigestVersion::Legacy)
         .count();
-    println!(
+    writeln!(
+        out,
         "contract digests: {} under {}, {} legacy",
         report.contract_digest_versions.len() - legacy_digests,
         ContractDigestVersion::CanonicalJsonV1.as_str(),
         legacy_digests
-    );
+    )?;
     for agent in &report.agents {
-        println!(
-            "\n{}: {}/{} resolved ({:.1}%), {} blind, {} consensus-exposed",
+        writeln!(
+            out,
+            "
+{}: {}/{} resolved ({:.1}%), {} blind, {} consensus-exposed",
             agent.agent_id,
             agent.n_resolved,
             agent.n_claims,
             100.0 * agent.resolution_rate,
             agent.blind_resolved,
             agent.consensus_exposed_resolved
-        );
+        )?;
+        if let Some(gap) = support
+            .unresolved_by_agent
+            .get(&agent.agent_id)
+            .filter(|gap| gap.n_unresolved > 0)
+        {
+            writeln!(
+                out,
+                "  unresolved field support: {} ({} pending, {} cancelled, {} rejected, {} not claimed)",
+                gap.n_unresolved,
+                gap.pending.len(),
+                gap.cancelled.len(),
+                gap.rejected.len(),
+                gap.not_claimed.len()
+            )?;
+        }
         for metric in &agent.metrics {
-            println!(
+            writeln!(
+                out,
                 "  {:<20} mean loss {:>10.6}  n={}",
                 metric.scoring_rule, metric.mean_loss, metric.n
-            );
+            )?;
         }
         if let Some(calibration) = &agent.binary_calibration {
-            println!(
+            writeln!(
+                out,
                 "  binary calibration   Brier {:>10.6}  skill {}",
                 calibration.brier,
                 calibration
                     .brier_skill
                     .map(|value| format!("{value:.6}"))
                     .unwrap_or_else(|| "undefined (constant outcomes)".to_string())
-            );
+            )?;
+        }
+    }
+    if !support.settlement_status_disagreements.is_empty() {
+        writeln!(
+            out,
+            "
+settlement status disagreements (resolved by one agent, not by another):"
+        )?;
+        for record in &support.settlement_status_disagreements {
+            writeln!(
+                out,
+                "  {}  resolved by [{}]  pending for [{}]  cancelled for [{}]",
+                record.contract_sha256,
+                record.resolved_by.join(", "),
+                record.pending_by.join(", "),
+                record.cancelled_by.join(", ")
+            )?;
         }
     }
     if !report.comparisons.is_empty() {
-        println!("\nexact-common-support comparisons (loss A minus loss B):");
+        writeln!(
+            out,
+            "
+exact-pair-support comparisons (loss A minus loss B):"
+        )?;
         for comparison in &report.comparisons {
             // A withheld comparison prints why, not a blank where a number
             // should be. The interval and the p-value are unavailable together
-            // whenever the block resampling law cannot resolve the level being
-            // claimed, so the operator sees the reason rather than inferring a
-            // failure from missing output.
+            // whenever the two agents resolved different contracts or the block
+            // resampling law cannot resolve the level being claimed, so the
+            // operator sees the reason rather than inferring a failure from
+            // missing output.
             match (
                 comparison.confidence_lower,
                 comparison.confidence_upper,
                 comparison.holm_adjusted_p_value,
             ) {
-                (Some(low), Some(high), Some(p)) => println!(
+                (Some(low), Some(high), Some(p)) => writeln!(
+                    out,
                     "  {} vs {}  diff={:.6}  CI=[{low:.6}, {high:.6}]  Holm p={p:.6}{}",
                     comparison.agent_a,
                     comparison.agent_b,
@@ -213,20 +269,23 @@ fn print_report(report: &ForecastQualityReport) {
                     } else {
                         ""
                     }
-                ),
-                _ => println!(
-                    "  {} vs {}  diff={:.6}  inference withheld: {}",
+                )?,
+                _ => writeln!(
+                    out,
+                    "  {} vs {}  diff={:.6} over {} contract(s)  inference withheld: {}",
                     comparison.agent_a,
                     comparison.agent_b,
                     comparison.mean_loss_difference,
+                    comparison.n_contracts,
                     comparison
                         .inference_error
                         .as_deref()
                         .unwrap_or("insufficient settlement support")
-                ),
+                )?,
             }
         }
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -307,8 +366,51 @@ mod tests {
         .expect("--output contains JSON");
         fs::remove_file(&output).expect("remove temporary forecast report");
 
+        assert_eq!(report["schema_version"], "sharpebench.forecast-quality.v2");
         assert_eq!(report["common_support"]["n_contracts"], 12);
+        assert_eq!(
+            report["common_support"]["unresolved_by_agent"]["agent-beta"]["n_unresolved"],
+            0
+        );
         assert_eq!(report["agents"].as_array().map(Vec::len), Some(2));
+    }
+
+    #[test]
+    fn human_report_charges_a_pending_settlement_to_the_agent_that_left_it() {
+        let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/forecast-quality/fixtures");
+        let load = |name: &str| {
+            parse_forecast_evidence(
+                &fs::read_to_string(fixtures.join(name)).expect("tutorial fixture is readable"),
+            )
+            .expect("tutorial fixture is valid evidence")
+        };
+        let alpha = load("agent-alpha.json");
+        let mut beta = load("agent-beta.json");
+        let resolution = beta
+            .resolutions
+            .iter_mut()
+            .find(|resolution| resolution.status == "resolved")
+            .expect("the tutorial resolves every claim");
+        resolution.status = "pending".to_string();
+        resolution.outcome = None;
+        resolution.available_at = None;
+
+        let report = analyze_forecast_quality(&[alpha, beta], ForecastAnalysisConfig::default())
+            .expect("a pending settlement is disclosed, not refused");
+        let rendered = render_report(&report);
+
+        assert!(rendered.contains("field support: 12 contract digest(s)"));
+        assert!(rendered.contains(
+            "unresolved field support: 1 (1 pending, 0 cancelled, 0 rejected, 0 not claimed)"
+        ));
+        assert_eq!(rendered.matches("unresolved field support").count(), 1);
+        assert!(rendered.contains("resolved by [agent-alpha]  pending for [agent-beta]"));
+        assert!(rendered.contains(
+            "agent-alpha vs agent-beta  diff=-0.141809 over 11 contract(s)  inference withheld: \
+             unequal resolved support: agent_a did not resolve 0 contract(s) that agent_b \
+             resolved and agent_b did not resolve 1 that agent_a resolved"
+        ));
     }
 
     #[test]

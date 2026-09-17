@@ -12,7 +12,7 @@ public import Std
 # Forecast-quality report invariants
 
 This module is a small Lean model of rules SharpeBench declares for its forecast-quality report:
-exact common support, the separation between forecast reporting and trading rank, one step of the
+exact pair support, the separation between forecast reporting and trading rank, one step of the
 Holm adjustment, and the finite-bootstrap plus-one correction. The theorems are proved about this
 model.
 
@@ -20,8 +20,9 @@ The model is not mechanically linked to the Rust implementation. No Rust, Python
 references a declaration in this module, and there is no extraction or refinement proof relating
 the two. Separate executable Rust tests cover the same rules independently of this model: the unit
 tests in `crates/sharpebench-core/src/forecast.rs` and the integration tests in
-`crates/sharpebench-core/tests/forecast_settlement_and_support.rs` exercise common support, the
-Holm adjustment, the bootstrap p-value and rank isolation on the implementation.
+`crates/sharpebench-core/tests/forecast_settlement_and_support.rs` and
+`crates/sharpebench-core/tests/forecast_partial_support.rs` exercise pair support, the Holm
+adjustment, the bootstrap p-value and rank isolation on the implementation.
 
 ## Main results
 
@@ -37,9 +38,9 @@ Holm adjustment, the bootstrap p-value and rank isolation on the implementation.
 
 ## Scope
 
-Covers: rules declared in `crates/sharpebench-core/src/forecast.rs`: exact common support as the
-intersection of resolved contract digests in `analyze_forecast_quality` (`commonSupport`); one
-ordered step of `holm_adjust`, which takes the larger of the prior adjusted value and the candidate
+Covers: rules declared in `crates/sharpebench-core/src/forecast.rs`: exact pair support, the
+intersection of two agents' resolved contract digests that `compare_agents` differences
+(`commonSupport`); one ordered step of `holm_adjust`, which takes the larger of the prior adjusted value and the candidate
 and caps it at 1.0 (`holmStep`); and the plus-one p-value in `compare_agents`, whose numerator is
 the extreme count plus one and whose denominator is the bootstrap sample count plus one
 (`correctedBootstrapCounts`). It also records the projection trading rank consumes
@@ -52,10 +53,13 @@ cap; an extreme count no greater than the sample count; two agents in place of a
 size; and lists over a type with lawful boolean equality in place of the Rust set of digest
 strings.
 
-Not modelled: sorting the raw p-values before the Holm steps, the family-size multiplier that forms
-each Holm candidate, the withheld comparisons that stay in the family size without an adjusted
-value, the division that turns the plus-one counts into a p-value, and the Rust rank functions
-themselves.
+Not modelled: the rule in `compare_agents` that a pair receives inference only when the two agents'
+resolved digest sets are equal, so that the intersection is each agent's whole resolved set (the
+model's intersection is not required to equal either list); the per-agent gap disclosure in
+`field_support`; sorting the raw p-values before the Holm steps, the family-size multiplier that
+forms each Holm candidate, the withheld comparisons that stay in the family size without an
+adjusted value, the division that turns the plus-one counts into a p-value, and the Rust rank
+functions themselves.
 
 Check: the CI scope check (scripts/check-lean-scope.py) proves only that at least one repository
 path named in backticks in this block exists. It does not prove that the rules described here still
