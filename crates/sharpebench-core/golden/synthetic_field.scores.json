@@ -150,7 +150,7 @@
     "mandate_ok": true,
     "worst_run_drawdown": 0.0,
     "turnover": 0.0,
-    "pareto_optimal": true,
+    "pareto_optimal": false,
     "step_down_significant": false,
     "confidence_weighted_return": 0.0,
     "cost": 0.0,

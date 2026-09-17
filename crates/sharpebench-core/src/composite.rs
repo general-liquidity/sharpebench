@@ -908,7 +908,11 @@ pub struct CompositeScore {
     /// Turnover proxy: average orders placed per run (trading frequency / capacity).
     pub turnover: f64,
     /// Whether the agent is on the Pareto front over (return↑, drawdown↓,
-    /// turnover↓). Filled by [`rank`].
+    /// turnover↓), taken among the agents whose pooled track has a Sharpe
+    /// ratio. Always `false` for a track the kernel refuses as having none (it
+    /// is constant, or its Sharpe is not finite), and such a track removes no
+    /// other agent from the front. Reported only: no gate, eligibility rule or
+    /// rank reads it. Filled by [`rank`].
     pub pareto_optimal: bool,
     /// Whether the agent's outperformance survives Romano–Wolf step-down multiple
     /// testing across the field. Filled by [`rank`].
@@ -1196,6 +1200,23 @@ fn dominates(a: &CompositeScore, b: &CompositeScore) -> bool {
         && (a.raw_mean_return > b.raw_mean_return
             || a.max_drawdown < b.max_drawdown
             || a.turnover < b.turnover)
+}
+
+/// Whether the kernel refuses `pooled` as having no Sharpe ratio: the refusal
+/// `score_agent_with` reads as `sharpe_undefined`, where every observation is
+/// equal or the Sharpe does not stay finite. Such a track is not a Pareto
+/// candidate. A never-trading track is all zeros, so its drawdown is zero and,
+/// with no orders, so is its turnover, and nothing could ever dominate it.
+fn has_no_sharpe_ratio(pooled: &[f64]) -> bool {
+    matches!(
+        checked_probabilistic_sharpe_ratio(pooled, 0.0),
+        Err(StatisticalError::InvalidParameter {
+            name: "returns",
+            ..
+        } | StatisticalError::NonFiniteComputation {
+            quantity: "Sharpe ratio"
+        })
+    )
 }
 
 /// The resolved per-period deflation dispersion a score is computed with, and
@@ -2102,9 +2123,17 @@ pub fn rank_declared(
         }
     }
 
-    // Pareto front over (return↑, drawdown↓, turnover↓).
+    // Pareto front over (return↑, drawdown↓, turnover↓), among the agents
+    // whose pooled track has a Sharpe ratio. A refused track is neither on the
+    // front nor able to push another agent off it. `pooled` is in field order,
+    // as `scores` still is before the sort below.
+    let candidate: Vec<bool> = pooled.iter().map(|p| !has_no_sharpe_ratio(p)).collect();
     let pareto: Vec<bool> = (0..scores.len())
-        .map(|i| !(0..scores.len()).any(|j| j != i && dominates(&scores[j], &scores[i])))
+        .map(|i| {
+            candidate[i]
+                && !(0..scores.len())
+                    .any(|j| j != i && candidate[j] && dominates(&scores[j], &scores[i]))
+        })
         .collect();
     for (cs, p) in scores.iter_mut().zip(pareto) {
         cs.pareto_optimal = p;
