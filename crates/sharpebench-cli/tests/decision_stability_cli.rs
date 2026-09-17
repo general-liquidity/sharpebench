@@ -203,6 +203,20 @@ fn identical_replicates_are_refused_unless_declared() {
         "--json",
     ]));
     assert_eq!(declared["identical_replicate_runs"], 16);
+    // The inputs are named by digest, so a reader sees that they are equal.
+    assert_eq!(declared["inputs"].as_array().unwrap().len(), 2);
+    assert_eq!(declared["inputs"][0], declared["inputs"][1]);
+    assert_eq!(declared["identical_inputs"], 1);
+    let captured: AgentTrajectory =
+        serde_json::from_slice(&std::fs::read(&original).unwrap()).unwrap();
+    let contract = captured.contract.unwrap();
+    assert_eq!(declared["dataset_sha256"], contract.dataset_sha256.as_str());
+    assert_eq!(
+        declared["cost_model_sha256"],
+        contract.cost_model_sha256.as_str()
+    );
+    assert_eq!(declared["engine_version"], contract.engine_version.as_str());
+    assert_eq!(declared["runner_artifact_sha256"], binary_sha256().as_str());
 
     let text = cli(&[
         "decision-stability",
@@ -214,6 +228,14 @@ fn identical_replicates_are_refused_unless_declared() {
     assert!(text.contains("identical replicates  : 16"), "{text}");
     assert!(
         text.contains("identical replicate runs were declared separate executions"),
+        "{text}"
+    );
+    assert!(
+        text.contains("inputs  : 2 trajectories, 1 identical to an earlier one"),
+        "{text}"
+    );
+    assert!(
+        text.contains(&format!("runner  : {}", binary_sha256())),
         "{text}"
     );
 }

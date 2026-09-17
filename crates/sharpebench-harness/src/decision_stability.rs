@@ -14,10 +14,13 @@
 //! [`decision_stability_from_trajectories`] runs the strict artifact checks on
 //! every trajectory first, so the replay is against the data, costs and engine
 //! the decisions were captured under, then hands the digested decisions to
-//! [`sharpebench_core::decision_stability`]. Each run's content identity is the
+//! [`sharpebench_core::decision_stability()`]. Each run's content identity is the
 //! SHA-256 of its serialized JSON bytes, so a byte copy of a run is an identical
-//! replicate.
+//! replicate. The returned [`DecisionStabilityEvidence`] also records what was
+//! measured: the dataset, cost model, engine and runner identities, and a digest
+//! of every input trajectory.
 
+use serde::Serialize;
 use sharpebench_core::{
     decision_stability, observation_sha256, DecisionStabilityReport, IdenticalReplicates,
     ObservedDecision, ReplicateRun, ScoreConfig,
@@ -27,7 +30,35 @@ use sharpebench_protocol::{
 };
 use sharpebench_sim::{run_backtest, Agent, CostModel, Dataset, Window};
 
-use crate::verify_trajectory_strict;
+use crate::{trajectory_contract, verify_trajectory_strict};
+
+/// One input trajectory, identified by the SHA-256 of its compact JSON
+/// serialization. A byte copy of a file and a repeated capture of a
+/// deterministic agent both produce an equal digest: the digest shows that
+/// two inputs are equal, not how they came to be.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct InputTrajectory {
+    pub trajectory_sha256: String,
+    pub runs: usize,
+}
+
+/// A decision-stability report with the identities of everything it measured.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct DecisionStabilityEvidence {
+    #[serde(flatten)]
+    pub report: DecisionStabilityReport,
+    /// The dataset, cost model and engine every trajectory was verified against.
+    pub dataset_sha256: String,
+    pub cost_model_sha256: String,
+    pub engine_version: String,
+    /// The runner identity every trajectory was verified against, when one was
+    /// required.
+    pub runner_artifact_sha256: Option<String>,
+    /// Every input, in the order given.
+    pub inputs: Vec<InputTrajectory>,
+    /// Inputs whose digest equals an earlier input's.
+    pub identical_inputs: usize,
+}
 
 /// Plays a run's recorded decisions and digests each observation it is shown.
 struct DigestingReplay<'a> {
@@ -131,12 +162,13 @@ pub fn decision_stability_from_trajectories(
     costs: CostModel,
     runner_artifact_sha256: Option<&str>,
     identical: IdenticalReplicates,
-) -> Result<DecisionStabilityReport, String> {
+) -> Result<DecisionStabilityEvidence, String> {
     let Some(first) = trajectories.first() else {
         return Err("decision stability needs at least one trajectory".to_string());
     };
     let cfg = ScoreConfig::default();
     let mut runs = Vec::new();
+    let mut inputs: Vec<InputTrajectory> = Vec::with_capacity(trajectories.len());
     for (index, trajectory) in trajectories.iter().enumerate() {
         if trajectory.agent_id != first.agent_id {
             return Err(format!(
@@ -146,6 +178,11 @@ pub fn decision_stability_from_trajectories(
         }
         verify_trajectory_strict(data, trajectory, costs, &cfg, runner_artifact_sha256)
             .map_err(|error| format!("trajectory {index}: {error}"))?;
+        let bytes = serde_json::to_vec(trajectory).expect("trajectories serialize");
+        inputs.push(InputTrajectory {
+            trajectory_sha256: sharpebench_attest::content_digest(&bytes),
+            runs: trajectory.runs.len(),
+        });
         for run in &trajectory.runs {
             let digests = replay_observation_digests(data, run, costs)
                 .map_err(|error| format!("trajectory {index}: {error}"))?;
@@ -165,7 +202,23 @@ pub fn decision_stability_from_trajectories(
             });
         }
     }
-    decision_stability(&first.agent_id, &runs, identical).map_err(|error| error.to_string())
+    let report =
+        decision_stability(&first.agent_id, &runs, identical).map_err(|error| error.to_string())?;
+    let distinct: std::collections::BTreeSet<&str> = inputs
+        .iter()
+        .map(|input| input.trajectory_sha256.as_str())
+        .collect();
+    let identical_inputs = inputs.len() - distinct.len();
+    let verified = trajectory_contract(data, costs, &[], &[]);
+    Ok(DecisionStabilityEvidence {
+        report,
+        dataset_sha256: verified.dataset_sha256,
+        cost_model_sha256: verified.cost_model_sha256,
+        engine_version: verified.engine_version,
+        runner_artifact_sha256: runner_artifact_sha256.map(str::to_string),
+        inputs,
+        identical_inputs,
+    })
 }
 
 #[cfg(test)]
@@ -203,6 +256,14 @@ mod tests {
         trajectories: &[AgentTrajectory],
         identical: IdenticalReplicates,
     ) -> Result<DecisionStabilityReport, String> {
+        evidence(data, trajectories, identical).map(|evidence| evidence.report)
+    }
+
+    fn evidence(
+        data: &Dataset,
+        trajectories: &[AgentTrajectory],
+        identical: IdenticalReplicates,
+    ) -> Result<DecisionStabilityEvidence, String> {
         decision_stability_from_trajectories(
             data,
             trajectories,
@@ -339,17 +400,78 @@ mod tests {
             "window [20, 40) holds 2 replicate runs identical to another replicate; a copied capture agrees with itself, so declare them separate executions or remove the copies"
         );
 
-        let declared = measure(
+        let declared = evidence(
             &data(),
             &[capture.clone(), copy],
             IdenticalReplicates::Declared,
         )
         .unwrap();
-        assert_eq!(declared.totals.identical_replicate_runs, 4);
+        assert_eq!(declared.report.totals.identical_replicate_runs, 4);
+        assert_eq!(declared.inputs.len(), 2);
+        assert_eq!(declared.inputs[0], declared.inputs[1]);
+        assert_eq!(declared.inputs[0].runs, 4);
+        assert_eq!(declared.identical_inputs, 1);
 
         // One capture alone holds no copies: its runs differ in seed.
         let alone = measure(&data(), &[capture], IdenticalReplicates::Refused).unwrap();
         assert_eq!(alone.totals.identical_replicate_runs, 0);
+    }
+
+    #[test]
+    fn the_evidence_names_what_it_measured() {
+        let momentum = momentum_capture(&[0, 1]);
+        let other_seeds = momentum_capture(&[2]);
+        let runner = "ab".repeat(32);
+        let mut bound = [momentum.clone(), other_seeds.clone()];
+        for trajectory in &mut bound {
+            trajectory.contract.as_mut().unwrap().runner_artifact_sha256 = Some(runner.clone());
+        }
+        let evidence = decision_stability_from_trajectories(
+            &data(),
+            &bound,
+            CostModel::default(),
+            Some(&runner),
+            IdenticalReplicates::Refused,
+        )
+        .unwrap();
+        let contract = momentum.contract.as_ref().unwrap();
+        assert_eq!(evidence.dataset_sha256, contract.dataset_sha256);
+        assert_eq!(evidence.cost_model_sha256, contract.cost_model_sha256);
+        assert_eq!(evidence.engine_version, contract.engine_version);
+        assert_eq!(
+            evidence.runner_artifact_sha256.as_deref(),
+            Some(runner.as_str())
+        );
+        assert_eq!(
+            evidence
+                .inputs
+                .iter()
+                .map(|input| input.runs)
+                .collect::<Vec<_>>(),
+            vec![4, 2]
+        );
+        assert_eq!(
+            evidence.inputs[0].trajectory_sha256,
+            sharpebench_attest::content_digest(&serde_json::to_vec(&bound[0]).unwrap())
+        );
+        assert_ne!(
+            evidence.inputs[0].trajectory_sha256,
+            evidence.inputs[1].trajectory_sha256
+        );
+        assert_eq!(evidence.identical_inputs, 0);
+
+        let json = serde_json::to_value(&evidence).unwrap();
+        assert_eq!(json["schema"], "sharpebench.decision-stability.v1");
+        assert_eq!(json["dataset_sha256"], contract.dataset_sha256.as_str());
+        assert_eq!(json["runner_artifact_sha256"], runner.as_str());
+        assert_eq!(json["inputs"][1]["runs"], 2);
+
+        let unbound = evidence_without_runner(&[momentum]);
+        assert_eq!(unbound.runner_artifact_sha256, None);
+    }
+
+    fn evidence_without_runner(trajectories: &[AgentTrajectory]) -> DecisionStabilityEvidence {
+        evidence(&data(), trajectories, IdenticalReplicates::Refused).unwrap()
     }
 
     #[test]

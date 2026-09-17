@@ -10,7 +10,9 @@ use std::path::PathBuf;
 use sharpebench_core::{
     DecisionStabilityReport, IdenticalReplicates, StabilityCounts, StabilityRate,
 };
-use sharpebench_harness::decision_stability::decision_stability_from_trajectories;
+use sharpebench_harness::decision_stability::{
+    decision_stability_from_trajectories, DecisionStabilityEvidence,
+};
 use sharpebench_protocol::AgentTrajectory;
 
 const USAGE: &str = "usage: sharpebench decision-stability <traj.json> [<traj.json> ...] [--data <csv>] [--short-borrow-bps <bps>] [--declare-identical-replicates] [--json]";
@@ -80,11 +82,12 @@ pub(crate) fn run(args: &[String], json: bool) -> i32 {
         Some(&runner),
         identical,
     ) {
-        Ok(report) => {
+        Ok(evidence) => {
             if json {
-                crate::emit_json(&report);
+                crate::emit_json(&evidence);
             } else {
-                print_report(&report);
+                print_report(&evidence.report);
+                print_identities(&evidence);
             }
             0
         }
@@ -173,6 +176,30 @@ fn print_counts(indent: &str, counts: &StabilityCounts) {
     println!(
         "{indent}identical replicates  : {}",
         counts.identical_replicate_runs
+    );
+}
+
+fn print_identities(evidence: &DecisionStabilityEvidence) {
+    println!(
+        "inputs  : {} trajectories, {} identical to an earlier one",
+        evidence.inputs.len(),
+        evidence.identical_inputs
+    );
+    for (index, input) in evidence.inputs.iter().enumerate() {
+        println!(
+            "  input {index}: {} ({} runs)",
+            input.trajectory_sha256, input.runs
+        );
+    }
+    println!("dataset : {}", evidence.dataset_sha256);
+    println!("costs   : {}", evidence.cost_model_sha256);
+    println!("engine  : {}", evidence.engine_version);
+    println!(
+        "runner  : {}",
+        evidence
+            .runner_artifact_sha256
+            .as_deref()
+            .unwrap_or("not bound")
     );
 }
 
