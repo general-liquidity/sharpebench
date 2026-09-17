@@ -25,13 +25,17 @@ impl Agent for TeamAgent {
     fn decide(&mut self, obs: &MarketObservation) -> Decision {
         let n = self.members.len().max(1) as f64;
         let mut weight: BTreeMap<String, f64> = BTreeMap::new();
-        let mut conf: BTreeMap<String, f64> = BTreeMap::new();
-        let mut votes: BTreeMap<String, f64> = BTreeMap::new();
+        // Sum and count of the confidences members stated for each symbol. A
+        // member that states none is not counted as a 0.5 vote.
+        let mut conf: BTreeMap<String, (f64, f64)> = BTreeMap::new();
         for m in self.members.iter_mut() {
             for o in m.decide(obs).orders {
                 *weight.entry(o.symbol.clone()).or_default() += o.target_weight;
-                *conf.entry(o.symbol.clone()).or_default() += o.confidence;
-                *votes.entry(o.symbol).or_default() += 1.0;
+                if let Some(c) = o.confidence {
+                    let (sum, stated) = conf.entry(o.symbol).or_default();
+                    *sum += c;
+                    *stated += 1.0;
+                }
             }
         }
         let orders = weight
@@ -46,7 +50,7 @@ impl Agent for TeamAgent {
                         Action::Close
                     },
                     target_weight: avg_w,
-                    confidence: conf[sym] / votes[sym].max(1.0),
+                    confidence: conf.get(sym).map(|&(sum, stated)| sum / stated),
                     rationale: format!("team consensus weight {avg_w:.3}"),
                 }
             })
@@ -73,7 +77,7 @@ impl Agent for BuyAndHold {
                 symbol: s.symbol.clone(),
                 action: Action::Buy,
                 target_weight: w,
-                confidence: 0.5,
+                confidence: Some(0.5),
                 rationale: "equal-weight hold".to_string(),
             })
             .collect();
@@ -148,7 +152,7 @@ impl Agent for RandomAgent {
                     symbol: s.symbol.clone(),
                     action: if w > 0.0 { Action::Buy } else { Action::Close },
                     target_weight: w,
-                    confidence: 0.5,
+                    confidence: Some(0.5),
                     rationale: "random allocation".to_string(),
                 }
             })
@@ -329,7 +333,7 @@ impl Agent for RiskManaged {
                 symbol: s.symbol.clone(),
                 action: if invested { Action::Buy } else { Action::Close },
                 target_weight: w,
-                confidence: 0.5,
+                confidence: Some(0.5),
                 rationale: if invested {
                     format!("trend up, vol-scaled gross {gross:.3}")
                 } else if self.halted {
@@ -404,7 +408,7 @@ impl Agent for Momentum {
                     symbol: sym.clone(),
                     action: if positive { Action::Buy } else { Action::Close },
                     target_weight: if positive { w } else { 0.0 },
-                    confidence: sc.map_or(0.5, |r| (0.5 + r.abs()).min(1.0)),
+                    confidence: Some(sc.map_or(0.5, |r| (0.5 + r.abs()).min(1.0))),
                     rationale: match sc {
                         Some(r) => format!("{}-interval trailing return {r:.3}", self.lookback),
                         None => format!(
@@ -538,7 +542,7 @@ mod tests {
         ] {
             let d = Momentum { lookback: 2 }.decide(&obs(&[("A", history)], 100.0));
             assert_eq!(gross_of(&d), 0.0);
-            assert!(d.orders[0].confidence.is_finite());
+            assert!(d.orders[0].confidence.is_some_and(f64::is_finite));
             assert!(d.orders[0].rationale.contains("unavailable"));
         }
     }
