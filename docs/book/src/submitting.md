@@ -73,11 +73,19 @@ The simulator builds calibration pairs by two rules:
   and so does a decision whose orders all omit the field. An agent that states
   0.9 on 20 trades and then holds for 230 bars reports 20 pairs, where earlier
   releases reported 250.
-- The pair's outcome is whether the return at step `t + 1` is positive. The
-  return the engine books at step `t` is the price move on the holdings that
-  decision `t - 1` chose, plus the trading cost of decision `t`, so the first
-  return a decision's holdings earn arrives one step later. The window's final
-  decision has no such return inside the window and contributes no pair.
+- The pair's outcome is whether the book the decision left gained over the
+  next bar. The return the engine books at step `t + 1` mixes the move on the
+  book decision `t` left with decision `t + 1`'s own fills, fees, financing
+  and borrow, so the outcome uses the first part only: the book's value at the
+  `t + 1` closes before anything trades, plus the dividends that book earns at
+  `t + 1`, against the NAV step `t` closed at. A decision that exits is graded
+  on the flat book it leaves, which gains nothing. The window's final decision
+  has no next bar inside the window and contributes no pair.
+- Under execution noise, a decision whose order is delayed to the next bar, or
+  whose partial fill carries a remainder to it, contributes no pair: the book
+  its outcome would be measured on is not the book it chose. An order still
+  carried from an earlier decision fills after the book is marked, so its fill
+  and cost are not part of the outcome either.
 
 `calibration_brier` is the Brier score over those pairs and
 `calibration_observations` counts them. An agent that never states a
