@@ -2,7 +2,7 @@
 
 All commands run from the repository root. Commands that reproduce empirical numbers use the v0.9.0 evidence snapshot; commands that test the newer contracts use the current engineering tree. The kernel is deterministic, so its golden outputs reproduce on the three CI targets (Linux, macOS, Windows).
 
-\paragraph{Version.} Findings 1 and 2 were first observed at v0.2.1, and \cref{tab:units} was computed against v0.2.1 deliberately because it documents that kernel's unit error. The units fix shipped in v0.3.0. The admitted result artifacts are from v0.9.0, a cut and published tag, and were regenerated from the content-hashed source snapshot containing corrected execution-seed pooling, the observed-field trial floor, the measured-dispersion floor, clone collapse and the strict forward-window schema. Historical package labels are not substituted for that exact content snapshot. Later checkpoint, trajectory, transport, forecast-quality, formal and diagnostic-schema changes are software claims exercised below, not a new empirical validation. The capability descriptions in this revision were checked against the 0.26.0 release; the manifest identifies the exact engineering tree. The result JSONL and figures were not regenerated, except the synthetic witness (\cref{app:repairs}), and no current-model result is admitted.
+\paragraph{Version.} Findings 1 and 2 were first observed at v0.2.1, and \cref{tab:units} was computed against v0.2.1 deliberately because it documents that kernel's unit error. The units fix shipped in v0.3.0. The admitted result artifacts are from v0.9.0, a cut and published tag, and were regenerated from the content-hashed source snapshot containing corrected execution-seed pooling, the observed-field trial floor, the measured-dispersion floor, clone collapse and the strict forward-window schema. Historical package labels are not substituted for that exact content snapshot. Later checkpoint, trajectory, transport, forecast-quality, formal and diagnostic-schema changes are software claims exercised below, not a new empirical validation. The capability descriptions in this revision were checked against the source tree after the 0.27.0 release, including the repairs merged since; the manifest identifies the exact engineering tree. The result JSONL and figures were not regenerated, except the synthetic witness (\cref{app:repairs}), and no current-model result is admitted.
 
 \paragraph{Content provenance.}
 \begin{verbatim}
@@ -135,14 +135,14 @@ cargo run -q -p sharpebench -- forecast-quality \
   --alpha 0.05 --bins 5 --json
 cd formal && lake build
 \end{verbatim}
-The first command reproduces the complete committed report from two deterministic SharpeArena \citep{toca2026sharpearena} ledgers, including exact common support over twelve contracts in six resolution-time blocks, late-revision exclusion, calibration, block-bootstrap comparison and Holm adjustment. The same command over \texttt{fixtures/withheld/}, the first eight of those contracts in two blocks, reproduces the companion report in which inference is withheld with its reason recorded (\cref{sec:forecast-quality}). The second checks the separate abstract proofs of common-support membership, the definitional rank-projection identity, Holm monotonicity and boundedness, and finite-bootstrap count bounds. Neither command produces an empirical model result; the Lean project is not an extraction of the Rust implementation, and no test references a Lean declaration.
+The first command reproduces the complete committed report from two deterministic SharpeArena \citep{toca2026sharpearena} ledgers under report schema \texttt{sharpebench.\allowbreak forecast-quality.\allowbreak v2}, including exact pair support over twelve contracts in six resolution-time blocks, empty lists of unresolved contracts, late-revision exclusion, calibration, block-bootstrap comparison and Holm adjustment. The same command over \texttt{fixtures/withheld/}, the first eight of those contracts in two blocks, reproduces the companion report in which inference is withheld with its reason recorded (\cref{sec:forecast-quality}). The second checks the separate abstract proofs of pair-support membership, the definitional rank-projection identity, Holm monotonicity and boundedness, and finite-bootstrap count bounds. Neither command produces an empirical model result; the Lean project is not an extraction of the Rust implementation, and no test references a Lean declaration.
 
 \paragraph{Capturing and strictly replaying a trajectory.}
 \begin{verbatim}
 sharpebench capture <agent> <trajectory.json> [--data <csv>]
 sharpebench verify-trajectory <trajectory.json> [--data <csv>]
 \end{verbatim}
-The second command is strict by default: it verifies the data, cost, engine, optional runner, ordered-window and ordered-seed contract and requires the complete run matrix before replay. \texttt{--allow-unbound-trajectory} is the explicitly labeled legacy or cross-version regrade, not a fallback used after strict verification fails.
+The second command is strict by default: it verifies the data, cost, engine, optional runner, ordered-window and ordered-seed contract, refuses windows that overlap or are out of time order and a capture older than contract schema 3, and requires the complete run matrix before replay. Both commands take \texttt{--short-borrow-bps <bps>} (capture of an external entrant refuses it for now), and a trajectory verifies only under the borrow rate it was captured with. \texttt{--allow-unbound-trajectory} is the explicitly labeled legacy or cross-version regrade, not a fallback used after strict verification fails.
 
 \paragraph{Rescoring, regrading, comparing and diagnosing (\cref{sec:attest}, \cref{app:mechanism}).}
 \begin{verbatim}
@@ -151,10 +151,12 @@ sharpebench regrade <bundle.json> --original-evaluator <json> \
   --replacement-evaluator <json> --reason <text>
 sharpebench compare --axis <entrant|invocation|score-config> \
   --baseline <checkpoint.json> --treatment <checkpoint.json>
-sharpebench score <field.json> \
-  --diagnostics autocorrelated-psr,null-se-psr,mppm
+sharpebench score <field.json> --diagnostics \
+  autocorrelated-psr,null-se-psr,mppm,expected-shortfall
+sharpebench verify-trajectory <trajectory.json> --data <csv> \
+  --diagnostics sizing-response [--vol-lookback N]
 \end{verbatim}
-None of these produces a number reported in this paper. The first recomputes a submission from a declared bundle; the second emits a regrade receipt and no figure; the third declares or refuses a comparison between two sweep arms; the fourth prints opt-in Sharpe diagnostics beside an unchanged board.
+None of these produces a number reported in this paper. The first recomputes a submission from a declared bundle; the second emits a regrade receipt and no figure; the third declares or refuses a comparison between two sweep arms; the fourth prints opt-in return diagnostics beside an unchanged board; the fifth appends the volatility-response sizing report to an unchanged verification.
 
 \paragraph{Importing a rival field.}
 \begin{verbatim}
