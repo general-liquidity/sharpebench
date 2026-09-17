@@ -1,6 +1,29 @@
 \section{Threats to validity and the integrity protocol}\label{sec:integrity}
 
-A benchmark that certifies capital allocation invites entrants who optimize against it instead of against the market.
+A benchmark that certifies capital allocation invites entrants who optimize against it instead of against the market. \Cref{tab:leakage} lists the channels through which future information or selection can reach a score, the control this artifact applies to each, and the exposure that remains; the paragraphs and subsections below give the detail.
+
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\caption{Leakage channels. Each row names a way in which information the agent should not have, or selection the score does not charge for, can reach a published number; the control this artifact applies; and what that control leaves open. No row reports a measurement.}
+\label{tab:leakage}
+\begin{tabular}{>{\raggedright\arraybackslash}p{0.2\linewidth}>{\raggedright\arraybackslash}p{0.37\linewidth}>{\raggedright\arraybackslash}p{0.36\linewidth}}
+\toprule
+Channel & Control in SharpeBench & Remaining exposure \\
+\midrule
+Future bars through the agent interface & the observation holds only bars at or before the decision index, and the agent holds no handle to the dataset (\cref{sec:integrity}) & the dataset type accepts any index, so the guarantee rests on the observation builder, the component to audit \\[2pt]
+Observation and fill on the same bar & the close-to-close convention is stated (\cref{sec:simdata}) & the convention is idealized; no delay sensitivity has been run, and the backtest driver does not apply the stressed profile's two-bar delay \\[2pt]
+Windows that share bars & strict replay, bound sweep contracts and the gateway sweep refuse overlapping or out-of-order windows (\cref{sec:stats}) & the kernel sees no window coordinates; the legacy regrade and the unbound compatibility sweep do not check \\[2pt]
+Search on the evaluation windows & deflation at an effective trial count no smaller than the observed field, raised by declared trials (\cref{sec:stats,sec:incentives}) & declared trials are an honor system, search before entry is uncounted, and deflation does not detect a contaminated information set \citep[p.~7]{gencay2026survives} \\[2pt]
+Pretraining memory of historical windows & backtest verdicts for pretrained models are advisory; a masked view renames symbols and dates (\cref{sec:incentives,sec:contamination}) & the masked view does not hide price shapes, and no model field has been evaluated \\[2pt]
+Held-out bytes reaching an entrant & sealed data under a published hash, a canary token and an opt-in raw-byte image preflight (\cref{sec:contamination,sec:attest}) & the canary and the preflight match literal bytes only, so a miss is not evidence of absence \\[2pt]
+Adaptive resubmission & a salted commitment before an operator-declared deadline, with at most three recorded variants per window (\cref{sec:attest,sec:governance}) & the commitment binds bytes and not chronology; the operator holds the data and the key and applies the cap \\[2pt]
+Hindsight choice of universe & none; the fixed universes are stated (\cref{sec:limitations}) & the crypto and index symbols were chosen from survivors, so survivorship bias remains \\[2pt]
+Returns supplied instead of replayed & a captured trajectory is replayed from its decisions; an imported series is marked as imported (\cref{sec:replay,sec:governance}) & an imported series has no decisions to replay and an unknown trial count \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \paragraph{Look-ahead.} The observation builder hands the agent the trailing window of history at or before the decision index, and the agent never holds a handle to the dataset. A future bar is therefore unrepresentable through the agent interface. The dataset type itself exposes a close-at-index accessor that accepts any index, so look-ahead is prevented at the agent boundary, not by the type system. The guarantee holds for every shipped transport, and the observation builder is the component to audit. Look-ahead in this sense is access to a future bar; the timing of the fill is a separate convention. The observation at bar $t$ includes the close at $t$, and the order it produces fills at that same close (\cref{sec:simdata}), which gives the agent no information about bar $t+1$ but does assume it can trade at the price it has just observed. That convention is idealized, and the effect of a decision delay on each entrant is not established.
 
