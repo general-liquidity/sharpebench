@@ -27,7 +27,7 @@ Panel (a) is read from the kernel's golden score record; panel (b) uses \texttt{
 \begin{verbatim}
 sharpebench audit
 \end{verbatim}
-The command runs the nine constructed attacks and exits non-zero unless every one is defended. A commit-time test requires all nine defended and no known gap, and a claimed defense that regresses fails it; the Sybil case also fails if the attack stops reproducing with \texttt{dedup\_clones\_for\_measured\_sr\_std} switched off. The per-case detail the command prints describes fixed synthetic constructions and is not reported as a result in this paper (\cref{sec:selfaudit}).
+The command runs the ten constructed attacks and exits non-zero unless every one is defended. A commit-time test requires all ten defended and no known gap, and a claimed defense that regresses fails it; the Sybil case also fails if the attack stops reproducing with \texttt{dedup\_clones\_for\_measured\_sr\_std} switched off. The per-case detail the command prints describes fixed synthetic constructions and is not reported as a result in this paper (\cref{sec:selfaudit}).
 
 \paragraph{The realized index Sharpe ratios quoted in \cref{sec:units}.}
 \begin{verbatim}
@@ -120,11 +120,12 @@ sharpebench commit <agent_id> <target_window> <artifact_digest> <salt> \
   > commitment.json
 sharpebench arena commit <dir> <window> <commitment.json>
 sharpebench arena advance <dir> <epoch>
-sharpebench arena score <dir> <window> <dataset> <entries.json>
+sharpebench arena score <dir> <window> <dataset> <entries.json> \
+  [--replay-only] [--allow-supplied-returns]
 sharpebench arena publish <dir> <window> <key>
 sharpebench arena verify <dir> [--pubkey <hex>]
 \end{verbatim}
-The opening command refuses to create a window without the exact scorer artifact digest. The standalone \texttt{commit} command produces the commitment document that \texttt{arena commit} registers; the latter does not accept the agent, artifact and salt as positional fields.
+The opening command refuses to create a window without the exact scorer artifact digest. The standalone \texttt{commit} command produces the commitment document that \texttt{arena commit} registers; the latter does not accept the agent, artifact and salt as positional fields. \texttt{arena score} re-executes every capture it ranks unless \texttt{--replay-only} is given, and refuses returns supplied in place of a capture unless \texttt{--allow-supplied-returns} is; either flag signs the board noncertifying (\cref{sec:selfaudit}).
 
 \paragraph{The prospective forecast report and formal model (\cref{sec:forecast-quality}).}
 \begin{verbatim}
