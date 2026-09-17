@@ -405,7 +405,8 @@ pass^k pool reads them.
 
 A binary built before the class existed reads a settlement's `finish_reason` as
 an unknown key, drops it, and writes the journal back without it on its next
-save. The journal's schema version turns that silent loss into a refusal:
+save. To stop that, the gateway writes a schema version such a binary refuses
+whenever the journal holds a class to lose:
 
 | The journal holds | Schema version written | A binary from before the class |
 |---|---|---|
@@ -425,7 +426,7 @@ pair.
 The build that first recorded classes wrote them under v1, before the version
 existed. This binary reads such a journal without loss and writes it as v2 on
 its next save. An older binary that resumes one before that save still drops its
-classes: a version cannot protect a file written before the version existed.
+classes, because nothing in that file tells it to refuse.
 
 ## Identity and resume
 
