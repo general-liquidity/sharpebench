@@ -83,8 +83,13 @@ The simulator builds calibration pairs by two rules:
 `calibration_observations` counts them. An agent that never states a
 confidence reports no Brier score and zero observations.
 `confidence_weighted_return` weights each run by the mean of its paired
-confidences. A run with none carries no weight, unless no run in the
-submission has any; then every run weighs the same.
+confidences. A run with none weighs the mean of those per-run weights over the
+runs that have one, and every run weighs 1.0 when no run has any. A run the
+harness replaces with a failing sentinel states nothing, so it keeps a weight
+and stays in the mean. A submission that states confidences in one run only
+scores the equal-weight mean, as if it had stated none. Four runs at +0.001 stating 0.6 beside one
+sentinel run at -0.01 score -0.0012, the equal-weight mean, where a zero weight
+for the sentinel would report +0.001.
 
 Trajectory contract schema 3 marks the optional confidence. A schema-2 capture
 wrote a confidence on every order, including the 0.5 filled in for an entrant

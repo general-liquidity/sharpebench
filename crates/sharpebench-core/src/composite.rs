@@ -921,7 +921,8 @@ pub struct CompositeScore {
     /// Conviction-weighted return: each run's mean return weighted by the mean
     /// of the run's `confidences`, the stated confidences paired with an
     /// outcome. Rewards sizing conviction with the outcome. A run with no such
-    /// confidence carries no weight. When no run has one, every run weighs the
+    /// confidence weighs the mean of the other runs' weights, so a failing run
+    /// that states nothing stays in. When no run has one, every run weighs the
     /// same (the mean of the per-run mean returns).
     pub confidence_weighted_return: f64,
     /// Total compute/token cost across all runs (0.0 if unreported).
@@ -1453,17 +1454,29 @@ fn score_agent_with(
 
     // Confidence-weighted return: weight each run's return by the conviction
     // staked on it, so sizing-with-conviction beats flat-confidence trading.
-    // A run with no stated confidence has no conviction to weigh and carries
-    // no weight, unless no run states one, in which case every run weighs the
-    // same.
-    let any_stated = sub.runs.iter().any(|r| !r.confidences.is_empty());
+    // A run with no stated confidence (a run of holds, or a failing sentinel)
+    // takes the submission's mean stated weight, the mean over stating runs of
+    // each run's mean confidence. It stays in the mean, and stating a
+    // confidence in some runs only cannot replace the equal-weight mean. With
+    // no stated confidence anywhere every run weighs 1.0.
+    let stated_weights: Vec<f64> = sub
+        .runs
+        .iter()
+        .filter(|r| !r.confidences.is_empty())
+        .map(|r| mean(&r.confidences))
+        .collect();
+    let unstated_weight = if stated_weights.is_empty() {
+        1.0
+    } else {
+        mean(&stated_weights)
+    };
     let mut cw_num = 0.0;
     let mut cw_den = 0.0;
     for r in &sub.runs {
-        let w = match (any_stated, r.confidences.is_empty()) {
-            (false, _) => 1.0,
-            (true, true) => continue,
-            (true, false) => mean(&r.confidences),
+        let w = if r.confidences.is_empty() {
+            unstated_weight
+        } else {
+            mean(&r.confidences)
         };
         cw_num += w * mean(&r.returns);
         cw_den += w;
