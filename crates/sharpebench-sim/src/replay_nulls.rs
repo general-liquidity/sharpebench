@@ -1188,6 +1188,10 @@ mod tests {
         assert_eq!(distinct_placements(&slices, 200), u64::MAX);
         assert_eq!(binomial(5, 7), Some(0));
         assert_eq!(binomial(60, 30), Some(118_264_581_564_861_424));
+        // C(200, 190) is computed as C(200, 10); the direct product would pass
+        // C(200, 100), which does not fit in u128 (checked with sympy).
+        assert_eq!(binomial(200, 190), Some(22_451_004_309_013_280));
+        assert_eq!(binomial(200, 10), Some(22_451_004_309_013_280));
     }
 
     #[test]
@@ -1199,6 +1203,24 @@ mod tests {
         assert_ne!(first(4, 20, 100), first(5, 20, 100));
         // Swapping start and end is a different window and a different stream.
         assert_ne!(first(4, 20, 100), first(4, 100, 20));
+        // The stream is part of the declared-seed contract: a report must
+        // replay identically across releases. These values were computed
+        // independently in Python from the same SplitMix64 definitions.
+        assert_eq!(
+            first(0, 20, 100),
+            6_996_585_929_892_984.0 / (1u64 << 53) as f64
+        );
+        assert_eq!(
+            first(7, 110, 200),
+            8_692_885_399_010_738.0 / (1u64 << 53) as f64
+        );
+        assert_eq!(first(0, 20, 100), 0.7767770793135602);
+        // Nearby windows do not collide.
+        let mut seen = std::collections::BTreeSet::new();
+        for start in 0..2_000u64 {
+            seen.insert(first(3, start as usize, start as usize + 80).to_bits());
+        }
+        assert_eq!(seen.len(), 2_000);
         let mut rng = Rng::new(0);
         for bound in [1, 2, 7] {
             for _ in 0..200 {

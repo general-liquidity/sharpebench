@@ -725,6 +725,19 @@ fn a_run_without_comparable_rows_is_typed_unavailable() {
     assert_eq!(*runs, 1);
     assert_eq!(aggregate(&report), aggregate(&alone));
 
+    // A first fill four bars from the end leaves exactly two compared bars.
+    let edge = planted(&data, window, |bar| (bar >= window.1 - 4).then_some(0.5));
+    let report = lagged_replay(&data, &trajectory(vec![edge]), costs, &[1]).unwrap();
+    let LaggedRun::Available {
+        skipped_leading_bars,
+        compared_bars,
+        ..
+    } = &report.runs[0]
+    else {
+        panic!("{report:?}");
+    };
+    assert_eq!((*skipped_leading_bars, *compared_bars), (98, 2));
+
     // A late first fill can leave too few bars.
     let late = planted(&data, window, |bar| (bar >= window.1 - 3).then_some(0.5));
     let report = lagged_replay(&data, &trajectory(vec![late]), costs, &[1]).unwrap();
@@ -1092,9 +1105,39 @@ fn oversized_lags_and_draw_counts_are_refused() {
         );
     }
     assert_eq!(MAX_TIMING_NULL_DRAWS, 100_000);
+    // The cap itself is accepted; a run that was never invested draws nothing.
+    let hold = trajectory(vec![planted(&data, (20, 120), |_| None)]);
+    let capped = timing_null(&data, &hold, costs, config(MAX_TIMING_NULL_DRAWS, 0)).unwrap();
+    assert_eq!(capped.draws, MAX_TIMING_NULL_DRAWS);
     let refusal = ReplayNullRefusal::TooManyDraws {
         draws: usize::MAX,
         max: MAX_TIMING_NULL_DRAWS,
     };
     assert!(refusal.to_string().contains("at most 100000 draws"));
+}
+
+/// A levered book whose NAV reaches exactly zero while it still holds a
+/// position counts as invested on that bar.
+#[test]
+fn a_book_at_zero_nav_with_a_position_is_invested() {
+    let mut closes = vec![100.0, 50.0];
+    closes.extend(std::iter::repeat_n(50.0, 28));
+    let data = Dataset {
+        dates: (0..30).map(|bar| format!("b{bar:02}")).collect(),
+        closes: BTreeMap::from([("S0".to_string(), closes)]),
+        dividends: BTreeMap::new(),
+    };
+    // Twice levered at 100, held through the halving (NAV -1 + 0.02 * 50 = 0),
+    // then closed.
+    let run = planted(&data, (0, 30), |bar| match bar {
+        0 => Some(2.0),
+        1 => None,
+        _ => Some(0.0),
+    });
+    let report = timing_null(&data, &trajectory(vec![run]), frictionless(), config(4, 0)).unwrap();
+    let RunTimingNull::Available { exposure, .. } = &report.runs[0] else {
+        panic!("{report:?}");
+    };
+    assert_eq!((exposure.invested_bars, exposure.holding_periods), (2, 1));
+    assert_eq!(exposure.mean_gross_when_invested, 2.0);
 }
