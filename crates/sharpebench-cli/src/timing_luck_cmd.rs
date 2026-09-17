@@ -2,9 +2,9 @@
 //!
 //! Resolves the dataset, windows and cost model exactly as `sharpebench run`
 //! does (the default costs, or `--short-borrow-bps` through the same parser),
-//! with the same eight execution seeds and reference roster, and
-//! reports how far the reference rows' Sharpe and deflated Sharpe move when
-//! every window's start shifts by 0 to k-1 bars
+//! with the same eight execution seeds and reference roster. It then reports
+//! how far the reference rows' Sharpe and deflated Sharpe move when they
+//! rebalance every `--cadence` bars and only the phase of that schedule moves
 //! ([`sharpebench_harness::timing_luck`]). No external entrant is accepted, no
 //! board is printed, and nothing `run` reads is written, so `run` output is the
 //! same whether or not this command has run. The report is reporting surface
@@ -17,7 +17,7 @@ use sharpebench_harness::timing_luck::{
     TIMING_LUCK_SCHEMA_VERSION,
 };
 
-const USAGE: &str = "usage: sharpebench timing-luck --offsets <k> [--data <csv>] \
+const USAGE: &str = "usage: sharpebench timing-luck --cadence <m> [--data <csv>] \
                      [--periods-per-year N] [--short-borrow-bps <bps>] [--json]";
 
 /// The emitted document. An unavailable report still says what it is and that
@@ -44,43 +44,48 @@ fn span(spread: &Spread) -> String {
     format!("{}..{}", figure(spread.min), figure(spread.max))
 }
 
-/// Offsets that produced the figure, over offsets declared.
+/// Phases that produced the figure, over phases evaluated.
 fn measured(spread: &Spread) -> String {
-    format!("{}/{}", spread.offsets_measured, spread.by_offset.len())
+    format!("{}/{}", spread.phases_measured, spread.by_phase.len())
 }
 
 fn print_report(source: &str, symbols: usize, periods_per_year: f64, report: &TimingLuckReport) {
-    let geometry = &report.geometry;
     println!(
         "SharpeBench timing-luck floor on {source} ({symbols} symbols, {} windows x {} seeds, \
-         {} start offsets, {periods_per_year} periods/year, costs on)",
-        geometry.windows.len(),
+         cadence {} so {} phases, {periods_per_year} periods/year, costs on)",
+        report.windows.len(),
         report.seeds,
-        geometry.offsets,
+        report.cadence,
+        report.cadence,
     );
     println!(
         "Reference field and hold control only. Not used by the gate, eligibility or the rank."
     );
-    for window in &geometry.windows {
+    println!(
+        "Every phase decides on a window's first bar, then on bars start+p, start+p+{}, ...; \
+         every phase evaluates every bar.",
+        report.cadence
+    );
+    for window in &report.windows {
+        let counts: Vec<String> = window
+            .decisions_by_phase
+            .iter()
+            .map(ToString::to_string)
+            .collect();
         println!(
-            "window {}: {}-bar shifted windows from {} to {}; the first and last share {} bars",
-            window.declared,
-            window.instance_len,
-            window.first_instance,
-            window.last_instance,
-            window.bars_shared_by_first_and_last_instance,
+            "window {} ({} bars): decisions per run by phase {}",
+            window.window,
+            window.bars,
+            counts.join(",")
         );
     }
     println!(
-        "declared windows disjoint: {}; shifted windows of distinct declared windows disjoint: {}",
-        geometry.declared_windows_disjoint, geometry.instances_of_distinct_windows_disjoint,
+        "The deflated Sharpe of every phase uses the row's phase-0 bar; dsr bar and field sd \
+         (min..max over phases) show what each phase's own field measured."
     );
-    if geometry.instances_of_one_window_overlap {
-        println!("offsets of one window overlap each other, so they are not independent draws");
-    }
-    println!("n = offsets that produced the figure / offsets declared; win = windows behind it");
+    println!("n = phases that produced the figure / phases; win = windows behind it");
     println!(
-        "\n{:<18} {:<12} {:>3} {:>5} {:>10} {:>17} {:>5} {:>10} {:>15}",
+        "\n{:<18} {:<12} {:>3} {:>5} {:>10} {:>17} {:>5} {:>10} {:>15} {:>9} {:>17}",
         "agent",
         "scope",
         "win",
@@ -89,12 +94,24 @@ fn print_report(source: &str, symbols: usize, periods_per_year: f64, report: &Ti
         "sharpe min..max",
         "n",
         "dsr rng",
-        "dsr min..max"
+        "dsr min..max",
+        "dsr bar",
+        "field sd"
     );
     for row in &report.rows {
         for scope in std::iter::once(&row.all_windows).chain(&row.per_window) {
+            let field_sd: Vec<f64> = scope
+                .field_dispersion_by_phase
+                .iter()
+                .map(|f| f.trials_sr_std)
+                .collect();
+            let field_span = format!(
+                "{}..{}",
+                figure(field_sd.iter().copied().reduce(f64::min)),
+                figure(field_sd.iter().copied().reduce(f64::max))
+            );
             println!(
-                "{:<18} {:<12} {:>3} {:>5} {:>10} {:>17} {:>5} {:>10} {:>15}",
+                "{:<18} {:<12} {:>3} {:>5} {:>10} {:>17} {:>5} {:>10} {:>15} {:>9} {:>17}",
                 crate::truncate(&row.agent_id, 18),
                 crate::truncate(&scope.scope, 12),
                 scope.windows,
@@ -104,6 +121,8 @@ fn print_report(source: &str, symbols: usize, periods_per_year: f64, report: &Ti
                 measured(&scope.deflated_sharpe),
                 figure(scope.deflated_sharpe.range),
                 span(&scope.deflated_sharpe),
+                figure(scope.deflation.deflation_bar_per_period),
+                field_span,
             );
         }
     }
@@ -121,15 +140,15 @@ pub fn run(args: &[String], json: bool) -> i32 {
         );
         return 2;
     }
-    let Some(raw) = crate::flag_value(args, "--offsets") else {
+    let Some(raw) = crate::flag_value(args, "--cadence") else {
         eprintln!("{USAGE}");
         return 2;
     };
-    let offsets = match raw.parse::<usize>() {
-        Ok(offsets) if offsets >= 1 => offsets,
+    let cadence = match raw.parse::<usize>() {
+        Ok(cadence) if cadence >= 1 => cadence,
         _ => {
             eprintln!(
-                "error: --offsets must be a whole number of at least 1, got `{raw}`\n{USAGE}"
+                "error: --cadence must be a whole number of bars, at least 1, got `{raw}`\n{USAGE}"
             );
             return 2;
         }
@@ -161,7 +180,7 @@ pub fn run(args: &[String], json: bool) -> i32 {
     let seeds: Vec<u64> = (0..8).collect();
     let cfg = ScoreConfig::for_periods_per_year(periods_per_year);
     let spec = TimingLuckSpec {
-        offsets,
+        cadence,
         luck_floor_agents: crate::LUCK_FLOOR_AGENTS,
         hold_control_id: crate::HOLD_CONTROL_ID,
     };
