@@ -908,11 +908,12 @@ pub struct CompositeScore {
     /// Turnover proxy: average orders placed per run (trading frequency / capacity).
     pub turnover: f64,
     /// Whether the agent is on the Pareto front over (return↑, drawdown↓,
-    /// turnover↓), taken among the agents whose pooled track has a Sharpe
-    /// ratio. Always `false` for a track the kernel refuses as having none (it
-    /// is constant, or its Sharpe is not finite), and such a track removes no
-    /// other agent from the front. Reported only: no gate, eligibility rule or
-    /// rank reads it. Filled by [`rank`].
+    /// turnover↓). Always `false` for a track the kernel refuses as having no
+    /// Sharpe ratio (fewer than two observations, constant, or a Sharpe that is
+    /// not finite). Such a track still dominates when it has an observation,
+    /// so an agent it beats on all three is not on the front; an empty track
+    /// dominates nobody. Reported only: no gate, eligibility rule or rank reads
+    /// it. Filled by [`rank`].
     pub pareto_optimal: bool,
     /// Whether the agent's outperformance survives Romano–Wolf step-down multiple
     /// testing across the field. Filled by [`rank`].
@@ -1202,21 +1203,15 @@ fn dominates(a: &CompositeScore, b: &CompositeScore) -> bool {
             || a.turnover < b.turnover)
 }
 
-/// Whether the kernel refuses `pooled` as having no Sharpe ratio: the refusal
-/// `score_agent_with` reads as `sharpe_undefined`, where every observation is
-/// equal or the Sharpe does not stay finite. Such a track is not a Pareto
-/// candidate. A never-trading track is all zeros, so its drawdown is zero and,
-/// with no orders, so is its turnover, and nothing could ever dominate it.
+/// Whether `pooled` has no Sharpe ratio, by [`observed_sharpe_ratio`], the
+/// kernel's single statement of it: fewer than two observations, every
+/// observation equal, or a Sharpe that does not stay finite. Such a track is
+/// not a Pareto member. The PSR-based `sharpe_undefined` in `score_agent_with`
+/// is narrower for a short track, because the checked PSR keeps a 0.0
+/// convention below two observations; the deflation interval refuses that
+/// track, so `deflation_error` still names it.
 fn has_no_sharpe_ratio(pooled: &[f64]) -> bool {
-    matches!(
-        checked_probabilistic_sharpe_ratio(pooled, 0.0),
-        Err(StatisticalError::InvalidParameter {
-            name: "returns",
-            ..
-        } | StatisticalError::NonFiniteComputation {
-            quantity: "Sharpe ratio"
-        })
-    )
+    observed_sharpe_ratio(pooled).is_err()
 }
 
 /// The resolved per-period deflation dispersion a score is computed with, and
@@ -2123,16 +2118,19 @@ pub fn rank_declared(
         }
     }
 
-    // Pareto front over (return↑, drawdown↓, turnover↓), among the agents
-    // whose pooled track has a Sharpe ratio. A refused track is neither on the
-    // front nor able to push another agent off it. `pooled` is in field order,
-    // as `scores` still is before the sort below.
-    let candidate: Vec<bool> = pooled.iter().map(|p| !has_no_sharpe_ratio(p)).collect();
+    // Pareto front over (return↑, drawdown↓, turnover↓). Only an agent whose
+    // pooled track has a Sharpe ratio is a member. Every agent with at least
+    // one observation can dominate, because return, drawdown and turnover are
+    // defined without a Sharpe ratio: an agent that a never-trading track beats
+    // on all three is not optimal. An empty track has no return to compare and
+    // dominates nobody. `pooled` is in field order, as `scores` still is before
+    // the sort below.
+    let member: Vec<bool> = pooled.iter().map(|p| !has_no_sharpe_ratio(p)).collect();
     let pareto: Vec<bool> = (0..scores.len())
         .map(|i| {
-            candidate[i]
+            member[i]
                 && !(0..scores.len())
-                    .any(|j| j != i && candidate[j] && dominates(&scores[j], &scores[i]))
+                    .any(|j| j != i && !pooled[j].is_empty() && dominates(&scores[j], &scores[i]))
         })
         .collect();
     for (cs, p) in scores.iter_mut().zip(pareto) {

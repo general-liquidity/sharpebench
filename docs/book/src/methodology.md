@@ -42,15 +42,19 @@ rewards an edge that doesn't arrive with downside churn, where the Sharpe penali
 all volatility symmetrically.
 
 **Pareto-optimality** (`pareto_optimal`) marks the agents that no other agent
-beats on return, drawdown and turnover at once, taken among the agents whose
-pooled track has a Sharpe ratio. A track the kernel refuses as having none (it
-is constant, or its Sharpe is not finite, and its `deflation_error` says which)
-is never on the front and never removes another agent from it. Without that
-rule a track that never trades, all zeros with zero drawdown and, having placed
-no orders, zero turnover, could never be dominated and would always be marked
-optimal, and it would push every agent with a negative mean return off the
-front. The flag is
-reported only: no gate, eligibility rule or rank reads it.
+beats on return, drawdown and turnover at once. Only an agent whose pooled
+track has a Sharpe ratio can carry the flag. A track the kernel refuses as
+having none is never marked: it has fewer than two observations, or every
+observation is equal, or its Sharpe is not finite, and its `deflation_error`
+says which. Without that rule a track that never trades, all zeros with zero
+drawdown and, having placed no orders, zero turnover, could never be dominated
+and would always be marked optimal. A refused track with at least one
+observation still counts when the flag asks whether another agent is beaten,
+because its return, drawdown and turnover are defined without a Sharpe ratio.
+An agent that loses money with drawdown and orders is beaten on all three by
+a track that does nothing, so it is not Pareto-optimal. An empty track has no
+return to compare and beats nobody. The flag is reported only: no gate,
+eligibility rule or rank reads it.
 
 ## What the rank does not answer
 
