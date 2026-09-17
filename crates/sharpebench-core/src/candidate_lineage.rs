@@ -1495,16 +1495,16 @@ fn shared_interval(identity: &Value, [start, end]: [u64; 2], bars: u64) -> Optio
 }
 
 /// Number of bars in the union of half-open intervals.
+///
+/// In start order, each interval adds only the bars past the furthest bar an
+/// earlier one reached, so an interval inside an earlier one adds nothing.
 fn covered_bars(mut intervals: Vec<(u64, u64)>) -> u64 {
     intervals.sort_unstable();
     let mut covered = 0;
     let mut reach = 0;
     for (start, end) in intervals {
-        let start = start.max(reach);
-        if end > start {
-            covered += end - start;
-            reach = end;
-        }
+        covered += end.saturating_sub(start.max(reach));
+        reach = reach.max(end);
     }
     covered
 }
