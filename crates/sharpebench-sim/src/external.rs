@@ -28,6 +28,40 @@ use crate::transport::{
     decide_with_retry, CircuitBreaker, DecideError, TransportDiagnostics, TransportHealth,
 };
 
+/// How much state an external entrant can carry from one (window, seed) cell of a
+/// sweep into the next, as fixed by the runner that executes it.
+///
+/// Execution seeds of one window replay the same bars, so an entrant that keeps
+/// what it saw in one cell can act on it in the next, and its seed runs are then
+/// not independent. This value discloses which runner applied. It does not detect
+/// that any entrant carried state: an entrant under a runner that allows carryover
+/// may carry nothing. It is derived from the runner kind and has no
+/// `Deserialize`, so it is never read from anything an entrant sends.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CellIsolation {
+    /// A fresh container per cell, removed when the cell ends: nothing the
+    /// entrant wrote inside it reaches another cell.
+    ContainerPerCell,
+    /// A fresh host process per cell, with no sandbox: the harness ends the
+    /// process it spawned when the cell ends, but files the entrant writes on
+    /// the host, and anything it starts outside that process, can reach the
+    /// next cell.
+    ProcessPerCellHostWritable,
+    /// An endpoint the operator runs. The harness neither starts nor stops it,
+    /// so whatever it keeps outlives every cell.
+    OperatorEndpoint,
+}
+
+impl CellIsolation {
+    /// Whether the runner itself discards everything an entrant wrote before
+    /// the next cell starts. Only then are seed replicates of one window
+    /// independent by construction.
+    pub const fn runner_discards_state(self) -> bool {
+        matches!(self, Self::ContainerPerCell)
+    }
+}
+
 /// Cap on bytes read from an external agent's HTTP response, so a hostile or buggy
 /// endpoint can't exhaust the harness's memory.
 const MAX_AGENT_RESPONSE: u64 = 8 * 1024 * 1024;
@@ -368,6 +402,11 @@ fn agent_environment(extra: &[&str]) -> Vec<(String, String)> {
 }
 
 impl ExternalAgent {
+    /// The isolation of a runner that spawns one value per cell and drops it
+    /// before the next, as `sharpebench run --cmd` does. A runner that reuses
+    /// one process across cells keeps even less apart than this says.
+    pub const CELL_ISOLATION: CellIsolation = CellIsolation::ProcessPerCellHostWritable;
+
     /// Spawn `program args...` as an agent subprocess with a **cleared**
     /// environment: the agent receives only the fixed hermetic allowlist and the
     /// names opted in via `SHARPEBENCH_AGENT_ENV`, never the
@@ -724,6 +763,10 @@ pub struct HttpAgent {
 }
 
 impl HttpAgent {
+    /// The isolation of any runner over this transport: a fresh value per cell
+    /// still reaches the same operator-run endpoint.
+    pub const CELL_ISOLATION: CellIsolation = CellIsolation::OperatorEndpoint;
+
     /// `addr` is `host:port` (e.g. `"127.0.0.1:8080"`); each decision POSTs to
     /// `/decide`. A bare host defaults to port 80. Uses the default retry / breaker
     /// budget; see [`HttpAgent::with_resilience`] to tune it.
