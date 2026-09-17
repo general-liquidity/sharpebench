@@ -229,8 +229,10 @@ no tools, memory, portfolio, or order interface. The committed
 reconstructs support, calibration, Brier loss, block resampling, and Holm
 adjustment from the imported ledgers. The committed `report.json` and that
 check are schema `sharpebench.forecast-quality.v1` and stay frozen. The field is
-complete, so its support is the same under v2, but the command below now writes
-v2, which the checker does not accept.
+complete, so its support is the same under v2, and the command below now writes
+v2. The checker verifies a v1 report and a v2 report whose ledgers resolve the
+same contract digests, and refuses a v2 report over ledgers that resolve
+different digests, because it does not reconstruct the pairs v2 withholds.
 
 The exact pipeline is:
 
