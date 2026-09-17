@@ -20,11 +20,14 @@ under the data and cost model the strict path has just bound the trajectory to
 `--short-borrow-bps` rate), so they refuse `--allow-unbound-trajectory` and
 `--reexecute`. They also refuse `--diagnostics sizing-response`, whose output
 nests the verification in a different shape; request the two separately. A
-malformed or contradictory flag exits 2 before any file is read; a trajectory
-the diagnostics cannot replay (see below) exits 1.
+malformed or contradictory flag exits 2 before any file is read, and so does a
+draw count above 100,000. A declared lag too long for the trajectory's runs
+exits 2 once the trajectory is read. A trajectory the diagnostics cannot replay
+(see below) exits 1.
 
 The library functions are `timing_null` and `lagged_replay` in
-`sharpebench_sim::replay_nulls`. They take any `CostModel`.
+`sharpebench_sim::replay_nulls`. They take any `CostModel`; the CLI always
+passes the bound one.
 
 ## Exposure-matched random timing
 
@@ -50,21 +53,47 @@ for each run.
    among the draws' Sharpe ratios as a mid-rank percentile,
    `(below + ties / 2) / draws`, reported with the draw count.
 
+Each percentile comes with its Monte Carlo standard error: every draw scores 1,
+1/2 or 0, and the error is the standard deviation of those scores over the
+square root of the draw count. At 200 draws it is about 0.035 near the middle
+and 0.015 near 0.05. It reads zero when every draw falls on one side; the
+resolution there is one over the draw count. Each run also reports its number of
+distinct placements: the distinct orders of its holding periods (periods with
+the same orders count once) times the `C(F + 1, c)` ways to spread `F` flat bars
+around `c` periods, saturating at `u64::MAX`. A run with one period and one flat
+bar has two. When the count is not far above the draw count, draws repeat.
+
 The report also carries, for every run, the exposure profile (bars, invested
 bars, holding periods, longest holding period, mean gross exposure when
-invested) and the draws' mean invested bars. Without a liquidity cap or
-execution noise that mean equals the entrant's invested bars exactly; under a
-cap or noise the engine can hold a draw's position for a different number of
-bars, and the two numbers show by how much.
+invested) and the draws' mean invested bars as the engine executed them. That
+mean equals the entrant's invested bars except where a moved order meets a
+close that is not positive, or a trade value below the engine's `1e-9`
+minimum, both of which the engine skips.
+
+The timing reference refuses a cost model with execution noise or a finite
+liquidity cap (`ExposureNotPreserved`). There, whether an order fills depends
+on when and how often orders are sent. A deferred entry sits on a bar that
+reads flat, so the detected period starts on a hold that opens nothing once
+moved, and delayed exits lengthen the entrant's periods. A review measurement
+under the realistic profile, over 400 runs, found draws holding about 126 bars
+per run against the entrant's 147, and a no-skill entrant's mean percentile at
+0.40 instead of 0.50 on a driftless panel. The CLI binds the typical profile,
+so it never meets this refusal.
 
 Across runs, draw `i` of the reference is the mean of draw `i` over every run
 that has timing freedom, and the entrant's mean per-run Sharpe is placed in that
-distribution.
+distribution. Runs over the same window read the same placement stream, so draw
+`i` places the holding periods of every execution-seed copy of a window at the
+same bars. A capture records one run per window and seed, and a price-only
+entrant's copies carry the same decisions. A separate placement per copy would
+shrink the spread of the reference mean by about the number of copies and put a
+no-skill entrant in the tails far too often. A test holds a no-skill entrant
+with four copies per window to the nominal tail rate.
 
 The draws are a pure function of the trajectory, the data, the cost model, the
-declared draw count and the declared seed. Each run draws from its own stream,
-derived from the seed and the run's position in the trajectory. The default
-declaration is 200 draws from seed 0.
+declared draw count and the declared seed. The placement stream is derived from
+the seed and the window. The default declaration is 200 draws from seed 0, and
+the most a report accepts is 100,000.
 
 A run with no timing to test is typed unavailable rather than given a
 degenerate percentile: `never_invested` when no bar was invested, and
@@ -80,15 +109,36 @@ Sharpe and the pooled mean per-period return beside the undelayed figures. A
 policy that uses current observations loses its edge when its decisions arrive
 late; a static tilt earns the same.
 
-For lag `k` the first `k` bars hold (the book starts in cash, so they are flat)
-and the last `k` recorded decisions fall after the window and never execute. A
-lag of zero replays the recorded decisions unchanged and reproduces the
-undelayed replay exactly. Every row, the undelayed one included, is computed on
-the same bars: each run's bars after the first `max(k) + 1`, so each compared
-bar is earned by a position every lag has already taken and no row carries its
-opening trade. The report states how many leading bars it skipped. Lags are
-reported ascending without repeats; an empty list, or a lag that leaves fewer
-than two compared bars in some run, is refused.
+For lag `k` the first `k` bars hold (the book starts in cash, so they are flat).
+A lag of zero replays the recorded decisions unchanged and reproduces the
+undelayed replay exactly. Lags are reported ascending without repeats. An empty
+list is refused, and so is any lag above the shortest run's length less 3,
+since such a row has no two bars to compare. The check uses checked
+arithmetic, so a lag near `usize::MAX` is refused rather than wrapped.
+
+Within a run every row, the undelayed one included, is computed on the same
+bars: those after the latest bar at which any row first holds a position. No
+row carries its opening trade, and every compared bar is earned by a position
+each row has already taken. An entrant whose first trade comes late is compared
+from after its latest row's first fill, not from a fixed offset. Each run
+reports how many leading bars it skipped and how many it compared. The
+aggregate averages per-run Sharpe over the runs with rows and pools the mean
+return over their compared bars.
+
+The window's end is not symmetric, and every report says so as `end_effect`: a
+lag-`k` row never executes the run's last `k` recorded decisions, whose fills
+would fall after the window, while the undelayed row executes them on the
+window's last `k` bars. Under execution noise a moved decision also meets
+other noise draws, so a lag row then mixes the delay with a different fill
+realization.
+
+A run whose rows cannot all be compared is typed unavailable and left out of
+the aggregate: `never_fills` when a row never holds a position in the window,
+`too_few_compared_bars` when skipping past every opening fill leaves fewer than
+two bars, and `no_sharpe` when the kernel's `observed_sharpe_ratio` refuses a
+row's compared bars, as it does for a book that is flat on all of them. A flat
+row is not averaged in as a Sharpe of zero. When no run has rows, the
+aggregate is unavailable (`no_comparable_run`).
 
 ### Decision delay
 
@@ -96,8 +146,11 @@ The stressed profile declares a two-bar decision delay that the backtest driver
 does not apply. The lagged replay is the way to measure decision-delay
 sensitivity: `lagged_replay` with the stressed profile's cost model and lag
 `decision_delay_bars` replays every decision two bars late under the stressed
-frictions. The stressed profile's own behaviour is unchanged, so evidence
-produced under it keeps its meaning.
+frictions. This route is library-only: the CLI replays a trajectory under the
+cost model it is bound to, which for CLI captures is the typical profile, so
+`--lagged-replay 2` there measures the delay under typical costs. The stressed
+profile's own behaviour is unchanged, so evidence produced under it keeps its
+meaning.
 
 ## Validity
 

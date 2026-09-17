@@ -66,8 +66,10 @@ profile was produced, and that stays so. Decision-delay sensitivity is measured
 by the [lagged replay](replay-diagnostics.md#lagged-replay) instead, which
 replays a captured run's decisions `k` bars late through this engine and
 reports Sharpe and mean return beside the undelayed figures. Passing the
-stressed cost model with lag `decision_delay_bars` measures the declared delay
-without changing the profile.
+stressed cost model with lag `decision_delay_bars` to the library function
+`lagged_replay` measures the declared delay without changing the profile. The
+CLI's `--lagged-replay` replays under the cost model a trajectory is bound to,
+which for CLI captures is the typical profile.
 
 ## Synthetic data
 
