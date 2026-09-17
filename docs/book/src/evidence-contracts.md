@@ -119,10 +119,14 @@ from whatever records arrive.
 
 ## Captured trajectories
 
-Trajectory contract schema 2 binds dataset, costs, engine version, ordered
+Trajectory contract schema 3 binds dataset, costs, engine version, ordered
 windows, ordered seeds, and, for CLI captures, the runner artifact. Strict
 verification requires exactly one run for every window-by-seed cell in the
-declared order.
+declared order. Schema 3 records an order's confidence only when the agent
+stated one. Schema 2 captures wrote a filled-in 0.5 on every order, so strict
+verification refuses them, and the explicit legacy regrade still replays them
+with every recorded value counted as stated. See
+[confidence and calibration](submitting.md#confidence-and-calibration).
 
 For every run, the verifier checks:
 
