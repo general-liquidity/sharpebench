@@ -30,6 +30,7 @@ mod gateway_cli;
 mod import_cmd;
 mod lineage_cmd;
 mod regrade_cmd;
+mod replay_diagnostics_cmd;
 mod rescore_cmd;
 mod timing_luck_cmd;
 #[cfg(feature = "self-update")]
@@ -630,6 +631,8 @@ fn help() {
     println!("                       --allow-unbound-trajectory: explicit legacy or cross-version regrade; never the default");
     println!("                       --short-borrow-bps <bps>: for capture (reference agents) and verify-trajectory; the rate is bound, so a different one refuses");
     println!("                       --reexecute [--cmd \"<prog>\"|--http <addr>|--image <ref>]: also re-run every captured run with a fresh agent and refuse the first divergent decision");
+    println!("                       --timing-null [--null-draws N] [--null-seed S]: also place each run's Sharpe among seeded replays of its own holding periods at random bars (rank-neutral)");
+    println!("                       --lagged-replay <k,k,...>: also report Sharpe and mean return with every decision executed k bars late (rank-neutral)");
     println!("                       --diagnostics sizing-response [--vol-lookback N]: also report how gross exposure moved with trailing volatility; never a rank input");
     println!("  sharpebench decision-stability <traj.json>... [--data <csv>] [--short-borrow-bps <bps>] [--declare-identical-replicates]  rank-neutral pairwise disagreement of replicate runs that shared their history");
     println!(
@@ -2726,7 +2729,7 @@ fn run_verify_trajectory(args: &[String], json: bool) -> ExitCode {
 
     if args.len() < 3 {
         eprintln!(
-            "usage: sharpebench verify-trajectory <trajectory.json> [--data <csv>] [--allow-unbound-trajectory] [--reexecute [--cmd \"<prog>\"|--http <addr>]] [--diagnostics sizing-response [--vol-lookback N]] [--json]"
+            "usage: sharpebench verify-trajectory <trajectory.json> [--data <csv>] [--allow-unbound-trajectory] [--reexecute [--cmd \"<prog>\"|--http <addr>]] [--diagnostics sizing-response [--vol-lookback N]] [--timing-null [--null-draws N] [--null-seed S]] [--lagged-replay <k,k,...>] [--json]"
         );
         return ExitCode::from(2);
     }
@@ -2762,6 +2765,13 @@ fn run_verify_trajectory(args: &[String], json: bool) -> ExitCode {
         );
         return ExitCode::from(2);
     }
+    let replay_diagnostics = match replay_diagnostics_cmd::requested(args) {
+        Ok(requested) => requested,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::from(2);
+        }
+    };
     let costs: CostModel = match cost_model_from_args(args) {
         Ok(costs) => costs,
         Err(error) => {
@@ -2828,6 +2838,9 @@ fn run_verify_trajectory(args: &[String], json: bool) -> ExitCode {
             }
         }
     };
+    if let Some(requested) = replay_diagnostics {
+        return replay_diagnostics_cmd::report(&requested, &data, &traj, costs, &result, json);
+    }
     let Some(sizing) = sizing else {
         emit_verification(&result, json, None);
         return ExitCode::SUCCESS;

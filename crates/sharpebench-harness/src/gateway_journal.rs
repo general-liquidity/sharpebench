@@ -19,7 +19,19 @@ use serde::{Deserialize, Serialize};
 
 use crate::accounting::{MonetarySummary, RateCard};
 
+/// The version a journal starts at, and keeps while no record carries a
+/// [`FinishClass`].
 pub const JOURNAL_SCHEMA_VERSION: &str = "sharpebench.gateway-journal.v1";
+
+/// The version of a journal in which any record carries a [`FinishClass`].
+///
+/// A binary built before the class existed reads a settlement's
+/// `finish_reason` as an unknown key, drops it, and would write the journal back
+/// without it. It only loads a journal whose identity equals its own, schema
+/// version included, and its version is v1, so it refuses a v2 document
+/// instead of rewriting it. [`GatewayJournal::save`] sets the version from the
+/// records, so no caller can write a class under v1.
+pub const JOURNAL_SCHEMA_VERSION_V2: &str = "sharpebench.gateway-journal.v2";
 
 /// Schema of the document a [`JournalLock`] writes. A lock is not a journal:
 /// it lives at a different path, carries a different schema version and is
@@ -184,6 +196,29 @@ impl JournalIdentity {
         self.sweep_sha256 = Some(sweep_sha256);
         self
     }
+
+    /// Whether `other` binds the same routes, budget and sweep, under schema
+    /// versions this binary reads. The two versions may differ: a v1 caller
+    /// resumes the v2 journal its own earlier save produced.
+    fn binds_same(&self, other: &Self) -> bool {
+        // Destructured, so a field added to the identity cannot be left out of
+        // the comparison without a compile error.
+        let Self {
+            schema_version,
+            route_table_sha256,
+            budget,
+            sweep_sha256,
+        } = self;
+        is_readable_version(schema_version)
+            && is_readable_version(&other.schema_version)
+            && *route_table_sha256 == other.route_table_sha256
+            && *budget == other.budget
+            && *sweep_sha256 == other.sweep_sha256
+    }
+}
+
+fn is_readable_version(version: &str) -> bool {
+    version == JOURNAL_SCHEMA_VERSION || version == JOURNAL_SCHEMA_VERSION_V2
 }
 
 /// Derived spend state. Every field is a fold over the records; none of it is
@@ -977,8 +1012,11 @@ impl GatewayJournal {
 
     /// Load a journal and refuse one that is not bound to this experiment. A
     /// journal whose binding differs is never truncated, merged or reused.
+    ///
+    /// Either schema version this binary writes is accepted, and a schema
+    /// version it does not know is refused.
     pub fn load_bound(path: &Path, identity: &JournalIdentity) -> std::io::Result<Self> {
-        Self::load_checked(path, |found| found == identity)
+        Self::load_checked(path, |found| found.binds_same(identity))
     }
 
     /// Load a journal bound to these routes and this budget, whichever sweep
@@ -990,7 +1028,7 @@ impl GatewayJournal {
         budget: GatewayBudget,
     ) -> std::io::Result<Self> {
         Self::load_checked(path, |found| {
-            found.schema_version == JOURNAL_SCHEMA_VERSION
+            is_readable_version(&found.schema_version)
                 && found.route_table_sha256 == route_table_sha256
                 && found.budget == budget
         })
@@ -1175,6 +1213,25 @@ impl GatewayJournal {
         });
     }
 
+    /// The schema version these records need on disk. See
+    /// [`JOURNAL_SCHEMA_VERSION_V2`].
+    pub fn required_schema_version(&self) -> &'static str {
+        let holds_a_class = self.records.iter().any(|record| {
+            matches!(
+                record,
+                JournalRecord::Settled {
+                    finish_reason: Some(_),
+                    ..
+                }
+            )
+        });
+        if holds_a_class {
+            JOURNAL_SCHEMA_VERSION_V2
+        } else {
+            JOURNAL_SCHEMA_VERSION
+        }
+    }
+
     /// Settle a call whose provider answer the host parsed, with the class of
     /// the reason the answer stopped.
     pub fn settle_answered(&mut self, ordinal: u32, settlement: Settlement, finish: FinishClass) {
@@ -1306,6 +1363,12 @@ impl GatewayJournal {
     /// claim file per version, which a crashed writer would leave behind for an
     /// operator to clear: a benign fault turned into a stuck journal, to narrow
     /// a window the lock already covers.
+    ///
+    /// The schema version written is a function of the records, set here and
+    /// nowhere else: [`JOURNAL_SCHEMA_VERSION_V2`] once any record carries a
+    /// [`FinishClass`], [`JOURNAL_SCHEMA_VERSION`] otherwise. A journal with no
+    /// class is written exactly as before the class existed, and a v1 journal
+    /// that already holds classes is written as v2 on its next save.
     pub fn save(&mut self, path: &Path) -> Result<(), JournalSaveError> {
         use std::io::Write as _;
         let found = Self::version_on_disk(path)
@@ -1317,6 +1380,7 @@ impl GatewayJournal {
                 found,
             });
         }
+        self.identity.schema_version = self.required_schema_version().to_string();
         self.version += 1;
         let payload = match serde_json::to_string_pretty(self) {
             Ok(payload) => payload,
