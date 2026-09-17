@@ -166,10 +166,11 @@ because they change SharpeBench.
   deviation cannot separate frequent small losses from rare large ones. An
   opt-in, rank-neutral expected-shortfall and tail-count diagnostic now
   separates them (PR <<SB-PR-P9>>).
-- **Constant tracks off the Pareto front** (FineFT). `pareto_optimal` marked a
-  never-trading track optimal, because nothing can dominate zero drawdown and
-  zero turnover, and the committed golden showed `hold` as Pareto optimal.
-  Tracks the kernel refuses as constant are no longer Pareto candidates
+- **Tracks without a Sharpe ratio off the Pareto front** (FineFT). `pareto_optimal`
+  marked a never-trading track optimal, because nothing can dominate zero drawdown
+  and zero turnover, and the committed golden showed `hold` as Pareto optimal. A
+  track the kernel refuses for an undefined Sharpe ratio, constant or non-finite,
+  is no longer a Pareto candidate and never dominates another track
   (PR <<SB-PR-P10>>).
 
 ## Statistical support made visible
