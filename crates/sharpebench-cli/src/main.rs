@@ -23,6 +23,7 @@ mod artifact_preflight;
 mod cell_isolation;
 mod compare_cmd;
 mod csv_columns;
+mod decision_stability_cmd;
 mod external_capture;
 mod forecast_cmd;
 mod gateway_cli;
@@ -30,6 +31,7 @@ mod import_cmd;
 mod lineage_cmd;
 mod regrade_cmd;
 mod rescore_cmd;
+mod timing_luck_cmd;
 #[cfg(feature = "self-update")]
 mod update;
 
@@ -61,6 +63,9 @@ fn main() -> ExitCode {
         Some("verify") => run_verify(&args, json),
         Some("capture") => run_capture(&args, json),
         Some("verify-trajectory") => run_verify_trajectory(&args, json),
+        Some("decision-stability") => {
+            ExitCode::from(decision_stability_cmd::run(&args, json).clamp(0, 255) as u8)
+        }
         Some("rescore") => ExitCode::from(rescore_cmd::run(&args, json).clamp(0, 255) as u8),
         Some("regrade") => ExitCode::from(regrade_cmd::run(&args, json).clamp(0, 255) as u8),
         Some("compare") => ExitCode::from(compare_cmd::run(&args, json).clamp(0, 255) as u8),
@@ -78,6 +83,9 @@ fn main() -> ExitCode {
         }
         Some("import") => ExitCode::from(import_cmd::run(&args, json).clamp(0, 255) as u8),
         Some("gateway") => ExitCode::from(gateway_cli::run(&args, json).clamp(0, 255) as u8),
+        Some("timing-luck") => {
+            ExitCode::from(timing_luck_cmd::run(&args, json).clamp(0, 255) as u8)
+        }
         Some(sub @ ("select" | "disqualify" | "rediscover" | "uncertainty" | "decay-prior")) => {
             ExitCode::from(analysis_cmd::run(sub, &args, json).clamp(0, 255) as u8)
         }
@@ -623,6 +631,7 @@ fn help() {
     println!("                       --short-borrow-bps <bps>: for capture (reference agents) and verify-trajectory; the rate is bound, so a different one refuses");
     println!("                       --reexecute [--cmd \"<prog>\"|--http <addr>|--image <ref>]: also re-run every captured run with a fresh agent and refuse the first divergent decision");
     println!("                       --diagnostics sizing-response [--vol-lookback N]: also report how gross exposure moved with trailing volatility; never a rank input");
+    println!("  sharpebench decision-stability <traj.json>... [--data <csv>] [--short-borrow-bps <bps>] [--declare-identical-replicates]  rank-neutral pairwise disagreement of replicate runs that shared their history");
     println!(
         "  sharpebench rescore <bundle.json>     recompute a declared submission bundle's quality from its frozen, digest-bound files only"
     );
@@ -651,6 +660,9 @@ fn help() {
     );
     println!(
         "  sharpebench regime <a.csv> <b.csv> <regimes.csv> [--col NAME]  compare two return series within each regime (labels are an input)"
+    );
+    println!(
+        "  sharpebench timing-luck --cadence <m> [--data <csv>] [--periods-per-year N]  how far run's reference rows move when they rebalance every m bars and only the schedule phase moves (rank-neutral)"
     );
     println!(
         "  sharpebench lineage <strategy-evidence.json>                   verify Arena candidate ancestry, sources, and within-family robustness"
