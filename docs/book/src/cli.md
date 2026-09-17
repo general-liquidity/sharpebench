@@ -694,15 +694,29 @@ produces no report and a nonzero exit. A produced report exits 0; read
 ## `lineage`
 
 ```bash
-sharpebench lineage strategy-evidence.json [--json]
+sharpebench lineage strategy-evidence.json [--census] [--dataset prices.csv]... [--json]
 ```
 
-Verifies one SharpeArena generated-strategy ledger and reports its observed
-trial count, candidate ancestry, cited idea sources, and best-versus-median
-robustness within each host-derived strategy family. It recomputes the ledger
-and family bindings and requires validation scores for every selectable
-candidate. The report is diagnostic only and cannot alter eligibility, rank, or
-the trial denominator. See [Candidate lineage diagnostics](candidate-lineage.md).
+Without `--census`, verifies one SharpeArena generated-strategy record (schema 2
+or 3) and reports its observed trial count, candidate ancestry, cited idea
+sources, and best-versus-median robustness within each host-derived strategy
+family. It recomputes the ledger and family bindings and requires validation
+scores for every selectable candidate. A journal with more than one record is
+refused in this mode.
+
+`--census` reads a whole strategy-evidence journal instead. It groups records by
+test split, counts test consultations and cumulative observed trials per split,
+checks every record's declared census and hash chain against the lines before
+it, and verifies the lineage of each completed record. It counts only the one
+journal file it reads.
+
+`--dataset <prices.csv>` may be repeated. A dataset whose content digest matches
+a recorded split lets the verifier resolve that split's first calendar day, date
+the cited sources against it, and check a declared panel bar count. Without a
+matching dataset, a historical split's dating is reported unavailable.
+
+Every report is diagnostic only and cannot alter eligibility, rank, or the
+trial denominator. See [Candidate lineage diagnostics](candidate-lineage.md).
 
 ## `audit-briefing` / `canary` / `score-allocation` / `greeks`
 
