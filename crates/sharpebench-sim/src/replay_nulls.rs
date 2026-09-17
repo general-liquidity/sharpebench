@@ -1203,6 +1203,10 @@ mod tests {
         assert_ne!(first(4, 20, 100), first(5, 20, 100));
         // Swapping start and end is a different window and a different stream.
         assert_ne!(first(4, 20, 100), first(4, 100, 20));
+        // The window bits are mixed in, not merged: a window equal to the
+        // mixing constant is not the same stream as a zero one.
+        assert_ne!(first(3, 0x7131_4E55_0000_0000, 10), first(3, 0, 10));
+        assert_ne!(first(3, 10, 0x2B7E_1516_28AE_D2A6), first(3, 10, 0));
         // The stream is part of the declared-seed contract: a report must
         // replay identically across releases. These values were computed
         // independently in Python from the same SplitMix64 definitions.

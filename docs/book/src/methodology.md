@@ -35,7 +35,10 @@ score. See [Candidate lineage diagnostics](candidate-lineage.md).
 Two replay diagnostics are reported-only as well: an exposure-matched
 random-timing reference, which asks whether an entrant's timing beats random
 placements of its own holding periods, and a lagged replay, which asks whether
-its result survives decisions executed a few bars late. See
+its result survives decisions executed a few bars late. Neither enters the
+composite score or the gates. Each percentile carries its Monte Carlo standard
+error, execution-seed copies of a window share their placements, and a cost
+model whose fills depend on order timing is refused rather than reported. See
 [Replay diagnostics](replay-diagnostics.md).
 
 The composite also *reports* (without gating, to keep the default behaviour
