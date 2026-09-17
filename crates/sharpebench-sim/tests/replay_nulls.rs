@@ -10,8 +10,10 @@ use std::collections::BTreeMap;
 use sharpebench_protocol::{Action, AgentTrajectory, Decision, DecisionStep, Order, RunTrajectory};
 use sharpebench_sim::costs::Rng;
 use sharpebench_sim::replay_nulls::{
-    lagged_replay, lagged_trajectory, timing_null, ReplayNullRefusal, RunTimingNull,
-    TimingNullAggregate, TimingNullConfig, TimingNullReport, TimingNullUnavailable, VALID_WHEN,
+    lagged_replay, lagged_trajectory, timing_null, LagFigures, LagRowFigures, LaggedAggregate,
+    LaggedAggregateUnavailable, LaggedReplayReport, LaggedRun, LaggedRunUnavailable,
+    ReplayNullRefusal, RunTimingNull, TimingNullAggregate, TimingNullConfig, TimingNullReport,
+    TimingNullUnavailable, LAG_END_EFFECT, MAX_TIMING_NULL_DRAWS, VALID_WHEN,
 };
 use sharpebench_sim::{
     replay_run, run_backtest_capture, BuyAndHold, CostModel, CostProfile, Dataset, HoldAgent,
@@ -152,6 +154,27 @@ fn config(draws: usize, seed: u64) -> TimingNullConfig {
 
 const WINDOW: (usize, usize) = (20, 320);
 
+fn aggregate(report: &LaggedReplayReport) -> (&LagFigures, &[LagFigures]) {
+    match &report.aggregate {
+        LaggedAggregate::Available {
+            undelayed, lagged, ..
+        } => (undelayed, lagged),
+        other => panic!("expected lagged figures, got {other:?}"),
+    }
+}
+
+fn rows(run: &LaggedRun) -> (usize, &LagRowFigures, &[LagRowFigures]) {
+    match run {
+        LaggedRun::Available {
+            skipped_leading_bars,
+            undelayed,
+            lagged,
+            ..
+        } => (*skipped_leading_bars, undelayed, lagged),
+        other => panic!("expected rows, got {other:?}"),
+    }
+}
+
 #[test]
 fn the_timing_percentile_is_a_pure_function_of_the_declared_seed_and_draws() {
     let data = iid_panel(1, WINDOW.1, 1, 0.0005, 0.02);
@@ -185,11 +208,13 @@ fn the_timing_percentile_is_a_pure_function_of_the_declared_seed_and_draws() {
         }
         other => panic!("{other:?}"),
     }
-    // The two runs draw from separate streams: identical decisions in both
-    // would otherwise give identical reference distributions.
+    // Runs over one window share the placement stream: two runs with the same
+    // decisions and execution seed get the same reference, and a run over
+    // another window gets another one.
     let twins = trajectory(vec![
         random_timing(&data, WINDOW, 11),
         random_timing(&data, WINDOW, 11),
+        random_timing(&data, (WINDOW.0 + 1, WINDOW.1), 11),
     ]);
     let twins = timing_null(&data, &twins, costs, config(60, 7)).unwrap();
     let references: Vec<_> = twins
@@ -200,7 +225,8 @@ fn the_timing_percentile_is_a_pure_function_of_the_declared_seed_and_draws() {
             other => panic!("{other:?}"),
         })
         .collect();
-    assert_ne!(references[0], references[1]);
+    assert_eq!(references[0], references[1]);
+    assert_ne!(references[0], references[2]);
 }
 
 #[test]
@@ -218,13 +244,16 @@ fn genuine_timing_skill_ranks_above_every_random_placement() {
             reference,
             reference_mean_invested_bars,
             entrant_sharpe,
+            distinct_placements,
             ..
         } = &report.runs[0]
         else {
             panic!("panel {panel}: {report:?}");
         };
         assert_eq!(reference.below, 200, "panel {panel}");
+        assert_eq!(reference.monte_carlo_standard_error, 0.0);
         assert!(*entrant_sharpe > reference.reference_mean_sharpe);
+        assert!(*distinct_placements > 1_000_000, "{distinct_placements}");
         // Without a liquidity cap or execution noise every draw holds for
         // exactly as many bars as the entrant did.
         assert_eq!(*reference_mean_invested_bars, exposure.invested_bars as f64);
@@ -398,10 +427,11 @@ fn a_run_with_no_timing_freedom_is_typed_unavailable() {
     };
     assert_eq!(*entrant_sharpe, replayed);
     assert_eq!(*entrant_mean_sharpe, replayed);
-    assert_eq!(
-        serde_json::to_value(&beside).unwrap()["runs"][1]["status"],
-        "available"
-    );
+    let json = serde_json::to_value(&beside).unwrap();
+    assert_eq!(json["runs"][1]["status"], "available");
+    assert!(json["runs"][1]["distinct_placements"].is_u64());
+    assert!(json["runs"][1]["reference"]["monte_carlo_standard_error"].is_f64());
+    assert!(json["aggregate"]["reference"]["monte_carlo_standard_error"].is_f64());
 }
 
 #[test]
@@ -471,6 +501,18 @@ fn a_diagnostic_that_would_invent_decisions_is_refused() {
     for refusal in [
         ReplayNullRefusal::NoDraws,
         ReplayNullRefusal::EmptyLagSet,
+        ReplayNullRefusal::ExposureNotPreserved {
+            execution_noise: true,
+            liquidity_cap: false,
+        },
+        ReplayNullRefusal::ExposureNotPreserved {
+            execution_noise: false,
+            liquidity_cap: true,
+        },
+        ReplayNullRefusal::ExposureNotPreserved {
+            execution_noise: true,
+            liquidity_cap: true,
+        },
         ReplayNullRefusal::LagTooLong {
             lag: 98,
             run: 0,
@@ -501,13 +543,11 @@ fn a_zero_lag_reproduces_the_undelayed_replay_exactly() {
         serde_json::to_string(&captured).unwrap()
     );
     let report = lagged_replay(&data, &trajectory(vec![run.clone()]), costs, &[0, 2]).unwrap();
-    assert_eq!(report.lagged[0].lag, 0);
-    assert_eq!(
-        report.lagged[0].sharpe_by_run,
-        report.undelayed.sharpe_by_run
-    );
-    assert_eq!(report.lagged[0].mean_return, report.undelayed.mean_return);
-    assert_eq!(report.undelayed.lag, 0);
+    let (_, undelayed, lagged) = rows(&report.runs[0]);
+    assert_eq!(undelayed.lag, 0);
+    assert_eq!(lagged[0], *undelayed);
+    let (undelayed, lagged) = aggregate(&report);
+    assert_eq!(lagged[0], *undelayed);
 
     // A lag shifts the decisions and holds before them; nothing else moves.
     let late = lagged_trajectory(&run, 2);
@@ -551,41 +591,161 @@ fn every_lag_is_compared_on_the_same_bars() {
     let traj = trajectory(runs.clone());
     let report = lagged_replay(&data, &traj, costs, &[5, 1, 5, 2]).unwrap();
     assert_eq!(report.lags, vec![1, 2, 5]);
-    assert_eq!(
-        report.lagged.iter().map(|row| row.lag).collect::<Vec<_>>(),
-        vec![1, 2, 5]
-    );
-    assert_eq!(report.skipped_leading_bars, 6);
-    assert_eq!(report.compared_bars, 2 * 94);
-    assert_eq!(report.runs, 2);
     assert_eq!(report.valid_when, VALID_WHEN);
-
-    // Recompute one row by hand from the lagged replays' bars after the sixth.
-    let bars: Vec<Vec<f64>> = runs
-        .iter()
-        .map(|run| replay_run(&data, &lagged_trajectory(run, 2), costs).returns[6..].to_vec())
-        .collect();
-    let row = &report.lagged[1];
-    let pooled: f64 = bars.iter().flatten().sum::<f64>() / 188.0;
-    assert_eq!(row.mean_return, pooled);
-    for (index, returns) in bars.iter().enumerate() {
+    assert_eq!(report.end_effect, LAG_END_EFFECT);
+    // Momentum buys on the window's first bar, so the lag-5 row first holds
+    // a position after bar 5 and every row is compared from bar 6.
+    for (index, run) in report.runs.iter().enumerate() {
+        let (skipped, undelayed, lagged) = rows(run);
+        assert_eq!(skipped, 6);
         assert_eq!(
-            row.sharpe_by_run[index],
-            sharpebench_core::deflated_sharpe::sharpe_ratio(returns)
+            lagged.iter().map(|row| row.lag).collect::<Vec<_>>(),
+            vec![1, 2, 5]
         );
-        assert_eq!(
-            row.mean_return_by_run[index],
-            returns.iter().sum::<f64>() / returns.len() as f64
-        );
+        // Recompute the rows by hand from the replays' bars after the sixth.
+        for row in std::iter::once(undelayed).chain(lagged) {
+            let returns = replay_run(&data, &lagged_trajectory(&runs[index], row.lag), costs)
+                .returns[6..]
+                .to_vec();
+            assert_eq!(
+                row.sharpe,
+                sharpebench_core::deflated_sharpe::sharpe_ratio(&returns)
+            );
+            assert_eq!(
+                row.mean_return,
+                returns.iter().sum::<f64>() / returns.len() as f64
+            );
+        }
     }
+    let LaggedAggregate::Available {
+        runs: counted,
+        compared_bars,
+        undelayed,
+        lagged,
+    } = &report.aggregate
+    else {
+        panic!("{report:?}");
+    };
+    assert_eq!((*counted, *compared_bars), (2, 2 * 94));
+    let first = rows(&report.runs[0]);
+    let second = rows(&report.runs[1]);
     assert_eq!(
-        row.mean_sharpe,
-        (row.sharpe_by_run[0] + row.sharpe_by_run[1]) / 2.0
+        lagged[1].mean_sharpe,
+        (first.2[1].sharpe + second.2[1].sharpe) / 2.0
     );
-    let undelayed: Vec<f64> = replay_run(&data, &runs[0], costs).returns[6..].to_vec();
+    let pooled: f64 = runs
+        .iter()
+        .flat_map(|run| replay_run(&data, &lagged_trajectory(run, 2), costs).returns[6..].to_vec())
+        .sum::<f64>()
+        / 188.0;
+    assert!((lagged[1].mean_return - pooled).abs() < 1e-15);
+    assert_eq!(undelayed.lag, 0);
+}
+
+/// An entrant whose first trade comes after the longest lag: every row is
+/// compared only on bars after its own opening fill, so a static tilt earns
+/// the same on every row.
+#[test]
+fn the_compared_bars_start_after_every_rows_opening_fill() {
+    let data = iid_panel(2, 220, 8, 0.0006, 0.02);
+    let window = (20, 220);
+    let tilt = |first: usize| {
+        planted(&data, window, move |bar| {
+            (bar >= window.0 + first).then_some(0.8)
+        })
+    };
+    for (first, lags) in [(10, vec![1, 2]), (1, vec![3]), (0, vec![1, 4])] {
+        let report =
+            lagged_replay(&data, &trajectory(vec![tilt(first)]), frictionless(), &lags).unwrap();
+        let (skipped, undelayed, lagged) = rows(&report.runs[0]);
+        let longest = *lags.last().unwrap();
+        assert_eq!(skipped, first + longest + 1, "first trade at {first}");
+        for row in lagged {
+            assert!(
+                (row.mean_return - undelayed.mean_return).abs() < 1e-15
+                    && (row.sharpe - undelayed.sharpe).abs() < 1e-12,
+                "first trade at {first}: {row:?} against {undelayed:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_run_without_comparable_rows_is_typed_unavailable() {
+    let data = iid_panel(1, 120, 3, 0.0, 0.02);
+    let window = (20, 120);
+    let costs = CostModel::default();
+    let hold = planted(&data, window, |_| None);
+    // Opens on the first bar and closes on the next: flat on every compared bar.
+    let brief = planted(&data, window, |bar| {
+        Some(if bar == window.0 { 0.5 } else { 0.0 })
+    });
+    // Trades only on the window's last bar: a lagged row never fills.
+    let last = planted(&data, window, |bar| (bar == window.1 - 1).then_some(0.5));
+    let active = random_timing(&data, window, 41);
+
+    let report = lagged_replay(
+        &data,
+        &trajectory(vec![hold, brief, last, active.clone()]),
+        costs,
+        &[1, 2],
+    )
+    .unwrap();
     assert_eq!(
-        report.undelayed.sharpe_by_run[0],
-        sharpebench_core::deflated_sharpe::sharpe_ratio(&undelayed)
+        report.runs[0],
+        LaggedRun::Unavailable {
+            run: 0,
+            why: LaggedRunUnavailable::NeverFills { lag: 0 },
+        }
+    );
+    assert_eq!(
+        report.runs[1],
+        LaggedRun::Unavailable {
+            run: 1,
+            why: LaggedRunUnavailable::NoSharpe { lag: 0 },
+        }
+    );
+    assert_eq!(
+        report.runs[2],
+        LaggedRun::Unavailable {
+            run: 2,
+            why: LaggedRunUnavailable::NeverFills { lag: 1 },
+        }
+    );
+    let json = serde_json::to_value(&report).unwrap();
+    assert_eq!(
+        json["runs"][1],
+        serde_json::json!({"status": "unavailable", "run": 1, "reason": "no_sharpe", "lag": 0})
+    );
+    // The aggregate is the active run alone.
+    let alone = lagged_replay(&data, &trajectory(vec![active]), costs, &[1, 2]).unwrap();
+    let LaggedAggregate::Available { runs, .. } = &report.aggregate else {
+        panic!("{report:?}");
+    };
+    assert_eq!(*runs, 1);
+    assert_eq!(aggregate(&report), aggregate(&alone));
+
+    // A late first fill can leave too few bars.
+    let late = planted(&data, window, |bar| (bar >= window.1 - 3).then_some(0.5));
+    let report = lagged_replay(&data, &trajectory(vec![late]), costs, &[1]).unwrap();
+    assert_eq!(
+        report.runs[0],
+        LaggedRun::Unavailable {
+            run: 0,
+            why: LaggedRunUnavailable::TooFewComparedBars {
+                skipped_leading_bars: 99,
+            },
+        }
+    );
+    assert_eq!(
+        report.aggregate,
+        LaggedAggregate::Unavailable {
+            reason: LaggedAggregateUnavailable::NoComparableRun,
+        }
+    );
+    assert_eq!(
+        serde_json::to_value(&report).unwrap()["aggregate"],
+        serde_json::json!({"status": "unavailable", "reason": "no_comparable_run"})
     );
 }
 
@@ -603,11 +763,12 @@ fn a_static_tilt_earns_the_same_at_every_lag() {
                 .collect(),
         );
         let report = lagged_replay(&data, &traj, costs, &[1, 2, 5]).unwrap();
+        let (undelayed, lagged) = aggregate(&report);
         let exact = costs.fee_bps == 0.0;
-        for row in &report.lagged {
+        for row in lagged {
             let (return_gap, sharpe_gap) = (
-                (row.mean_return - report.undelayed.mean_return).abs(),
-                (row.mean_sharpe - report.undelayed.mean_sharpe).abs(),
+                (row.mean_return - undelayed.mean_return).abs(),
+                (row.mean_sharpe - undelayed.mean_sharpe).abs(),
             );
             if exact {
                 assert!(return_gap < 1e-15 && sharpe_gap < 1e-12, "{row:?}");
@@ -616,7 +777,7 @@ fn a_static_tilt_earns_the_same_at_every_lag() {
                 assert!(return_gap < 2e-7 && sharpe_gap < 1e-4, "{row:?}");
             }
         }
-        assert!(report.undelayed.mean_return > 0.0);
+        assert!(undelayed.mean_return > 0.0);
     }
 }
 
@@ -634,9 +795,9 @@ fn a_next_bar_informed_agent_loses_its_edge_at_one_bar() {
         });
         let report =
             lagged_replay(&data, &trajectory(vec![informed]), frictionless(), &[1, 2]).unwrap();
-        let undelayed = &report.undelayed;
+        let (undelayed, lagged) = aggregate(&report);
         assert!(undelayed.mean_sharpe > 0.5, "panel {panel}: {undelayed:?}");
-        for row in &report.lagged {
+        for row in lagged {
             assert!(
                 row.mean_sharpe.abs() < 0.2 && row.mean_return.abs() < undelayed.mean_return / 5.0,
                 "panel {panel}: {row:?} against {undelayed:?}"
@@ -752,15 +913,188 @@ fn the_stressed_profiles_declared_delay_is_measured_by_a_lagged_replay() {
     )
     .unwrap();
     assert_eq!(report.lags, vec![2]);
-    assert_eq!(report.skipped_leading_bars, 3);
+    let (skipped, undelayed_row, lagged) = rows(&report.runs[0]);
+    assert!(skipped >= 3);
     let delayed = replay_run(&data, &lagged_trajectory(&run, 2), stressed.costs);
     assert_ne!(delayed.returns, undelayed.returns);
     assert_eq!(
-        report.lagged[0].sharpe_by_run[0],
-        sharpebench_core::deflated_sharpe::sharpe_ratio(&delayed.returns[3..])
+        lagged[0].sharpe,
+        sharpebench_core::deflated_sharpe::sharpe_ratio(&delayed.returns[skipped..])
     );
     assert_eq!(
-        report.undelayed.sharpe_by_run[0],
-        sharpebench_core::deflated_sharpe::sharpe_ratio(&undelayed.returns[3..])
+        undelayed_row.sharpe,
+        sharpebench_core::deflated_sharpe::sharpe_ratio(&undelayed.returns[skipped..])
     );
+}
+
+/// Under execution noise or a liquidity cap a moved holding period does not
+/// keep the entrant's exposure, so the timing reference refuses those cost
+/// models instead of reporting a percentile biased by the mismatch.
+#[test]
+fn the_timing_reference_refuses_costs_that_break_exposure_matching() {
+    let data = iid_panel(1, 120, 5, 0.0, 0.02);
+    let traj = trajectory(vec![random_timing(&data, (20, 120), 7)]);
+    for (profile, execution_noise, liquidity_cap) in [
+        (CostProfile::Realistic, true, false),
+        (CostProfile::WorstCase, false, true),
+    ] {
+        assert_eq!(
+            timing_null(&data, &traj, profile.resolve().costs, config(5, 0)).unwrap_err(),
+            ReplayNullRefusal::ExposureNotPreserved {
+                execution_noise,
+                liquidity_cap,
+            },
+            "{}",
+            profile.name()
+        );
+    }
+    let both = CostModel {
+        max_participation: 0.2,
+        ..CostProfile::Realistic.resolve().costs
+    };
+    assert_eq!(
+        timing_null(&data, &traj, both, config(5, 0)).unwrap_err(),
+        ReplayNullRefusal::ExposureNotPreserved {
+            execution_noise: true,
+            liquidity_cap: true,
+        }
+    );
+    // A borrow carry moves no fill, so it is accepted, and so are the
+    // frictionless and typical profiles; there every draw holds for exactly
+    // as many bars as the entrant.
+    let borrowing = CostModel {
+        short_borrow_bps: 30.0,
+        ..CostModel::default()
+    };
+    for costs in [
+        CostProfile::None.resolve().costs,
+        CostProfile::Typical.resolve().costs,
+        borrowing,
+    ] {
+        let report = timing_null(&data, &traj, costs, config(5, 0)).unwrap();
+        let RunTimingNull::Available {
+            exposure,
+            reference_mean_invested_bars,
+            ..
+        } = &report.runs[0]
+        else {
+            panic!("{report:?}");
+        };
+        assert_eq!(*reference_mean_invested_bars, exposure.invested_bars as f64);
+    }
+    // The lagged replay makes no exposure claim and runs under noise.
+    assert!(lagged_replay(&data, &traj, CostProfile::Realistic.resolve().costs, &[1]).is_ok());
+}
+
+/// `capture` records one run per window and execution seed, and a price-only
+/// entrant's copies of a window carry the same decisions. Draw `i` has to place
+/// every copy's holding periods at the same bars: independent placements per
+/// copy shrink the reference mean's spread by about the number of copies and
+/// push no-skill entrants into the tails.
+#[test]
+fn seed_copies_of_a_window_share_their_placements() {
+    let data = iid_panel(1, 120, 17, 0.0, 0.02);
+    let base = random_timing(&data, (20, 120), 23);
+    let copies: Vec<RunTrajectory> = (0..3)
+        .map(|seed| RunTrajectory {
+            seed,
+            ..base.clone()
+        })
+        .collect();
+    // Without slippage the copies replay identically, so shared placements
+    // give identical references.
+    let report = timing_null(&data, &trajectory(copies), frictionless(), config(40, 5)).unwrap();
+    let references: Vec<_> = report
+        .runs
+        .iter()
+        .map(|run| match run {
+            RunTimingNull::Available { reference, .. } => reference.clone(),
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(references[0], references[1]);
+    assert_eq!(references[0], references[2]);
+}
+
+#[test]
+fn a_no_skill_entrant_with_seed_copies_lands_in_the_tails_at_the_nominal_rate() {
+    const ENTRANTS: u64 = 200;
+    const DRAWS: usize = 50;
+    let percentiles: Vec<f64> = std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..ENTRANTS)
+            .map(|entrant| {
+                scope.spawn(move || {
+                    let data = iid_panel(1, 120, 7_000 + entrant, 0.0, 0.02);
+                    let base = random_timing(&data, (20, 120), 11_000 + entrant);
+                    let copies = (0..4)
+                        .map(|seed| RunTrajectory {
+                            seed,
+                            ..base.clone()
+                        })
+                        .collect();
+                    let report = timing_null(
+                        &data,
+                        &trajectory(copies),
+                        CostModel::default(),
+                        config(DRAWS, entrant),
+                    )
+                    .unwrap();
+                    aggregate_percentile(&report)
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .collect()
+    });
+    // A no-skill entrant's mid-rank over 50 draws is uniform on 0/50..50/50,
+    // so it sits at or beyond 0.05 or 0.95 with probability 6/51: 23.5 of 200
+    // expected, standard deviation 4.6. Independent placements per copy put
+    // several times as many there.
+    let tails = percentiles
+        .iter()
+        .filter(|&&p| p <= 0.05 || p >= 0.95)
+        .count();
+    let mean = percentiles.iter().sum::<f64>() / percentiles.len() as f64;
+    assert!(tails <= 40, "{tails} of 200 in the tails: {percentiles:?}");
+    assert!((0.4..=0.6).contains(&mean), "{mean}: {percentiles:?}");
+}
+
+/// Lags and draw counts at the edge of `usize` are refused, not wrapped.
+#[test]
+fn oversized_lags_and_draw_counts_are_refused() {
+    let data = iid_panel(1, 120, 2, 0.0, 0.02);
+    let traj = trajectory(vec![random_timing(&data, (20, 120), 3)]);
+    let costs = CostModel::default();
+    for lag in [usize::MAX, usize::MAX - 1, usize::MAX - 3, 98] {
+        assert_eq!(
+            lagged_replay(&data, &traj, costs, &[1, lag]).unwrap_err(),
+            ReplayNullRefusal::LagTooLong {
+                lag,
+                run: 0,
+                steps: 100,
+            },
+            "{lag}"
+        );
+    }
+    assert!(lagged_replay(&data, &traj, costs, &[97]).is_ok());
+    let far = lagged_trajectory(&traj.runs[0], usize::MAX);
+    assert!(far.steps.iter().all(|step| step.decision.orders.is_empty()));
+
+    for draws in [MAX_TIMING_NULL_DRAWS + 1, usize::MAX] {
+        assert_eq!(
+            timing_null(&data, &traj, costs, config(draws, 0)).unwrap_err(),
+            ReplayNullRefusal::TooManyDraws {
+                draws,
+                max: MAX_TIMING_NULL_DRAWS,
+            }
+        );
+    }
+    assert_eq!(MAX_TIMING_NULL_DRAWS, 100_000);
+    let refusal = ReplayNullRefusal::TooManyDraws {
+        draws: usize::MAX,
+        max: MAX_TIMING_NULL_DRAWS,
+    };
+    assert!(refusal.to_string().contains("at most 100000 draws"));
 }
