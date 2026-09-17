@@ -192,6 +192,7 @@ fn report(
             "available_usd_nanos": journal.available_usd_nanos().to_string(),
             "overspent_usd_nanos": state.overspent_usd_nanos.to_string(),
             "overspent_calls": state.overspent_calls,
+            "finish_reasons": journal.finish_reasons(),
             "ceiling_breached": journal.ceiling_breached(),
             "partial": state.is_partial(),
         });
@@ -512,6 +513,60 @@ mod tests {
         .expect("a sweep-bound journal under the same routes and budget reports");
         assert_eq!(value["spend"]["sweep_sha256"], sweep.as_str());
         assert_eq!(value["limits"]["max_requests_per_decision"], 32);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A truncated answer the journal recorded is in the operator report,
+    /// counted by class beside the spend.
+    #[test]
+    fn the_report_counts_answers_by_finish_reason() {
+        use sharpebench_harness::gateway_journal::{FinishClass, Settlement};
+        let dir = temp_dir("finish");
+        let routes_path = write(
+            &dir,
+            "routes.json",
+            &manifest("fake.v1", "2026-01-01", KEY_VAR),
+        );
+        let (routes, _) = load_routes(&routes_path, &present).expect("routes");
+        let budget = GatewayBudget {
+            max_usd_nanos: 1000,
+            max_calls: 5,
+        };
+        let path = dir.join("journal.json");
+        let mut journal =
+            GatewayJournal::new(JournalIdentity::new(routes.identity_digest(), budget));
+        let card = routes
+            .resolve("fake.v1")
+            .expect("alias")
+            .rate_card()
+            .clone();
+        let ordinal = journal.reserve("fake.v1", &card, 40);
+        journal.settle_answered(
+            ordinal,
+            Settlement::Priced {
+                input_tokens: 10,
+                output_tokens: 5,
+                usd_nanos: "20".into(),
+            },
+            FinishClass::Length,
+        );
+        journal.save(&path).expect("save");
+        let journal = path.display().to_string();
+        let value = present_report(&args(&[
+            "--routes",
+            &routes_path,
+            "--budget-usd-nanos",
+            "1000",
+            "--max-calls",
+            "5",
+            "--journal",
+            &journal,
+        ]))
+        .expect("the journal reports");
+        assert_eq!(
+            value["spend"]["finish_reasons"],
+            serde_json::json!({"stop": 0, "length": 1, "other": 0, "absent": 0, "unrecorded": 0})
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
