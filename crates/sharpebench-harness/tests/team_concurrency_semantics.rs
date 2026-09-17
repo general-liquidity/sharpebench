@@ -51,7 +51,7 @@ impl Agent for RecordingMember {
                     symbol: s.symbol.clone(),
                     action: Action::Buy,
                     target_weight: self.weight,
-                    confidence: 0.5,
+                    confidence: Some(0.5),
                     rationale: "fixed weight".to_string(),
                 }]
             })
