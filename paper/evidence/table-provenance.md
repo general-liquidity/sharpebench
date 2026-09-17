@@ -6,7 +6,8 @@ it is not evidence that the system lacks the property. This file records the
 source for every mark and distinguishes exhaustively searched blanks from
 abstract-only checks. "abs" = the paper's arXiv abstract page; "body" = full
 text searched; "unchecked" = no claim was found at abstract level and the body
-was not exhaustively searched. Checked 2026-08-23; amended 2026-08-24. This
+was not exhaustively searched. Checked 2026-08-23; amended 2026-08-24 and 2026-09-17. PARTIAL marks a cell
+the paper renders as a circle: the source states a partial form of the property. This
 sheet is bibliographic provenance for the related-work tables only; it is not
 a source for numerical experiment values, which are frozen under
 `paper/evidence/final/`.
@@ -16,9 +17,9 @@ a source for numerical experiment values, which are frozen under
 | Row | Deflates | pass^k | Process gate | Costs | Deterministic | Forward commit |
 |---|---|---|---|---|---|---|
 | FinBen | blank: no deflation claim (abs+body, Table 4 reports raw SR with CI) | blank | blank | blank: unchecked (body not searched for fees) | blank | blank |
-| StockBench | blank: single-window evaluation, no deflation (abs) | blank | blank | blank: body searched for "transaction cost"/"commission"/"fee", zero hits | blank | blank |
+| StockBench | blank: single-window evaluation, no deflation (abs) | PARTIAL (v2 body p5): three seeds reported as an average, not required to pass on every run; checked 2026-09-17 | blank | blank: body searched for "transaction cost"/"commission"/"fee", zero hits | blank | blank |
 | QuantBench | blank: names overfitting as open problem (abs) | blank | blank | MARK: body p6, "Other costs such as commissions and transaction fees are also considered." | blank | blank |
-| InvestorBench | blank: return-based metrics, no deflation claim (abs) | blank | blank | blank: unchecked | blank | blank |
+| InvestorBench | blank: return-based metrics, no deflation claim (abs) | PARTIAL (v1 body p6): median of five epochs; checked 2026-09-17 | blank | blank: full text searched for transaction cost, commission and fee, no positive statement; checked 2026-09-17 | blank | blank |
 | FinRL-Meta | blank: environment library, no agent gating claimed (abs) | blank | blank | blank: unchecked (envs may charge costs; not claimed in abs) | blank | blank |
 | Open FinLLM | blank: knowledge axes only (board) | blank | blank | n/a: no trading axis | blank | blank |
 | tau-bench | blank | MARK: pass^k is its construct (abs) | blank | n/a | blank | blank |
