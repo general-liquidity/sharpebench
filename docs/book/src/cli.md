@@ -512,6 +512,24 @@ capture exits 1 with `capture_transport_failure` and writes nothing, because a
 degraded transport would otherwise put the harness's holds into the trajectory
 as the entrant's decisions.
 
+## `decision-stability`
+
+```bash
+sharpebench decision-stability <traj.json>... [--data <csv>] [--short-borrow-bps <bps>] [--declare-identical-replicates] [--json]
+```
+
+Runs the strict `verify-trajectory` checks on each capture, replays the recorded
+decisions to recover the observation the engine showed at every step, and
+groups replicate runs of one window that share their observations and earlier
+decisions. The headline rate is pairwise disagreement: the share of replicate
+pairs in those groups whose decisions differ. Steps a replicate spends outside
+any group are excluded and counted. Byte-identical runs of one window are
+refused unless `--declare-identical-replicates` says they are separate
+executions. A deterministic agent reports exactly zero; a single replicate is
+reported as unavailable, not as zero. The report carries `rank_input: false`.
+See
+[Decision stability](decision-stability.md).
+
 ## `rescore`
 
 `verify-trajectory` recomputes a score from one artifact the operator points it
