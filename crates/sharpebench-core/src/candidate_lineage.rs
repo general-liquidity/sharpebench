@@ -2714,6 +2714,9 @@ mod tests {
         assert_eq!(covered_bars(vec![(5, 7), (0, 2)]), 4);
         assert_eq!(covered_bars(vec![(0, 4), (4, 8)]), 8);
         assert_eq!(covered_bars(vec![(2, 6), (0, 3)]), 6);
+        // An empty interval covers nothing and hides nothing after it.
+        assert_eq!(covered_bars(vec![(2, 2)]), 0);
+        assert_eq!(covered_bars(vec![(2, 2), (1, 3)]), 2);
     }
 
     #[test]
@@ -2965,6 +2968,16 @@ mod tests {
         inflated["test_split_census"]["overlapping_prior_observed_n_trials"] = json!(5);
         assert_eq!(
             path_after_first(inflated),
+            Err("line 2.test_split_census".to_owned())
+        );
+
+        // Only the earlier trial sum is wrong, and the overlap counts agree, so
+        // nothing but the exact-history check can refuse it.
+        let mut understated = honest.clone();
+        understated["test_split_census"]["prior_observed_n_trials"] = json!(0);
+        understated["test_split_census"]["cumulative_observed_n_trials"] = json!(6);
+        assert_eq!(
+            path_after_first(understated),
             Err("line 2.test_split_census".to_owned())
         );
 
