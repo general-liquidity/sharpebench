@@ -1,8 +1,10 @@
 //! The installed CLI end to end on bound forward intake: a trajectory written by
-//! `sharpebench capture --data` over the revealed dataset is ranked by `arena
-//! score` as `replayed`, and as `re-executed` under `--reexecute`, so the
-//! arena's execution matrix is the one the capture command runs. `sharpebench
-//! audit` carries the forward hindsight-oracle case as its tenth attack.
+//! `sharpebench capture --data` over the revealed dataset, committed under the
+//! digest `arena reference-artifact` prints, is ranked by `arena score` as
+//! `re-executed` on a certifying board, and as `replayed` on a noncertifying
+//! board under `--replay-only`. So the arena's execution matrix is the one the
+//! capture command runs. `sharpebench audit` carries the forward
+//! hindsight-oracle case as its tenth attack.
 
 use std::path::PathBuf;
 use std::process::{Command, Output};
@@ -87,12 +89,20 @@ fn a_cli_capture_is_ranked_replayed_and_reexecuted_by_arena_score() {
     )
     .unwrap();
     let scorer = content_digest(&std::fs::read(env!("CARGO_BIN_EXE_sharpebench")).unwrap());
+    // The commitment names the reference agent as well as the runner.
+    let artifact =
+        String::from_utf8(fx.expect(0, &["arena", "reference-artifact", "momentum", &scorer]))
+            .unwrap()
+            .trim()
+            .to_string();
+    assert_eq!(artifact.len(), 64, "{artifact}");
+    assert_ne!(artifact, scorer);
     let capture: serde_json::Value =
         serde_json::from_slice(&std::fs::read(fx.path("capture.json")).unwrap()).unwrap();
     let entries = serde_json::json!([{
         "agent_id": "alpha",
         "capture": capture,
-        "artifact_digest": scorer,
+        "artifact_digest": artifact,
         "salt": "salt-a",
     }]);
     std::fs::write(fx.path("entries.json"), entries.to_string()).unwrap();
@@ -114,16 +124,16 @@ fn a_cli_capture_is_ranked_replayed_and_reexecuted_by_arena_score() {
                 "config.json",
             ],
         );
-        let commitment = fx.expect(0, &["commit", "alpha", window, &scorer, "salt-a"]);
+        let commitment = fx.expect(0, &["commit", "alpha", window, &artifact, "salt-a"]);
         let name = format!("{window}-commitment.json");
         std::fs::write(fx.path(&name), commitment).unwrap();
         fx.expect(0, &["arena", "commit", "arena", window, &name]);
     }
     fx.expect(0, &["arena", "advance", "arena", "20"]);
 
-    for (window, extra, expected) in [
-        ("replay", None, "replayed"),
-        ("reexecute", Some("--reexecute"), "re-executed"),
+    for (window, extra, expected, certifying) in [
+        ("replay", Some("--replay-only"), "replayed", false),
+        ("reexecute", None, "re-executed", true),
     ] {
         let mut args = vec![
             "--json",
@@ -139,6 +149,7 @@ fn a_cli_capture_is_ranked_replayed_and_reexecuted_by_arena_score() {
         assert_eq!(scored["scored"], 1, "{scored}");
         assert_eq!(scored["refused"], serde_json::json!([]), "{scored}");
         assert_eq!(scored["returns_provenance"]["alpha"], expected, "{scored}");
+        assert_eq!(scored["certifying"], certifying, "{scored}");
         assert!(
             scored.get("supplied_returns_accepted").is_none(),
             "{scored}"

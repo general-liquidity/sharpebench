@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use sharpebench_arena::{
-    execution_matrix, forward_hindsight_oracle_case, verify_arena, Arena, BoardRow,
-    EntrantLauncher, IdentityField, IntakeOptions, LaunchedEntrant, ReplayWindow,
+    execution_matrix, forward_hindsight_oracle_case, reference_entrant_digest, verify_arena, Arena,
+    BoardRow, EntrantLauncher, IdentityField, IntakeOptions, LaunchedEntrant, ReplayWindow,
     ReturnsProvenance, RevealedEntry, SigningKey, WindowStatus, BOARD_FILE, BOARD_MD_FILE,
     FORWARD_HINDSIGHT_ORACLE, SUPPLIED_RETURNS_REFUSAL, WINDOWS_DIR, WINDOW_FILE,
 };
@@ -255,6 +255,8 @@ fn a_valid_capture_is_scored_identically_to_the_direct_replay() {
         Some(capture.contract.as_ref().unwrap().dataset_sha256.as_str())
     );
     assert!(!w.supplied_returns_accepted);
+    // Nothing re-executed the capture, so the board does not certify it.
+    assert_eq!(w.certifying, Some(false));
 
     let board_path = arena.publish(WINDOW, &SigningKey::derive(b"k")).unwrap();
     let board: PublicChain = serde_json::from_slice(&std::fs::read(&board_path).unwrap()).unwrap();
@@ -267,12 +269,14 @@ fn a_valid_capture_is_scored_identically_to_the_direct_replay() {
         header.get("supplied_returns_accepted").is_none(),
         "{header}"
     );
+    assert_eq!(header["certifying"], false, "{header}");
     let row: BoardRow = serde_json::from_str(&board.chain[1].payload).unwrap();
     assert_eq!(row.score, expected[0]);
     assert_eq!(row.returns_provenance, Some(ReturnsProvenance::Replayed));
     let md = std::fs::read_to_string(board_path.with_file_name(BOARD_MD_FILE)).unwrap();
     assert!(md.contains("- `alpha`: replayed"), "{md}");
-    assert!(!md.contains("Noncertifying"), "{md}");
+    assert!(md.contains("**Noncertifying board.**"), "{md}");
+    assert!(md.contains("A row marked `replayed`"), "{md}");
     assert!(verify_arena(&dir, None).unwrap().ok);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -366,7 +370,7 @@ fn a_capture_whose_artifact_differs_from_the_commitment_is_refused() {
         refusal(&arena, "reference"),
         format!(
             "the capture records entrant artifact {}, but the committed artifact digest is {committed_digest}",
-            scorer()
+            reference_entrant_digest("momentum", &scorer())
         )
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -583,12 +587,13 @@ fn reexecution_refuses_hindsight_decisions_and_ranks_the_committed_entrant() {
     let data = market(1);
     let (reference, digest) = image("committed");
     let entrant = format!("sandbox:{reference}");
-    let scorer_digest = scorer();
+    let momentum_digest = reference_entrant_digest("momentum", &scorer());
+    let buy_and_hold_digest = reference_entrant_digest("buy-and-hold", &scorer());
     let entrants = [
         ("oracle", digest.as_str()),
         ("honest", digest.as_str()),
-        ("reference", scorer_digest.as_str()),
-        ("forged-reference", scorer_digest.as_str()),
+        ("reference", momentum_digest.as_str()),
+        ("forged-reference", buy_and_hold_digest.as_str()),
     ];
     let (mut arena, dataset) = committed(&dir, &data, &entrants, None);
 
@@ -601,8 +606,8 @@ fn reexecution_refuses_hindsight_decisions_and_ranks_the_committed_entrant() {
     let entries = [
         reveal("oracle", &digest, oracle),
         reveal("honest", &digest, honest),
-        reveal("reference", &scorer(), reference_capture),
-        reveal("forged-reference", &scorer(), forged_reference),
+        reveal("reference", &momentum_digest, reference_capture),
+        reveal("forged-reference", &buy_and_hold_digest, forged_reference),
     ];
 
     // Replay alone ranks the oracle's capture: its returns do follow from its
@@ -616,6 +621,7 @@ fn reexecution_refuses_hindsight_decisions_and_ranks_the_committed_entrant() {
         provenance(&replay_only, "oracle"),
         Some(ReturnsProvenance::Replayed)
     );
+    assert_eq!(replay_only.window(WINDOW).unwrap().certifying, Some(false));
     let _ = std::fs::remove_dir_all(&replayed_dir);
 
     let mut launcher = FakeLauncher::new(&reference, Script::default());
@@ -634,6 +640,7 @@ fn reexecution_refuses_hindsight_decisions_and_ranks_the_committed_entrant() {
     let ranked: Vec<&str> = scores.iter().map(|s| s.agent_id.as_str()).collect();
     assert_eq!(ranked.len(), 2, "{ranked:?}");
     assert!(ranked.contains(&"honest") && ranked.contains(&"reference"));
+    assert_eq!(arena.window(WINDOW).unwrap().certifying, Some(true));
     assert_eq!(
         provenance(&arena, "honest"),
         Some(ReturnsProvenance::ReExecuted)
@@ -763,12 +770,13 @@ fn a_launcher_that_cannot_run_anything_is_an_error_and_records_nothing() {
     // A reference entrant needs no launcher to be ready.
     let reference_capture = capture("momentum", &data, momentum);
     let dir2 = temp_dir("not-ready-reference");
-    let (mut arena, dataset) = committed(&dir2, &data, &[("alpha", &scorer())], None);
+    let committed_momentum = reference_entrant_digest("momentum", &scorer());
+    let (mut arena, dataset) = committed(&dir2, &data, &[("alpha", &committed_momentum)], None);
     let scores = arena
         .reveal_and_score_with(
             WINDOW,
             &dataset,
-            &[reveal("alpha", &scorer(), reference_capture)],
+            &[reveal("alpha", &committed_momentum, reference_capture)],
             IntakeOptions {
                 allow_supplied_returns: false,
                 reexecute: Some(&mut launcher),
@@ -886,10 +894,12 @@ fn entries_that_cannot_be_ranked_are_refused_and_recorded() {
             &[both, neither, renamed, twice.clone(), twice, supplied],
         )
         .unwrap();
-    assert!(scores.is_empty(), "{scores:?}");
+    // The two identical copies of `twice` rank once.
+    let ranked: Vec<&str> = scores.iter().map(|s| s.agent_id.as_str()).collect();
+    assert_eq!(ranked, ["twice"]);
     let w = arena.window(WINDOW).unwrap();
-    assert_eq!(w.refusals.len(), 6, "{:?}", w.refusals);
-    assert!(w.returns_provenance.is_empty());
+    assert_eq!(w.refusals.len(), 5, "{:?}", w.refusals);
+    assert_eq!(w.returns_provenance.len(), 1);
     assert!(refusal(&arena, "both").contains("both supplied returns and a capture"));
     assert_eq!(
         refusal(&arena, "neither"),
@@ -899,36 +909,24 @@ fn entries_that_cannot_be_ranked_are_refused_and_recorded() {
         refusal(&arena, "renamed"),
         "the entry names agent `renamed` but its supplied submission names `someone-else`"
     );
-    assert!(w.refusals.iter().filter(|r| r.agent_id == "twice").all(
-        |r| r.reason == "revealed 2 times in one scoring call; one commitment admits one entry"
-    ));
+    assert_eq!(
+        refusal(&arena, "twice"),
+        "an identical copy of this agent's admitted entry; ranked once"
+    );
     assert_eq!(refusal(&arena, "supplied"), SUPPLIED_RETURNS_REFUSAL);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
-fn an_entry_without_an_agent_or_an_unreplayable_dataset_records_nothing() {
+fn an_unreplayable_dataset_records_nothing() {
     let data = market(1);
     let (reference, digest) = image("committed");
     let entrant = format!("sandbox:{reference}");
 
-    let dir = temp_dir("no-agent");
+    let dir = temp_dir("unreplayable");
     let (mut arena, dataset) = committed(&dir, &data, &[("alpha", &digest)], None);
     let window_file = dir.join(WINDOWS_DIR).join(WINDOW).join(WINDOW_FILE);
     let before = std::fs::read(&window_file).unwrap();
-    let anonymous = RevealedEntry {
-        agent_id: None,
-        ..reveal("alpha", &digest, capture(&entrant, &data, momentum))
-    };
-    let error = arena
-        .reveal_and_score(WINDOW, &dataset, &[anonymous])
-        .unwrap_err();
-    assert_eq!(
-        error,
-        "entry 0 names no agent: an entry that reveals a capture must set `agent_id`"
-    );
-    assert_eq!(std::fs::read(&window_file).unwrap(), before);
-
     // A dataset the simulator cannot parse cannot be replayed at all.
     std::fs::write(&dataset, "sym,close\nA,1.0\nA,1.01\n").unwrap();
     let error = arena
@@ -959,7 +957,7 @@ type WindowEdit = (
 fn verify_cross_checks_the_intake_identity() {
     let data = market(1);
     let (reference, digest) = image("committed");
-    let edits: [WindowEdit; 3] = [
+    let edits: [WindowEdit; 5] = [
         (IdentityField::ReplayDatasetSha256, |w| {
             w.insert(
                 "replay_dataset_sha256".into(),
@@ -971,6 +969,12 @@ fn verify_cross_checks_the_intake_identity() {
         }),
         (IdentityField::SuppliedReturnsAccepted, |w| {
             w.insert("supplied_returns_accepted".into(), serde_json::json!(true));
+        }),
+        (IdentityField::Certifying, |w| {
+            w.insert("certifying".into(), serde_json::json!(true));
+        }),
+        (IdentityField::Certifying, |w| {
+            w.remove("certifying");
         }),
     ];
     for (index, (field, edit)) in edits.into_iter().enumerate() {
@@ -1022,14 +1026,28 @@ fn the_forward_hindsight_oracle_case_is_refused() {
         "{}",
         case.detail
     );
-    // And it states the boundary replay alone leaves open.
+    // Under the default intake the capture is refused, and the board certifies.
     assert!(
         case.detail
-            .contains("its capture naming the committed image is ranked as replayed by replay alone and refused (re-execution diverged"),
+            .contains("its capture naming the committed image is refused (re-execution diverged"),
+        "{}",
+        case.detail
+    );
+    assert!(
+        case.detail
+            .contains("under the default re-executing intake, whose board certifies: true"),
+        "{}",
+        case.detail
+    );
+    // Replay alone ranks it, and that board says it certifies nothing.
+    assert!(
+        case.detail.contains(
+            "the replay-only intake has it ranked as replayed on a board that certifies: false"
+        ),
         "{}",
         case.detail
     );
     assert!(case
         .detail
-        .ends_with("the committed image's own capture is ranked as re-executed"));
+        .ends_with("the committed image's own capture is ranked as re-executed; oracle on a certifying board: false"));
 }

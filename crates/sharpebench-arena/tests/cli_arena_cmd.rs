@@ -7,7 +7,7 @@ mod arena_cmd;
 
 use std::path::PathBuf;
 
-use sharpebench_arena::{ReplayWindow, ReturnsProvenance, RevealedEntry};
+use sharpebench_arena::{reference_entrant_digest, ReplayWindow, ReturnsProvenance, RevealedEntry};
 use sharpebench_attest::{content_digest, make_commitment};
 use sharpebench_core::{AgentSubmission, Run, ScoreConfig};
 use sharpebench_sim::{Dataset, Momentum};
@@ -34,13 +34,19 @@ fn write_dataset(path: &std::path::Path) {
     std::fs::write(path, out).unwrap();
 }
 
-/// Momentum run as the image `digest` over the window's execution matrix,
-/// captured by the window's frozen scorer.
-fn capture_entry(dataset: &std::path::Path, digest: &str, scorer: &str) -> RevealedEntry {
+/// Momentum over the window's execution matrix, captured by the window's
+/// frozen scorer and naming `entrant` (the reference name `momentum`, or a
+/// `sandbox:` image), revealed with the committed `digest`.
+fn capture_entry(
+    dataset: &std::path::Path,
+    entrant: &str,
+    digest: &str,
+    scorer: &str,
+) -> RevealedEntry {
     let bytes = std::fs::read(dataset).unwrap();
     let replay = ReplayWindow::parse(&bytes, &ScoreConfig::default()).unwrap();
     let (_, mut capture) = sharpebench_harness::run_agent_capture(
-        &format!("sandbox:cli/alpha@sha256:{digest}"),
+        entrant,
         &replay.data,
         &replay.windows,
         &replay.seeds,
@@ -75,34 +81,41 @@ fn cli_drives_the_full_lifecycle_and_verify_walks_the_chain() {
 
     assert_eq!(arena_cmd::run(&argv(&["init", dir]), true), 0);
     let scorer = content_digest(b"cli-scorer-artifact");
-    assert_eq!(
-        arena_cmd::run(
-            &argv(&[
-                "open",
-                dir,
-                "w1",
-                "10",
-                "20",
-                "--scorer-artifact-sha256",
-                &scorer,
-            ]),
-            true,
-        ),
-        0
-    );
+    for window in ["w1", "w2"] {
+        assert_eq!(
+            arena_cmd::run(
+                &argv(&[
+                    "open",
+                    dir,
+                    window,
+                    "10",
+                    "20",
+                    "--scorer-artifact-sha256",
+                    &scorer,
+                ]),
+                true,
+            ),
+            0
+        );
+    }
 
-    // Commitment file, as `sharpebench commit` would emit it.
-    let digest = content_digest(b"cli-artifact");
-    let commitment = make_commitment("alpha", "w1", &digest, "salt-a");
-    let commit_path = root.join("commitment.json");
-    std::fs::write(&commit_path, serde_json::to_string(&commitment).unwrap()).unwrap();
-    assert_eq!(
-        arena_cmd::run(
-            &argv(&["commit", dir, "w1", commit_path.to_str().unwrap()]),
-            true
-        ),
-        0
-    );
+    // w1: alpha commits to the momentum reference agent compiled into the
+    // scorer; w2: alpha commits to an image.
+    let digest = reference_entrant_digest("momentum", &scorer);
+    let image_digest = content_digest(b"cli-artifact");
+    for (window, artifact) in [("w1", &digest), ("w2", &image_digest)] {
+        // Commitment file, as `sharpebench commit` would emit it.
+        let commitment = make_commitment("alpha", window, artifact, "salt-a");
+        let commit_path = root.join(format!("{window}-commitment.json"));
+        std::fs::write(&commit_path, serde_json::to_string(&commitment).unwrap()).unwrap();
+        assert_eq!(
+            arena_cmd::run(
+                &argv(&["commit", dir, window, commit_path.to_str().unwrap()]),
+                true
+            ),
+            0
+        );
+    }
 
     assert_eq!(arena_cmd::run(&argv(&["advance", dir, "20"]), true), 0);
 
@@ -120,9 +133,10 @@ fn cli_drives_the_full_lifecycle_and_verify_walks_the_chain() {
 
     let dataset_path = root.join("dataset.csv");
     write_dataset(&dataset_path);
-    let entries = vec![capture_entry(&dataset_path, &digest, &scorer)];
+    let entries = vec![capture_entry(&dataset_path, "momentum", &digest, &scorer)];
     let entries_path = root.join("entries.json");
     std::fs::write(&entries_path, serde_json::to_string(&entries).unwrap()).unwrap();
+    // The default intake re-executes: the reference agent runs in process.
     assert_eq!(
         arena_cmd::run(
             &argv(&[
@@ -139,21 +153,68 @@ fn cli_drives_the_full_lifecycle_and_verify_walks_the_chain() {
     let window = window_json(dir, "w1");
     assert_eq!(window["scores"].as_array().unwrap().len(), 1, "{window}");
     assert_eq!(
-        window["returns_provenance"]["alpha"], "replayed",
+        window["returns_provenance"]["alpha"], "re-executed",
         "{window}"
     );
+    assert_eq!(window["certifying"], true, "{window}");
     assert!(
         window.get("supplied_returns_accepted").is_none(),
         "{window}"
     );
 
+    // --replay-only ranks the image capture without re-executing it, on a
+    // board that does not certify it.
+    let image_entries = vec![capture_entry(
+        &dataset_path,
+        &format!("sandbox:cli/alpha@sha256:{image_digest}"),
+        &image_digest,
+        &scorer,
+    )];
+    let image_entries_path = root.join("image-entries.json");
+    std::fs::write(
+        &image_entries_path,
+        serde_json::to_string(&image_entries).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        arena_cmd::run(
+            &argv(&[
+                "score",
+                dir,
+                "w2",
+                dataset_path.to_str().unwrap(),
+                image_entries_path.to_str().unwrap(),
+                "--replay-only",
+            ]),
+            true
+        ),
+        0
+    );
+    let window = window_json(dir, "w2");
+    assert_eq!(
+        window["returns_provenance"]["alpha"], "replayed",
+        "{window}"
+    );
+    assert_eq!(window["certifying"], false, "{window}");
+
     // Key via the file: convention.
     let key_path = root.join("host.key");
     std::fs::write(&key_path, "cli-test-signing-secret\n").unwrap();
     let key_spec = format!("file:{}", key_path.display());
-    assert_eq!(
-        arena_cmd::run(&argv(&["publish", dir, "w1", &key_spec]), true),
-        0
+    for window in ["w1", "w2"] {
+        assert_eq!(
+            arena_cmd::run(&argv(&["publish", dir, window, &key_spec]), true),
+            0
+        );
+    }
+    let md = |window: &str| {
+        std::fs::read_to_string(arena_dir.join("windows").join(window).join("board.md")).unwrap()
+    };
+    assert!(!md("w1").contains("Noncertifying"), "{}", md("w1"));
+    assert!(
+        md("w2").contains("**Noncertifying board.**"),
+        "{}",
+        md("w2")
     );
 
     // Verify with the embedded key, and pinned to the host's public key.
@@ -178,13 +239,36 @@ fn cli_drives_the_full_lifecycle_and_verify_walks_the_chain() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// `arena reference-artifact` prints the name-bound digest a reference
+/// entrant commits to, and refuses a name that is not a reference agent.
+#[test]
+fn reference_artifact_prints_the_name_bound_digest() {
+    let scorer = content_digest(b"cli-scorer-artifact");
+    assert_eq!(
+        arena_cmd::run(&argv(&["reference-artifact", "momentum", &scorer]), true),
+        0
+    );
+    assert_eq!(
+        arena_cmd::run(&argv(&["reference-artifact", "oracle", &scorer]), true),
+        1
+    );
+    assert_eq!(
+        arena_cmd::run(&argv(&["reference-artifact", "momentum"]), true),
+        2
+    );
+    assert_ne!(
+        reference_entrant_digest("momentum", &scorer),
+        reference_entrant_digest("buy-and-hold", &scorer)
+    );
+}
+
 #[test]
 fn usage_errors_exit_2() {
     assert_eq!(arena_cmd::run(&argv(&[]), false), 2);
     assert_eq!(arena_cmd::run(&argv(&["nonsense"]), false), 2);
     assert_eq!(arena_cmd::run(&argv(&["open", "somewhere"]), false), 2);
     // An intake flag in an operand position is a usage error, never a path.
-    for flag in ["--reexecute", "--allow-supplied-returns"] {
+    for flag in ["--replay-only", "--allow-supplied-returns"] {
         assert_eq!(
             arena_cmd::run(&argv(&["score", "dir", "w1", "data.csv", flag]), false),
             2,
@@ -294,9 +378,12 @@ fn supplied_returns_are_ranked_only_under_the_explicit_flag() {
     let md = std::fs::read_to_string(arena_dir.join("windows").join("flagged").join("board.md"))
         .unwrap();
     assert!(md.contains("**Noncertifying board.**"), "{md}");
+    // `plain` ranked nothing, so its board certifies vacuously.
     let plain_md =
         std::fs::read_to_string(arena_dir.join("windows").join("plain").join("board.md")).unwrap();
     assert!(!plain_md.contains("Noncertifying"), "{plain_md}");
+    assert_eq!(window_json(dir, "plain")["certifying"], true);
+    assert_eq!(flagged["certifying"], false, "{flagged}");
     assert_eq!(arena_cmd::run(&argv(&["verify", dir]), true), 0);
     let _ = std::fs::remove_dir_all(&root);
 }

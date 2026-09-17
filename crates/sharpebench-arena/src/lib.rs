@@ -32,8 +32,10 @@ pub mod sandbox;
 
 pub use audit::{forward_hindsight_oracle_case, FORWARD_HINDSIGHT_ORACLE};
 pub use intake::{
-    admit_entries, execution_matrix, Admission, CapturedEntrant, DockerLauncher, EntrantLauncher,
-    IntakeOptions, LaunchedEntrant, ReplayWindow, ReturnsProvenance, SUPPLIED_RETURNS_REFUSAL,
+    admit_entries, board_certifies, execution_matrix, is_reference_entrant,
+    reference_entrant_digest, unnamed_entry, Admission, CapturedEntrant, DockerLauncher,
+    EntrantLauncher, IntakeOptions, LaunchedEntrant, ReplayWindow, ReturnsProvenance,
+    SUPPLIED_RETURNS_REFUSAL, UNNAMED_ENTRY_REFUSAL,
 };
 pub use sandbox::{
     check_sandbox_readiness, classify_container_exit, docker_available, probe_egress,
@@ -190,6 +192,12 @@ pub struct WindowState {
     /// noncertifying. Omitted when false.
     #[serde(default, skip_serializing_if = "is_false")]
     pub supplied_returns_accepted: bool,
+    /// Whether the board certifies its rows ([`board_certifies`]): true only
+    /// when supplied returns were refused and every ranked row was
+    /// re-executed. Recorded at scoring; absent before, and absent reads as not
+    /// certified.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub certifying: Option<bool>,
     #[serde(default)]
     pub scores: Vec<CompositeScore>,
     /// How each ranked entry's returns were obtained, by agent id. Rank-neutral;
@@ -279,6 +287,11 @@ pub struct WindowHeader {
     /// noncertifying. Omitted when false.
     #[serde(default, skip_serializing_if = "is_false")]
     pub supplied_returns_accepted: bool,
+    /// The window's `certifying`. A reader treats a board as certifying its
+    /// rows only when this is `true`; a header without it, as every header
+    /// signed before the field existed, certifies nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub certifying: Option<bool>,
     pub refusals: Vec<Refusal>,
     /// Final signature of the previously published window's board, or
     /// [`GENESIS_ANCHOR`] for the arena's first published window.
@@ -360,6 +373,7 @@ pub enum IdentityField {
     DatasetHash,
     ReplayDatasetSha256,
     SuppliedReturnsAccepted,
+    Certifying,
 }
 
 impl IdentityField {
@@ -377,6 +391,7 @@ impl IdentityField {
             Self::DatasetHash => "dataset_hash",
             Self::ReplayDatasetSha256 => "replay_dataset_sha256",
             Self::SuppliedReturnsAccepted => "supplied_returns_accepted",
+            Self::Certifying => "certifying",
         }
     }
 }
@@ -469,6 +484,11 @@ fn identity_mismatches(
             IdentityField::SuppliedReturnsAccepted,
             Some(header.supplied_returns_accepted.to_string()),
             Some(window.supplied_returns_accepted.to_string()),
+        ),
+        (
+            IdentityField::Certifying,
+            header.certifying.map(|c| c.to_string()),
+            window.certifying.map(|c| c.to_string()),
         ),
     ];
     Ok(pairs
@@ -868,6 +888,7 @@ impl Arena {
                 dataset_hash: None,
                 replay_dataset_sha256: None,
                 supplied_returns_accepted: false,
+                certifying: None,
                 scores: Vec::new(),
                 returns_provenance: BTreeMap::new(),
             },
@@ -1045,9 +1066,8 @@ impl Arena {
                 w.data_reveal_epoch, self.state.current_epoch
             ));
         }
-        // An entry naming no agent, or produced under another fault plan than
-        // the window's, is refused before anything is recorded, as a config
-        // mismatch is.
+        // An entry produced under another fault plan than the window's is
+        // refused before anything is recorded, as a config mismatch is.
         intake::check_entries(w, entries)?;
         let dataset_bytes = std::fs::read(dataset_path)
             .map_err(|e| format!("cannot read dataset {}: {e}", dataset_path.display()))?;
@@ -1065,6 +1085,7 @@ impl Arena {
         w.dataset_hash = Some(admission.dataset_hash);
         w.replay_dataset_sha256 = admission.replay_dataset_sha256;
         w.supplied_returns_accepted = allow_supplied_returns;
+        w.certifying = Some(admission.certifying);
         w.refusals.extend(admission.refusals);
         w.scores = scores.clone();
         w.returns_provenance = admission.returns_provenance;
@@ -1119,6 +1140,7 @@ impl Arena {
             fault_plan_sha256: w.fault_plan_sha256.clone(),
             replay_dataset_sha256: w.replay_dataset_sha256.clone(),
             supplied_returns_accepted: w.supplied_returns_accepted,
+            certifying: w.certifying,
             refusals: w.refusals.clone(),
             prev_final_signature,
         };
@@ -1161,8 +1183,21 @@ impl Arena {
 fn render_markdown(header: &WindowHeader, scores: &[CompositeScore], rows: &[BoardRow]) -> String {
     let mut out = String::new();
     out.push_str(&format!("# Arena window `{}`\n\n", header.window_id));
-    if header.supplied_returns_accepted {
-        out.push_str("**Noncertifying board.** This window was scored with supplied returns allowed: a row marked `supplied` ranks returns its entrant delivered after the data reveal, which nothing ties to the committed artifact.\n\n");
+    if header.certifying != Some(true) {
+        out.push_str("**Noncertifying board.** Nothing on this board certifies that its rows were measured without hindsight:\n\n");
+        if header.supplied_returns_accepted {
+            out.push_str("- The window was scored with supplied returns allowed. A row marked `supplied` ranks returns its entrant delivered after the data reveal, which nothing ties to the committed artifact.\n");
+        }
+        if rows
+            .iter()
+            .any(|row| row.returns_provenance == Some(ReturnsProvenance::Replayed))
+        {
+            out.push_str("- A row marked `replayed` ranks recorded decisions that were not re-executed, so nothing shows the committed artifact made them without the revealed data.\n");
+        }
+        if header.certifying.is_none() {
+            out.push_str("- The signed header does not state that the board certifies its rows.\n");
+        }
+        out.push('\n');
     }
     out.push_str(&format!(
         "- commit deadline: epoch {}\n- data reveal: epoch {}\n- dataset SHA-256: `{}`\n- scorer artifact SHA-256: `{}`\n- previous board signature: `{}`\n\n",

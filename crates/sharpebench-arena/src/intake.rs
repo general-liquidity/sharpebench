@@ -31,7 +31,13 @@
 //! to be inside the artifact, fixed before the deadline. That rests on the
 //! operator's custody of the data, which no file here can prove.
 //!
-//! Every refusal is recorded against the entry's agent, like a failed reveal.
+//! A board certifies only when every ranked row was re-executed and supplied
+//! returns were not accepted ([`board_certifies`]). Intake computes that from
+//! the rows ([`Admission::certifying`]); no caller sets it. A replayed or
+//! supplied row therefore puts its window on a noncertifying board.
+//!
+//! Every refusal is recorded, like a failed reveal: against the entry's agent,
+//! or against `(unnamed entry <index>)` for an entry that names none.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -88,6 +94,23 @@ impl ReturnsProvenance {
 /// `sharpebench capture <name>` trajectory carries.
 const REFERENCE_ENTRANTS: [&str; 2] = ["buy-and-hold", "momentum"];
 
+/// The artifact digest an entrant commits to for the reference agent `name`
+/// compiled into the runner `runner_sha256`. It binds the name as well as the
+/// runner, so one commitment admits one reference agent: an entrant cannot
+/// commit to the runner and choose between the agents after the reveal. The
+/// pre-image is `sharpebench-arena/reference-entrant/v1`, a newline, `name`, a
+/// newline and `runner_sha256`.
+pub fn reference_entrant_digest(name: &str, runner_sha256: &str) -> String {
+    content_digest(
+        format!("sharpebench-arena/reference-entrant/v1\n{name}\n{runner_sha256}").as_bytes(),
+    )
+}
+
+/// Whether `name` is a reference agent compiled into the scorer.
+pub fn is_reference_entrant(name: &str) -> bool {
+    REFERENCE_ENTRANTS.contains(&name)
+}
+
 /// The entrant artifact a capture says it recorded, read from the capture's
 /// `agent_id` as the capture commands write it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -97,15 +120,21 @@ pub enum CapturedEntrant {
     /// characters after `@sha256:`.
     Image { reference: String, digest: String },
     /// `buy-and-hold` or `momentum`, as `sharpebench capture <name>` names a
-    /// reference agent. The agent is compiled into the runner, so the artifact
-    /// is the runner binary the capture's contract records.
-    Reference { name: String, runner_sha256: String },
+    /// reference agent compiled into the runner the capture's contract records.
+    /// The artifact is [`reference_entrant_digest`] of the name and that runner.
+    Reference {
+        name: String,
+        runner_sha256: String,
+        artifact_sha256: String,
+    },
 }
 
 impl CapturedEntrant {
     /// Read the entrant a capture names. A `cmd:` or `http:` capture, or any
     /// other name, identifies no artifact and is refused: a command line or an
-    /// address does not identify the bytes behind it.
+    /// address does not identify the bytes behind it. An image reference must
+    /// be one the sandbox would launch, so an option-like repository such as
+    /// `--privileged@sha256:<digest>` is refused here and never ranked.
     pub fn of(capture: &AgentTrajectory) -> Result<Self, String> {
         let id = capture.agent_id.as_str();
         if let Some(reference) = id.strip_prefix("sandbox:") {
@@ -120,20 +149,24 @@ impl CapturedEntrant {
                         "capture entrant `{id}` is not a digest-pinned image (sandbox:<repository>@sha256:<64 lowercase hex>)"
                     )
                 })?;
+            crate::resolve_launch(true, reference, &crate::SandboxOptions::default()).map_err(
+                |error| format!("capture entrant `{id}` is not a launchable image: {error}"),
+            )?;
             return Ok(Self::Image {
                 reference: reference.to_string(),
                 digest,
             });
         }
-        if REFERENCE_ENTRANTS.contains(&id) {
+        if is_reference_entrant(id) {
             let runner_sha256 = capture
                 .contract
                 .as_ref()
                 .and_then(|contract| contract.runner_artifact_sha256.clone())
                 .ok_or_else(|| {
-                    format!("reference capture `{id}` records no runner artifact, and the runner is the artifact it names")
+                    format!("reference capture `{id}` records no runner artifact, and the runner is part of the artifact it names")
                 })?;
             return Ok(Self::Reference {
+                artifact_sha256: reference_entrant_digest(id, &runner_sha256),
                 name: id.to_string(),
                 runner_sha256,
             });
@@ -147,7 +180,9 @@ impl CapturedEntrant {
     pub fn artifact_sha256(&self) -> &str {
         match self {
             Self::Image { digest, .. } => digest,
-            Self::Reference { runner_sha256, .. } => runner_sha256,
+            Self::Reference {
+                artifact_sha256, ..
+            } => artifact_sha256,
         }
     }
 }
@@ -257,7 +292,7 @@ impl EntrantLauncher for DockerLauncher {
         if crate::docker_available() {
             Ok(())
         } else {
-            Err("re-executing an image entrant needs a running Docker daemon".to_string())
+            Err("re-executing an image entrant needs a running Docker daemon; score with --replay-only to publish a noncertifying board without re-execution".to_string())
         }
     }
 
@@ -330,7 +365,8 @@ impl Drop for WatchedRun {
 }
 
 /// How [`crate::Arena::reveal_and_score_with`] admits entries. The default
-/// ranks only replayed captures and re-executes nothing.
+/// ranks replayed captures and re-executes nothing, so a window scored with it
+/// is noncertifying whenever it ranks a row ([`board_certifies`]).
 #[derive(Default)]
 pub struct IntakeOptions<'a> {
     /// Also rank returns an entrant supplied after the reveal, as given. The
@@ -352,45 +388,71 @@ pub struct Admission {
     pub dataset_hash: String,
     /// The parsed dataset's identity, when an entry carried a capture.
     pub replay_dataset_sha256: Option<String>,
+    /// [`board_certifies`] for this admission, computed from its rows.
+    pub certifying: bool,
+}
+
+/// Whether a board certifies its rows: supplied returns were not accepted, and
+/// every ranked row was re-executed. A replayed row can hold hindsight
+/// decisions, and a supplied row holds whatever the entrant sent, so either one
+/// makes the board noncertifying. An empty field meets the rule vacuously.
+pub fn board_certifies(
+    returns_provenance: &BTreeMap<String, ReturnsProvenance>,
+    supplied_returns_accepted: bool,
+) -> bool {
+    !supplied_returns_accepted
+        && returns_provenance
+            .values()
+            .all(|provenance| *provenance == ReturnsProvenance::ReExecuted)
 }
 
 /// Refusal reason for supplied returns under the default intake.
 pub const SUPPLIED_RETURNS_REFUSAL: &str = "supplied returns are not ranked: returns revealed after the data can be computed with hindsight and are not bound to the committed artifact; reveal a strict capture, or score with the noncertifying supplied-returns intake (arena score --allow-supplied-returns)";
 
-/// The committed agent of every entry, and the window's fault plan on every
-/// entry. Either failure is an error for the whole call, before anything is
-/// recorded: an entry that names no agent cannot even be refused.
-pub(crate) fn check_entries<'e>(
-    window: &WindowState,
-    entries: &'e [RevealedEntry],
-) -> Result<Vec<&'e str>, String> {
-    let mut agents = Vec::with_capacity(entries.len());
+/// Refusal reason for an entry that names no agent.
+pub const UNNAMED_ENTRY_REFUSAL: &str =
+    "the entry names no agent: an entry that reveals a capture must set `agent_id`";
+
+/// The name a refusal records for entry `index` when the entry names no agent.
+pub fn unnamed_entry(index: usize) -> String {
+    format!("(unnamed entry {index})")
+}
+
+/// The window's fault plan on every entry. A mismatch is an error for the
+/// whole call, before anything is recorded, as a config mismatch is.
+pub(crate) fn check_entries(window: &WindowState, entries: &[RevealedEntry]) -> Result<(), String> {
     for (index, entry) in entries.iter().enumerate() {
-        let agent_id = entry.committed_agent_id().ok_or_else(|| {
-            format!(
-                "entry {index} names no agent: an entry that reveals a capture must set `agent_id`"
-            )
-        })?;
         // A submission produced under another fault plan, or under none when
         // the window has one (or the reverse), is not the same experiment.
         if entry.fault_plan_sha256 != window.fault_plan_sha256 {
+            let name = entry
+                .committed_agent_id()
+                .map_or_else(|| unnamed_entry(index), str::to_string);
             return Err(format!(
-                "entry `{agent_id}` was produced under {}, but window `{}` is scored under {}",
+                "entry `{name}` was produced under {}, but window `{}` is scored under {}",
                 describe_fault_plan(entry.fault_plan_sha256.as_deref()),
                 window.id,
                 describe_fault_plan(window.fault_plan_sha256.as_deref())
             ));
         }
-        agents.push(agent_id);
     }
-    Ok(agents)
+    Ok(())
 }
+
+type Admissible = (AgentSubmission, ReturnsProvenance);
 
 /// Admit revealed entries into a window's field without touching the disk.
 /// Each entry's commitment is revealed through the attest registry at
 /// `current_epoch` (which enforces the data-reveal lock), then its returns are
 /// taken by the rules in the module docs. An `Err` records nothing; a refused
 /// entry is an [`Admission::refusals`] row.
+///
+/// Every entry is judged on its own first, so an entry that does not open its
+/// agent's commitment is refused alone and cannot take an honest reveal down
+/// with it. One commitment then admits one entry: admissible copies that agree
+/// are ranked once, and admissible entries for one agent that differ are all
+/// refused, because the commitment does not say which one its entrant stands
+/// behind.
 pub fn admit_entries(
     window: &WindowState,
     current_epoch: u64,
@@ -398,7 +460,7 @@ pub fn admit_entries(
     entries: &[RevealedEntry],
     options: IntakeOptions<'_>,
 ) -> Result<Admission, String> {
-    let agents = check_entries(window, entries)?;
+    check_entries(window, entries)?;
     let replay = if entries.iter().any(|entry| entry.capture.is_some()) {
         Some(ReplayWindow::parse(dataset_bytes, &window.score_config)?)
     } else {
@@ -408,78 +470,99 @@ pub fn admit_entries(
         allow_supplied_returns,
         reexecute: mut launcher,
     } = options;
-    if let Some(launcher) = launcher.as_deref_mut() {
-        let names_image = entries
-            .iter()
-            .filter_map(|entry| entry.capture.as_ref())
-            .any(|capture| {
-                matches!(
-                    CapturedEntrant::of(capture),
-                    Ok(CapturedEntrant::Image { .. })
-                )
-            });
-        if names_image {
-            launcher.ready()?;
+    // A faulted window refuses every capture, so it re-executes nothing.
+    if window.fault_plan_sha256.is_none() {
+        if let Some(launcher) = launcher.as_deref_mut() {
+            let names_image = entries
+                .iter()
+                .filter_map(|entry| entry.capture.as_ref())
+                .any(|capture| {
+                    matches!(
+                        CapturedEntrant::of(capture),
+                        Ok(CapturedEntrant::Image { .. })
+                    )
+                });
+            if names_image {
+                launcher.ready()?;
+            }
         }
     }
-    let mut reveals: BTreeMap<&str, usize> = BTreeMap::new();
-    for agent_id in &agents {
-        *reveals.entry(agent_id).or_default() += 1;
-    }
     let mut registry = registry_for(window, window.data_reveal_epoch, current_epoch)?;
+    let mut outcomes: Vec<(String, Result<Admissible, String>)> = Vec::with_capacity(entries.len());
+    for (index, entry) in entries.iter().enumerate() {
+        let outcome = match entry.committed_agent_id() {
+            Some(agent_id) => (
+                agent_id.to_string(),
+                admit_one(
+                    window,
+                    &mut registry,
+                    replay.as_ref(),
+                    entry,
+                    agent_id,
+                    allow_supplied_returns,
+                    launcher
+                        .as_mut()
+                        .map(|launcher| &mut **launcher as &mut dyn EntrantLauncher),
+                ),
+            ),
+            None => (unnamed_entry(index), Err(UNNAMED_ENTRY_REFUSAL.to_string())),
+        };
+        outcomes.push(outcome);
+    }
+
+    let mut admissible: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (agent_id, outcome) in &outcomes {
+        if let Ok(entry) = outcome {
+            let bytes = serde_json::to_string(entry)
+                .map_err(|e| format!("internal: serialize an admitted entry: {e}"))?;
+            admissible.entry(agent_id.clone()).or_default().push(bytes);
+        }
+    }
     let mut admission = Admission {
         field: Vec::new(),
         returns_provenance: BTreeMap::new(),
         refusals: Vec::new(),
         dataset_hash: content_digest(dataset_bytes),
         replay_dataset_sha256: replay.as_ref().map(|r| r.dataset_sha256.clone()),
+        certifying: false,
     };
-    for (entry, agent_id) in entries.iter().zip(agents) {
-        let outcome = admit_one(
-            window,
-            &mut registry,
-            replay.as_ref(),
-            entry,
-            agent_id,
-            reveals[agent_id],
-            allow_supplied_returns,
-            launcher
-                .as_mut()
-                .map(|launcher| &mut **launcher as &mut dyn EntrantLauncher),
-        );
-        match outcome {
+    for (agent_id, outcome) in outcomes {
+        let reason = match outcome {
+            Err(reason) => reason,
             Ok((submission, provenance)) => {
-                admission
-                    .returns_provenance
-                    .insert(agent_id.to_string(), provenance);
-                admission.field.push(submission);
+                let copies = &admissible[&agent_id];
+                if copies.iter().any(|copy| *copy != copies[0]) {
+                    format!(
+                        "revealed {} admissible entries that differ; one commitment admits one entry",
+                        copies.len()
+                    )
+                } else if admission.returns_provenance.contains_key(&agent_id) {
+                    "an identical copy of this agent's admitted entry; ranked once".to_string()
+                } else {
+                    admission
+                        .returns_provenance
+                        .insert(agent_id.clone(), provenance);
+                    admission.field.push(submission);
+                    continue;
+                }
             }
-            Err(reason) => admission.refusals.push(Refusal {
-                agent_id: agent_id.to_string(),
-                reason,
-            }),
-        }
+        };
+        admission.refusals.push(Refusal { agent_id, reason });
     }
+    admission.certifying = board_certifies(&admission.returns_provenance, allow_supplied_returns);
     Ok(admission)
 }
 
 /// Admit one entry, or return the reason it is refused.
-#[allow(clippy::too_many_arguments)]
 fn admit_one(
     window: &WindowState,
     registry: &mut Registry,
     replay: Option<&ReplayWindow>,
     entry: &RevealedEntry,
     agent_id: &str,
-    reveals: usize,
     allow_supplied_returns: bool,
     launcher: Option<&mut dyn EntrantLauncher>,
-) -> Result<(AgentSubmission, ReturnsProvenance), String> {
-    if reveals > 1 {
-        return Err(format!(
-            "revealed {reveals} times in one scoring call; one commitment admits one entry"
-        ));
-    }
+) -> Result<Admissible, String> {
     if let (Some(named), Some(submission)) = (&entry.agent_id, &entry.submission) {
         if *named != submission.agent_id {
             return Err(format!(

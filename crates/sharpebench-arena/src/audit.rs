@@ -10,11 +10,12 @@
 //! deadline, then, holding the revealed data, delivers what a next-bar oracle
 //! earns on it. The case does not claim that statistics catch this; it first
 //! shows the opposite, that the oracle's returns are rank-eligible when ranked
-//! directly. It passes only when intake stops the oracle on both routes: the
-//! supplied returns are refused, and a capture of the oracle's decisions that
-//! names the committed image, which replays exactly and is therefore ranked as
-//! `replayed` without re-execution, is refused when that image is re-executed.
-//! An in-process momentum agent stands in for the committed image's container.
+//! directly. It passes only when the oracle never reaches a certifying board.
+//! Its supplied returns are refused. A capture of its decisions that names the
+//! committed image replays exactly: the re-executing intake, which `arena
+//! score` runs by default, refuses it, and the replay-only intake ranks it as
+//! `replayed` on a board signed noncertifying. An in-process momentum agent
+//! stands in for the committed image's container.
 
 use std::collections::BTreeMap;
 
@@ -169,9 +170,11 @@ fn describe(admission: &Admission, agent_id: &str) -> String {
 }
 
 /// Run the forward hindsight-oracle case. Defended when the oracle's returns
-/// are rank-eligible if ranked directly, its supplied returns are refused under
-/// both intakes, its capture is refused on re-execution, and the committed
-/// image's own capture is ranked as re-executed.
+/// are rank-eligible if ranked directly and yet the oracle reaches no
+/// certifying board: its supplied returns are refused under both intakes, its
+/// capture is refused on re-execution, the replay-only board that ranks the
+/// capture is noncertifying, and the re-executing board, where the committed
+/// image's own capture is ranked as re-executed, certifies.
 pub fn forward_hindsight_oracle_case() -> AuditCase {
     run_case().unwrap_or_else(|error| AuditCase {
         name: FORWARD_HINDSIGHT_ORACLE.to_string(),
@@ -263,6 +266,7 @@ fn run_case() -> Result<AuditCase, String> {
         dataset_hash: None,
         replay_dataset_sha256: None,
         supplied_returns_accepted: false,
+        certifying: None,
         scores: Vec::new(),
         returns_provenance: BTreeMap::new(),
     };
@@ -293,21 +297,34 @@ fn run_case() -> Result<AuditCase, String> {
         .is_some_and(|reason| reason.starts_with("re-execution diverged"));
     let honest_reexecuted =
         reexecuted.returns_provenance.get(HONEST_AGENT) == Some(&ReturnsProvenance::ReExecuted);
-    let defended =
-        exposed.rank_eligible && supplied_refused && capture_refused && honest_reexecuted;
+    let oracle_certified = [&replayed, &reexecuted].iter().any(|a| {
+        a.certifying
+            && (a.returns_provenance.contains_key(CAPTURE_AGENT)
+                || a.returns_provenance.contains_key(RETURNS_AGENT))
+    });
+    let defended = exposed.rank_eligible
+        && !oracle_certified
+        && supplied_refused
+        && capture_refused
+        && honest_reexecuted
+        && reexecuted.certifying
+        && !replayed.certifying;
     Ok(AuditCase {
         name: FORWARD_HINDSIGHT_ORACLE.to_string(),
         attack: ATTACK.to_string(),
         defended,
         expected_vulnerable: false,
         detail: format!(
-            "oracle returns ranked directly: DSR {:.3}, eligible {}; at intake its supplied returns are {}; its capture naming the committed image is {} by replay alone and {} under re-execution; the committed image's own capture is {}",
+            "oracle returns ranked directly: DSR {:.3}, eligible {}; its supplied returns are {} under both intakes; its capture naming the committed image is {} under the default re-executing intake, whose board certifies: {}; the replay-only intake has it {} on a board that certifies: {}; the committed image's own capture is {}; oracle on a certifying board: {}",
             exposed.deflated_sharpe,
             exposed.rank_eligible,
-            if supplied_refused { "refused" } else { "ranked" },
-            describe(&replayed, CAPTURE_AGENT),
+            if supplied_refused { "refused" } else { "not refused" },
             describe(&reexecuted, CAPTURE_AGENT),
+            reexecuted.certifying,
+            describe(&replayed, CAPTURE_AGENT),
+            replayed.certifying,
             describe(&reexecuted, HONEST_AGENT),
+            oracle_certified,
         ),
     })
 }
