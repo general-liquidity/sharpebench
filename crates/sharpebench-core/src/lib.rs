@@ -95,8 +95,8 @@ pub use composite::{
 pub use correlation::{crowdedness, Crowdedness};
 pub use decision_stability::{
     decision_stability, observation_sha256, same_decision, DecisionStabilityError,
-    DecisionStabilityReport, DifferingGroup, ObservedDecision, ReplicateRun, StabilityCounts,
-    StabilityRate, StabilityUnavailable, WindowStability,
+    DecisionStabilityReport, DifferingGroup, IdenticalReplicates, ObservedDecision, ReplicateRun,
+    StabilityCounts, StabilityRate, StabilityUnavailable, WindowStability,
 };
 pub use disqualification::{classify_disqualification, rollup, DisqualThresholds, FailReason};
 pub use econrationality::{
