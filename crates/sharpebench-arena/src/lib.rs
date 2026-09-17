@@ -26,8 +26,17 @@
 //! checkable with only the public key.
 #![forbid(unsafe_code)]
 
+pub mod audit;
+pub mod intake;
 pub mod sandbox;
 
+pub use audit::{forward_hindsight_oracle_case, FORWARD_HINDSIGHT_ORACLE};
+pub use intake::{
+    admit_entries, board_certifies, execution_matrix, is_reference_entrant,
+    reference_entrant_digest, unnamed_entry, Admission, CapturedEntrant, DockerLauncher,
+    EntrantLauncher, IntakeOptions, LaunchedEntrant, ReplayWindow, ReturnsProvenance,
+    SUPPLIED_RETURNS_REFUSAL, UNNAMED_ENTRY_REFUSAL,
+};
 pub use sandbox::{
     check_sandbox_readiness, classify_container_exit, docker_available, probe_egress,
     require_local_image, resolve_launch, run_external_sandboxed, ContainerExitState,
@@ -49,6 +58,7 @@ use sharpebench_attest::{
     Commitment, PublicChain,
 };
 use sharpebench_core::{rank, AgentSubmission, CompositeScore, ScoreConfig};
+use sharpebench_protocol::AgentTrajectory;
 
 pub const STATE_FILE: &str = "state.json";
 pub const WINDOWS_DIR: &str = "windows";
@@ -87,6 +97,10 @@ fn describe_fault_plan(fault_plan_sha256: Option<&str>) -> String {
 fn score_config_digest(config: &ScoreConfig) -> Result<String, String> {
     let bytes = serde_json::to_vec(config).map_err(|e| format!("serialize score config: {e}"))?;
     Ok(content_digest(&bytes))
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 fn validate_sha256(label: &str, digest: &str) -> Result<(), String> {
@@ -168,16 +182,50 @@ pub struct WindowState {
     /// SHA-256 hex of the revealed dataset bytes, recorded at scoring time.
     #[serde(default)]
     pub dataset_hash: Option<String>,
+    /// The revealed dataset's identity as captures name it
+    /// (`TrajectoryContract::dataset_sha256`, a digest of the parsed dataset),
+    /// recorded when an entry revealed a capture. Omitted otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay_dataset_sha256: Option<String>,
+    /// The window was scored with supplied returns allowed
+    /// ([`IntakeOptions::allow_supplied_returns`]), so its board is
+    /// noncertifying. Omitted when false.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub supplied_returns_accepted: bool,
+    /// Whether the board certifies its rows ([`board_certifies`]): true only
+    /// when supplied returns were refused and every ranked row was
+    /// re-executed. Recorded at scoring; absent before, and absent reads as not
+    /// certified.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub certifying: Option<bool>,
     #[serde(default)]
     pub scores: Vec<CompositeScore>,
+    /// How each ranked entry's returns were obtained, by agent id. Rank-neutral;
+    /// published on the board rows. Omitted when empty.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub returns_provenance: BTreeMap<String, ReturnsProvenance>,
 }
 
-/// One revealed entry at scoring time: the agent's scored submission plus the
-/// pre-image (artifact digest + salt) of the commitment it registered before the
-/// deadline. The commitment itself is already on file in the window.
+/// One revealed entry at scoring time: the pre-image (artifact digest + salt)
+/// of the commitment the agent registered before the deadline, plus the
+/// evidence its returns are taken from. The commitment itself is already on
+/// file in the window. See [`intake`] for which evidence is ranked.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RevealedEntry {
-    pub submission: AgentSubmission,
+    /// The committed agent. Required with `capture`, whose own `agent_id`
+    /// names the entrant artifact rather than the arena entrant; optional with
+    /// `submission`, which names its agent itself. Omitted when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    /// Returns the entrant supplied after the data reveal. Ranked only under
+    /// [`IntakeOptions::allow_supplied_returns`]; refused and recorded
+    /// otherwise. Omitted when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub submission: Option<AgentSubmission>,
+    /// The entrant's strict trajectory capture over the revealed dataset. The
+    /// arena derives the ranked returns from it by replay. Omitted when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture: Option<AgentTrajectory>,
     pub artifact_digest: String,
     pub salt: String,
     /// The fault plan digest the submission was produced under, as reported in
@@ -185,6 +233,27 @@ pub struct RevealedEntry {
     /// equal the window's `fault_plan_sha256`, absent for an unfaulted window.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fault_plan_sha256: Option<String>,
+}
+
+impl RevealedEntry {
+    /// The committed agent this entry reveals: `agent_id` when set, else the
+    /// supplied submission's.
+    pub fn committed_agent_id(&self) -> Option<&str> {
+        self.agent_id
+            .as_deref()
+            .or_else(|| self.submission.as_ref().map(|s| s.agent_id.as_str()))
+    }
+}
+
+/// One published board row: the kernel's scored row, with how its returns were
+/// obtained beside the kernel's fields. `returns_provenance` is omitted when
+/// absent, so such a row has the bytes of the plain [`CompositeScore`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BoardRow {
+    #[serde(flatten)]
+    pub score: CompositeScore,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub returns_provenance: Option<ReturnsProvenance>,
 }
 
 /// The first signed payload of every published board. Binding the window's
@@ -210,6 +279,19 @@ pub struct WindowHeader {
     /// otherwise, so an unfaulted header signs the same bytes as before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fault_plan_sha256: Option<String>,
+    /// The window's `replay_dataset_sha256`. Omitted when absent, so a header
+    /// for a window that replayed no capture signs the same bytes as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay_dataset_sha256: Option<String>,
+    /// The window's `supplied_returns_accepted`: true signs the board as
+    /// noncertifying. Omitted when false.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub supplied_returns_accepted: bool,
+    /// The window's `certifying`. A reader treats a board as certifying its
+    /// rows only when this is `true`; a header without it, as every header
+    /// signed before the field existed, certifies nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub certifying: Option<bool>,
     pub refusals: Vec<Refusal>,
     /// Final signature of the previously published window's board, or
     /// [`GENESIS_ANCHOR`] for the arena's first published window.
@@ -289,6 +371,9 @@ pub enum IdentityField {
     SealedEvalSaltSha256,
     FaultPlanSha256,
     DatasetHash,
+    ReplayDatasetSha256,
+    SuppliedReturnsAccepted,
+    Certifying,
 }
 
 impl IdentityField {
@@ -304,6 +389,9 @@ impl IdentityField {
             Self::SealedEvalSaltSha256 => "sealed_eval_salt_sha256",
             Self::FaultPlanSha256 => "fault_plan_sha256",
             Self::DatasetHash => "dataset_hash",
+            Self::ReplayDatasetSha256 => "replay_dataset_sha256",
+            Self::SuppliedReturnsAccepted => "supplied_returns_accepted",
+            Self::Certifying => "certifying",
         }
     }
 }
@@ -387,6 +475,21 @@ fn identity_mismatches(
             Some(header.dataset_hash.clone()),
             window.dataset_hash.clone(),
         ),
+        (
+            IdentityField::ReplayDatasetSha256,
+            header.replay_dataset_sha256.clone(),
+            window.replay_dataset_sha256.clone(),
+        ),
+        (
+            IdentityField::SuppliedReturnsAccepted,
+            Some(header.supplied_returns_accepted.to_string()),
+            Some(window.supplied_returns_accepted.to_string()),
+        ),
+        (
+            IdentityField::Certifying,
+            header.certifying.map(|c| c.to_string()),
+            window.certifying.map(|c| c.to_string()),
+        ),
     ];
     Ok(pairs
         .into_iter()
@@ -453,6 +556,29 @@ fn read_window_state(path: &Path) -> Result<WindowState, String> {
         ));
     }
     serde_json::from_value(value).map_err(|e| format!("invalid JSON in {}: {e}", path.display()))
+}
+
+/// Rebuild an attest [`Registry`] holding a window's commitments, each
+/// registered with `unlock_epoch`, and positioned at `current_epoch`. The
+/// registry has one unlock epoch per registration serving both as the commit
+/// cutoff and the reveal lock; the arena has two distinct epochs, so it wraps
+/// the registry twice: register-side with the commit deadline, reveal-side
+/// with the data-reveal epoch.
+fn registry_for(
+    w: &WindowState,
+    unlock_epoch: u64,
+    current_epoch: u64,
+) -> Result<Registry, String> {
+    let mut reg = Registry::new();
+    // Epoch 0 is always below a valid unlock epoch (open_window enforces
+    // commit_deadline > current >= 0), so re-registering history succeeds.
+    reg.set_epoch(0);
+    for c in &w.commitments {
+        reg.register(c.clone(), unlock_epoch)
+            .map_err(|e| format!("internal: re-registering stored commitment: {e}"))?;
+    }
+    reg.set_epoch(current_epoch);
+    Ok(reg)
 }
 
 fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
@@ -760,7 +886,11 @@ impl Arena {
                 commitments: Vec::new(),
                 refusals: Vec::new(),
                 dataset_hash: None,
+                replay_dataset_sha256: None,
+                supplied_returns_accepted: false,
+                certifying: None,
                 scores: Vec::new(),
+                returns_provenance: BTreeMap::new(),
             },
         );
         self.state.window_order.push(id.to_string());
@@ -859,25 +989,6 @@ impl Arena {
         write_json(&dir.join(STATE_FILE), &state)
     }
 
-    /// Rebuild an attest [`Registry`] holding this window's commitments, each
-    /// registered with `unlock_epoch`, and positioned at the arena's current
-    /// epoch. The registry has one unlock epoch per registration serving both as
-    /// the commit cutoff and the reveal lock; the arena has two distinct epochs,
-    /// so it wraps the registry twice: register-side with the commit deadline,
-    /// reveal-side with the data-reveal epoch.
-    fn registry_for(&self, w: &WindowState, unlock_epoch: u64) -> Result<Registry, String> {
-        let mut reg = Registry::new();
-        // Epoch 0 is always below a valid unlock epoch (open_window enforces
-        // commit_deadline > current >= 0), so re-registering history succeeds.
-        reg.set_epoch(0);
-        for c in &w.commitments {
-            reg.register(c.clone(), unlock_epoch)
-                .map_err(|e| format!("internal: re-registering stored commitment: {e}"))?;
-        }
-        reg.set_epoch(self.state.current_epoch);
-        Ok(reg)
-    }
-
     /// Register a commitment for a window. Refused at or after the commit
     /// deadline epoch, and refused for a duplicate (agent, window) pair - both
     /// checks are the attest registry's own semantics, wrapped, not re-derived.
@@ -903,8 +1014,7 @@ impl Arena {
                 commitment.target_window
             ));
         }
-        let mut reg = self.registry_for(w, w.commit_deadline)?;
-        reg.set_epoch(current);
+        let mut reg = registry_for(w, w.commit_deadline, current)?;
         reg.register(commitment.clone(), w.commit_deadline)?;
         // The registry accepted it; persist.
         let w = self.windows.get_mut(window_id).expect("checked above");
@@ -912,18 +1022,33 @@ impl Arena {
         self.save()
     }
 
-    /// Reveal and score a window. Each entry's pre-image is verified against its
-    /// registered commitment through the attest registry's `reveal` (which also
-    /// enforces the data-reveal lock). An entry whose commitment does not
-    /// verify, or that never committed, is refused and recorded; the rest of the
-    /// field is scored with `sharpebench_core::rank` under the ScoreConfig
-    /// recorded at open time. The dataset bytes are hashed into the window
-    /// record so the published header binds the exact revealed data.
+    /// Reveal and score a window under the default intake: only replayed
+    /// captures are ranked, and nothing is re-executed. See
+    /// [`Arena::reveal_and_score_with`].
     pub fn reveal_and_score(
         &mut self,
         window_id: &str,
         dataset_path: &Path,
         entries: &[RevealedEntry],
+    ) -> Result<Vec<CompositeScore>, String> {
+        self.reveal_and_score_with(window_id, dataset_path, entries, IntakeOptions::default())
+    }
+
+    /// Reveal and score a window. Each entry's pre-image is verified against its
+    /// registered commitment through the attest registry's `reveal` (which also
+    /// enforces the data-reveal lock), and its returns are taken as
+    /// [`intake`] describes: derived by replaying its capture, or supplied only
+    /// when `options` allow it. An entry that fails either is refused and
+    /// recorded; the rest of the field is scored with `sharpebench_core::rank`
+    /// under the ScoreConfig recorded at open time, and each row's
+    /// [`ReturnsProvenance`] is recorded. The dataset bytes are hashed into the
+    /// window record so the published header binds the exact revealed data.
+    pub fn reveal_and_score_with(
+        &mut self,
+        window_id: &str,
+        dataset_path: &Path,
+        entries: &[RevealedEntry],
+        options: IntakeOptions<'_>,
     ) -> Result<Vec<CompositeScore>, String> {
         let w = self
             .windows
@@ -941,47 +1066,29 @@ impl Arena {
                 w.data_reveal_epoch, self.state.current_epoch
             ));
         }
-        // A submission produced under another fault plan, or under none when
-        // the window has one (or the reverse), is not the same experiment. It
-        // is refused before anything is recorded, as a config mismatch is.
-        for e in entries {
-            if e.fault_plan_sha256 != w.fault_plan_sha256 {
-                return Err(format!(
-                    "entry `{}` was produced under {}, but window `{window_id}` is scored under {}",
-                    e.submission.agent_id,
-                    describe_fault_plan(e.fault_plan_sha256.as_deref()),
-                    describe_fault_plan(w.fault_plan_sha256.as_deref())
-                ));
-            }
-        }
+        // An entry produced under another fault plan than the window's is
+        // refused before anything is recorded, as a config mismatch is.
+        intake::check_entries(w, entries)?;
         let dataset_bytes = std::fs::read(dataset_path)
             .map_err(|e| format!("cannot read dataset {}: {e}", dataset_path.display()))?;
-        let dataset_hash = content_digest(&dataset_bytes);
-
-        let mut reg = self.registry_for(w, w.data_reveal_epoch)?;
-        let mut refusals = Vec::new();
-        let mut field = Vec::new();
-        for e in entries {
-            let agent_id = e.submission.agent_id.clone();
-            // A faulted window's commitments bind its plan digest, so one made
-            // for another plan, or for none, does not match and is refused.
-            match reg.reveal_under_fault_plan(
-                &agent_id,
-                window_id,
-                &e.artifact_digest,
-                &e.salt,
-                w.fault_plan_sha256.as_deref(),
-            ) {
-                Ok(()) => field.push(e.submission.clone()),
-                Err(reason) => refusals.push(Refusal { agent_id, reason }),
-            }
-        }
-        let scores = rank(&field, &w.score_config);
+        let allow_supplied_returns = options.allow_supplied_returns;
+        let admission = admit_entries(
+            w,
+            self.state.current_epoch,
+            &dataset_bytes,
+            entries,
+            options,
+        )?;
+        let scores = rank(&admission.field, &w.score_config);
 
         let w = self.windows.get_mut(window_id).expect("checked above");
-        w.dataset_hash = Some(dataset_hash);
-        w.refusals.extend(refusals);
+        w.dataset_hash = Some(admission.dataset_hash);
+        w.replay_dataset_sha256 = admission.replay_dataset_sha256;
+        w.supplied_returns_accepted = allow_supplied_returns;
+        w.certifying = Some(admission.certifying);
+        w.refusals.extend(admission.refusals);
         w.scores = scores.clone();
+        w.returns_provenance = admission.returns_provenance;
         w.status = WindowStatus::Scoring;
         self.save()?;
         Ok(scores)
@@ -1031,13 +1138,24 @@ impl Arena {
             scorer_artifact_sha256: w.scorer_artifact_sha256.clone(),
             sealed_eval_salt_sha256: w.sealed_eval_salt_sha256.clone(),
             fault_plan_sha256: w.fault_plan_sha256.clone(),
+            replay_dataset_sha256: w.replay_dataset_sha256.clone(),
+            supplied_returns_accepted: w.supplied_returns_accepted,
+            certifying: w.certifying,
             refusals: w.refusals.clone(),
             prev_final_signature,
         };
+        let rows: Vec<BoardRow> = w
+            .scores
+            .iter()
+            .map(|score| BoardRow {
+                score: score.clone(),
+                returns_provenance: w.returns_provenance.get(&score.agent_id).copied(),
+            })
+            .collect();
         let mut payloads =
             vec![serde_json::to_string(&header).map_err(|e| format!("serialize header: {e}"))?];
-        for s in &w.scores {
-            payloads.push(serde_json::to_string(s).map_err(|e| format!("serialize score: {e}"))?);
+        for row in &rows {
+            payloads.push(serde_json::to_string(row).map_err(|e| format!("serialize score: {e}"))?);
         }
         let board = publish_public_chain(&payloads, key);
 
@@ -1046,8 +1164,11 @@ impl Arena {
             .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
         let board_path = dir.join(BOARD_FILE);
         write_json(&board_path, &board)?;
-        std::fs::write(dir.join(BOARD_MD_FILE), render_markdown(&header, &w.scores))
-            .map_err(|e| format!("cannot write board.md: {e}"))?;
+        std::fs::write(
+            dir.join(BOARD_MD_FILE),
+            render_markdown(&header, &w.scores, &rows),
+        )
+        .map_err(|e| format!("cannot write board.md: {e}"))?;
 
         let w = self.windows.get_mut(window_id).expect("checked above");
         w.status = WindowStatus::Published;
@@ -1059,9 +1180,25 @@ impl Arena {
 
 /// The human-readable board written beside `board.json`. Cosmetic; the signed
 /// JSON is the document of record.
-fn render_markdown(header: &WindowHeader, scores: &[CompositeScore]) -> String {
+fn render_markdown(header: &WindowHeader, scores: &[CompositeScore], rows: &[BoardRow]) -> String {
     let mut out = String::new();
     out.push_str(&format!("# Arena window `{}`\n\n", header.window_id));
+    if header.certifying != Some(true) {
+        out.push_str("**Noncertifying board.** Nothing on this board certifies that its rows were measured without hindsight:\n\n");
+        if header.supplied_returns_accepted {
+            out.push_str("- The window was scored with supplied returns allowed. A row marked `supplied` ranks returns its entrant delivered after the data reveal, which nothing ties to the committed artifact.\n");
+        }
+        if rows
+            .iter()
+            .any(|row| row.returns_provenance == Some(ReturnsProvenance::Replayed))
+        {
+            out.push_str("- A row marked `replayed` ranks recorded decisions that were not re-executed, so nothing shows the committed artifact made them without the revealed data.\n");
+        }
+        if header.certifying.is_none() {
+            out.push_str("- The signed header does not state that the board certifies its rows.\n");
+        }
+        out.push('\n');
+    }
     out.push_str(&format!(
         "- commit deadline: epoch {}\n- data reveal: epoch {}\n- dataset SHA-256: `{}`\n- scorer artifact SHA-256: `{}`\n- previous board signature: `{}`\n\n",
         header.commit_deadline, header.data_reveal_epoch, header.dataset_hash, header.scorer_artifact_sha256, header.prev_final_signature
@@ -1069,9 +1206,26 @@ fn render_markdown(header: &WindowHeader, scores: &[CompositeScore]) -> String {
     if let Some(plan) = &header.fault_plan_sha256 {
         out.push_str(&format!("Scored under fault plan SHA-256 `{plan}`.\n\n"));
     }
+    if let Some(replay) = &header.replay_dataset_sha256 {
+        out.push_str(&format!(
+            "Captures replayed against the parsed dataset `{replay}`.\n\n"
+        ));
+    }
     out.push_str("```\n");
     out.push_str(&sharpebench_leaderboard::render(scores));
     out.push_str("```\n");
+    if rows.iter().any(|row| row.returns_provenance.is_some()) {
+        out.push_str("\n## Returns provenance\n\n");
+        for row in rows {
+            if let Some(provenance) = row.returns_provenance {
+                out.push_str(&format!(
+                    "- `{}`: {}\n",
+                    row.score.agent_id,
+                    provenance.as_str()
+                ));
+            }
+        }
+    }
     if !header.refusals.is_empty() {
         out.push_str("\n## Refused entries\n\n");
         for r in &header.refusals {

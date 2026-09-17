@@ -7,8 +7,8 @@
 use std::path::{Path, PathBuf};
 
 use sharpebench_arena::{
-    verify_arena, Arena, IdentityField, IdentityMismatch, RevealedEntry, SigningKey, WINDOWS_DIR,
-    WINDOW_FILE,
+    verify_arena, Arena, IdentityField, IdentityMismatch, IntakeOptions, RevealedEntry, SigningKey,
+    WINDOWS_DIR, WINDOW_FILE,
 };
 use sharpebench_attest::{content_digest, make_commitment_under_fault_plan};
 use sharpebench_core::{AgentSubmission, Run, ScoreConfig};
@@ -64,7 +64,8 @@ fn published(dir: &Path, plan: Option<String>) {
             .unwrap();
         arena.advance(deadline + 10).unwrap();
         let entry = RevealedEntry {
-            submission: AgentSubmission {
+            agent_id: None,
+            submission: Some(AgentSubmission {
                 agent_id: "alpha".to_string(),
                 runs: vec![Run {
                     returns: (0..40).map(|i| 0.001 * (i as f64 + 1.0).sin()).collect(),
@@ -72,14 +73,21 @@ fn published(dir: &Path, plan: Option<String>) {
                 }],
                 in_sample_trials: 0,
                 candidates: Vec::new(),
-            },
+            }),
+            capture: None,
             artifact_digest: artifact,
             salt: "salt".to_string(),
             fault_plan_sha256: window_plan,
         };
+        // No capture path applies a fault plan, so a faulted window is scored
+        // from supplied returns, under the noncertifying intake.
+        let supplied = IntakeOptions {
+            allow_supplied_returns: true,
+            reexecute: None,
+        };
         assert_eq!(
             arena
-                .reveal_and_score(id, &dataset, &[entry])
+                .reveal_and_score_with(id, &dataset, &[entry], supplied)
                 .unwrap()
                 .len(),
             1

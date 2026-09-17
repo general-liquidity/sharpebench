@@ -46,6 +46,27 @@ pub struct SelfAuditReport {
     pub known_gaps: usize,
 }
 
+impl SelfAuditReport {
+    fn from_cases(cases: Vec<AuditCase>) -> Self {
+        let all_defended = cases.iter().all(|c| c.defended || c.expected_vulnerable);
+        let known_gaps = cases.iter().filter(|c| c.expected_vulnerable).count();
+        Self {
+            cases,
+            all_defended,
+            known_gaps,
+        }
+    }
+
+    /// Append a case run outside this pure kernel and recompute the summary.
+    /// `sharpebench audit` appends the forward-arena leakage case this way,
+    /// because that case needs the simulator and the arena intake; every
+    /// surface that calls only [`run_self_audit`] reports the kernel's cases.
+    pub fn with_case(mut self, case: AuditCase) -> Self {
+        self.cases.push(case);
+        Self::from_cases(self.cases)
+    }
+}
+
 fn run_with(returns: Vec<f64>, trace: Trace) -> Run {
     Run {
         returns,
@@ -613,13 +634,7 @@ pub fn run_self_audit() -> SelfAuditReport {
         });
     }
 
-    let all_defended = cases.iter().all(|c| c.defended || c.expected_vulnerable);
-    let known_gaps = cases.iter().filter(|c| c.expected_vulnerable).count();
-    SelfAuditReport {
-        cases,
-        all_defended,
-        known_gaps,
-    }
+    SelfAuditReport::from_cases(cases)
 }
 
 #[cfg(test)]
@@ -635,6 +650,43 @@ mod tests {
         assert!(report.all_defended);
         assert_eq!(report.known_gaps, 0, "no documented gaps remain");
         assert_eq!(report.cases.len(), 9);
+    }
+
+    fn appended(defended: bool, expected_vulnerable: bool) -> AuditCase {
+        AuditCase {
+            name: "appended".into(),
+            attack: "a case run outside the kernel".into(),
+            defended,
+            expected_vulnerable,
+            detail: String::new(),
+        }
+    }
+
+    /// An appended case is judged like the kernel's own: the summary is
+    /// recomputed over all of them, and the kernel's cases are left as they were.
+    #[test]
+    fn an_appended_case_is_summarized_with_the_kernel_cases() {
+        let kernel = run_self_audit();
+        let names: Vec<String> = kernel.cases.iter().map(|c| c.name.clone()).collect();
+
+        let defended = run_self_audit().with_case(appended(true, false));
+        assert_eq!(defended.cases.len(), 10);
+        assert!(defended.all_defended);
+        assert_eq!(defended.known_gaps, 0);
+        assert_eq!(defended.cases[9].name, "appended");
+        let kept: Vec<String> = defended.cases[..9].iter().map(|c| c.name.clone()).collect();
+        assert_eq!(kept, names);
+
+        let gamed = run_self_audit().with_case(appended(false, false));
+        assert!(
+            !gamed.all_defended,
+            "an undefended appended case fails the audit"
+        );
+        assert_eq!(gamed.known_gaps, 0);
+
+        let gap = run_self_audit().with_case(appended(false, true));
+        assert!(gap.all_defended, "a documented gap does not fail the audit");
+        assert_eq!(gap.known_gaps, 1);
     }
 
     /// The Sybil case is a defense, and it has to prove both halves: with the
