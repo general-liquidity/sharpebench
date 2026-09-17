@@ -949,6 +949,16 @@ pub fn verify_trajectory_strict(
             ));
         }
     }
+    let planned: Vec<Window> = contract
+        .windows
+        .iter()
+        .map(|window| Window {
+            start: window.start,
+            end: window.end,
+        })
+        .collect();
+    sharpebench_sim::trajectory::check_window_order(&planned)
+        .map_err(|refusal| format!("trajectory contract: {refusal}"))?;
     let unique_seeds: std::collections::BTreeSet<u64> = contract.seeds.iter().copied().collect();
     if unique_seeds.len() != contract.seeds.len() {
         return Err("trajectory contract repeats an execution seed".to_string());
@@ -1551,7 +1561,7 @@ mod tests {
                     symbol: sym,
                     action: Action::Buy,
                     target_weight: 1.0e9, // absurd size → sim-exploitation attempt
-                    confidence: 1.0,      // inflated conviction
+                    confidence: Some(1.0), // inflated conviction
                     rationale: "exploit the fill engine".to_string(),
                 }],
                 reasoning: "cheat".to_string(),
@@ -2164,7 +2174,7 @@ mod tests {
                     symbol: obs.symbols[0].symbol.clone(),
                     action: sharpebench_protocol::Action::Buy,
                     target_weight: (now % 1000) as f64 / 1000.0,
-                    confidence: 0.5,
+                    confidence: Some(0.5),
                     rationale: String::new(),
                 }],
                 reasoning: String::new(),

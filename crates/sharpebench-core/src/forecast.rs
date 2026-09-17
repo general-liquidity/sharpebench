@@ -2,12 +2,14 @@
 //!
 //! SharpeArena owns the commit-time ledger. SharpeBench accepts only the closed
 //! `sharpe.forecast-evidence.v1` and `.v2` file contracts, reconstructs every score locally,
-//! and compares agents only on the exact contracts resolved for the whole field,
-//! settled to the exact same outcome. Bench takes documents from any producer, so
-//! contract identity alone does not license differencing two losses; the realized
-//! outcome and its availability time are retained past scoring and must agree.
-//! This module does not import [`crate::composite`] and its report is not an input
-//! to trading-rank eligibility.
+//! and compares two agents only on the exact contracts both resolved, settled to the
+//! exact same outcome. A pair receives an interval, a p-value and a Holm verdict only
+//! when each agent resolved every contract the other did, so one agent's gaps can
+//! neither shrink another pair's comparison nor choose its own. Bench takes documents
+//! from any producer, so contract identity alone does not license differencing two
+//! losses; the realized outcome and its availability time are retained past scoring
+//! and must agree. This module does not import [`crate::composite`] and its report is
+//! not an input to trading-rank eligibility.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
@@ -24,7 +26,13 @@ pub const FORECAST_EVIDENCE_SCHEMA: &str = "sharpe.forecast-evidence.v1";
 /// The v1 envelope plus `contract_digest_encoding` on every revision. A v2
 /// revision is verified under the encoding it declares and under nothing else.
 pub const FORECAST_EVIDENCE_SCHEMA_V2: &str = "sharpe.forecast-evidence.v2";
-pub const FORECAST_QUALITY_SCHEMA: &str = "sharpebench.forecast-quality.v1";
+/// Version 2 replaces the field-wide support intersection with exact pairwise
+/// support: `common_support` names the digests any agent resolved and charges each
+/// agent's gaps to that agent, and a pair with unequal resolved support carries
+/// `support_gap` and a withheld inference.
+pub const FORECAST_QUALITY_SCHEMA: &str = "sharpebench.forecast-quality.v2";
+const SUPPORT_RULE: &str = "a pair is differenced on the contract digests both agents resolved \
+     and receives inference only when each agent resolved every digest the other did";
 const CONTRACT_SCHEMA: &str = "sharpearena.forecast-contract.v1";
 
 /// The encoding a revision's `contract_sha256` was verified under.
@@ -1092,20 +1100,67 @@ pub struct AgentForecastSummary {
     pub normal_distribution_calibration: Option<DistributionCalibration>,
 }
 
+/// The field contracts one agent did not resolve, each listed once under that agent's
+/// own status for it.
+///
+/// A digest named by a pending claim is listed as pending even if another claim on it
+/// was cancelled or rejected, and a cancelled one outranks a rejected one: the list
+/// records the most recoverable reason the agent gave.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct AgentUnresolvedSupport {
+    pub n_unresolved: usize,
+    /// Named by no claim in this agent's document. Support is exact by digest, so a
+    /// contract the agent claimed under its other encoding is listed here.
+    pub not_claimed: Vec<String>,
+    pub pending: Vec<String>,
+    pub cancelled: Vec<String>,
+    /// Claimed, but the claim had no eligible revision to settle.
+    pub rejected: Vec<String>,
+}
+
+/// A contract some agent resolved while another agent's document leaves it pending
+/// or cancelled. Recorded, never differenced: the non-resolving agent is charged the
+/// gap and its pairs are withheld.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct SettlementStatusDisagreement {
+    pub contract_sha256: String,
+    pub resolved_by: Vec<String>,
+    pub pending_by: Vec<String>,
+    pub cancelled_by: Vec<String>,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct CommonSupport {
+    pub rule: &'static str,
+    /// Every contract digest at least one agent resolved: the field support each
+    /// agent's gaps are charged against. It equals every pair's support when the
+    /// whole field resolved the same digests.
     pub n_contracts: usize,
     pub contract_sha256: Vec<String>,
-    pub excluded_resolved_by_agent: BTreeMap<String, usize>,
+    pub unresolved_by_agent: BTreeMap<String, AgentUnresolvedSupport>,
+    pub settlement_status_disagreements: Vec<SettlementStatusDisagreement>,
+}
+
+/// How far apart two agents' resolved supports are. Each count is charged to the
+/// agent that did not resolve those digests.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct SupportGap {
+    /// Digests agent B resolved and agent A did not.
+    pub agent_a_unresolved: usize,
+    /// Digests agent A resolved and agent B did not.
+    pub agent_b_unresolved: usize,
 }
 
 #[derive(Clone, Debug, Serialize)]
 pub struct PairwiseForecastComparison {
     pub agent_a: String,
     pub agent_b: String,
+    /// Contracts both agents resolved, which are the contracts differenced.
     pub n_contracts: usize,
     pub n_settlement_blocks: usize,
-    /// Mean loss(A) minus mean loss(B); negative favors A.
+    /// Mean loss(A) minus mean loss(B); negative favors A. Descriptive only when
+    /// inference is withheld: under a `support_gap` it covers the contracts the
+    /// incomplete agent chose to resolve.
     pub mean_loss_difference: f64,
     /// Absent, together with the other three inference fields, when
     /// `inference_error` says the block resampling law cannot support the claim.
@@ -1118,6 +1173,9 @@ pub struct PairwiseForecastComparison {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub holm_adjusted_p_value: Option<f64>,
     pub familywise_significant: bool,
+    /// Present only when the two agents did not resolve the same digests.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub support_gap: Option<SupportGap>,
     /// Present only when inference was withheld. Omitted for a supported comparison.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub inference_error: Option<String>,
@@ -1126,6 +1184,7 @@ pub struct PairwiseForecastComparison {
 /// Why a paired comparison carries no interval, no p-value and no significance.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum ForecastInferenceError {
+    UnequalResolvedSupport(SupportGap),
     NoSettlementBlock,
     LevelBelowResamplingResolution {
         blocks: usize,
@@ -1137,6 +1196,13 @@ enum ForecastInferenceError {
 impl Display for ForecastInferenceError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::UnequalResolvedSupport(gap) => write!(
+                formatter,
+                "unequal resolved support: agent_a did not resolve {} contract(s) that agent_b \
+                 resolved and agent_b did not resolve {} that agent_a resolved; a pair receives \
+                 inference only when both agents resolved the same contracts",
+                gap.agent_a_unresolved, gap.agent_b_unresolved
+            ),
             Self::NoSettlementBlock => formatter.write_str(
                 "no settlement block on exact common support: there is nothing to resample",
             ),
@@ -1247,26 +1313,7 @@ pub fn analyze_forecast_quality(
         }
         rows.push(scored_forecasts(document)?);
     }
-    let common: BTreeSet<String> = rows
-        .iter()
-        .map(|agent| {
-            agent
-                .iter()
-                .map(|row| row.contract_sha256.clone())
-                .collect::<BTreeSet<_>>()
-        })
-        .reduce(|left, right| left.intersection(&right).cloned().collect())
-        .unwrap_or_default();
-    let excluded_resolved_by_agent = evidence
-        .iter()
-        .zip(&rows)
-        .map(|(document, rows)| {
-            (
-                document.identity.agent_id.clone(),
-                rows.len().saturating_sub(common.len()),
-            )
-        })
-        .collect();
+    let common_support = field_support(evidence, &rows);
     let agents = evidence
         .iter()
         .zip(&rows)
@@ -1280,7 +1327,6 @@ pub fn analyze_forecast_quality(
                 &rows[left],
                 &evidence[right].identity.agent_id,
                 &rows[right],
-                &common,
                 config,
             )?);
         }
@@ -1296,15 +1342,114 @@ pub fn analyze_forecast_quality(
         rank_effect: "reported_only_never_trading_rank",
         dependence_unit: "whole resolution-clock block across assets and questions",
         config,
-        common_support: CommonSupport {
-            n_contracts: common.len(),
-            contract_sha256: common.into_iter().collect(),
-            excluded_resolved_by_agent,
-        },
+        common_support,
         contract_digest_versions,
         agents,
         comparisons,
     })
+}
+
+/// Charge every field contract an agent did not resolve to that agent, and record
+/// each contract one agent resolved while another left it pending or cancelled.
+///
+/// The field support is the union of resolved digests, so an agent's gaps are
+/// measured against what the rest of the field settled. It is disclosure only: no
+/// comparison reads it, so a document with gaps or extra contracts cannot change the
+/// support of a pair it is not part of.
+fn field_support(evidence: &[ForecastEvidence], rows: &[Vec<ScoredForecast>]) -> CommonSupport {
+    let resolved: Vec<BTreeSet<&str>> = rows
+        .iter()
+        .map(|rows| {
+            rows.iter()
+                .map(|row| row.contract_sha256.as_str())
+                .collect()
+        })
+        .collect();
+    let field: BTreeSet<&str> = resolved.iter().flatten().copied().collect();
+    let mut unresolved_by_agent = BTreeMap::new();
+    let mut disputed: BTreeMap<&str, SettlementStatusDisagreement> = BTreeMap::new();
+    for (document, resolved) in evidence.iter().zip(&resolved) {
+        let agent_id = &document.identity.agent_id;
+        let statuses = claim_statuses_by_digest(document);
+        let mut gap = AgentUnresolvedSupport::default();
+        for digest in field.difference(resolved) {
+            let record = || SettlementStatusDisagreement {
+                contract_sha256: digest.to_string(),
+                resolved_by: Vec::new(),
+                pending_by: Vec::new(),
+                cancelled_by: Vec::new(),
+            };
+            match statuses.get(digest) {
+                None => gap.not_claimed.push(digest.to_string()),
+                Some(status) if status.contains("pending") => {
+                    gap.pending.push(digest.to_string());
+                    disputed
+                        .entry(*digest)
+                        .or_insert_with(record)
+                        .pending_by
+                        .push(agent_id.clone());
+                }
+                Some(status) if status.contains("cancelled") => {
+                    gap.cancelled.push(digest.to_string());
+                    disputed
+                        .entry(*digest)
+                        .or_insert_with(record)
+                        .cancelled_by
+                        .push(agent_id.clone());
+                }
+                Some(_) => gap.rejected.push(digest.to_string()),
+            }
+        }
+        gap.n_unresolved = field.len() - resolved.len();
+        unresolved_by_agent.insert(agent_id.clone(), gap);
+    }
+    for (document, resolved) in evidence.iter().zip(&resolved) {
+        for (digest, record) in &mut disputed {
+            if resolved.contains(digest) {
+                record.resolved_by.push(document.identity.agent_id.clone());
+            }
+        }
+    }
+    let settlement_status_disagreements = disputed
+        .into_values()
+        .map(|mut record| {
+            record.resolved_by.sort();
+            record.pending_by.sort();
+            record.cancelled_by.sort();
+            record
+        })
+        .collect();
+    CommonSupport {
+        rule: SUPPORT_RULE,
+        n_contracts: field.len(),
+        contract_sha256: field.into_iter().map(str::to_string).collect(),
+        unresolved_by_agent,
+        settlement_status_disagreements,
+    }
+}
+
+/// Every resolution status this document gives a contract digest, over all claims
+/// naming it. Validation holds a claim to one digest across its revisions, so any
+/// revision identifies it.
+fn claim_statuses_by_digest(document: &ForecastEvidence) -> BTreeMap<&str, BTreeSet<&str>> {
+    let digest_by_claim: BTreeMap<&str, &str> = document
+        .revisions
+        .iter()
+        .map(|revision| {
+            (
+                revision.claim_id.as_str(),
+                revision.contract_sha256.as_str(),
+            )
+        })
+        .collect();
+    let mut statuses: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    for resolution in &document.resolutions {
+        statuses
+            .entry(digest_by_claim[resolution.claim_id.as_str()])
+            .or_default()
+            .insert(resolution.status.as_str());
+    }
+    statuses
 }
 
 fn summarize_agent(
@@ -1505,7 +1650,6 @@ fn compare_agents(
     rows_a: &[ScoredForecast],
     agent_b: &str,
     rows_b: &[ScoredForecast],
-    common: &BTreeSet<String>,
     config: ForecastAnalysisConfig,
 ) -> Result<PairwiseForecastComparison, ForecastError> {
     let by_hash_a: BTreeMap<_, _> = rows_a
@@ -1516,14 +1660,14 @@ fn compare_agents(
         .iter()
         .map(|row| (row.contract_sha256.as_str(), row))
         .collect();
+    // Settlement agreement is checked on every contract both resolved, including a
+    // pair whose inference is withheld below, so a disputed settlement is refused
+    // whichever other documents the field holds.
     let mut blocks: BTreeMap<u64, Vec<f64>> = BTreeMap::new();
-    for contract_hash in common {
-        let left = by_hash_a
-            .get(contract_hash.as_str())
-            .ok_or_else(|| reject("common support is absent from agent A"))?;
-        let right = by_hash_b
-            .get(contract_hash.as_str())
-            .ok_or_else(|| reject("common support is absent from agent B"))?;
+    for (contract_hash, left) in &by_hash_a {
+        let Some(right) = by_hash_b.get(contract_hash) else {
+            continue;
+        };
         if left.resolves_at != right.resolves_at
             || left.instrument != right.instrument
             || left.scoring_rule != right.scoring_rule
@@ -1552,7 +1696,16 @@ fn compare_agents(
     }
     let observed_values: Vec<f64> = blocks.values().flatten().copied().collect();
     let block_values: Vec<&Vec<f64>> = blocks.values().collect();
-    if let Err(unsupported) = inference_support(block_values.len(), config.familywise_alpha) {
+    let gap = SupportGap {
+        agent_a_unresolved: by_hash_b.len() - observed_values.len(),
+        agent_b_unresolved: by_hash_a.len() - observed_values.len(),
+    };
+    let supported = if gap.agent_a_unresolved > 0 || gap.agent_b_unresolved > 0 {
+        Err(ForecastInferenceError::UnequalResolvedSupport(gap))
+    } else {
+        inference_support(block_values.len(), config.familywise_alpha)
+    };
+    if let Err(unsupported) = supported {
         return Ok(PairwiseForecastComparison {
             agent_a: agent_a.to_string(),
             agent_b: agent_b.to_string(),
@@ -1568,6 +1721,10 @@ fn compare_agents(
             raw_p_value: None,
             holm_adjusted_p_value: None,
             familywise_significant: false,
+            support_gap: match unsupported {
+                ForecastInferenceError::UnequalResolvedSupport(gap) => Some(gap),
+                _ => None,
+            },
             inference_error: Some(unsupported.to_string()),
         });
     }
@@ -1601,6 +1758,7 @@ fn compare_agents(
         raw_p_value: Some((null_extreme as f64 + 1.0) / (config.bootstrap_samples as f64 + 1.0)),
         holm_adjusted_p_value: None,
         familywise_significant: false,
+        support_gap: None,
         inference_error: None,
     })
 }
@@ -1843,6 +2001,8 @@ mod tests {
         );
         assert_eq!(report.common_support.n_contracts, 12);
         let comparison = &report.comparisons[0];
+        assert_eq!(comparison.n_contracts, 12);
+        assert_eq!(comparison.support_gap, None);
         assert_eq!(comparison.n_settlement_blocks, 6);
         assert_eq!(comparison.inference_error, None);
         assert!(comparison.confidence_lower.unwrap() < comparison.confidence_upper.unwrap());
@@ -1859,6 +2019,8 @@ mod tests {
         );
         assert_eq!(report.common_support.n_contracts, 8);
         let comparison = &report.comparisons[0];
+        assert_eq!(comparison.n_contracts, 8);
+        assert_eq!(comparison.support_gap, None);
         assert_eq!(comparison.n_settlement_blocks, 2);
         assert!(comparison.inference_error.is_some());
         assert_eq!(comparison.raw_p_value, None);
@@ -1974,7 +2136,7 @@ mod tests {
     }
 
     #[test]
-    fn comparison_uses_only_field_common_contracts_and_whole_time_blocks() {
+    fn comparison_uses_exact_pair_support_and_whole_time_blocks() {
         let a =
             parse_forecast_evidence(&fixture("a", &[0.9, 0.1, 0.8, 0.2], &[1.0, 0.0, 1.0, 0.0]))
                 .unwrap();
@@ -2016,8 +2178,10 @@ mod tests {
         }
     }
 
+    /// Replaces the pre-v2 pin that charged `b`'s pending settlement to `a` as one
+    /// excluded contract. The gap is `b`'s, and the pair receives no inference.
     #[test]
-    fn unmatched_questions_are_disclosed_and_excluded_from_every_comparison() {
+    fn unmatched_questions_are_charged_to_the_agent_missing_them_and_withhold_the_pair() {
         let a =
             parse_forecast_evidence(&fixture("a", &[0.9, 0.1, 0.8, 0.2], &[1.0, 0.0, 1.0, 0.0]))
                 .unwrap();
@@ -2030,11 +2194,50 @@ mod tests {
         b.resolutions[3].status = "pending".to_string();
         b.resolutions[3].outcome = None;
         b.resolutions[3].available_at = None;
+        let pending = b.revisions[3].contract_sha256.clone();
         let report = analyze_forecast_quality(&[a, b], ForecastAnalysisConfig::default()).unwrap();
-        assert_eq!(report.common_support.n_contracts, 3);
-        assert_eq!(report.common_support.excluded_resolved_by_agent["a"], 1);
-        assert_eq!(report.common_support.excluded_resolved_by_agent["b"], 0);
-        assert_eq!(report.comparisons[0].n_contracts, 3);
+        let support = &report.common_support;
+        assert_eq!(report.schema_version, "sharpebench.forecast-quality.v2");
+        assert_eq!(support.n_contracts, 4);
+        assert_eq!(
+            support.unresolved_by_agent["a"],
+            AgentUnresolvedSupport::default()
+        );
+        assert_eq!(
+            support.unresolved_by_agent["b"],
+            AgentUnresolvedSupport {
+                n_unresolved: 1,
+                pending: vec![pending.clone()],
+                ..AgentUnresolvedSupport::default()
+            }
+        );
+        assert_eq!(
+            support.settlement_status_disagreements,
+            vec![SettlementStatusDisagreement {
+                contract_sha256: pending,
+                resolved_by: vec!["a".to_string()],
+                pending_by: vec!["b".to_string()],
+                cancelled_by: vec![],
+            }]
+        );
+        let comparison = &report.comparisons[0];
+        assert_eq!(comparison.n_contracts, 3);
+        assert_eq!(
+            comparison.support_gap,
+            Some(SupportGap {
+                agent_a_unresolved: 0,
+                agent_b_unresolved: 1,
+            })
+        );
+        assert_eq!(comparison.raw_p_value, None);
+        assert_eq!(
+            comparison.inference_error.as_deref(),
+            Some(
+                "unequal resolved support: agent_a did not resolve 0 contract(s) that agent_b \
+                 resolved and agent_b did not resolve 1 that agent_a resolved; a pair receives \
+                 inference only when both agents resolved the same contracts"
+            )
+        );
     }
 
     #[test]
@@ -2053,6 +2256,7 @@ mod tests {
                 raw_p_value: Some(p),
                 holm_adjusted_p_value: None,
                 familywise_significant: false,
+                support_gap: None,
                 inference_error: None,
             })
             .collect::<Vec<_>>();

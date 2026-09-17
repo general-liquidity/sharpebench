@@ -87,7 +87,7 @@ fn populated_order() -> Order {
         symbol: "SPX".to_string(),
         action: Action::Sell,
         target_weight: -0.3,
-        confidence: 0.7,
+        confidence: Some(0.7),
         rationale: "downtrend".to_string(),
     }
 }
@@ -182,7 +182,7 @@ fn published_observation_schema_matches_the_protocol_types() {
 fn schema_required_keys_deserialize_and_forbidden_keys_do_not() {
     let minimal_decision = r#"{"orders":[{"symbol":"A","action":"buy","target_weight":0.5}]}"#;
     let parsed: Decision = serde_json::from_str(minimal_decision).expect("required keys suffice");
-    assert!((parsed.orders[0].confidence - 0.5).abs() < 1e-12);
+    assert_eq!(parsed.orders[0].confidence, None);
 
     let extra = r#"{"orders":[],"latency_ms":12}"#;
     assert!(

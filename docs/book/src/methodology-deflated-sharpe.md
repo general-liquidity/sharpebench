@@ -198,15 +198,16 @@ The shipped datasets: `us-indices-1d`, `fx-majors-1d`, `commodities-1d`,
 
 ## Opt-in diagnostics the gate does not use
 
-Three estimators from the literature audit are implemented as diagnostics a
-caller has to ask for. **None of them is read by the gate, by eligibility or by
-the rank**, and none is a field of `CompositeScore`: switching the gate to any
-of them would move published values, so they sit beside the board instead.
-They are library functions in `sharpebench_stats::opt_in_diagnostics` and a
-flag on the command line:
+Three estimators from the literature audit, and a tail-risk diagnostic, are
+implemented as diagnostics a caller has to ask for. **None of them is read by
+the gate, by eligibility or by the rank**, and none is a field of
+`CompositeScore`: switching the gate to any of them would move published
+values, so they sit beside the board instead. They are library functions in
+`sharpebench_stats::opt_in_diagnostics` and `sharpebench_stats::tail_risk`, and
+a flag on the command line:
 
 ```text
-sharpebench score field.json --diagnostics autocorrelated-psr,null-se-psr,mppm [--json]
+sharpebench score field.json --diagnostics autocorrelated-psr,null-se-psr,mppm,expected-shortfall [--json]
 ```
 
 Without `--diagnostics` the output is the board and nothing else, byte for byte
@@ -215,8 +216,8 @@ after the board, and `--json` prints an object whose `board` member is the
 board-only output and whose `sharpe_diagnostics` array carries one record per
 row, each marked `"used_by_gate": false`. The diagnostics are computed by
 `sharpebench_core::sharpe_diagnostics` on the same pooled track the row's PSR
-and DSR read (shared cells, execution seeds averaged), against the same two
-benchmarks: zero, the counterpart of `psr`, and the row's
+and DSR read (shared cells, execution seeds averaged), the two PSR diagnostics
+against the same two benchmarks: zero, the counterpart of `psr`, and the row's
 `deflation_bar_per_period`, the counterpart of `deflated_sharpe`. An
 input a diagnostic cannot score is reported with its reason and no number.
 
@@ -225,6 +226,7 @@ input a diagnostic cannot score is reported with its reason and no number.
 | `autocorrelated-psr` | PSR with the pooled track's lag-one autocorrelation `rho` in the Sharpe variance, standard error at the observed Sharpe | López de Prado, Lipton and Zoonekynd (2026), eq. 2 and eq. 3, p. 9; `rho = Cor[x_t, x_{t+1}]`, eq. 34, p. 35 | only the autocorrelation weights |
 | `null-se-psr` | PSR with the standard error evaluated at the benchmark, serial independence kept | the same paper, eqs. 4 and 5, p. 10 | only the Sharpe at which the variance is evaluated |
 | `mppm` | Manipulation-proof performance measure, risk aversion 3, zero risk-free rate, annualized | Goetzmann, Ingersoll, Spiegel and Welch (2007), working paper eq. 18, printed p. 18 | a different statistic, a certainty equivalent rather than a test |
+| `expected-shortfall` | Historical expected shortfall of the worst 5% of the pooled track with its tail count, and the fraction of bars below zero | the expected shortfall of the empirical distribution (Acerbi and Tasche 2002); shortfall probability beside expected shortfall as in Hu, Chen, Yi and Sun (2026), pp. 5 to 6 | no board column: `downside_deviation` mixes loss frequency with loss severity |
 
 **Autocorrelation-aware PSR.** The variance bracket is
 
@@ -296,6 +298,52 @@ the one defense against option-like payoffs that
 an imported return series has: the simulator only executes linear exposures,
 but nothing checks an imported series. It is reported, not gated. A return at
 or below -1 is outside its domain and refused.
+
+**Expected shortfall and loss frequency.** Downside deviation, the denominator
+of `sortino`, is a root mean square of the below-zero returns over every bar,
+so it mixes how often a track loses with how much. A track that loses 0.02 on
+half its bars and one that loses 0.04 on one bar in eight have the same
+downside deviation (`0.5 * 0.02^2 = 0.125 * 0.04^2`) and, with every loss
+followed by an equal gain, the same mean; a test builds both on 240 bars and
+their board `downside_deviation` values agree to 1e-15. `expected-shortfall`
+reports what separates them:
+
+```text
+T  = n * 0.05                                        (the tail size)
+m  = floor(T)
+ES = ( x_(1) + ... + x_(m) + (T - m) * x_(m+1) ) / T
+```
+
+with `x_(1) <= ... <= x_(n)` the sorted pooled returns. This is the expected
+shortfall of the sample's empirical distribution, the definition of Acerbi and
+Tasche (2002) applied to the sample. At an integer `T` it is the mean of the
+`T` lowest returns. At a fractional `T` the observation that straddles the
+boundary enters with the fraction `T - m`, so the tail carries exactly 5% of
+the sample and the value moves continuously with the level. A product within
+`2 * f64::EPSILON` of an integer, relative to itself, is taken as that integer,
+so a decimal level stored slightly off its value (0.07 of 100 bars computes as
+7.000000000000001) still gives the integer tail. Tied returns need no rule:
+they are equal, so which of them falls in the tail does not change the value,
+and a permuted input gives the same bits. On the two tracks above the 12-bar
+tail is -0.02 for the first and -0.04 for the second, to rounding, and the
+loss frequency, the fraction of bars strictly below zero (a zero is not a
+loss), is 0.5 against 0.125.
+
+`tail_mean_return` is a return, not a positive loss: -0.04 means the tail lost
+4% a bar on average. Each record states `level` (0.05),
+`min_tail_observations` (10), `tail_size` (`T`) and `tail_observations`
+(`ceil(T)`, the observations with a positive weight), with `losses` and
+`loss_frequency`. The shortfall is withheld, with the reason, when the tail
+holds fewer than ten whole observations (`floor(T) < 10`): a pooled track of
+199 bars (`T = 9.95`) gets none and one of 200 bars gets one, and a single
+252-bar daily window (`T = 12.6`) is enough. The library function takes other
+levels and minimums, but never a minimum below three. The count travels with
+the number because a tail of a dozen observations is a thin estimate, and like
+the MPPM a sample tail cannot see a loss that has not landed: a track that
+sells insurance and has not yet paid out shows a benign tail. Hu, Chen, Yi and
+Sun (2026, pp. 5 to 6) report shortfall probability beside expected shortfall
+because the two rank hedgers differently; this diagnostic reports both and
+ranks by neither.
 
 Exposure on the other surfaces: the WASM module, the npm package, the MCP tools
 and the Python binding are unchanged and do not expose these diagnostics; the
