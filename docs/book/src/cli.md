@@ -313,6 +313,30 @@ census does not move a score, the controls carry no score field, and the binding
 is provenance beside a result; none of them reaches the gate, eligibility or the
 rank.
 
+## `timing-luck`
+
+```bash
+sharpebench timing-luck --cadence <m> [--data <csv>] [--periods-per-year N] [--short-borrow-bps <bps>] [--json]
+```
+
+Reruns `run`'s reference rows and the `pipeline-hold` control on `run`'s
+dataset, windows, seeds and cost model, with every row rebalancing every `m`
+bars, once for each of the `m` schedule phases. Each phase decides on a
+window's first bar and then on bars `start + p`, `start + p + m`, and so on,
+over the full declared windows. The report gives, per window and over all
+windows, how far each row's Sharpe and deflated Sharpe move across the phases
+(`by_phase`, `min`, `max`, `range`, `std_dev`), with the phases and windows
+behind each figure. The deflated Sharpe uses the row's phase-0 deflation inputs
+at every phase, and `field_dispersion_by_phase` records what each phase's own
+field measured. `--cadence 1` reproduces the board's deflated Sharpe and
+deflation inputs for every reference row.
+
+It runs without any external entrant or model, so it is a property of the
+protocol and the dataset. The report (`sharpebench.timing-luck.v2`) carries
+`rank_input: false`; `--cmd`, `--image` and `--http` are refused, and `run`
+output is unchanged. A cadence longer than a declared window exits 1 with
+`window_shorter_than_cadence`. See [Timing-luck floor](timing-luck.md).
+
 ## `score`
 
 Ranks a JSON field of pre-computed submissions (see

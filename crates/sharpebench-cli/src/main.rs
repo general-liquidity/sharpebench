@@ -31,6 +31,7 @@ mod import_cmd;
 mod lineage_cmd;
 mod regrade_cmd;
 mod rescore_cmd;
+mod timing_luck_cmd;
 #[cfg(feature = "self-update")]
 mod update;
 
@@ -82,6 +83,9 @@ fn main() -> ExitCode {
         }
         Some("import") => ExitCode::from(import_cmd::run(&args, json).clamp(0, 255) as u8),
         Some("gateway") => ExitCode::from(gateway_cli::run(&args, json).clamp(0, 255) as u8),
+        Some("timing-luck") => {
+            ExitCode::from(timing_luck_cmd::run(&args, json).clamp(0, 255) as u8)
+        }
         Some(sub @ ("select" | "disqualify" | "rediscover" | "uncertainty" | "decay-prior")) => {
             ExitCode::from(analysis_cmd::run(sub, &args, json).clamp(0, 255) as u8)
         }
@@ -656,6 +660,9 @@ fn help() {
     );
     println!(
         "  sharpebench regime <a.csv> <b.csv> <regimes.csv> [--col NAME]  compare two return series within each regime (labels are an input)"
+    );
+    println!(
+        "  sharpebench timing-luck --cadence <m> [--data <csv>] [--periods-per-year N]  how far run's reference rows move when they rebalance every m bars and only the schedule phase moves (rank-neutral)"
     );
     println!(
         "  sharpebench lineage <strategy-evidence.json>                   verify Arena candidate ancestry, sources, and within-family robustness"
