@@ -12,7 +12,7 @@ trading, collected in 2026: 84 PDF files counting versions. Three papers are hel
 versions: FINSABER (v1 to v6), FutureX (v1 to v3) and Prophet Arena (v1 and v2). The corpus was
 assembled by hand and is not a systematic sample.
 
-Every paper was read in full, appendices included, on 16 September 2026, by nine AI-assisted
+Every paper was read in full, appendices included, on 16 September 2026, by nine language-model
 readers working to one written brief. Where a paper is held in several versions, the highest
 version was read in full and the earlier versions were compared on their abstracts and evaluation
 sections. For each paper a reader recorded the evaluation facts with page numbers, each mechanism
@@ -177,8 +177,8 @@ in every field.
 | When AI Trading Agents Compete | Runs | 10 to 246 episodes | 10 evaluation episodes, and 20 per side for the aware agent; 140 and 246 are training-episode counts | pp. 4-6 |
 
 Six papers were not in the earlier coding: Can LLM-based Investing Strategies Outperform in the
-Long Run (FINSABER), FutureX, LLM-as-a-Prophet (Prophet Arena), What LLM Trading Agents Do in
-Production (DXRG), Agentic Quantitative Trading (survey) and R&D-Agent-Quant.
+Long Run (FINSABER), FutureX, LLM-as-a-Prophet (Prophet Arena), What LLM Trading Agents Actually Do
+in Production (DXRG), Agentic Quantitative Trading (survey) and R&D-Agent-Quant.
 
 ## What changed in the products
 
@@ -188,7 +188,7 @@ paragraph names the pull request. The same round also includes changes that came
 papers and repositories outside this corpus; they are not described here.
 
 **Sizing response to volatility.** The production record reports a median leverage of 5.0x in
-every volatility sextile across a 5.7x volatility spread (What LLM Trading Agents Do in Production,
+every volatility sextile across a 5.7x volatility spread (What LLM Trading Agents Actually Do in Production,
 pp. 7-8, Table 3). No SharpeBench report related gross exposure to trailing realized volatility, so
 an agent holding constant exposure through volatility spikes looked the same as a
 volatility-targeted one. `sharpebench-sim` now has a rank-neutral diagnostic built on point-in-time
@@ -214,7 +214,7 @@ multi-record journal that accepts schemas 2 and 3. (<<SB-PR-P1>>, <<SA-PR-P1>>)
 publication date (pp. 18-19). `IdeaProvenance` in SharpeBench and the SharpeArena edge manifest
 recorded no date for an idea source, so a source published after the test split began passed
 `sharpebench lineage` unflagged. Both now accept an optional source date and report how many
-sources are dated after each split and how many are undated. (<<SB-PR-P2>>, <<SA-PR-P2>>)
+sources are dated on or after each split's first day and how many are undated. (<<SB-PR-P2>>, <<SA-PR-P2>>)
 
 **Exposure-matched random timing.** Adaptive Alpha Weighting with PPO compares its agent with a
 random entry and exit baseline matched to the agent's turnover and holding duration (p. 11).
@@ -247,7 +247,8 @@ digest. (<<SB-PR-P6>>)
 p. 14), and Auditing AI Investment Recommendations records a token budget that truncated a
 reasoning model's output (p. 4). The SharpeBench gateway carried `finish_reason` per call without
 totalling it, and the SharpeArena local field recorded no stop reason. Finish-reason counts now
-appear in attempt accounting and in the bridge manifest, rank-neutral. (<<SB-PR-P7>>,
+appear in SharpeBench's gateway journal, host-observed usage record and gateway report, and in
+SharpeArena's attempt ledger and bridge manifest, rank-neutral. (<<SB-PR-P7>>,
 <<SA-PR-P7>>)
 
 **Cell isolation disclosure.** R&D-Agent-Quant stores every round's hypotheses, code and results
@@ -267,7 +268,8 @@ expected-shortfall and tail-count diagnostic is now available, rank-neutral. (<<
 periods (p. 8), and on one asset the method closed two positions in six months (p. 26).
 SharpeBench's `pareto_optimal` marked a never-trading track as optimal, because nothing can dominate
 zero drawdown and zero turnover; at the time of the audit the synthetic-field golden recorded the
-`hold` row as Pareto-optimal. Tracks the kernel refuses as constant are no longer Pareto candidates.
+`hold` row as Pareto-optimal. A track the kernel refuses for an undefined Sharpe ratio, constant or non-finite, is no longer a
+Pareto candidate and never dominates another track.
 (<<SB-PR-P10>>)
 
 **Overlapping windows.** AlphaQuanter's robustness check averages three-month windows stepped seven
@@ -288,7 +290,7 @@ reading found 16 of 16 seeds shared at the default rate and 0 of 16 at 200 arriv
 is unchanged, so the frozen F2 results do not move. (<<SA-PR-A1>>)
 
 **Market-making attribution.** The dissertation's reward decomposes into spread earnings, inventory
-mark-to-market and hedging cost (Eqs. 4.1 to 4.4, PDF pp. 67-68). SharpeArena's step information
+mark-to-market, hedging cost and an inventory penalty (Eqs. 4.1 to 4.5, PDF pp. 67-68). SharpeArena's step information
 and `mm_regret` exposed one number, so inventory luck and spread capture could not be told apart.
 SharpeArena now reports an exact per-step decomposition into spread capture, inventory
 mark-to-market, running inventory penalty and liquidation cost that sums to the reward,
@@ -313,14 +315,16 @@ activates one random agent per step (p. 7), FinEvo randomizes wake-up intervals 
 KineticSim aggregates orders per price level without agent identity (pp. 4-5). SharpeArena's book
 processed each bar's orders by agent index, so seat 0 always queued first at a shared price; a
 read-only check during the reading found seat 0 ahead on 32 of 32 seeds for identical quoters.
-An opt-in same-bar priority rule (seeded rotation or pro rata) is now available, with the default
-path and the golden tape unchanged. (<<SA-PR-A7>>)
+An opt-in same-bar priority rule, a seeded shuffle of seat order each step, is now available, with
+the default path and the golden tape unchanged. (<<SA-PR-A7>>)
 
 **Meta-order impact shape.** When AI Trading Agents Compete reports square-root impact during a
 meta-order and power-law decay after it (pp. 3-4). SharpeArena's market model called exponents
 below one "the square-root-law regime", while its permanent impact compounds every bar and never
-decays; a read-only check found impact linear in executed quantity at exponents 1 and 0.5. The
-wording is corrected and a rank-neutral meta-order impact-shape probe is added. A transient-impact
+decays; a read-only check found impact linear in executed quantity at exponents 1 and 0.5. A
+rank-neutral meta-order impact-shape probe is added, and the SharpeArena evaluation guide describes
+the compounding. The code comment is unchanged for now, because `market.rs` is an input to
+`SPEC_HASH`. A transient-impact
 kernel stays Future. (<<SA-PR-A8>>)
 
 **Documentation: the alpha-decay prior.** AI-Driven Alpha Decay describes its 13F portfolio
@@ -447,7 +451,7 @@ the same row.
 | 71 | TradingGroup | 2025 | arXiv 2508.17565v1 | agent-framework | historical backtest | 1 (p. 7) | no | none | none | fees: commission charged, rate not stated (p. 5) | fine-tuning windows end before the test window; online modules disabled (p. 5-6) |
 | 72 | TradingMoE | 2026 | arXiv 2608.11785v1 | LLM-agent | historical backtest + live paper | 1 reference seed (p. 17); repeats only for the Stock benchmark: 5 seeds (p. 14, p. 17) | partial: standard deviation over 5 Stock seeds (p. 17) | Ledoit-Wolf Sharpe test; Newey-West HAC mean test (p. 14) | none | fees: 5 bps one-way; no slippage or borrow (p. 14) | chronological split with causal preprocessing; older-backbone rerun; prospective paper trading (p. 7-8, p. 13) |
 | 73 | Unified Multi-Modal Framework for Financial Systems | not stated | no arXiv id or venue stated | method | historical backtest + synthetic | not stated (p. 13-16) | no | none | none; hyperparameter optimum reported (p. 24) | not stated: a cost term without values (p. 8) | none stated; live deployments claimed without data (p. 13, p. 16, p. 24) |
-| 74 | What LLM Trading Agents Do in Production (DXRG) | 2026 | arXiv 2609.05663v1 | LLM-agent | live real money + live paper + historical backtest | multiple: 3,505 live vaults and 500 to 599 agents; replay league of captured scenarios with 3 repeats per forced cell (p. 3, p. 12) | yes: day-clustered intervals; choice changes across repeats (p. 7, p. 12) | regression discontinuity; Mantel-Haenszel; permutation nulls; Holm-adjusted league tests (p. 6, p. 7, p. 11, p. 12) | comparisons only: Holm across league models (p. 12) | fees: swap and builder fees restated at 5.5 bps; the paper engine has zero slippage and funding (p. 3) | live deployment; leave-window-out validation (p. 2, p. 13) |
+| 74 | What LLM Trading Agents Actually Do in Production (DXRG) | 2026 | arXiv 2609.05663v1 | LLM-agent | live real money + live paper + historical backtest | multiple: 3,505 live vaults and 500 to 599 agents; replay league of captured scenarios with 3 repeats per forced cell (p. 3, p. 12) | yes: day-clustered intervals; choice changes across repeats (p. 7, p. 12) | regression discontinuity; Mantel-Haenszel; permutation nulls; Holm-adjusted league tests (p. 6, p. 7, p. 11, p. 12) | comparisons only: Holm across league models (p. 12) | fees: swap and builder fees restated at 5.5 bps; the paper engine has zero slippage and funding (p. 3) | live deployment; leave-window-out validation (p. 2, p. 13) |
 | 75 | When AI Trading Agents Compete | 2025 | arXiv 2510.27334v1 | method | synthetic | 10 evaluation episodes, 20 per side for the aware agent; one trained agent per variant (p. 4-6) | no | none | none; checkpoint chosen after inspecting behaviour (p. 5-6) | fees: 1 bp on liquidation (p. 4) | none stated |
 | 76 | XALPHA | 2026 | arXiv 2607.08332v2 | LLM-agent | historical backtest | 1 (p. 9) | no | none | none | fees: open 0.05%, close 0.15%, 5 CNY minimum (p. 17) | chronological split; test used only for reporting; leakage tests on generated code (p. 6, p. 27, p. 36) |
 
@@ -533,7 +537,7 @@ The ledger records 17 adopted, 41 already covered, 9 future and 9 not transferab
 | 71 | TradingGroup | Per-decision counterfactual values from the recorded decision and the next bar (p. 5) | **Adopted** (<<SB-PR-P4>>) | Replaying recorded decisions through the frozen engine is built as the rank-neutral lagged replay, valid where the entrant's trades do not move the price. |
 | 72 | TradingMoE | Older-backbone rerun and prospective paper trading as leakage controls (p. 7-8) | Already covered | Forward windows with commit and reveal postdate every entrant (`docs/book/src/attestation.md`); pass^k requires every seed; declared trials cover a displayed grid. |
 | 73 | Unified Multi-Modal Framework for Financial Systems | Robustness table under observation noise, missing data and distribution shift (p. 28) | Future | Perturbed observations fit only a rank-neutral SharpeArena probe, as for TraderBench in the benchmark audit; SharpeArena perturbs execution, not observations (`exec_noise.rs`). |
-| 74 | What LLM Trading Agents Do in Production (DXRG) | A 17-rule methodology canon, choice stability across repeats, sizing against volatility and a zero-funding paper engine (p. 3-15) | **Adopted** (<<SB-PR-P5>>, <<SB-PR-P6>>, <<SB-PR-P7>>, <<SA-PR-P7>>, <<SB-PR-C1>>, <<SB-PR-C2>>) | Sixteen canon rules were already enforced or out of scope; the timing-luck floor, decision stability, finish-reason counts, the sizing-response diagnostic and short-borrow carry are built. |
+| 74 | What LLM Trading Agents Actually Do in Production (DXRG) | A 17-rule methodology canon, choice stability across repeats, sizing against volatility and a zero-funding paper engine (p. 3-15) | **Adopted** (<<SB-PR-P5>>, <<SB-PR-P6>>, <<SB-PR-P7>>, <<SA-PR-P7>>, <<SB-PR-C1>>, <<SB-PR-C2>>) | Sixteen canon rules were already enforced or out of scope; the timing-luck floor, decision stability, finish-reason counts, the sizing-response diagnostic and short-borrow carry are built. |
 | 75 | When AI Trading Agents Compete | Meta-order impact shape: square-root growth during execution and decay after it (p. 3-4) | **Adopted** (<<SA-PR-A8>>) | The concave-exponent wording in `market.rs` is corrected and a rank-neutral impact-shape probe is built; a transient-impact kernel stays Future. |
 | 76 | XALPHA | Research memory from ingested reports with no availability date (p. 4-5, p. 18-19) | **Adopted** (<<SB-PR-P2>>, <<SA-PR-P2>>) | Idea-source provenance carried no date (`candidate_lineage.rs:82-89`); an optional source date, with counts of sources dated after each split and of undated sources, is built. |
 
