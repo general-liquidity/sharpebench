@@ -7,11 +7,13 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 
-use sharpebench_core::{DecisionStabilityReport, StabilityCounts, StabilityRate};
+use sharpebench_core::{
+    DecisionStabilityReport, IdenticalReplicates, StabilityCounts, StabilityRate,
+};
 use sharpebench_harness::decision_stability::decision_stability_from_trajectories;
 use sharpebench_protocol::AgentTrajectory;
 
-const USAGE: &str = "usage: sharpebench decision-stability <traj.json> [<traj.json> ...] [--data <csv>] [--short-borrow-bps <bps>] [--json]";
+const USAGE: &str = "usage: sharpebench decision-stability <traj.json> [<traj.json> ...] [--data <csv>] [--short-borrow-bps <bps>] [--declare-identical-replicates] [--json]";
 
 pub(crate) fn run(args: &[String], json: bool) -> i32 {
     let paths = match trajectory_paths(args) {
@@ -61,7 +63,23 @@ pub(crate) fn run(args: &[String], json: bool) -> i32 {
             return 1;
         }
     };
-    match decision_stability_from_trajectories(&data, &trajectories, costs, Some(&runner)) {
+    // A byte copy of a capture agrees with it by construction. Two captures of
+    // a deterministic agent are equal too, so the operator can declare them.
+    let identical = if args
+        .iter()
+        .any(|arg| arg == "--declare-identical-replicates")
+    {
+        IdenticalReplicates::Declared
+    } else {
+        IdenticalReplicates::Refused
+    };
+    match decision_stability_from_trajectories(
+        &data,
+        &trajectories,
+        costs,
+        Some(&runner),
+        identical,
+    ) {
         Ok(report) => {
             if json {
                 crate::emit_json(&report);
@@ -89,6 +107,8 @@ fn trajectory_paths(args: &[String]) -> Result<Vec<String>, String> {
         } else if arg == "--short-borrow-bps" {
             // The value is validated by `cost_model_from_args`.
             rest.next();
+        } else if arg == "--declare-identical-replicates" {
+            continue;
         } else if arg.starts_with("--") {
             return Err(format!("unknown option `{arg}`"));
         } else {
@@ -122,17 +142,37 @@ fn rate(rate: &StabilityRate) -> String {
 
 fn print_counts(indent: &str, counts: &StabilityCounts) {
     println!(
-        "{indent}differing fraction : {} ({} of {} groups)",
-        rate(&counts.differing_fraction),
+        "{indent}pairwise disagreement : {} ({} of {} replicate pairs)",
+        rate(&counts.pairwise_disagreement),
+        counts.differing_pairs,
+        counts.pairs_compared
+    );
+    let sizes: Vec<String> = counts
+        .group_sizes
+        .iter()
+        .map(|(size, groups)| format!("{groups} of size {size}"))
+        .collect();
+    println!(
+        "{indent}groups (context)      : {} compared, {} differing; {}",
+        counts.groups_compared,
         counts.groups_with_differing_decisions,
-        counts.groups_compared
+        if sizes.is_empty() {
+            "none".to_string()
+        } else {
+            sizes.join(", ")
+        }
     );
     println!(
-        "{indent}steps              : {} compared, {} excluded (observation diverged), {} without a replicate, {} total",
+        "{indent}steps                 : {} compared, {} excluded (observation diverged), {} excluded (decision diverged), {} without a replicate, {} total",
         counts.steps_compared,
         counts.steps_excluded_diverged_observation,
+        counts.steps_excluded_diverged_decision,
         counts.steps_unreplicated,
         counts.steps_total
+    );
+    println!(
+        "{indent}identical replicates  : {}",
+        counts.identical_replicate_runs
     );
 }
 
@@ -150,11 +190,20 @@ fn print_report(report: &DecisionStabilityReport) {
         print_counts("    ", &window.counts);
         for group in &window.differing_groups {
             println!(
-                "    step {}: {} distinct decisions among {} replicates (observation {})",
-                group.step, group.distinct_decisions, group.replicates, group.observation_sha256
+                "    step {}: {} distinct decisions among {} replicates, {} differing pairs (observation {})",
+                group.step,
+                group.distinct_decisions,
+                group.replicates,
+                group.differing_pairs,
+                group.observation_sha256
             );
         }
     }
-    println!("\ngrouping: {}", report.grouping);
+    println!("\nrate    : {}", report.rate);
+    println!("grouping: {}", report.grouping);
     println!("differ  : {}", report.decision_difference);
+    println!("unit    : {}", report.sampling_unit);
+    if report.identical_replicates_declared {
+        println!("identical replicate runs were declared separate executions");
+    }
 }

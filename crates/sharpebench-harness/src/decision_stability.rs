@@ -14,11 +14,13 @@
 //! [`decision_stability_from_trajectories`] runs the strict artifact checks on
 //! every trajectory first, so the replay is against the data, costs and engine
 //! the decisions were captured under, then hands the digested decisions to
-//! [`sharpebench_core::decision_stability`].
+//! [`sharpebench_core::decision_stability`]. Each run's content identity is the
+//! SHA-256 of its serialized JSON bytes, so a byte copy of a run is an identical
+//! replicate.
 
 use sharpebench_core::{
-    decision_stability, observation_sha256, DecisionStabilityReport, ObservedDecision,
-    ReplicateRun, ScoreConfig,
+    decision_stability, observation_sha256, DecisionStabilityReport, IdenticalReplicates,
+    ObservedDecision, ReplicateRun, ScoreConfig,
 };
 use sharpebench_protocol::{
     AgentTrajectory, Decision, DecisionStep, MarketObservation, RunTrajectory,
@@ -120,12 +122,15 @@ pub fn replay_observation_digests(
 /// seeds of one capture, and the same seeds again in a repeated capture. Each
 /// trajectory must pass [`verify_trajectory_strict`] against `data`, `costs` and
 /// `runner_artifact_sha256` (its score is discarded), and all of them must name
-/// the same agent. The report is rank-neutral.
+/// the same agent. Runs of one window with byte-identical JSON are refused
+/// unless `identical` declares them separate executions. The report is
+/// rank-neutral.
 pub fn decision_stability_from_trajectories(
     data: &Dataset,
     trajectories: &[AgentTrajectory],
     costs: CostModel,
     runner_artifact_sha256: Option<&str>,
+    identical: IdenticalReplicates,
 ) -> Result<DecisionStabilityReport, String> {
     let Some(first) = trajectories.first() else {
         return Err("decision stability needs at least one trajectory".to_string());
@@ -144,9 +149,11 @@ pub fn decision_stability_from_trajectories(
         for run in &trajectory.runs {
             let digests = replay_observation_digests(data, run, costs)
                 .map_err(|error| format!("trajectory {index}: {error}"))?;
+            let bytes = serde_json::to_vec(run).expect("run trajectories serialize");
             runs.push(ReplicateRun {
                 window_start: run.window_start,
                 window_end: run.window_end,
+                content_sha256: sharpebench_attest::content_digest(&bytes),
                 steps: digests
                     .into_iter()
                     .zip(&run.steps)
@@ -158,7 +165,7 @@ pub fn decision_stability_from_trajectories(
             });
         }
     }
-    decision_stability(&first.agent_id, &runs).map_err(|error| error.to_string())
+    decision_stability(&first.agent_id, &runs, identical).map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
@@ -191,6 +198,20 @@ mod tests {
         .1
     }
 
+    fn measure(
+        data: &Dataset,
+        trajectories: &[AgentTrajectory],
+        identical: IdenticalReplicates,
+    ) -> Result<DecisionStabilityReport, String> {
+        decision_stability_from_trajectories(
+            data,
+            trajectories,
+            CostModel::default(),
+            None,
+            identical,
+        )
+    }
+
     /// Never trades, so every replicate is shown the same observations. The
     /// replicates with an odd creation index state a different confidence on
     /// every fourth step: a choice the scorer reads, with no fill that could
@@ -213,7 +234,7 @@ mod tests {
                     symbol: observation.symbols[0].symbol.clone(),
                     action: Action::Hold,
                     target_weight: 0.0,
-                    confidence,
+                    confidence: Some(confidence),
                     rationale: String::new(),
                 }],
                 reasoning: String::new(),
@@ -273,63 +294,92 @@ mod tests {
     }
 
     #[test]
-    fn a_deterministic_agent_reports_zero_over_seeds_and_repeated_captures() {
+    fn a_deterministic_agent_reports_zero_over_seeds_and_declared_repeated_captures() {
         let seeds = [0, 1, 2, 3];
-        let report = decision_stability_from_trajectories(
+        let report = measure(
             &data(),
             &[momentum_capture(&seeds), momentum_capture(&seeds)],
-            CostModel::default(),
-            None,
+            IdenticalReplicates::Declared,
         )
         .unwrap();
         assert_eq!(report.agent_id, "momentum");
         assert!(!report.rank_input);
+        assert!(report.identical_replicates_declared);
         assert_eq!(report.replicate_runs, 16);
         assert_eq!(report.windows.len(), 2);
+        assert!(report.windows.iter().all(|window| window.replicates == 8));
+        // Each seed's second capture repeats its first byte for byte.
+        assert_eq!(report.totals.identical_replicate_runs, 8);
         // Every step of a seed is matched by the same seed of the repeated
         // capture, so no step leaves the comparison.
         assert_eq!(report.totals.steps_total, 16 * 20);
         assert_eq!(report.totals.steps_compared, report.totals.steps_total);
         assert_eq!(report.totals.steps_excluded_diverged_observation, 0);
-        assert!(report.totals.groups_compared >= 2 * 20);
-        assert_eq!(report.totals.groups_with_differing_decisions, 0);
+        assert_eq!(report.totals.steps_excluded_diverged_decision, 0);
+        assert!(report.totals.pairs_compared >= 2 * 20);
+        assert_eq!(report.totals.differing_pairs, 0);
         assert_eq!(
-            report.totals.differing_fraction,
+            report.totals.pairwise_disagreement,
             StabilityRate::Available { value: 0.0 }
         );
     }
 
     #[test]
-    fn a_planted_flip_on_alternate_replicates_reports_the_planted_rate() {
-        // Two windows of 20 steps, four replicates each: steps 0, 4, 8, 12 and
-        // 16 of every window hold a disagreement, 5 of 20 groups per window.
-        let report = decision_stability_from_trajectories(
+    fn a_copied_capture_is_refused_unless_declared() {
+        let capture = momentum_capture(&[0, 1]);
+        let copy = capture.clone();
+        let refused = measure(
+            &data(),
+            &[capture.clone(), copy.clone()],
+            IdenticalReplicates::Refused,
+        )
+        .unwrap_err();
+        assert_eq!(
+            refused,
+            "window [20, 40) holds 2 replicate runs identical to another replicate; a copied capture agrees with itself, so declare them separate executions or remove the copies"
+        );
+
+        let declared = measure(
+            &data(),
+            &[capture.clone(), copy],
+            IdenticalReplicates::Declared,
+        )
+        .unwrap();
+        assert_eq!(declared.totals.identical_replicate_runs, 4);
+
+        // One capture alone holds no copies: its runs differ in seed.
+        let alone = measure(&data(), &[capture], IdenticalReplicates::Refused).unwrap();
+        assert_eq!(alone.totals.identical_replicate_runs, 0);
+    }
+
+    #[test]
+    fn a_planted_split_reports_its_pairwise_rate_and_counts_each_difference_once() {
+        // Four replicates per window of 20 steps. The odd replicates choose a
+        // different confidence at step 0 (4 of 6 pairs differ) and again at
+        // every fourth step; after step 0 the two sides are separate histories,
+        // so those repeats are not counted. Per window: 4 / (6 + 19 * 2) = 1 / 11.
+        let report = measure(
             &data(),
             &[planted_capture(&[0, 1, 2, 3])],
-            CostModel::default(),
-            None,
+            IdenticalReplicates::Refused,
         )
         .unwrap();
         for window in &report.windows {
             assert_eq!(window.replicates, 4);
-            assert_eq!(window.counts.groups_compared, 20);
-            assert_eq!(window.counts.groups_with_differing_decisions, 5);
-            let steps: Vec<usize> = window
-                .differing_groups
-                .iter()
-                .map(|group| group.step)
-                .collect();
-            assert_eq!(steps, vec![0, 4, 8, 12, 16]);
-            assert!(window
-                .differing_groups
-                .iter()
-                .all(|group| group.replicates == 4 && group.distinct_decisions == 2));
+            assert_eq!(window.counts.pairs_compared, 44);
+            assert_eq!(window.counts.differing_pairs, 4);
+            assert_eq!(window.counts.groups_compared, 39);
+            assert_eq!(window.differing_groups.len(), 1);
+            assert_eq!(window.differing_groups[0].step, 0);
+            assert_eq!(window.differing_groups[0].differing_pairs, 4);
+            assert_eq!(window.counts.steps_compared, 80);
         }
         assert_eq!(
-            report.totals.differing_fraction,
-            StabilityRate::Available { value: 0.25 }
+            report.totals.pairwise_disagreement,
+            StabilityRate::Available { value: 1.0 / 11.0 }
         );
         assert_eq!(report.totals.steps_excluded_diverged_observation, 0);
+        assert_eq!(report.totals.steps_excluded_diverged_decision, 0);
     }
 
     #[test]
@@ -345,15 +395,10 @@ mod tests {
             || Box::new(BuyAndHold) as Box<dyn Agent>,
         )
         .1;
-        let report = decision_stability_from_trajectories(
-            &data(),
-            &[trajectory],
-            CostModel::default(),
-            None,
-        )
-        .unwrap();
+        let report = measure(&data(), &[trajectory], IdenticalReplicates::Refused).unwrap();
         for window in &report.windows {
             assert_eq!(window.counts.groups_compared, 1);
+            assert_eq!(window.counts.pairs_compared, 3);
             assert_eq!(window.counts.steps_compared, 3);
             assert_eq!(window.counts.steps_excluded_diverged_observation, 3 * 19);
         }
@@ -361,27 +406,27 @@ mod tests {
             report.totals.steps_excluded_diverged_observation,
             2 * 3 * 19
         );
+        assert_eq!(report.totals.steps_excluded_diverged_decision, 0);
         assert_eq!(
-            report.totals.differing_fraction,
+            report.totals.pairwise_disagreement,
             StabilityRate::Available { value: 0.0 }
         );
     }
 
     #[test]
     fn a_single_replicate_is_typed_unavailable() {
-        let report = decision_stability_from_trajectories(
+        let report = measure(
             &data(),
             &[planted_capture(&[7])],
-            CostModel::default(),
-            None,
+            IdenticalReplicates::Refused,
         )
         .unwrap();
         assert_eq!(report.replicate_runs, 2);
         assert!(report.windows.iter().all(|window| window.replicates == 1));
         assert_eq!(report.totals.steps_unreplicated, 40);
-        assert_eq!(report.totals.groups_compared, 0);
+        assert_eq!(report.totals.pairs_compared, 0);
         assert_eq!(
-            report.totals.differing_fraction,
+            report.totals.pairwise_disagreement,
             StabilityRate::Unavailable {
                 reason: StabilityUnavailable::SingleReplicate
             }
@@ -390,38 +435,26 @@ mod tests {
 
     #[test]
     fn a_mixed_or_unbound_field_is_refused() {
-        let mixed = decision_stability_from_trajectories(
+        let refused = IdenticalReplicates::Refused;
+        let mixed = measure(
             &data(),
             &[momentum_capture(&[0]), planted_capture(&[0])],
-            CostModel::default(),
-            None,
+            refused,
         )
         .unwrap_err();
         assert!(mixed.contains("trajectory 1 is agent `flipper`"), "{mixed}");
 
         let mut unbound = momentum_capture(&[0]);
         unbound.contract = None;
-        let refused =
-            decision_stability_from_trajectories(&data(), &[unbound], CostModel::default(), None)
-                .unwrap_err();
-        assert!(refused.starts_with("trajectory 0: "), "{refused}");
-        assert!(refused.contains("no execution contract"), "{refused}");
+        let error = measure(&data(), &[unbound], refused).unwrap_err();
+        assert!(error.starts_with("trajectory 0: "), "{error}");
+        assert!(error.contains("no execution contract"), "{error}");
 
         let foreign = Dataset::synthetic(3, 60, 1);
-        let refused = decision_stability_from_trajectories(
-            &foreign,
-            &[momentum_capture(&[0])],
-            CostModel::default(),
-            None,
-        )
-        .unwrap_err();
-        assert!(
-            refused.contains("does not match verifier dataset"),
-            "{refused}"
-        );
+        let error = measure(&foreign, &[momentum_capture(&[0])], refused).unwrap_err();
+        assert!(error.contains("does not match verifier dataset"), "{error}");
 
-        let empty = decision_stability_from_trajectories(&data(), &[], CostModel::default(), None)
-            .unwrap_err();
+        let empty = measure(&data(), &[], refused).unwrap_err();
         assert_eq!(empty, "decision stability needs at least one trajectory");
     }
 

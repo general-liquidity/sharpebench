@@ -84,7 +84,7 @@ impl Agent for PlantedFlipper {
                 symbol: observation.symbols[0].symbol.clone(),
                 action: Action::Hold,
                 target_weight: 0.0,
-                confidence,
+                confidence: Some(confidence),
                 rationale: String::new(),
             }],
             reasoning: String::new(),
@@ -130,26 +130,40 @@ fn capture(dir: &Path, agent: &str, name: &str) -> String {
 }
 
 #[test]
-fn a_deterministic_reference_agent_reports_zero_over_repeated_captures() {
+fn a_deterministic_reference_agent_reports_zero_over_declared_repeated_captures() {
     let dir = tempfile::tempdir().unwrap();
     let first = capture(dir.path(), "momentum", "first.json");
     let second = capture(dir.path(), "momentum", "second.json");
 
-    let report = stdout_json(&cli(&["decision-stability", &first, &second, "--json"]));
+    let report = stdout_json(&cli(&[
+        "decision-stability",
+        &first,
+        &second,
+        "--declare-identical-replicates",
+        "--json",
+    ]));
     assert_eq!(report["schema"], "sharpebench.decision-stability.v1");
     assert_eq!(report["agent_id"], "momentum");
     assert_eq!(report["rank_input"], false);
+    assert_eq!(report["identical_replicates_declared"], true);
     assert_eq!(report["replicate_runs"], 32);
+    // The second capture repeats every run of the first byte for byte.
+    assert_eq!(report["identical_replicate_runs"], 16);
     assert_eq!(report["steps_total"], 32 * 80);
     // Each seed is matched by the same seed of the other capture at every step.
     assert_eq!(report["steps_compared"], 32 * 80);
     assert_eq!(report["steps_excluded_diverged_observation"], 0);
-    assert_eq!(report["groups_with_differing_decisions"], 0);
-    assert!(report["groups_compared"].as_u64().unwrap() >= 2 * 80);
+    assert_eq!(report["steps_excluded_diverged_decision"], 0);
+    assert_eq!(report["differing_pairs"], 0);
+    assert!(report["pairs_compared"].as_u64().unwrap() >= 2 * 80);
     assert_eq!(
-        report["differing_fraction"],
+        report["pairwise_disagreement"],
         json!({"status": "available", "value": 0.0})
     );
+    assert!(report["sampling_unit"]
+        .as_str()
+        .unwrap()
+        .starts_with("the replicate run"));
     let windows: Vec<(u64, u64, u64)> = report["windows"]
         .as_array()
         .unwrap()
@@ -166,47 +180,106 @@ fn a_deterministic_reference_agent_reports_zero_over_repeated_captures() {
 }
 
 #[test]
+fn identical_replicates_are_refused_unless_declared() {
+    let dir = tempfile::tempdir().unwrap();
+    let original = capture(dir.path(), "momentum", "original.json");
+    let copy = path(dir.path(), "copy.json");
+    std::fs::copy(&original, &copy).unwrap();
+
+    let refused = cli(&["decision-stability", &original, &copy]);
+    assert_eq!(refused.status.code(), Some(1));
+    assert!(
+        stderr(&refused)
+            .contains("window [20, 100) holds 8 replicate runs identical to another replicate"),
+        "{}",
+        stderr(&refused)
+    );
+
+    let declared = stdout_json(&cli(&[
+        "decision-stability",
+        &original,
+        &copy,
+        "--declare-identical-replicates",
+        "--json",
+    ]));
+    assert_eq!(declared["identical_replicate_runs"], 16);
+
+    let text = cli(&[
+        "decision-stability",
+        &original,
+        &copy,
+        "--declare-identical-replicates",
+    ]);
+    let text = String::from_utf8_lossy(&text.stdout);
+    assert!(text.contains("identical replicates  : 16"), "{text}");
+    assert!(
+        text.contains("identical replicate runs were declared separate executions"),
+        "{text}"
+    );
+}
+
+#[test]
 fn execution_seeds_of_one_capture_diverge_and_the_excluded_steps_are_counted() {
     let dir = tempfile::tempdir().unwrap();
     let only = capture(dir.path(), "buy-and-hold", "only.json");
     let report = stdout_json(&cli(&["decision-stability", &only, "--json"]));
     // Buy-and-hold fills on its first step at a seed-dependent price, so the
-    // eight seeds share one observation per window.
+    // eight seeds share one observation per window: 28 agreeing pairs each.
     assert_eq!(report["groups_compared"], 2);
+    assert_eq!(report["group_sizes"], json!({"8": 2}));
+    assert_eq!(report["pairs_compared"], 2 * 28);
     assert_eq!(report["steps_compared"], 2 * 8);
     assert_eq!(report["steps_excluded_diverged_observation"], 2 * 8 * 79);
+    assert_eq!(report["steps_excluded_diverged_decision"], 0);
     assert_eq!(report["steps_unreplicated"], 0);
+    assert_eq!(report["identical_replicate_runs"], 0);
     assert_eq!(
-        report["differing_fraction"],
+        report["pairwise_disagreement"],
         json!({"status": "available", "value": 0.0})
     );
 }
 
 #[test]
-fn a_planted_flip_is_reported_at_its_planted_rate() {
+fn a_planted_split_is_reported_at_its_pairwise_rate() {
+    // Four replicates per window of 80 steps; the odd ones choose differently
+    // at step 0 and every fourth step after it. Step 0 holds 4 of 6 differing
+    // pairs; the two sides then agree within themselves for 79 steps, and the
+    // repeats are not counted again: 8 / (2 * (6 + 79 * 2)) = 1 / 41.
     let dir = tempfile::tempdir().unwrap();
     let flipper = write_flipper(dir.path(), "flipper.json", &[0, 1, 2, 3]);
     let report = stdout_json(&cli(&["decision-stability", &flipper, "--json"]));
-    assert_eq!(report["groups_compared"], 160);
-    assert_eq!(report["groups_with_differing_decisions"], 40);
+    assert_eq!(report["pairs_compared"], 328);
+    assert_eq!(report["differing_pairs"], 8);
     assert_eq!(
-        report["differing_fraction"],
-        json!({"status": "available", "value": 0.25})
+        report["pairwise_disagreement"],
+        json!({"status": "available", "value": 1.0 / 41.0})
     );
+    assert_eq!(report["groups_compared"], 2 * (1 + 79 * 2));
+    assert_eq!(report["groups_with_differing_decisions"], 2);
     let first_window = &report["windows"][0];
     assert_eq!(
-        first_window["differing_groups"].as_array().unwrap().len(),
-        20
+        first_window["differing_groups"],
+        json!([{
+            "step": 0,
+            "observation_sha256": first_window["differing_groups"][0]["observation_sha256"],
+            "replicates": 4,
+            "distinct_decisions": 2,
+            "differing_pairs": 4,
+        }])
     );
-    assert_eq!(first_window["differing_groups"][1]["step"], 4);
-    assert_eq!(first_window["differing_groups"][1]["distinct_decisions"], 2);
 
     let text = cli(&["decision-stability", &flipper]);
     assert!(text.status.success(), "{}", stderr(&text));
     let text = String::from_utf8_lossy(&text.stdout);
     assert!(text.contains("rank-neutral, not a rank input"), "{text}");
     assert!(
-        text.contains("differing fraction : 0.2500 (40 of 160 groups)"),
+        text.contains("pairwise disagreement : 0.0244 (8 of 328 replicate pairs)"),
+        "{text}"
+    );
+    assert!(
+        text.contains(
+            "groups (context)      : 318 compared, 2 differing; 316 of size 2, 2 of size 4"
+        ),
         "{text}"
     );
 }
@@ -218,14 +291,17 @@ fn a_single_replicate_is_typed_unavailable() {
     let output = cli(&["decision-stability", &alone, "--json"]);
     let report = stdout_json(&output);
     assert_eq!(
-        report["differing_fraction"],
+        report["pairwise_disagreement"],
         json!({"status": "unavailable", "reason": "single_replicate"})
     );
     assert_eq!(report["steps_unreplicated"], 160);
-    assert_eq!(report["groups_compared"], 0);
+    assert_eq!(report["pairs_compared"], 0);
+    assert_eq!(report["group_sizes"], json!({}));
 
     let text = cli(&["decision-stability", &alone]);
-    assert!(String::from_utf8_lossy(&text.stdout).contains("unavailable (single_replicate)"));
+    let text = String::from_utf8_lossy(&text.stdout);
+    assert!(text.contains("unavailable (single_replicate)"), "{text}");
+    assert!(text.contains("0 compared, 0 differing; none"), "{text}");
 }
 
 #[test]
@@ -310,7 +386,7 @@ fn a_capture_under_a_borrow_rate_replays_only_under_that_rate() {
         "--json",
     ]));
     assert_eq!(report["replicate_runs"], 16);
-    assert_eq!(report["groups_with_differing_decisions"], 0);
+    assert_eq!(report["differing_pairs"], 0);
 
     let invalid = cli(&["decision-stability", &out, "--short-borrow-bps", "-1"]);
     assert_eq!(invalid.status.code(), Some(2));
