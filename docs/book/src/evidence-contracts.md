@@ -119,10 +119,14 @@ from whatever records arrive.
 
 ## Captured trajectories
 
-Trajectory contract schema 2 binds dataset, costs, engine version, ordered
+Trajectory contract schema 3 binds dataset, costs, engine version, ordered
 windows, ordered seeds, and, for CLI captures, the runner artifact. Strict
 verification requires exactly one run for every window-by-seed cell in the
-declared order.
+declared order. Schema 3 records an order's confidence only when the agent
+stated one. Schema 2 captures wrote a filled-in 0.5 on every order, so strict
+verification refuses them, and the explicit legacy regrade still replays them
+with every recorded value counted as stated. See
+[confidence and calibration](submitting.md#confidence-and-calibration).
 
 For every run, the verifier checks:
 
@@ -131,6 +135,12 @@ For every run, the verifier checks:
 - `steps.len() == end - start`;
 - sequential step indices; and
 - observation identity equal to the frozen dataset date for that step.
+
+The declared windows must also be in time order with no bar in two windows;
+adjacent windows (`end` equal to the next `start`) are accepted. An overlap or
+a window listed before an earlier one is refused with a typed
+`WindowOrderError` naming both windows, because the pooled track would count
+the shared bars twice. See [pass^k reliability](methodology-pass-k.md).
 
 The replay score derives `execution_seeds_per_window` from the contract, so
 seed replicates remain replicates instead of becoming extra market-time

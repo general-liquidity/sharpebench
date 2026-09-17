@@ -596,7 +596,7 @@ fn help() {
         "                       --diagnostics <list>: also report opt-in Sharpe diagnostics the gate"
     );
     println!(
-        "                         does not use: autocorrelated-psr,null-se-psr,mppm (comma-separated)"
+        "                         does not use: autocorrelated-psr,null-se-psr,mppm,expected-shortfall (comma-separated)"
     );
     println!(
         "  sharpebench commit <agent> <window> <digest> <salt> [--fault-plan <plan.json>]  forward-attestation pre-registration"
@@ -1392,7 +1392,7 @@ fn checkpoint_contract(
         }
         None => sharpebench_attest::content_digest(entrant_material),
     };
-    Ok(sharpebench_harness::SweepContract::new(
+    sharpebench_harness::SweepContract::try_new(
         sharpebench_harness::SweepIdentity {
             dataset_sha256: digest_json("dataset", execution.data)?,
             cost_model_sha256: sharpebench_harness::cost_model_digest(execution.costs),
@@ -1415,7 +1415,8 @@ fn checkpoint_contract(
         execution.windows,
         execution.seeds,
         execution.max_retries,
-    ))
+    )
+    .map_err(|e| e.to_string())
 }
 
 fn invocation_with_rates(material: &[u8], card: Option<&RateCard>) -> Result<String, String> {
@@ -1719,7 +1720,7 @@ fn invalid_orders(
         symbol: symbol.to_string(),
         action: Action::Buy,
         target_weight,
-        confidence: 0.5,
+        confidence: Some(0.5),
         rationale: String::new(),
     };
     let decision = |orders: Vec<Order>| Decision {
@@ -3321,6 +3322,7 @@ fn print_sharpe_diagnostics(
             SharpeDiagnostic::AutocorrelatedPsr => "     rho  ac_PSR  ac_DSR",
             SharpeDiagnostic::NullSePsr => " null_PSR null_DSR",
             SharpeDiagnostic::Mppm => "   MPPM(3)/yr",
+            SharpeDiagnostic::ExpectedShortfall => "   ES(5%)  tail  loss_fq",
         });
     }
     println!("\nOpt-in Sharpe diagnostics. Not used by the gate, eligibility or the rank.");
@@ -3357,6 +3359,15 @@ fn print_sharpe_diagnostics(
                         cell(row.mppm.as_ref().and_then(|m| m.annualized))
                     )
                 }
+                SharpeDiagnostic::ExpectedShortfall => {
+                    let t = row.expected_shortfall.as_ref();
+                    format!(
+                        " {:>8} {:>5} {:>8}",
+                        cell(t.and_then(|t| t.tail_mean_return)),
+                        t.map_or(0, |t| t.tail_observations),
+                        cell(t.and_then(|t| t.loss_frequency))
+                    )
+                }
             };
             line.push_str(&text);
         }
@@ -3372,6 +3383,8 @@ fn print_sharpe_diagnostics(
                     "null_*: the same two statistics with the standard error evaluated at the benchmark, serial independence kept (ibid., eqs. 4-5).",
                 SharpeDiagnostic::Mppm =>
                     "MPPM(3)/yr: manipulation-proof performance, risk aversion 3, zero risk-free rate, annualized (Goetzmann, Ingersoll, Spiegel and Welch 2007, eq. 18).",
+                SharpeDiagnostic::ExpectedShortfall =>
+                    "ES(5%): mean return over the worst 5% of the pooled track (historical expected shortfall), n/a below 10 whole tail observations; tail: observations in it; loss_fq: fraction of bars below zero.",
             }
         );
     }

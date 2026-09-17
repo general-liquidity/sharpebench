@@ -49,8 +49,13 @@ pub struct Run {
     pub returns: Vec<f64>,
     #[serde(default)]
     pub trace: Trace,
+    /// Confidences the agent stated, one per decision that stated one, in
+    /// decision order. Index-aligned with `outcomes`, not with `returns`: a
+    /// decision that stated no confidence has no entry, and nothing may be
+    /// filled in for it.
     #[serde(default)]
     pub confidences: Vec<f64>,
+    /// Whether the decision behind the matching `confidences` entry paid off.
     #[serde(default)]
     pub outcomes: Vec<bool>,
     /// Compute/token cost incurred to produce this run (any consistent unit).
@@ -863,9 +868,10 @@ pub struct CompositeScore {
     pub alpha: f64,
     pub beta: f64,
     /// Calibration of stated confidence (Brier score; lower = better). `None` if
-    /// the agent reported no confidences/outcomes.
+    /// no run carries a stated confidence with its outcome.
     pub calibration_brier: Option<f64>,
-    /// Decision-level confidence/outcome pairs behind `calibration_brier`.
+    /// Decision-level confidence/outcome pairs behind `calibration_brier`: only
+    /// confidences the agent stated, never a filled-in value.
     /// Pairing is performed inside each run, never across a run boundary.
     #[serde(default)]
     pub calibration_observations: usize,
@@ -902,14 +908,20 @@ pub struct CompositeScore {
     /// Turnover proxy: average orders placed per run (trading frequency / capacity).
     pub turnover: f64,
     /// Whether the agent is on the Pareto front over (return↑, drawdown↓,
-    /// turnover↓). Filled by [`rank`].
+    /// turnover↓), taken among the agents whose pooled track has a Sharpe
+    /// ratio. Always `false` for a track the kernel refuses as having none (it
+    /// is constant, or its Sharpe is not finite), and such a track removes no
+    /// other agent from the front. Reported only: no gate, eligibility rule or
+    /// rank reads it. Filled by [`rank`].
     pub pareto_optimal: bool,
     /// Whether the agent's outperformance survives Romano–Wolf step-down multiple
     /// testing across the field. Filled by [`rank`].
     pub step_down_significant: bool,
-    /// Conviction-weighted return: each run's return weighted by the confidence the
-    /// agent staked on it. Rewards sizing conviction with the outcome. Falls back to
-    /// the raw mean when no confidences are reported.
+    /// Conviction-weighted return: each run's mean return weighted by the mean
+    /// of the run's `confidences`, the stated confidences paired with an
+    /// outcome. Rewards sizing conviction with the outcome. A run with no such
+    /// confidence carries no weight. When no run has one, every run weighs the
+    /// same (the mean of the per-run mean returns).
     pub confidence_weighted_return: f64,
     /// Total compute/token cost across all runs (0.0 if unreported).
     pub cost: f64,
@@ -1190,6 +1202,23 @@ fn dominates(a: &CompositeScore, b: &CompositeScore) -> bool {
             || a.turnover < b.turnover)
 }
 
+/// Whether the kernel refuses `pooled` as having no Sharpe ratio: the refusal
+/// `score_agent_with` reads as `sharpe_undefined`, where every observation is
+/// equal or the Sharpe does not stay finite. Such a track is not a Pareto
+/// candidate. A never-trading track is all zeros, so its drawdown is zero and,
+/// with no orders, so is its turnover, and nothing could ever dominate it.
+fn has_no_sharpe_ratio(pooled: &[f64]) -> bool {
+    matches!(
+        checked_probabilistic_sharpe_ratio(pooled, 0.0),
+        Err(StatisticalError::InvalidParameter {
+            name: "returns",
+            ..
+        } | StatisticalError::NonFiniteComputation {
+            quantity: "Sharpe ratio"
+        })
+    )
+}
+
 /// The resolved per-period deflation dispersion a score is computed with, and
 /// where it came from. Built exactly once per scoring call so the configured
 /// prior is converted in one place ([`per_period_sr_std`]) and the measured
@@ -1429,13 +1458,17 @@ fn score_agent_with(
 
     // Confidence-weighted return: weight each run's return by the conviction
     // staked on it, so sizing-with-conviction beats flat-confidence trading.
+    // A run with no stated confidence has no conviction to weigh and carries
+    // no weight, unless no run states one, in which case every run weighs the
+    // same.
+    let any_stated = sub.runs.iter().any(|r| !r.confidences.is_empty());
     let mut cw_num = 0.0;
     let mut cw_den = 0.0;
     for r in &sub.runs {
-        let w = if r.confidences.is_empty() {
-            1.0
-        } else {
-            mean(&r.confidences)
+        let w = match (any_stated, r.confidences.is_empty()) {
+            (false, _) => 1.0,
+            (true, true) => continue,
+            (true, false) => mean(&r.confidences),
         };
         cw_num += w * mean(&r.returns);
         cw_den += w;
@@ -2090,9 +2123,17 @@ pub fn rank_declared(
         }
     }
 
-    // Pareto front over (return↑, drawdown↓, turnover↓).
+    // Pareto front over (return↑, drawdown↓, turnover↓), among the agents
+    // whose pooled track has a Sharpe ratio. A refused track is neither on the
+    // front nor able to push another agent off it. `pooled` is in field order,
+    // as `scores` still is before the sort below.
+    let candidate: Vec<bool> = pooled.iter().map(|p| !has_no_sharpe_ratio(p)).collect();
     let pareto: Vec<bool> = (0..scores.len())
-        .map(|i| !(0..scores.len()).any(|j| j != i && dominates(&scores[j], &scores[i])))
+        .map(|i| {
+            candidate[i]
+                && !(0..scores.len())
+                    .any(|j| j != i && candidate[j] && dominates(&scores[j], &scores[i]))
+        })
         .collect();
     for (cs, p) in scores.iter_mut().zip(pareto) {
         cs.pareto_optimal = p;

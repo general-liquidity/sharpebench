@@ -41,6 +41,17 @@ downside deviation (excess return per unit of *downside* volatility, MAR = 0). I
 rewards an edge that doesn't arrive with downside churn, where the Sharpe penalizes
 all volatility symmetrically.
 
+**Pareto-optimality** (`pareto_optimal`) marks the agents that no other agent
+beats on return, drawdown and turnover at once, taken among the agents whose
+pooled track has a Sharpe ratio. A track the kernel refuses as having none (it
+is constant, or its Sharpe is not finite, and its `deflation_error` says which)
+is never on the front and never removes another agent from it. Without that
+rule a track that never trades, all zeros with zero drawdown and, having placed
+no orders, zero turnover, could never be dominated and would always be marked
+optimal, and it would push every agent with a negative mean return off the
+front. The flag is
+reported only: no gate, eligibility rule or rank reads it.
+
 ## What the rank does not answer
 
 Two boundaries come straight from Sharpe's own 1994 statement of the ratio, and
