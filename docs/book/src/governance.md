@@ -20,12 +20,15 @@ tampering without pretending to remove the host from the trust boundary.
    committed artifact, the revealed dataset and the window's execution matrix,
    and each published row says so (`returns_provenance`). Replay does not show
    the decisions were made without hindsight: anyone holding the revealed data
-   can record hindsight decisions that replay exactly. Only a row re-executed
-   from the committed artifact (`arena score --reexecute`, for a pinned image or
-   a reference agent) shows the artifact itself makes those decisions on
-   point-in-time observations, and that still rests on the operator's data
-   custody. Returns an entrant supplies after the reveal are ranked only on a
-   board signed as noncertifying. See [returns intake](arena.md#returns-intake).
+   can record hindsight decisions that replay exactly. `arena score` therefore
+   re-executes the committed artifact by default (a pinned image or a reference
+   agent) and refuses a capture whose decisions it does not repeat. The signed
+   header marks a board `certifying` only when every ranked row was
+   re-executed. A board with a row ranked from replay alone
+   (`arena score --replay-only`) or from supplied returns
+   (`--allow-supplied-returns`) is signed noncertifying. A certifying row still
+   rests on the operator's custody of the data. See
+   [returns intake](arena.md#returns-intake).
 4. **Boards are tamper-evident.** A published board is an HMAC-signed chain; a
    silently edited or reordered result fails `verify`.
 5. **The benchmark exercises ten catalogued attacks.** `sharpebench audit`

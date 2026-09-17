@@ -52,7 +52,7 @@ each is demoted:
 [DEFENDED] tail-seller                smooth linear returns earned by selling tail risk (naked short gamma)
 [DEFENDED] adversarial-input          look excellent in-sample with an accurate forecast head, then collapse under a small in-range input perturbation
 [DEFENDED] sybil-sock-puppets         flood the field with near-duplicate agents to shrink measured trials_sr_std and lower the bar
-[DEFENDED] forward-hindsight-oracle   deliver a next-bar oracle's hindsight returns or decisions through the forward arena
+[DEFENDED] forward-hindsight-oracle   deliver a next-bar oracle's hindsight returns or decisions through the forward arena; never on a certifying board
 ```
 
 The command exits non-zero if **any** attack is not demoted. That makes the audit
