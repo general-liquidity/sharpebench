@@ -1329,13 +1329,32 @@ pub struct TestSplitCensusClaim {
     pub scope: String,
     pub test_split_identity: Value,
     pub test_split_sha256: String,
+    /// Half-open bar interval the kernel resolved for this test split.
+    pub test_window_bars: [u64; 2],
+    /// Bar count of the panel the test split reads.
+    pub test_dataset_bars: u64,
     pub test_consulted: bool,
     pub prior_test_consultations: usize,
     pub prior_consultation_record_sha256: Vec<String>,
     pub prior_observed_n_trials: u64,
     pub cumulative_observed_n_trials: u64,
+    /// Earlier consultations of the same panel whose window intersects
+    /// `test_window_bars`, exact matches included.
+    pub overlapping_prior_test_consultations: usize,
+    pub overlapping_prior_consultation_record_sha256: Vec<String>,
+    pub overlapping_prior_observed_n_trials: u64,
+    /// Bars of `test_window_bars` that at least one overlapping consultation read.
+    pub prior_consulted_test_bars: u64,
     pub unidentified_prior_records: usize,
+    /// Digest of the journal's last nonblank line before this record, or
+    /// `None` for the first line. Removing, inserting or reordering an earlier
+    /// line breaks it; lines cut from the journal's end leave no trace.
+    pub previous_record_sha256: Option<String>,
 }
+
+/// Newest SharpeArena strategy evidence schema whose census rules this
+/// verifier knows.
+pub const NEWEST_STRATEGY_SCHEMA: u64 = 3;
 
 /// Identity of the bars one test consultation read, from a recorded split and
 /// its seed list, or `None` when either is missing or malformed.
@@ -1449,6 +1468,76 @@ fn observed_trials(record: &Value) -> u64 {
         .unwrap_or(0)
 }
 
+/// Whether two split identities read bars of the same panel: the same content,
+/// and for synthetic panels at least one common seed.
+fn shares_bars(prior: &Value, current: &Value) -> bool {
+    if prior["content_sha256"] != current["content_sha256"] {
+        return false;
+    }
+    match (
+        prior["scenario_seeds"].as_array(),
+        current["scenario_seeds"].as_array(),
+    ) {
+        (Some(prior_seeds), Some(current_seeds)) => {
+            prior_seeds.iter().any(|seed| current_seeds.contains(seed))
+        }
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+/// The bars of `identity`'s window inside `[start, end)`, with omitted bounds
+/// resolved against a panel of `bars` bars.
+fn shared_interval(identity: &Value, [start, end]: [u64; 2], bars: u64) -> Option<(u64, u64)> {
+    let low = start.max(identity["window_start"].as_u64().unwrap_or(0));
+    let high = end.min(identity["window_end"].as_u64().unwrap_or(bars));
+    (low < high).then_some((low, high))
+}
+
+/// Number of bars in the union of half-open intervals.
+fn covered_bars(mut intervals: Vec<(u64, u64)>) -> u64 {
+    intervals.sort_unstable();
+    let mut covered = 0;
+    let mut reach = 0;
+    for (start, end) in intervals {
+        let start = start.max(reach);
+        if end > start {
+            covered += end - start;
+            reach = end;
+        }
+    }
+    covered
+}
+
+/// Refuse a declared panel bar count that contradicts a supplied dataset.
+///
+/// `calendars` maps a content digest to its bar labels, as for
+/// [`resolve_split_first_date`]. A synthetic split, or a historical split whose
+/// dataset was not supplied, is left unchecked here.
+pub fn check_census_dataset_bars(
+    claim: &TestSplitCensusClaim,
+    calendars: &BTreeMap<String, Vec<String>>,
+) -> Result<(), CandidateLineageError> {
+    let identity = &claim.test_split_identity;
+    let labels = identity["content_sha256"]
+        .as_str()
+        .filter(|_| identity["scenario_seeds"].is_null())
+        .and_then(|content| calendars.get(content));
+    match labels {
+        Some(labels) if u64::try_from(labels.len()).ok() != Some(claim.test_dataset_bars) => {
+            Err(CandidateLineageError::at(
+                "test_split_census.test_dataset_bars",
+                format!(
+                    "claims {}, but the supplied dataset has {} bars",
+                    claim.test_dataset_bars,
+                    labels.len()
+                ),
+            ))
+        }
+        _ => Ok(()),
+    }
+}
+
 /// Check a record's declared test-split census against the record itself.
 ///
 /// Schema 3 records must carry one. The identity must be well formed and
@@ -1459,7 +1548,9 @@ pub fn check_test_split_census_claim(
     record: &Value,
 ) -> Result<Option<TestSplitCensusClaim>, CandidateLineageError> {
     let Some(raw) = record.get("test_split_census") else {
-        if record.get("schema_version").and_then(Value::as_u64) >= Some(3) {
+        if record.get("evidence_class").and_then(Value::as_str) == Some(STRATEGY_EVIDENCE_CLASS)
+            && record.get("schema_version").and_then(Value::as_u64) >= Some(3)
+        {
             return Err(CandidateLineageError::at(
                 "test_split_census",
                 "is required from strategy evidence schema 3",
@@ -1485,13 +1576,62 @@ pub fn check_test_split_census_claim(
         &claim.test_split_sha256,
         &claim.test_split_identity,
     )?;
+    let [start, end] = claim.test_window_bars;
+    let bars = claim.test_dataset_bars;
+    let identity = &claim.test_split_identity;
+    if !(start < end && end <= bars)
+        || identity["window_start"].as_u64().unwrap_or(0) != start
+        || identity["window_end"].as_u64().unwrap_or(bars) != end
+    {
+        return Err(CandidateLineageError::at(
+            "test_split_census.test_window_bars",
+            format!("[{start}, {end}) over {bars} bars does not resolve the identity's window"),
+        ));
+    }
     compare_count(
         "test_split_census.prior_test_consultations",
         claim.prior_test_consultations,
         claim.prior_consultation_record_sha256.len(),
     )?;
-    for digest in &claim.prior_consultation_record_sha256 {
+    compare_count(
+        "test_split_census.overlapping_prior_test_consultations",
+        claim.overlapping_prior_test_consultations,
+        claim.overlapping_prior_consultation_record_sha256.len(),
+    )?;
+    for digest in claim
+        .prior_consultation_record_sha256
+        .iter()
+        .chain(&claim.overlapping_prior_consultation_record_sha256)
+    {
         verify_plain_sha256(digest, "test_split_census.prior_consultation_record_sha256")?;
+    }
+    if let Some(previous) = &claim.previous_record_sha256 {
+        verify_plain_sha256(previous, "test_split_census.previous_record_sha256")?;
+    }
+    if claim.prior_consultation_record_sha256.iter().any(|digest| {
+        !claim
+            .overlapping_prior_consultation_record_sha256
+            .contains(digest)
+    }) || claim.overlapping_prior_observed_n_trials < claim.prior_observed_n_trials
+    {
+        return Err(CandidateLineageError::at(
+            "test_split_census.overlapping_prior_consultation_record_sha256",
+            "must include every exact prior consultation and its trials",
+        ));
+    }
+    if claim.prior_consulted_test_bars > end - start
+        || (claim.prior_consulted_test_bars == 0)
+            != (claim.overlapping_prior_test_consultations == 0)
+    {
+        return Err(CandidateLineageError::at(
+            "test_split_census.prior_consulted_test_bars",
+            format!(
+                "{} is impossible for {} overlapping consultations of a {}-bar window",
+                claim.prior_consulted_test_bars,
+                claim.overlapping_prior_test_consultations,
+                end - start
+            ),
+        ));
     }
     let own = if claim.test_consulted {
         observed_trials(record)
@@ -1515,6 +1655,15 @@ pub fn check_test_split_census_claim(
             return Err(CandidateLineageError::at(
                 "test_split_census",
                 "a completed record must claim a consultation of the test split it recorded",
+            ));
+        }
+        // A synthetic panel's bar count is its recorded length.
+        if !identity["scenario_seeds"].is_null()
+            && record.pointer("/test/split/n_days").and_then(Value::as_u64) != Some(bars)
+        {
+            return Err(CandidateLineageError::at(
+                "test_split_census.test_dataset_bars",
+                "does not equal the synthetic test split's n_days",
             ));
         }
     }
@@ -1552,6 +1701,10 @@ pub struct CensusJournalEntry {
     pub test_consulted: bool,
     pub observed_n_trials: u64,
     pub declared_census_verified: bool,
+    /// From a verified census claim: earlier consultations whose window
+    /// overlaps this record's test window, and the bars of it they read.
+    pub overlapping_prior_test_consultations: Option<usize>,
+    pub prior_consulted_test_bars: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lineage: Option<CandidateLineageReport>,
 }
@@ -1583,17 +1736,40 @@ pub fn verify_test_split_census(
     journal: &[JournalRecord],
 ) -> Result<TestSplitCensusReport, CandidateLineageError> {
     let mut splits: BTreeMap<String, TestSplitConsultations> = BTreeMap::new();
+    let mut reads: Vec<(Value, &str, u64)> = Vec::new();
     let mut entries = Vec::with_capacity(journal.len());
     let mut unidentified = 0;
     let mut completed = 0;
     let mut failed = 0;
     let mut verified_claims = 0;
+    let mut previous: Option<&str> = None;
     for item in journal {
         let located = |error: CandidateLineageError| {
             CandidateLineageError::at(format!("line {}.{}", item.line, error.path), error.message)
         };
+        let strategy = item.record.get("evidence_class").and_then(Value::as_str)
+            == Some(STRATEGY_EVIDENCE_CLASS);
+        if strategy
+            && item.record.get("schema_version").and_then(Value::as_u64)
+                > Some(NEWEST_STRATEGY_SCHEMA)
+        {
+            return Err(located(CandidateLineageError::at(
+                "schema_version",
+                format!(
+                    "is newer than strategy evidence schema {NEWEST_STRATEGY_SCHEMA}, whose \
+                     census rules this verifier knows"
+                ),
+            )));
+        }
         let claim = check_test_split_census_claim(&item.record).map_err(located)?;
         if let Some(claim) = &claim {
+            if claim.previous_record_sha256.as_deref() != previous {
+                return Err(located(CandidateLineageError::at(
+                    "test_split_census.previous_record_sha256",
+                    "does not name the line before this record; a line was removed, inserted \
+                     or reordered",
+                )));
+            }
             let (earlier, earlier_trials) =
                 splits
                     .get(&claim.test_split_sha256)
@@ -1621,6 +1797,40 @@ pub fn verify_test_split_census(
                     ),
                 )));
             }
+            let mut overlapping = Vec::new();
+            let mut overlapping_trials = 0_u64;
+            let mut intervals = Vec::new();
+            for (identity, digest, trials) in &reads {
+                if !shares_bars(identity, &claim.test_split_identity) {
+                    continue;
+                }
+                if let Some(interval) =
+                    shared_interval(identity, claim.test_window_bars, claim.test_dataset_bars)
+                {
+                    overlapping.push(*digest);
+                    overlapping_trials = overlapping_trials.saturating_add(*trials);
+                    intervals.push(interval);
+                }
+            }
+            let bars = covered_bars(intervals);
+            if overlapping != claim.overlapping_prior_consultation_record_sha256
+                || overlapping_trials != claim.overlapping_prior_observed_n_trials
+                || bars != claim.prior_consulted_test_bars
+            {
+                return Err(located(CandidateLineageError::at(
+                    "test_split_census",
+                    format!(
+                        "declares {} overlapping consultations with {} trials covering {} bars, \
+                         but the journal before it holds {} with {} trials covering {}",
+                        claim.overlapping_prior_test_consultations,
+                        claim.overlapping_prior_observed_n_trials,
+                        claim.prior_consulted_test_bars,
+                        overlapping.len(),
+                        overlapping_trials,
+                        bars
+                    ),
+                )));
+            }
             verified_claims += 1;
         }
 
@@ -1630,9 +1840,7 @@ pub fn verify_test_split_census(
             .get("status")
             .and_then(Value::as_str)
             .map(str::to_owned);
-        if item.record.get("evidence_class").and_then(Value::as_str)
-            == Some(STRATEGY_EVIDENCE_CLASS)
-        {
+        if strategy {
             completed += usize::from(status.as_deref() == Some("completed"));
             failed += usize::from(status.as_deref() == Some("failed"));
         }
@@ -1655,6 +1863,11 @@ pub fn verify_test_split_census(
                             unconsulted_records: 0,
                         });
                 if consultation.consulted {
+                    reads.push((
+                        identity.clone(),
+                        item.record_sha256.as_str(),
+                        consultation.trials,
+                    ));
                     group.test_consultations += 1;
                     group.cumulative_observed_n_trials = group
                         .cumulative_observed_n_trials
@@ -1677,8 +1890,13 @@ pub fn verify_test_split_census(
             test_consulted: consultation.identity.is_some() && consultation.consulted,
             observed_n_trials: consultation.trials,
             declared_census_verified: claim.is_some(),
+            overlapping_prior_test_consultations: claim
+                .as_ref()
+                .map(|claim| claim.overlapping_prior_test_consultations),
+            prior_consulted_test_bars: claim.as_ref().map(|claim| claim.prior_consulted_test_bars),
             lineage: None,
         });
+        previous = Some(&item.record_sha256);
     }
     Ok(TestSplitCensusReport {
         schema_version: 1,
@@ -2346,50 +2564,172 @@ mod tests {
         assert!(!is_split_identity(&missing));
     }
 
-    fn search(window_start: u64, trials: u64) -> Value {
+    /// Bar count of the historical panel the census tests read.
+    const PANEL_BARS: u64 = 24;
+
+    fn search_at(split: Value, trials: u64) -> Value {
         json!({
             "schema_version": 2,
             "evidence_class": STRATEGY_EVIDENCE_CLASS,
             "status": "completed",
             "generation": {"observed_n_trials": trials},
-            "test": {"split": historical(json!(window_start), json!(20)), "seeds": [3]}
+            "test": {"split": split, "seeds": [3]}
         })
     }
 
-    fn identity_of(window_start: u64) -> Value {
-        consulted_split_identity(
-            Some(&historical(json!(window_start), json!(20))),
-            Some(&json!([3])),
-        )
-        .unwrap()
+    fn search(window_start: u64, trials: u64) -> Value {
+        search_at(historical(json!(window_start), json!(20)), trials)
     }
 
+    fn identity_at(split: &Value) -> Value {
+        consulted_split_identity(Some(split), Some(&json!([3]))).unwrap()
+    }
+
+    fn identity_of(window_start: u64) -> Value {
+        identity_at(&historical(json!(window_start), json!(20)))
+    }
+
+    fn digests(records: &[&JournalRecord]) -> Vec<String> {
+        records
+            .iter()
+            .map(|item| item.record_sha256.clone())
+            .collect()
+    }
+
+    fn trials_of(records: &[&JournalRecord]) -> u64 {
+        records
+            .iter()
+            .map(|item| observed_trials(&item.record))
+            .sum()
+    }
+
+    /// Stamp a schema 3 census. `exact` and `overlap` name the earlier
+    /// consultations the claim declares, and `prior_bars` the bars of the
+    /// window they read, all worked out by the caller.
     fn with_census(
         mut record: Value,
         identity: Value,
         consulted: bool,
-        prior: &[&JournalRecord],
+        exact: &[&JournalRecord],
+        overlap: &[&JournalRecord],
+        prior_bars: u64,
         unidentified: usize,
     ) -> Value {
-        let prior_trials: u64 = prior.iter().map(|item| observed_trials(&item.record)).sum();
         let own = if consulted {
             observed_trials(&record)
         } else {
             0
         };
+        let start = identity["window_start"].as_u64().unwrap_or(0);
+        let end = identity["window_end"].as_u64().unwrap_or(PANEL_BARS);
         record["schema_version"] = json!(3);
         record["test_split_census"] = json!({
             "scope": TEST_SPLIT_CENSUS_SCOPE,
             "test_split_sha256": canonical_sha256(&identity).unwrap(),
             "test_split_identity": identity,
+            "test_window_bars": [start, end],
+            "test_dataset_bars": PANEL_BARS,
             "test_consulted": consulted,
-            "prior_test_consultations": prior.len(),
-            "prior_consultation_record_sha256": prior.iter().map(|item| item.record_sha256.clone()).collect::<Vec<_>>(),
-            "prior_observed_n_trials": prior_trials,
-            "cumulative_observed_n_trials": prior_trials + own,
+            "prior_test_consultations": exact.len(),
+            "prior_consultation_record_sha256": digests(exact),
+            "prior_observed_n_trials": trials_of(exact),
+            "cumulative_observed_n_trials": trials_of(exact) + own,
+            "overlapping_prior_test_consultations": overlap.len(),
+            "overlapping_prior_consultation_record_sha256": digests(overlap),
+            "overlapping_prior_observed_n_trials": trials_of(overlap),
+            "prior_consulted_test_bars": prior_bars,
             "unidentified_prior_records": unidentified,
+            "previous_record_sha256": null,
         });
         record
+    }
+
+    /// A journal record that follows `previous`: its census, if any, chains to it.
+    fn linked(previous: &JournalRecord, line: usize, mut record: Value) -> JournalRecord {
+        if let Some(claim) = record.get_mut("test_split_census") {
+            claim["previous_record_sha256"] = json!(previous.record_sha256);
+        }
+        entry(line, record)
+    }
+
+    #[test]
+    fn panels_share_bars_through_content_and_a_common_seed() {
+        let history = |content: &str| json!({"content_sha256": content, "scenario_seeds": null});
+        let panel = |seeds: Value| json!({"content_sha256": "s", "scenario_seeds": seeds});
+        assert!(shares_bars(&history("h"), &history("h")));
+        assert!(!shares_bars(&history("h"), &history("g")));
+        assert!(shares_bars(&panel(json!([1, 2])), &panel(json!([2, 3]))));
+        assert!(!shares_bars(&panel(json!([1, 2])), &panel(json!([3]))));
+        assert!(!shares_bars(&history("s"), &panel(json!([1]))));
+        assert!(!shares_bars(&panel(json!([1])), &history("s")));
+        assert!(!shares_bars(
+            &panel(json!([1])),
+            &json!({"content_sha256": "t", "scenario_seeds": [1]})
+        ));
+    }
+
+    #[test]
+    fn a_shared_interval_resolves_omitted_bounds_against_the_panel() {
+        let window = |start: Value, end: Value| json!({"window_start": start, "window_end": end});
+        assert_eq!(
+            shared_interval(&window(json!(10), json!(20)), [12, 22], 24),
+            Some((12, 20))
+        );
+        assert_eq!(
+            shared_interval(&window(Value::Null, Value::Null), [5, 10], 24),
+            Some((5, 10))
+        );
+        assert_eq!(
+            shared_interval(&window(json!(10), Value::Null), [0, 30], 24),
+            Some((10, 24))
+        );
+        assert_eq!(
+            shared_interval(&window(json!(10), Value::Null), [0, 20], 24),
+            Some((10, 20))
+        );
+        assert_eq!(
+            shared_interval(&window(json!(10), json!(20)), [20, 24], 24),
+            None
+        );
+        assert_eq!(
+            shared_interval(&window(json!(10), json!(20)), [0, 10], 24),
+            None
+        );
+        assert_eq!(
+            shared_interval(&window(json!(10), json!(20)), [19, 24], 24),
+            Some((19, 20))
+        );
+        assert_eq!(
+            shared_interval(&window(json!(10), json!(20)), [0, 11], 24),
+            Some((10, 11))
+        );
+    }
+
+    #[test]
+    fn covered_bars_counts_the_union_of_windows() {
+        assert_eq!(covered_bars(vec![]), 0);
+        assert_eq!(covered_bars(vec![(3, 5)]), 2);
+        assert_eq!(covered_bars(vec![(10, 20), (12, 22), (8, 10)]), 14);
+        assert_eq!(covered_bars(vec![(0, 10), (2, 4), (4, 6)]), 10);
+        assert_eq!(covered_bars(vec![(5, 7), (0, 2)]), 4);
+        assert_eq!(covered_bars(vec![(0, 4), (4, 8)]), 8);
+        assert_eq!(covered_bars(vec![(2, 6), (0, 3)]), 6);
+    }
+
+    #[test]
+    fn a_declared_panel_bar_count_must_match_a_supplied_dataset() {
+        let honest = with_census(search(10, 6), identity_of(10), true, &[], &[], 0, 0);
+        let claim = check_test_split_census_claim(&honest).unwrap().unwrap();
+        let labels =
+            |bars: usize| BTreeMap::from([("c".repeat(64), vec!["2025-01-01".to_owned(); bars])]);
+        assert!(check_census_dataset_bars(&claim, &labels(24)).is_ok());
+        assert!(check_census_dataset_bars(&claim, &BTreeMap::new()).is_ok());
+        let error = check_census_dataset_bars(&claim, &labels(23)).unwrap_err();
+        assert_eq!(error.path, "test_split_census.test_dataset_bars");
+        assert!(check_census_dataset_bars(&claim, &labels(25)).is_err());
+        let mut synthetic = claim.clone();
+        synthetic.test_split_identity["scenario_seeds"] = json!([3]);
+        assert!(check_census_dataset_bars(&synthetic, &labels(23)).is_ok());
     }
 
     fn entry(line: usize, record: Value) -> JournalRecord {
@@ -2411,10 +2751,25 @@ mod tests {
 
     #[test]
     fn a_census_counts_every_read_of_a_test_split_across_one_journal() {
+        // Windows over one 24-bar panel "c...": A = [10, 20) for lines 1, 2, 5
+        // and 6, B = [12, 20) for line 7, D = [15, 24) for line 10. Line 9 reads
+        // [10, 24) of a different panel "d...". Bars read before each claim:
+        // lines 2, 5, 6 have A before them, so all 10 of A's bars; line 7 has
+        // A three times, covering 12..19, 8 bars; line 9 shares no panel, 0;
+        // line 10 has A and B, covering 15..19, 5 bars.
         let first = entry(1, search(10, 4));
-        let unconsulted = entry(
+        let unconsulted = linked(
+            &first,
             2,
-            with_census(failed(None), identity_of(10), false, &[&first], 0),
+            with_census(
+                failed(None),
+                identity_of(10),
+                false,
+                &[&first],
+                &[&first],
+                10,
+                0,
+            ),
         );
         let foreign = entry(
             3,
@@ -2424,24 +2779,81 @@ mod tests {
             4,
             json!({"schema_version": 2, "evidence_class": STRATEGY_EVIDENCE_CLASS, "status": "failed"}),
         );
-        let second = entry(
+        let second = linked(
+            &legacy_failure,
             5,
-            with_census(search(10, 6), identity_of(10), true, &[&first], 2),
+            with_census(
+                search(10, 6),
+                identity_of(10),
+                true,
+                &[&first],
+                &[&first],
+                10,
+                2,
+            ),
         );
-        let consulted_failure = entry(
+        let consulted_failure = linked(
+            &second,
             6,
             with_census(
                 failed(Some(5)),
                 identity_of(10),
                 true,
                 &[&first, &second],
+                &[&first, &second],
+                10,
                 2,
             ),
         );
-        let elsewhere = entry(7, with_census(search(12, 9), identity_of(12), true, &[], 2));
+        let elsewhere = linked(
+            &consulted_failure,
+            7,
+            with_census(
+                search(12, 9),
+                identity_of(12),
+                true,
+                &[],
+                &[&first, &second, &consulted_failure],
+                8,
+                2,
+            ),
+        );
         let running = entry(
             8,
             json!({"schema_version": 2, "evidence_class": STRATEGY_EVIDENCE_CLASS, "status": "running"}),
+        );
+        let other_panel = json!({
+            "kind": "historical",
+            "content_sha256": "d".repeat(64),
+            "window_start": 10,
+            "window_end": null
+        });
+        let other_content = linked(
+            &running,
+            9,
+            with_census(
+                search_at(other_panel.clone(), 2),
+                identity_at(&other_panel),
+                true,
+                &[],
+                &[],
+                0,
+                3,
+            ),
+        );
+        let late_panel = historical(json!(15), Value::Null);
+        let shifted = linked(
+            &other_content,
+            10,
+            with_census(
+                search_at(late_panel.clone(), 3),
+                identity_at(&late_panel),
+                true,
+                &[],
+                &[&first, &second, &consulted_failure, &elsewhere],
+                5,
+                3,
+            ),
         );
         let journal = [
             first.clone(),
@@ -2452,14 +2864,16 @@ mod tests {
             consulted_failure.clone(),
             elsewhere,
             running,
+            other_content,
+            shifted,
         ];
         let report = verify_test_split_census(&journal).unwrap();
-        assert_eq!(report.records, 8);
+        assert_eq!(report.records, 10);
         // Neither completed nor failed: counted in neither.
-        assert_eq!(report.completed_records, 3);
+        assert_eq!(report.completed_records, 5);
         assert_eq!(report.failed_records, 3);
         assert_eq!(report.unidentified_records, 3);
-        assert_eq!(report.declared_censuses_verified, 4);
+        assert_eq!(report.declared_censuses_verified, 6);
         let shared = canonical_sha256(&identity_of(10)).unwrap();
         let group = report
             .splits
@@ -2474,10 +2888,12 @@ mod tests {
             group.consultation_record_sha256,
             [&first, &second, &consulted_failure].map(|item| item.record_sha256.clone())
         );
+        assert_eq!(report.splits.len(), 4);
+        let moved = canonical_sha256(&identity_of(12)).unwrap();
         let other = report
             .splits
             .iter()
-            .find(|split| split.test_split_sha256 != shared)
+            .find(|split| split.test_split_sha256 == moved)
             .unwrap();
         assert_eq!(
             (other.test_consultations, other.cumulative_observed_n_trials),
@@ -2493,20 +2909,24 @@ mod tests {
                     row.test_consulted,
                     row.observed_n_trials,
                     row.declared_census_verified,
+                    row.overlapping_prior_test_consultations,
+                    row.prior_consulted_test_bars,
                 )
             })
             .collect();
         assert_eq!(
             rows,
             [
-                (1, true, true, 4, false),
-                (2, true, false, 0, true),
-                (3, false, false, 0, false),
-                (4, false, false, 0, false),
-                (5, true, true, 6, true),
-                (6, true, true, 5, true),
-                (7, true, true, 9, true),
-                (8, false, false, 0, false),
+                (1, true, true, 4, false, None, None),
+                (2, true, false, 0, true, Some(1), Some(10)),
+                (3, false, false, 0, false, None, None),
+                (4, false, false, 0, false, None, None),
+                (5, true, true, 6, true, Some(1), Some(10)),
+                (6, true, true, 5, true, Some(2), Some(10)),
+                (7, true, true, 9, true, Some(3), Some(8)),
+                (8, false, false, 0, false, None, None),
+                (9, true, true, 2, true, Some(0), Some(0)),
+                (10, true, true, 3, true, Some(4), Some(5)),
             ]
         );
         assert_eq!(report.journal[0].schema_version, Some(2));
@@ -2518,32 +2938,163 @@ mod tests {
     #[test]
     fn a_census_refuses_a_declared_history_the_journal_does_not_hold() {
         let first = entry(1, search(10, 4));
-        let honest = with_census(search(10, 6), identity_of(10), true, &[&first], 0);
-        assert!(verify_test_split_census(&[first.clone(), entry(2, honest.clone())]).is_ok());
+        let honest = with_census(
+            search(10, 6),
+            identity_of(10),
+            true,
+            &[&first],
+            &[&first],
+            10,
+            0,
+        );
+        let path_after_first = |claim: Value| {
+            verify_test_split_census(&[first.clone(), linked(&first, 2, claim)])
+                .map(|_| ())
+                .map_err(|error| error.path)
+        };
+        assert_eq!(path_after_first(honest.clone()), Ok(()));
 
         // Written against a journal that held the first search, then moved.
         let error = verify_test_split_census(&[entry(9, honest.clone())]).unwrap_err();
-        assert!(
-            error.path.starts_with("line 9.test_split_census"),
-            "{error}"
-        );
+        assert_eq!(error.path, "line 9.test_split_census");
+        assert!(error.message.contains("declares 1 earlier"), "{error}");
 
         let mut inflated = honest.clone();
         inflated["test_split_census"]["prior_observed_n_trials"] = json!(5);
         inflated["test_split_census"]["cumulative_observed_n_trials"] = json!(11);
-        assert!(verify_test_split_census(&[first.clone(), entry(2, inflated)]).is_err());
+        inflated["test_split_census"]["overlapping_prior_observed_n_trials"] = json!(5);
+        assert_eq!(
+            path_after_first(inflated),
+            Err("line 2.test_split_census".to_owned())
+        );
 
         let mut hidden = honest.clone();
         hidden["test_split_census"]["unidentified_prior_records"] = json!(1);
-        assert!(verify_test_split_census(&[first.clone(), entry(2, hidden)]).is_err());
+        assert_eq!(
+            path_after_first(hidden),
+            Err("line 2.test_split_census".to_owned())
+        );
 
         let foreign = entry(1, json!({"evidence_class": "other"}));
-        let blind = with_census(search(10, 6), identity_of(10), true, &[], 0);
-        assert!(verify_test_split_census(&[foreign, entry(2, blind)]).is_err());
+        let blind = with_census(search(10, 6), identity_of(10), true, &[], &[], 0, 0);
+        let error =
+            verify_test_split_census(&[foreign.clone(), linked(&foreign, 2, blind)]).unwrap_err();
+        assert_eq!(error.path, "line 2.test_split_census");
+        assert!(error.message.contains("0 unidentified"), "{error}");
 
-        let broken = with_census(search(10, 6), json!({}), true, &[], 0);
+        let broken = with_census(search(10, 6), json!({}), true, &[], &[], 0, 0);
         let error = verify_test_split_census(&[entry(4, broken)]).unwrap_err();
         assert_eq!(error.path, "line 4.test_split_census.test_split_identity");
+
+        // An earlier window [0, 12) overlaps [10, 20) in bars 10 and 11, so the
+        // honest claim declares two overlapping reads covering all 10 bars.
+        let early_split = historical(json!(0), json!(12));
+        let early = entry(2, search_at(early_split, 3));
+        let journal = |claim: Value| {
+            verify_test_split_census(&[first.clone(), early.clone(), linked(&early, 3, claim)])
+                .map(|_| ())
+                .map_err(|error| (error.path, error.message))
+        };
+        let overlapped = with_census(
+            search(10, 6),
+            identity_of(10),
+            true,
+            &[&first],
+            &[&first, &early],
+            10,
+            0,
+        );
+        assert_eq!(journal(overlapped.clone()), Ok(()));
+        let overlap_refusal = |claim: Value| {
+            let (path, message) = journal(claim).unwrap_err();
+            assert_eq!(path, "line 3.test_split_census");
+            assert!(message.contains("overlapping"), "{message}");
+        };
+        overlap_refusal(honest.clone());
+        let mut short = overlapped.clone();
+        short["test_split_census"]["prior_consulted_test_bars"] = json!(9);
+        overlap_refusal(short);
+        let mut heavy = overlapped.clone();
+        heavy["test_split_census"]["overlapping_prior_observed_n_trials"] = json!(8);
+        overlap_refusal(heavy);
+        let mut reordered = overlapped.clone();
+        reordered["test_split_census"]["overlapping_prior_consultation_record_sha256"] =
+            json!(digests(&[&early, &first]));
+        overlap_refusal(reordered);
+        // Only the earlier window's two shared bars were read before [10, 20)
+        // when the first search is absent.
+        let partial = with_census(search(10, 6), identity_of(10), true, &[], &[&early], 2, 0);
+        assert!(verify_test_split_census(&[early.clone(), linked(&early, 3, partial)]).is_ok());
+    }
+
+    #[test]
+    fn the_census_chain_exposes_a_removed_inserted_or_reordered_line() {
+        let chain_path = "test_split_census.previous_record_sha256";
+        let first = entry(1, search(10, 4));
+        let other = entry(2, search(12, 5));
+        let second = linked(
+            &other,
+            3,
+            with_census(
+                search(10, 6),
+                identity_of(10),
+                true,
+                &[&first],
+                &[&first, &other],
+                10,
+                0,
+            ),
+        );
+        let refusal =
+            |journal: &[JournalRecord]| verify_test_split_census(journal).unwrap_err().path;
+        assert!(verify_test_split_census(&[first.clone(), other.clone(), second.clone()]).is_ok());
+        // Removing the line on another split leaves every count intact, so
+        // only the chain can tell.
+        assert_eq!(
+            refusal(&[first.clone(), second.clone()]),
+            format!("line 3.{chain_path}")
+        );
+        assert_eq!(
+            refusal(&[other.clone(), first.clone(), second.clone()]),
+            format!("line 3.{chain_path}")
+        );
+        let inserted = entry(4, json!({"evidence_class": "other"}));
+        assert_eq!(
+            refusal(&[first.clone(), other.clone(), inserted, second.clone()]),
+            format!("line 3.{chain_path}")
+        );
+        // The first line claims no predecessor.
+        let orphan = linked(
+            &first,
+            1,
+            with_census(search(10, 6), identity_of(10), true, &[], &[], 0, 0),
+        );
+        assert_eq!(refusal(&[orphan]), format!("line 1.{chain_path}"));
+        let mut malformed = with_census(search(10, 6), identity_of(10), true, &[], &[], 0, 0);
+        malformed["test_split_census"]["previous_record_sha256"] = json!("line 0");
+        assert_eq!(
+            refusal(&[entry(1, malformed)]),
+            format!("line 1.{chain_path}")
+        );
+        // Lines cut from the end leave no record to notice.
+        assert!(verify_test_split_census(&[first, other]).is_ok());
+    }
+
+    #[test]
+    fn a_census_refuses_a_strategy_schema_it_does_not_know() {
+        let mut future = search(10, 4);
+        future["schema_version"] = json!(NEWEST_STRATEGY_SCHEMA + 1);
+        let error = verify_test_split_census(&[entry(5, future)]).unwrap_err();
+        assert_eq!(error.path, "line 5.schema_version");
+        assert!(verify_test_split_census(&[entry(1, search(10, 4))]).is_ok());
+        // Schema 3 strategy records must carry a census; other evidence never does.
+        let mut newest = search(10, 4);
+        newest["schema_version"] = json!(NEWEST_STRATEGY_SCHEMA);
+        let error = verify_test_split_census(&[entry(2, newest)]).unwrap_err();
+        assert_eq!(error.path, "line 2.test_split_census");
+        let foreign = json!({"evidence_class": "other", "schema_version": 9});
+        let report = verify_test_split_census(&[entry(1, foreign)]).unwrap();
+        assert_eq!(report.unidentified_records, 1);
     }
 
     #[test]
@@ -2588,9 +3139,19 @@ mod tests {
     #[test]
     fn a_declared_census_must_be_internally_consistent() {
         let first = entry(1, search(10, 4));
-        let honest = with_census(search(10, 6), identity_of(10), true, &[&first], 0);
+        let honest = with_census(
+            search(10, 6),
+            identity_of(10),
+            true,
+            &[&first],
+            &[&first],
+            10,
+            0,
+        );
         let claim = check_test_split_census_claim(&honest).unwrap().unwrap();
         assert_eq!(claim.cumulative_observed_n_trials, 10);
+        assert_eq!(claim.test_window_bars, [10, 20]);
+        assert_eq!(claim.test_dataset_bars, 24);
         assert_eq!(check_test_split_census_claim(&search(10, 4)).unwrap(), None);
 
         let mut missing = honest.clone();
@@ -2634,6 +3195,7 @@ mod tests {
         assert_eq!(
             path_of(&|r| {
                 r["test_split_census"]["prior_observed_n_trials"] = json!(u64::MAX);
+                r["test_split_census"]["overlapping_prior_observed_n_trials"] = json!(u64::MAX);
                 r["test_split_census"]["cumulative_observed_n_trials"] = json!(u64::MAX);
             }),
             "test_split_census.cumulative_observed_n_trials"
@@ -2650,17 +3212,150 @@ mod tests {
             path_of(&|r| r["test"]["seeds"] = json!("3")),
             "test_split_census"
         );
-        let moved = with_census(search(10, 6), identity_of(12), true, &[&first], 0);
+        let moved = with_census(
+            search(10, 6),
+            identity_of(12),
+            true,
+            &[&first],
+            &[&first],
+            8,
+            0,
+        );
         assert_eq!(
             check_test_split_census_claim(&moved).unwrap_err().path,
             "test_split_census"
         );
 
         // A failed search that never reached the test split adds no trials.
-        let unconsulted = with_census(failed(Some(7)), identity_of(10), false, &[&first], 0);
+        let unconsulted = with_census(
+            failed(Some(7)),
+            identity_of(10),
+            false,
+            &[&first],
+            &[&first],
+            10,
+            0,
+        );
         let claim = check_test_split_census_claim(&unconsulted)
             .unwrap()
             .unwrap();
         assert_eq!(claim.cumulative_observed_n_trials, 4);
+
+        // The resolved window must be the identity's window on the panel.
+        let bars_path = "test_split_census.test_window_bars";
+        assert_eq!(
+            path_of(&|r| r["test_split_census"]["test_window_bars"] = json!([11, 20])),
+            bars_path
+        );
+        assert_eq!(
+            path_of(&|r| r["test_split_census"]["test_window_bars"] = json!([10, 19])),
+            bars_path
+        );
+        let resolved = |start: Value, end: Value, bars: Value, window: Value| {
+            let split = historical(start, end);
+            let mut record =
+                with_census(failed(Some(1)), identity_at(&split), false, &[], &[], 0, 0);
+            record["test_split_census"]["test_dataset_bars"] = bars;
+            record["test_split_census"]["test_window_bars"] = window;
+            check_test_split_census_claim(&record)
+                .map(|_| ())
+                .map_err(|error| error.path)
+        };
+        assert_eq!(
+            resolved(Value::Null, Value::Null, json!(24), json!([0, 24])),
+            Ok(())
+        );
+        assert_eq!(
+            resolved(json!(3), Value::Null, json!(30), json!([3, 30])),
+            Ok(())
+        );
+        assert_eq!(
+            resolved(json!(3), Value::Null, json!(30), json!([3, 24])).unwrap_err(),
+            bars_path
+        );
+        assert_eq!(
+            resolved(json!(20), json!(20), json!(24), json!([20, 20])).unwrap_err(),
+            bars_path
+        );
+        assert_eq!(
+            resolved(json!(21), json!(20), json!(24), json!([21, 20])).unwrap_err(),
+            bars_path
+        );
+        assert_eq!(
+            resolved(json!(10), json!(30), json!(24), json!([10, 30])).unwrap_err(),
+            bars_path
+        );
+        assert_eq!(
+            resolved(json!(10), json!(24), json!(24), json!([10, 24])),
+            Ok(())
+        );
+
+        let overlap_path = "test_split_census.overlapping_prior_consultation_record_sha256";
+        assert_eq!(
+            path_of(&|r| r["test_split_census"]["overlapping_prior_test_consultations"] = json!(2)),
+            "test_split_census.overlapping_prior_test_consultations"
+        );
+        assert_eq!(
+            path_of(
+                &|r| r["test_split_census"]["overlapping_prior_consultation_record_sha256"] =
+                    json!(["ABC"])
+            ),
+            "test_split_census.prior_consultation_record_sha256"
+        );
+        assert_eq!(
+            path_of(&|r| {
+                r["test_split_census"]["overlapping_prior_consultation_record_sha256"] =
+                    json!(["0".repeat(64)]);
+            }),
+            overlap_path
+        );
+        assert_eq!(
+            path_of(&|r| r["test_split_census"]["overlapping_prior_observed_n_trials"] = json!(3)),
+            overlap_path
+        );
+        let mut heavier = honest.clone();
+        heavier["test_split_census"]["overlapping_prior_observed_n_trials"] = json!(5);
+        assert!(check_test_split_census_claim(&heavier).is_ok());
+
+        let prior_bars = "test_split_census.prior_consulted_test_bars";
+        assert_eq!(
+            path_of(&|r| r["test_split_census"]["prior_consulted_test_bars"] = json!(11)),
+            prior_bars
+        );
+        assert_eq!(
+            path_of(&|r| r["test_split_census"]["prior_consulted_test_bars"] = json!(0)),
+            prior_bars
+        );
+        let fresh = with_census(search(10, 6), identity_of(10), true, &[], &[], 0, 0);
+        assert!(check_test_split_census_claim(&fresh).is_ok());
+        let mut phantom = fresh;
+        phantom["test_split_census"]["prior_consulted_test_bars"] = json!(5);
+        assert_eq!(
+            check_test_split_census_claim(&phantom).unwrap_err().path,
+            prior_bars
+        );
+
+        // A synthetic panel's bar count is its recorded length.
+        let mut panel = historical(json!(0), json!(20));
+        panel["kind"] = json!("synthetic");
+        panel["n_days"] = json!(24);
+        let synthetic = |n_days: Value| {
+            let mut split = panel.clone();
+            split["n_days"] = n_days;
+            let mut record = search_at(split, 2);
+            record = with_census(record, identity_at(&panel), true, &[], &[], 0, 0);
+            check_test_split_census_claim(&record)
+                .map(|_| ())
+                .map_err(|error| error.path)
+        };
+        assert_eq!(synthetic(json!(24)), Ok(()));
+        assert_eq!(
+            synthetic(json!(30)).unwrap_err(),
+            "test_split_census.test_dataset_bars"
+        );
+        assert_eq!(
+            synthetic(Value::Null).unwrap_err(),
+            "test_split_census.test_dataset_bars"
+        );
     }
 }
