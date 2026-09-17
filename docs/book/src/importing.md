@@ -88,15 +88,36 @@ when:
 
 The error names the repeating row, the earlier row it repeats and the period.
 An intraday export labelled by date only repeats its dates and is refused:
-label each bar with a timestamp. The same period in a different agent, run or
-seed is part of the grid, not a repeat.
+label each bar with a timestamp. The same period in a different agent or seed
+is part of the grid, not a repeat.
 
-`score --require-run-keys` applies the same rule to a field that did not come
+A period also belongs to one window. Each run label (long format) or column
+(wide format) is a window, and the pooled track that deflation, the PSR and
+the bootstrap read concatenates the windows. A period in two windows would
+enter that track twice and count twice in the sample length the PSR and the
+deflated Sharpe test against. Execution seeds of one window replicate its
+periods, and the scorer averages them before pooling, so seeds may share
+periods. The import refuses, and writes no output, when:
+
+- a long-format row puts a period under a run label other than the one an
+  earlier row of the same agent put it under, whatever the two seeds are. The
+  error names both rows, both runs and the period. Replicates of one window
+  share a run label and differ in the `seed` column;
+- a wide-format row with a period has returns in two columns. A wide file can
+  still hold disjoint windows on one date axis: leave a column blank outside
+  its window. Replicates of one window go in long format with a `seed` column.
+
+`score --require-run-keys` applies both rules to a field that did not come
 through the import. A run whose `periods` list names one period twice is
 refused with the agent, the cell, the period and both indices. The check runs
 on each run before periods are compared across agents, so the field is
 refused even when every agent repeats the same period, or when only one agent
-declares periods at all.
+declares periods at all. A period declared in two different windows is
+refused with both cells and the agent that declared each. Because every
+agent's declaration of a cell must agree, the check covers one agent repeating
+a period across its windows and two agents whose separate declarations do. A
+field that declares no periods carries no identities to compare, and `score`
+without `--require-run-keys` reads no period identities at all.
 
 ## What the re-score can and cannot claim
 

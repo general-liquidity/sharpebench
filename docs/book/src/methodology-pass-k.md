@@ -53,9 +53,21 @@ shared bars:
   writes a checkpoint, however the contract was built.
 
 The legacy regrade (`verify-trajectory --allow-unbound-trajectory`) and the
-unbound compatibility sweep `run_resumable_sweep` do not check. The scoring
-kernel does not either: `score_agent` and `pooled_returns` receive runs without
-window coordinates, so the check sits where the coordinates are known.
+unbound compatibility sweep `run_resumable_sweep` do not check. `score_agent`
+and `pooled_returns` do not either: they receive runs without window
+coordinates, so the check sits where the coordinates are known.
+
+A keyed field is the one scoring input that carries coordinates of its own.
+Its `run_keys` name each run's window and seed and may list the run's period
+identities. `sharpebench_core::parse_keyed_field`, which
+`score --require-run-keys` calls, refuses a period declared in two different
+windows with `RunIdentityError::PeriodInTwoWindows`, and `import csv` refuses
+the same overlap before it writes the field (see
+[Importing a rival benchmark's field](importing.md)). Seeds of one window may
+share periods, because the scorer averages them before pooling. The check
+reads period labels, not bar indices, so it cannot see an overlap in a field
+that declares no periods. It does not order the windows in time either: the
+keyed field sorts its windows by label.
 
 ## Units: what the per-run bar means
 
