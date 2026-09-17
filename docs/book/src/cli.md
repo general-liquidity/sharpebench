@@ -402,10 +402,10 @@ declared cell and every decision step, validates step and observation identity,
 and derives replicate grouping from the contract. Missing, duplicated,
 reordered, shortened, or cross-environment evidence is refused.
 
-`capture` of a reference agent and `verify-trajectory` accept the same
-`--short-borrow-bps <bps>` as `run`, and a trajectory verifies only under the
-rate it was captured with. External `capture` refuses the flag for now, because
-its capture path builds the default cost model.
+`capture` and `verify-trajectory` accept the same `--short-borrow-bps <bps>` as
+`run`, for a reference agent and for an external entrant alike, and a trajectory
+verifies only under the rate it was captured with. An out-of-domain rate is
+refused before any entrant starts.
 
 `--allow-unbound-trajectory` is an explicit legacy or cross-version regrade. It
 does not claim that the artifact reproduces its original execution conditions.

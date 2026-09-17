@@ -620,7 +620,7 @@ fn help() {
         "  sharpebench verify-trajectory <traj.json> [--data <csv>]  strictly replay the complete data/cost/engine/runner/window/seed contract"
     );
     println!("                       --allow-unbound-trajectory: explicit legacy or cross-version regrade; never the default");
-    println!("                       --short-borrow-bps <bps>: for capture (reference agents) and verify-trajectory; the rate is bound, so a different one refuses");
+    println!("                       --short-borrow-bps <bps>: for capture (reference or external entrant) and verify-trajectory; the rate is bound, so a different one refuses");
     println!("                       --reexecute [--cmd \"<prog>\"|--http <addr>|--image <ref>]: also re-run every captured run with a fresh agent and refuse the first divergent decision");
     println!("                       --diagnostics sizing-response [--vol-lookback N]: also report how gross exposure moved with trailing volatility; never a rank input");
     println!(
@@ -1534,7 +1534,7 @@ fn load_retry_backoff(args: &[String], max_retries: u32) -> Result<BackoffSchedu
 /// default one, byte for byte. Present, the rate is part of the cost-model
 /// digest, so a checkpoint or trajectory bound under one rate is refused under
 /// another. A negative or non-finite rate is refused before anything runs.
-fn cost_model_from_args(args: &[String]) -> Result<sharpebench_sim::CostModel, String> {
+pub(crate) fn cost_model_from_args(args: &[String]) -> Result<sharpebench_sim::CostModel, String> {
     let mut costs = sharpebench_sim::CostModel::default();
     if !args.iter().any(|arg| arg == "--short-borrow-bps") {
         return Ok(costs);
@@ -2619,14 +2619,7 @@ fn run_capture(args: &[String], json: bool) -> ExitCode {
     use sharpebench_sim::{Agent, BuyAndHold, CostModel, Momentum};
 
     if external_capture::names_external_entrant(args) {
-        // The external capture path builds its own default cost model, so the
-        // flag would be silently dropped there. Refuse it instead.
-        if args.iter().any(|arg| arg == "--short-borrow-bps") {
-            eprintln!(
-                "error: --short-borrow-bps is not supported for an external capture; capture the reference agents or omit the flag"
-            );
-            return ExitCode::from(2);
-        }
+        // The external capture path builds the cost model from the same flags.
         return external_capture::run_capture_external(
             args,
             json,
