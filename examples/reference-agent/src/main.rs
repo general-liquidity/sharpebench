@@ -22,7 +22,7 @@ fn decide(obs: &MarketObservation) -> Decision {
             symbol: s.symbol.clone(),
             action: Action::Buy,
             target_weight: weight,
-            confidence: 0.5,
+            confidence: Some(0.5),
             rationale: "equal-weight hold".to_string(),
         })
         .collect();

@@ -135,6 +135,107 @@ pub fn replay_submission(
     }
 }
 
+/// One evaluation window and its position in the list it was checked in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct IndexedWindow {
+    pub index: usize,
+    pub start: usize,
+    pub end: usize,
+}
+
+/// Why a list of evaluation windows cannot be scored as evidence.
+///
+/// The scorer concatenates a submission's runs in window order into one pooled
+/// track, and PSR, the Deflated Sharpe and the bootstrap read that track as
+/// successive market observations, while pass^k counts each window as its own
+/// regime. Two windows that share a bar would count it twice, and windows out
+/// of time order would splice the track out of sequence. Adjacent windows,
+/// where one ends on the bar the next starts at (`end == next.start`), share
+/// nothing and are accepted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowOrderError {
+    /// `later` starts before `earlier` does.
+    Unordered {
+        earlier: IndexedWindow,
+        later: IndexedWindow,
+    },
+    /// `later` starts inside `earlier`, so bars `[shared_start, shared_end)`
+    /// belong to both.
+    Overlapping {
+        earlier: IndexedWindow,
+        later: IndexedWindow,
+        shared_start: usize,
+        shared_end: usize,
+    },
+}
+
+impl std::fmt::Display for WindowOrderError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unordered { earlier, later } => write!(
+                f,
+                "evaluation window {} [{}, {}) starts before window {} [{}, {}): windows must be listed in time order",
+                later.index, later.start, later.end, earlier.index, earlier.start, earlier.end
+            ),
+            Self::Overlapping {
+                earlier,
+                later,
+                shared_start,
+                shared_end,
+            } => write!(
+                f,
+                "evaluation windows {} [{}, {}) and {} [{}, {}) overlap on bars [{shared_start}, {shared_end}): scoring both would count those bars twice; windows may be adjacent but must not overlap",
+                earlier.index, earlier.start, earlier.end, later.index, later.start, later.end
+            ),
+        }
+    }
+}
+
+impl std::error::Error for WindowOrderError {}
+
+/// Refuse a window list that is out of time order or in which two windows
+/// share a bar. Windows are compared by position: each must start no earlier
+/// than the window before it and no earlier than the end of the last window
+/// that holds bars. A window with no bars (`start >= end`) cannot count a bar
+/// twice, so only its order is checked.
+pub fn check_window_order(windows: &[Window]) -> Result<(), WindowOrderError> {
+    let mut previous: Option<IndexedWindow> = None;
+    let mut last_with_bars: Option<IndexedWindow> = None;
+    for (index, window) in windows.iter().enumerate() {
+        let current = IndexedWindow {
+            index,
+            start: window.start,
+            end: window.end,
+        };
+        if let Some(earlier) = previous {
+            if current.start < earlier.start {
+                return Err(WindowOrderError::Unordered {
+                    earlier,
+                    later: current,
+                });
+            }
+        }
+        if current.start < current.end {
+            // Every earlier window with bars is ordered and disjoint by now, so
+            // the last one ends furthest right and is the only one `current`
+            // can reach into.
+            if let Some(earlier) = last_with_bars {
+                if current.start < earlier.end {
+                    return Err(WindowOrderError::Overlapping {
+                        earlier,
+                        later: current,
+                        shared_start: current.start,
+                        shared_end: current.end.min(earlier.end),
+                    });
+                }
+            }
+            last_with_bars = Some(current);
+        }
+        previous = Some(current);
+    }
+    Ok(())
+}
+
 /// Who graded a frozen artifact, and under what resource limits.
 ///
 /// A regrade changes the evaluator, never the run. The limits are part of the
