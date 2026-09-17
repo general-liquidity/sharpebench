@@ -20,6 +20,7 @@ use csv_columns::read_returns_column;
 mod analysis_cmd;
 mod arena_cmd;
 mod artifact_preflight;
+mod cell_isolation;
 mod compare_cmd;
 mod csv_columns;
 mod external_capture;
@@ -1291,6 +1292,8 @@ struct ExternalRowMetadata<'a> {
     artifact_preflight: Option<serde_json::Value>,
     /// The fault-injection report, when `--fault-plan` armed the sweep.
     fault_injection: Option<serde_json::Value>,
+    /// The runner's cell isolation class; see `cell_isolation`.
+    cell_isolation: Option<sharpebench_sim::external::CellIsolation>,
 }
 
 /// Keep the existing JSON board array and scoring fields. Only the externally
@@ -1317,6 +1320,9 @@ fn run_board_json(
                 }
                 if let Some(report) = &external.fault_injection {
                     row["fault_injection"] = report.clone();
+                }
+                if let Some(isolation) = external.cell_isolation {
+                    row["cell_isolation"] = cell_isolation::disclosure(isolation);
                 }
             }
         }
@@ -2544,6 +2550,7 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                     monetary_cost: cost,
                     artifact_preflight: preflight_row.clone(),
                     fault_injection: fault_row.clone(),
+                    cell_isolation: cell_isolation::of_entrant(label),
                 }),
         );
         // The board stays the whole document unless the evidence is asked for.
@@ -2561,6 +2568,7 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
     } else {
         if let Some((label, attempts, cost)) = external_accounting {
             print_attempt_accounting(&label, attempts, &cost);
+            cell_isolation::print(&label);
             if let Some(report) = &fault_row {
                 print_fault_injection(&label, report);
             }
@@ -3565,6 +3573,7 @@ mod tests {
                 monetary_cost: &res.monetary_cost,
                 artifact_preflight: None,
                 fault_injection: None,
+                cell_isolation: None,
             }),
         );
         let rows = observed.as_array_mut().unwrap();
@@ -3630,6 +3639,7 @@ mod tests {
                 monetary_cost: &res.monetary_cost,
                 artifact_preflight: Some(preflight),
                 fault_injection: None,
+                cell_isolation: None,
             }),
         );
 

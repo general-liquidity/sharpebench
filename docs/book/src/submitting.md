@@ -174,6 +174,34 @@ its trajectory is re-executed, not while the sweep is running. The CLI runs the
 check as `sharpebench verify-trajectory <traj.json> --reexecute`, launching the
 agent with `--cmd` or `--http` (see the [CLI reference](cli.md#capture--verify-trajectory)).
 
+## State between cells: the isolation a row discloses
+
+Execution seeds of one window replay the same bars. An agent that keeps what it
+saw in one (window, seed) cell can act on it in the next, and its seed runs are
+then not independent. How much a runner lets through depends on the transport,
+and the entrant's JSON board row says which applied, in `cell_isolation`
+(`sharpebench.cell-isolation.v1`):
+
+| Transport | `class` | What carries over |
+|---|---|---|
+| `--image` | `container_per_cell` | nothing the runner keeps: each cell gets a fresh container, removed when the cell ends |
+| `--cmd` | `process_per_cell_host_writable` | the harness ends the process it spawned with the cell, but the process runs unsandboxed, so files it writes on the host, and anything it starts outside that process, can reach the next cell |
+| `--http` | `operator_endpoint` | anything: the operator runs the endpoint and the harness neither starts nor stops it |
+
+`runner_discards_state_between_cells` is true only for `container_per_cell`,
+the one class under which seed replicates are independent by construction. The
+class comes from the transport flag, through the runner tag at the front of the
+entrant id (`sandbox:`, `cmd:`, `http:`), never from anything the agent sends;
+the closed decision contract has no field that could carry it. The entrant id
+is what a `--checkpoint` is bound to, and the same tag is part of the invocation
+digest, so a sweep checkpointed under one class refuses to resume under another.
+Reference rows carry no `cell_isolation`, and the field moves no score or rank.
+
+This is a disclosure, not a detector: `detects_state_carryover` is always
+`false`. An agent under a runner that allows carryover may carry nothing, and no
+check here looks for it. Human output prints the class beside the attempt
+accounting.
+
 ## Faulted observations under a declared plan
 
 An operator may run your entrant under a seeded fault plan (`sharpebench run
