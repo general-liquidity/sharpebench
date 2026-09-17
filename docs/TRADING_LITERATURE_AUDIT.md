@@ -1,8 +1,8 @@
 # Trading literature audit
 
 This audit records how recent AI, reinforcement-learning and language-model trading papers
-evaluate their results, and what SharpeBench and SharpeArena took from them. It is the companion
-of the [benchmark architecture audit](BENCHMARK_ARCHITECTURE_AUDIT.md). That document reviews
+evaluate their results, and what SharpeBench and SharpeArena took from them. It is a companion
+to the [benchmark architecture audit](BENCHMARK_ARCHITECTURE_AUDIT.md). That document reviews
 evaluation benchmarks and, where it was available, their code. This one reviews trading-method
 papers, most of which propose a model, an agent, an environment or a simulator rather than a
 benchmark.
@@ -131,11 +131,13 @@ forecast table and no trading evaluation.
 
 ## What the full read corrected
 
-Every field where a reader recorded that the earlier coding differs from the full read. Pages are
-PDF pages. Where the ledger below maps a reader's free-text value to a label, the cell keeps the
-reader's qualifier; such mappings are not listed here unless the reader recorded a difference.
+The table lists every field where a reader recorded that the earlier coding differs from the full
+read. Pages are PDF pages. Where the ledger below maps a reader's free-text value to a label, the
+cell keeps the reader's qualifier; such mappings are not listed here unless the reader recorded a
+difference.
 
-The full read changed 34 fields in 26 of the 70 earlier records; the other 44 records agree with it in every field.
+The full read changed 34 fields in 26 of the 70 earlier records; the other 44 records agree with it
+in every field.
 
 | Paper | Field | Earlier coding | Full read | Page |
 |---|---|---|---|---|
@@ -180,7 +182,7 @@ Production (DXRG), Agentic Quantitative Trading (survey) and R&D-Agent-Quant.
 
 ## What changed in the products
 
-Each paragraph below is a change built in this round from a mechanism these papers describe. The
+Each paragraph below is a change built in this round from a mechanism these papers describe. Each
 gap was confirmed in the product source before the change was made. The placeholder after each
 paragraph names the pull request. The same round also includes changes that came from benchmark
 papers and repositories outside this corpus; they are not described here.
@@ -216,8 +218,8 @@ sources are dated after each split and how many are undated. (<<SB-PR-P2>>, <<SA
 
 **Exposure-matched random timing.** Adaptive Alpha Weighting with PPO compares its agent with a
 random entry and exit baseline matched to the agent's turnover and holding duration (p. 11).
-SharpeBench's luck floor is a fully invested random allocator, so nothing said whether a mostly flat
-entrant beats random timing at its own exposure and holding periods. SharpeBench now reports a
+SharpeBench's luck floor is a fully invested random allocator, so no report said whether a mostly
+flat entrant beats random timing at its own exposure and holding periods. SharpeBench now reports a
 rank-neutral exposure-matched random-timing reference computed by replay. (<<SB-PR-P3>>)
 
 **Lagged replay.** The benchmark audit recorded lagged replay as a candidate from LiveTradeBench.
@@ -235,7 +237,7 @@ for the reference agents. (<<SB-PR-P5>>)
 
 **Decision stability.** In the production record's replay league, three frontier models are not
 distinguishable on decision quality, while the share of forced cells in which they change their
-choice across repeats runs from 35% to about 90 to 95% (p. 12). Auditing AI Investment
+choice across repeats ranges from 35% to about 90 to 95% (p. 12). Auditing AI Investment
 Recommendations measures stability across repeated runs as a separate axis (pp. 3-4). Neither
 product measured decision changes across replicate runs that saw identical observations.
 SharpeBench now reports rank-neutral decision stability over replicate runs, keyed by observation
@@ -249,10 +251,11 @@ appear in attempt accounting and in the bridge manifest, rank-neutral. (<<SB-PR-
 <<SA-PR-P7>>)
 
 **Cell isolation disclosure.** R&D-Agent-Quant stores every round's hypotheses, code and results
-and keeps a persistent cache (p. 3, p. 5, p. 19). Image entrants get a fresh container per cell, but
-an `--http` endpoint or a `--cmd` host process can keep state across the seeds of a window, and the
-board row did not say so. The row now carries a contract-bound `cell_isolation` disclosure. It
-discloses the isolation class; it does not detect carried state. (<<SB-PR-P8>>)
+and keeps a persistent cache (p. 3, p. 5, p. 19). In SharpeBench, image entrants get a fresh
+container per cell, but an `--http` endpoint or a `--cmd` host process can keep state across the
+seeds of a window, and the board row did not say so. The row now carries a contract-bound
+`cell_isolation` disclosure. It discloses the isolation class; it does not detect carried state.
+(<<SB-PR-P8>>)
 
 **Expected shortfall.** Autonomous AI Agents for Option Hedging reports shortfall probability beside
 expected shortfall and finds that the two views rank models differently (pp. 5-6, p. 8). Tail-Safe
@@ -273,7 +276,7 @@ span (p. 4). SharpeBench's `walk_forward` yields overlapping windows whenever th
 than the test length, and pooled tracks concatenated windows without a disjointness check, so
 overlapping bars counted as independent in PSR, DSR and the bootstrap. Strict replay and
 sweep-contract construction now refuse overlapping windows with a typed error. `walk_forward`
-behaves as before and is documented, and the SharpeArena README wording is corrected.
+behaves as before and its overlap is documented, and the SharpeArena README wording is corrected.
 (<<SB-PR-P11>>, <<SA-PR-P11>>)
 
 **Paired market-making regret.** The market-making dissertation derives a separate random stream
@@ -300,9 +303,9 @@ training-only and has no rank effect. (<<SA-PR-A3>>)
 
 **Impact-misspecification gap.** Robust Reinforcement Learning in Finance judges robustness by the
 portfolio gap between trading with and without market impact (p. 9). SharpeArena had an elliptic
-uncertainty set and a robust clearing path, but nothing reported how far a policy's return moves
-between the point estimate and the worst case on the same seeds. It now has a rank-neutral paired
-report of that gap. (<<SA-PR-A4>>)
+uncertainty set and a robust clearing path, but no report showed how far a policy's return moves
+between the point estimate and the worst case on the same seeds. SharpeArena now has a rank-neutral
+paired report of that gap. (<<SA-PR-A4>>)
 
 **Same-bar priority in the shared book.** ABIDES-MARL fixes the execution order of simultaneous
 agents' actions through one coordinator (p. 4). Financial Market as a Self-Organized Ecosystem
@@ -338,7 +341,7 @@ volatility; its attribution is corrected. (<<SA-PR-D4>>)
 
 ## What the literature says about its own evaluation
 
-Direct quotations, each checked against the extracted text of the PDF. Pages are PDF pages.
+Each quotation below was checked against the extracted text of its PDF. Pages are PDF pages.
 
 - "The growth of financial language models has outpaced the availability of standardized and time
   safe benchmarks that connect textual understanding to tradable decisions." (The New Quant, p. 11)
@@ -503,7 +506,7 @@ The ledger records 17 adopted, 41 already covered, 9 future and 9 not transferab
 | 44 | Market Making Strategies with RL | Per-agent random streams for paired comparisons; reward split into spread, inventory and hedging terms (PDF p. 41, p. 67-68) | **Adopted** (<<SA-PR-A1>>, <<SA-PR-A2>>) | `mm_regret` refuses unpaired mid paths and the market-making reward is decomposed per step (`market_making.py`), both rank-neutral; training runs are named as declared trials (<<SA-PR-D2>>). |
 | 45 | ML Enhanced Multi-Factor Quantitative Trading | Tradability mask through every rolling operator, with a deflated Sharpe (p. 1-7) | Future | Deflation is covered (`composite.rs:1313`); the bundled datasets carry no price-limit or halt fields, so a mask-aware execution model waits for a keyed equity dataset. |
 | 46 | MountainLion | Retrieval-refined reports with a rolling-accuracy forecast fusion (p. 3-13) | Not transferable | No trading evaluation, and live retrieval with no point-in-time boundary. |
-| 47 | News-Aware Direct RL Trading | Test score as the mean over randomly sampled sub-periods of one test span (p. 4) | **Adopted** (<<SB-PR-P11>>, <<SA-PR-P11>>) | A second instance of the overlap gap under AlphaQuanter; overlapping windows are refused at the evidence boundary. |
+| 47 | News-Aware Direct RL Trading | Test score as the mean over randomly sampled sub-periods of one test span (p. 4) | **Adopted** (<<SB-PR-P11>>, <<SA-PR-P11>>) | A second instance of the overlap gap recorded under AlphaQuanter; overlapping windows are refused at the evidence boundary. |
 | 48 | OOM-RL | Live loss as an alignment signal, with a principal-loss barrier and a hash-anchored test boundary (p. 3-5) | Already covered | `DrawdownStopper(mode="initial")` (`risk.py`), digest-bound contracts and forward pre-registration. |
 | 49 | OpenFinGym | Host-side verifier with a rate-limited scoring API (p. 7) | Already covered | The frozen engine never exposes future bars, forward windows are scored once, and SharpeArena requires private held-out seeds (`EVALUATION.md:56-64`). |
 | 50 | Pretrained LLM with LoRA as Decision Transformer | Offline RL from expert trajectories with a later test span (p. 5, p. 10) | Already covered | The Minari export emits leak-safe train and test datasets over disjoint seed bands (`minari_export.py`). |
@@ -545,7 +548,7 @@ The ledger records 17 adopted, 41 already covered, 9 future and 9 not transferab
 - The corpus is a convenience sample assembled by hand. It over-represents 2025 and 2026, so the
   counts describe this corpus, not the field.
 - Each record describes the highest version of a paper held in the corpus on 16 September 2026.
-  Papers revise, and a revision can change exactly the fields coded here. The files named FutureX
+  Authors revise papers, and a revision can change the fields coded here. The files named FutureX
   (v1) and (v3) are swapped relative to arXiv; the arXiv v3 text was read in full.
 - The fields rest on the stated definitions, and some papers sit between labels. Mapping a reader's
   free text to a label, deciding which result is the headline, and counting simulated evaluation
