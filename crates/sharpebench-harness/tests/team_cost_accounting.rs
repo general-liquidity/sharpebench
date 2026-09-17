@@ -29,7 +29,7 @@ impl Agent for PricedMember {
                     symbol: s.symbol.clone(),
                     action: Action::Buy,
                     target_weight: self.weight,
-                    confidence: 0.5,
+                    confidence: Some(0.5),
                     rationale: "fixed weight".to_string(),
                 }]
             })
@@ -55,7 +55,7 @@ impl Agent for FreeMember {
                     symbol: s.symbol.clone(),
                     action: Action::Buy,
                     target_weight: 0.5,
-                    confidence: 0.5,
+                    confidence: Some(0.5),
                     rationale: "fixed weight".to_string(),
                 }]
             })

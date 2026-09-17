@@ -838,7 +838,10 @@ where
     let mut identity = sweep.identity;
     identity.invocation_sha256 =
         gateway_invocation_sha256(&identity.invocation_sha256, host.routes, host.budget);
-    let contract = SweepContract::new(identity, sweep.windows, sweep.seeds, sweep.max_retries);
+    // Refuse overlapping or unordered windows before the pair is admitted and a
+    // journal is written, not after.
+    let contract = SweepContract::try_new(identity, sweep.windows, sweep.seeds, sweep.max_retries)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
     let sweep_sha256 = gateway_sweep_sha256(sweep.agent_id, &contract);
     let journal_identity = JournalIdentity::new(host.routes.identity_digest(), host.budget)
         .for_sweep(sweep_sha256.clone());

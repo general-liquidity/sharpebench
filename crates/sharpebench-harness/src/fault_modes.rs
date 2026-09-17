@@ -652,7 +652,7 @@ mod tests {
                         Action::Sell
                     },
                     target_weight: *target,
-                    confidence: 0.5,
+                    confidence: Some(0.5),
                     rationale: String::new(),
                 })
                 .collect(),

@@ -89,9 +89,11 @@ ordinary hold.
 - `action` ∈ `"buy" | "sell" | "hold" | "close"` (lower-case).
 - `target_weight` is the signed desired portfolio weight for the symbol in
   `[-1, 1]`; sizing is carried here, not by `action`.
-- `confidence` ∈ `[0, 1]` (defaults to `0.5`) is your stated conviction. It is
-  **scored for calibration** (Brier), so report it honestly: claiming 0.9 on
-  coin-flips is penalized.
+- `confidence` ∈ `[0, 1]` is your optional stated conviction that the decision
+  pays off. It is **scored for calibration** (Brier) against the next step's
+  return, the first return the new holdings earn, so report it honestly:
+  claiming 0.9 on coin-flips is penalized. Omit it to state nothing: the
+  harness fills in no value and the decision adds no calibration pair.
 - `reasoning` is optional and captured for auditability.
 
 Omitted symbols are left untouched. A `Decision` with no orders is a valid hold.

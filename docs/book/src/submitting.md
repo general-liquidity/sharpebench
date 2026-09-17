@@ -29,7 +29,10 @@ sharpebench score submissions.json
 
 `trace`, `confidences`, `outcomes`, and `cost` are optional (serde-defaulted).
 One `run` per seed × window, which is what makes pass^k and multi-window OOS
-meaningful.
+meaningful. The scorer pairs `confidences` and `outcomes` by position with each
+other, and neither with `returns`. List only the confidences the agent stated,
+each beside whether that decision paid off. See
+[Confidence and calibration](#confidence-and-calibration).
 
 A submission object may also carry an optional `declared_mandate`, e.g.
 `{"kind": "drawdown_capped", "max_per_run_drawdown": 0.2}` or
@@ -51,8 +54,51 @@ let board = sharpebench_core::rank(&[sub], &ScoreConfig::default());
 
 The external protocol is a request/response loop: the harness writes a
 point-in-time `MarketObservation` (only data at or before the decision date) and
-reads back a `Decision` (target weights + confidence). The agent never sees a
-future bar: look-ahead is impossible by construction, not by convention.
+reads back a `Decision` (target weights + an optional confidence per order). The
+agent never sees a future bar: look-ahead is impossible by construction, not by
+convention.
+
+## Confidence and calibration
+
+An order's `confidence` is optional. If you send it, it must be a number in
+`[0, 1]`, and the wire contract refuses `null`. If you omit it, the harness fills
+in nothing: the key stays absent in the captured trajectory and the order adds
+nothing to calibration. Releases before this change read an omitted confidence
+as 0.5.
+
+The simulator builds calibration pairs by two rules:
+
+- A decision contributes one pair when at least one of its orders states a
+  confidence, using the mean over the orders that do. A hold contributes none,
+  and so does a decision whose orders all omit the field. An agent that states
+  0.9 on 20 trades and then holds for 230 bars reports 20 pairs, where earlier
+  releases reported 250.
+- The pair's outcome is whether the return at step `t + 1` is positive. The
+  return the engine books at step `t` is the price move on the holdings that
+  decision `t - 1` chose, plus the trading cost of decision `t`, so the first
+  return a decision's holdings earn arrives one step later. The window's final
+  decision has no such return inside the window and contributes no pair.
+
+`calibration_brier` is the Brier score over those pairs and
+`calibration_observations` counts them. An agent that never states a
+confidence reports no Brier score and zero observations.
+`confidence_weighted_return` weights each run by the mean of its paired
+confidences. A run with none carries no weight, unless no run in the
+submission has any; then every run weighs the same.
+
+Trajectory contract schema 3 marks the optional confidence. A schema-2 capture
+wrote a confidence on every order, including the 0.5 filled in for an entrant
+that stated none, so a verifier cannot tell its stated values from filled-in
+ones. Strict verification refuses schema 2. An explicit legacy regrade
+(`sharpebench verify-trajectory --allow-unbound-trajectory`) replays it and
+counts every recorded confidence as stated, the filled-in ones included. In the
+other direction, strict verification in a release before this change refuses a
+schema-3 capture as an unsupported schema.
+
+Rust agents that build `Order` values directly migrate by wrapping a stated
+confidence in `Some(..)` and passing `None` to state nothing. Wire JSON needs no
+change: a decision that omits the key still parses, and a decision that states
+it round-trips byte for byte.
 
 ## The wire contract is published, and it is closed
 
@@ -107,7 +153,8 @@ or from outside the run. If your agent wants randomness, derive it from the
 observations it was given.
 
 **What must repeat.** The score-bearing part of every decision: each order's
-`symbol`, `action`, `target_weight` and `confidence`, and the `cost` report.
+`symbol`, `action`, `target_weight` and `confidence` (present or absent), and
+the `cost` report.
 `reasoning` and each order's `rationale` are audit text the scorer never reads;
 they may differ between executions.
 
