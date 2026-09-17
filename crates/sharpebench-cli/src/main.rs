@@ -671,7 +671,7 @@ fn help() {
         "  sharpebench arena <init|open|commit|advance|score|publish|verify> ...  drive a forward-attested scoring window (see docs/book/src/arena.md)"
     );
     println!(
-        "  sharpebench forecast-quality <evidence.json>...              score prospective forecasts on exact common support (reported only)"
+        "  sharpebench forecast-quality <evidence.json>... [--contracts <plan.json>]  score prospective forecasts on exact common support, or on a declared contract plan (reported only)"
     );
     println!(
         "  sharpebench import <csv|stockbench> ... --out subs.json     convert a rival board's return series into a scoreable field"
