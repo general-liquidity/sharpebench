@@ -41,7 +41,10 @@ reports them as `identical_replicate_runs` and refuses the field unless you pass
 `--declare-identical-replicates`. Pass it only when the runs are separate
 executions. Two captures of a deterministic agent over the same seeds are
 byte-identical. Two captures of a sampling agent differ as soon as one decision
-or its audit text does.
+or its audit text does. The report cannot tell a re-capture from a copy: equal
+bytes look the same either way, so a zero over declared identical replicates is
+only as good as the declaration. The report lists every input by digest so a
+reader can see which inputs are equal.
 
 ## Which steps are compared
 
@@ -145,6 +148,8 @@ share takes the values above, and for three options with probabilities
 | `steps_unreplicated` | steps of a window that has a single replicate |
 | `identical_replicate_runs` | runs byte-identical to an earlier run of the same window |
 | `identical_replicates_declared` | whether `--declare-identical-replicates` was passed |
+| `inputs[]`, `identical_inputs` | each input trajectory's SHA-256 over its compact JSON and its run count, and the inputs whose digest repeats an earlier one |
+| `dataset_sha256`, `cost_model_sha256`, `engine_version`, `runner_artifact_sha256` | what every input was verified against |
 | `windows[]` | the same counts per window, with `replicates` and every differing group (`step`, `observation_sha256`, `replicates`, `distinct_decisions`, `differing_pairs`) |
 
 The top-level counts are sums over the windows. For a window with two or more
