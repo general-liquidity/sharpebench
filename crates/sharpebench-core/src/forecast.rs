@@ -1366,6 +1366,13 @@ pub fn analyze_forecast_quality_against_plan(
     analyze(evidence, config, Some(plan))
 }
 
+/// Every unordered pair of documents in a field, by index, in report order. One
+/// statement of the pairing, so the settlement check and the comparisons cover
+/// the same pairs and neither compares a document with itself.
+fn document_pairs(documents: usize) -> impl Iterator<Item = (usize, usize)> {
+    (0..documents).flat_map(move |left| ((left + 1)..documents).map(move |right| (left, right)))
+}
+
 fn analyze(
     evidence: &[ForecastEvidence],
     config: ForecastAnalysisConfig,
@@ -1400,11 +1407,10 @@ fn analyze(
     let mut planned = None;
     if let Some(plan) = plan {
         // Every settlement is checked before the plan drops anything, so an
-        // unscored contract still has one outcome across the field.
-        for left in 0..rows.len() {
-            for right in (left + 1)..rows.len() {
-                check_shared_settlements(&rows[left], &rows[right])?;
-            }
+        // unscored contract still has one outcome across the field. The pairs
+        // are the ones compared below.
+        for (left, right) in document_pairs(rows.len()) {
+            check_shared_settlements(&rows[left], &rows[right])?;
         }
         let digests: BTreeSet<&str> = plan.contract_sha256.iter().map(String::as_str).collect();
         let mut outside = BTreeMap::new();
@@ -1431,16 +1437,14 @@ fn analyze(
         .map(|(document, rows)| summarize_agent(document, rows, config.calibration_bins))
         .collect();
     let mut comparisons = Vec::new();
-    for left in 0..evidence.len() {
-        for right in (left + 1)..evidence.len() {
-            comparisons.push(compare_agents(
-                &evidence[left].identity.agent_id,
-                &rows[left],
-                &evidence[right].identity.agent_id,
-                &rows[right],
-                config,
-            )?);
-        }
+    for (left, right) in document_pairs(evidence.len()) {
+        comparisons.push(compare_agents(
+            &evidence[left].identity.agent_id,
+            &rows[left],
+            &evidence[right].identity.agent_id,
+            &rows[right],
+            config,
+        )?);
     }
     holm_adjust(&mut comparisons, config.familywise_alpha);
     let contract_digest_versions = rows
