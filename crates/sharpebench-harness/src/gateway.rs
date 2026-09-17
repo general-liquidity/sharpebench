@@ -45,8 +45,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::accounting::RateCard;
 use crate::gateway_journal::{
-    GatewayBudget, GatewayJournal, JournalIdentity, JournalLock, JournalSaveError, ReleaseReason,
-    Settlement, UnknownCostReason,
+    FinishClass, GatewayBudget, GatewayJournal, JournalIdentity, JournalLock, JournalSaveError,
+    ReleaseReason, Settlement, UnknownCostReason,
 };
 
 #[path = "gateway_serve.rs"]
@@ -546,6 +546,10 @@ impl GatewayResponse {
 #[serde(deny_unknown_fields)]
 pub struct ProviderBody {
     pub text: String,
+    /// Normalized to `"stop"` for an answer the model ended and `"length"` for
+    /// one the output bound cut off. The journal counts every parsed answer by
+    /// [`FinishClass`]; any other string counts as `other`, a missing one as
+    /// `absent`.
     #[serde(default)]
     pub finish_reason: Option<String>,
     /// Absent means the provider reported no usage. It never means zero.
@@ -1219,7 +1223,8 @@ impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
             },
         };
         let usage_observed = matches!(settlement, Settlement::Priced { .. });
-        if !self.settle_and_persist(ordinal, settlement) {
+        let finish = FinishClass::of(parsed.finish_reason.as_deref());
+        if !self.record_and_persist(ordinal, settlement, Some(finish)) {
             // The call happened and the money is spent; what failed is the
             // record of it. Handing back the completion as a success would let
             // the sweep carry on over a journal that no longer says what it
@@ -1254,7 +1259,21 @@ impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
     /// completed at all. The settled records stay in memory either way,
     /// reachable through [`ModelGateway::into_journal`].
     fn settle_and_persist(&mut self, ordinal: u32, settlement: Settlement) -> bool {
-        self.journal.settle(ordinal, settlement);
+        self.record_and_persist(ordinal, settlement, None)
+    }
+
+    /// [`Self::settle_and_persist`], with the stop-reason class of a parsed
+    /// answer recorded beside the settlement when there is one.
+    fn record_and_persist(
+        &mut self,
+        ordinal: u32,
+        settlement: Settlement,
+        finish: Option<FinishClass>,
+    ) -> bool {
+        match finish {
+            Some(finish) => self.journal.settle_answered(ordinal, settlement, finish),
+            None => self.journal.settle(ordinal, settlement),
+        }
         let Some(path) = &self.journal_path else {
             return true;
         };
