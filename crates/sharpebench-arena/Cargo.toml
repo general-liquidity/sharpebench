@@ -16,14 +16,14 @@ sharpebench-leaderboard = { path = "../sharpebench-leaderboard", version = "0.27
 sharpebench-sim = { path = "../sharpebench-sim", version = "0.27.0" }
 # Observation/decision types named by the `Agent` impl on `SandboxedAgent`.
 sharpebench-protocol = { path = "../sharpebench-protocol", version = "0.27.0" }
+# Reveal intake replays each entry's capture with the harness's strict verifier
+# and re-executes it with the harness's re-execution check (`intake.rs`). The
+# CLI's `arena_cmd.rs`, compiled by `tests/cli_arena_cmd.rs`, also validates a
+# window's `--fault-plan` with it. harness never depends on arena, so this adds
+# no cycle, and harness publishes before arena.
+sharpebench-harness = { path = "../sharpebench-harness", version = "0.27.0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-
-[dev-dependencies]
-# `tests/cli_arena_cmd.rs` compiles the CLI's `arena_cmd.rs`, which validates a
-# window's `--fault-plan` with the harness. harness never depends on arena, so
-# this adds no cycle, and harness publishes before arena.
-sharpebench-harness = { path = "../sharpebench-harness", version = "0.27.0" }
 
 [lints]
 workspace = true

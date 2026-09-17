@@ -5,13 +5,14 @@
 use std::path::{Path, PathBuf};
 
 use sharpebench_arena::{
-    verify_arena, Arena, RevealedEntry, WindowStatus, BOARD_FILE, WINDOWS_DIR,
+    verify_arena, Arena, BoardRow, ReplayWindow, ReturnsProvenance, RevealedEntry, WindowStatus,
+    BOARD_FILE, WINDOWS_DIR,
 };
 use sharpebench_attest::{
     content_digest, make_commitment, publish_public_chain, PublicChain, SigningKey,
 };
-use sharpebench_core::{AgentSubmission, Run, ScoreConfig};
-use sharpebench_sim::Dataset;
+use sharpebench_core::ScoreConfig;
+use sharpebench_sim::{Agent, BuyAndHold, Dataset, Momentum};
 
 fn temp_arena_dir(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
@@ -26,46 +27,71 @@ fn signing_key() -> SigningKey {
     SigningKey::derive(b"arena-test-host-secret")
 }
 
-/// Serialize the synthetic dataset to deterministic bytes (BTreeMap iteration
-/// is ordered) so the same seed yields the same dataset hash on every run.
-fn dataset_bytes(data: &Dataset) -> Vec<u8> {
-    let mut out = String::new();
-    for (sym, closes) in &data.closes {
-        for (t, c) in closes.iter().enumerate() {
-            out.push_str(&format!("{sym},{t},{c}\n"));
+/// The revealed dataset as the `date,symbol,close` CSV `--data` reads. `f64`
+/// display round-trips exactly, so every run writes the same bytes and the
+/// parsed dataset equals the synthetic one.
+fn dataset_csv(data: &Dataset) -> String {
+    let mut out = String::from(
+        "date,symbol,close
+",
+    );
+    for (symbol, closes) in &data.closes {
+        for (date, close) in data.dates.iter().zip(closes) {
+            out.push_str(&format!(
+                "{date},{symbol},{close}
+"
+            ));
         }
     }
-    out.into_bytes()
+    out
 }
 
 fn write_dataset(dir: &Path, seed: u64) -> PathBuf {
-    let data = Dataset::synthetic(4, 60, seed);
     let path = dir.join("dataset.csv");
-    std::fs::write(&path, dataset_bytes(&data)).unwrap();
+    std::fs::write(&path, dataset_csv(&Dataset::synthetic(4, 60, seed))).unwrap();
     path
 }
 
-/// A submission whose returns come from the synthetic dataset's own closes
-/// (symbol `sym_idx`), so the scored field is derived from real dataset bytes.
-fn submission_from_dataset(agent_id: &str, sym_idx: usize, seed: u64) -> AgentSubmission {
-    let data = Dataset::synthetic(4, 60, seed);
-    let symbols = data.symbols();
-    let closes = &data.closes[&symbols[sym_idx % symbols.len()]];
-    let returns: Vec<f64> = closes.windows(2).map(|w| w[1] / w[0] - 1.0).collect();
-    AgentSubmission {
-        agent_id: agent_id.to_string(),
-        runs: vec![Run {
-            returns,
-            ..Run::default()
-        }],
-        in_sample_trials: 0,
-        candidates: Vec::new(),
-    }
+/// The scorer digest `Arena::open_window` freezes for an in-process window. A
+/// capture made by the window's scorer records it as its runner.
+fn scorer(arena: &Arena, window: &str) -> String {
+    arena.window(window).unwrap().scorer_artifact_sha256.clone()
 }
 
-fn entry(agent_id: &str, sym_idx: usize, seed: u64, digest: &str, salt: &str) -> RevealedEntry {
+/// A strict capture over the dataset for `seed`, over the window's execution
+/// matrix, of momentum (`policy` even) or buy-and-hold (`policy` odd) run as the
+/// image `digest`, made by `scorer`. The arena derives the entry's returns from
+/// it by replay.
+fn entry(
+    agent_id: &str,
+    policy: usize,
+    seed: u64,
+    digest: &str,
+    salt: &str,
+    scorer: &str,
+) -> RevealedEntry {
+    let data = Dataset::synthetic(4, 60, seed);
+    let replay =
+        ReplayWindow::parse(dataset_csv(&data).as_bytes(), &ScoreConfig::default()).unwrap();
+    let (_, mut capture) = sharpebench_harness::run_agent_capture(
+        &format!("sandbox:test/{agent_id}@sha256:{digest}"),
+        &replay.data,
+        &replay.windows,
+        &replay.seeds,
+        replay.costs,
+        || {
+            if policy.is_multiple_of(2) {
+                Box::new(Momentum::default()) as Box<dyn Agent>
+            } else {
+                Box::new(BuyAndHold)
+            }
+        },
+    );
+    capture.contract.as_mut().unwrap().runner_artifact_sha256 = Some(scorer.to_string());
     RevealedEntry {
-        submission: submission_from_dataset(agent_id, sym_idx, seed),
+        agent_id: Some(agent_id.to_string()),
+        submission: None,
+        capture: Some(capture),
         artifact_digest: digest.to_string(),
         salt: salt.to_string(),
         fault_plan_sha256: None,
@@ -90,9 +116,10 @@ fn run_window(arena: &mut Arena, dir: &Path, id: &str, base_epoch: u64, seed: u6
     }
     arena.advance(reveal).unwrap();
     let dataset = write_dataset(dir, seed);
+    let scorer = scorer(arena, id);
     let entries = vec![
-        entry("alpha", 0, seed, &digest, "salt-alpha"),
-        entry("beta", 1, seed, &digest, "salt-beta"),
+        entry("alpha", 0, seed, &digest, "salt-alpha", &scorer),
+        entry("beta", 1, seed, &digest, "salt-beta", &scorer),
     ];
     arena.reveal_and_score(id, &dataset, &entries).unwrap();
     arena.publish(id, &signing_key()).unwrap()
@@ -138,9 +165,10 @@ fn full_lifecycle_is_deterministic_and_verifies() {
         WindowStatus::Committed
     );
     let dataset = write_dataset(&dir, 42);
+    let scorer = scorer(&arena, "2026-W01");
     let entries = vec![
-        entry("alpha", 0, 42, &digest, "salt-a"),
-        entry("beta", 1, 42, &digest, "salt-b"),
+        entry("alpha", 0, 42, &digest, "salt-a", &scorer),
+        entry("beta", 1, 42, &digest, "salt-b", &scorer),
     ];
     let err = arena
         .reveal_and_score("2026-W01", &dataset, &entries)
@@ -159,6 +187,20 @@ fn full_lifecycle_is_deterministic_and_verifies() {
         content_digest(&std::fs::read(&dataset).unwrap()),
         "the window record binds the exact revealed dataset bytes"
     );
+    assert_eq!(
+        w.replay_dataset_sha256.as_deref(),
+        entries[0]
+            .capture
+            .as_ref()
+            .and_then(|c| c.contract.as_ref())
+            .map(|c| c.dataset_sha256.as_str()),
+        "the window records the parsed dataset identity every capture named"
+    );
+    assert!(w.refusals.is_empty(), "{:?}", w.refusals);
+    assert!(w
+        .returns_provenance
+        .values()
+        .all(|p| *p == ReturnsProvenance::Replayed));
 
     let board_path = arena.publish("2026-W01", &signing_key()).unwrap();
     assert!(board_path.ends_with(Path::new("2026-W01").join(BOARD_FILE)));
@@ -168,6 +210,13 @@ fn full_lifecycle_is_deterministic_and_verifies() {
     );
     // board.md exists beside board.json.
     assert!(board_path.with_file_name("board.md").exists());
+    // Every published row says its returns were replayed from a capture.
+    let board: PublicChain =
+        serde_json::from_str(&std::fs::read_to_string(&board_path).unwrap()).unwrap();
+    for link in &board.chain[1..] {
+        let row: BoardRow = serde_json::from_str(&link.payload).unwrap();
+        assert_eq!(row.returns_provenance, Some(ReturnsProvenance::Replayed));
+    }
 
     // Determinism: a second arena driven with the same epochs, inputs, and key
     // produces byte-identical board.json.
@@ -303,8 +352,9 @@ fn tampered_reveal_is_refused_and_recorded_while_the_rest_score() {
         .unwrap();
     arena.advance(20).unwrap();
     let dataset = write_dataset(&dir, 7);
+    let scorer = scorer(&arena, "w");
     let entries = vec![
-        entry("honest", 0, 7, &digest, "salt-h"),
+        entry("honest", 0, 7, &digest, "salt-h", &scorer),
         // The tamperer reveals a different artifact than it committed to.
         entry(
             "tamperer",
@@ -312,9 +362,10 @@ fn tampered_reveal_is_refused_and_recorded_while_the_rest_score() {
             7,
             &content_digest(b"swapped-after-the-fact"),
             "salt-t",
+            &scorer,
         ),
         // And someone who never committed at all shows up.
-        entry("gatecrasher", 2, 7, &digest, "salt-g"),
+        entry("gatecrasher", 2, 7, &digest, "salt-g", &scorer),
     ];
     let scores = arena.reveal_and_score("w", &dataset, &entries).unwrap();
     assert_eq!(scores.len(), 1);
@@ -455,8 +506,13 @@ fn state_survives_reload_at_every_stage() {
         let mut arena = Arena::load(&dir).unwrap();
         assert_eq!(arena.current_epoch(), 20);
         assert_eq!(arena.window("w").unwrap().status, WindowStatus::Committed);
+        let scorer = scorer(&arena, "w");
         arena
-            .reveal_and_score("w", &dataset, &[entry("alpha", 0, 9, &digest, "s")])
+            .reveal_and_score(
+                "w",
+                &dataset,
+                &[entry("alpha", 0, 9, &digest, "s", &scorer)],
+            )
             .unwrap();
     }
     {

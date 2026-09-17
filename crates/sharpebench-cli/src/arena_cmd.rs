@@ -15,7 +15,10 @@
 
 use std::path::Path;
 
-use sharpebench_arena::{verify_arena, Arena, RevealedEntry, SigningKey, VerifyingKey};
+use sharpebench_arena::{
+    verify_arena, Arena, DockerLauncher, EntrantLauncher, IntakeOptions, RevealedEntry, SigningKey,
+    VerifyingKey,
+};
 
 /// Entry point (see the module docs for the argv contract).
 pub fn run(args: &[String], json: bool) -> i32 {
@@ -25,6 +28,7 @@ pub fn run(args: &[String], json: bool) -> i32 {
         Some("supersede-empty") => cmd_supersede_empty(args, json),
         Some("link-supersession") => cmd_link_supersession(args, json),
         Some("commitment") => cmd_commitment(args, json),
+        Some("reference-artifact") => cmd_reference_artifact(args, json),
         Some("commit") => cmd_commit(args, json),
         Some("advance") => cmd_advance(args, json),
         Some("score") => cmd_score(args, json),
@@ -48,7 +52,11 @@ fn usage() {
     eprintln!("                                                         print a commitment; a faulted window's must bind its plan");
     eprintln!("  arena commit <dir> <window> <commitment.json>          register a pre-deadline commitment (from `sharpebench commit` or `arena commitment`)");
     eprintln!("  arena advance <dir> <epoch>                            advance the epoch (operator/cron/CI supplies \"now\")");
-    eprintln!("  arena score <dir> <window> <dataset> <entries.json>    verify reveals, refuse mismatches, rank the rest");
+    eprintln!("  arena reference-artifact <buy-and-hold|momentum> <runner_sha256>");
+    eprintln!("                                                         print the artifact digest a reference entrant commits to");
+    eprintln!("  arena score <dir> <window> <dataset> <entries.json> [--replay-only] [--allow-supplied-returns]");
+    eprintln!("                                                         verify reveals, replay and re-execute each capture, refuse mismatches, rank the rest");
+    eprintln!("                                                         --replay-only skips re-execution; --allow-supplied-returns also ranks returns as given; either marks the board noncertifying");
     eprintln!("  arena publish <dir> <window> <key>                     sign + write the window's Ed25519 board");
     eprintln!("  arena verify <dir> [--pubkey <hex>]                    verify every published board + the cross-window chain");
     eprintln!("\n<key> and --pubkey accept a literal, or env:NAME / file:PATH to keep secrets out of process listings.");
@@ -214,6 +222,34 @@ fn cmd_commitment(args: &[String], json: bool) -> i32 {
     0
 }
 
+/// Print the artifact digest an entrant commits to for a reference agent
+/// compiled into the runner, so the commitment names one agent.
+fn cmd_reference_artifact(args: &[String], json: bool) -> i32 {
+    let (Some(name), Some(runner)) = (args.get(3), args.get(4)) else {
+        eprintln!(
+            "usage: sharpebench arena reference-artifact <buy-and-hold|momentum> <runner_sha256>"
+        );
+        return 2;
+    };
+    if !sharpebench_arena::is_reference_entrant(name) {
+        return fail(
+            &format!("`{name}` is not a reference entrant (use buy-and-hold or momentum)"),
+            json,
+        );
+    }
+    let digest = sharpebench_arena::reference_entrant_digest(name, runner);
+    if json {
+        emit_json(&serde_json::json!({
+            "reference_entrant": name,
+            "runner_sha256": runner,
+            "artifact_digest": digest,
+        }));
+    } else {
+        println!("{digest}");
+    }
+    0
+}
+
 fn cmd_commit(args: &[String], json: bool) -> i32 {
     let (Some(dir), Some(window), Some(commitment_path)) = (args.get(3), args.get(4), args.get(5))
     else {
@@ -289,12 +325,24 @@ fn cmd_advance(args: &[String], json: bool) -> i32 {
 }
 
 fn cmd_score(args: &[String], json: bool) -> i32 {
+    const USAGE: &str = "usage: sharpebench arena score <dir> <window> <dataset> <entries.json> [--replay-only] [--allow-supplied-returns]";
     let (Some(dir), Some(window), Some(dataset), Some(entries_path)) =
         (args.get(3), args.get(4), args.get(5), args.get(6))
     else {
-        eprintln!("usage: sharpebench arena score <dir> <window> <dataset> <entries.json>");
+        eprintln!("{USAGE}");
         return 2;
     };
+    if [dir, window, dataset, entries_path]
+        .iter()
+        .any(|operand| operand.starts_with("--"))
+    {
+        eprintln!("{USAGE}");
+        return 2;
+    }
+    let allow_supplied_returns = args.iter().any(|arg| arg == "--allow-supplied-returns");
+    // Re-execution is the default: a replayed row can hold hindsight decisions,
+    // so skipping it is an explicit choice, and its board is noncertifying.
+    let replay_only = args.iter().any(|arg| arg == "--replay-only");
     let entries: Vec<RevealedEntry> = match std::fs::read_to_string(entries_path)
         .map_err(|e| format!("cannot read {entries_path}: {e}"))
         .and_then(|t| {
@@ -308,26 +356,49 @@ fn cmd_score(args: &[String], json: bool) -> i32 {
         Ok(a) => a,
         Err(e) => return fail(&e, json),
     };
-    match arena.reveal_and_score(window, Path::new(dataset), &entries) {
+    let mut docker = DockerLauncher;
+    let options = IntakeOptions {
+        allow_supplied_returns,
+        reexecute: (!replay_only).then_some(&mut docker as &mut dyn EntrantLauncher),
+    };
+    match arena.reveal_and_score_with(window, Path::new(dataset), &entries, options) {
         Ok(scores) => {
-            let refusals = arena
+            let (refusals, provenance, certifying) = arena
                 .window(window)
-                .map(|w| w.refusals.clone())
+                .map(|w| {
+                    (
+                        w.refusals.clone(),
+                        w.returns_provenance.clone(),
+                        w.certifying == Some(true),
+                    )
+                })
                 .unwrap_or_default();
             if json {
-                emit_json(&serde_json::json!({
+                let mut out = serde_json::json!({
                     "ok": true,
                     "window": window,
                     "scored": scores.len(),
                     "refused": refusals,
+                    "returns_provenance": provenance,
+                    "certifying": certifying,
                     "board": sharpebench_core::seal_board(&scores),
-                }));
+                });
+                if allow_supplied_returns {
+                    out["supplied_returns_accepted"] = serde_json::json!(true);
+                }
+                emit_json(&out);
             } else {
                 println!(
                     "scored window `{window}`: {} entries ranked, {} refused",
                     scores.len(),
                     refusals.len()
                 );
+                if !certifying {
+                    println!("  NONCERTIFYING: a `replayed` or `supplied` row was ranked, or supplied returns were allowed; the board does not certify its rows");
+                }
+                for (agent_id, returns) in &provenance {
+                    println!("  returns of `{agent_id}`: {}", returns.as_str());
+                }
                 for r in &refusals {
                     println!("  refused `{}`: {}", r.agent_id, r.reason);
                 }

@@ -12,6 +12,7 @@
   - [Regime-conditional comparison](methodology-regime.md)
   - [Volatility-response sizing](methodology-sizing.md)
   - [Candidate lineage diagnostics](candidate-lineage.md)
+  - [Replay diagnostics](replay-diagnostics.md)
   - [Timing-luck floor](timing-luck.md)
 - [Prospective forecast quality](forecast-quality.md)
 - [The simulator](simulator.md)
