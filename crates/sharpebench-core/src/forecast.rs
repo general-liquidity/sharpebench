@@ -31,8 +31,18 @@ pub const FORECAST_EVIDENCE_SCHEMA_V2: &str = "sharpe.forecast-evidence.v2";
 /// agent's gaps to that agent, and a pair with unequal resolved support carries
 /// `support_gap` and a withheld inference.
 pub const FORECAST_QUALITY_SCHEMA: &str = "sharpebench.forecast-quality.v2";
+/// The report written against a declared [`ForecastContractPlan`]: v2 with the
+/// plan as the field support and `common_support.outside_plan_by_agent` listing
+/// the resolved digests the plan does not name, which are not scored. A report
+/// without a plan stays v2.
+pub const FORECAST_QUALITY_PLAN_SCHEMA: &str = "sharpebench.forecast-quality.v3";
+/// Schema of the declared contract universe file.
+pub const FORECAST_CONTRACT_PLAN_SCHEMA: &str = "sharpebench.forecast-contract-plan.v1";
 const SUPPORT_RULE: &str = "a pair is differenced on the contract digests both agents resolved \
      and receives inference only when each agent resolved every digest the other did";
+const PLAN_SUPPORT_RULE: &str = "a pair is differenced on the declared plan's contract digests \
+     both agents resolved and receives inference only when each agent resolved every plan digest \
+     the other did; resolved digests outside the plan are listed and not scored";
 const CONTRACT_SCHEMA: &str = "sharpearena.forecast-contract.v1";
 
 /// The encoding a revision's `contract_sha256` was verified under.
@@ -277,6 +287,47 @@ pub fn parse_forecast_evidence(payload: &str) -> Result<ForecastEvidence, Foreca
         .map_err(|error| reject(format!("invalid forecast evidence JSON: {error}")))?;
     validate_evidence(&evidence)?;
     Ok(evidence)
+}
+
+/// The contract digests every agent in a field is asked to answer, declared
+/// before resolution.
+///
+/// Without a plan the field support is the union of the digests the documents
+/// resolved, and a document chooses its part of that union: resolving one
+/// contract nobody else resolved withholds inference on every pair it is in and
+/// charges that contract to every other agent. A plan fixes the support
+/// instead. A resolved digest the plan does not name is listed and not scored,
+/// and an agent's gaps are the planned digests it did not resolve.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ForecastContractPlan {
+    pub schema_version: String,
+    pub contract_sha256: Vec<String>,
+}
+
+/// Parse and validate a [`ForecastContractPlan`]: the exact schema, at least one
+/// digest, every digest a lowercase SHA-256, and no digest twice.
+pub fn parse_forecast_contract_plan(payload: &str) -> Result<ForecastContractPlan, ForecastError> {
+    let plan: ForecastContractPlan = serde_json::from_str(payload)
+        .map_err(|error| reject(format!("invalid forecast contract plan: {error}")))?;
+    if plan.schema_version != FORECAST_CONTRACT_PLAN_SCHEMA {
+        return Err(reject("unsupported forecast contract plan schema_version"));
+    }
+    if plan.contract_sha256.is_empty() {
+        return Err(reject(
+            "a forecast contract plan names at least one contract",
+        ));
+    }
+    let mut seen = BTreeSet::new();
+    for value in &plan.contract_sha256 {
+        digest(value, "plan contract_sha256")?;
+        if !seen.insert(value.as_str()) {
+            return Err(reject(format!(
+                "forecast contract plan names contract digest {value} twice"
+            )));
+        }
+    }
+    Ok(plan)
 }
 
 fn nonempty(value: &str, field: &str) -> Result<(), ForecastError> {
@@ -1132,13 +1183,18 @@ pub struct SettlementStatusDisagreement {
 #[derive(Clone, Debug, Serialize)]
 pub struct CommonSupport {
     pub rule: &'static str,
-    /// Every contract digest at least one agent resolved: the field support each
-    /// agent's gaps are charged against. It equals every pair's support when the
-    /// whole field resolved the same digests.
+    /// The field support each agent's gaps are charged against: every contract
+    /// digest at least one agent resolved, or, against a plan, the planned
+    /// digests. It equals every pair's support when the whole field resolved the
+    /// same digests.
     pub n_contracts: usize,
     pub contract_sha256: Vec<String>,
     pub unresolved_by_agent: BTreeMap<String, AgentUnresolvedSupport>,
     pub settlement_status_disagreements: Vec<SettlementStatusDisagreement>,
+    /// Against a plan only: per agent, the resolved digests the plan does not
+    /// name, sorted. They enter no score, calibration or comparison.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outside_plan_by_agent: Option<BTreeMap<String, Vec<String>>>,
 }
 
 /// How far apart two agents' resolved supports are. Each count is charged to the
@@ -1284,9 +1340,36 @@ pub struct ForecastQualityReport {
 }
 
 /// Recompute forecast quality without changing or consulting trading-rank eligibility.
+///
+/// The field support is the union of the digests the documents resolved, so a
+/// document that resolves a contract nobody else did withholds inference on its
+/// own pairs and charges that contract to every other agent. Use
+/// [`analyze_forecast_quality_against_plan`] when the question set is declared.
 pub fn analyze_forecast_quality(
     evidence: &[ForecastEvidence],
     config: ForecastAnalysisConfig,
+) -> Result<ForecastQualityReport, ForecastError> {
+    analyze(evidence, config, None)
+}
+
+/// [`analyze_forecast_quality`] against a declared contract universe. The plan
+/// is the field support: every agent's gaps are the planned digests it did not
+/// resolve, and a resolved digest outside the plan is listed in
+/// `outside_plan_by_agent` and enters no score, calibration or comparison. Its
+/// settlement is still checked against every other document that resolved it.
+/// The report is [`FORECAST_QUALITY_PLAN_SCHEMA`].
+pub fn analyze_forecast_quality_against_plan(
+    evidence: &[ForecastEvidence],
+    config: ForecastAnalysisConfig,
+    plan: &ForecastContractPlan,
+) -> Result<ForecastQualityReport, ForecastError> {
+    analyze(evidence, config, Some(plan))
+}
+
+fn analyze(
+    evidence: &[ForecastEvidence],
+    config: ForecastAnalysisConfig,
+    plan: Option<&ForecastContractPlan>,
 ) -> Result<ForecastQualityReport, ForecastError> {
     if evidence.is_empty() {
         return Err(reject(
@@ -1313,7 +1396,35 @@ pub fn analyze_forecast_quality(
         }
         rows.push(scored_forecasts(document)?);
     }
-    let common_support = field_support(evidence, &rows);
+    let mut outside_plan_by_agent = None;
+    let mut planned = None;
+    if let Some(plan) = plan {
+        // Every settlement is checked before the plan drops anything, so an
+        // unscored contract still has one outcome across the field.
+        for left in 0..rows.len() {
+            for right in (left + 1)..rows.len() {
+                check_shared_settlements(&rows[left], &rows[right])?;
+            }
+        }
+        let digests: BTreeSet<&str> = plan.contract_sha256.iter().map(String::as_str).collect();
+        let mut outside = BTreeMap::new();
+        for (document, rows) in evidence.iter().zip(&mut rows) {
+            let unplanned: BTreeSet<String> = rows
+                .iter()
+                .filter(|row| !digests.contains(row.contract_sha256.as_str()))
+                .map(|row| row.contract_sha256.clone())
+                .collect();
+            rows.retain(|row| digests.contains(row.contract_sha256.as_str()));
+            outside.insert(
+                document.identity.agent_id.clone(),
+                unplanned.into_iter().collect::<Vec<_>>(),
+            );
+        }
+        outside_plan_by_agent = Some(outside);
+        planned = Some(digests);
+    }
+    let mut common_support = field_support(evidence, &rows, planned.as_ref());
+    common_support.outside_plan_by_agent = outside_plan_by_agent;
     let agents = evidence
         .iter()
         .zip(&rows)
@@ -1338,7 +1449,11 @@ pub fn analyze_forecast_quality(
         .map(|row| (row.contract_sha256.clone(), row.contract_digest_version))
         .collect();
     Ok(ForecastQualityReport {
-        schema_version: FORECAST_QUALITY_SCHEMA,
+        schema_version: if plan.is_some() {
+            FORECAST_QUALITY_PLAN_SCHEMA
+        } else {
+            FORECAST_QUALITY_SCHEMA
+        },
         rank_effect: "reported_only_never_trading_rank",
         dependence_unit: "whole resolution-clock block across assets and questions",
         config,
@@ -1352,11 +1467,16 @@ pub fn analyze_forecast_quality(
 /// Charge every field contract an agent did not resolve to that agent, and record
 /// each contract one agent resolved while another left it pending or cancelled.
 ///
-/// The field support is the union of resolved digests, so an agent's gaps are
-/// measured against what the rest of the field settled. It is disclosure only: no
-/// comparison reads it, so a document with gaps or extra contracts cannot change the
-/// support of a pair it is not part of.
-fn field_support(evidence: &[ForecastEvidence], rows: &[Vec<ScoredForecast>]) -> CommonSupport {
+/// Without a plan the field support is the union of resolved digests, so an agent's
+/// gaps are measured against what the rest of the field settled. With one it is the
+/// planned digests, and `rows` hold only those. It is disclosure only: no comparison
+/// reads it, so a document with gaps or extra contracts cannot change the support of
+/// a pair it is not part of.
+fn field_support(
+    evidence: &[ForecastEvidence],
+    rows: &[Vec<ScoredForecast>],
+    plan: Option<&BTreeSet<&str>>,
+) -> CommonSupport {
     let resolved: Vec<BTreeSet<&str>> = rows
         .iter()
         .map(|rows| {
@@ -1365,7 +1485,10 @@ fn field_support(evidence: &[ForecastEvidence], rows: &[Vec<ScoredForecast>]) ->
                 .collect()
         })
         .collect();
-    let field: BTreeSet<&str> = resolved.iter().flatten().copied().collect();
+    let field: BTreeSet<&str> = match plan {
+        Some(plan) => plan.clone(),
+        None => resolved.iter().flatten().copied().collect(),
+    };
     let mut unresolved_by_agent = BTreeMap::new();
     let mut disputed: BTreeMap<&str, SettlementStatusDisagreement> = BTreeMap::new();
     for (document, resolved) in evidence.iter().zip(&resolved) {
@@ -1420,11 +1543,16 @@ fn field_support(evidence: &[ForecastEvidence], rows: &[Vec<ScoredForecast>]) ->
         })
         .collect();
     CommonSupport {
-        rule: SUPPORT_RULE,
+        rule: if plan.is_some() {
+            PLAN_SUPPORT_RULE
+        } else {
+            SUPPORT_RULE
+        },
         n_contracts: field.len(),
         contract_sha256: field.into_iter().map(str::to_string).collect(),
         unresolved_by_agent,
         settlement_status_disagreements,
+        outside_plan_by_agent: None,
     }
 }
 
@@ -1645,13 +1773,13 @@ fn percentile(sorted: &[f64], probability: f64) -> f64 {
     sorted[index]
 }
 
-fn compare_agents(
-    agent_a: &str,
+/// Refuse two documents that settle a contract digest they both resolved
+/// differently: other contract semantics, another realized outcome, or another
+/// outcome availability time.
+fn check_shared_settlements(
     rows_a: &[ScoredForecast],
-    agent_b: &str,
     rows_b: &[ScoredForecast],
-    config: ForecastAnalysisConfig,
-) -> Result<PairwiseForecastComparison, ForecastError> {
+) -> Result<(), ForecastError> {
     let by_hash_a: BTreeMap<_, _> = rows_a
         .iter()
         .map(|row| (row.contract_sha256.as_str(), row))
@@ -1660,10 +1788,6 @@ fn compare_agents(
         .iter()
         .map(|row| (row.contract_sha256.as_str(), row))
         .collect();
-    // Settlement agreement is checked on every contract both resolved, including a
-    // pair whose inference is withheld below, so a disputed settlement is refused
-    // whichever other documents the field holds.
-    let mut blocks: BTreeMap<u64, Vec<f64>> = BTreeMap::new();
     for (contract_hash, left) in &by_hash_a {
         let Some(right) = by_hash_b.get(contract_hash) else {
             continue;
@@ -1689,6 +1813,34 @@ fn compare_agents(
                 "equal contract digest settled at unequal outcome availability times",
             ));
         }
+    }
+    Ok(())
+}
+
+fn compare_agents(
+    agent_a: &str,
+    rows_a: &[ScoredForecast],
+    agent_b: &str,
+    rows_b: &[ScoredForecast],
+    config: ForecastAnalysisConfig,
+) -> Result<PairwiseForecastComparison, ForecastError> {
+    // Settlement agreement is checked on every contract both resolved, including a
+    // pair whose inference is withheld below, so a disputed settlement is refused
+    // whichever other documents the field holds.
+    check_shared_settlements(rows_a, rows_b)?;
+    let by_hash_a: BTreeMap<_, _> = rows_a
+        .iter()
+        .map(|row| (row.contract_sha256.as_str(), row))
+        .collect();
+    let by_hash_b: BTreeMap<_, _> = rows_b
+        .iter()
+        .map(|row| (row.contract_sha256.as_str(), row))
+        .collect();
+    let mut blocks: BTreeMap<u64, Vec<f64>> = BTreeMap::new();
+    for (contract_hash, left) in &by_hash_a {
+        let Some(right) = by_hash_b.get(contract_hash) else {
+            continue;
+        };
         blocks
             .entry(left.resolves_at)
             .or_default()
