@@ -652,7 +652,7 @@ fn help() {
         "  sharpebench regime <a.csv> <b.csv> <regimes.csv> [--col NAME]  compare two return series within each regime (labels are an input)"
     );
     println!(
-        "  sharpebench lineage <strategy-evidence.json>                   verify Arena candidate ancestry, sources, and within-family robustness"
+        "  sharpebench lineage <strategy-evidence.json> [--census] [--dataset <prices.csv>]...  verify Arena candidate ancestry, sources, and within-family robustness; --census counts test-split reads across a journal"
     );
     println!(
         "  sharpebench arena <init|open|commit|advance|score|publish|verify> ...  drive a forward-attested scoring window (see docs/book/src/arena.md)"

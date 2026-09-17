@@ -3,9 +3,9 @@ use std::fs;
 
 use serde_json::Value;
 use sharpebench_core::candidate_lineage::{
-    check_declared_source_dating, check_test_split_census_claim, content_sha256,
-    date_cited_sources, resolve_split_first_date, verify_test_split_census, JournalRecord,
-    SourceDatingReport, SplitDating, TestSplitCensusReport,
+    check_census_dataset_bars, check_declared_source_dating, check_test_split_census_claim,
+    content_sha256, date_cited_sources, resolve_split_first_date, verify_test_split_census,
+    JournalRecord, SourceDatingReport, SplitDating, TestSplitCensusReport, NEWEST_STRATEGY_SCHEMA,
 };
 use sharpebench_core::{
     verify_candidate_lineage, CandidateLineageError, CandidateLineageLedger,
@@ -196,6 +196,9 @@ fn verify_record(
     let mut report = verify_candidate_lineage(&ledger, &scores).map_err(RecordError::Lineage)?;
     report.declared_test_split_census =
         check_test_split_census_claim(evidence).map_err(RecordError::Lineage)?;
+    if let Some(claim) = &report.declared_test_split_census {
+        check_census_dataset_bars(claim, calendars).map_err(RecordError::Lineage)?;
+    }
     let schema_3 = evidence.get("schema_version").and_then(Value::as_u64) >= Some(3);
     if schema_3
         || date_sources
@@ -254,6 +257,14 @@ fn run_census(text: &str, calendars: &BTreeMap<String, Vec<String>>, json: bool)
     };
     for (entry, item) in report.journal.iter_mut().zip(&journal) {
         let record = &item.record;
+        // Every declared census was checked while the report was built; a
+        // failed search's claim still names a panel length a dataset can refute.
+        if let Ok(Some(claim)) = check_test_split_census_claim(record) {
+            if let Err(error) = check_census_dataset_bars(&claim, calendars) {
+                eprintln!("census verification failed: line {}: {error}", item.line);
+                return 1;
+            }
+        }
         let completed_strategy = record.get("evidence_class").and_then(Value::as_str)
             == Some("retrospective_generated_strategy")
             && record.get("status").and_then(Value::as_str) == Some("completed")
@@ -287,8 +298,15 @@ fn run_census(text: &str, calendars: &BTreeMap<String, Vec<String>>, json: bool)
 fn extract_contract(
     evidence: &Value,
 ) -> Result<(CandidateLineageLedger, Vec<CandidateLineageScore>), String> {
-    if evidence.get("schema_version").and_then(Value::as_u64) < Some(2) {
-        return Err("strategy evidence schema_version must be 2 or newer".to_owned());
+    // Schema 3 added census and dating rules; a later schema may add rules this
+    // verifier cannot check, so it is refused rather than read as schema 3.
+    if !matches!(
+        evidence.get("schema_version").and_then(Value::as_u64),
+        Some(2 | NEWEST_STRATEGY_SCHEMA)
+    ) {
+        return Err(format!(
+            "strategy evidence schema_version must be 2 or {NEWEST_STRATEGY_SCHEMA}"
+        ));
     }
     if evidence.get("evidence_class").and_then(Value::as_str)
         != Some("retrospective_generated_strategy")
@@ -461,6 +479,14 @@ fn print_report(report: &CandidateLineageReport) {
             census.unidentified_prior_records
         );
         println!(
+            "  window=[{}, {}) of {} bars overlapping_prior_consultations={} prior_consulted_bars={}",
+            census.test_window_bars[0],
+            census.test_window_bars[1],
+            census.test_dataset_bars,
+            census.overlapping_prior_test_consultations,
+            census.prior_consulted_test_bars
+        );
+        println!(
             "  checked against this record only; run --census over the whole journal to check the earlier records"
         );
     }
@@ -522,16 +548,17 @@ fn print_census(report: &TestSplitCensusReport) {
                         .map_or_else(|| "n/a".to_owned(), |split| describe_dating(&split.dating))
                 },
             );
+        let optional = |value: Option<String>| value.unwrap_or_else(|| "n/a".to_owned());
         println!(
-            "  line={} schema={} status={} split={} consulted={} trials={} lineage={} test_dating={}",
+            "  line={} schema={} status={} split={} consulted={} trials={} overlapping_prior={} prior_consulted_bars={} lineage={} test_dating={}",
             entry.line,
-            entry
-                .schema_version
-                .map_or_else(|| "n/a".to_owned(), |version| version.to_string()),
+            optional(entry.schema_version.map(|version| version.to_string())),
             entry.status.as_deref().unwrap_or("n/a"),
             entry.test_split_sha256.as_deref().unwrap_or("unidentified"),
             entry.test_consulted,
             entry.observed_n_trials,
+            optional(entry.overlapping_prior_test_consultations.map(|count| count.to_string())),
+            optional(entry.prior_consulted_test_bars.map(|bars| bars.to_string())),
             if entry.lineage.is_some() {
                 "verified"
             } else {
@@ -704,20 +731,100 @@ mod tests {
             (1, 4)
         );
         assert!(report.scope.contains("other journal files"));
+        // Line 4 reads [12, 22), a different split from [10, 20), but lines 1
+        // and 3 already read bars 12 to 19 of the same panel.
+        let overlap: Vec<_> = report
+            .journal
+            .iter()
+            .map(|entry| {
+                (
+                    entry.overlapping_prior_test_consultations,
+                    entry.prior_consulted_test_bars,
+                )
+            })
+            .collect();
+        assert_eq!(
+            overlap,
+            [
+                (None, None),
+                (Some(1), Some(10)),
+                (Some(1), Some(10)),
+                (Some(2), Some(8)),
+                (Some(3), Some(10)),
+            ]
+        );
     }
 
     #[test]
-    fn census_refuses_a_record_whose_declared_prior_consultations_are_false() {
-        // Dropping the first search leaves line 3 claiming a consultation the
-        // journal no longer holds: exactly what a split journal would show.
-        let trimmed: String = JOURNAL
-            .lines()
-            .skip(1)
-            .map(|line| format!("{line}\n"))
-            .collect();
-        let error = verify_test_split_census(&parse_journal(&trimmed).unwrap()).unwrap_err();
-        assert!(error.path.starts_with("line 1."), "{error}");
-        assert!(error.message.contains("declares 1 earlier"), "{error}");
+    fn a_declared_panel_length_that_contradicts_the_dataset_is_refused() {
+        let mut record = journal_line(5);
+        record["test_split_census"]["test_dataset_bars"] = Value::from(30);
+        assert!(verify_record(&record, &BTreeMap::new(), false).is_ok());
+        assert!(matches!(
+            verify_record(&record, &prices_calendar(), true),
+            Err(RecordError::Lineage(error)) if error.path == "test_split_census.test_dataset_bars"
+        ));
+        let mut lines: Vec<String> = JOURNAL.lines().map(str::to_owned).collect();
+        let mut failed = journal_line(2);
+        failed["test_split_census"]["test_dataset_bars"] = Value::from(30);
+        lines[1] = serde_json::to_string(&failed).unwrap();
+        // Line 2 changed, so rebuild the journal from lines 1 and 2 only.
+        let tampered = format!("{}\n{}\n", lines[0], lines[1]);
+        assert_eq!(run_census(&tampered, &BTreeMap::new(), true), 0);
+        assert_eq!(run_census(&tampered, &prices_calendar(), true), 1);
+    }
+
+    #[test]
+    fn census_refuses_a_journal_with_any_earlier_line_removed() {
+        // The review's cases: dropping line 2 or line 4 left every count
+        // intact and was accepted before the chain. Dropping line 5 removes
+        // the tail, which no later record can notice.
+        let without = |dropped: &[usize]| -> String {
+            JOURNAL
+                .lines()
+                .enumerate()
+                .filter(|(index, _)| !dropped.contains(&(index + 1)))
+                .map(|(_, line)| format!("{line}\n"))
+                .collect()
+        };
+        for (dropped, refused_line) in [(1, 1), (2, 2), (3, 3), (4, 4)] {
+            let error = verify_test_split_census(&parse_journal(&without(&[dropped])).unwrap())
+                .unwrap_err();
+            assert_eq!(
+                error.path,
+                format!("line {refused_line}.test_split_census.previous_record_sha256"),
+                "dropping line {dropped}"
+            );
+        }
+        let tail_cut = verify_test_split_census(&parse_journal(&without(&[5])).unwrap()).unwrap();
+        assert_eq!(tail_cut.records, 4);
+        let mut swapped: Vec<&str> = JOURNAL.lines().collect();
+        swapped.swap(2, 3);
+        let swapped = swapped.join("\n");
+        let error = verify_test_split_census(&parse_journal(&swapped).unwrap()).unwrap_err();
+        assert_eq!(
+            error.path,
+            "line 3.test_split_census.previous_record_sha256"
+        );
+        assert_eq!(run_census(&without(&[4]), &BTreeMap::new(), true), 1);
+    }
+
+    #[test]
+    fn only_strategy_schemas_2_and_3_are_read() {
+        for version in [0, 1, 4, 99] {
+            let mut record = journal_line(3);
+            record["schema_version"] = Value::from(version);
+            let error = extract_contract(&record).err().unwrap();
+            assert_eq!(error, "strategy evidence schema_version must be 2 or 3");
+        }
+        let mut record = journal_line(3);
+        record["schema_version"] = Value::from("3");
+        assert!(extract_contract(&record).is_err());
+        for version in [2, 3] {
+            let mut record = journal_line(3);
+            record["schema_version"] = Value::from(version);
+            assert!(extract_contract(&record).is_ok(), "schema {version}");
+        }
     }
 
     #[test]
