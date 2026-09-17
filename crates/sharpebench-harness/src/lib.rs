@@ -10,6 +10,7 @@ pub mod accounting;
 pub mod artifact_scan;
 pub mod artifact_tar;
 pub mod checkpoint;
+pub mod decision_stability;
 pub mod failure;
 pub mod fault_plan;
 pub mod gateway;
@@ -17,6 +18,7 @@ pub mod gateway_journal;
 pub mod perturb;
 #[cfg(test)]
 mod scratch;
+pub mod timing_luck;
 
 pub use checkpoint::{
     run_resumable_sweep, run_resumable_sweep_bound, run_resumable_sweep_bound_with_policy,

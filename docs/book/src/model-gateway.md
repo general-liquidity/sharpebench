@@ -401,6 +401,33 @@ class is refused as malformed. The entrant still receives the provider's
 The counts are rank-neutral like every other gateway figure: no score, rank or
 pass^k pool reads them.
 
+### Journal schema versions and rollback
+
+A binary built before the class existed reads a settlement's `finish_reason` as
+an unknown key, drops it, and writes the journal back without it on its next
+save. To stop that, the gateway writes a schema version such a binary refuses
+whenever the journal holds a class to lose:
+
+| The journal holds | Schema version written | A binary from before the class |
+|---|---|---|
+| no record with a class | `sharpebench.gateway-journal.v1`, the same bytes as before | resumes it, and nothing is lost |
+| a record with a class | `sharpebench.gateway-journal.v2` | refuses it as bound to a different route table, budget or sweep, and leaves the file unchanged |
+
+`GatewayJournal::save` sets the version from the records on every write, so no
+caller can write a class under v1. This binary reads both versions, refuses any
+other, and still requires the same routes, budget and sweep. A journal moves to
+v2 on the save that records its first class, which is the settlement of the
+first parsed answer. Loading a journal never rewrites it.
+
+After a sweep records a class, only a binary that reads v2 can resume its
+journal. To run an older binary, start it on a fresh journal and checkpoint
+pair.
+
+The build that first recorded classes wrote them under v1, before the version
+existed. This binary reads such a journal without loss and writes it as v2 on
+its next save. An older binary that resumes one before that save still drops its
+classes, because nothing in that file tells it to refuse.
+
 ## Identity and resume
 
 `RouteTable::identity_digest` covers, for every alias, the provider, model,
@@ -570,6 +597,7 @@ the gate checks that claim too.
 | `crates/sharpebench-harness/src/gateway_serve_tests.rs` | 13 | the serving loop on real OS pipes and one real child process: a call through the entrant's own pipe, a scored sweep with usage on the entrant's row, resume making no new calls, an interrupted sweep rerunning only unfinished cells, typed budget refusals, overlapping windows refused before a journal is written, the checkpoint and journal pair, gateway lines never read as decisions, the per-decision ceiling, host serving time excluded from the entrant clock, no credential in any launch, and host material withheld |
 | `crates/sharpebench-harness/tests/journal_ownership_review.rs` | 3 | the two journal-ownership findings of the [accounting review](https://github.com/general-liquidity/sharpebench/blob/main/docs/audits/2026-09-09/ACCOUNTING-REVIEW.md), through the public surface only: a holder releases the lock it holds and no other, and one journal document admits one gateway under either of two names, a document written before it carried an identity included |
 | `crates/sharpebench-harness/tests/finish_reason_accounting.rs` | 6 | stop-reason accounting: a length-stopped answer counted as `length`, the exact class vocabulary, refused and released calls in no class, the counts surviving the journal file, a journal written before the field reporting its answers as `unrecorded`, an unknown class refused at load, and a truncated sweep publishing its counts in `host_observed_usage` |
+| `crates/sharpebench-harness/tests/journal_schema_rollback.rs` | 6 | rollback safety for the class: the published version strings, a journal with no class staying v1 and passing an older binary's admission checks, the first recorded class writing v2, which those checks refuse and this binary resumes, a v1 journal that already holds classes written as v2 on its next save and not on load, unknown versions refused by both loaders, and a v2 journal keeping its route, budget and sweep binding |
 | `crates/sharpebench-cli/src/gateway_cli.rs` | 8 | the operator report, including `limits.max_requests_per_decision`, `journal_lock_held` and `finish_reasons`, a sweep-bound journal reported with its sweep, and the refusals: a malformed manifest, a missing credential, a missing or zero budget, and a journal bound to another route table |
 
 The arena's sandbox is not one of those files. Most of its tests are the

@@ -43,6 +43,7 @@ pub mod comparison_sets;
 pub mod composite;
 pub mod correlation;
 pub mod decay;
+pub mod decision_stability;
 pub mod disqualification;
 pub mod econrationality;
 pub mod entrant_visibility;
@@ -92,6 +93,11 @@ pub use composite::{
     MandateVerdict, Run, ScoreConfig, TrialsSrStdSource,
 };
 pub use correlation::{crowdedness, Crowdedness};
+pub use decision_stability::{
+    decision_stability, observation_sha256, same_decision, DecisionStabilityError,
+    DecisionStabilityReport, DifferingGroup, IdenticalReplicates, ObservedDecision, ReplicateRun,
+    StabilityCounts, StabilityRate, StabilityUnavailable, WindowStability,
+};
 pub use disqualification::{classify_disqualification, rollup, DisqualThresholds, FailReason};
 pub use econrationality::{
     assess_rationality, elicit_revealed_selection, DominanceChoice, EconRationalityReport,
