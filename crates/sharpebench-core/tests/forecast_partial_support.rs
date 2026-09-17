@@ -11,7 +11,8 @@
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use sharpebench_core::forecast::{
-    AgentUnresolvedSupport, PairwiseForecastComparison, SettlementStatusDisagreement, SupportGap,
+    analyze_forecast_quality_against_plan, parse_forecast_contract_plan, AgentUnresolvedSupport,
+    ForecastContractPlan, PairwiseForecastComparison, SettlementStatusDisagreement, SupportGap,
 };
 use sharpebench_core::{
     analyze_forecast_quality, parse_forecast_evidence, ForecastAnalysisConfig, ForecastEvidence,
@@ -577,4 +578,265 @@ fn a_disputed_settlement_outside_the_partial_agents_support_is_refused() {
     )
     .expect_err("a dispute with a partial agent is still a dispute");
     assert!(error.0.contains("unequal realized outcomes"));
+}
+
+// A declared contract universe (CR-MAIN SB-5).
+//
+// Without a plan the field support is the union of resolved digests, so one
+// document that resolves contracts nobody else resolved withholds inference on all
+// of its own pairs and charges those contracts to every other agent. With a plan
+// the support is the declared digest set: an extra contract is reported and never
+// scored, and a gap is a planned contract the agent did not resolve.
+
+fn plan(indices: impl IntoIterator<Item = u64>) -> ForecastContractPlan {
+    let digests: Vec<String> = indices.into_iter().map(digest).collect();
+    parse_forecast_contract_plan(
+        &json!({
+            "schema_version": "sharpebench.forecast-contract-plan.v1",
+            "contract_sha256": digests,
+        })
+        .to_string(),
+    )
+    .expect("fixture plan is valid")
+}
+
+fn sorted_digests(indices: impl IntoIterator<Item = u64>) -> Vec<String> {
+    let mut digests: Vec<String> = indices.into_iter().map(digest).collect();
+    digests.sort();
+    digests
+}
+
+#[test]
+fn without_a_plan_extra_contracts_still_withhold_the_padded_pairs() {
+    // The documented weakness of the planless report, pinned so a change to it is
+    // deliberate: `d` resolves the ten field contracts plus two of its own.
+    let report = analyze_forecast_quality(
+        &[complete("a", true), document("d", &resolved(0..12, true))],
+        CONFIG,
+    )
+    .expect("field is reported");
+    assert_eq!(report.schema_version, "sharpebench.forecast-quality.v2");
+    let comparison = pair(&report, "a", "d");
+    assert_eq!(comparison.raw_p_value, None);
+    assert_eq!(
+        report.common_support.unresolved_by_agent["a"].not_claimed,
+        sorted_digests(10..12)
+    );
+    let encoded = serde_json::to_string(&report).expect("report serializes");
+    assert!(!encoded.contains("outside_plan_by_agent"));
+}
+
+#[test]
+fn with_a_plan_extra_contracts_are_reported_and_charge_nobody() {
+    let planned = plan(0..10);
+    let baseline = analyze_forecast_quality_against_plan(
+        &[complete("a", true), complete("b", false)],
+        CONFIG,
+        &planned,
+    )
+    .expect("complete planned field");
+    let unplanned = analyze_forecast_quality(&[complete("a", true), complete("b", false)], CONFIG)
+        .expect("complete field");
+    // A complete field compares the same way with or without its plan.
+    assert_same_inference(pair(&unplanned, "a", "b"), pair(&baseline, "a", "b"));
+
+    let report = analyze_forecast_quality_against_plan(
+        &[
+            complete("a", true),
+            complete("b", false),
+            document("d", &resolved(0..12, true)),
+        ],
+        CONFIG,
+        &planned,
+    )
+    .expect("padded field is reported");
+    assert_eq!(report.schema_version, "sharpebench.forecast-quality.v3");
+    assert!(report.common_support.rule.contains("declared plan"));
+    let two = pair(&baseline, "a", "b");
+    let three = pair(&report, "a", "b");
+    assert_eq!(two.n_contracts, three.n_contracts);
+    assert_eq!(two.mean_loss_difference, three.mean_loss_difference);
+    assert_eq!(two.raw_p_value, three.raw_p_value);
+    assert_eq!(two.confidence_lower, three.confidence_lower);
+
+    for other in ["a", "b"] {
+        let comparison = pair(&report, other, "d");
+        assert_eq!(comparison.n_contracts, 10);
+        assert_eq!(comparison.n_settlement_blocks, 5);
+        assert_eq!(comparison.support_gap, None);
+        assert!(comparison.inference_error.is_none(), "{other}");
+        assert!(comparison.raw_p_value.is_some(), "{other}");
+    }
+
+    let support = &report.common_support;
+    assert_eq!(support.n_contracts, 10);
+    assert_eq!(support.contract_sha256, sorted_digests(0..10));
+    for agent in ["a", "b", "d"] {
+        assert_eq!(
+            support.unresolved_by_agent[agent],
+            AgentUnresolvedSupport::default(),
+            "{agent}"
+        );
+    }
+    let outside = support
+        .outside_plan_by_agent
+        .as_ref()
+        .expect("a planned report lists digests outside the plan");
+    assert_eq!(outside["a"], Vec::<String>::new());
+    assert_eq!(outside["b"], Vec::<String>::new());
+    assert_eq!(outside["d"], sorted_digests(10..12));
+
+    // The padded agent is scored on the plan only, and its document still says
+    // what it resolved.
+    let d = report
+        .agents
+        .iter()
+        .find(|agent| agent.agent_id == "d")
+        .expect("d is summarized");
+    assert_eq!(d.metrics[0].n, 10);
+    assert_eq!(d.n_resolved, 12);
+    assert_eq!(report.contract_digest_versions.len(), 10);
+}
+
+#[test]
+fn with_a_plan_an_abstaining_agent_is_charged_its_planned_gaps() {
+    // `c` leaves out contracts 8 and 9 and pads with 10 and 11. Without a plan the
+    // padding charges `a` two gaps; with one, `c` carries its own two.
+    let abstainer = || {
+        let mut claims = resolved(0..8, true);
+        claims.extend(resolved(10..12, true));
+        document("c", &claims)
+    };
+    let unplanned = analyze_forecast_quality(&[complete("a", true), abstainer()], CONFIG)
+        .expect("field is reported");
+    assert_eq!(
+        pair(&unplanned, "a", "c").support_gap,
+        Some(SupportGap {
+            agent_a_unresolved: 2,
+            agent_b_unresolved: 2,
+        })
+    );
+    assert_eq!(
+        unplanned.common_support.unresolved_by_agent["a"].n_unresolved,
+        2
+    );
+
+    let report = analyze_forecast_quality_against_plan(
+        &[complete("a", true), abstainer()],
+        CONFIG,
+        &plan(0..10),
+    )
+    .expect("planned field is reported");
+    let comparison = pair(&report, "a", "c");
+    assert_eq!(comparison.n_contracts, 8);
+    assert_eq!(
+        comparison.support_gap,
+        Some(SupportGap {
+            agent_a_unresolved: 0,
+            agent_b_unresolved: 2,
+        })
+    );
+    assert_eq!(comparison.raw_p_value, None);
+    assert!(!comparison.familywise_significant);
+    let support = &report.common_support;
+    assert_eq!(
+        support.unresolved_by_agent["a"],
+        AgentUnresolvedSupport::default()
+    );
+    assert_eq!(
+        support.unresolved_by_agent["c"],
+        AgentUnresolvedSupport {
+            n_unresolved: 2,
+            not_claimed: sorted_digests(8..10),
+            ..AgentUnresolvedSupport::default()
+        }
+    );
+    assert_eq!(
+        support.outside_plan_by_agent.as_ref().expect("planned")["c"],
+        sorted_digests(10..12)
+    );
+}
+
+#[test]
+fn a_planned_contract_nobody_resolved_is_charged_to_every_agent() {
+    // Contract 10 is planned and nobody claimed it. Both agents resolved the same
+    // planned digests, so their pair keeps its inference, and each carries the gap.
+    let report = analyze_forecast_quality_against_plan(
+        &[complete("a", true), complete("b", false)],
+        CONFIG,
+        &plan(0..11),
+    )
+    .expect("planned field is reported");
+    let comparison = pair(&report, "a", "b");
+    assert_eq!(comparison.n_contracts, 10);
+    assert!(comparison.raw_p_value.is_some());
+    assert_eq!(report.common_support.n_contracts, 11);
+    for agent in ["a", "b"] {
+        assert_eq!(
+            report.common_support.unresolved_by_agent[agent],
+            AgentUnresolvedSupport {
+                n_unresolved: 1,
+                not_claimed: vec![digest(10)],
+                ..AgentUnresolvedSupport::default()
+            },
+            "{agent}"
+        );
+    }
+}
+
+#[test]
+fn with_a_plan_a_settlement_dispute_outside_it_is_still_refused() {
+    let with_extra = |agent: &str, flipped: bool| {
+        let mut claims = resolved(0..10, true);
+        claims.extend(resolved([10], true));
+        let mut document = document(agent, &claims);
+        if flipped {
+            let last = document.resolutions.len() - 1;
+            document.resolutions[last].outcome = Some(json!(1.0 - outcome(10)));
+        }
+        document
+    };
+    let error = analyze_forecast_quality_against_plan(
+        &[with_extra("a", false), with_extra("b", true)],
+        CONFIG,
+        &plan(0..10),
+    )
+    .expect_err("an unscored contract still has one settlement");
+    assert!(error.0.contains("unequal realized outcomes"), "{}", error.0);
+}
+
+#[test]
+fn a_malformed_plan_is_refused() {
+    let parse = |value: Value| parse_forecast_contract_plan(&value.to_string());
+    let schema = "sharpebench.forecast-contract-plan.v1";
+    let good = digest(0);
+    assert!(parse(json!({"schema_version": schema, "contract_sha256": [good]})).is_ok());
+    for (label, value) in [
+        (
+            "schema",
+            json!({"schema_version": "sharpebench.forecast-contract-plan.v2", "contract_sha256": [good]}),
+        ),
+        (
+            "empty",
+            json!({"schema_version": schema, "contract_sha256": []}),
+        ),
+        (
+            "uppercase",
+            json!({"schema_version": schema, "contract_sha256": [good.to_uppercase()]}),
+        ),
+        (
+            "short",
+            json!({"schema_version": schema, "contract_sha256": [&good[1..]]}),
+        ),
+        (
+            "duplicate",
+            json!({"schema_version": schema, "contract_sha256": [good, good]}),
+        ),
+        (
+            "unknown field",
+            json!({"schema_version": schema, "contract_sha256": [good], "extra": 1}),
+        ),
+    ] {
+        assert!(parse(value).is_err(), "{label}");
+    }
 }

@@ -92,7 +92,8 @@ fn usage() {
          run identity: a header row names each run (wide format) and a `run`\n\
          column names it (long format); an optional `seed` column and an optional\n\
          `period` (or `date`) column carry the seed and the period identities.\n\
-         A period repeated within one run is refused, naming the row.\n\
+         A period repeated within one run, or placed in two runs (windows) of one\n\
+         agent, is refused, naming the row.\n\
          Those become `run_keys` in the output, which\n\
          `sharpebench score --require-run-keys` validates. Without them the import\n\
          is unkeyed and that scorer refuses it: no run identity is inferred from\n\
@@ -346,8 +347,9 @@ fn is_period_column(name: &str) -> bool {
 /// A header row is also the run identity: each remaining column name becomes a
 /// window id at seed 0. A leading `period` or `date` column is the period axis
 /// rather than a run, and a period it names twice is refused with both rows.
-/// Without a header the file declares no identity, so the runs come back
-/// unkeyed.
+/// A dated row with a return in two columns is refused as well: the columns are
+/// windows, and a period belongs to one window. Without a header the file
+/// declares no identity, so the runs come back unkeyed.
 fn parse_wide(text: &str) -> Result<Vec<ImportedRun>, String> {
     let mut lines = text.lines().filter(|l| !l.trim().is_empty());
     let Some(first) = lines.next() else {
@@ -376,6 +378,10 @@ fn parse_wide(text: &str) -> Result<Vec<ImportedRun>, String> {
     // Period identity to the row that first declared it. A period column only
     // exists under a header, so the header is row 1 and the body starts at 2.
     let mut period_rows: BTreeMap<&str, usize> = BTreeMap::new();
+    // The first row whose period has a return in two columns, with those two
+    // column indices. Reported after the loop, so a malformed or repeated row
+    // later in the file keeps its own message.
+    let mut shared_row: Option<(usize, &str, usize, usize)> = None;
     for (body_idx, line) in body.into_iter().enumerate() {
         let cells: Vec<_> = line.split(',').map(str::trim).collect();
         if cells.len() > n_cols {
@@ -395,12 +401,21 @@ fn parse_wide(text: &str) -> Result<Vec<ImportedRun>, String> {
                 ));
             }
         }
+        let mut first_column: Option<usize> = None;
         for (i, cell) in cells.into_iter().enumerate() {
             if period_col == Some(i) {
                 continue;
             }
             if cell.is_empty() {
                 continue;
+            }
+            if let Some(period) = period {
+                match first_column {
+                    None => first_column = Some(i),
+                    Some(first) => {
+                        shared_row.get_or_insert((body_idx + 2, period, first, i));
+                    }
+                }
             }
             let run = runs
                 .get_mut(i)
@@ -415,6 +430,19 @@ fn parse_wide(text: &str) -> Result<Vec<ImportedRun>, String> {
                 periods[i].push(period.to_string());
             }
         }
+    }
+    // Each column is a window, and a period belongs to one window. Two columns
+    // with a return on the same dated row would put that period's return into
+    // the pooled track twice.
+    if let Some((row, period, first, second)) = shared_row {
+        let labels = labels.as_ref().expect("a period column implies a header");
+        return Err(format!(
+            "row {row}: period `{period}` has a return in column `{}` and in column `{}`; \
+             each column is a window and a period belongs to one window, so the pooled \
+             track would count its return twice. Leave all but one of those cells blank, \
+             or import replicates of one window in long format with a `seed` column",
+            labels[first], labels[second]
+        ));
     }
     // An empty column drops together with its label, so a surviving key still
     // names the column it came from.
@@ -456,7 +484,10 @@ fn parse_wide(text: &str) -> Result<Vec<ImportedRun>, String> {
 ///
 /// A second row with the same agent, run, seed and period is refused, naming
 /// both rows, whether or not the file has a `run` column: either way the
-/// parser would pool both rows into one run as two observations.
+/// parser would pool both rows into one run as two observations. A period that
+/// one agent places under two run labels is refused too, naming both rows: a
+/// run label is a window, and a period belongs to one window. Seeds of one run
+/// label may share periods.
 ///
 /// Returns `Ok(None)` when the file has no agent column (caller falls back to
 /// wide format).
@@ -485,15 +516,16 @@ fn parse_long(text: &str) -> Result<Option<Vec<ImportedAgent>>, String> {
         })
         .ok_or("no returns column beside the agent column")?;
 
-    // (agent, runs as ((run label, seed), periods, returns, period -> first row))
-    // in first-appearance order.
+    // (agent, runs as ((run label, seed), periods, returns, period -> first row),
+    // period -> (run label, first row)) in first-appearance order.
     type LabeledRun = (
         (String, u64),
         Vec<String>,
         Vec<f64>,
         BTreeMap<String, usize>,
     );
-    let mut agents: Vec<(String, Vec<LabeledRun>)> = Vec::new();
+    type PeriodWindows = BTreeMap<String, (String, usize)>;
+    let mut agents: Vec<(String, Vec<LabeledRun>, PeriodWindows)> = Vec::new();
     for (row_idx, line) in lines.enumerate() {
         let cells: Vec<&str> = line.split(',').map(str::trim).collect();
         let get = |i: usize| cells.get(i).copied().unwrap_or_default();
@@ -520,10 +552,10 @@ fn parse_long(text: &str) -> Result<Option<Vec<ImportedAgent>>, String> {
         let v = cell
             .parse::<f64>()
             .map_err(|_| format!("row {}: non-numeric return `{cell}`", row_idx + 2))?;
-        let entry = match agents.iter_mut().find(|(a, _)| a == agent) {
+        let entry = match agents.iter_mut().find(|(a, _, _)| a == agent) {
             Some(e) => e,
             None => {
-                agents.push((agent.to_string(), Vec::new()));
+                agents.push((agent.to_string(), Vec::new(), BTreeMap::new()));
                 agents.last_mut().expect("just pushed")
             }
         };
@@ -556,6 +588,22 @@ fn parse_long(text: &str) -> Result<Option<Vec<ImportedAgent>>, String> {
                      returns to a run{hint}"
                 ));
             }
+            // A run label names a window, and a period belongs to one window:
+            // seeds of one run label may share it, another run label may not.
+            let (window, first_row) = entry
+                .2
+                .entry(period.clone())
+                .or_insert_with(|| (run.0 .0.clone(), row));
+            if *window != run.0 .0 {
+                return Err(format!(
+                    "row {row}: period `{period}` is in run `{}` for agent `{agent}`, and \
+                     row {first_row} put it in run `{window}`; each run label is a window \
+                     and a period belongs to one window, so the pooled track would count \
+                     its return twice (replicates of one window share a run label and \
+                     differ by `seed`)",
+                    run.0 .0
+                ));
+            }
             run.1.push(period);
         }
         run.2.push(v);
@@ -567,7 +615,7 @@ fn parse_long(text: &str) -> Result<Option<Vec<ImportedAgent>>, String> {
     Ok(Some(
         agents
             .into_iter()
-            .map(|(agent_id, runs)| ImportedAgent {
+            .map(|(agent_id, runs, _)| ImportedAgent {
                 agent_id,
                 runs: runs
                     .into_iter()
@@ -761,16 +809,76 @@ mod tests {
              rows pool into one run: name distinct runs in a `run` column)"
         );
 
-        // The same period in another agent, run or seed is the grid, not a repeat.
+        // The same period in another agent or seed is the grid, not a repeat.
         let grid = "agent,run,seed,period,return\n\
                     a,w0,0,d1,0.01\n\
                     a,w0,1,d1,0.02\n\
-                    a,w1,0,d1,0.03\n\
+                    a,w1,0,d2,0.03\n\
                     b,w0,0,d1,0.04\n";
         let agents = parse_long(grid).expect("parse").expect("long format");
         assert_eq!(agents.len(), 2);
         assert_eq!(agents[0].runs.len(), 3);
         assert_eq!(agents[1].runs.len(), 1);
+    }
+
+    #[test]
+    fn a_long_period_in_two_runs_of_one_agent_is_refused_naming_both_rows() {
+        // Row 4 puts d1 in w1 at seed 1; row 2 put it in w0 at seed 0. The
+        // seed differs too, and the refusal still holds: w0 and w1 are windows.
+        let crossed = "agent,run,seed,period,return\n\
+                       a,w0,0,d1,0.01\n\
+                       a,w0,1,d1,0.02\n\
+                       a,w1,1,d1,0.03\n";
+        assert_eq!(
+            long_error(crossed),
+            "row 4: period `d1` is in run `w1` for agent `a`, and row 2 put it in run \
+             `w0`; each run label is a window and a period belongs to one window, so the \
+             pooled track would count its return twice (replicates of one window share \
+             a run label and differ by `seed`)"
+        );
+        // Another agent's windows are its own: b may hold d1 in w1 while a
+        // holds it in w0 (the keyed scorer then compares the cells).
+        let other_agent = "agent,run,seed,period,return\n\
+                           a,w0,0,d1,0.01\n\
+                           b,w1,0,d1,0.02\n";
+        assert!(parse_long(other_agent).is_ok());
+        // Without a `run` column there is one window per agent, so nothing
+        // can overlap across windows.
+        let unkeyed = "agent,seed,date,return\na,0,d1,0.01\na,1,d1,0.02\n";
+        assert!(parse_long(unkeyed).is_ok());
+    }
+
+    #[test]
+    fn a_wide_dated_row_with_returns_in_two_columns_is_refused() {
+        assert_eq!(
+            wide_error("date,w0,w1,w2\nd1,0.01,,\nd2,,0.02,0.03\nd3,,0.04,0.05\n"),
+            "row 3: period `d2` has a return in column `w1` and in column `w2`; each \
+             column is a window and a period belongs to one window, so the pooled track \
+             would count its return twice. Leave all but one of those cells blank, or \
+             import replicates of one window in long format with a `seed` column"
+        );
+        // A later repeated date keeps its own message.
+        assert!(
+            wide_error("date,w0,w1\nd1,0.01,0.02\nd2,0.03,0.04\nd2,0.05,0.06\n")
+                .starts_with("row 4: period `d2` repeats row 3")
+        );
+        // Windows that take turns on one date axis are disjoint.
+        let runs = parse_wide("date,w0,w1\nd1,0.01,\nd2,0.02,\nd3,,0.03\nd4,,0.04\n")
+            .expect("disjoint windows");
+        let periods: Vec<Vec<String>> = runs
+            .iter()
+            .map(|r| r.identity.as_ref().expect("keyed").periods.clone())
+            .collect();
+        assert_eq!(
+            periods,
+            vec![
+                vec!["d1".to_string(), "d2".to_string()],
+                vec!["d3".to_string(), "d4".to_string()]
+            ]
+        );
+        // Without a period column nothing identifies a row, so two columns on
+        // one row are not compared.
+        assert_eq!(parse_wide("w0,w1\n0.01,0.02\n").expect("undated").len(), 2);
     }
 
     #[test]

@@ -62,15 +62,18 @@ fn refused(output: &Output, needles: &[&str]) {
     }
 }
 
-/// 40 distinct periods per cell, with one extra row that repeats `t07` for
-/// agent `mo` in cell (w0, 0). The header is row 1, so that row is 322.
+/// 40 distinct periods per cell (t00 to t39 in `w0`, t40 to t79 in `w1`), with
+/// one extra row that repeats `t07` for agent `mo` in cell (w0, 0). The header
+/// is row 1, so that row is 322.
 fn long_csv_with_one_repeat() -> String {
     let mut csv = String::from("agent,run,seed,period,return\n");
     for agent in ["mo", "bh"] {
         for (window, seed) in [("w0", 0), ("w0", 1), ("w1", 0), ("w1", 1)] {
+            let first = if window == "w0" { 0 } else { 40 };
             for i in 0..40 {
                 let r = 0.001 + 0.0004 * ((i as f64) * 0.9 + seed as f64).sin();
-                csv.push_str(&format!("{agent},{window},{seed},t{i:02},{r}\n"));
+                let period = first + i;
+                csv.push_str(&format!("{agent},{window},{seed},t{period:02},{r}\n"));
             }
         }
     }
