@@ -577,3 +577,222 @@ fn pass_witness_fields_have_no_clone_merges() {
         }
     }
 }
+
+// --- the vote that sets the measured bar, on the panels that measure ----------
+
+/// The rejected cap's constant at seven votes: the 99th percentile of the
+/// largest robust z in an honest normal field of seven.
+const FENCE_C_7: f64 = 10.75;
+
+fn median(sorted: &[f64]) -> f64 {
+    let n = sorted.len();
+    if n % 2 == 1 {
+        sorted[n / 2]
+    } else {
+        (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0
+    }
+}
+
+/// The measured-and-rejected cap: winsorize the votes at
+/// `median +/- c * max(1.4826 * MAD, floor)` and take the standard deviation.
+/// Returns that dispersion and the largest robust z, the distance from the
+/// median in units of the unfloored scale.
+fn fenced_dispersion(sorted: &[f64], c: f64, floor: f64) -> (f64, f64) {
+    use sharpebench_core::stats::std_dev;
+    let m = median(sorted);
+    let mut dev: Vec<f64> = sorted.iter().map(|x| (x - m).abs()).collect();
+    dev.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let raw_scale = 1.4826 * median(&dev);
+    let scale = raw_scale.max(floor);
+    let clipped: Vec<f64> = sorted
+        .iter()
+        .map(|x| x.clamp(m - c * scale, m + c * scale))
+        .collect();
+    (std_dev(&clipped), dev[dev.len() - 1] / raw_scale)
+}
+
+/// On the three panels the current engine measures, the disclosure names the
+/// honest reference vote that carries the dispersion, and the bar is untouched.
+///
+/// The five luck-floor agents sit in a tight cluster and buy-and-hold sits far
+/// from it, so one honest vote multiplies the measured dispersion: 4.89 on
+/// hourly crypto, 4.15 on daily FX and 1.55 on daily rates, measured on this
+/// engine. A cap on the vote was measured against exactly these fields and not
+/// shipped, because containing one hostile entrant would have lowered the hourly
+/// crypto bar by 74.5% and the daily FX bar by 17.4%. The disclosure reports the
+/// row instead, and the measured dispersion is still the plain standard
+/// deviation of the sorted votes, bit for bit.
+///
+/// The same loop recomputes the rejected cap on these votes, so the chapter's
+/// binding-table rows for the three sweep panels, and the robust distance it
+/// quotes for hourly buy-and-hold, are reproduced by a test rather than
+/// carried as numbers from a study.
+#[test]
+fn the_measured_panels_disclose_the_vote_that_sets_their_bar() {
+    use sharpebench_core::composite::window_tracks;
+    use sharpebench_core::deflated_sharpe::observed_sharpe_ratio_of_windows;
+    use sharpebench_core::stats::std_dev;
+    use sharpebench_core::{rank, ScoreConfig, TrialsSrStdSource};
+
+    for (name, periods, leverage, bar_change, robust_z) in [
+        ("crypto-majors-1h", 8760.0, 4.89, -0.745, Some(162.0)),
+        ("fx-majors-1d", 252.0, 4.15, -0.174, None),
+        ("rates-1d", 252.0, 1.55, 0.0, None),
+    ] {
+        let data = load(name);
+        let windows = windows_for(data.len());
+        let mut sweep = vec![
+            run_agent("buy-and-hold", &data, &windows, || Box::new(BuyAndHold)),
+            run_agent(
+                "momentum",
+                &data,
+                &windows,
+                || Box::new(Momentum::default()),
+            ),
+            run_agent("hold", &data, &windows, || Box::new(HoldAgent)),
+        ];
+        sweep.extend(luck_floor(
+            &data,
+            &windows,
+            &EXEC_SEEDS,
+            CostModel::default(),
+            LUCK_FLOOR_AGENTS,
+        ));
+        // The bootstrap legs are orthogonal to the dispersion; a small count
+        // keeps the hourly panel affordable in a debug test run.
+        let cfg = ScoreConfig {
+            execution_seeds_per_window: EXEC_SEEDS.len(),
+            n_boot: 20,
+            ..ScoreConfig::for_periods_per_year(periods)
+        };
+        let board = rank(&sweep, &cfg);
+
+        // The kernel's qualification predicate: a vote is a track whose
+        // windowed Sharpe exists.
+        let mut votes: Vec<f64> = sweep
+            .iter()
+            .filter_map(|s| {
+                let tracks = window_tracks(s, EXEC_SEEDS.len());
+                let slices: Vec<&[f64]> = tracks.iter().map(Vec::as_slice).collect();
+                observed_sharpe_ratio_of_windows(&slices).ok()
+            })
+            .collect();
+        votes.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let measured = std_dev(&votes);
+
+        let floor = cfg.min_measured_trials_sr_std / periods.sqrt();
+        let (capped, z) = fenced_dispersion(&votes, FENCE_C_7, floor);
+        let change = capped / measured - 1.0;
+        eprintln!("{name}: cap moves the dispersion {measured:.5} to {capped:.5} ({change:+.4}), top robust z {z:.1}");
+        assert!(
+            (change - bar_change).abs() < 0.0005,
+            "{name}: the rejected cap would move the bar {change:+.4}, the chapter says {bar_change:+.3}"
+        );
+        if let Some(want) = robust_z {
+            assert!(
+                (z - want).abs() < 0.5,
+                "{name}: robust z {z:.2}, the chapter says {want}"
+            );
+        }
+
+        for row in &board {
+            assert_eq!(
+                row.trials_sr_std_source,
+                TrialsSrStdSource::Measured,
+                "{name}"
+            );
+            assert_eq!(
+                row.trials_sr_std.to_bits(),
+                measured.to_bits(),
+                "{name}: the disclosure must not move the measured dispersion"
+            );
+            let vote = row
+                .trials_sr_std_most_influential_vote
+                .as_ref()
+                .unwrap_or_else(|| panic!("{name}: a measured row carries the disclosure"));
+            assert_eq!(vote.agent_id, "buy-and-hold", "{name}: {vote:?}");
+            assert_eq!(vote.agents_in_vote, 1, "{name}");
+            assert_eq!(vote.votes, 7, "{name}");
+            let got = vote.leverage.expect("the other votes are not all equal");
+            assert!(
+                (got - leverage).abs() < 0.005,
+                "{name}: leverage {got}, measured {leverage}"
+            );
+        }
+    }
+}
+
+// --- the between-window share on honest traded tracks --------------------------
+
+/// The chapter says an honest traded track's between-window share is near 0.
+/// On the nine frozen panels, for the reference agents, the risk-managed agent
+/// and the five-agent luck floor, every share is below 0.03, the largest on
+/// weekly crypto where the windows are shortest. The one-way split of i.i.d.
+/// returns has an expected share of about `(windows - 1) / (bars - 1)`, so the
+/// short weekly panels sit highest by construction. Commodities is reported
+/// with its reason, not a share: its raw WTI prices include the documented
+/// negative quote, which leaves non-finite returns in the pooled track.
+#[test]
+fn honest_tracks_on_the_frozen_panels_split_almost_nothing_between_windows() {
+    use sharpebench_core::{rank, sharpe_diagnostics, ScoreConfig, SharpeDiagnostic};
+    let mut largest = (0.0_f64, String::new());
+    for &name in DATASETS {
+        let periods = match name {
+            "crypto-majors-1h" => 8760.0,
+            "crypto-majors-4h" => 2190.0,
+            "crypto-majors-1d" => 365.0,
+            "us-indices-1w" | "crypto-majors-1w" => 52.0,
+            _ => 252.0,
+        };
+        let data = load(name);
+        let windows = windows_for(data.len());
+        let mut field = vec![
+            run_agent("buy-and-hold", &data, &windows, || Box::new(BuyAndHold)),
+            run_agent(
+                "momentum",
+                &data,
+                &windows,
+                || Box::new(Momentum::default()),
+            ),
+            run_agent("risk-managed", &data, &windows, || {
+                Box::new(RiskManaged::new())
+            }),
+        ];
+        field.extend(luck_floor(
+            &data,
+            &windows,
+            &EXEC_SEEDS,
+            CostModel::default(),
+            LUCK_FLOOR_AGENTS,
+        ));
+        let cfg = ScoreConfig {
+            execution_seeds_per_window: EXEC_SEEDS.len(),
+            n_boot: 20,
+            ..ScoreConfig::for_periods_per_year(periods)
+        };
+        let board = rank(&field, &cfg);
+        let requested = [SharpeDiagnostic::BetweenWindowVariance];
+        for row in sharpe_diagnostics(&field, &board, &cfg, &requested) {
+            let d = row.between_window_variance.expect("requested");
+            match d.between_window_share {
+                Some(share) => {
+                    assert!(share < 0.03, "{name} {}: share {share}", row.agent_id);
+                    if share > largest.0 {
+                        largest = (share, format!("{name} {}", row.agent_id));
+                    }
+                }
+                None => {
+                    assert_eq!(name, "commodities-1d", "{}: {:?}", row.agent_id, d.error);
+                    assert_eq!(
+                        d.error.as_deref(),
+                        Some("a pooled observation is not finite")
+                    );
+                }
+            }
+        }
+    }
+    eprintln!(
+        "largest honest between-window share: {:.4} ({})",
+        largest.0, largest.1
+    );
+}

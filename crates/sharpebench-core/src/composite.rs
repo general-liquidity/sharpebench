@@ -724,6 +724,57 @@ pub enum TrialsSrStdSource {
     MeasuredFloored,
 }
 
+/// The vote with the largest single-vote leverage over a field's measured
+/// deflation dispersion, reported on every row of a measured board.
+///
+/// The measured dispersion is the sample standard deviation of one per-period
+/// Sharpe per vote, a vote being an agent or a collapsed cluster of near-clones.
+/// A vote's leverage is that standard deviation with the vote over the same
+/// standard deviation without it. The vote named is the one whose presence
+/// raises the dispersion most; some vote always has a leverage of at least
+/// 1.0, and a vote near the middle, whose removal would raise the dispersion,
+/// is never the one named. A leverage of 1.0 means the vote changes nothing;
+/// 4.89, measured on the hourly crypto panel where buy-and-hold sits far from a
+/// tight luck-floor cluster, means the measured dispersion is almost five times
+/// what it would be without that one row.
+///
+/// The leverage describes the dispersion before the floor. When
+/// `trials_sr_std_source` is `MeasuredFloored` the bar is the floor, and
+/// removing this vote would not lower it. When the source is `Measured`, the
+/// bar without the vote would be the larger of `measured_dispersion_without_it`
+/// and the floor.
+///
+/// It is a leave-one-out figure, so it sees one vote at a time. Two votes that
+/// sit together far from the rest carry the dispersion jointly, and each one's
+/// removal leaves the other in place: a pair of equal outliers beside a tight
+/// cluster shows a largest single-vote leverage of about 1.2 however far out
+/// the pair sits.
+///
+/// No bound is applied to it. A cap on the vote was measured and rejected: on
+/// the paper's own measured panels one honest reference agent routinely carries
+/// the dispersion, and a cap strict enough to contain one hostile entrant would
+/// have lowered those panels' bars by up to 74.5%. The row is disclosed instead,
+/// so a reader can see when one vote sets the bar.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DispersionLeverage {
+    /// The agent whose vote it is: for a collapsed cluster, the member whose
+    /// Sharpe is the cluster's vote (the lower middle, ties broken by id).
+    pub agent_id: String,
+    /// Submissions collapsed into this one vote; 1 for an agent that is
+    /// nobody's near-clone.
+    pub agents_in_vote: usize,
+    /// The vote itself, a per-period Sharpe ratio.
+    pub vote_sharpe: f64,
+    /// Votes in the dispersion sample.
+    pub votes: usize,
+    /// The measured dispersion without this vote, per period, before any floor.
+    pub measured_dispersion_without_it: f64,
+    /// Measured dispersion with the vote over the same without it. Absent when
+    /// the other votes are all equal, where the ratio has no finite value.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub leverage: Option<f64>,
+}
+
 impl Default for ScoreConfig {
     fn default() -> Self {
         Self {
@@ -1074,6 +1125,17 @@ pub struct CompositeScore {
     /// configured prior. Always `Configured` from `score_agent` alone.
     #[serde(default)]
     pub trials_sr_std_source: TrialsSrStdSource,
+    /// When `trials_sr_std` was measured from the field: the one vote whose
+    /// presence raises the measured dispersion most, and by how much. Absent on
+    /// the configured path, where no field voted, and on a field whose votes
+    /// are all equal, where no vote raises a dispersion of zero.
+    ///
+    /// A disclosure only. Nothing is clipped, nobody is refused and no bar
+    /// moves: it says, on the face of every row, whether one agent's Sharpe is
+    /// what set the deflation bar. On small measured fields that is often an
+    /// honest reference agent (see [`DispersionLeverage`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trials_sr_std_most_influential_vote: Option<DispersionLeverage>,
     /// Runs the agent submitted, before any shared-cell restriction.
     #[serde(default)]
     pub runs_submitted: usize,
@@ -1729,6 +1791,7 @@ fn score_agent_with(
         deflation_null_mean_per_period: defl.null_mean_per_period,
         pooled_observations: pooled.len(),
         trials_sr_std_source: defl.source,
+        trials_sr_std_most_influential_vote: None,
         runs_submitted: sub.runs.len(),
         runs_scored: sub.runs.len(),
         process_score: graded_process_score,
@@ -1875,34 +1938,131 @@ pub(crate) fn restrict_to_shared_positions(subs: &[AgentSubmission]) -> Vec<Agen
 /// measures byte for byte as it would without the collapse.
 fn measured_trials_sr_std(
     tracks: &[Vec<Vec<f64>>],
+    ids: &[&str],
     min_field: usize,
     dedup_clones: bool,
-) -> Option<f64> {
-    let qualifying: Vec<(Vec<f64>, f64)> = tracks
+) -> Option<MeasuredDispersion> {
+    let qualifying: Vec<(usize, Vec<f64>, f64)> = tracks
         .iter()
-        .filter_map(|t| {
+        .enumerate()
+        .filter_map(|(index, t)| {
             let sharpe = observed_sharpe_ratio_of_windows(&window_slices(t)).ok()?;
-            Some((t.concat(), sharpe))
+            Some((index, t.concat(), sharpe))
         })
         .collect();
-    let mut sharpes: Vec<f64> = if dedup_clones {
-        let streams: Vec<Vec<f64>> = qualifying.iter().map(|(p, _)| p.clone()).collect();
+    // (voting agent's field index, submissions in the vote, the vote)
+    let mut votes: Vec<(usize, usize, f64)> = if dedup_clones {
+        let streams: Vec<Vec<f64>> = qualifying.iter().map(|(_, p, _)| p.clone()).collect();
         clone_clusters(&streams, CLONE_COLLAPSE_COSINE, false)
             .iter()
             .map(|members| {
-                let mut cluster: Vec<f64> = members.iter().map(|&i| qualifying[i].1).collect();
-                cluster.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-                cluster[(cluster.len() - 1) / 2]
+                let mut cluster: Vec<(usize, f64)> = members
+                    .iter()
+                    .map(|&i| (qualifying[i].0, qualifying[i].2))
+                    .collect();
+                // The vote is the value it always was; the id only settles
+                // which of several equal Sharpes the disclosure names.
+                cluster.sort_by(|a, b| {
+                    a.1.partial_cmp(&b.1)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                        .then_with(|| ids[a.0].cmp(ids[b.0]))
+                });
+                let (index, sharpe) = cluster[(cluster.len() - 1) / 2];
+                (index, members.len(), sharpe)
             })
             .collect()
     } else {
-        qualifying.iter().map(|(_, sr)| *sr).collect()
+        qualifying
+            .iter()
+            .map(|&(index, _, sharpe)| (index, 1, sharpe))
+            .collect()
     };
-    if sharpes.len() < min_field.max(2) {
+    if votes.len() < min_field.max(2) {
         return None;
     }
-    sharpes.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    Some(std_dev(&sharpes))
+    votes.sort_by(|a, b| {
+        a.2.partial_cmp(&b.2)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| ids[a.0].cmp(ids[b.0]))
+    });
+    let sharpes: Vec<f64> = votes.iter().map(|v| v.2).collect();
+    let sr_std = std_dev(&sharpes);
+    Some(MeasuredDispersion {
+        sr_std,
+        most_influential_vote: most_influential_vote(&votes, &sharpes, sr_std, ids),
+    })
+}
+
+/// A field-measured dispersion and the disclosure that travels with it.
+struct MeasuredDispersion {
+    sr_std: f64,
+    most_influential_vote: Option<DispersionLeverage>,
+}
+
+/// The vote whose presence raises the measured dispersion most. `votes` and
+/// `sharpes` are the sorted dispersion sample and `sr_std` its standard
+/// deviation, so this reads the dispersion and never recomputes it.
+///
+/// `None` when every vote is equal: removing any one leaves the rest equal
+/// too, and no vote raises anything.
+///
+/// A vote whose removal leaves the others all equal has no finite leverage and
+/// outranks every finite one, because it alone is the dispersion. Equal
+/// leverages go to the lower agent id, so the answer does not depend on
+/// submission order.
+fn most_influential_vote(
+    votes: &[(usize, usize, f64)],
+    sharpes: &[f64],
+    sr_std: f64,
+    ids: &[&str],
+) -> Option<DispersionLeverage> {
+    // Equal votes can still measure a dispersion of a few ulps, from the mean
+    // rounding, so equality is read off the votes rather than off `sr_std`.
+    let equal = sharpes.first() == sharpes.last();
+    if equal || !sr_std.is_finite() || sr_std <= 0.0 {
+        return None;
+    }
+    let without = |skip: usize| -> f64 {
+        let rest: Vec<f64> = sharpes
+            .iter()
+            .enumerate()
+            .filter(|&(i, _)| i != skip)
+            .map(|(_, &x)| x)
+            .collect();
+        std_dev(&rest)
+    };
+    // Higher leverage first, a non-finite one above every finite one, then the
+    // lower agent id.
+    let outranks = |a: (Option<f64>, &str), b: (Option<f64>, &str)| -> bool {
+        match (a.0, b.0) {
+            (None, Some(_)) => true,
+            (Some(_), None) => false,
+            (Some(x), Some(y)) if x != y => x > y,
+            _ => a.1 < b.1,
+        }
+    };
+    let mut best: Option<(usize, f64, Option<f64>)> = None;
+    for position in 0..votes.len() {
+        let rest = without(position);
+        let leverage = (rest > 0.0).then(|| sr_std / rest);
+        let candidate = (leverage, ids[votes[position].0]);
+        let beats = best.is_none_or(|(held, _, held_leverage)| {
+            outranks(candidate, (held_leverage, ids[votes[held].0]))
+        });
+        if beats {
+            best = Some((position, rest, leverage));
+        }
+    }
+    let (position, rest, leverage) = best.expect("a measured field has at least two votes");
+    let (index, agents_in_vote, vote_sharpe) = votes[position];
+    Some(DispersionLeverage {
+        agent_id: ids[index].to_string(),
+        agents_in_vote,
+        vote_sharpe,
+        votes: votes.len(),
+        measured_dispersion_without_it: rest,
+        leverage,
+    })
 }
 
 /// Score and rank a field of agents. Eligible agents sort first (by composite
@@ -2042,15 +2202,18 @@ pub fn rank_declared(
     // per-period Sharpes, so it goes in as-is; only the configured prior is
     // annualized and needs converting. A small field scores exactly as
     // `score_agent` would, so the configured path stays byte-identical.
-    let defl = measured_trials_sr_std(
+    let ids: Vec<&str> = field.iter().map(|s| s.agent_id.as_str()).collect();
+    let measured = measured_trials_sr_std(
         &tracks,
+        &ids,
         cfg.min_field_for_measured_sr_std,
         cfg.dedup_clones_for_measured_sr_std,
-    )
-    .map_or_else(
-        || Deflation::configured(cfg),
-        |sr_std| Deflation::measured(sr_std, cfg),
     );
+    let defl = measured.as_ref().map_or_else(
+        || Deflation::configured(cfg),
+        |m| Deflation::measured(m.sr_std, cfg),
+    );
+    let most_influential_vote = measured.and_then(|m| m.most_influential_vote);
 
     // The relative verdict's benchmark is a member of this same (restricted)
     // field, so its run `i` is every other agent's cell `i`. Looked up only
@@ -2191,6 +2354,11 @@ pub fn rank_declared(
         .collect();
     for (cs, p) in scores.iter_mut().zip(pareto) {
         cs.pareto_optimal = p;
+    }
+    // The measured dispersion is one number for the whole field, so every row
+    // carries the same disclosure beside its `trials_sr_std_source`.
+    for cs in &mut scores {
+        cs.trials_sr_std_most_influential_vote = most_influential_vote.clone();
     }
 
     let sort_key = |s: &CompositeScore| match cfg.rank_key {
