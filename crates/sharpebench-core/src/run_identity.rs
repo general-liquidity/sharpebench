@@ -22,7 +22,14 @@
 //! 6. no period is declared in two different windows. Execution seeds of one
 //!    window replicate the same market periods and may share them; windows are
 //!    the successive segments the pooled track concatenates, so a period in two
-//!    of them would enter that track twice.
+//!    of them would enter that track twice, and
+//! 7. every agent lists the windows in the same order. That order is the one
+//!    the pooled track concatenates them in, so it is the field's time axis and
+//!    the submission has to declare it. A window identity is opaque, so its
+//!    spelling says nothing about when it ran: ordering the segments by label
+//!    would make `max_drawdown` and `return_drift_half_life` change when
+//!    `w1 .. w12` is renamed `w01 .. w12`. Agents that disagree declare no
+//!    order, and the field is refused rather than settled by the labels.
 //!
 //! A repeated period is refused per run, before any cross-agent comparison, so
 //! a field in which every agent repeats the same period is refused too: the
@@ -152,6 +159,14 @@ pub enum RunIdentityError {
         other_agent_id: String,
         index: usize,
     },
+    /// Two agents listed the same windows in different orders, so the field
+    /// does not say which order the pooled track concatenates them in.
+    WindowOrderMismatch {
+        agent_id: String,
+        other_agent_id: String,
+        windows: Vec<String>,
+        other_windows: Vec<String>,
+    },
 }
 
 /// The two cells of [`RunIdentityError::PeriodInTwoWindows`]. `first` is the
@@ -262,6 +277,18 @@ impl fmt::Display for RunIdentityError {
                 "run identity: {key} has different period identities at index {index} \
                  for agents `{other_agent_id}` and `{agent_id}`"
             ),
+            Self::WindowOrderMismatch {
+                agent_id,
+                other_agent_id,
+                windows,
+                other_windows,
+            } => write!(
+                f,
+                "run identity: agent `{other_agent_id}` lists windows {other_windows:?} \
+                 and agent `{agent_id}` lists {windows:?}. The declared order is the \
+                 order the pooled track concatenates them in, so the field must not \
+                 leave it to the labels' spelling"
+            ),
         }
     }
 }
@@ -273,10 +300,12 @@ impl std::error::Error for RunIdentityError {}
 /// shared canonical `keys` order.
 #[derive(Clone, Debug)]
 pub struct KeyedField {
-    /// The canonical cell order, sorted by `(window, seed)`. Index `i` of every
-    /// submission's `runs` is `keys[i]` for every agent.
+    /// The canonical cell order: window-major in `windows` order, seeds
+    /// ascending. Index `i` of every submission's `runs` is `keys[i]` for every
+    /// agent.
     pub keys: Vec<RunKey>,
-    /// The distinct window identities, sorted.
+    /// The distinct window identities, in the order every agent declared them.
+    /// This is the field's time axis, not a sort of the labels.
     pub windows: Vec<String>,
     /// The distinct execution seeds, sorted.
     pub seeds: Vec<u64>,
@@ -284,6 +313,20 @@ pub struct KeyedField {
     pub submissions: Vec<AgentSubmission>,
     /// Mandate declarations, unchanged from [`parse_declared_field`].
     pub declarations: MandateDeclarations,
+}
+
+/// The windows in the order `identities` first names each one. This is the
+/// field's declared time axis: the order the pooled track concatenates its
+/// segments in, taken from the submission rather than from the labels.
+fn declared_window_order(identities: &[RunIdentity]) -> Vec<String> {
+    let mut seen: BTreeSet<&str> = BTreeSet::new();
+    let mut order = Vec::new();
+    for identity in identities {
+        if seen.insert(identity.key.window.as_str()) {
+            order.push(identity.key.window.clone());
+        }
+    }
+    order
 }
 
 fn check_window(window: &str) -> Result<(), String> {
@@ -406,14 +449,32 @@ pub fn parse_keyed_field(json: &str) -> Result<KeyedField, RunIdentityError> {
         }
     }
 
+    // The window axis is ordered by declaration, not by spelling. The pooled
+    // track concatenates the windows as successive segments (rule 6), so their
+    // order sets the field's time axis, and `max_drawdown` and
+    // `return_drift_half_life` are read off that track. Taking the order from a
+    // `BTreeSet<RunKey>` would take it from the labels: `w1 .. w12` sorts as
+    // `w1, w10, w11, w12, w2, ..`, and respelling them `w01 .. w12` would move
+    // the drawdown without moving a single return. Each agent declares the
+    // order by the order it first names each window, and a field whose agents
+    // disagree names no order at all, so it is refused rather than settled by
+    // the labels.
+    let (first_position, first_identities) = &per_agent[0];
+    let windows = declared_window_order(first_identities);
+    for (position, identities) in &per_agent {
+        let declared = declared_window_order(identities);
+        if declared != windows {
+            return Err(RunIdentityError::WindowOrderMismatch {
+                agent_id: subs[*position].agent_id.clone(),
+                other_agent_id: subs[*first_position].agent_id.clone(),
+                windows: declared,
+                other_windows: windows,
+            });
+        }
+    }
+
     // Completeness: the union must be the whole window times seed product. No
     // axis is inferred beyond the identities actually submitted.
-    let windows: Vec<String> = union
-        .iter()
-        .map(|key| key.window.clone())
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect();
     let seeds: Vec<u64> = union
         .iter()
         .map(|key| key.seed)
@@ -500,8 +561,19 @@ pub fn parse_keyed_field(json: &str) -> Result<KeyedField, RunIdentityError> {
         }
     }
 
-    // Canonical order, applied to every submission.
-    let keys: Vec<RunKey> = union.into_iter().collect();
+    // Canonical order, applied to every submission: window-major in the
+    // declared window order, seeds ascending. Completeness above makes this the
+    // same set as `union`, ordered by the field's time axis rather than by the
+    // labels.
+    let keys: Vec<RunKey> = windows
+        .iter()
+        .flat_map(|window| {
+            seeds.iter().map(move |seed| RunKey {
+                window: window.clone(),
+                seed: *seed,
+            })
+        })
+        .collect();
     let mut submissions = subs;
     for (position, identities) in per_agent {
         let mut by_key: BTreeMap<&RunKey, usize> = BTreeMap::new();
@@ -536,6 +608,71 @@ pub fn parse_keyed_field(json: &str) -> Result<KeyedField, RunIdentityError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::composite::{score_agent, ScoreConfig};
+
+    /// One agent, one seed, one return per window, windows listed in the given
+    /// order. Only the labels differ between two calls with the same returns.
+    fn spelled_field(windows: &[String], returns: &[f64]) -> String {
+        let docs = serde_json::json!([{
+            "agent_id": "a",
+            "runs": returns
+                .iter()
+                .map(|r| serde_json::json!({ "returns": [r] }))
+                .collect::<Vec<_>>(),
+            "run_keys": windows
+                .iter()
+                .map(|w| serde_json::json!({ "window": w, "seed": 0 }))
+                .collect::<Vec<_>>(),
+        }]);
+        serde_json::to_string(&docs).expect("serialize field")
+    }
+
+    /// S2: the pooled track concatenates the windows in the order they are
+    /// declared, so a statistic read off it cannot change when the labels are
+    /// respelled. `w1 .. w12` sorts lexicographically as `w1, w10, w11, w12,
+    /// w2, ..`, and `w01 .. w12` sorts into its declared order, so ordering the
+    /// canonical keys by label made `max_drawdown` a function of the spelling.
+    #[test]
+    fn a_pooled_statistic_does_not_change_when_the_window_labels_are_respelled() {
+        // Two drops first, then a long recovery. Read in declared order the
+        // drops compound; read in label order the recovery is spliced between
+        // them and the deepest drawdown is shallower.
+        let mut returns = vec![-0.3, -0.3];
+        returns.extend(std::iter::repeat_n(0.4, 10));
+        let short: Vec<String> = (1..=12).map(|i| format!("w{i}")).collect();
+        let padded: Vec<String> = (1..=12).map(|i| format!("w{i:02}")).collect();
+
+        let cfg = ScoreConfig {
+            execution_seeds_per_window: 1,
+            ..ScoreConfig::default()
+        };
+        let drawdown = |windows: &[String]| {
+            let keyed = parse_keyed_field(&spelled_field(windows, &returns)).expect("keyed field");
+            score_agent(&keyed.submissions[0], &cfg).max_drawdown
+        };
+
+        assert_eq!(
+            drawdown(&short),
+            drawdown(&padded),
+            "renaming w1..w12 to w01..w12 changed no return, so it must change no statistic"
+        );
+    }
+
+    /// The order the windows are declared in is the field's time axis, so two
+    /// agents that disagree about it describe two different pooled tracks.
+    /// Nothing else in a keyed field can settle which one is right.
+    #[test]
+    fn agents_that_declare_different_window_orders_are_refused() {
+        let json = field(&[
+            ("a", &[("w0", 0), ("w1", 0)]),
+            ("b", &[("w1", 0), ("w0", 0)]),
+        ]);
+        let error = parse_keyed_field(&json).expect_err("contradictory window order");
+        assert!(
+            matches!(error, RunIdentityError::WindowOrderMismatch { .. }),
+            "{error}"
+        );
+    }
 
     fn field(entries: &[(&str, &[(&str, u64)])]) -> String {
         let docs: Vec<serde_json::Value> = entries
@@ -564,11 +701,13 @@ mod tests {
 
     #[test]
     fn a_complete_keyed_grid_is_reordered_into_one_canonical_cell_order() {
-        // The two agents list the same four cells in opposite orders. Position
+        // The two agents interleave the same four cells differently. Position
         // alignment would compare different cells; keyed alignment must not.
+        // They agree on which window comes first, which is the one part of the
+        // listing order that carries meaning.
         let json = field(&[
             ("a", &[("w0", 0), ("w0", 1), ("w1", 0), ("w1", 1)]),
-            ("b", &[("w1", 1), ("w1", 0), ("w0", 1), ("w0", 0)]),
+            ("b", &[("w0", 1), ("w1", 0), ("w0", 0), ("w1", 1)]),
         ]);
         let keyed = parse_keyed_field(&json).expect("complete grid");
         assert_eq!(
