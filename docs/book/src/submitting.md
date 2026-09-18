@@ -97,9 +97,14 @@ The simulator builds calibration pairs by two rules:
 `calibration_brier` is the Brier score over those pairs and
 `calibration_observations` counts them. An agent that never states a
 confidence reports no Brier score and zero observations.
-`confidence_weighted_return` weights each run by the mean of its paired
-confidences. A run with none weighs the mean of those per-run weights over the
-runs that have one, and every run weighs 1.0 when no run has any. A run the
+`confidence_weighted_return` weights each run's mean return by the mean of the
+confidences that run stated, each clamped to `[0, 1]` as the Brier score clamps
+them. It weighs conviction against the run's own realized return rather than
+against the `outcomes` a decision is scored on, so a run that states
+confidences without outcomes still weighs, and a confidence above 1 weighs no
+more than full conviction. A run that states none weighs the mean of those
+per-run weights over the runs that do, and every run weighs 1.0 when no run
+states any. A run the
 harness replaces with a failing sentinel states nothing, so it keeps a weight
 and stays in the mean. A submission that states confidences in one run only
 scores the equal-weight mean, as if it had stated none. Four runs at +0.001 stating 0.6 beside one

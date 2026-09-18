@@ -124,15 +124,21 @@ that names no agent is refused and recorded as `(unnamed entry <index>)`, and
 the rest of the field is scored. A dataset the simulator cannot parse, while
 any entry carries a capture, fails the whole call and records nothing.
 
-**One commitment admits one entry.** The arena judges each entry on its own
-first, so an entry that does not open its agent's commitment is refused alone
-and the agent's honest reveal is still ranked. Among the entries that pass,
-identical copies are ranked once, with each extra copy recorded as a refusal.
-When one agent has admissible entries that differ, all of them are refused,
-because the commitment does not say which one the entrant stands behind. Once a
-salt is revealed, anyone who sees it can attach it to a second capture;
-re-execution refuses that capture on its own when the committed entrant does
-not repeat its decisions.
+**One commitment opens once.** The arena judges each entry on its own first, so
+an entry that does not open its agent's commitment is refused alone and the
+agent's honest reveal is still ranked. Once a salt is revealed, anyone who sees
+it can attach it to a second entry, so the registry counts reveals rather than
+trusting that only the entrant holds one: the first entry that both opens the
+commitment and passes every other check spends it, and every later reveal of
+that commitment is refused and recorded. The refusal falls on the copy, never
+on the entry it copies. Matching the pre-image alone does not spend the
+commitment; an entry refused further down leaves it open for the one that is
+not.
+
+A capture is also refused when it declares `in_sample_trials`. That field is
+folded into the deflation bar, and no commitment binds it, so a stranger who
+read the public reveal could otherwise author the entrant's deflation
+footprint. A capture is ranked only on what re-execution derives.
 
 ### What replay proves, and what re-execution adds
 
@@ -178,15 +184,20 @@ noncertifying board.
 
 ### Certifying boards
 
-A board certifies its rows only when supplied returns were not accepted and
-every ranked row is `re-executed`. The arena computes this from the rows when it
-scores; no option sets it. The window records it as `certifying`, the signed
-header carries it, and `arena score --json` reports it. A `replayed` or
-`supplied` row makes the board noncertifying, and `board.md` then opens with a
-notice that names the reason. A reader treats a board as certifying only when
-its header says `"certifying": true`; a header without the field, as signed
-before the field existed, certifies nothing. A window that ranks no row meets
-the rule vacuously unless it accepted supplied returns.
+A board certifies its rows only when it ranked at least one row, supplied
+returns were not accepted, and every ranked row is `re-executed`. The arena
+computes this from the rows when it scores; no option sets it. The window
+records it as `certifying`, the signed header carries it, and `arena score
+--json` reports it. A `replayed` or `supplied` row makes the board
+noncertifying, and `board.md` then opens with a notice that names the reason. A
+reader treats a board as certifying only when its header says `"certifying":
+true`; a header without the field, as signed before the field existed,
+certifies nothing.
+
+A window that ranked no row is noncertifying too. `certifying` is a claim about
+rows, so a board that has none has nothing to claim it of, and a window where
+every entry was refused would otherwise sign the mark that says its rows were
+re-executed.
 
 ### Provenance on the board
 
