@@ -138,6 +138,20 @@ const MEASURED_FIELD = JSON.stringify(
   })),
 );
 
+// Six agents with bitwise-equal votes: each window is the same dyadic values (mean
+// exactly 1/64, deviations j/64) in its own order, so every sum is exact. The field
+// measures a dispersion of zero, where no vote is named.
+const EQUAL_BASE = Array.from({ length: 30 }, (_, j) => [(2 + j) / 64, -j / 64]).flat();
+const EQUAL_STRIDES = [1, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43];
+const EQUAL_VOTE_FIELD = JSON.stringify(
+  Array.from({ length: 6 }, (_, k) => ({
+    agent_id: `equal-${k}`,
+    runs: [0, 1].map((w) => ({
+      returns: Array.from({ length: 60 }, (_, t) => EQUAL_BASE[(t * EQUAL_STRIDES[2 * k + w] + k) % 60]),
+    })),
+  })),
+);
+
 /**
  * The fixed input battery: every export, on inputs chosen to reach the branches a version
  * stamp does not cover, including the refusal paths (a malformed dispersion, an invalid
@@ -159,6 +173,7 @@ function battery() {
   }
   push("score(field)", "score", [FIELD, ""]);
   push("score(measured field)", "score", [MEASURED_FIELD, ""]);
+  push("score(equal-vote field)", "score", [EQUAL_VOTE_FIELD, ""]);
   push("score(field, n_trials 500)", "score", [FIELD, '{"n_trials":500,"trials_sr_std":0.5,"dsr_bar":0.95,"per_run_psr_bar":0.9,"alpha":0.05,"bootstrap_seed":7,"n_boot":99,"block_prob":0.1}']);
   push("score(empty field)", "score", ["[]", ""]);
   push("score(malformed)", "score", ["{", ""]);
@@ -362,9 +377,29 @@ try {
     );
   }
   const missedGoldens = before.goldens.filter((g) => !g.ok).map((g) => g.name);
+  // Two bundles that both fall back to the prior on the measured field would agree
+  // while neither reached the branch the field exists for, so reaching it is checked.
+  const unreached = [];
+  try {
+    const rows = JSON.parse(after.answers.get("score(measured field)"));
+    const reached =
+      Array.isArray(rows) &&
+      rows.length > 0 &&
+      rows.every((r) => r.trials_sr_std_source === "measured" && r.trials_sr_std_most_influential_vote);
+    if (!reached) unreached.push("score(measured field) no longer scores a measured board with its disclosure");
+  } catch (e) {
+    unreached.push(`score(measured field) did not return a board: ${e && e.message ? e.message : String(e)}`);
+  }
   const divergent = [...after.answers.keys()].filter(
     (label) => before.answers.get(label) !== after.answers.get(label),
   );
+
+  if (unreached.length > 0) {
+    console.error("");
+    console.error("FAIL the battery no longer reaches a branch it is meant to drive");
+    for (const line of unreached) console.error(`     ${line}`);
+    process.exit(1);
+  }
 
   if (stampMismatch.length === 0 && missedGoldens.length === 0 && divergent.length === 0 && uncovered.length === 0) {
     console.log(`ok   ${name} answers identically to this tree's wasm-pack build`);
