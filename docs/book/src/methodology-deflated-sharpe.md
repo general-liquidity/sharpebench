@@ -124,21 +124,42 @@ near-duplicate submissions cannot shrink the dispersion and lower the bar
 ### Which vote sets the measured bar
 
 Every row of a measured board carries `trials_sr_std_most_influential_vote`
-beside `trials_sr_std_source`. It names the one vote that moves the measured
-dispersion most: the agent (`agent_id`), how many submissions the clone collapse
+beside `trials_sr_std_source`. It names the one vote whose presence raises the
+measured dispersion most: the agent (`agent_id`), how many submissions the clone collapse
 folded into that vote (`agents_in_vote`), the vote itself as a per-period Sharpe
 (`vote_sharpe`), the size of the dispersion sample (`votes`), the dispersion
 without that vote (`measured_dispersion_without_it`, per period, before the
 floor), and the ratio of the two (`leverage`). A leverage of 1.0 means the vote
-changes nothing. A leverage of 4.89 means the bar is almost five times what it
-would be without that one row. The field is absent on the configured path,
-where no field voted, so a board scored against the prior serializes exactly as
-it did before the field existed.
+changes nothing. A leverage of 4.89 means the measured dispersion, and with it
+the bar when the source is `measured`, is almost five times what it would be
+without that one row. Some vote always has a leverage of at least 1.0, so the
+vote named is one that raises the dispersion; a vote near the middle, whose
+removal would raise it, is never named. The field is absent on the configured
+path, where no field voted, so a board scored against the prior serializes
+exactly as it did before the field existed. It is also absent when every vote
+is equal, because then no vote raises anything.
+
+Three limits on reading it:
+
+- **The floor.** The leverage is taken over the dispersion before the floor.
+  When `trials_sr_std_source` is `measured_floored` the bar is the floor, and
+  removing the named vote would not lower it. When the source is `measured`,
+  the bar without the vote is the larger of `measured_dispersion_without_it` and
+  the floor.
+- **One vote at a time.** It is a leave-one-out figure. Two votes that sit
+  together far from the rest carry the dispersion jointly, and removing either
+  leaves the other in place: a pair of equal outliers beside a tight cluster
+  shows a largest single-vote leverage of about 1.2 however far out the pair
+  sits. A low leverage therefore does not show that no small group set the bar.
+- **Upward only.** The disclosure names the vote that raises the dispersion.
+  Votes that lower it, by crowding the middle, are not reported.
 
 It is a disclosure and nothing more. It clips no vote, refuses no agent and
 moves no bar: the measured dispersion is still the plain standard deviation of
-the sorted votes, bit for bit, and a test on the three measured panels pins that.
-On the current engine those panels name the same agent:
+the sorted votes, bit for bit, and a test on the three measured panels
+(`the_measured_panels_disclose_the_vote_that_sets_their_bar` in
+`sharpebench-harness/tests/evidence_fields_no_clone_merges.rs`) pins that. On
+the current engine those panels name the same agent:
 
 | Panel | Votes | Vote that sets the bar | Leverage |
 |---|---|---|---|
@@ -163,7 +184,7 @@ frozen evidence producer measures under the current engine:
 | Producer | Votes | Periods a year | Dispersion used, before and after | Bar change | Votes clipped |
 |---|---|---|---|---|---|
 | evidence sweep, crypto-majors-1h | 7 | 8760 | 0.10713 to 0.02737 | -74.5% | 1 |
-| evidence sweep, fx-majors-1d | 7 | 252 | 0.15436 to 0.12756 | -17.4% | 1 |
+| evidence sweep, fx-majors-1d | 7 | 252 | 0.15436 to 0.12754 | -17.4% | 1 |
 | evidence sweep, rates-1d | 7 | 252 | 0.08304 to 0.08304 | 0.0% | 0 |
 | mandate and relative mandate, hourly | 8 | 8760 | 0.11035 to 0.02248 | -79.6% | 3 |
 | risk-managed, hourly | 7 | 8760 | 0.11907 to 0.02851 | -76.1% | 2 |
@@ -171,7 +192,13 @@ frozen evidence producer measures under the current engine:
 | seed leg, daily | 8 | 252 | 0.12374 to 0.10189 | -17.7% | 1 |
 | risk-managed, daily | 7 | 252 | 0.17741 to 0.15702 | -11.5% | 1 |
 
-The rule clipped votes on 10 of the 26 distinct frozen-field samples. It clipped
+Dispersions are per period. The three evidence-sweep rows are recomputed by
+the same harness test, which applies the rule to the votes the kernel measures
+and asserts each bar change to within 0.05 percentage points, so they cannot
+drift from the engine unnoticed. The other five rows were recorded from a
+one-off instrumented run of their producers and are not pinned by a test; rerun
+them before relying on them. The rule clipped votes on 10 of the 26 distinct
+frozen-field samples. It clipped
 nothing on the 13-agent external field, the pass witness, the 1000-agent luck
 floor, commodities or daily rates, and it cannot reach either committed golden,
 whose fields sit below the five-vote minimum and score against the prior. The
@@ -184,7 +211,7 @@ within 0.004 of each other. Momentum and buy-and-hold sit far from that cluster,
 and the measured dispersion is mostly that distance, which is the cost-drag
 mechanism the paper describes. A robust fence reads a vote that far from a tight
 cluster as an outlier, 162 robust standard deviations out for buy-and-hold on
-hourly crypto, however honest it is. Any rule strict enough to stop one hostile
+hourly crypto (the same test pins that distance), however honest it is. Any rule strict enough to stop one hostile
 entrant from setting the bar therefore overrules the reference agents on the
 panels where they set it, and lowering the bar there admits more luck. On the
 13-agent external field, where the votes are spread out, no single vote carries
@@ -366,15 +393,25 @@ The segments are the ones the board's own pooled track is built from, after the
 shared-cell restriction and with execution seeds averaged. The share is taken
 over `SSB + SSW` rather than a separately computed `SST`: the two are equal in
 exact arithmetic, and the sum keeps the share inside [0, 1] under rounding. A
-track with fewer than two windows, a non-finite observation or no variance at all
-is reported with its reason and no share.
+track with fewer than two windows, a non-finite observation or no variance at
+all, and a board row with no submission behind it, is reported with its reason
+and no share.
 
 A share near 1 means the track's dispersion is almost all level differences
 between windows. That is the shape of a track whose every window is constant,
 which the kernel refuses as having no Sharpe ratio, and of its near relative the
 refusal cannot see: change one bar inside one window by 1e-12 and exact value
 equality clears, while the share still reads 1 to nine decimals. An honest
-traded track's dispersion sits inside its windows, and its share is near 0.
+traded track's dispersion sits inside its windows, and its share is near 0. For
+independent returns the expected share is about `(windows - 1) / (bars - 1)`,
+so short windows read higher. On the nine frozen panels, for the reference
+agents, the risk-managed agent and the five-agent luck floor, every share is
+below 0.03, the largest 0.0285 on weekly crypto, where the windows are
+shortest; a harness test
+(`honest_tracks_on_the_frozen_panels_split_almost_nothing_between_windows`)
+pins that bound. Commodities reports a reason instead of a share, because its
+raw prices include a documented negative quote that leaves non-finite returns
+in the pooled track.
 
 The diagnostic refuses nobody and changes no rank. It is published so that a
 gate on this shape, if one is ever wanted, can take its threshold from the
