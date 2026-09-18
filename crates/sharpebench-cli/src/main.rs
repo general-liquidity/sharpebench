@@ -3349,6 +3349,7 @@ fn print_sharpe_diagnostics(
             SharpeDiagnostic::NullSePsr => " null_PSR null_DSR",
             SharpeDiagnostic::Mppm => "   MPPM(3)/yr",
             SharpeDiagnostic::ExpectedShortfall => "   ES(5%)  tail  loss_fq",
+            SharpeDiagnostic::BetweenWindowVariance => "  windows  between",
         });
     }
     println!("\nOpt-in Sharpe diagnostics. Not used by the gate, eligibility or the rank.");
@@ -3394,6 +3395,14 @@ fn print_sharpe_diagnostics(
                         cell(t.and_then(|t| t.loss_frequency))
                     )
                 }
+                SharpeDiagnostic::BetweenWindowVariance => {
+                    let b = row.between_window_variance.as_ref();
+                    format!(
+                        " {:>8} {:>8}",
+                        b.map_or(0, |b| b.windows),
+                        cell(b.and_then(|b| b.between_window_share))
+                    )
+                }
             };
             line.push_str(&text);
         }
@@ -3411,6 +3420,8 @@ fn print_sharpe_diagnostics(
                     "MPPM(3)/yr: manipulation-proof performance, risk aversion 3, zero risk-free rate, annualized (Goetzmann, Ingersoll, Spiegel and Welch 2007, eq. 18).",
                 SharpeDiagnostic::ExpectedShortfall =>
                     "ES(5%): mean return over the worst 5% of the pooled track (historical expected shortfall), n/a below 10 whole tail observations; tail: observations in it; loss_fq: fraction of bars below zero.",
+                SharpeDiagnostic::BetweenWindowVariance =>
+                    "between: share of the pooled track's variance that lies between its windows rather than within them (SSB / SST); near 1 means the dispersion is mostly level differences between windows. n/a below two windows.",
             }
         );
     }

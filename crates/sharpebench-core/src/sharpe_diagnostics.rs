@@ -26,7 +26,8 @@ use sharpebench_stats::{
 };
 
 use crate::composite::{
-    pooled_returns, restrict_to_shared_positions, AgentSubmission, CompositeScore, ScoreConfig,
+    pooled_returns, restrict_to_shared_positions, window_tracks, AgentSubmission, CompositeScore,
+    ScoreConfig,
 };
 
 /// One opt-in diagnostic, by the identifier the command line accepts.
@@ -54,15 +55,26 @@ pub enum SharpeDiagnostic {
     /// shortfall is unavailable, with the reason, when the tail holds fewer
     /// than 10 whole observations.
     ExpectedShortfall,
+    /// `between-window-variance`: the share of the pooled track's variance
+    /// that lies between its windows rather than within them, `SSB / SST`
+    /// from the one-way decomposition `SST = SSB + SSW` over the window
+    /// segments the pooled track is concatenated from. Near 1 is the shape of
+    /// a track whose dispersion is mostly level differences between windows,
+    /// the shape a window-constant track and its near relatives produce;
+    /// honest traded tracks sit near 0. Published so that a gate, if one is
+    /// ever wanted, can be set from its distribution across honest fields
+    /// rather than from a threshold chosen in advance.
+    BetweenWindowVariance,
 }
 
 impl SharpeDiagnostic {
     /// Every diagnostic, in report order.
-    pub const ALL: [SharpeDiagnostic; 4] = [
+    pub const ALL: [SharpeDiagnostic; 5] = [
         SharpeDiagnostic::AutocorrelatedPsr,
         SharpeDiagnostic::NullSePsr,
         SharpeDiagnostic::Mppm,
         SharpeDiagnostic::ExpectedShortfall,
+        SharpeDiagnostic::BetweenWindowVariance,
     ];
 
     /// The command-line identifier.
@@ -72,6 +84,7 @@ impl SharpeDiagnostic {
             SharpeDiagnostic::NullSePsr => "null-se-psr",
             SharpeDiagnostic::Mppm => "mppm",
             SharpeDiagnostic::ExpectedShortfall => "expected-shortfall",
+            SharpeDiagnostic::BetweenWindowVariance => "between-window-variance",
         }
     }
 
@@ -188,6 +201,29 @@ pub struct SharpeDiagnostics {
     pub mppm: Option<MppmDiagnostic>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expected_shortfall: Option<TailRiskDiagnostic>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub between_window_variance: Option<BetweenWindowVarianceDiagnostic>,
+}
+
+/// How one agent's pooled variance splits between and within its windows.
+///
+/// Rank-neutral like every diagnostic here: no gate, eligibility rule or rank
+/// predicate reads it, and it refuses nobody.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct BetweenWindowVarianceDiagnostic {
+    /// Windows with at least one observation, after the shared-cell
+    /// restriction and replicate averaging the board applies.
+    pub windows: usize,
+    /// `SSB / (SSB + SSW)`, in [0, 1]. `SSB` sums, over windows, the
+    /// observations in the window times its mean's squared distance from the
+    /// pooled mean; `SSW` sums squared distances from each window's own mean.
+    /// Absent when `error` is present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub between_window_share: Option<f64>,
+    /// Why the share could not be computed: fewer than two windows, a
+    /// non-finite observation, or a pooled track with no variance at all.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// Compute `requested` for every row of `board`, in board order.
@@ -214,9 +250,8 @@ pub fn sharpe_diagnostics(
     board
         .iter()
         .map(|row| {
-            let pooled = field
-                .iter()
-                .find(|s| s.agent_id == row.agent_id)
+            let submission = field.iter().find(|s| s.agent_id == row.agent_id);
+            let pooled = submission
                 .map(|s| pooled_returns(s, cfg.execution_seeds_per_window))
                 .unwrap_or_default();
             let bar = row
@@ -256,6 +291,14 @@ pub fn sharpe_diagnostics(
                 }),
                 expected_shortfall: wants(SharpeDiagnostic::ExpectedShortfall)
                     .then(|| tail_risk(&pooled)),
+                between_window_variance: wants(SharpeDiagnostic::BetweenWindowVariance).then(
+                    || {
+                        let windows = submission
+                            .map(|s| window_tracks(s, cfg.execution_seeds_per_window))
+                            .unwrap_or_default();
+                        between_window_variance(&windows)
+                    },
+                ),
             }
         })
         .collect()
@@ -277,6 +320,47 @@ fn tail_risk(pooled: &[f64]) -> TailRiskDiagnostic {
         error: shortfall
             .err()
             .map(|e| format!("tail at level {DEFAULT_TAIL_LEVEL}: {e}")),
+    }
+}
+
+/// The one-way split `SST = SSB + SSW` of a pooled track over its windows.
+///
+/// The share is taken over `SSB + SSW` rather than over a separately computed
+/// `SST`: the two are equal in exact arithmetic, and dividing by the sum keeps
+/// the share inside [0, 1] under rounding.
+fn between_window_variance(windows: &[Vec<f64>]) -> BetweenWindowVarianceDiagnostic {
+    let present: Vec<&Vec<f64>> = windows.iter().filter(|w| !w.is_empty()).collect();
+    let refuse = |why: &str| BetweenWindowVarianceDiagnostic {
+        windows: present.len(),
+        between_window_share: None,
+        error: Some(why.to_string()),
+    };
+    if present.len() < 2 {
+        return refuse("fewer than two windows: there is no between-window variance to split");
+    }
+    if present
+        .iter()
+        .flat_map(|w| w.iter())
+        .any(|x| !x.is_finite())
+    {
+        return refuse("a pooled observation is not finite");
+    }
+    let count: usize = present.iter().map(|w| w.len()).sum();
+    let grand = present.iter().flat_map(|w| w.iter()).sum::<f64>() / count as f64;
+    let (mut between, mut within) = (0.0_f64, 0.0_f64);
+    for window in &present {
+        let mean = window.iter().sum::<f64>() / window.len() as f64;
+        between += window.len() as f64 * (mean - grand) * (mean - grand);
+        within += window.iter().map(|x| (x - mean) * (x - mean)).sum::<f64>();
+    }
+    let total = between + within;
+    if !total.is_finite() || total <= 0.0 {
+        return refuse("the pooled track has no variance to split");
+    }
+    BetweenWindowVarianceDiagnostic {
+        windows: present.len(),
+        between_window_share: Some(between / total),
+        error: None,
     }
 }
 
