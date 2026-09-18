@@ -90,9 +90,10 @@ pub const FAULTED_WINDOW_SCHEMA_VERSION: u32 = 3;
 /// the code to undo it. That binary knows only [`WINDOW_SCHEMA_VERSION`] and
 /// [`FAULTED_WINDOW_SCHEMA_VERSION`], so it refuses this version instead.
 ///
-/// [`Arena::save`] sets the version from the record, and every one of these
-/// fields is skipped when it holds its default, so a window that records none
-/// of them keeps [`WINDOW_SCHEMA_VERSION`] and the bytes it always had.
+/// The arena sets the version from the record whenever it writes one, and
+/// every one of these fields is skipped when it holds its default, so a window
+/// that records none of them keeps [`WINDOW_SCHEMA_VERSION`] and the bytes it
+/// always had.
 pub const SCORED_WINDOW_SCHEMA_VERSION: u32 = 4;
 
 /// [`SCORED_WINDOW_SCHEMA_VERSION`] for a window opened under a fault plan.
@@ -1262,6 +1263,9 @@ fn render_markdown(header: &WindowHeader, scores: &[CompositeScore], rows: &[Boa
     out.push_str(&format!("# Arena window `{}`\n\n", header.window_id));
     if header.certifying != Some(true) {
         out.push_str("**Noncertifying board.** Nothing on this board certifies that its rows were measured without hindsight:\n\n");
+        if rows.is_empty() {
+            out.push_str("- The board ranked no rows. Every entry was refused, so there is nothing here to certify.\n");
+        }
         if header.supplied_returns_accepted {
             out.push_str("- The window was scored with supplied returns allowed. A row marked `supplied` ranks returns its entrant delivered after the data reveal, which nothing ties to the committed artifact.\n");
         }

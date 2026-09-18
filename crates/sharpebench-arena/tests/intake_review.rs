@@ -633,5 +633,9 @@ fn a_board_that_ranked_nothing_does_not_certify() {
         md.contains("**Noncertifying board.**"),
         "a board with no rows must say so: {md}"
     );
+    assert!(
+        md.contains("The board ranked no rows."),
+        "the notice must name the reason, not open a list with nothing under it: {md}"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
