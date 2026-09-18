@@ -577,3 +577,90 @@ fn pass_witness_fields_have_no_clone_merges() {
         }
     }
 }
+
+// --- the vote that sets the measured bar, on the panels that measure ----------
+
+/// On the three panels the current engine measures, the disclosure names the
+/// honest reference vote that carries the dispersion, and the bar is untouched.
+///
+/// The five luck-floor agents sit in a tight cluster and buy-and-hold sits far
+/// from it, so one honest vote multiplies the measured dispersion: 4.89 on
+/// hourly crypto, 4.15 on daily FX and 1.55 on daily rates, measured on this
+/// engine. A cap on the vote was measured against exactly these fields and not
+/// shipped, because containing one hostile entrant would have lowered the hourly
+/// crypto bar by 74.5% and the daily FX bar by 17.4%. The disclosure reports the
+/// row instead, and the measured dispersion is still the plain standard
+/// deviation of the sorted votes, bit for bit.
+#[test]
+fn the_measured_panels_disclose_the_vote_that_sets_their_bar() {
+    use sharpebench_core::composite::pooled_returns;
+    use sharpebench_core::deflated_sharpe::observed_sharpe_ratio;
+    use sharpebench_core::stats::std_dev;
+    use sharpebench_core::{rank, ScoreConfig, TrialsSrStdSource};
+
+    for (name, periods, leverage) in [
+        ("crypto-majors-1h", 8760.0, 4.89),
+        ("fx-majors-1d", 252.0, 4.15),
+        ("rates-1d", 252.0, 1.55),
+    ] {
+        let data = load(name);
+        let windows = windows_for(data.len());
+        let mut sweep = vec![
+            run_agent("buy-and-hold", &data, &windows, || Box::new(BuyAndHold)),
+            run_agent(
+                "momentum",
+                &data,
+                &windows,
+                || Box::new(Momentum::default()),
+            ),
+            run_agent("hold", &data, &windows, || Box::new(HoldAgent)),
+        ];
+        sweep.extend(luck_floor(
+            &data,
+            &windows,
+            &EXEC_SEEDS,
+            CostModel::default(),
+            LUCK_FLOOR_AGENTS,
+        ));
+        // The bootstrap legs are orthogonal to the dispersion; a small count
+        // keeps the hourly panel affordable in a debug test run.
+        let cfg = ScoreConfig {
+            execution_seeds_per_window: EXEC_SEEDS.len(),
+            n_boot: 20,
+            ..ScoreConfig::for_periods_per_year(periods)
+        };
+        let board = rank(&sweep, &cfg);
+
+        let mut votes: Vec<f64> = sweep
+            .iter()
+            .filter_map(|s| observed_sharpe_ratio(&pooled_returns(s, EXEC_SEEDS.len())).ok())
+            .collect();
+        votes.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let measured = std_dev(&votes);
+
+        for row in &board {
+            assert_eq!(
+                row.trials_sr_std_source,
+                TrialsSrStdSource::Measured,
+                "{name}"
+            );
+            assert_eq!(
+                row.trials_sr_std.to_bits(),
+                measured.to_bits(),
+                "{name}: the disclosure must not move the measured dispersion"
+            );
+            let vote = row
+                .trials_sr_std_most_influential_vote
+                .as_ref()
+                .unwrap_or_else(|| panic!("{name}: a measured row carries the disclosure"));
+            assert_eq!(vote.agent_id, "buy-and-hold", "{name}: {vote:?}");
+            assert_eq!(vote.agents_in_vote, 1, "{name}");
+            assert_eq!(vote.votes, 7, "{name}");
+            let got = vote.leverage.expect("the other votes are not all equal");
+            assert!(
+                (got - leverage).abs() < 0.005,
+                "{name}: leverage {got}, measured {leverage}"
+            );
+        }
+    }
+}

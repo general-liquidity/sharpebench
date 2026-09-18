@@ -343,6 +343,20 @@ pub const ROLE_CONTRIBUTION_VISIBILITY: VisibilityAllowlist = VisibilityAllowlis
     ],
 };
 
+/// [`crate::composite::DispersionLeverage`]: which vote set the measured
+/// deflation bar. Every field is a scalar about a vote already on the board.
+pub const DISPERSION_LEVERAGE_VISIBILITY: VisibilityAllowlist = VisibilityAllowlist {
+    document: "sharpebench_core::composite::DispersionLeverage",
+    fields: &[
+        ("agent_id", V),
+        ("agents_in_vote", V),
+        ("vote_sharpe", V),
+        ("votes", V),
+        ("measured_dispersion_without_it", V),
+        ("leverage", V),
+    ],
+};
+
 /// [`crate::certification::CertificationGap`], internally tagged by `property`.
 pub const CERTIFICATION_GAP_VISIBILITY: VisibilityAllowlist = VisibilityAllowlist {
     document: "sharpebench_core::certification::CertificationGap",
@@ -428,6 +442,10 @@ pub const COMPOSITE_SCORE_VISIBILITY: VisibilityAllowlist = VisibilityAllowlist 
         ("deflation_null_mean_per_period", V),
         ("pooled_observations", V),
         ("trials_sr_std_source", V),
+        (
+            "trials_sr_std_most_influential_vote",
+            Visibility::Nested(&DISPERSION_LEVERAGE_VISIBILITY),
+        ),
         ("runs_submitted", V),
         ("runs_scored", V),
         ("process_score", V),
@@ -492,7 +510,8 @@ mod tests {
     use super::*;
     use crate::certification::{Certification, CertificationGap};
     use crate::composite::{
-        score_agent, AgentSubmission, DeclaredMandate, MandateVerdict, Run, ScoreConfig,
+        score_agent, AgentSubmission, DeclaredMandate, DispersionLeverage, MandateVerdict, Run,
+        ScoreConfig,
     };
     use crate::evidence_coverage::COMPOSITE_SCORE_INVENTORY;
     use crate::roles::RoleContribution;
@@ -539,6 +558,14 @@ mod tests {
         score.declared_passed_k = Some(true);
         score.declared_mandate_eligible = Some(false);
         score.declared_mandate_ordinal = Some(1);
+        score.trials_sr_std_most_influential_vote = Some(DispersionLeverage {
+            agent_id: "buy-and-hold".to_string(),
+            agents_in_vote: 1,
+            vote_sharpe: 0.00916,
+            votes: 7,
+            measured_dispersion_without_it: 0.0219,
+            leverage: Some(4.89),
+        });
         score.certification = Some(Certification {
             mode: "lifecycle-certified/v1".to_string(),
             certified: false,
@@ -592,6 +619,10 @@ mod tests {
             (
                 CERTIFICATION_VISIBILITY,
                 declared_struct_fields::<Certification>(),
+            ),
+            (
+                DISPERSION_LEVERAGE_VISIBILITY,
+                declared_struct_fields::<DispersionLeverage>(),
             ),
         ] {
             let audit = allowlist.audit(fields);

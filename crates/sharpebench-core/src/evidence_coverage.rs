@@ -338,6 +338,9 @@ pub const COMPOSITE_SCORE_INVENTORY: EvidenceInventory = EvidenceInventory {
         ("deflation_null_mean_per_period", COVERED_SCORE),
         ("pooled_observations", COVERED_SCORE),
         ("trials_sr_std_source", COVERED_SCORE),
+        // A fixed-shape record like declared_mandate, and set by the field's
+        // composition like pareto_optimal, so it binds under field_context.
+        ("trials_sr_std_most_influential_vote", COVERED_FIELD),
         ("runs_submitted", COVERED_SCORE),
         ("runs_scored", COVERED_SCORE),
         ("process_score", COVERED_SCORE),
