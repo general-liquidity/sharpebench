@@ -12,6 +12,13 @@ from pathlib import Path
 from typing import Any
 
 REPORT_SCHEMA = "sharpebench.forecast-quality.v1"
+# v2 compares each pair on the digests both agents resolved and charges every
+# gap to the agent that has it. The committed prospective report is v1.
+REPORT_SCHEMA_V2 = "sharpebench.forecast-quality.v2"
+SUPPORT_RULE_V2 = (
+    "a pair is differenced on the contract digests both agents resolved "
+    "and receives inference only when each agent resolved every digest the other did"
+)
 RANK_EFFECT = "reported_only_never_trading_rank"
 DEPENDENCE_UNIT = "whole resolution-clock block across assets and questions"
 
@@ -320,11 +327,77 @@ def _compare_calibration(actual: object, expected: dict[str, Any], label: str) -
                 _close(item.get(key), wanted[key], f"{label}.bins[{index}].{key}")
 
 
+def _check_support_v1(
+    support: dict[str, Any],
+    agent_ids: list[str],
+    rows_by_agent: dict[str, dict[str, dict[str, Any]]],
+    common: list[str],
+) -> None:
+    if (
+        support.get("n_contracts") != len(common)
+        or support.get("contract_sha256") != common
+    ):
+        raise ReportCheckError(
+            "report common support differs from the resolved ledgers"
+        )
+    excluded = support.get("excluded_resolved_by_agent")
+    expected_excluded = {
+        agent_id: len(rows_by_agent[agent_id]) - len(common) for agent_id in agent_ids
+    }
+    if excluded != expected_excluded:
+        raise ReportCheckError("report excluded-support counts differ")
+
+
+def _check_support_v2(
+    support: dict[str, Any],
+    agent_ids: list[str],
+    rows_by_agent: dict[str, dict[str, dict[str, Any]]],
+) -> None:
+    digests = [set(rows_by_agent[agent_id]) for agent_id in agent_ids]
+    field = sorted(set.union(*digests))
+    if any(resolved != set(field) for resolved in digests):
+        # Such pairs carry support_gap and no interval or p-value; this checker
+        # reconstructs only comparisons that report inference.
+        raise ReportCheckError(
+            "resolved ledgers name different contract digests; v2 withholds "
+            "those pairs and this checker does not reconstruct them"
+        )
+    # _rows refuses every claim that is not resolved, so a field it accepts has
+    # no pending, cancelled, rejected or unclaimed gap to charge.
+    expected = {
+        "rule": SUPPORT_RULE_V2,
+        "n_contracts": len(field),
+        "contract_sha256": field,
+        "unresolved_by_agent": {
+            agent_id: {
+                "n_unresolved": 0,
+                "not_claimed": [],
+                "pending": [],
+                "cancelled": [],
+                "rejected": [],
+            }
+            for agent_id in agent_ids
+        },
+        "settlement_status_disagreements": [],
+    }
+    for key, value in expected.items():
+        if support.get(key) != value:
+            raise ReportCheckError(
+                f"report common_support.{key} differs from the resolved ledgers"
+            )
+    if set(support) != set(expected):
+        raise ReportCheckError(
+            "report common_support fields differ from "
+            f"{REPORT_SCHEMA_V2}: {sorted(set(support) ^ set(expected))}"
+        )
+
+
 def verify(field_dir: Path, report_path: Path) -> dict[str, Any]:
     plan = _mapping(_read_json(field_dir / "field-plan.json"), "field plan")
     report = _mapping(_read_json(report_path), "forecast-quality report")
     analysis = _mapping(plan.get("analysis"), "field plan analysis")
-    if report.get("schema_version") != REPORT_SCHEMA:
+    schema = report.get("schema_version")
+    if schema not in (REPORT_SCHEMA, REPORT_SCHEMA_V2):
         raise ReportCheckError("forecast-quality report has an unsupported schema")
     if (
         report.get("rank_effect") != RANK_EFFECT
@@ -362,19 +435,10 @@ def verify(field_dir: Path, report_path: Path) -> dict[str, Any]:
     }
     common = sorted(set.intersection(*(set(rows) for rows in rows_by_agent.values())))
     support = _mapping(report.get("common_support"), "common_support")
-    if (
-        support.get("n_contracts") != len(common)
-        or support.get("contract_sha256") != common
-    ):
-        raise ReportCheckError(
-            "report common support differs from the resolved ledgers"
-        )
-    excluded = support.get("excluded_resolved_by_agent")
-    expected_excluded = {
-        agent_id: len(rows_by_agent[agent_id]) - len(common) for agent_id in agent_ids
-    }
-    if excluded != expected_excluded:
-        raise ReportCheckError("report excluded-support counts differ")
+    if schema == REPORT_SCHEMA:
+        _check_support_v1(support, agent_ids, rows_by_agent, common)
+    else:
+        _check_support_v2(support, agent_ids, rows_by_agent)
 
     report_agents = {
         str(_mapping(raw, "agent summary").get("agent_id")): _mapping(
@@ -435,6 +499,8 @@ def verify(field_dir: Path, report_path: Path) -> dict[str, Any]:
         for key in ("n_contracts", "n_settlement_blocks", "familywise_significant"):
             if actual.get(key) != expected[key]:
                 raise ReportCheckError(f"{label}.{key} differs")
+        if "support_gap" in actual:
+            raise ReportCheckError(f"{label} reports a support gap on equal support")
         for key in (
             "mean_loss_difference",
             "confidence_lower",

@@ -20,15 +20,19 @@ use csv_columns::read_returns_column;
 mod analysis_cmd;
 mod arena_cmd;
 mod artifact_preflight;
+mod cell_isolation;
 mod compare_cmd;
 mod csv_columns;
+mod decision_stability_cmd;
 mod external_capture;
 mod forecast_cmd;
 mod gateway_cli;
 mod import_cmd;
 mod lineage_cmd;
 mod regrade_cmd;
+mod replay_diagnostics_cmd;
 mod rescore_cmd;
+mod timing_luck_cmd;
 #[cfg(feature = "self-update")]
 mod update;
 
@@ -60,6 +64,9 @@ fn main() -> ExitCode {
         Some("verify") => run_verify(&args, json),
         Some("capture") => run_capture(&args, json),
         Some("verify-trajectory") => run_verify_trajectory(&args, json),
+        Some("decision-stability") => {
+            ExitCode::from(decision_stability_cmd::run(&args, json).clamp(0, 255) as u8)
+        }
         Some("rescore") => ExitCode::from(rescore_cmd::run(&args, json).clamp(0, 255) as u8),
         Some("regrade") => ExitCode::from(regrade_cmd::run(&args, json).clamp(0, 255) as u8),
         Some("compare") => ExitCode::from(compare_cmd::run(&args, json).clamp(0, 255) as u8),
@@ -77,6 +84,9 @@ fn main() -> ExitCode {
         }
         Some("import") => ExitCode::from(import_cmd::run(&args, json).clamp(0, 255) as u8),
         Some("gateway") => ExitCode::from(gateway_cli::run(&args, json).clamp(0, 255) as u8),
+        Some("timing-luck") => {
+            ExitCode::from(timing_luck_cmd::run(&args, json).clamp(0, 255) as u8)
+        }
         Some(sub @ ("select" | "disqualify" | "rediscover" | "uncertainty" | "decay-prior")) => {
             ExitCode::from(analysis_cmd::run(sub, &args, json).clamp(0, 255) as u8)
         }
@@ -569,6 +579,7 @@ fn help() {
     println!("                       --rate-card <json>: frozen token rates; emits a separate self-reported estimate, never a rank input");
     println!("                       --fault-plan <json>: seeded fault injection at the entrant boundary; checkpoint-bound, rank-neutral evidence");
     println!("                       --retry-backoff <ms,ms,...>: wait before each runtime retry (entry i precedes retry i); checkpoint-bound");
+    println!("                       --short-borrow-bps <bps>: opt-in per-step borrow cost on short notional (default 0); cost-model and checkpoint bound");
     println!("                       --periods-per-year N: bars per year of the dataset (default 252; 1h crypto 8760, 4h 2190, 1d crypto 365, 1w 52)");
     println!("                       --pass-mode all|any|at-least:N|relative-to-benchmark: reliability verdict (default all)");
     println!("                       --benchmark-agent <id>: benchmark for relative-to-benchmark (default buy-and-hold)");
@@ -595,7 +606,7 @@ fn help() {
         "                       --diagnostics <list>: also report opt-in Sharpe diagnostics the gate"
     );
     println!(
-        "                         does not use: autocorrelated-psr,null-se-psr,mppm (comma-separated)"
+        "                         does not use: autocorrelated-psr,null-se-psr,mppm,expected-shortfall (comma-separated)"
     );
     println!(
         "  sharpebench commit <agent> <window> <digest> <salt> [--fault-plan <plan.json>]  forward-attestation pre-registration"
@@ -618,7 +629,12 @@ fn help() {
         "  sharpebench verify-trajectory <traj.json> [--data <csv>]  strictly replay the complete data/cost/engine/runner/window/seed contract"
     );
     println!("                       --allow-unbound-trajectory: explicit legacy or cross-version regrade; never the default");
+    println!("                       --short-borrow-bps <bps>: for capture (reference or external entrant) and verify-trajectory; the rate is bound, so a different one refuses");
     println!("                       --reexecute [--cmd \"<prog>\"|--http <addr>|--image <ref>]: also re-run every captured run with a fresh agent and refuse the first divergent decision");
+    println!("                       --timing-null [--null-draws N] [--null-seed S]: also place each run's Sharpe among seeded replays of its own holding periods at random bars (rank-neutral)");
+    println!("                       --lagged-replay <k,k,...>: also report Sharpe and mean return with every decision executed k bars late (rank-neutral)");
+    println!("                       --diagnostics sizing-response [--vol-lookback N]: also report how gross exposure moved with trailing volatility; never a rank input");
+    println!("  sharpebench decision-stability <traj.json>... [--data <csv>] [--short-borrow-bps <bps>] [--declare-identical-replicates]  rank-neutral pairwise disagreement of replicate runs that shared their history");
     println!(
         "  sharpebench rescore <bundle.json>     recompute a declared submission bundle's quality from its frozen, digest-bound files only"
     );
@@ -649,13 +665,16 @@ fn help() {
         "  sharpebench regime <a.csv> <b.csv> <regimes.csv> [--col NAME]  compare two return series within each regime (labels are an input)"
     );
     println!(
-        "  sharpebench lineage <strategy-evidence.json>                   verify Arena candidate ancestry, sources, and within-family robustness"
+        "  sharpebench timing-luck --cadence <m> [--data <csv>] [--periods-per-year N]  how far run's reference rows move when they rebalance every m bars and only the schedule phase moves (rank-neutral)"
+    );
+    println!(
+        "  sharpebench lineage <strategy-evidence.json> [--census] [--dataset <prices.csv>]...  verify Arena candidate ancestry, sources, and within-family robustness; --census counts test-split reads across a journal"
     );
     println!(
         "  sharpebench arena <init|open|commit|advance|score|publish|verify> ...  drive a forward-attested scoring window (see docs/book/src/arena.md)"
     );
     println!(
-        "  sharpebench forecast-quality <evidence.json>...              score prospective forecasts on exact common support (reported only)"
+        "  sharpebench forecast-quality <evidence.json>... [--contracts <plan.json>]  score prospective forecasts on exact common support, or on a declared contract plan (reported only)"
     );
     println!(
         "  sharpebench import <csv|stockbench> ... --out subs.json     convert a rival board's return series into a scoreable field"
@@ -922,7 +941,8 @@ fn run_verify(args: &[String], json: bool) -> ExitCode {
 }
 
 fn run_audit(json: bool) -> ExitCode {
-    let report = sharpebench_core::run_self_audit();
+    let report = sharpebench_core::run_self_audit()
+        .with_case(sharpebench_arena::forward_hindsight_oracle_case());
     if json {
         emit_json(&report);
     } else {
@@ -1281,6 +1301,8 @@ struct ExternalRowMetadata<'a> {
     artifact_preflight: Option<serde_json::Value>,
     /// The fault-injection report, when `--fault-plan` armed the sweep.
     fault_injection: Option<serde_json::Value>,
+    /// The runner's cell isolation class; see `cell_isolation`.
+    cell_isolation: Option<sharpebench_sim::external::CellIsolation>,
 }
 
 /// Keep the existing JSON board array and scoring fields. Only the externally
@@ -1307,6 +1329,9 @@ fn run_board_json(
                 }
                 if let Some(report) = &external.fault_injection {
                     row["fault_injection"] = report.clone();
+                }
+                if let Some(isolation) = external.cell_isolation {
+                    row["cell_isolation"] = cell_isolation::disclosure(isolation);
                 }
             }
         }
@@ -1388,7 +1413,7 @@ fn checkpoint_contract(
         }
         None => sharpebench_attest::content_digest(entrant_material),
     };
-    Ok(sharpebench_harness::SweepContract::new(
+    sharpebench_harness::SweepContract::try_new(
         sharpebench_harness::SweepIdentity {
             dataset_sha256: digest_json("dataset", execution.data)?,
             cost_model_sha256: sharpebench_harness::cost_model_digest(execution.costs),
@@ -1411,7 +1436,8 @@ fn checkpoint_contract(
         execution.windows,
         execution.seeds,
         execution.max_retries,
-    ))
+    )
+    .map_err(|e| e.to_string())
 }
 
 fn invocation_with_rates(material: &[u8], card: Option<&RateCard>) -> Result<String, String> {
@@ -1517,6 +1543,28 @@ fn load_retry_backoff(args: &[String], max_retries: u32) -> Result<BackoffSchedu
         ));
     }
     Ok(BackoffSchedule::from_delays(&delays))
+}
+
+/// `--short-borrow-bps <bps>`: the opt-in per-step borrow cost on short
+/// notional (`CostModel::short_borrow_bps`). Absent, the cost model is the
+/// default one, byte for byte. Present, the rate is part of the cost-model
+/// digest, so a checkpoint or trajectory bound under one rate is refused under
+/// another. A negative or non-finite rate is refused before anything runs.
+pub(crate) fn cost_model_from_args(args: &[String]) -> Result<sharpebench_sim::CostModel, String> {
+    let mut costs = sharpebench_sim::CostModel::default();
+    if !args.iter().any(|arg| arg == "--short-borrow-bps") {
+        return Ok(costs);
+    }
+    let raw = flag_value(args, "--short-borrow-bps")
+        .filter(|raw| !raw.starts_with("--"))
+        .ok_or("--short-borrow-bps requires a rate in basis points per step, such as 25")?;
+    costs.short_borrow_bps = raw.parse::<f64>().map_err(|_| {
+        format!("--short-borrow-bps must be a number of basis points per step, got `{raw}`")
+    })?;
+    costs
+        .validate()
+        .map_err(|error| format!("--short-borrow-bps `{raw}` is refused: {error}"))?;
+    Ok(costs)
 }
 
 /// Rank-neutral record of what a fault plan did to the sweep: the plan
@@ -1693,7 +1741,7 @@ fn invalid_orders(
         symbol: symbol.to_string(),
         action: Action::Buy,
         target_weight,
-        confidence: 0.5,
+        confidence: Some(0.5),
         rationale: String::new(),
     };
     let decision = |orders: Vec<Order>| Decision {
@@ -1815,6 +1863,13 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
     };
     let backoff = match load_retry_backoff(args, EXTERNAL_MAX_RETRIES) {
         Ok(schedule) => schedule,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let costs: CostModel = match cost_model_from_args(args) {
+        Ok(costs) => costs,
         Err(error) => {
             eprintln!("error: {error}");
             return ExitCode::from(2);
@@ -1946,7 +2001,6 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
     }
 
     let seeds: Vec<u64> = (0..8).collect();
-    let costs = CostModel::default();
     cfg.execution_seeds_per_window = seeds.len();
 
     // The roster is declared here, before anything runs, out of this
@@ -2470,6 +2524,12 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                 cfg.benchmark_agent_id
             );
         }
+        if costs.short_borrow_bps != 0.0 {
+            println!(
+                "short borrow: {} bps per step on every short position's notional, beside leverage financing\n",
+                costs.short_borrow_bps
+            );
+        }
     }
     let board = rank(&field, &cfg);
     // The controls run over the same dataset, windows and seeds the field was
@@ -2499,6 +2559,7 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                     monetary_cost: cost,
                     artifact_preflight: preflight_row.clone(),
                     fault_injection: fault_row.clone(),
+                    cell_isolation: cell_isolation::of_entrant(label),
                 }),
         );
         // The board stays the whole document unless the evidence is asked for.
@@ -2516,6 +2577,7 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
     } else {
         if let Some((label, attempts, cost)) = external_accounting {
             print_attempt_accounting(&label, attempts, &cost);
+            cell_isolation::print(&label);
             if let Some(report) = &fault_row {
                 print_fault_injection(&label, report);
             }
@@ -2573,6 +2635,7 @@ fn run_capture(args: &[String], json: bool) -> ExitCode {
     use sharpebench_sim::{Agent, BuyAndHold, CostModel, Momentum};
 
     if external_capture::names_external_entrant(args) {
+        // The external capture path builds the cost model from the same flags.
         return external_capture::run_capture_external(
             args,
             json,
@@ -2587,6 +2650,13 @@ fn run_capture(args: &[String], json: bool) -> ExitCode {
     }
     let agent_id = args[2].as_str();
     let out = &args[3];
+    let costs: CostModel = match cost_model_from_args(args) {
+        Ok(costs) => costs,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::from(2);
+        }
+    };
     let (data, windows) = match resolve_dataset(args) {
         Ok(dw) => dw,
         Err(e) => {
@@ -2595,7 +2665,6 @@ fn run_capture(args: &[String], json: bool) -> ExitCode {
         }
     };
     let seeds: Vec<u64> = (0..8).collect();
-    let costs = CostModel::default();
     let make: Box<dyn Fn() -> Box<dyn Agent>> = match agent_id {
         "buy-and-hold" => Box::new(|| Box::new(BuyAndHold) as Box<dyn Agent>),
         "momentum" => Box::new(|| Box::new(Momentum::default()) as Box<dyn Agent>),
@@ -2654,11 +2723,24 @@ fn run_verify_trajectory(args: &[String], json: bool) -> ExitCode {
 
     if args.len() < 3 {
         eprintln!(
-            "usage: sharpebench verify-trajectory <trajectory.json> [--data <csv>] [--allow-unbound-trajectory] [--reexecute [--cmd \"<prog>\"|--http <addr>]] [--json]"
+            "usage: sharpebench verify-trajectory <trajectory.json> [--data <csv>] [--allow-unbound-trajectory] [--reexecute [--cmd \"<prog>\"|--http <addr>]] [--diagnostics sizing-response [--vol-lookback N]] [--timing-null [--null-draws N] [--null-seed S]] [--lagged-replay <k,k,...>] [--json]"
         );
         return ExitCode::from(2);
     }
     let reexecute = args.iter().any(|arg| arg == "--reexecute");
+    // `--diagnostics sizing-response` is opt-in, as on `score`. Absent, the
+    // output below is the verification alone, byte for byte.
+    let sizing = match sizing_response_request(args) {
+        Ok(request) => request,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    if reexecute && sizing.is_some() {
+        eprintln!("error: --diagnostics reads the strict replay; request it without --reexecute");
+        return ExitCode::from(2);
+    }
     if !reexecute
         && ["--cmd", "--http"]
             .iter()
@@ -2677,6 +2759,20 @@ fn run_verify_trajectory(args: &[String], json: bool) -> ExitCode {
         );
         return ExitCode::from(2);
     }
+    let replay_diagnostics = match replay_diagnostics_cmd::requested(args) {
+        Ok(requested) => requested,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let costs: CostModel = match cost_model_from_args(args) {
+        Ok(costs) => costs,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::from(2);
+        }
+    };
     let text = match std::fs::read_to_string(&args[2]) {
         Ok(t) => t,
         Err(e) => {
@@ -2698,7 +2794,6 @@ fn run_verify_trajectory(args: &[String], json: bool) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let costs = CostModel::default();
     let cfg = ScoreConfig::default();
     if reexecute {
         return run_reexecution(
@@ -2737,8 +2832,130 @@ fn run_verify_trajectory(args: &[String], json: bool) -> ExitCode {
             }
         }
     };
-    emit_verification(&result, json, None);
+    if let Some(requested) = replay_diagnostics {
+        return replay_diagnostics_cmd::report(&requested, &data, &traj, costs, &result, json);
+    }
+    let Some(sizing) = sizing else {
+        emit_verification(&result, json, None);
+        return ExitCode::SUCCESS;
+    };
+    // Computed before anything is printed, so a refusal leaves no output.
+    let report = match sharpebench_sim::sizing_response(&data, &traj, costs, &sizing) {
+        Ok(report) => report,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if json {
+        let sealed = sharpebench_core::seal(
+            &result,
+            &sharpebench_harness::VERIFICATION_RESULT_VISIBILITY,
+        )
+        .expect("verification results serialize");
+        emit_json(&serde_json::json!({
+            "verification": sealed,
+            "sizing_response": report,
+        }));
+    } else {
+        emit_verification(&result, false, None);
+        print_sizing_response(&report);
+    }
     ExitCode::SUCCESS
+}
+
+/// Parse `verify-trajectory --diagnostics <list> [--vol-lookback N]` the way
+/// `score --diagnostics` is parsed: a missing value or an unknown identifier
+/// is refused by name, never read as no request.
+fn sizing_response_request(
+    args: &[String],
+) -> Result<Option<sharpebench_sim::SizingResponseConfig>, String> {
+    use sharpebench_sim::{SizingResponseConfig, SIZING_RESPONSE_ID};
+    let lookback_given = args.iter().any(|a| a == "--vol-lookback");
+    if !args.iter().any(|a| a == "--diagnostics") {
+        if lookback_given {
+            return Err(format!(
+                "--vol-lookback requires --diagnostics {SIZING_RESPONSE_ID}"
+            ));
+        }
+        return Ok(None);
+    }
+    let Some(list) = flag_value(args, "--diagnostics").filter(|v| !v.starts_with("--")) else {
+        return Err("--diagnostics requires a value".to_string());
+    };
+    for raw in list.split(',') {
+        let id = raw.trim();
+        if id != SIZING_RESPONSE_ID {
+            return Err(format!(
+                "unknown diagnostic `{id}`; verify-trajectory accepts {SIZING_RESPONSE_ID}"
+            ));
+        }
+    }
+    let mut cfg = SizingResponseConfig::default();
+    if lookback_given {
+        if flag_value(args, "--vol-lookback").is_none_or(|v| v.starts_with("--")) {
+            return Err("--vol-lookback requires a value".to_string());
+        }
+        if let Some(lookback) = positive_usize_flag(args, "--vol-lookback")? {
+            cfg.vol_lookback = lookback;
+        }
+    }
+    cfg.validate().map_err(|error| error.to_string())?;
+    Ok(Some(cfg))
+}
+
+/// The opt-in sizing diagnostic as a block after the verification. A figure
+/// that could not be computed prints its reason in its place.
+fn print_sizing_response(report: &sharpebench_sim::SizingResponse) {
+    let census = &report.census;
+    let cfg = &report.config;
+    println!("\nOpt-in sizing-response diagnostic. Not used by the gate, eligibility or the rank.");
+    println!(
+        "  bars paired     : {} of {} across {} runs ({} before a full window, {} without volatility, {} without exposure)",
+        census.pairs,
+        census.bars_replayed,
+        report.runs,
+        census.bars_without_history,
+        census.bars_without_volatility,
+        census.bars_without_exposure
+    );
+    let rank = &report.rank_correlation;
+    match (rank.spearman_rho, rank.unavailable) {
+        (Some(rho), _) => println!(
+            "  Spearman rho    : {rho:.4} (gross exposure vs trailing volatility, {} pairs)",
+            rank.pairs
+        ),
+        (None, reason) => println!(
+            "  Spearman rho    : n/a ({})",
+            reason.map(|r| r.to_string()).unwrap_or_default()
+        ),
+    }
+    let table = &report.by_volatility;
+    if let Some(reason) = table.unavailable {
+        println!("  by volatility   : n/a ({reason})");
+    } else {
+        let cell = |v: Option<f64>, places: usize| {
+            v.map_or_else(|| "n/a".to_string(), |v| format!("{v:.places$}"))
+        };
+        println!("  quintile     pairs  median_vol  median_gross");
+        for q in &table.quintiles {
+            let label = match q.quintile {
+                1 => "1 calmest".to_string(),
+                5 => "5 wildest".to_string(),
+                n => n.to_string(),
+            };
+            println!(
+                "  {label:<10} {:>7} {:>11} {:>13}",
+                q.pairs,
+                cell(q.median_volatility, 6),
+                cell(q.median_gross_exposure, 4)
+            );
+        }
+    }
+    println!(
+        "Gross exposure: post-fill holdings over the pre-fill NAV, resolution {} NAV. Volatility: sample std of the last {} simple returns at or before the bar, mean across symbols.",
+        cfg.exposure_resolution, cfg.vol_lookback
+    );
 }
 
 /// What a passed re-execution adds to the verification output.
@@ -3131,6 +3348,7 @@ fn print_sharpe_diagnostics(
             SharpeDiagnostic::AutocorrelatedPsr => "     rho  ac_PSR  ac_DSR",
             SharpeDiagnostic::NullSePsr => " null_PSR null_DSR",
             SharpeDiagnostic::Mppm => "   MPPM(3)/yr",
+            SharpeDiagnostic::ExpectedShortfall => "   ES(5%)  tail  loss_fq",
         });
     }
     println!("\nOpt-in Sharpe diagnostics. Not used by the gate, eligibility or the rank.");
@@ -3167,6 +3385,15 @@ fn print_sharpe_diagnostics(
                         cell(row.mppm.as_ref().and_then(|m| m.annualized))
                     )
                 }
+                SharpeDiagnostic::ExpectedShortfall => {
+                    let t = row.expected_shortfall.as_ref();
+                    format!(
+                        " {:>8} {:>5} {:>8}",
+                        cell(t.and_then(|t| t.tail_mean_return)),
+                        t.map_or(0, |t| t.tail_observations),
+                        cell(t.and_then(|t| t.loss_frequency))
+                    )
+                }
             };
             line.push_str(&text);
         }
@@ -3182,6 +3409,8 @@ fn print_sharpe_diagnostics(
                     "null_*: the same two statistics with the standard error evaluated at the benchmark, serial independence kept (ibid., eqs. 4-5).",
                 SharpeDiagnostic::Mppm =>
                     "MPPM(3)/yr: manipulation-proof performance, risk aversion 3, zero risk-free rate, annualized (Goetzmann, Ingersoll, Spiegel and Welch 2007, eq. 18).",
+                SharpeDiagnostic::ExpectedShortfall =>
+                    "ES(5%): mean return over the worst 5% of the pooled track (historical expected shortfall), n/a below 10 whole tail observations; tail: observations in it; loss_fq: fraction of bars below zero.",
             }
         );
     }
@@ -3356,6 +3585,7 @@ mod tests {
                 monetary_cost: &res.monetary_cost,
                 artifact_preflight: None,
                 fault_injection: None,
+                cell_isolation: None,
             }),
         );
         let rows = observed.as_array_mut().unwrap();
@@ -3421,6 +3651,7 @@ mod tests {
                 monetary_cost: &res.monetary_cost,
                 artifact_preflight: Some(preflight),
                 fault_injection: None,
+                cell_isolation: None,
             }),
         );
 

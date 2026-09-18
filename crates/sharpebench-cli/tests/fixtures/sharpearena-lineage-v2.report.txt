@@ -1,0 +1,17 @@
+VERIFIED candidate lineage
+observed trials:       1
+scored candidates:     1
+strategy families:     1
+ancestry edges:        0
+cited sources:         1
+trial denominator:     1
+family grouping:       diagnostic only; never changes rank or trial count
+
+FAMILIES
+  9cda3af2624eb2328180938c4356ff391692eda7dcd9e2d54f6bae4ec1a022bc  observed=1 scored=1 best=0.500000 median=0.500000 gap=0.000000
+
+ANCESTRY
+  trial=0 candidate=momentum-v1 status=declared parents=0 sources=1
+
+SOURCES
+  repository  sha256:2b14c0fdd0bff097f4c691bd43e07f81f94e425a5a954bda37942263bfde8893  https://github.com/example/aiuts

@@ -16,7 +16,19 @@ on every fill. An edge has to survive the friction it would actually meet:
 - **Fees**: a proportional per-trade fee.
 - **Slippage**: seeded, so the same run always pays the same slippage.
 - **Market impact**: a square-root function of order size against available liquidity.
-- **Financing**: a carry cost on held inventory.
+- **Financing**: a per-step carry (`financing_bps`) on gross exposure above 1x NAV,
+  the cost of leverage. A book at or below 1x gross, long or short, pays none.
+- **Short borrow (opt-in)**: a per-step carry (`short_borrow_bps`) on the full notional
+  of every short position, with no 1x threshold, charged beside financing. A 1x
+  long/short book pays financing on the leveraged 1x and borrow on its 1x short leg.
+  Without it an unlevered short book carries for free, which flatters a short-biased
+  agent against a long one. The default is `0`, which charges nothing and leaves the
+  serialized cost model and its digest byte-identical to a model written before the
+  field existed; a set rate is written to the cost model JSON and bound into the
+  cost-model digest, so a checkpoint or trajectory bound under one rate is refused
+  under another. A negative or non-finite rate is refused. On the CLI,
+  `--short-borrow-bps <bps>` sets it for `run`, for `capture` of a reference agent or
+  an external entrant, and for `verify-trajectory`.
 - **Liquidity caps**: an order larger than the available depth is only partially filled.
 - **Turnover cost (TRF)**: a cost proportional to how much the portfolio weights move
   from one step to the next. `trf_factor(weights_prev, weights_new, c)` returns a
@@ -40,6 +52,24 @@ the paper; the Rust identifier differs and is given beside it:
 | `realistic` | `CostProfile::Realistic` | typical, plus seeded fill delay, partial fills and queue-position slippage |
 
 `CostProfile::name()` is the one place that maps a variant to its reported name.
+No shipped profile sets a short borrow rate, so the reported profiles and the evidence
+recorded under them are unchanged by the field; `stressed` still charges nothing on an
+unlevered short book.
+
+## Decision delay
+
+`ExecutionProfile::decision_delay_bars` declares how many bars an order waits
+after its decision. The stressed profile declares two, and the backtest driver
+does not apply the delay: a run under the stressed profile executes each
+decision on the bar it was made, which is how the evidence recorded under that
+profile was produced, and that stays so. Decision-delay sensitivity is measured
+by the [lagged replay](replay-diagnostics.md#lagged-replay) instead, which
+replays a captured run's decisions `k` bars late through this engine and
+reports Sharpe and mean return beside the undelayed figures. Passing the
+stressed cost model with lag `decision_delay_bars` to the library function
+`lagged_replay` measures the declared delay without changing the profile. The
+CLI's `--lagged-replay` replays under the cost model a trajectory is bound to,
+which for CLI captures is the typical profile.
 
 ## Synthetic data
 

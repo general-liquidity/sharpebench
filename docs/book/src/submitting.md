@@ -29,7 +29,10 @@ sharpebench score submissions.json
 
 `trace`, `confidences`, `outcomes`, and `cost` are optional (serde-defaulted).
 One `run` per seed × window, which is what makes pass^k and multi-window OOS
-meaningful.
+meaningful. The scorer pairs `confidences` and `outcomes` by position with each
+other, and neither with `returns`. List only the confidences the agent stated,
+each beside whether that decision paid off. See
+[Confidence and calibration](#confidence-and-calibration).
 
 A submission object may also carry an optional `declared_mandate`, e.g.
 `{"kind": "drawdown_capped", "max_per_run_drawdown": 0.2}` or
@@ -51,8 +54,64 @@ let board = sharpebench_core::rank(&[sub], &ScoreConfig::default());
 
 The external protocol is a request/response loop: the harness writes a
 point-in-time `MarketObservation` (only data at or before the decision date) and
-reads back a `Decision` (target weights + confidence). The agent never sees a
-future bar: look-ahead is impossible by construction, not by convention.
+reads back a `Decision` (target weights + an optional confidence per order). The
+agent never sees a future bar: look-ahead is impossible by construction, not by
+convention.
+
+## Confidence and calibration
+
+An order's `confidence` is optional. If you send it, it must be a number in
+`[0, 1]`, and the wire contract refuses `null`. If you omit it, the harness fills
+in nothing: the key stays absent in the captured trajectory and the order adds
+nothing to calibration. Releases before this change read an omitted confidence
+as 0.5.
+
+The simulator builds calibration pairs by two rules:
+
+- A decision contributes one pair when at least one of its orders states a
+  confidence, using the mean over the orders that do. A hold contributes none,
+  and so does a decision whose orders all omit the field. An agent that states
+  0.9 on 20 trades and then holds for 230 bars reports 20 pairs, where earlier
+  releases reported 250.
+- The pair's outcome is whether the book the decision left gained over the
+  next bar. The return the engine books at step `t + 1` mixes the move on the
+  book decision `t` left with decision `t + 1`'s own fills, fees, financing
+  and borrow, so the outcome uses the first part only: the book's value at the
+  `t + 1` closes before anything trades, plus the dividends that book earns at
+  `t + 1`, against the NAV step `t` closed at. A decision that exits is graded
+  on the flat book it leaves, which gains nothing. The window's final decision
+  has no next bar inside the window and contributes no pair.
+- Under execution noise, a decision whose order is delayed to the next bar, or
+  whose partial fill carries a remainder to it, contributes no pair: the book
+  its outcome would be measured on is not the book it chose. An order still
+  carried from an earlier decision fills after the book is marked, so its fill
+  and cost are not part of the outcome either.
+
+`calibration_brier` is the Brier score over those pairs and
+`calibration_observations` counts them. An agent that never states a
+confidence reports no Brier score and zero observations.
+`confidence_weighted_return` weights each run by the mean of its paired
+confidences. A run with none weighs the mean of those per-run weights over the
+runs that have one, and every run weighs 1.0 when no run has any. A run the
+harness replaces with a failing sentinel states nothing, so it keeps a weight
+and stays in the mean. A submission that states confidences in one run only
+scores the equal-weight mean, as if it had stated none. Four runs at +0.001 stating 0.6 beside one
+sentinel run at -0.01 score -0.0012, the equal-weight mean, where a zero weight
+for the sentinel would report +0.001.
+
+Trajectory contract schema 3 marks the optional confidence. A schema-2 capture
+wrote a confidence on every order, including the 0.5 filled in for an entrant
+that stated none, so a verifier cannot tell its stated values from filled-in
+ones. Strict verification refuses schema 2. An explicit legacy regrade
+(`sharpebench verify-trajectory --allow-unbound-trajectory`) replays it and
+counts every recorded confidence as stated, the filled-in ones included. In the
+other direction, strict verification in a release before this change refuses a
+schema-3 capture as an unsupported schema.
+
+Rust agents that build `Order` values directly migrate by wrapping a stated
+confidence in `Some(..)` and passing `None` to state nothing. Wire JSON needs no
+change: a decision that omits the key still parses, and a decision that states
+it round-trips byte for byte.
 
 ## The wire contract is published, and it is closed
 
@@ -107,7 +166,8 @@ or from outside the run. If your agent wants randomness, derive it from the
 observations it was given.
 
 **What must repeat.** The score-bearing part of every decision: each order's
-`symbol`, `action`, `target_weight` and `confidence`, and the `cost` report.
+`symbol`, `action`, `target_weight` and `confidence` (present or absent), and
+the `cost` report.
 `reasoning` and each order's `rationale` are audit text the scorer never reads;
 they may differ between executions.
 
@@ -126,6 +186,34 @@ rerun against the attempt it replaced. A non-deterministic agent is caught when
 its trajectory is re-executed, not while the sweep is running. The CLI runs the
 check as `sharpebench verify-trajectory <traj.json> --reexecute`, launching the
 agent with `--cmd` or `--http` (see the [CLI reference](cli.md#capture--verify-trajectory)).
+
+## State between cells: the isolation a row discloses
+
+Execution seeds of one window replay the same bars. An agent that keeps what it
+saw in one (window, seed) cell can act on it in the next, and its seed runs are
+then not independent. How much a runner lets through depends on the transport,
+and the entrant's JSON board row says which applied, in `cell_isolation`
+(`sharpebench.cell-isolation.v1`):
+
+| Transport | `class` | What carries over |
+|---|---|---|
+| `--image` | `container_per_cell` | nothing the runner keeps: each cell gets a fresh container, removed when the cell ends |
+| `--cmd` | `process_per_cell_host_writable` | the harness ends the process it spawned with the cell, but the process runs unsandboxed, so files it writes on the host, and anything it starts outside that process, can reach the next cell |
+| `--http` | `operator_endpoint` | anything: the operator runs the endpoint and the harness neither starts nor stops it |
+
+`runner_discards_state_between_cells` is true only for `container_per_cell`,
+the one class under which seed replicates are independent by construction. The
+class comes from the transport flag, through the runner tag at the front of the
+entrant id (`sandbox:`, `cmd:`, `http:`), never from anything the agent sends;
+the closed decision contract has no field that could carry it. The entrant id
+is what a `--checkpoint` is bound to, and the same tag is part of the invocation
+digest, so a sweep checkpointed under one class refuses to resume under another.
+Reference rows carry no `cell_isolation`, and the field moves no score or rank.
+
+This is a disclosure, not a detector: `detects_state_carryover` is always
+`false`. An agent under a runner that allows carryover may carry nothing, and no
+check here looks for it. Human output prints the class beside the attempt
+accounting.
 
 ## Faulted observations under a declared plan
 

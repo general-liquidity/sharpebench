@@ -63,13 +63,17 @@ fn refused(output: &Output, message: &str) {
     );
 }
 
-/// A long-format field: one row per (agent, run, seed, period).
+/// A long-format field: one row per (agent, run, seed, period). Window `w0`
+/// covers periods t00 to t39 and `w1` covers t40 to t79, since a period belongs
+/// to one window.
 fn long_csv(cells: &[(&str, &str, u64)]) -> String {
     let mut csv = String::from("agent,run,seed,period,return\n");
     for (agent, window, seed) in cells {
+        let first = if *window == "w0" { 0 } else { 40 };
         for i in 0..40 {
             let r = 0.001 + 0.0004 * ((i as f64) * 0.9 + *seed as f64).sin();
-            csv.push_str(&format!("{agent},{window},{seed},t{i:02},{r}\n"));
+            let period = first + i;
+            csv.push_str(&format!("{agent},{window},{seed},t{period:02},{r}\n"));
         }
     }
     csv
@@ -101,7 +105,7 @@ fn import_carries_run_window_seed_and_period_identity_into_the_scored_field() {
     assert_eq!(keys.len(), 4);
     assert_eq!(keys[0]["window"], "w1");
     assert_eq!(keys[0]["seed"], 1);
-    assert_eq!(keys[0]["periods"][0], "t00");
+    assert_eq!(keys[0]["periods"][0], "t40");
     assert_eq!(keys[0]["periods"].as_array().unwrap().len(), 40);
 
     // The scorer accepts it and reorders both agents onto one cell order.

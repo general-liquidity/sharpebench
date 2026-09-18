@@ -3,7 +3,17 @@
 This Lean project models selected invariants of the rules SharpeBench declares
 for its prospective forecast-quality report, and proves them about the model:
 
-- exact common support is an intersection;
+- exact pair support is the intersection of two agents' resolved contracts, in
+  both directions: a contract is on the support exactly when both agents
+  resolved it, so a support that resolved nothing would not satisfy the
+  statement;
+- under a declared contract plan, a pair is differenced on the plan restricted
+  to both agents, and a contract is differenced exactly when it is in scope for
+  both, which is symmetric in the two agents with no further hypothesis;
+- when the pair passes the gate that refuses unequal resolved support, the
+  differenced set is each agent's whole in-scope support rather than some
+  subset of it, and the rule a report without a plan declares is the same
+  theorem applied with no plan;
 - the model's rank projection of an entry paired with a forecast report is that
   entry, which holds by definition for any pair and does not show that the Rust
   rank path ignores forecast data;
@@ -30,18 +40,25 @@ TOML file references a Lean declaration. Separate executable tests in
 
 ## Scope
 
-Every module under `SharpeBenchFormal/` carries a `## Scope` block in its doc
-comment with a `Covers:` line (the production rules it models) and an
+Every module in the `SharpeBenchFormal` library, the root module and every
+module under `SharpeBenchFormal/` at any depth, carries a `## Scope` block in
+its doc comment with a `Covers:` line (the production rules it models) and an
 `Assumes:` line (the assumptions the proofs rest on).
 `scripts/check-lean-scope.py` fails CI when a module lacks the block or its
-block references no existing repository path; it runs as one step of the
-`Lean model` job. The check proves that a named path exists, not that the model
-still corresponds to the code at that path.
+block names a repository path that does not exist; it runs as one step of the
+`Lean model` job. The check proves that every named path exists, not that the
+model still corresponds to the code at those paths.
 
-`Forecast.lean` covers exact common support in `analyze_forecast_quality`, one
-ordered step of `holm_adjust` and the plus-one bootstrap p-value in
-`compare_agents` (all in `crates/sharpebench-core/src/forecast.rs`), and the
-projection trading rank consumes, standing for the separation from the trading
-rank in `crates/sharpebench-core/src/composite.rs`. It assumes natural-number
-fixed-point values, no floating-point semantics and two agents rather than a
-field of any size.
+`Forecast.lean` covers exact pair support, the intersection of two agents'
+resolved contract digests that `compare_agents` differences; the declared
+contract plan that `analyze_forecast_quality_against_plan` filters each agent's
+rows against before a pair is formed; the condition under which `compare_agents`
+emits inference at all, taken as a hypothesis; one ordered step of `holm_adjust`
+and the plus-one bootstrap p-value in `compare_agents` (all in
+`crates/sharpebench-core/src/forecast.rs`), and the projection trading rank
+consumes, standing for the separation from the trading rank in
+`crates/sharpebench-core/src/composite.rs`. It does not model the support-gap
+arithmetic that decides that condition in Rust, the per-agent disclosure of
+resolved digests a plan does not name, nor the per-agent gap disclosure in
+`field_support`. It assumes natural-number fixed-point values, no
+floating-point semantics and two agents rather than a field of any size.

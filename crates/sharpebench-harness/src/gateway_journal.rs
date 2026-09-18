@@ -19,7 +19,19 @@ use serde::{Deserialize, Serialize};
 
 use crate::accounting::{MonetarySummary, RateCard};
 
+/// The version a journal starts at, and keeps while no record carries a
+/// [`FinishClass`].
 pub const JOURNAL_SCHEMA_VERSION: &str = "sharpebench.gateway-journal.v1";
+
+/// The version of a journal in which any record carries a [`FinishClass`].
+///
+/// A binary built before the class existed reads a settlement's
+/// `finish_reason` as an unknown key, drops it, and would write the journal back
+/// without it. It only loads a journal whose identity equals its own, schema
+/// version included, and its version is v1, so it refuses a v2 document
+/// instead of rewriting it. [`GatewayJournal::save`] sets the version from the
+/// records, so no caller can write a class under v1.
+pub const JOURNAL_SCHEMA_VERSION_V2: &str = "sharpebench.gateway-journal.v2";
 
 /// Schema of the document a [`JournalLock`] writes. A lock is not a journal:
 /// it lives at a different path, carries a different schema version and is
@@ -81,6 +93,36 @@ pub enum Settlement {
     Released { reason: ReleaseReason },
 }
 
+/// Why a provider stopped writing one answer, reduced to four classes. The
+/// adapter hands the host a normalized `finish_reason` string; the host keeps
+/// only its class, so no provider-chosen text reaches the journal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FinishClass {
+    /// `"stop"`: the model ended the answer itself.
+    Stop,
+    /// `"length"`: the output token bound cut the answer off.
+    Length,
+    /// Any other reason the adapter reported, such as a content filter or a
+    /// tool call. Not a clean stop.
+    Other,
+    /// The answer carried no reason at all. Unknown, never read as `stop`.
+    Absent,
+}
+
+impl FinishClass {
+    /// Exact matching on the normalized vocabulary. A provider spelling the
+    /// adapter did not normalize, such as `max_tokens`, is `Other`, not a guess.
+    pub fn of(reason: Option<&str>) -> Self {
+        match reason {
+            None => Self::Absent,
+            Some("stop") => Self::Stop,
+            Some("length") => Self::Length,
+            Some(_) => Self::Other,
+        }
+    }
+}
+
 /// One append-only journal record.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "record", rename_all = "snake_case")]
@@ -97,6 +139,12 @@ pub enum JournalRecord {
     },
     Settled {
         ordinal: u32,
+        /// Present on the settlement of an answer the host parsed. Absent on
+        /// every other settlement, and on answers settled by a journal written
+        /// before the field existed, which keeps such records byte for byte
+        /// what they were.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        finish_reason: Option<FinishClass>,
         #[serde(flatten)]
         settlement: Settlement,
     },
@@ -148,6 +196,29 @@ impl JournalIdentity {
         self.sweep_sha256 = Some(sweep_sha256);
         self
     }
+
+    /// Whether `other` binds the same routes, budget and sweep, under schema
+    /// versions this binary reads. The two versions may differ: a v1 caller
+    /// resumes the v2 journal its own earlier save produced.
+    fn binds_same(&self, other: &Self) -> bool {
+        // Destructured, so a field added to the identity cannot be left out of
+        // the comparison without a compile error.
+        let Self {
+            schema_version,
+            route_table_sha256,
+            budget,
+            sweep_sha256,
+        } = self;
+        is_readable_version(schema_version)
+            && is_readable_version(&other.schema_version)
+            && *route_table_sha256 == other.route_table_sha256
+            && *budget == other.budget
+            && *sweep_sha256 == other.sweep_sha256
+    }
+}
+
+fn is_readable_version(version: &str) -> bool {
+    version == JOURNAL_SCHEMA_VERSION || version == JOURNAL_SCHEMA_VERSION_V2
 }
 
 /// Derived spend state. Every field is a fold over the records; none of it is
@@ -180,6 +251,25 @@ pub struct SpendState {
     pub overspent_usd_nanos: u128,
     /// Calls whose observed price exceeded their reservation.
     pub overspent_calls: u32,
+}
+
+/// Parsed provider answers counted by why they stopped. A fold over the
+/// settlements like [`SpendState`], and rank-neutral like every gateway figure.
+/// Only answers the host parsed are counted, so the total is at most
+/// `priced_calls + unknown_calls`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct FinishReasonCounts {
+    pub stop: u32,
+    /// Answers the output token bound truncated. A truncated answer can still
+    /// parse into a decision, or be read by the entrant as an abstention.
+    pub length: u32,
+    pub other: u32,
+    /// Answers that carried no reason.
+    pub absent: u32,
+    /// Answers, priced or settled as `usage_absent`, whose settlement was
+    /// written before the journal recorded a reason. Their reason is unknown to
+    /// this record, which is different from the provider reporting none.
+    pub unrecorded: u32,
 }
 
 impl SpendState {
@@ -922,8 +1012,11 @@ impl GatewayJournal {
 
     /// Load a journal and refuse one that is not bound to this experiment. A
     /// journal whose binding differs is never truncated, merged or reused.
+    ///
+    /// Either schema version this binary writes is accepted, and a schema
+    /// version it does not know is refused.
     pub fn load_bound(path: &Path, identity: &JournalIdentity) -> std::io::Result<Self> {
-        Self::load_checked(path, |found| found == identity)
+        Self::load_checked(path, |found| found.binds_same(identity))
     }
 
     /// Load a journal bound to these routes and this budget, whichever sweep
@@ -935,7 +1028,7 @@ impl GatewayJournal {
         budget: GatewayBudget,
     ) -> std::io::Result<Self> {
         Self::load_checked(path, |found| {
-            found.schema_version == JOURNAL_SCHEMA_VERSION
+            is_readable_version(&found.schema_version)
                 && found.route_table_sha256 == route_table_sha256
                 && found.budget == budget
         })
@@ -997,6 +1090,7 @@ impl GatewayJournal {
                 JournalRecord::Settled {
                     ordinal,
                     settlement,
+                    ..
                 } => {
                     if !reserved.contains(ordinal) {
                         return Err(invalid("a settlement names no reservation"));
@@ -1034,6 +1128,7 @@ impl GatewayJournal {
                 JournalRecord::Settled {
                     ordinal,
                     settlement,
+                    ..
                 } => {
                     let Some(index) = open.iter().position(|(open, _)| open == ordinal) else {
                         continue;
@@ -1113,8 +1208,70 @@ impl GatewayJournal {
     pub fn settle(&mut self, ordinal: u32, settlement: Settlement) {
         self.records.push(JournalRecord::Settled {
             ordinal,
+            finish_reason: None,
             settlement,
         });
+    }
+
+    /// The schema version these records need on disk. See
+    /// [`JOURNAL_SCHEMA_VERSION_V2`].
+    pub fn required_schema_version(&self) -> &'static str {
+        let holds_a_class = self.records.iter().any(|record| {
+            matches!(
+                record,
+                JournalRecord::Settled {
+                    finish_reason: Some(_),
+                    ..
+                }
+            )
+        });
+        if holds_a_class {
+            JOURNAL_SCHEMA_VERSION_V2
+        } else {
+            JOURNAL_SCHEMA_VERSION
+        }
+    }
+
+    /// Settle a call whose provider answer the host parsed, with the class of
+    /// the reason the answer stopped.
+    pub fn settle_answered(&mut self, ordinal: u32, settlement: Settlement, finish: FinishClass) {
+        self.records.push(JournalRecord::Settled {
+            ordinal,
+            finish_reason: Some(finish),
+            settlement,
+        });
+    }
+
+    /// Fold the settlements into counts by stop reason. Like [`Self::spend`],
+    /// nothing is stored: a resumed journal reports the reasons its earlier
+    /// process recorded.
+    pub fn finish_reasons(&self) -> FinishReasonCounts {
+        let mut counts = FinishReasonCounts::default();
+        for record in &self.records {
+            let JournalRecord::Settled {
+                finish_reason,
+                settlement,
+                ..
+            } = record
+            else {
+                continue;
+            };
+            let slot = match finish_reason {
+                Some(FinishClass::Stop) => &mut counts.stop,
+                Some(FinishClass::Length) => &mut counts.length,
+                Some(FinishClass::Other) => &mut counts.other,
+                Some(FinishClass::Absent) => &mut counts.absent,
+                None => match settlement {
+                    Settlement::Priced { .. }
+                    | Settlement::Unknown {
+                        reason: UnknownCostReason::UsageAbsent,
+                    } => &mut counts.unrecorded,
+                    _ => continue,
+                },
+            };
+            *slot = slot.saturating_add(1);
+        }
+        counts
     }
 
     /// Every observed call, priced once, as the rank-neutral summary the rest of
@@ -1206,6 +1363,12 @@ impl GatewayJournal {
     /// claim file per version, which a crashed writer would leave behind for an
     /// operator to clear: a benign fault turned into a stuck journal, to narrow
     /// a window the lock already covers.
+    ///
+    /// The schema version written is a function of the records, set here and
+    /// nowhere else: [`JOURNAL_SCHEMA_VERSION_V2`] once any record carries a
+    /// [`FinishClass`], [`JOURNAL_SCHEMA_VERSION`] otherwise. A journal with no
+    /// class is written exactly as before the class existed, and a v1 journal
+    /// that already holds classes is written as v2 on its next save.
     pub fn save(&mut self, path: &Path) -> Result<(), JournalSaveError> {
         use std::io::Write as _;
         let found = Self::version_on_disk(path)
@@ -1217,6 +1380,7 @@ impl GatewayJournal {
                 found,
             });
         }
+        self.identity.schema_version = self.required_schema_version().to_string();
         self.version += 1;
         let payload = match serde_json::to_string_pretty(self) {
             Ok(payload) => payload,

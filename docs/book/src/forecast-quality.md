@@ -98,8 +98,9 @@ Migration notes for producers:
   match the legacy encoding only where its number text happens to coincide
   with `serde_json`'s, and match nothing where it does not.
 - Support is exact by digest. A contract presented under its legacy digest by
-  one agent and under its v1 digest by another is two digests and is not
-  common support. A field should be produced under one encoding.
+  one agent and under its v1 digest by another is two digests, so the two
+  agents' resolved supports differ and their pair receives no inference. A
+  field should be produced under one encoding.
 
 ## Scores and calibration
 
@@ -123,10 +124,114 @@ and blind versus consensus-exposed counts remain visible beside score means.
 
 ## Exact support and dependence
 
-Agents are compared only on the exact contract-digest intersection resolved by
-the whole field. An unmatched question or horizon is excluded for every pair,
-and the excluded count is reported per agent. This prevents a favorable
-pair-specific subset from becoming the comparison set.
+Each pair is differenced on the contract digests both agents resolved, and it
+receives an interval, a p-value and a Holm verdict only when each agent resolved
+every digest the other did. A pair's inference therefore depends on its two
+documents alone: adding a document with gaps, or with contracts nobody else
+answered, never changes the support, interval or raw p-value of a pair it is not
+part of. The one exception is a settlement dispute, which refuses the whole
+report as before. An agent that abstains, or leaves settlements pending, on contracts it
+would lose cannot shrink anyone else's comparison, and cannot choose a subset
+to be compared on (it can still withhold its own comparisons, see below):
+its pairs with agents that resolved more carry `support_gap` and an
+`inference_error` beginning `unequal resolved support`, with no interval and no
+p-value. Their `mean_loss_difference` is still printed, over the contracts both
+resolved, and is descriptive only, because the incomplete agent chose that set.
+Two agents with the same gaps resolved the same digests, so they are compared on
+that shared support like any other pair. Missing forecasts are never imputed: a
+filled-in probability would put a loss nobody forecast into a proper score.
+
+`common_support` in the report (schema `sharpebench.forecast-quality.v2`)
+discloses the gaps and charges each one to the agent that has it:
+
+- `n_contracts` and `contract_sha256` name every digest at least one agent
+  resolved. When the whole field resolved the same digests this is also every
+  pair's support.
+- `unresolved_by_agent` lists, per agent, the field digests it did not resolve,
+  under its own status for each: `pending`, `cancelled`, `rejected` (claimed,
+  but no eligible revision), or `not_claimed`. A digest named by several claims
+  is listed once, under pending before cancelled before rejected, and not at all
+  when one of those claims resolved.
+- `settlement_status_disagreements` records every digest one agent resolved
+  while another agent's document leaves it pending or cancelled, with the agents
+  on each side. Such a contract is never differenced against the agent that did
+  not resolve it; that agent is charged the gap and its pairs are withheld.
+
+Version 1 compared every pair on the intersection over the whole field and
+reported `excluded_resolved_by_agent`, which charged a partial agent's gaps to
+the agents that had resolved those contracts. Settlement agreement is now
+checked for every pair on every contract both resolved, so an unequal outcome or
+availability time is refused even when another document lacks that contract.
+
+A withheld pair stays in the Holm family, so adding any third agent, complete
+or not, enlarges the family that sets a surviving pair's Holm multiplier. The
+pair's support, interval and raw p-value do not move.
+
+### Without a plan, a document chooses its own comparisons
+
+The field support above is the union of what the documents resolved, and the
+documents are self-declared: each one embeds its own contracts. That leaves two
+moves open to a single entrant, and a v2 report cannot tell either from an
+honest gap:
+
+- **Opting out.** A document that resolves one contract nobody else resolved,
+  which it can invent, has unequal support with every other agent, so all of
+  its pairs are withheld. The same contract is charged to every other agent as
+  `not_claimed`, although they answered the full question set.
+- **Selective abstention.** A document that leaves out the contracts it
+  expects to lose also withholds its pairs, and the gap it carries is measured
+  against a union it helped define.
+
+### Declaring the question set: `--contracts`
+
+```bash
+sharpebench forecast-quality agent-a.json agent-b.json --contracts plan.json
+```
+
+`plan.json` names the contract digests every agent is asked to answer, fixed
+before resolution:
+
+```json
+{
+  "schema_version": "sharpebench.forecast-contract-plan.v1",
+  "contract_sha256": ["05e43c87...", "..."]
+}
+```
+
+The schema is exact, the list is non-empty, and every entry is a lowercase
+SHA-256 named once; anything else is refused before any document is read. The
+plan becomes the field support, and the report is
+`sharpebench.forecast-quality.v3`:
+
+- `common_support.n_contracts` and `contract_sha256` are the planned digests,
+  and `rule` says so.
+- `unresolved_by_agent` charges each agent the planned digests it did not
+  resolve, under the same statuses as v2. A planned contract nobody claimed is
+  charged to every agent, and two agents that both miss it still share their
+  support.
+- `outside_plan_by_agent` lists, per agent, the resolved digests the plan does
+  not name. They enter no loss mean, calibration, comparison or
+  `contract_digest_versions` entry. In `agents`, `n_claims`, `n_revisions`,
+  `n_eligible_claims`, the resolution counts and `resolution_rate` still
+  describe the whole document, while `blind_resolved` and
+  `consensus_exposed_resolved` count planned digests only.
+- A settlement is checked across every pair of documents before the plan drops
+  anything, so a disputed outcome on an unplanned contract still refuses the
+  report.
+
+Against a plan an invented contract changes nothing that is scored, and nobody
+else is charged for it. An abstaining agent is charged its own gaps against a
+set it did not choose, and it cannot shrink or reshape any other pair. What a
+plan does not do is force a comparison: an agent with planned gaps still has
+its own pairs withheld, because the only way to compare it on the full plan
+would be to fill in forecasts it never made, and a filled-in probability puts a
+loss nobody forecast into a proper score. Log loss and CRPS have no finite
+worst case to impute either. The abstention is disclosed contract by contract
+instead.
+
+Without `--contracts` the report stays v2, byte for byte, and keeps both
+weaknesses above. Use a plan whenever the question set was declared before
+resolution, as it is for a prospective field.
 
 The resampler treats all assets and questions with the same resolution clock as
 one block. It draws whole blocks, preserving contemporaneous dependence rather
@@ -144,6 +249,7 @@ Relevant options are:
 --alpha A               familywise significance level inside (0, 1)
 --bins N                calibration and PIT bin count
 --output PATH           write the complete JSON report to PATH
+--contracts PATH        score against the declared contract plan at PATH (v3)
 ```
 
 `--output` is independent of display mode: the CLI writes the same complete,
@@ -161,8 +267,9 @@ blocks, where the block-resampling law cannot resolve the default familywise
 level, so the report records the reason and no interval or p-value. The core
 test suite verifies the producer-file digests and recomputes both reports
 byte-for-byte with frozen resampling settings. The example exercises exact
-common support, resolution-time blocks, the block-count requirement for
+pair support, resolution-time blocks, the block-count requirement for
 inference, revision eligibility, and blind versus consensus-visible exposure.
+Both fields are complete, so their `unresolved_by_agent` entries are empty.
 It is a compatibility fixture, not an empirical agent result.
 
 ## Superseded prospective engineering pilot
@@ -188,7 +295,12 @@ had crossed its threshold. It also does not score a trading loop: the models had
 no tools, memory, portfolio, or order interface. The committed
 `report-check.json` comes from a standalone Python implementation that
 reconstructs support, calibration, Brier loss, block resampling, and Holm
-adjustment from the imported ledgers.
+adjustment from the imported ledgers. The committed `report.json` and that
+check are schema `sharpebench.forecast-quality.v1` and stay frozen. The field is
+complete, so its support is the same under v2, and the command below now writes
+v2. The checker verifies a v1 report and a v2 report whose ledgers resolve the
+same contract digests, and refuses a v2 report over ledgers that resolve
+different digests, because it does not reconstruct the pairs v2 withholds.
 
 The exact pipeline is:
 
@@ -226,8 +338,9 @@ Different realized values remain incompatible even when the contract matches.
 
 - The ledger clock establishes logical order, not independently verified wall
   time.
-- Exact common support removes question mismatch. It does not make agents,
-  prompts, or information sets identical.
+- Exact pair support removes question mismatch within a pair. It does not make
+  agents, prompts, or information sets identical, and a pair withheld for
+  unequal support says nothing about which agent forecasts better.
 - Resolution-time blocks preserve a declared dependence unit. They do not prove
   that no longer-range dependence exists.
 - Calibration and proper scores describe forecast quality. Trading eligibility

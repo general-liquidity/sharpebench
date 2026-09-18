@@ -60,6 +60,14 @@ Three external-agent transports are explicit rather than interchangeable:
   `SHARPEBENCH_AGENT_ENV=NAME1,NAME2`.
 - `--http <addr>` posts to an endpoint whose isolation the operator owns.
 
+Add `--short-borrow-bps <bps>` to charge an opt-in per-step borrow cost on every
+short dollar, which the leverage financing charge never reaches for a short book
+at or below 1x gross exposure. The rate must be finite and nonnegative, no named
+cost profile sets it, and a zero rate leaves the run and the cost-model digest
+exactly as they are without the flag. A set rate is bound into the cost-model
+digest, so a checkpoint or trajectory written under one rate is refused under
+another. See [the simulator](simulator.md) for the cost terms.
+
 Add `--checkpoint <path>` to resume an external sweep. The checkpoint contract
 binds the dataset, costs, score configuration, running CLI binary, entrant,
 ordered windows, ordered seeds, and retry policy. A checkpointed `--cmd` or
@@ -305,6 +313,30 @@ census does not move a score, the controls carry no score field, and the binding
 is provenance beside a result; none of them reaches the gate, eligibility or the
 rank.
 
+## `timing-luck`
+
+```bash
+sharpebench timing-luck --cadence <m> [--data <csv>] [--periods-per-year N] [--short-borrow-bps <bps>] [--json]
+```
+
+Reruns `run`'s reference rows and the `pipeline-hold` control on `run`'s
+dataset, windows, seeds and cost model, with every row rebalancing every `m`
+bars, once for each of the `m` schedule phases. Each phase decides on a
+window's first bar and then on bars `start + p`, `start + p + m`, and so on,
+over the full declared windows. The report gives, per window and over all
+windows, how far each row's Sharpe and deflated Sharpe move across the phases
+(`by_phase`, `min`, `max`, `range`, `std_dev`), with the phases and windows
+behind each figure. The deflated Sharpe uses the row's phase-0 deflation inputs
+at every phase, and `field_dispersion_by_phase` records what each phase's own
+field measured. `--cadence 1` reproduces the board's deflated Sharpe and
+deflation inputs for every reference row.
+
+It runs without any external entrant or model, so it is a property of the
+protocol and the dataset. The report (`sharpebench.timing-luck.v2`) carries
+`rank_input: false`; `--cmd`, `--image` and `--http` are refused, and `run`
+output is unchanged. A cadence longer than a declared window exits 1 with
+`window_shorter_than_cadence`. See [Timing-luck floor](timing-luck.md).
+
 ## `score`
 
 Ranks a JSON field of pre-computed submissions (see
@@ -339,8 +371,8 @@ order or ordinal. An identifier the kernel does not implement is refused with
 exit code 2. Without the flag the board is unchanged.
 
 `--diagnostics <list>` also reports opt-in Sharpe diagnostics that the gate,
-eligibility and the rank do not use: `autocorrelated-psr`, `null-se-psr` and
-`mppm`, comma-separated, described under
+eligibility and the rank do not use: `autocorrelated-psr`, `null-se-psr`,
+`mppm` and `expected-shortfall`, comma-separated, described under
 [opt-in diagnostics](methodology-deflated-sharpe.md#opt-in-diagnostics-the-gate-does-not-use).
 The human table gains a separate block after the unchanged board; `--json`
 prints `{"board": ..., "sharpe_diagnostics": [...]}`, where `board` is the
@@ -394,6 +426,11 @@ declared cell and every decision step, validates step and observation identity,
 and derives replicate grouping from the contract. Missing, duplicated,
 reordered, shortened, or cross-environment evidence is refused.
 
+`capture` and `verify-trajectory` accept the same `--short-borrow-bps <bps>` as
+`run`, for a reference agent and for an external entrant alike, and a trajectory
+verifies only under the rate it was captured with. An out-of-domain rate is
+refused before any entrant starts.
+
 `--allow-unbound-trajectory` is an explicit legacy or cross-version regrade. It
 does not claim that the artifact reproduces its original execution conditions.
 See [Evidence contracts](evidence-contracts.md).
@@ -434,6 +471,24 @@ out-of-memory verdict is reported as `reexecution_transport_failure` with
 is started after the first failure. A divergence is `reexecution_diverged`,
 as for the other agents. There is no host fallback.
 
+`--diagnostics sizing-response [--vol-lookback N]` also reports how gross
+exposure moved with trailing volatility, a rank-neutral diagnostic described
+under [Volatility-response sizing](methodology-sizing.md). `--json` prints
+`{"verification": ..., "sizing_response": {...}}`, where `verification` is the
+output without the flag; the text form appends a separate block. An unknown
+identifier, a missing value, `--vol-lookback` without the diagnostic, a lookback
+below 2, or a combination with `--reexecute` exits 2 with no output. Without the
+flag the output is unchanged.
+
+`--timing-null [--null-draws N] [--null-seed S]` and `--lagged-replay <k,k,...>`
+add two rank-neutral replay diagnostics beside the verification: where the
+entrant's Sharpe falls among random placements of its own holding periods, and
+how its Sharpe and return move when every recorded decision executes k bars
+late. See [Replay diagnostics](replay-diagnostics.md). They cannot be combined
+with `--allow-unbound-trajectory`, `--reexecute` or `--diagnostics`. A malformed
+flag exits 2 before any file is read, and so does a draw count above 100,000; a
+lag too long for the trajectory's runs exits 2 once the trajectory is read.
+
 `capture` also records an external entrant, over the same transports as `run`:
 
 ```bash
@@ -465,6 +520,24 @@ the same conditions. A spawn, transport, protocol or resource failure during a
 capture exits 1 with `capture_transport_failure` and writes nothing, because a
 degraded transport would otherwise put the harness's holds into the trajectory
 as the entrant's decisions.
+
+## `decision-stability`
+
+```bash
+sharpebench decision-stability <traj.json>... [--data <csv>] [--short-borrow-bps <bps>] [--declare-identical-replicates] [--json]
+```
+
+Runs the strict `verify-trajectory` checks on each capture, replays the recorded
+decisions to recover the observation the engine showed at every step, and
+groups replicate runs of one window that share their observations and earlier
+decisions. The headline rate is pairwise disagreement: the share of replicate
+pairs in those groups whose decisions differ. Steps a replicate spends outside
+any group are excluded and counted. Byte-identical runs of one window are
+refused unless `--declare-identical-replicates` says they are separate
+executions. A deterministic agent reports exactly zero; a single replicate is
+reported as unavailable, not as zero. The report carries `rank_input: false`.
+See
+[Decision stability](decision-stability.md).
 
 ## `rescore`
 
@@ -672,15 +745,29 @@ produces no report and a nonzero exit. A produced report exits 0; read
 ## `lineage`
 
 ```bash
-sharpebench lineage strategy-evidence.json [--json]
+sharpebench lineage strategy-evidence.json [--census] [--dataset prices.csv]... [--json]
 ```
 
-Verifies one SharpeArena generated-strategy ledger and reports its observed
-trial count, candidate ancestry, cited idea sources, and best-versus-median
-robustness within each host-derived strategy family. It recomputes the ledger
-and family bindings and requires validation scores for every selectable
-candidate. The report is diagnostic only and cannot alter eligibility, rank, or
-the trial denominator. See [Candidate lineage diagnostics](candidate-lineage.md).
+Without `--census`, verifies one SharpeArena generated-strategy record (schema 2
+or 3) and reports its observed trial count, candidate ancestry, cited idea
+sources, and best-versus-median robustness within each host-derived strategy
+family. It recomputes the ledger and family bindings and requires validation
+scores for every selectable candidate. A journal with more than one record is
+refused in this mode.
+
+`--census` reads a whole strategy-evidence journal instead. It groups records by
+test split, counts test consultations and cumulative observed trials per split,
+checks every record's declared census and hash chain against the lines before
+it, and verifies the lineage of each completed record. It counts only the one
+journal file it reads.
+
+`--dataset <prices.csv>` may be repeated. A dataset whose content digest matches
+a recorded split lets the verifier resolve that split's first calendar day, date
+the cited sources against it, and check a declared panel bar count. Without a
+matching dataset, a historical split's dating is reported unavailable.
+
+Every report is diagnostic only and cannot alter eligibility, rank, or the
+trial denominator. See [Candidate lineage diagnostics](candidate-lineage.md).
 
 ## `audit-briefing` / `canary` / `score-allocation` / `greeks`
 
