@@ -35,3 +35,15 @@ exclude_re = [
 # so the CI invocation is self-describing.
 timeout_multiplier = 3.0
 minimum_test_timeout = 60
+
+# Run the suite under nextest, the runner ci.yml already uses. It stops a run
+# at the first failing test, so a caught mutant costs seconds instead of the
+# whole package suite. That matters because the baseline is measured with the
+# machine to itself while mutants run `--jobs` at a time: each mutant run then
+# gets a fraction of the cores, and a full core suite no longer fits inside a
+# timeout derived from the baseline. Measured on the search-census diff, 176
+# mutants in `sharpebench-core`, each test run pinned to one thread: caught
+# mutants took a median of 2.5s and at most 8.5s under nextest, against a
+# 91s full-suite run under `cargo test`. Nextest does not run doctests; ci.yml
+# runs those separately.
+test_tool = "nextest"
