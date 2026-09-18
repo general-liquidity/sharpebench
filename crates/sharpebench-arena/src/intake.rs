@@ -449,10 +449,11 @@ type Admissible = (AgentSubmission, ReturnsProvenance);
 ///
 /// Every entry is judged on its own first, so an entry that does not open its
 /// agent's commitment is refused alone and cannot take an honest reveal down
-/// with it. One commitment then admits one entry: admissible copies that agree
-/// are ranked once, and admissible entries for one agent that differ are all
-/// refused, because the commitment does not say which one its entrant stands
-/// behind.
+/// with it. One commitment then admits one entry: the registry opens each
+/// commitment once, so the refusal falls on every later reveal of it and never
+/// on the first. A pre-image is public from the moment it is revealed, so
+/// without that rule a rival who committed nothing could append a copy of an
+/// honest reveal and take the honest row off the board with it.
 pub fn admit_entries(
     window: &WindowState,
     current_epoch: u64,
@@ -510,14 +511,6 @@ pub fn admit_entries(
         outcomes.push(outcome);
     }
 
-    let mut admissible: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for (agent_id, outcome) in &outcomes {
-        if let Ok(entry) = outcome {
-            let bytes = serde_json::to_string(entry)
-                .map_err(|e| format!("internal: serialize an admitted entry: {e}"))?;
-            admissible.entry(agent_id.clone()).or_default().push(bytes);
-        }
-    }
     let mut admission = Admission {
         field: Vec::new(),
         returns_provenance: BTreeMap::new(),
@@ -526,28 +519,19 @@ pub fn admit_entries(
         replay_dataset_sha256: replay.as_ref().map(|r| r.dataset_sha256.clone()),
         certifying: false,
     };
+    // A window holds one commitment per agent and the registry opens each one
+    // once, so an agent reaches this loop with at most one admitted entry. The
+    // field needs no second pass to decide which copy of a commitment to rank:
+    // there is never more than one, and a copy that arrived too late is already
+    // a refusal.
     for (agent_id, outcome) in outcomes {
-        let reason = match outcome {
-            Err(reason) => reason,
+        match outcome {
             Ok((submission, provenance)) => {
-                let copies = &admissible[&agent_id];
-                if copies.iter().any(|copy| *copy != copies[0]) {
-                    format!(
-                        "revealed {} admissible entries that differ; one commitment admits one entry",
-                        copies.len()
-                    )
-                } else if admission.returns_provenance.contains_key(&agent_id) {
-                    "an identical copy of this agent's admitted entry; ranked once".to_string()
-                } else {
-                    admission
-                        .returns_provenance
-                        .insert(agent_id.clone(), provenance);
-                    admission.field.push(submission);
-                    continue;
-                }
+                admission.returns_provenance.insert(agent_id, provenance);
+                admission.field.push(submission);
             }
-        };
-        admission.refusals.push(Refusal { agent_id, reason });
+            Err(reason) => admission.refusals.push(Refusal { agent_id, reason }),
+        }
     }
     admission.certifying = board_certifies(&admission.returns_provenance, allow_supplied_returns);
     Ok(admission)
@@ -573,14 +557,14 @@ fn admit_one(
     }
     // A faulted window's commitments bind its plan digest, so one made for
     // another plan, or for none, does not match and is refused.
-    registry.reveal_under_fault_plan(
+    let verified = registry.check_reveal_under_fault_plan(
         agent_id,
         &window.id,
         &entry.artifact_digest,
         &entry.salt,
         window.fault_plan_sha256.as_deref(),
     )?;
-    match (&entry.capture, &entry.submission) {
+    let admitted = match (&entry.capture, &entry.submission) {
         (Some(_), Some(_)) => Err(
             "the entry carries both supplied returns and a capture; the arena ranks only returns it derives from the capture"
                 .to_string(),
@@ -598,7 +582,13 @@ fn admit_one(
         }
         (None, Some(_)) => Err(SUPPLIED_RETURNS_REFUSAL.to_string()),
         (None, None) => Err("the entry carries neither a capture nor returns".to_string()),
-    }
+    }?;
+    // Only the entry that is admitted spends the commitment's single reveal.
+    // Matching the pre-image is not enough: anyone who reads the public reveal
+    // can match it, so an entry refused further down must leave the commitment
+    // open for the one that is not.
+    registry.open(verified);
+    Ok(admitted)
 }
 
 fn admit_capture(
@@ -611,6 +601,19 @@ fn admit_capture(
 ) -> Result<(AgentSubmission, ReturnsProvenance), String> {
     if window.fault_plan_sha256.is_some() {
         return Err("no capture path applies a fault plan, so a capture cannot be replayed as this window's faulted experiment; a faulted window ranks only supplied returns, under the noncertifying intake".to_string());
+    }
+    // A commitment binds the agent id, the target window, the artifact digest,
+    // the salt and the window's fault plan. It does not bind the capture, so
+    // every scored byte must be re-derived from the frozen dataset and the
+    // decisions. `in_sample_trials` is the one field `replay_submission`
+    // carries straight out of the capture, and `score_agent` folds it into the
+    // deflation bar, so an entrant-authored number nothing binds would move a
+    // signed row. Anyone who reads the public reveal can author it.
+    if capture.in_sample_trials != 0 {
+        return Err(format!(
+            "the capture declares in_sample_trials={}, which no commitment binds; a capture is ranked only on what re-execution derives",
+            capture.in_sample_trials
+        ));
     }
     let entrant = CapturedEntrant::of(capture)?;
     if entrant.artifact_sha256() != entry.artifact_digest {

@@ -410,8 +410,9 @@ fn a_reference_commitment_admits_only_the_named_reference_agent() {
 }
 
 /// F1-4: an entry that does not open the agent's commitment is refused alone;
-/// the honest reveal beside it is ranked. A copy that opens the commitment
-/// with other decisions is refused on re-execution, also alone.
+/// the honest reveal beside it is ranked. A copy carrying the honest salt and
+/// other decisions arrives after the commitment is already open, so it is
+/// refused there, also alone.
 #[test]
 fn a_forged_entry_is_refused_alone() {
     let dir = temp_dir("forged");
@@ -448,18 +449,20 @@ fn a_forged_entry_is_refused_alone() {
     let reasons = refusals(&arena, "alpha");
     assert_eq!(reasons.len(), 2, "{reasons:?}");
     assert_eq!(reasons[0], "reveal does not match commitment");
-    assert!(
-        reasons[1].starts_with("re-execution diverged"),
-        "{reasons:?}"
+    assert_eq!(
+        reasons[1],
+        "commitment already revealed; one commitment opens once"
     );
     assert_eq!(window_json(&dir)["certifying"], true);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// F1-4: without re-execution nothing tells two admissible entries for one
-/// agent apart, so both are refused; identical copies rank once.
+/// F1-4, as S1 amended it: one commitment admits one entry, and the refusal
+/// falls on the reveal that arrives second rather than on both. A pre-image is
+/// public once it is revealed, so refusing both let a rival who committed
+/// nothing delete the entrant's row by appending a copy.
 #[test]
-fn admissible_entries_that_differ_are_refused_and_identical_copies_rank_once() {
+fn a_second_reveal_of_one_commitment_is_refused_and_the_first_still_ranks() {
     let data = market(1);
     let (reference, digest) = image("committed");
     let entrant = format!("sandbox:{reference}");
@@ -476,14 +479,11 @@ fn admissible_entries_that_differ_are_refused_and_identical_copies_rank_once() {
             ],
         )
         .unwrap();
-    assert!(scores.is_empty());
+    assert_eq!(scores.len(), 1);
+    assert_eq!(scores[0].agent_id, "alpha");
     assert_eq!(
         refusals(&arena, "alpha"),
-        vec![
-            "revealed 2 admissible entries that differ; one commitment admits one entry"
-                .to_string();
-            2
-        ]
+        ["commitment already revealed; one commitment opens once"]
     );
     let _ = std::fs::remove_dir_all(&dir);
 
@@ -496,7 +496,7 @@ fn admissible_entries_that_differ_are_refused_and_identical_copies_rank_once() {
     assert_eq!(scores.len(), 1);
     assert_eq!(
         refusals(&arena, "alpha"),
-        ["an identical copy of this agent's admitted entry; ranked once"]
+        ["commitment already revealed; one commitment opens once"]
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
