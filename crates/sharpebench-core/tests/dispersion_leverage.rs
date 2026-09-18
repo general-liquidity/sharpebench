@@ -17,7 +17,9 @@
 
 use serde_json::Value;
 use sharpebench_core::{rank, score_agent, AgentSubmission, Run, ScoreConfig};
-use sharpebench_stats::deflated_sharpe::observed_sharpe_ratio;
+use sharpebench_stats::deflated_sharpe::{
+    deflated_sharpe_ratio_against_null, expected_max_sharpe, observed_sharpe_ratio,
+};
 use sharpebench_stats::stats::std_dev;
 
 const KEY: &str = "trials_sr_std_most_influential_vote";
@@ -155,8 +157,8 @@ fn an_hourly_crypto_shaped_field_names_the_honest_vote_that_sets_the_bar() {
 
 /// The disclosure reads the dispersion and never recomputes it: the measured
 /// value is still the plain standard deviation of the sorted votes, bit for
-/// bit, and the deflated Sharpes are what the same field scores with the
-/// disclosure absent from the comparison.
+/// bit, and every row's bar and deflated Sharpe are what the deflation formula
+/// gives at that dispersion, with every vote in it.
 #[test]
 fn the_disclosure_moves_no_bar() {
     let field = hourly_crypto_field();
@@ -174,22 +176,84 @@ fn the_disclosure_moves_no_bar() {
             row.agent_id
         );
     }
-    // Strip the disclosure and the rows are the rows the kernel scored.
-    let stripped: Vec<Value> = board_json(&field, &cfg)
-        .into_iter()
-        .map(|mut v| {
-            v.as_object_mut().unwrap().remove(KEY);
-            v
+    for (row, sub) in board.iter().map(|row| {
+        (
+            row,
+            field.iter().find(|s| s.agent_id == row.agent_id).unwrap(),
+        )
+    }) {
+        let pooled: Vec<f64> = sub.runs.iter().flat_map(|r| r.returns.clone()).collect();
+        let dsr =
+            deflated_sharpe_ratio_against_null(&pooled, row.effective_n_trials, 0.0, measured)
+                .unwrap();
+        let bar = expected_max_sharpe(measured, row.effective_n_trials).unwrap();
+        assert_eq!(
+            row.deflated_sharpe.to_bits(),
+            dsr.to_bits(),
+            "{}",
+            row.agent_id
+        );
+        assert_eq!(
+            row.deflation_bar_per_period.to_bits(),
+            bar.to_bits(),
+            "{}",
+            row.agent_id
+        );
+    }
+}
+
+/// A field whose votes are all equal has a measured dispersion of zero, so no
+/// vote raises it and nothing is named. Each track is the same dyadic values
+/// in its own order, so every Sharpe is bitwise the same and the tracks are far
+/// from clones of each other.
+#[test]
+fn a_field_of_equal_votes_names_no_vote() {
+    // A mean of exactly 1/64 and deviations of j/64: every sum, mean and square
+    // is exact, so the order the values come in cannot move a bit.
+    let base: Vec<f64> = (1..=30)
+        .flat_map(|j| [(1 + j) as f64 / 64.0, (1 - j) as f64 / 64.0])
+        .collect();
+    let strides = [1, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43];
+    let field: Vec<AgentSubmission> = (0..6)
+        .map(|k| {
+            let windows: Vec<Vec<f64>> = (0..2)
+                .map(|w| {
+                    let stride = strides[2 * k + w];
+                    (0..60).map(|t| base[(t * stride + k) % 60]).collect()
+                })
+                .collect();
+            agent(&format!("equal-{k}"), windows)
         })
         .collect();
-    let again: Vec<Value> = board_json(&field, &cfg)
-        .into_iter()
-        .map(|mut v| {
-            v.as_object_mut().unwrap().remove(KEY);
-            v
-        })
+    let sharpes: Vec<f64> = votes(&field).into_iter().map(|(_, s)| s).collect();
+    assert!(sharpes.iter().all(|s| s.to_bits() == sharpes[0].to_bits()));
+    let board = board_json(&field, &hourly_cfg());
+    for row in &board {
+        assert_eq!(row["trials_sr_std_source"], "measured_floored", "{row}");
+        assert!(row.get(KEY).is_none(), "{}", row[KEY]);
+    }
+}
+
+/// Below the floor the bar is the floor. The disclosure still names the vote
+/// with the largest leverage over the measured dispersion, and the source says
+/// that removing it would not lower the bar.
+#[test]
+fn a_floored_board_still_names_its_vote() {
+    let field: Vec<AgentSubmission> = HOURLY_CRYPTO_VOTES
+        .iter()
+        .enumerate()
+        .map(|(i, &(id, sharpe))| agent(id, track(i, sharpe / 100.0)))
         .collect();
-    assert_eq!(stripped, again);
+    let sharpes: Vec<f64> = votes(&field).into_iter().map(|(_, s)| s).collect();
+    let cfg = hourly_cfg();
+    let floor = cfg.min_measured_trials_sr_std / cfg.periods_per_year.sqrt();
+    assert!(std_dev(&sharpes) < floor);
+    for row in board_json(&field, &cfg) {
+        assert_eq!(row["trials_sr_std_source"], "measured_floored");
+        assert!((row["trials_sr_std"].as_f64().unwrap() - floor).abs() < 1e-15);
+        assert_eq!(row[KEY]["agent_id"], "buy-and-hold");
+        assert!(row[KEY]["leverage"].as_f64().unwrap() > 4.0);
+    }
 }
 
 /// A field too small to measure, and a lone agent, use the configured prior:
