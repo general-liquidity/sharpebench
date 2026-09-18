@@ -148,6 +148,46 @@ pub fn observed_sharpe_ratio(returns: &[f64]) -> Result<f64, StatisticalError> {
     finite_computation(center / scale, "Sharpe ratio")
 }
 
+/// The requirement [`observed_sharpe_ratio_of_windows`] refuses a track on when
+/// no window of it varies within itself.
+pub const NO_WINDOW_VARIES: &str =
+    "must vary inside at least one window: a track whose every window is constant has no \
+     within-window dispersion, and the dispersion of its pooled track is the level difference \
+     between windows";
+
+/// The Sharpe ratio of an **observed** track presented as the per-window
+/// segments its pooled series was built from, or the error the deflation family
+/// refuses that track with.
+///
+/// [`observed_sharpe_ratio`] receives the concatenation alone. It cannot see
+/// where one window ends and the next begins, so a track whose every window is
+/// constant at its own level reaches it as a series that varies, and clears it:
+/// two thirty-bar windows at 0.001 and 0.002 pool to a per-period Sharpe of
+/// 2.97, about 47 annualized at 252 periods a year, from a track no bar of which
+/// ever moved. Ask the question here instead and the answer reads each window on
+/// its own, so the concatenation boundary is no longer where constancy can hide.
+///
+/// A window that never traded is not on its own a refusal. An agent that stands
+/// aside in one regime and trades in another has a flat window and a moving one,
+/// and the moving one is what its Sharpe ratio is measured on.
+/// The pooled question is asked first, so a track the concatenation already
+/// refuses keeps the error it has always carried and only a track that reaches
+/// [`observed_sharpe_ratio`] as a series that varies can meet the new one.
+pub fn observed_sharpe_ratio_of_windows(windows: &[&[f64]]) -> Result<f64, StatisticalError> {
+    let pooled: Vec<f64> = windows.iter().flat_map(|w| w.iter().copied()).collect();
+    let sharpe = observed_sharpe_ratio(&pooled)?;
+    if windows
+        .iter()
+        .all(|window| observed_sharpe_ratio(window).is_err())
+    {
+        return Err(StatisticalError::InvalidParameter {
+            name: "returns",
+            requirement: NO_WINDOW_VARIES,
+        });
+    }
+    Ok(sharpe)
+}
+
 /// Checked counterpart for Result-returning deflation. Validate before a
 /// numerical floor or CDF saturation can conceal an overflowing computation.
 /// The legacy scalar PSR above retains its API and operation order.
@@ -458,6 +498,52 @@ mod tests {
         let underflowing: Vec<f64> = (0..60).map(|i| (i % 2) as f64 * 1e-170).collect();
         assert!(!is_constant_track(&underflowing));
         assert!(observed_sharpe_ratio(&underflowing).is_err());
+    }
+
+    /// The windowed question, and the ordering that keeps it additive: a track
+    /// the concatenation already refuses keeps the message it had, and the new
+    /// refusal reaches only tracks the concatenation let through.
+    #[test]
+    fn a_track_whose_every_window_is_constant_has_no_sharpe_ratio() {
+        let flat_a = vec![0.001_f64; 30];
+        let flat_b = vec![0.002_f64; 30];
+        let pooled: Vec<f64> = flat_a.iter().chain(&flat_b).copied().collect();
+
+        // The concatenation alone reads as a track that varies.
+        let pooled_sharpe = observed_sharpe_ratio(&pooled).expect("the concatenation varies");
+        assert!((pooled_sharpe - 2.974_895).abs() < 1e-5, "{pooled_sharpe}");
+
+        assert_eq!(
+            observed_sharpe_ratio_of_windows(&[&flat_a, &flat_b]),
+            Err(StatisticalError::InvalidParameter {
+                name: "returns",
+                requirement: NO_WINDOW_VARIES,
+            })
+        );
+
+        // One window that varies is enough, and the answer is the pooled one.
+        let moving: Vec<f64> = (0..30)
+            .map(|i| 0.002 + 0.0005 * f64::from(i).sin())
+            .collect();
+        let mixed: Vec<f64> = flat_a.iter().chain(&moving).copied().collect();
+        assert_eq!(
+            observed_sharpe_ratio_of_windows(&[&flat_a, &moving]).map(f64::to_bits),
+            observed_sharpe_ratio(&mixed).map(f64::to_bits)
+        );
+
+        // A wholly constant track and a too-short one keep their own refusals.
+        assert_eq!(
+            observed_sharpe_ratio_of_windows(&[&flat_a, &flat_a]),
+            observed_sharpe_ratio(&[flat_a.clone(), flat_a.clone()].concat())
+        );
+        assert_eq!(
+            observed_sharpe_ratio_of_windows(&[]),
+            observed_sharpe_ratio(&[])
+        );
+        assert_eq!(
+            observed_sharpe_ratio_of_windows(&[&[0.01]]),
+            observed_sharpe_ratio(&[0.01])
+        );
     }
 
     /// A series whose sample Sharpe is `sr`, built as `c + b * x` over the

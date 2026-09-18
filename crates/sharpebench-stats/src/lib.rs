@@ -73,7 +73,8 @@ pub use agreement::{
 };
 pub use deflated_sharpe::{
     deflated_sharpe_ratio, expected_max_sharpe, is_constant_track, observed_sharpe_ratio,
-    per_period_from_annualized, probabilistic_sharpe_ratio, sharpe_ratio,
+    observed_sharpe_ratio_of_windows, per_period_from_annualized, probabilistic_sharpe_ratio,
+    sharpe_ratio, NO_WINDOW_VARIES,
 };
 pub use dissent::{
     dissent, dissent_across, kendall_tau_b, DissentReport, DissentThresholds, DissentVerdict,
