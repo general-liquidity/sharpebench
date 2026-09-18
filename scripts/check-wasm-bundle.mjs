@@ -120,6 +120,23 @@ const FIELD = JSON.stringify([
   { agent_id: "strong", runs: [{ returns: RETURNS }] },
   { agent_id: "weak", runs: [{ returns: RETURNS.map((x) => x - 0.0021) }] },
 ]);
+// Seven dissimilar agents, enough for `rank` to measure the deflation dispersion
+// instead of using the prior. Every other field in the battery is below the
+// five-vote minimum, so without this one the measured branch, and the
+// `trials_sr_std_most_influential_vote` it writes, is reached by no call.
+const MEASURED_FIELD = JSON.stringify(
+  Array.from({ length: 7 }, (_, k) => ({
+    agent_id: `agent-${k}`,
+    runs: [
+      {
+        returns: Array.from(
+          { length: 120 },
+          (_, i) => 0.0004 * k + 0.01 * Math.sin(i * (0.7 + 0.31 * k) + 1.3 * k),
+        ),
+      },
+    ],
+  })),
+);
 
 /**
  * The fixed input battery: every export, on inputs chosen to reach the branches a version
@@ -141,6 +158,7 @@ function battery() {
     push(`score(golden ${g.name})`, "score", [read(g.field), ""]);
   }
   push("score(field)", "score", [FIELD, ""]);
+  push("score(measured field)", "score", [MEASURED_FIELD, ""]);
   push("score(field, n_trials 500)", "score", [FIELD, '{"n_trials":500,"trials_sr_std":0.5,"dsr_bar":0.95,"per_run_psr_bar":0.9,"alpha":0.05,"bootstrap_seed":7,"n_boot":99,"block_prob":0.1}']);
   push("score(empty field)", "score", ["[]", ""]);
   push("score(malformed)", "score", ["{", ""]);
