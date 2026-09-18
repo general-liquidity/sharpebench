@@ -506,7 +506,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "reference-agent"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "serde_json",
  "sharpebench-protocol",
@@ -643,7 +643,7 @@ dependencies = [
 
 [[package]]
 name = "sharpebench"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -663,7 +663,7 @@ dependencies = [
 
 [[package]]
 name = "sharpebench-arena"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -677,7 +677,7 @@ dependencies = [
 
 [[package]]
 name = "sharpebench-attest"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "aes-gcm-siv",
  "ed25519-dalek",
@@ -690,7 +690,7 @@ dependencies = [
 
 [[package]]
 name = "sharpebench-core"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -701,7 +701,7 @@ dependencies = [
 
 [[package]]
 name = "sharpebench-edge"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "serde",
  "sharpebench-stats",
@@ -709,7 +709,7 @@ dependencies = [
 
 [[package]]
 name = "sharpebench-harness"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -723,7 +723,7 @@ dependencies = [
 
 [[package]]
 name = "sharpebench-leaderboard"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -733,7 +733,7 @@ dependencies = [
 
 [[package]]
 name = "sharpebench-memory"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -743,7 +743,7 @@ dependencies = [
 
 [[package]]
 name = "sharpebench-protocol"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -751,7 +751,7 @@ dependencies = [
 
 [[package]]
 name = "sharpebench-sim"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -762,11 +762,11 @@ dependencies = [
 
 [[package]]
 name = "sharpebench-stats"
-version = "0.27.0"
+version = "0.28.0"
 
 [[package]]
 name = "sharpebench-wasm"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -973,7 +973,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "serde_json",
  "sha2",

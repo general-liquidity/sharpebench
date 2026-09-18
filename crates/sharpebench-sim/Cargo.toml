@@ -9,11 +9,11 @@ keywords = ["benchmark", "trading", "backtest", "simulation", "quant"]
 categories = ["science", "finance", "simulation"]
 
 [dependencies]
-sharpebench-core = { path = "../sharpebench-core", version = "0.27.0" }
-sharpebench-protocol = { path = "../sharpebench-protocol", version = "0.27.0" }
+sharpebench-core = { path = "../sharpebench-core", version = "0.28.0" }
+sharpebench-protocol = { path = "../sharpebench-protocol", version = "0.28.0" }
 # The sizing-response diagnostic reuses the tie-correct Spearman rho. The crate
 # is already linked through sharpebench-core, so the build gains no new crate.
-sharpebench-stats = { path = "../sharpebench-stats", version = "0.27.0" }
+sharpebench-stats = { path = "../sharpebench-stats", version = "0.28.0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
