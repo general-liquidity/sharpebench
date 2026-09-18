@@ -919,11 +919,16 @@ pub struct CompositeScore {
     /// testing across the field. Filled by [`rank`].
     pub step_down_significant: bool,
     /// Conviction-weighted return: each run's mean return weighted by the mean
-    /// of the run's `confidences`, the stated confidences paired with an
-    /// outcome. Rewards sizing conviction with the outcome. A run with no such
-    /// confidence weighs the mean of the other runs' weights, so a failing run
-    /// that states nothing stays in. When no run has one, every run weighs the
-    /// same (the mean of the per-run mean returns).
+    /// of the run's stated `confidences`, each read as the probability it is
+    /// and clamped to `[0, 1]`. Rewards staking conviction on the runs that
+    /// paid off.
+    ///
+    /// The outcome it weighs against is the run's own realized return, not the
+    /// `outcomes` a decision is scored against: that pairing is
+    /// `calibration_brier`'s, and a run may state confidences without it. A run
+    /// with no stated confidence weighs the mean of the other runs' weights, so
+    /// a failing run that states nothing stays in. When no run states one,
+    /// every run weighs the same (the mean of the per-run mean returns).
     pub confidence_weighted_return: f64,
     /// Total compute/token cost across all runs (0.0 if unreported).
     pub cost: f64,
@@ -1258,6 +1263,25 @@ impl Deflation {
     }
 }
 
+/// The mean of a run's stated confidences, each read as the probability it is,
+/// or `None` when the run stated none.
+///
+/// A confidence is a probability. `brier_score` clamps this same field per
+/// entry (`calibration.rs`) and `ForecastRevision::confidence` refuses anything
+/// outside `[0, 1]`, so the conviction weight was the one reader that took the
+/// number as given: `confidences: vec![1e6]` on the best run drove
+/// `confidence_weighted_return` to that run's mean, and nothing validates
+/// `Run::confidences`' range on the way in. Both the per-run weight and the
+/// fallback for runs that state nothing read it here, so neither can be
+/// clamped without the other.
+fn stated_confidence(run: &Run) -> Option<f64> {
+    if run.confidences.is_empty() {
+        return None;
+    }
+    let total: f64 = run.confidences.iter().map(|c| c.clamp(0.0, 1.0)).sum();
+    Some(total / run.confidences.len() as f64)
+}
+
 /// Score a single agent submission against `cfg`. With no field to measure the
 /// cross-trial dispersion on, the configured annualized prior applies, converted
 /// to per period once.
@@ -1459,12 +1483,7 @@ fn score_agent_with(
     // each run's mean confidence. It stays in the mean, and stating a
     // confidence in some runs only cannot replace the equal-weight mean. With
     // no stated confidence anywhere every run weighs 1.0.
-    let stated_weights: Vec<f64> = sub
-        .runs
-        .iter()
-        .filter(|r| !r.confidences.is_empty())
-        .map(|r| mean(&r.confidences))
-        .collect();
+    let stated_weights: Vec<f64> = sub.runs.iter().filter_map(stated_confidence).collect();
     let unstated_weight = if stated_weights.is_empty() {
         1.0
     } else {
@@ -1473,11 +1492,7 @@ fn score_agent_with(
     let mut cw_num = 0.0;
     let mut cw_den = 0.0;
     for r in &sub.runs {
-        let w = if r.confidences.is_empty() {
-            unstated_weight
-        } else {
-            mean(&r.confidences)
-        };
+        let w = stated_confidence(r).unwrap_or(unstated_weight);
         cw_num += w * mean(&r.returns);
         cw_den += w;
     }
@@ -3228,6 +3243,54 @@ mod tests {
             s.confidence_weighted_return,
             s.raw_mean_return
         );
+    }
+
+    /// S4: a confidence is a probability, and the weight has to treat it as one.
+    /// `brier_score` already clamps the same numbers to `[0, 1]`, so without
+    /// this the two legs that read `Run::confidences` disagreed about what the
+    /// field means, and an unbounded weight let one run's mean return stand in
+    /// for the whole submission's.
+    #[test]
+    fn a_confidence_outside_zero_to_one_weighs_no_more_than_one_that_is_inside() {
+        let weighted = |best: f64, worst: f64| {
+            let mut win = run(0.01, 0.0005, 30);
+            win.confidences = vec![best; 30];
+            let mut lose = run(-0.005, 0.0005, 30);
+            lose.confidences = vec![worst; 30];
+            score_agent(&agent("conv", vec![win, lose]), &ScoreConfig::default())
+                .confidence_weighted_return
+        };
+
+        assert_eq!(
+            weighted(1e6, 0.1),
+            weighted(1.0, 0.1),
+            "a confidence above 1 must weigh exactly as much as full conviction"
+        );
+        assert_eq!(
+            weighted(0.9, -1e6),
+            weighted(0.9, 0.0),
+            "a confidence below 0 must weigh exactly as little as none"
+        );
+    }
+
+    /// The weight is conviction against the run's realized return. It is not
+    /// the calibration pairing, which is `brier_score`'s, so stating the
+    /// outcomes beside the same confidences must not move it.
+    #[test]
+    fn stating_outcomes_does_not_move_the_conviction_weight() {
+        let weighted = |outcomes: Vec<bool>| {
+            let mut win = run(0.01, 0.0005, 30);
+            win.confidences = vec![0.9; 30];
+            win.outcomes = outcomes.clone();
+            let mut lose = run(-0.005, 0.0005, 30);
+            lose.confidences = vec![0.1; 30];
+            lose.outcomes = outcomes;
+            score_agent(&agent("conv", vec![win, lose]), &ScoreConfig::default())
+                .confidence_weighted_return
+        };
+
+        assert_eq!(weighted(Vec::new()), weighted(vec![true; 30]));
+        assert_eq!(weighted(Vec::new()), weighted(vec![false; 30]));
     }
 
     #[test]
