@@ -1229,6 +1229,18 @@ pub struct PairwiseForecastComparison {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub holm_adjusted_p_value: Option<f64>,
     pub familywise_significant: bool,
+    /// The measured rejection rate of this comparison's test under the null, at
+    /// this comparison's block count, against the nominal 5%.
+    ///
+    /// It travels with the flag because the flag is not delivered at the block
+    /// counts the protocol admits: at four blocks, the first count
+    /// [`inference_support`] passes, the test rejects a true null 18.8% of the
+    /// time. Read `familywise_significant` against this, not against 0.05.
+    /// `None` when the comparison carries no p-value.
+    ///
+    /// [`inference_support`]: fn@inference_support
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub measured_size_at_nominal_5pct: Option<f64>,
     /// Present only when the two agents did not resolve the same digests.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub support_gap: Option<SupportGap>,
@@ -1285,6 +1297,50 @@ impl Error for ForecastInferenceError {}
 /// information about variation between blocks. Drawing `blocks` times from `blocks`
 /// blocks lands on such a draw with probability `blocks * blocks^-blocks`, that is
 /// `blocks^(1 - blocks)`: 1 at one block, 1/2 at two, 1/9 at three, 1/64 at four.
+/// What `familywise_significant` actually delivers, as written into the report.
+pub const FAMILYWISE_SIZE_RULE: &str =
+    "the paired test resamples whole blocks and centres the raw \
+     mean, not a studentised statistic, so it rejects a true null more often than its nominal 5%: \
+     measured 0.188 at 4 blocks, 0.162 at 5, 0.138 at 6, 0.096 at 10, 0.072 at 20 and 0.060 at 40 \
+     over 6000 i.i.d. normal draws of 5 contracts a block, and 0.237 at 4 blocks under lognormal \
+     contract differences; read familywise_significant against measured_size_at_nominal_5pct";
+
+/// The measured size of the block bootstrap at a block count, against a nominal
+/// 5%, under i.i.d. normal per-contract differences with five contracts a block
+/// and the shipped 2000 replications. Entries are `(blocks, size)` ascending.
+///
+/// These are measurements of this implementation, not properties of a block
+/// bootstrap in general, and the data-generating process is named because the
+/// number moves with it: the same table under lognormal differences reads 0.237
+/// at four blocks rather than 0.188. The table is reported rather than corrected
+/// because no available replacement holds its size across the admitted counts.
+/// Studentising the statistic swaps the error for the opposite one, measuring
+/// 0.013 at four blocks and rejecting a half-sigma effect 12.1% of the time
+/// against this test's 74.5%; a Student-t on the block means is exact under
+/// normal blocks (0.050) but reads 0.094 under skewed ones, and it tests the
+/// unweighted block mean rather than the contract mean this report publishes as
+/// `mean_loss_difference`.
+const MEASURED_SIZE: &[(usize, f64)] = &[
+    (4, 0.188),
+    (5, 0.162),
+    (6, 0.138),
+    (10, 0.096),
+    (20, 0.072),
+    (40, 0.060),
+];
+
+/// The measured size at or below `blocks`, so a reader is never handed a
+/// friendlier number than the block count earns. Above the largest measured
+/// count the last entry is carried forward, which is the closest to nominal the
+/// table states.
+fn measured_size(blocks: usize) -> f64 {
+    MEASURED_SIZE
+        .iter()
+        .rev()
+        .find(|(at, _)| *at <= blocks)
+        .map_or(MEASURED_SIZE[0].1, |(_, size)| *size)
+}
+
 fn degenerate_resample_mass(blocks: usize) -> f64 {
     if blocks == 0 {
         return 1.0;
@@ -1328,6 +1384,8 @@ pub struct ForecastQualityReport {
     pub schema_version: &'static str,
     pub rank_effect: &'static str,
     pub dependence_unit: &'static str,
+    /// What `familywise_significant` delivers at the admitted block counts.
+    pub familywise_size: &'static str,
     pub config: ForecastAnalysisConfig,
     pub common_support: CommonSupport,
     /// The encoding each scored contract digest verified under, for every digest
@@ -1460,6 +1518,7 @@ fn analyze(
         },
         rank_effect: "reported_only_never_trading_rank",
         dependence_unit: "whole resolution-clock block across assets and questions",
+        familywise_size: FAMILYWISE_SIZE_RULE,
         config,
         common_support,
         contract_digest_versions,
@@ -1877,6 +1936,7 @@ fn compare_agents(
             raw_p_value: None,
             holm_adjusted_p_value: None,
             familywise_significant: false,
+            measured_size_at_nominal_5pct: None,
             support_gap: match unsupported {
                 ForecastInferenceError::UnequalResolvedSupport(gap) => Some(gap),
                 _ => None,
@@ -1914,6 +1974,7 @@ fn compare_agents(
         raw_p_value: Some((null_extreme as f64 + 1.0) / (config.bootstrap_samples as f64 + 1.0)),
         holm_adjusted_p_value: None,
         familywise_significant: false,
+        measured_size_at_nominal_5pct: Some(measured_size(block_values.len())),
         support_gap: None,
         inference_error: None,
     })
@@ -2412,6 +2473,7 @@ mod tests {
                 raw_p_value: Some(p),
                 holm_adjusted_p_value: None,
                 familywise_significant: false,
+                measured_size_at_nominal_5pct: Some(measured_size(5)),
                 support_gap: None,
                 inference_error: None,
             })
@@ -2422,6 +2484,51 @@ mod tests {
         assert_eq!(comparisons[2].holm_adjusted_p_value, Some(0.06));
         assert!(comparisons[0].familywise_significant);
         assert!(!comparisons[1].familywise_significant);
+    }
+
+    /// `familywise_significant` carries the size it is actually run at.
+    ///
+    /// The paired test resamples blocks and centres the raw mean rather than a
+    /// studentised statistic, so its rejection rate under the null is well above
+    /// its nominal 5% at every block count `inference_support` admits. The flag
+    /// is reported with that number beside it rather than silently, and the
+    /// table is monotone toward nominal so a larger block count never reads
+    /// worse than a smaller one.
+    #[test]
+    fn the_measured_size_travels_with_the_familywise_flag() {
+        // The table is the one the book prints and the report states.
+        assert_eq!(measured_size(4), 0.188);
+        assert_eq!(measured_size(5), 0.162);
+        assert_eq!(measured_size(6), 0.138);
+        assert_eq!(measured_size(10), 0.096);
+        assert_eq!(measured_size(20), 0.072);
+        assert_eq!(measured_size(40), 0.060);
+        // Every entry overstates the error that a nominal 5% claims.
+        for (blocks, size) in MEASURED_SIZE {
+            assert!(*size > 0.05, "{blocks} blocks reads {size}");
+        }
+        // A count between entries reads the lower one, never the friendlier.
+        assert_eq!(measured_size(7), measured_size(6));
+        assert_eq!(measured_size(19), measured_size(10));
+        assert_eq!(measured_size(1000), measured_size(40));
+        // Monotone toward nominal.
+        let sizes: Vec<f64> = (4..=60).map(measured_size).collect();
+        assert!(sizes.windows(2).all(|w| w[1] <= w[0]), "{sizes:?}");
+        // Four blocks is the first count the resampling gate admits, and it is
+        // where the flag is furthest from what it claims.
+        assert!(inference_support(4, 0.05).is_ok());
+        assert!(inference_support(3, 0.05).is_err());
+        assert!(measured_size(4) > 3.0 * 0.05);
+
+        // The statement the report carries names the same numbers.
+        for number in [
+            "0.188", "0.162", "0.138", "0.096", "0.072", "0.060", "0.237",
+        ] {
+            assert!(
+                FAMILYWISE_SIZE_RULE.contains(number),
+                "the report statement must name {number}"
+            );
+        }
     }
 
     #[test]
