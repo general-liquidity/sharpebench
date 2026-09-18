@@ -179,7 +179,7 @@
       "sha256": "1e025ac30099de23ae8455f20ae5441b557e924870d0e1475c7508512908ec0d"
     }
   ],
-  "generated_at_head": "6b49125289134afb19f1862cf2c136646fea7eed",
+  "generated_at_head": "051ea8bae272b42342d64403339d8db50a16da8a",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -351,11 +351,11 @@
     },
     {
       "path": "crates/sharpebench-cli/src/lineage_cmd.rs",
-      "sha256": "7d427b65bbad51b02c7296271e124071111cb95e116f1d33489697ebfcffcde7"
+      "sha256": "422778883f96321ec4c0334119f30c8e43ec34de2ae702fc4768a050d3351b15"
     },
     {
       "path": "crates/sharpebench-cli/src/main.rs",
-      "sha256": "c97c5908509d07d3a09ebc57de65d1c8782ff43931fc049954f540ceba00c35e"
+      "sha256": "9948067c6bdf515fd93aea82de898b426301cf98e87e3d9daf0fe9ef9360fb5f"
     },
     {
       "path": "crates/sharpebench-cli/src/regrade_cmd.rs",
@@ -428,6 +428,10 @@
     {
       "path": "crates/sharpebench-cli/tests/honesty_units.rs",
       "sha256": "5e628339284b5595413ea461a5d0fdfa491b3b3328b34fa380ff5ff783d7a069"
+    },
+    {
+      "path": "crates/sharpebench-cli/tests/lineage_census_cli.rs",
+      "sha256": "7037bb16f835c6b3b545607daf34bd6db7a3d63e7a313abb91d2dcff82b813b2"
     },
     {
       "path": "crates/sharpebench-cli/tests/options_boundaries.rs",
@@ -507,7 +511,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/candidate_lineage.rs",
-      "sha256": "7ff57a06e61119cc65404d271813114b0d28e933f7327c7cdb0907a3902a3dba"
+      "sha256": "8628584edbad3b1cf547db0a3e6090dac0de6fdf57607c9e97b7e160f335b888"
     },
     {
       "path": "crates/sharpebench-core/src/certification.rs",
@@ -1411,5 +1415,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "50097ee8cfe30d1bceb45b203ba8788723de4d7558f055e1d90b54f225a43a80"
+  "source_snapshot_sha256": "6246efc7591e3d10c9806ff502c95770b988bc45bc6f3972d7e07d3aab520e73"
 }
