@@ -130,8 +130,24 @@ fn the_diagnostics_add_a_member_and_change_nothing_else() {
         assert_eq!(run["reference"]["draws"], 12);
         let percentile = run["reference"]["percentile"].as_f64().unwrap();
         assert!((0.0..=1.0).contains(&percentile));
-        assert!(run["reference"]["monte_carlo_standard_error"].is_f64());
-        assert!(run["distinct_placements"].as_u64().unwrap() > 12);
+        // A run whose draws had spread carries the plug-in error and no
+        // one-sided claim; a saturated one carries the exact bound and no
+        // plug-in error, which is the pair of shapes a reader must handle.
+        let se = &run["reference"]["monte_carlo_standard_error"];
+        let bound = &run["reference"]["one_sided_95_bound"];
+        if se.is_f64() {
+            assert!(bound.is_null(), "{run}");
+        } else {
+            assert!(se.is_null(), "{run}");
+            assert!(bound.is_f64() || percentile == 0.5, "{run}");
+        }
+        let placements = run["distinct_placements"].as_u64().unwrap();
+        assert!(placements > 12);
+        let ceiling = run["max_attainable_percentile"].as_f64().unwrap();
+        assert!(
+            (ceiling - (1.0 - 1.0 / (2.0 * placements as f64))).abs() < 1e-12,
+            "{run}"
+        );
         let exposure = &run["exposure"];
         assert_eq!(exposure["bars"], 90);
         assert!(exposure["invested_bars"].as_u64().unwrap() < 90);
