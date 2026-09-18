@@ -24,7 +24,7 @@ use crate::comparison_sets::{comparison_set, restrict_to_shared, TaggedRun, Tagg
 use crate::decay::return_drift_half_life;
 use crate::deflated_sharpe::{
     checked_probabilistic_sharpe_ratio, deflated_sharpe_ratio_against_null, expected_max_sharpe,
-    observed_sharpe_ratio, per_period_from_annualized,
+    observed_sharpe_ratio_of_windows, per_period_from_annualized,
 };
 use crate::econrationality::{elicit_revealed_selection, rationality_score};
 use crate::pass_k::{pass_k, PassMode};
@@ -919,11 +919,16 @@ pub struct CompositeScore {
     /// testing across the field. Filled by [`rank`].
     pub step_down_significant: bool,
     /// Conviction-weighted return: each run's mean return weighted by the mean
-    /// of the run's `confidences`, the stated confidences paired with an
-    /// outcome. Rewards sizing conviction with the outcome. A run with no such
-    /// confidence weighs the mean of the other runs' weights, so a failing run
-    /// that states nothing stays in. When no run has one, every run weighs the
-    /// same (the mean of the per-run mean returns).
+    /// of the run's stated `confidences`, each read as the probability it is
+    /// and clamped to `[0, 1]`. Rewards staking conviction on the runs that
+    /// paid off.
+    ///
+    /// The outcome it weighs against is the run's own realized return, not the
+    /// `outcomes` a decision is scored against: that pairing is
+    /// `calibration_brier`'s, and a run may state confidences without it. A run
+    /// with no stated confidence weighs the mean of the other runs' weights, so
+    /// a failing run that states nothing stays in. When no run states one,
+    /// every run weighs the same (the mean of the per-run mean returns).
     pub confidence_weighted_return: f64,
     /// Total compute/token cost across all runs (0.0 if unreported).
     pub cost: f64,
@@ -1204,15 +1209,16 @@ fn dominates(a: &CompositeScore, b: &CompositeScore) -> bool {
             || a.turnover < b.turnover)
 }
 
-/// Whether `pooled` has no Sharpe ratio, by [`observed_sharpe_ratio`], the
-/// kernel's single statement of it: fewer than two observations, every
-/// observation equal, or a Sharpe that does not stay finite. Such a track is
-/// not a Pareto member. The PSR-based `sharpe_undefined` in `score_agent_with`
-/// is narrower for a short track, because the checked PSR keeps a 0.0
-/// convention below two observations; the deflation interval refuses that
-/// track, so `deflation_error` still names it.
-fn has_no_sharpe_ratio(pooled: &[f64]) -> bool {
-    observed_sharpe_ratio(pooled).is_err()
+/// Whether a track whose windows are `tracks` has no Sharpe ratio, by
+/// [`observed_sharpe_ratio_of_windows`], the kernel's single statement of it:
+/// fewer than two pooled observations, every pooled observation equal, a Sharpe
+/// that does not stay finite, or no window that varies inside itself. Such a
+/// track is not a Pareto member. The PSR-based `sharpe_undefined` in
+/// `score_agent_with` is narrower for a short track, because the checked PSR
+/// keeps a 0.0 convention below two observations; the deflation interval refuses
+/// that track, so `deflation_error` still names it.
+fn has_no_sharpe_ratio(tracks: &[Vec<f64>]) -> bool {
+    observed_sharpe_ratio_of_windows(&window_slices(tracks)).is_err()
 }
 
 /// The resolved per-period deflation dispersion a score is computed with, and
@@ -1256,6 +1262,25 @@ impl Deflation {
             null_mean_per_period: cfg.deflation_null_mean_per_period,
         }
     }
+}
+
+/// The mean of a run's stated confidences, each read as the probability it is,
+/// or `None` when the run stated none.
+///
+/// A confidence is a probability. `brier_score` clamps this same field per
+/// entry (`calibration.rs`) and `ForecastRevision::confidence` refuses anything
+/// outside `[0, 1]`, so the conviction weight was the one reader that took the
+/// number as given: `confidences: vec![1e6]` on the best run drove
+/// `confidence_weighted_return` to that run's mean, and nothing validates
+/// `Run::confidences`' range on the way in. Both the per-run weight and the
+/// fallback for runs that state nothing read it here, so neither can be
+/// clamped without the other.
+fn stated_confidence(run: &Run) -> Option<f64> {
+    if run.confidences.is_empty() {
+        return None;
+    }
+    let total: f64 = run.confidences.iter().map(|c| c.clamp(0.0, 1.0)).sum();
+    Some(total / run.confidences.len() as f64)
 }
 
 /// Score a single agent submission against `cfg`. With no field to measure the
@@ -1309,7 +1334,8 @@ fn score_agent_with(
     benchmark: Option<&AgentSubmission>,
     declared: Option<ResolvedDeclaration<'_>>,
 ) -> CompositeScore {
-    let pooled = pooled_returns(sub, cfg.execution_seeds_per_window);
+    let tracks = window_tracks(sub, cfg.execution_seeds_per_window);
+    let pooled = tracks.concat();
 
     // A pooled track with no PSR (a constant one) reports the 0.0 floor; the
     // deflated Sharpe below is refused on the same track and names the cause.
@@ -1342,8 +1368,12 @@ fn score_agent_with(
     // a number here is the exact failure R02 closes, since the favorable
     // substitution (a zero deflation bar) is also the flattering one. The
     // frequency that converted the dispersion is part of that boundary.
+    // The windowed refusal runs first, so a track whose every window is constant
+    // is refused here rather than deflated on the level differences between its
+    // windows. It reads the same segments the pooled track is concatenated from.
     let frequency = checked_periods_per_year(cfg);
     let deflation = frequency
+        .and_then(|()| observed_sharpe_ratio_of_windows(&window_slices(&tracks)).map(|_| ()))
         .and_then(|()| expected_max_sharpe(defl.sr_std, effective_n_trials))
         .and_then(|bar| {
             let dsr = deflated_sharpe_ratio_against_null(
@@ -1459,12 +1489,7 @@ fn score_agent_with(
     // each run's mean confidence. It stays in the mean, and stating a
     // confidence in some runs only cannot replace the equal-weight mean. With
     // no stated confidence anywhere every run weighs 1.0.
-    let stated_weights: Vec<f64> = sub
-        .runs
-        .iter()
-        .filter(|r| !r.confidences.is_empty())
-        .map(|r| mean(&r.confidences))
-        .collect();
+    let stated_weights: Vec<f64> = sub.runs.iter().filter_map(stated_confidence).collect();
     let unstated_weight = if stated_weights.is_empty() {
         1.0
     } else {
@@ -1473,11 +1498,7 @@ fn score_agent_with(
     let mut cw_num = 0.0;
     let mut cw_den = 0.0;
     for r in &sub.runs {
-        let w = if r.confidences.is_empty() {
-            unstated_weight
-        } else {
-            mean(&r.confidences)
-        };
+        let w = stated_confidence(r).unwrap_or(unstated_weight);
         cw_num += w * mean(&r.returns);
         cw_den += w;
     }
@@ -1732,13 +1753,24 @@ fn score_agent_with(
 /// ones. A malformed final block or unequal return lengths is rejected loudly:
 /// silently truncating it would conceal a misaligned market-time axis.
 pub fn pooled_returns(sub: &AgentSubmission, seeds_per_window: usize) -> Vec<f64> {
+    window_tracks(sub, seeds_per_window).concat()
+}
+
+/// The same track as [`pooled_returns`], kept in the window segments it is
+/// concatenated from: one entry per window, already averaged over that window's
+/// execution replicates.
+///
+/// `pooled_returns` is defined as the concatenation of this, so the two cannot
+/// disagree about where a window ends. That matters because a predicate asked of
+/// the concatenation alone cannot see a boundary: a track whose every window is
+/// constant at its own level looks like a track that varies. Callers that decide
+/// whether a track has a Sharpe ratio ask
+/// [`sharpebench_stats::deflated_sharpe::observed_sharpe_ratio_of_windows`] with
+/// these segments rather than asking the flat series.
+pub fn window_tracks(sub: &AgentSubmission, seeds_per_window: usize) -> Vec<Vec<f64>> {
     let width = seeds_per_window.max(1);
     if width == 1 {
-        return sub
-            .runs
-            .iter()
-            .flat_map(|r| r.returns.iter().copied())
-            .collect();
+        return sub.runs.iter().map(|r| r.returns.clone()).collect();
     }
     assert!(
         sub.runs.len().is_multiple_of(width),
@@ -1748,17 +1780,24 @@ pub fn pooled_returns(sub: &AgentSubmission, seeds_per_window: usize) -> Vec<f64
     );
     sub.runs
         .chunks_exact(width)
-        .flat_map(|replicates| {
+        .map(|replicates| {
             let len = replicates.first().map_or(0, |r| r.returns.len());
             assert!(
                 replicates.iter().all(|r| r.returns.len() == len),
                 "execution replicates in one window must have equal return lengths"
             );
-            (0..len).map(move |t| {
-                replicates.iter().map(|r| r.returns[t]).sum::<f64>() / replicates.len() as f64
-            })
+            (0..len)
+                .map(|t| {
+                    replicates.iter().map(|r| r.returns[t]).sum::<f64>() / replicates.len() as f64
+                })
+                .collect()
         })
         .collect()
+}
+
+/// Borrowed view of [`window_tracks`], the shape the windowed refusal takes.
+fn window_slices(tracks: &[Vec<f64>]) -> Vec<&[f64]> {
+    tracks.iter().map(Vec::as_slice).collect()
 }
 
 /// Restrict a field to the run positions every non-empty submission completed —
@@ -1810,7 +1849,7 @@ pub(crate) fn restrict_to_shared_positions(subs: &[AgentSubmission]) -> Vec<Agen
 /// sorted before summing so the submission order of the field cannot move the
 /// deflation bar by an ULP.
 ///
-/// Qualification is [`observed_sharpe_ratio`], the same predicate the kernel
+/// Qualification is [`observed_sharpe_ratio_of_windows`], the same predicate the kernel
 /// refuses a track's own deflation on, not `sharpe_ratio().is_finite()`. The
 /// two differ exactly on the tracks that have no Sharpe: an all-zero track took
 /// the zero-variance sentinel and voted 0, and a constant nonzero track voted
@@ -1835,16 +1874,19 @@ pub(crate) fn restrict_to_shared_positions(subs: &[AgentSubmission]) -> Vec<Agen
 /// result is order-independent; a field with no clones is all singletons and
 /// measures byte for byte as it would without the collapse.
 fn measured_trials_sr_std(
-    pooled: &[Vec<f64>],
+    tracks: &[Vec<Vec<f64>>],
     min_field: usize,
     dedup_clones: bool,
 ) -> Option<f64> {
-    let qualifying: Vec<(&[f64], f64)> = pooled
+    let qualifying: Vec<(Vec<f64>, f64)> = tracks
         .iter()
-        .filter_map(|p| Some((p.as_slice(), observed_sharpe_ratio(p).ok()?)))
+        .filter_map(|t| {
+            let sharpe = observed_sharpe_ratio_of_windows(&window_slices(t)).ok()?;
+            Some((t.concat(), sharpe))
+        })
         .collect();
     let mut sharpes: Vec<f64> = if dedup_clones {
-        let streams: Vec<Vec<f64>> = qualifying.iter().map(|(p, _)| p.to_vec()).collect();
+        let streams: Vec<Vec<f64>> = qualifying.iter().map(|(p, _)| p.clone()).collect();
         clone_clusters(&streams, CLONE_COLLAPSE_COSINE, false)
             .iter()
             .map(|members| {
@@ -1968,10 +2010,11 @@ pub fn rank_declared(
 
     // Pooled returns per agent + an equal-weight market proxy (the field average),
     // used for performance attribution: alpha (skill) vs beta (market exposure).
-    let pooled: Vec<Vec<f64>> = field
+    let tracks: Vec<Vec<Vec<f64>>> = field
         .iter()
-        .map(|s| pooled_returns(s, rank_cfg.execution_seeds_per_window))
+        .map(|s| window_tracks(s, rank_cfg.execution_seeds_per_window))
         .collect();
+    let pooled: Vec<Vec<f64>> = tracks.iter().map(|t| t.concat()).collect();
     let min_len = pooled.iter().map(Vec::len).min().unwrap_or(0);
     let n_agents = pooled.len().max(1) as f64;
     let market: Vec<f64> = (0..min_len)
@@ -2000,7 +2043,7 @@ pub fn rank_declared(
     // annualized and needs converting. A small field scores exactly as
     // `score_agent` would, so the configured path stays byte-identical.
     let defl = measured_trials_sr_std(
-        &pooled,
+        &tracks,
         cfg.min_field_for_measured_sr_std,
         cfg.dedup_clones_for_measured_sr_std,
     )
@@ -2138,7 +2181,7 @@ pub fn rank_declared(
     // on all three is not optimal. An empty track has no return to compare and
     // dominates nobody. `pooled` is in field order, as `scores` still is before
     // the sort below.
-    let member: Vec<bool> = pooled.iter().map(|p| !has_no_sharpe_ratio(p)).collect();
+    let member: Vec<bool> = tracks.iter().map(|t| !has_no_sharpe_ratio(t)).collect();
     let pareto: Vec<bool> = (0..scores.len())
         .map(|i| {
             member[i]
@@ -3228,6 +3271,54 @@ mod tests {
             s.confidence_weighted_return,
             s.raw_mean_return
         );
+    }
+
+    /// S4: a confidence is a probability, and the weight has to treat it as one.
+    /// `brier_score` already clamps the same numbers to `[0, 1]`, so without
+    /// this the two legs that read `Run::confidences` disagreed about what the
+    /// field means, and an unbounded weight let one run's mean return stand in
+    /// for the whole submission's.
+    #[test]
+    fn a_confidence_outside_zero_to_one_weighs_no_more_than_one_that_is_inside() {
+        let weighted = |best: f64, worst: f64| {
+            let mut win = run(0.01, 0.0005, 30);
+            win.confidences = vec![best; 30];
+            let mut lose = run(-0.005, 0.0005, 30);
+            lose.confidences = vec![worst; 30];
+            score_agent(&agent("conv", vec![win, lose]), &ScoreConfig::default())
+                .confidence_weighted_return
+        };
+
+        assert_eq!(
+            weighted(1e6, 0.1),
+            weighted(1.0, 0.1),
+            "a confidence above 1 must weigh exactly as much as full conviction"
+        );
+        assert_eq!(
+            weighted(0.9, -1e6),
+            weighted(0.9, 0.0),
+            "a confidence below 0 must weigh exactly as little as none"
+        );
+    }
+
+    /// The weight is conviction against the run's realized return. It is not
+    /// the calibration pairing, which is `brier_score`'s, so stating the
+    /// outcomes beside the same confidences must not move it.
+    #[test]
+    fn stating_outcomes_does_not_move_the_conviction_weight() {
+        let weighted = |outcomes: Vec<bool>| {
+            let mut win = run(0.01, 0.0005, 30);
+            win.confidences = vec![0.9; 30];
+            win.outcomes = outcomes.clone();
+            let mut lose = run(-0.005, 0.0005, 30);
+            lose.confidences = vec![0.1; 30];
+            lose.outcomes = outcomes;
+            score_agent(&agent("conv", vec![win, lose]), &ScoreConfig::default())
+                .confidence_weighted_return
+        };
+
+        assert_eq!(weighted(Vec::new()), weighted(vec![true; 30]));
+        assert_eq!(weighted(Vec::new()), weighted(vec![false; 30]));
     }
 
     #[test]

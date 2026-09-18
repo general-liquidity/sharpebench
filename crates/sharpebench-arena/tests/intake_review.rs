@@ -410,8 +410,9 @@ fn a_reference_commitment_admits_only_the_named_reference_agent() {
 }
 
 /// F1-4: an entry that does not open the agent's commitment is refused alone;
-/// the honest reveal beside it is ranked. A copy that opens the commitment
-/// with other decisions is refused on re-execution, also alone.
+/// the honest reveal beside it is ranked. A copy carrying the honest salt and
+/// other decisions arrives after the commitment is already open, so it is
+/// refused there, also alone.
 #[test]
 fn a_forged_entry_is_refused_alone() {
     let dir = temp_dir("forged");
@@ -448,18 +449,20 @@ fn a_forged_entry_is_refused_alone() {
     let reasons = refusals(&arena, "alpha");
     assert_eq!(reasons.len(), 2, "{reasons:?}");
     assert_eq!(reasons[0], "reveal does not match commitment");
-    assert!(
-        reasons[1].starts_with("re-execution diverged"),
-        "{reasons:?}"
+    assert_eq!(
+        reasons[1],
+        "commitment already revealed; one commitment opens once"
     );
     assert_eq!(window_json(&dir)["certifying"], true);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// F1-4: without re-execution nothing tells two admissible entries for one
-/// agent apart, so both are refused; identical copies rank once.
+/// F1-4, as S1 amended it: one commitment admits one entry, and the refusal
+/// falls on the reveal that arrives second rather than on both. A pre-image is
+/// public once it is revealed, so refusing both let a rival who committed
+/// nothing delete the entrant's row by appending a copy.
 #[test]
-fn admissible_entries_that_differ_are_refused_and_identical_copies_rank_once() {
+fn a_second_reveal_of_one_commitment_is_refused_and_the_first_still_ranks() {
     let data = market(1);
     let (reference, digest) = image("committed");
     let entrant = format!("sandbox:{reference}");
@@ -476,14 +479,11 @@ fn admissible_entries_that_differ_are_refused_and_identical_copies_rank_once() {
             ],
         )
         .unwrap();
-    assert!(scores.is_empty());
+    assert_eq!(scores.len(), 1);
+    assert_eq!(scores[0].agent_id, "alpha");
     assert_eq!(
         refusals(&arena, "alpha"),
-        vec![
-            "revealed 2 admissible entries that differ; one commitment admits one entry"
-                .to_string();
-            2
-        ]
+        ["commitment already revealed; one commitment opens once"]
     );
     let _ = std::fs::remove_dir_all(&dir);
 
@@ -496,7 +496,7 @@ fn admissible_entries_that_differ_are_refused_and_identical_copies_rank_once() {
     assert_eq!(scores.len(), 1);
     assert_eq!(
         refusals(&arena, "alpha"),
-        ["an identical copy of this agent's admitted entry; ranked once"]
+        ["commitment already revealed; one commitment opens once"]
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -589,5 +589,53 @@ fn a_faulted_window_does_not_ask_the_launcher_to_be_ready() {
         .unwrap();
     assert!(scores.is_empty());
     assert!(refusals(&arena, "alpha")[0].starts_with("no capture path applies a fault plan"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A board that ranked nothing must not carry the mark that says its rows were
+/// re-executed. `board_certifies` was vacuously true on an empty field, so a
+/// window where every entry was refused signed `certifying: true` with zero
+/// rows and `board.md` opened with no notice. Found from the SharpeArena side,
+/// where every forward entry is refused under the default intake, which makes
+/// the empty board the expected outcome of a documented workflow rather than a
+/// corner case.
+#[test]
+fn a_board_that_ranked_nothing_does_not_certify() {
+    let dir = temp_dir("ranked-nothing");
+    let data = market(1);
+    let (_, digest) = image("committed");
+    let (mut arena, dataset) = committed(&dir, &data, &[("alpha", &digest)], None);
+    // Supplied returns are refused under the default intake, so the field is
+    // empty and every entry is on the refusals list.
+    let entry = RevealedEntry {
+        agent_id: Some("alpha".to_string()),
+        submission: Some(sharpebench_core::AgentSubmission {
+            agent_id: "alpha".to_string(),
+            runs: Vec::new(),
+            in_sample_trials: 0,
+            candidates: Vec::new(),
+        }),
+        capture: None,
+        artifact_digest: digest,
+        salt: salt("alpha"),
+        fault_plan_sha256: None,
+    };
+    let scores = arena.reveal_and_score(WINDOW, &dataset, &[entry]).unwrap();
+    assert!(scores.is_empty());
+    assert_eq!(refusals(&arena, "alpha").len(), 1);
+
+    assert_eq!(arena.window(WINDOW).unwrap().certifying, Some(false));
+    assert_eq!(window_json(&dir)["certifying"], false);
+    arena.publish(WINDOW, &SigningKey::derive(b"k")).unwrap();
+    assert_eq!(header_json(&dir)["certifying"], false);
+    let md = board_md(&dir);
+    assert!(
+        md.contains("**Noncertifying board.**"),
+        "a board with no rows must say so: {md}"
+    );
+    assert!(
+        md.contains("The board ranked no rows."),
+        "the notice must name the reason, not open a list with nothing under it: {md}"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

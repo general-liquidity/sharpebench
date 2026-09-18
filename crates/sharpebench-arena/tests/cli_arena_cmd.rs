@@ -378,11 +378,11 @@ fn supplied_returns_are_ranked_only_under_the_explicit_flag() {
     let md = std::fs::read_to_string(arena_dir.join("windows").join("flagged").join("board.md"))
         .unwrap();
     assert!(md.contains("**Noncertifying board.**"), "{md}");
-    // `plain` ranked nothing, so its board certifies vacuously.
+    // `plain` ranked nothing, so it has no rows to certify and says so.
     let plain_md =
         std::fs::read_to_string(arena_dir.join("windows").join("plain").join("board.md")).unwrap();
-    assert!(!plain_md.contains("Noncertifying"), "{plain_md}");
-    assert_eq!(window_json(dir, "plain")["certifying"], true);
+    assert!(plain_md.contains("**Noncertifying board.**"), "{plain_md}");
+    assert_eq!(window_json(dir, "plain")["certifying"], false);
     assert_eq!(flagged["certifying"], false, "{flagged}");
     assert_eq!(arena_cmd::run(&argv(&["verify", dir]), true), 0);
     let _ = std::fs::remove_dir_all(&root);
