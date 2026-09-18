@@ -668,7 +668,7 @@ fn help() {
         "  sharpebench timing-luck --cadence <m> [--data <csv>] [--periods-per-year N]  how far run's reference rows move when they rebalance every m bars and only the schedule phase moves (rank-neutral)"
     );
     println!(
-        "  sharpebench lineage <strategy-evidence.json>                   verify Arena candidate ancestry, sources, and within-family robustness"
+        "  sharpebench lineage <strategy-evidence.json> [--census] [--dataset <prices.csv>]...  verify Arena candidate ancestry, sources, and within-family robustness; --census counts test-split reads across a journal"
     );
     println!(
         "  sharpebench arena <init|open|commit|advance|score|publish|verify> ...  drive a forward-attested scoring window (see docs/book/src/arena.md)"
