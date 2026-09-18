@@ -21,7 +21,7 @@ use sharpebench_protocol::AgentTrajectory;
 use sharpebench_sim::replay_nulls::{
     lagged_replay, timing_null, LaggedAggregate, LaggedReplayReport, LaggedRun,
     LaggedRunUnavailable, ReplayNullRefusal, RunTimingNull, TimingNullAggregate, TimingNullConfig,
-    TimingNullReport, TimingNullUnavailable, MAX_TIMING_NULL_DRAWS, VALID_WHEN,
+    TimingNullReport, TimingNullUnavailable, TimingPercentile, MAX_TIMING_NULL_DRAWS, VALID_WHEN,
 };
 use sharpebench_sim::{CostModel, Dataset};
 
@@ -200,6 +200,22 @@ fn placements(count: u64) -> String {
     }
 }
 
+/// What the percentile's resolution column says. A plug-in standard error where
+/// the draws had spread, and the exact one-sided 95% bound where every draw fell
+/// on one side, because the plug-in estimate reads zero there for a quantity
+/// that is not known exactly.
+fn resolution(reference: &TimingPercentile) -> String {
+    match (
+        reference.monte_carlo_standard_error,
+        reference.one_sided_95_bound,
+    ) {
+        (Some(se), _) => format!("+/- {se:.3}"),
+        (None, Some(bound)) if reference.percentile > 0.5 => format!(">= {bound:.4}"),
+        (None, Some(bound)) => format!("<= {bound:.4}"),
+        (None, None) => "every draw tied".to_string(),
+    }
+}
+
 fn print_diagnostics(diagnostics: &ReplayDiagnostics) {
     println!(
         "
@@ -213,7 +229,7 @@ Replay diagnostics (rank-neutral: the gate and the rank never read them)"
             report.draws, report.seed
         );
         println!(
-            "  {:>4}  {:>11}  {:>9}  {:>8}  {:>11}  {:>10}  {:>8}  {:>20}",
+            "  {:>4}  {:>11}  {:>9}  {:>8}  {:>11}  {:>10}  {:>12}  {:>20}  {:>7}",
             "run",
             "window",
             "invested",
@@ -221,7 +237,8 @@ Replay diagnostics (rank-neutral: the gate and the rank never read them)"
             "entrant SR",
             "percentile",
             "MC s.e.",
-            "distinct placements"
+            "distinct placements",
+            "max pct"
         );
         for run in &report.runs {
             match run {
@@ -233,14 +250,15 @@ Replay diagnostics (rank-neutral: the gate and the rank never read them)"
                     entrant_sharpe,
                     reference,
                     distinct_placements,
+                    max_attainable_percentile,
                     ..
                 } => println!(
-                    "  {run:>4}  {:>11}  {:>9}  {:>8}  {entrant_sharpe:>11.4}  {:>10.3}  {:>8.3}  {:>20}",
+                    "  {run:>4}  {:>11}  {:>9}  {:>8}  {entrant_sharpe:>11.4}  {:>10.3}  {:>12}  {:>20}  {max_attainable_percentile:>7.3}",
                     format!("[{window_start}, {window_end})"),
                     format!("{}/{}", exposure.invested_bars, exposure.bars),
                     exposure.holding_periods,
                     reference.percentile,
-                    reference.monte_carlo_standard_error,
+                    resolution(reference),
                     placements(*distinct_placements)
                 ),
                 RunTimingNull::Unavailable {
@@ -256,9 +274,9 @@ Replay diagnostics (rank-neutral: the gate and the rank never read them)"
                 entrant_mean_sharpe,
                 reference,
             } => println!(
-                "  across {runs} runs: mean Sharpe {entrant_mean_sharpe:.4} sits at percentile {:.3} (MC s.e. {:.3}) of {} draws (reference mean {:.4})",
+                "  across {runs} runs: mean Sharpe {entrant_mean_sharpe:.4} sits at percentile {:.3} ({}) of {} draws (reference mean {:.4})",
                 reference.percentile,
-                reference.monte_carlo_standard_error,
+                resolution(reference),
                 reference.draws,
                 reference.reference_mean_sharpe
             ),

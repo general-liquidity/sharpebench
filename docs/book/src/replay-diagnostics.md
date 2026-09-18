@@ -56,12 +56,32 @@ for each run.
 Each percentile comes with its Monte Carlo standard error: every draw scores 1,
 1/2 or 0, and the error is the standard deviation of those scores over the
 square root of the draw count. At 200 draws it is about 0.035 near the middle
-and 0.015 near 0.05. It reads zero when every draw falls on one side; the
-resolution there is one over the draw count. Each run also reports its number of
-distinct placements: the distinct orders of its holding periods (periods with
-the same orders count once) times the `C(F + 1, c)` ways to spread `F` flat bars
-around `c` periods, saturating at `u64::MAX`. A run with one period and one flat
-bar has two. When the count is not far above the draw count, draws repeat.
+and 0.015 near 0.05.
+
+When every draw falls on one side the scores have no spread, so that estimate
+reads zero for a quantity nobody knows exactly. The report withholds it there
+(`monte_carlo_standard_error` is `null`) and gives `one_sided_95_bound`
+instead. With `n` independent draws all below the entrant, a true percentile
+`p` produces that observation with probability `p^n`, which reaches 0.05 at
+`p = 0.05^(1/n)`, so that value is the largest percentile the observation rules
+out at the 5% level. At 200 draws it is 0.9851 below and 0.0149 above. This is
+the Clopper-Pearson bound at a saturated count, in closed form. The zero it
+replaces was not conservative: a true percentile of 0.99 puts all 200 draws
+below 13.4% of the time, and the binomial standard error at 0.9851 is 0.0095.
+
+Each run also reports its number of distinct placements: the distinct orders of
+its holding periods (periods with the same orders count once) times the
+`C(F + 1, c)` ways to spread `F` flat bars around `c` periods, saturating at
+`u64::MAX`. Read the percentile against that count rather than against 0.95.
+The draws are uniform over the distinct placements and the entrant's own layout
+is one of them, so at least one placement ties with the entrant, the mid-rank
+percentile lives on a grid of `1 / (2K)` steps, and it cannot pass
+`1 - 1 / (2K)`. `max_attainable_percentile` carries that number. A run with one
+holding period and one flat bar has two placements and tops out at 0.75,
+whatever its timing; 0.95 needs ten placements. When the count is not far above
+the draw count, draws repeat, and when it is at or below the draw count the
+percentile is exactly enumerable in `K` replays, so the sampling error the
+report quotes is avoidable rather than inherent.
 
 The report also carries, for every run, the exposure profile (bars, invested
 bars, holding periods, longest holding period, mean gross exposure when

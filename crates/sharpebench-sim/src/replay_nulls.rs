@@ -556,9 +556,29 @@ pub struct TimingPercentile {
     pub percentile: f64,
     /// Plug-in Monte Carlo standard error of `percentile` over the draws:
     /// each draw scores 1, 1/2 or 0, and this is the standard deviation of
-    /// those scores over the square root of `draws`. It is zero when every
-    /// draw falls on one side, where the resolution is `1 / draws`.
-    pub monte_carlo_standard_error: f64,
+    /// those scores over the square root of `draws`.
+    ///
+    /// `None` when every draw scored the same, where the plug-in estimate is
+    /// degenerate and reads zero for a quantity that is not known exactly. At
+    /// 200 draws all below, the exact 95% lower bound on the percentile is
+    /// 0.9851 and the binomial standard error there is 0.0095, so zero
+    /// understates it without limit; a true percentile of 0.99 puts every one
+    /// of 200 draws below 13.4% of the time. [`one_sided_95_bound`] carries the
+    /// exact statement instead.
+    ///
+    /// [`one_sided_95_bound`]: Self::one_sided_95_bound
+    pub monte_carlo_standard_error: Option<f64>,
+    /// The exact 95% one-sided bound on the percentile when every draw fell on
+    /// one side of the entrant, and `None` otherwise.
+    ///
+    /// `draws` independent draws all land below the entrant with probability
+    /// `p^draws`, which is 0.05 at `p = 0.05^(1 / draws)`, so that is the
+    /// largest percentile the observation rules out at the 5% level: the bound
+    /// is a lower one when every draw is below and an upper one when every draw
+    /// is above. At 200 draws it is 0.9851 and 0.0149. No approximation is
+    /// involved and it needs no incomplete beta: this is the Clopper-Pearson
+    /// bound at a saturated count, in closed form.
+    pub one_sided_95_bound: Option<f64>,
     pub reference_mean_sharpe: f64,
 }
 
@@ -570,12 +590,20 @@ impl TimingPercentile {
         let percentile = (below as f64 + ties as f64 / 2.0) / draws;
         let second_moment = (below as f64 + ties as f64 / 4.0) / draws;
         let variance = (second_moment - percentile * percentile).max(0.0);
+        // Every draw scored the same, so the scores have no spread to plug in.
+        let degenerate = variance == 0.0;
+        let saturated = 0.05_f64.powf(1.0 / draws);
         Self {
             draws: reference.len(),
             below,
             ties,
             percentile,
-            monte_carlo_standard_error: (variance / draws).sqrt(),
+            monte_carlo_standard_error: (!degenerate).then(|| (variance / draws).sqrt()),
+            one_sided_95_bound: match (below, ties) {
+                (b, 0) if b == reference.len() && b > 0 => Some(saturated),
+                (0, 0) if !reference.is_empty() => Some(1.0 - saturated),
+                _ => None,
+            },
             reference_mean_sharpe: mean(reference),
         }
     }
@@ -600,6 +628,17 @@ pub enum RunTimingNull {
         /// to spread the flat bars. It saturates at `u64::MAX`. When it is
         /// not far above `draws`, the draws repeat placements.
         distinct_placements: u64,
+        /// The largest mid-rank percentile this run can reach,
+        /// `1 - 1 / (2 * distinct_placements)`.
+        ///
+        /// The draws are uniform over the distinct placements and the entrant's
+        /// own layout is one of them, so at least one placement always ties with
+        /// the entrant and the percentile lives on a grid of `1 / (2K)` steps
+        /// bounded by this. A run with one holding period and one flat bar has
+        /// two placements and cannot report above 0.75 however well it timed,
+        /// and 0.95 is out of reach below ten placements. Read the percentile
+        /// against this rather than against 0.95.
+        max_attainable_percentile: f64,
         /// Mean invested bars per draw as the engine executed them. It equals
         /// the entrant's invested bars except where a moved order meets a close
         /// that is not positive, or a trade value below the engine's `1e-9`
@@ -929,6 +968,7 @@ fn run_timing_null(
             entrant_sharpe,
             reference: TimingPercentile::of(entrant_sharpe, &reference),
             distinct_placements: placements,
+            max_attainable_percentile: 1.0 - 1.0 / (2.0 * placements as f64),
             reference_mean_invested_bars: invested_bars as f64 / config.draws as f64,
         },
         reference: Some((entrant_sharpe, reference)),
@@ -1080,6 +1120,27 @@ mod tests {
         }
     }
 
+    /// What a percentile can reach when the placement space is small.
+    ///
+    /// The draws are uniform over the distinct placements and the entrant's own
+    /// layout is one of them, so at least one placement ties and the mid-rank
+    /// percentile lives on a grid of `1 / (2K)` steps capped at `1 - 1 / (2K)`.
+    #[test]
+    fn the_placement_space_caps_the_percentile() {
+        let ceiling = |k: u64| 1.0 - 1.0 / (2.0 * k as f64);
+        // A run with one holding period and one flat bar has two placements and
+        // cannot report above 0.75, however well it timed.
+        assert_eq!(distinct_placements(&[&period(&[1.0])], 2), 2);
+        assert_eq!(ceiling(2), 0.75);
+        // 0.95 needs ten placements, and nine do not reach it.
+        assert!(ceiling(9) < 0.95);
+        assert_eq!(ceiling(10), 0.95);
+        // The reported field is that arithmetic on the reported count.
+        for k in [2_u64, 3, 10, 1_000] {
+            assert!((ceiling(k) - (1.0 - 1.0 / (2.0 * k as f64))).abs() < 1e-15);
+        }
+    }
+
     #[test]
     fn a_layout_draws_every_placement_about_equally_often() {
         // Two one-bar periods in four bars have three placements of the flat
@@ -1117,16 +1178,57 @@ mod tests {
         assert_eq!(placed.reference_mean_sharpe, 1.125);
         // Scores 1, 1/2, 1/2, 0: plug-in variance 1/8, standard error
         // sqrt(1/8 / 4) = sqrt(2) / 8 (checked with sympy).
-        assert!((placed.monte_carlo_standard_error - 2f64.sqrt() / 8.0).abs() < 1e-15);
+        let se = placed
+            .monte_carlo_standard_error
+            .expect("the draws had spread");
+        assert!((se - 2f64.sqrt() / 8.0).abs() < 1e-15);
+        assert_eq!(placed.one_sided_95_bound, None);
         // Without ties it is sqrt(p (1 - p) / n): p = 2/5, n = 5, sqrt(30) / 25.
         let untied = TimingPercentile::of(1.0, &[0.5, 0.7, 2.0, 3.0, 4.0]);
         assert_eq!(untied.percentile, 0.4);
-        assert!((untied.monte_carlo_standard_error - 30f64.sqrt() / 25.0).abs() < 1e-15);
+        let se = untied.monte_carlo_standard_error.expect("spread");
+        assert!((se - 30f64.sqrt() / 25.0).abs() < 1e-15);
+    }
+
+    /// Every draw on one side: the plug-in estimate is degenerate and is
+    /// withheld, and the exact one-sided bound is reported in its place.
+    ///
+    /// The plug-in read 0.000 there, which is the case the diagnostic exists to
+    /// flag. With `n` independent draws all below the entrant, a true percentile
+    /// `p` produces that observation with probability `p^n`, so the largest `p`
+    /// the observation rules out at the 5% level is `0.05^(1/n)`. That is the
+    /// Clopper-Pearson bound at a saturated count, in closed form.
+    #[test]
+    fn a_saturated_percentile_reports_an_exact_bound_and_no_plug_in_error() {
         for (value, percentile) in [(3.0, 1.0), (0.0, 0.0)] {
             let edge = TimingPercentile::of(value, &[0.5, 2.0]);
             assert_eq!(edge.percentile, percentile);
-            assert_eq!(edge.monte_carlo_standard_error, 0.0);
+            assert_eq!(edge.monte_carlo_standard_error, None);
+            let bound = edge.one_sided_95_bound.expect("saturated");
+            // 0.05^(1/2) = sqrt(0.05) = 0.223607.
+            let expected = if percentile > 0.5 {
+                0.05_f64.sqrt()
+            } else {
+                1.0 - 0.05_f64.sqrt()
+            };
+            assert!((bound - expected).abs() < 1e-15, "{bound}");
         }
+
+        // At the shipped 200 draws the bound is 0.985133, where the binomial
+        // standard error is 0.0095: the withheld zero understated it without
+        // limit. A percentile of 0.99 saturates 200 draws 13.4% of the time.
+        let saturated = TimingPercentile::of(1.0, &vec![0.0_f64; 200]);
+        assert_eq!(saturated.percentile, 1.0);
+        assert_eq!(saturated.monte_carlo_standard_error, None);
+        let bound = saturated.one_sided_95_bound.expect("saturated");
+        assert!((bound - 0.985_133_1).abs() < 1e-6, "{bound}");
+        assert!((0.99_f64.powi(200) - 0.134).abs() < 0.001);
+
+        // Every draw tied with the entrant: no spread and no one-sided claim.
+        let tied = TimingPercentile::of(1.0, &[1.0, 1.0, 1.0]);
+        assert_eq!(tied.percentile, 0.5);
+        assert_eq!(tied.monte_carlo_standard_error, None);
+        assert_eq!(tied.one_sided_95_bound, None);
     }
 
     fn period(weights: &[f64]) -> Vec<Decision> {

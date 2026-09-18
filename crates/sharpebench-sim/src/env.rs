@@ -21,6 +21,12 @@ const WARMUP: usize = 20;
 /// during the step (fills, sim-exploitation guards, captured rationale).
 pub struct StepInfo {
     pub nav: f64,
+    /// Financing and short borrow charged at this step's close, on the book this
+    /// step left. `nav` is already net of it. That book is the one held over the
+    /// next bar, so `nav + carry` is the base its return is measured against;
+    /// reporting the charge is what lets a caller rebuild that base rather than
+    /// infer it from the cost model.
+    pub carry: f64,
     pub events: Vec<ProcessEvent>,
 }
 
@@ -111,6 +117,7 @@ impl TradingEnv {
             done,
             info: StepInfo {
                 nav: nav_after,
+                carry: self.book.prev_carry,
                 events,
             },
         }

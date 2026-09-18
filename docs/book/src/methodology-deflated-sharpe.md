@@ -87,11 +87,25 @@ or unequal seed blocks are rejected rather than truncated.
 When `rank` has a field of at least `min_field_for_measured_sr_std` agents whose
 pooled track **has a Sharpe ratio** it *measures* the dispersion of per-period
 Sharpes across the field instead of using the prior. Qualification is
-`observed_sharpe_ratio`, the same refusal the kernel applies to a track's own
-deflation, so a constant track does not vote at any value: `sharpe_ratio` would
-hand an all-zero track the zero-variance sentinel 0.0 and a constant nonzero
-track the roughly 1e15 its rounded mean leaves, and one such entrant could set
-the deflation bar for the whole panel. An excluded agent is still scored, still
+`observed_sharpe_ratio_of_windows`, the same refusal the kernel applies to a
+track's own deflation, so a constant track does not vote at any value:
+`sharpe_ratio` would hand an all-zero track the zero-variance sentinel 0.0 and a
+constant nonzero track the roughly 1e15 its rounded mean leaves, and one such
+entrant could set the deflation bar for the whole panel.
+
+The refusal reads the window segments, not only the concatenation. A track whose
+every window is constant at its own level pools into a series that varies, so the
+concatenation alone cannot tell it apart from a track that moves: two thirty-bar
+windows at 0.001 and 0.002 reach a per-period Sharpe of 2.97, about 47
+annualized, from a track no bar of which ever moved. On a seven-agent field with
+a measured annualized bar of 1.3692, adding one such entrant took the bar to
+36.7192 and every honest deflated Sharpe to exactly zero while the entrant
+scored 1.0000, so this is the same class as the sock-puppet flood the clone
+collapse answers and it reaches the bar by a different route. Asking the
+question of each window closes that route: a submission qualifies only when at
+least one of its windows varies inside itself. A window that never traded is not
+on its own a refusal, because an agent that stands aside in one regime and
+trades in another is measured on the window that moves. An excluded agent is still scored, still
 ranked and still refused on its own terms. The exclusion runs before the clone
 collapse and before the field-size test, so a field that drops below
 `min_field_for_measured_sr_std` once such tracks are removed falls back to the

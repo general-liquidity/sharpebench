@@ -124,7 +124,7 @@ pub use forecast::{
     CalibrationBin, CommonSupport, ConfidenceCalibration, ContractDigestEncodingMismatch,
     ContractDigestVersion, DistributionCalibration, ForecastAnalysisConfig, ForecastContractPlan,
     ForecastError, ForecastEvidence, ForecastQualityReport, MetricMean, PairwiseForecastComparison,
-    SettlementStatusDisagreement, SupportGap,
+    SettlementStatusDisagreement, SupportGap, FAMILYWISE_SIZE_RULE,
 };
 pub use greeks::{
     bs_greeks, bs_price, classify_greeks_risk, classify_payoff_tail, portfolio_greeks, Greeks,
