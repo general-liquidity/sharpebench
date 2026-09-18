@@ -251,7 +251,12 @@ fn genuine_timing_skill_ranks_above_every_random_placement() {
             panic!("panel {panel}: {report:?}");
         };
         assert_eq!(reference.below, 200, "panel {panel}");
-        assert_eq!(reference.monte_carlo_standard_error, 0.0);
+        // Every draw fell below, so the plug-in estimate has no spread to read
+        // and is withheld rather than reported as an exact zero. The exact 95%
+        // one-sided bound is 0.05^(1/200) = 0.985133.
+        assert_eq!(reference.monte_carlo_standard_error, None, "panel {panel}");
+        let bound = reference.one_sided_95_bound.expect("every draw fell below");
+        assert!((bound - 0.985_133).abs() < 1e-6, "panel {panel}: {bound}");
         assert!(*entrant_sharpe > reference.reference_mean_sharpe);
         assert!(*distinct_placements > 1_000_000, "{distinct_placements}");
         // Without a liquidity cap or execution noise every draw holds for

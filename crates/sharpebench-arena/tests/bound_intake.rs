@@ -894,7 +894,7 @@ fn entries_that_cannot_be_ranked_are_refused_and_recorded() {
             &[both, neither, renamed, twice.clone(), twice, supplied],
         )
         .unwrap();
-    // The two identical copies of `twice` rank once.
+    // The second copy of `twice` finds the commitment already open, so it ranks once.
     let ranked: Vec<&str> = scores.iter().map(|s| s.agent_id.as_str()).collect();
     assert_eq!(ranked, ["twice"]);
     let w = arena.window(WINDOW).unwrap();
@@ -911,7 +911,7 @@ fn entries_that_cannot_be_ranked_are_refused_and_recorded() {
     );
     assert_eq!(
         refusal(&arena, "twice"),
-        "an identical copy of this agent's admitted entry; ranked once"
+        "commitment already revealed; one commitment opens once"
     );
     assert_eq!(refusal(&arena, "supplied"), SUPPLIED_RETURNS_REFUSAL);
     let _ = std::fs::remove_dir_all(&dir);

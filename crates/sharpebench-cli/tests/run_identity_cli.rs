@@ -82,15 +82,17 @@ fn long_csv(cells: &[(&str, &str, u64)]) -> String {
 #[test]
 fn import_carries_run_window_seed_and_period_identity_into_the_scored_field() {
     let fixture = Fixture::new();
-    // `mo` lists its cells in the opposite order to `bh`. Under positional
-    // alignment index 0 would be a different window for each agent.
+    // `mo` interleaves its cells differently to `bh` and reverses the seeds.
+    // Under positional alignment index 0 would be a different cell for each
+    // agent. Both still declare `w0` before `w1`, which is the field's time
+    // axis and the one part of the listing order that has to agree.
     fixture.write(
         "field.csv",
         &long_csv(&[
-            ("mo", "w1", 1),
-            ("mo", "w1", 0),
             ("mo", "w0", 1),
+            ("mo", "w1", 1),
             ("mo", "w0", 0),
+            ("mo", "w1", 0),
             ("bh", "w0", 0),
             ("bh", "w0", 1),
             ("bh", "w1", 0),
@@ -103,9 +105,9 @@ fn import_carries_run_window_seed_and_period_identity_into_the_scored_field() {
     let doc: serde_json::Value = serde_json::from_str(&fixture.read("subs.json")).unwrap();
     let keys = doc[0]["run_keys"].as_array().expect("run keys emitted");
     assert_eq!(keys.len(), 4);
-    assert_eq!(keys[0]["window"], "w1");
+    assert_eq!(keys[0]["window"], "w0");
     assert_eq!(keys[0]["seed"], 1);
-    assert_eq!(keys[0]["periods"][0], "t40");
+    assert_eq!(keys[0]["periods"][0], "t00");
     assert_eq!(keys[0]["periods"].as_array().unwrap().len(), 40);
 
     // The scorer accepts it and reorders both agents onto one cell order.

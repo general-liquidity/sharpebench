@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 
 use sharpebench_arena::{
     verify_arena, Arena, IntakeOptions, RevealedEntry, SigningKey, WindowState, WindowStatus,
-    BOARD_FILE, BOARD_MD_FILE, FAULTED_WINDOW_SCHEMA_VERSION, STATE_FILE, WINDOWS_DIR, WINDOW_FILE,
-    WINDOW_SCHEMA_VERSION,
+    BOARD_FILE, BOARD_MD_FILE, FAULTED_WINDOW_SCHEMA_VERSION, SCORED_FAULTED_WINDOW_SCHEMA_VERSION,
+    STATE_FILE, WINDOWS_DIR, WINDOW_FILE, WINDOW_SCHEMA_VERSION,
 };
 use sharpebench_attest::{
     content_digest, make_commitment, make_commitment_under_fault_plan, PublicChain,
@@ -219,7 +219,13 @@ fn a_faulted_window_binds_its_plan_through_to_the_signed_header() {
         .unwrap();
     let header = first_payload(&board);
     assert_eq!(header["fault_plan_sha256"], plan.as_str());
-    assert_eq!(header["schema_version"], FAULTED_WINDOW_SCHEMA_VERSION);
+    // Scored under the supplied-returns intake, so the record now says what its
+    // board means and carries the version a binary predating those fields
+    // refuses rather than strips.
+    assert_eq!(
+        header["schema_version"],
+        SCORED_FAULTED_WINDOW_SCHEMA_VERSION
+    );
     let md = std::fs::read_to_string(dir.join(WINDOWS_DIR).join("w1").join(BOARD_MD_FILE)).unwrap();
     assert!(md.contains(&plan), "{md}");
     assert!(verify_arena(&dir, None).unwrap().ok);

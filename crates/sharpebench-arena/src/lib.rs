@@ -78,12 +78,35 @@ pub const WINDOW_SCHEMA_VERSION: u32 = 2;
 /// window instead of loading it as unfaulted and dropping the digest on save.
 pub const FAULTED_WINDOW_SCHEMA_VERSION: u32 = 3;
 
-/// The schema a window must carry given whether it names a fault plan.
-fn expected_window_schema(fault_plan_sha256: Option<&str>) -> u32 {
-    if fault_plan_sha256.is_some() {
-        FAULTED_WINDOW_SCHEMA_VERSION
-    } else {
-        WINDOW_SCHEMA_VERSION
+/// Schema of a window that records what its board means: `certifying`,
+/// `supplied_returns_accepted`, `replay_dataset_sha256` or
+/// `returns_provenance`.
+///
+/// A binary built before those fields existed reads them as unknown keys,
+/// drops them, and would write the window back without them; `save` rewrites
+/// every window file, published ones included, so one rolled-back `advance`
+/// would strip the whole history. Three of the four are identity fields, so
+/// `verify_arena` would then fail on every published window with nothing in
+/// the code to undo it. That binary knows only [`WINDOW_SCHEMA_VERSION`] and
+/// [`FAULTED_WINDOW_SCHEMA_VERSION`], so it refuses this version instead.
+///
+/// The arena sets the version from the record whenever it writes one, and
+/// every one of these fields is skipped when it holds its default, so a window
+/// that records none of them keeps [`WINDOW_SCHEMA_VERSION`] and the bytes it
+/// always had.
+pub const SCORED_WINDOW_SCHEMA_VERSION: u32 = 4;
+
+/// [`SCORED_WINDOW_SCHEMA_VERSION`] for a window opened under a fault plan.
+pub const SCORED_FAULTED_WINDOW_SCHEMA_VERSION: u32 = 5;
+
+/// The schema a window must carry given whether it names a fault plan and
+/// whether it records what its board means.
+fn expected_window_schema(fault_plan_sha256: Option<&str>, records_score_meaning: bool) -> u32 {
+    match (fault_plan_sha256.is_some(), records_score_meaning) {
+        (false, false) => WINDOW_SCHEMA_VERSION,
+        (true, false) => FAULTED_WINDOW_SCHEMA_VERSION,
+        (false, true) => SCORED_WINDOW_SCHEMA_VERSION,
+        (true, true) => SCORED_FAULTED_WINDOW_SCHEMA_VERSION,
     }
 }
 
@@ -141,7 +164,13 @@ pub struct Refusal {
 }
 
 /// Persistent state of one evaluation window (`windows/<id>/window.json`).
+///
+/// Unknown fields are refused. A record written by a later release carries
+/// keys this binary would drop, and `save` rewrites every window file, so
+/// loading one and writing it back would silently strip what that release
+/// recorded. Refusing is recoverable; a stripped published window is not.
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct WindowState {
     /// Required schema discriminator. Opened windows never inherit a newer
     /// scorer's implicit serde defaults silently.
@@ -204,6 +233,41 @@ pub struct WindowState {
     /// published on the board rows. Omitted when empty.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub returns_provenance: BTreeMap<String, ReturnsProvenance>,
+}
+
+impl WindowState {
+    /// Whether this record carries any of the fields that decide what its
+    /// board means. See [`SCORED_WINDOW_SCHEMA_VERSION`], which is the version
+    /// such a record is written under.
+    ///
+    /// Destructured, so a field added to the record cannot be left out of the
+    /// judgement without a compile error.
+    fn records_score_meaning(&self) -> bool {
+        let Self {
+            schema_version: _,
+            id: _,
+            commit_deadline: _,
+            data_reveal_epoch: _,
+            status: _,
+            score_config: _,
+            score_config_sha256: _,
+            scorer_artifact_sha256: _,
+            sealed_eval_salt_sha256: _,
+            fault_plan_sha256: _,
+            commitments: _,
+            refusals: _,
+            dataset_hash: _,
+            replay_dataset_sha256,
+            supplied_returns_accepted,
+            certifying,
+            scores: _,
+            returns_provenance,
+        } = self;
+        replay_dataset_sha256.is_some()
+            || *supplied_returns_accepted
+            || certifying.is_some()
+            || !returns_provenance.is_empty()
+    }
 }
 
 /// One revealed entry at scoring time: the pre-image (artifact digest + salt)
@@ -607,7 +671,18 @@ impl Arena {
         self.root.join(WINDOWS_DIR).join(id)
     }
 
-    fn save(&self) -> Result<(), String> {
+    /// Write the arena state and every window record.
+    ///
+    /// The schema version each window is written under is a function of that
+    /// window, set here and nowhere else, so no caller can record what a board
+    /// means under a version that predates the fields saying it. A window that
+    /// records none of them is written exactly as it was before those fields
+    /// existed.
+    fn save(&mut self) -> Result<(), String> {
+        for w in self.windows.values_mut() {
+            w.schema_version =
+                expected_window_schema(w.fault_plan_sha256.as_deref(), w.records_score_meaning());
+        }
         write_json(&self.root.join(STATE_FILE), &self.state)?;
         for (id, w) in &self.windows {
             let dir = self.window_dir(id);
@@ -626,7 +701,7 @@ impl Arena {
         }
         std::fs::create_dir_all(dir.join(WINDOWS_DIR))
             .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
-        let arena = Self {
+        let mut arena = Self {
             root: dir.to_path_buf(),
             state: StateFile::default(),
             windows: BTreeMap::new(),
@@ -688,7 +763,8 @@ impl Arena {
         let mut windows = BTreeMap::new();
         for id in &state.window_order {
             let w = read_window_state(&dir.join(WINDOWS_DIR).join(id).join(WINDOW_FILE))?;
-            let expected_schema = expected_window_schema(w.fault_plan_sha256.as_deref());
+            let expected_schema =
+                expected_window_schema(w.fault_plan_sha256.as_deref(), w.records_score_meaning());
             if w.schema_version != expected_schema {
                 return Err(format!(
                     "window `{id}` uses schema {}, expected {expected_schema} for a window with {}",
@@ -873,7 +949,9 @@ impl Arena {
         self.windows.insert(
             id.to_string(),
             WindowState {
-                schema_version: expected_window_schema(fault_plan_sha256.as_deref()),
+                // An open window records nothing about a board yet; `save`
+                // re-derives this from the record before it is written.
+                schema_version: expected_window_schema(fault_plan_sha256.as_deref(), false),
                 id: id.to_string(),
                 commit_deadline,
                 data_reveal_epoch,
@@ -1185,6 +1263,9 @@ fn render_markdown(header: &WindowHeader, scores: &[CompositeScore], rows: &[Boa
     out.push_str(&format!("# Arena window `{}`\n\n", header.window_id));
     if header.certifying != Some(true) {
         out.push_str("**Noncertifying board.** Nothing on this board certifies that its rows were measured without hindsight:\n\n");
+        if rows.is_empty() {
+            out.push_str("- The board ranked no rows. Every entry was refused, so there is nothing here to certify.\n");
+        }
         if header.supplied_returns_accepted {
             out.push_str("- The window was scored with supplied returns allowed. A row marked `supplied` ranks returns its entrant delivered after the data reveal, which nothing ties to the committed artifact.\n");
         }

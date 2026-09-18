@@ -69,6 +69,15 @@ The scorer derives the execution-seed count from the validated key grid.
 An explicit `--execution-seeds-per-window` must agree with that count.
 Replicate seeds do not multiply the number of independent market periods.
 
+The order the windows are listed in is the field's time axis. The pooled track
+concatenates them as successive segments, so `max_drawdown` and
+`edge_half_life` are read off that order. A window identity is opaque and its
+spelling says nothing about when it ran, so the order comes from the
+submission: each agent declares it by the order it first names each window, and
+every agent must declare the same one. A field whose agents disagree is
+refused, naming both lists. Seeds within a window are replicates and are
+ordered numerically. Two agents may still interleave their cells differently.
+
 In a wide CSV with a period column, each return retains its own period ID.
 A missing return does not erase the column's date axis. Keyed scoring refuses
 columns whose retained periods differ, even if their lengths happen to match.
