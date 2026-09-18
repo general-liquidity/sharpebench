@@ -15,16 +15,38 @@ tampering without pretending to remove the host from the trust boundary.
    an operator-declared deadline (see [Forward attestation](attestation.md)). The
    commitment detects a later pre-image substitution; it does not prove wall
    time, data custody, or prior non-observation.
-3. **Boards are tamper-evident.** A published board is an HMAC-signed chain; a
+3. **Forward scores come from the committed artifact's recorded decisions.** A
+   forward window ranks returns it replays from a strict capture that names the
+   committed artifact, the revealed dataset and the window's execution matrix,
+   and each published row says so (`returns_provenance`). Replay does not show
+   the decisions were made without hindsight: anyone holding the revealed data
+   can record hindsight decisions that replay exactly. `arena score` therefore
+   re-executes the committed artifact by default (a pinned image or a reference
+   agent) and refuses a capture whose decisions it does not repeat. The signed
+   header marks a board `certifying` only when every ranked row was
+   re-executed. A board with a row ranked from replay alone
+   (`arena score --replay-only`) or from supplied returns
+   (`--allow-supplied-returns`) is signed noncertifying. A certifying row still
+   rests on the operator's custody of the data. See
+   [returns intake](arena.md#returns-intake).
+4. **Boards are tamper-evident.** A published board is an HMAC-signed chain; a
    silently edited or reordered result fails `verify`.
-4. **The benchmark exercises nine catalogued attacks.** `sharpebench audit`
-   checks that those fixtures are demoted. It is a regression suite over named
-   attacks, not a proof that no entrant can find another way to game the scorer.
+5. **The benchmark exercises ten catalogued attacks.** `sharpebench audit`
+   checks that those fixtures are demoted: nine against the scoring kernel,
+   which the WASM, npm and MCP `self_audit` surfaces also run, and a tenth,
+   `forward-hindsight-oracle`, a next-bar oracle delivered through the forward
+   arena, which needs the simulator and the arena and runs in the CLI only. That
+   case first shows the oracle's returns are rank-eligible when ranked directly,
+   so it credits intake, not the statistics. The suite is a regression suite
+   over named attacks, not a proof that no entrant can find another way to game
+   the scorer.
 
 The principle is **verify what the artifacts establish and name what they do
 not**. Scores and signed history are independently checkable. The operator still
 controls the reported chronology, epoch advancement, held-out-data custody,
-intake, and the signing key. A verifying key identifies a host only when it is
+intake, and the signing key. The intake the operator chose is on the board: each
+forward row names how its returns were obtained, and a window that accepted
+supplied returns is signed as noncertifying. A verifying key identifies a host only when it is
 authenticated through an independent channel. Prior non-observation, neutral
 hosting, neutral custody, and a dispute process are governance work, not
 properties of the hash chain.

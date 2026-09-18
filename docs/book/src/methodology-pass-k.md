@@ -24,6 +24,51 @@ noise on the rest **fails pass^k** and is ineligible, no matter how high its
 pooled raw return. See the `lucky_high_return_fails_pass_k` test in
 `sharpebench-core/src/composite.rs`.
 
+## Windows must not overlap
+
+pass^k counts every window as its own regime, and the pooled track that the
+Deflated Sharpe and the bootstrap test is the runs concatenated in window order,
+read as successive market observations. Both readings need the windows to be in
+time order with no bar in two of them. Adjacent windows, where one ends on the
+bar the next starts at, are fine.
+
+`sharpebench_sim::walk_forward(n_days, warmup, test, step)` does not guarantee
+that. Its windows are disjoint only when `step >= test`; with `step < test`
+consecutive windows share `test - step` bars, so
+`walk_forward(365, 30, 45, 20)` returns `[30, 75)`, `[50, 95)` and so on.
+Scoring that list would count each shared bar twice and count overlapping
+windows as separate regimes. The CLI uses two adjacent windows, and every
+evidence producer calls `walk_forward` with `step == test`.
+
+The evidence boundary refuses the rest with a typed
+`sharpebench_sim::trajectory::WindowOrderError` that names both windows and the
+shared bars:
+
+- `sharpebench_harness::verify_trajectory_strict` (and so `verify-trajectory`,
+  `--reexecute` and `rescore`) refuses a trajectory contract whose windows
+  overlap or are listed out of time order, for example `[20, 60)` then
+  `[40, 80)`, which overlap on `[40, 60)`;
+- `SweepContract::try_new` refuses the same windows when a sweep contract is
+  built, and every bound sweep runner refuses such a contract before it reads or
+  writes a checkpoint, however the contract was built.
+
+The legacy regrade (`verify-trajectory --allow-unbound-trajectory`) and the
+unbound compatibility sweep `run_resumable_sweep` do not check. `score_agent`
+and `pooled_returns` do not either: they receive runs without window
+coordinates, so the check sits where the coordinates are known.
+
+A keyed field is the one scoring input that carries coordinates of its own.
+Its `run_keys` name each run's window and seed and may list the run's period
+identities. `sharpebench_core::parse_keyed_field`, which
+`score --require-run-keys` calls, refuses a period declared in two different
+windows with `RunIdentityError::PeriodInTwoWindows`, and `import csv` refuses
+the same overlap before it writes the field (see
+[Importing a rival benchmark's field](importing.md)). Seeds of one window may
+share periods, because the scorer averages them before pooling. The check
+reads period labels, not bar indices, so it cannot see an overlap in a field
+that declares no periods. It does not order the windows in time either: the
+keyed field sorts its windows by label.
+
 ## Units: what the per-run bar means
 
 The per-run test is

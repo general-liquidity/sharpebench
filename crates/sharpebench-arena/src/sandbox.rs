@@ -27,6 +27,7 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
+use sharpebench_sim::external::CellIsolation;
 use sharpebench_sim::{Agent, ExternalAgent, TransportDiagnostics, TransportHealth};
 
 /// How a sandboxed agent run is configured.
@@ -1044,6 +1045,13 @@ pub struct SandboxedAgent {
 }
 
 impl SandboxedAgent {
+    /// The isolation of a runner that launches one container per cell through
+    /// [`run_external_sandboxed`] and finishes it before the next, as
+    /// `sharpebench run --image` does: the container is removed, so nothing the
+    /// entrant wrote inside it reaches another cell. An opted-in unsandboxed
+    /// local run (`allow_unsandboxed`) has no container and is not covered.
+    pub const CELL_ISOLATION: CellIsolation = CellIsolation::ContainerPerCell;
+
     /// Override the per-decision wall-clock budget on the wrapped transport.
     pub fn with_decide_timeout(mut self, timeout: Duration) -> Self {
         self.agent = self.agent.take().map(|a| a.with_decide_timeout(timeout));

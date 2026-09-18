@@ -62,7 +62,8 @@ use super::{
 };
 use crate::accounting::{MonetarySummary, RateCard};
 use crate::gateway_journal::{
-    GatewayBudget, GatewayJournal, JournalIdentity, JournalLock, JournalSaveError,
+    FinishReasonCounts, GatewayBudget, GatewayJournal, JournalIdentity, JournalLock,
+    JournalSaveError,
 };
 use crate::{AttemptObservation, ResilientSubmission, ResumePolicy, SweepContract, SweepIdentity};
 
@@ -721,6 +722,9 @@ pub struct HostObservedUsage {
     pub released_calls: u32,
     pub overspent_usd_nanos: String,
     pub overspent_calls: u32,
+    /// Parsed answers by why they stopped. A `length` count is a truncated
+    /// completion that may still have become a decision or an abstention.
+    pub finish_reasons: FinishReasonCounts,
     pub ceiling_breached: bool,
     /// The gateway lost its journal file to another writer and stopped
     /// spending. The figures above are this process's in-memory record.
@@ -748,6 +752,7 @@ impl HostObservedUsage {
             released_calls: state.released_calls,
             overspent_usd_nanos: state.overspent_usd_nanos.to_string(),
             overspent_calls: state.overspent_calls,
+            finish_reasons: journal.finish_reasons(),
             ceiling_breached: journal.ceiling_breached(),
             journal_ownership_lost: gateway.journal_conflict(),
             journal_unwritable: gateway.journal_unwritable(),
@@ -833,7 +838,10 @@ where
     let mut identity = sweep.identity;
     identity.invocation_sha256 =
         gateway_invocation_sha256(&identity.invocation_sha256, host.routes, host.budget);
-    let contract = SweepContract::new(identity, sweep.windows, sweep.seeds, sweep.max_retries);
+    // Refuse overlapping or unordered windows before the pair is admitted and a
+    // journal is written, not after.
+    let contract = SweepContract::try_new(identity, sweep.windows, sweep.seeds, sweep.max_retries)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
     let sweep_sha256 = gateway_sweep_sha256(sweep.agent_id, &contract);
     let journal_identity = JournalIdentity::new(host.routes.identity_digest(), host.budget)
         .for_sweep(sweep_sha256.clone());

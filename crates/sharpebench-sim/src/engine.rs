@@ -115,12 +115,22 @@ pub(crate) fn build_observation(
     }
 }
 
-/// What the engine records for one step: the realized return plus the calibration
-/// inputs (stated conviction and whether the step paid off).
+/// What the engine records for one step: the realized return, the previous
+/// decision's outcome, and the conviction this step's decision opens a
+/// calibration pair with (see [`run_backtest`] for how the two are paired).
 pub(crate) struct StepOutcome {
     pub(crate) ret: f64,
-    pub(crate) confidence: f64,
-    pub(crate) outcome: bool,
+    /// The return of the book the previous decision left, over this bar: its
+    /// pre-trade mark at this bar's closes plus the dividends that book earns
+    /// here, against the NAV the previous step closed at. This bar's fills,
+    /// fees, financing and borrow belong to this step's decision and are not in
+    /// it.
+    pub(crate) held_book_return: f64,
+    /// The mean confidence over this decision's orders that state one. `None`
+    /// when no order states one, and when the execution noise carried any of
+    /// the decision's orders to the next bar, because the book the outcome
+    /// would be measured on is then not the book the decision chose.
+    pub(crate) confidence: Option<f64>,
 }
 
 /// Whether attempting a fresh/carry order changed the execution state. The
@@ -262,6 +272,18 @@ pub(crate) fn step_once(
     decision: &Decision,
 ) -> StepOutcome {
     let cur_nav = nav(data, symbols, &book.shares, book.cash, t);
+    // The previous decision's outcome is read here, before anything at this
+    // bar trades: the book it left, marked at this bar's closes, plus the
+    // dividends that book earns at this bar, against the NAV it closed at.
+    let held_dividends: f64 = symbols
+        .iter()
+        .map(|s| book.shares[s] * data.dividend_at(s, t))
+        .sum();
+    let held_book_return = if book.prev_nav.abs() > 1e-12 {
+        (cur_nav + held_dividends) / book.prev_nav - 1.0
+    } else {
+        0.0
+    };
 
     // Orders carried from the previous bar by the execution-noise model fill
     // first, at this bar's price, unless the agent re-issues an order on the
@@ -291,6 +313,11 @@ pub(crate) fn step_once(
     // otherwise reuse one draw. Accept the first target and flag every duplicate
     // instead of making correlated same-bar execution look independent.
     let mut seen_symbols = std::collections::BTreeSet::new();
+    // Whether the execution noise carried one of this decision's orders to the
+    // next bar. The carried orders above were taken off `pending` and skip every
+    // symbol this decision orders, so a pending entry for one of those symbols
+    // can only come from this decision.
+    let mut deferred = false;
     // rebalance toward target weights with cost + seeded slippage.
     for ord in &decision.orders {
         if !seen_symbols.insert(&ord.symbol) {
@@ -321,6 +348,7 @@ pub(crate) fn step_once(
             ord.target_weight,
             false,
         );
+        deferred |= book.pending.contains_key(&ord.symbol);
         // With legacy noise-off costs, retain the historic trace contract: an
         // order/rationale event denotes an actual fill and no event is emitted
         // for a no-op target. With execution noise, an accepted delayed or
@@ -363,6 +391,18 @@ pub(crate) fn step_once(
             .sum::<f64>()
             / nav_now;
         book.cash -= crate::costs::financing_cost_frac(costs.financing_bps, gross) * nav_now;
+        // Short borrow: the opt-in carry on every short dollar, which the 1x
+        // threshold above never reaches for an unlevered short book. A zero
+        // rate skips this block, so the default path is untouched.
+        if costs.short_borrow_bps != 0.0 {
+            let short = symbols
+                .iter()
+                .map(|s| (-(book.shares[s] * price(data, s, t))).max(0.0))
+                .sum::<f64>()
+                / nav_now;
+            book.cash -=
+                crate::costs::short_borrow_cost_frac(costs.short_borrow_bps, short) * nav_now;
+        }
     }
 
     // daily return = post-trade NAV vs the prior step's NAV (captures the price
@@ -373,18 +413,18 @@ pub(crate) fn step_once(
     } else {
         0.0
     };
-    // Capture the decision's stated conviction and whether the step paid off, so
-    // the scoring kernel's calibration axis is fed from the live run.
-    let avg_conf = if decision.orders.is_empty() {
-        0.5
-    } else {
-        decision.orders.iter().map(|o| o.confidence).sum::<f64>() / decision.orders.len() as f64
-    };
+    // Capture the decision's stated conviction, so the scoring kernel's
+    // calibration axis is fed from the live run. Only stated confidences count:
+    // the mean over the orders that carry one, and no value at all for a hold,
+    // for orders that state none, or for a decision the noise deferred.
+    let stated = || decision.orders.iter().filter_map(|o| o.confidence);
+    let n_stated = stated().count();
+    let confidence = (n_stated > 0 && !deferred).then(|| stated().sum::<f64>() / n_stated as f64);
     book.prev_nav = navc;
     StepOutcome {
         ret,
-        confidence: avg_conf,
-        outcome: ret > 0.0,
+        held_book_return,
+        confidence,
     }
 }
 
@@ -408,6 +448,7 @@ pub fn run_backtest(
     let mut returns: Vec<f64> = Vec::new();
     let mut confidences: Vec<f64> = Vec::new();
     let mut outcomes: Vec<bool> = Vec::new();
+    let mut awaiting_outcome: Option<f64> = None;
     // Accumulate the agent's self-reported *compute* cost (distinct from trading
     // cost, which is already baked into `returns`). Feeds `Run.cost`, which drives
     // the cost-normalized leaderboard columns (`return_per_cost` / `dsr_per_cost`).
@@ -421,8 +462,19 @@ pub fn run_backtest(
         }
         let out = step_once(data, &symbols, &mut book, &costs, seed, t, &decision);
         returns.push(out.ret);
-        confidences.push(out.confidence);
-        outcomes.push(out.outcome);
+        // The return booked at step t mixes the move on the book decision t-1
+        // left with decision t's own fills, fees, financing and borrow. A
+        // stated confidence therefore waits for the next step's held-book
+        // return, which carries only the first part and the dividends that book
+        // earns. The window's final decision, whose outcome lies outside the
+        // window, adds no pair. A decision that stated no confidence, or whose
+        // orders the noise deferred, adds none either, so `confidences` and
+        // `outcomes` align with each other and not with `returns`.
+        if let Some(confidence) = awaiting_outcome {
+            confidences.push(confidence);
+            outcomes.push(out.held_book_return > 0.0);
+        }
+        awaiting_outcome = out.confidence;
     }
 
     Run {
@@ -451,7 +503,7 @@ mod tests {
                     symbol: sym,
                     action: Action::Buy,
                     target_weight: 2.0,
-                    confidence: 0.5,
+                    confidence: Some(0.5),
                     rationale: "2x leverage".to_string(),
                 }],
                 reasoning: "2x leverage".to_string(),
@@ -470,7 +522,7 @@ mod tests {
                     symbol: sym,
                     action: Action::Buy,
                     target_weight: 0.2,
-                    confidence: 0.7,
+                    confidence: Some(0.7),
                     rationale: "momentum breakout".to_string(),
                 }],
                 reasoning: "single-name buy".to_string(),
@@ -491,7 +543,7 @@ mod tests {
                     symbol: sym,
                     action: Action::Buy,
                     target_weight: 0.2,
-                    confidence: 0.6,
+                    confidence: Some(0.6),
                     rationale: String::new(),
                 }],
                 reasoning: "costly".to_string(),
@@ -579,7 +631,7 @@ mod tests {
                 symbol: symbols[0].clone(),
                 action: Action::Buy,
                 target_weight: 0.2,
-                confidence: 0.7,
+                confidence: Some(0.7),
                 rationale: "delayed rationale".to_string(),
             }],
             reasoning: String::new(),
@@ -661,6 +713,7 @@ mod tests {
             max_participation: f64::INFINITY,
             trf_cost: None,
             noise: None,
+            short_borrow_bps: 0.0,
         };
         let plain = run_backtest(&base, &mut BuyAndHold, w, 0, no_costs);
         let div = run_backtest(&paying, &mut BuyAndHold, w, 0, no_costs);
@@ -694,7 +747,7 @@ mod tests {
                         symbol: "AAA".into(),
                         action: Action::Buy,
                         target_weight: opening,
-                        confidence: 0.5,
+                        confidence: Some(0.5),
                         rationale: String::new(),
                     }],
                     reasoning: String::new(),
@@ -790,7 +843,7 @@ mod tests {
                     symbol: obs.symbols[0].symbol.clone(),
                     action: Action::Buy,
                     target_weight: 0.4,
-                    confidence: 0.5,
+                    confidence: Some(0.5),
                     rationale: String::new(),
                 }],
                 reasoning: "one shot".to_string(),
@@ -947,7 +1000,7 @@ mod tests {
                 symbol: symbols[0].clone(),
                 action: Action::Buy,
                 target_weight: 0.1,
-                confidence: 0.5,
+                confidence: Some(0.5),
                 rationale: String::new(),
             }],
             reasoning: String::new(),
@@ -994,6 +1047,7 @@ mod tests {
             max_participation: f64::INFINITY,
             trf_cost: None,
             noise: None,
+            short_borrow_bps: 0.0,
         };
         let decision = Decision {
             orders: vec![
@@ -1001,14 +1055,14 @@ mod tests {
                     symbol: symbols[0].clone(),
                     action: Action::Buy,
                     target_weight: 1.0,
-                    confidence: 0.5,
+                    confidence: Some(0.5),
                     rationale: String::new(),
                 },
                 Order {
                     symbol: symbols[1].clone(),
                     action: Action::Sell,
                     target_weight: -1.0,
-                    confidence: 0.5,
+                    confidence: Some(0.5),
                     rationale: String::new(),
                 },
             ],

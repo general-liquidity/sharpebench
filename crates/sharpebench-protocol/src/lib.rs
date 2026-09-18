@@ -219,9 +219,17 @@ pub struct Order {
     pub action: Action,
     /// Target portfolio weight for this symbol in [-1, 1]; negative values are shorts.
     pub target_weight: f64,
-    /// Stated conviction in [0, 1]; scored for calibration.
-    #[serde(default = "default_confidence")]
-    pub confidence: f64,
+    /// Stated conviction in [0, 1]; scored for calibration. `None` when the
+    /// agent states none: an omitted confidence stays absent on the wire and in
+    /// a captured trajectory, no default value replaces it, and it adds no
+    /// calibration pair. A present key must carry a number; deserialization
+    /// refuses `null`.
+    #[serde(
+        default,
+        deserialize_with = "stated_confidence",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub confidence: Option<f64>,
     /// Optional one-line rationale for *this* order, captured into the run trace
     /// (audit trail). Defaults to empty so existing agents need no change.
     #[serde(default)]
@@ -238,8 +246,12 @@ pub enum Action {
     Close,
 }
 
-fn default_confidence() -> f64 {
-    0.5
+/// A present `confidence` key is a statement, so it must be a number. Only an
+/// omitted key means "not stated".
+fn stated_confidence<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<f64>, D::Error> {
+    f64::deserialize(deserializer).map(Some)
 }
 
 /// Where an entrant finds the authoritative, machine-readable contract. Quoted
@@ -301,10 +313,12 @@ impl Decision {
                     "orders[{index}].target_weight must be finite and in [-1, 1]"
                 ));
             }
-            if !order.confidence.is_finite() || !(0.0..=1.0).contains(&order.confidence) {
-                return Err(format!(
-                    "orders[{index}].confidence must be finite and in [0, 1]"
-                ));
+            if let Some(confidence) = order.confidence {
+                if !confidence.is_finite() || !(0.0..=1.0).contains(&confidence) {
+                    return Err(format!(
+                        "orders[{index}].confidence must be finite and in [0, 1]"
+                    ));
+                }
             }
         }
         if let Some(cost) = self.cost {
@@ -380,7 +394,14 @@ pub struct TrajectoryContract {
 }
 
 impl TrajectoryContract {
-    pub const SCHEMA_VERSION: u32 = 2;
+    /// Bumped to 3 when [`Order::confidence`] became optional. A schema-2
+    /// capture serialized a confidence on every order, including the 0.5 the
+    /// wire default filled in for an entrant that stated none, so its recorded
+    /// decisions cannot tell a stated 0.5 from an unstated one. Replayed by the
+    /// current engine, every such value would count as a stated calibration
+    /// pair. Strict verification refuses the older schema instead of reading
+    /// it that way.
+    pub const SCHEMA_VERSION: u32 = 3;
 }
 
 /// The mandate an agent declares at submission: which **reliability verdict** it
@@ -474,7 +495,7 @@ mod tests {
                 symbol: "A".to_string(),
                 action: Action::Buy,
                 target_weight: 0.5,
-                confidence: 0.9,
+                confidence: Some(0.9),
                 rationale: "trailing breakout".to_string(),
             }],
             reasoning: "r".to_string(),
@@ -489,7 +510,10 @@ mod tests {
         let legacy = r#"{"orders":[{"symbol":"A","action":"buy","target_weight":0.5}]}"#;
         let parsed: Decision = serde_json::from_str(legacy).unwrap();
         assert_eq!(parsed.orders[0].rationale, "");
-        assert!((parsed.orders[0].confidence - 0.5).abs() < 1e-12);
+        assert_eq!(
+            parsed.orders[0].confidence, None,
+            "an omitted confidence is unstated, not a default value"
+        );
         // A legacy decision omits `cost` entirely (back-compat → None).
         assert!(parsed.cost.is_none());
     }
@@ -575,7 +599,7 @@ mod tests {
             symbol: symbol.to_string(),
             action: Action::Sell,
             target_weight: weight,
-            confidence: 0.5,
+            confidence: Some(0.5),
             rationale: String::new(),
         };
         let valid = Decision {
@@ -584,6 +608,29 @@ mod tests {
             cost: None,
         };
         assert!(valid.validate_for(&obs).is_ok());
+        let stated = |confidence: Option<f64>| Decision {
+            orders: vec![Order {
+                confidence,
+                ..order("A", 0.1)
+            }],
+            reasoning: String::new(),
+            cost: None,
+        };
+        for accepted in [None, Some(0.0), Some(1.0)] {
+            assert!(
+                stated(accepted).validate_for(&obs).is_ok(),
+                "{accepted:?} is a valid statement or no statement"
+            );
+        }
+        for refused in [Some(-0.01), Some(1.01), Some(f64::NAN), Some(f64::INFINITY)] {
+            let error = stated(refused)
+                .validate_for(&obs)
+                .expect_err("a stated confidence outside [0, 1] is refused");
+            assert_eq!(
+                error, "orders[0].confidence must be finite and in [0, 1]",
+                "{refused:?}"
+            );
+        }
 
         for invalid in [
             Decision {
@@ -654,7 +701,7 @@ mod tests {
                             symbol: "A".to_string(),
                             action: Action::Buy,
                             target_weight: 0.25,
-                            confidence: 0.8,
+                            confidence: Some(0.8),
                             rationale: String::new(),
                         }],
                         reasoning: "r".to_string(),

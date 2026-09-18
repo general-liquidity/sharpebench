@@ -10,6 +10,7 @@ pub mod accounting;
 pub mod artifact_scan;
 pub mod artifact_tar;
 pub mod checkpoint;
+pub mod decision_stability;
 pub mod failure;
 pub mod fault_plan;
 pub mod gateway;
@@ -17,6 +18,7 @@ pub mod gateway_journal;
 pub mod perturb;
 #[cfg(test)]
 mod scratch;
+pub mod timing_luck;
 
 pub use checkpoint::{
     run_resumable_sweep, run_resumable_sweep_bound, run_resumable_sweep_bound_with_policy,
@@ -150,8 +152,15 @@ pub fn cost_model_digest(costs: CostModel) -> String {
         || "none".to_string(),
         |value| format!("some:{:016x}", value.to_bits()),
     );
+    // Appended only when set, so every model without a short borrow rate keeps
+    // the digest it had before the field existed.
+    let short_borrow = if costs.short_borrow_bps == 0.0 {
+        String::new()
+    } else {
+        format!("|short-borrow:{:016x}", costs.short_borrow_bps.to_bits())
+    };
     let preimage = format!(
-        "sharpebench-cost-model-v1|{:016x}|{:016x}|{:016x}|{:016x}|{:016x}|{trf}|{noise}",
+        "sharpebench-cost-model-v1|{:016x}|{:016x}|{:016x}|{:016x}|{:016x}|{trf}|{noise}{short_borrow}",
         costs.fee_bps.to_bits(),
         costs.slippage_bps.to_bits(),
         costs.impact_bps.to_bits(),
@@ -941,6 +950,16 @@ pub fn verify_trajectory_strict(
             ));
         }
     }
+    let planned: Vec<Window> = contract
+        .windows
+        .iter()
+        .map(|window| Window {
+            start: window.start,
+            end: window.end,
+        })
+        .collect();
+    sharpebench_sim::trajectory::check_window_order(&planned)
+        .map_err(|refusal| format!("trajectory contract: {refusal}"))?;
     let unique_seeds: std::collections::BTreeSet<u64> = contract.seeds.iter().copied().collect();
     if unique_seeds.len() != contract.seeds.len() {
         return Err("trajectory contract repeats an execution seed".to_string());
@@ -1543,7 +1562,7 @@ mod tests {
                     symbol: sym,
                     action: Action::Buy,
                     target_weight: 1.0e9, // absurd size → sim-exploitation attempt
-                    confidence: 1.0,      // inflated conviction
+                    confidence: Some(1.0), // inflated conviction
                     rationale: "exploit the fill engine".to_string(),
                 }],
                 reasoning: "cheat".to_string(),
@@ -2156,7 +2175,7 @@ mod tests {
                     symbol: obs.symbols[0].symbol.clone(),
                     action: sharpebench_protocol::Action::Buy,
                     target_weight: (now % 1000) as f64 / 1000.0,
-                    confidence: 0.5,
+                    confidence: Some(0.5),
                     rationale: String::new(),
                 }],
                 reasoning: String::new(),

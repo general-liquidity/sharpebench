@@ -43,6 +43,7 @@ pub mod comparison_sets;
 pub mod composite;
 pub mod correlation;
 pub mod decay;
+pub mod decision_stability;
 pub mod disqualification;
 pub mod econrationality;
 pub mod entrant_visibility;
@@ -92,6 +93,11 @@ pub use composite::{
     MandateVerdict, Run, ScoreConfig, TrialsSrStdSource,
 };
 pub use correlation::{crowdedness, Crowdedness};
+pub use decision_stability::{
+    decision_stability, observation_sha256, same_decision, DecisionStabilityError,
+    DecisionStabilityReport, DifferingGroup, IdenticalReplicates, ObservedDecision, ReplicateRun,
+    StabilityCounts, StabilityRate, StabilityUnavailable, WindowStability,
+};
 pub use disqualification::{classify_disqualification, rollup, DisqualThresholds, FailReason};
 pub use econrationality::{
     assess_rationality, elicit_revealed_selection, DominanceChoice, EconRationalityReport,
@@ -113,10 +119,12 @@ pub use evidence_coverage::{
     COMPOSITE_SCORE_INVENTORY, REDACTED, RUN_PROVENANCE_INVENTORY,
 };
 pub use forecast::{
-    analyze_forecast_quality, parse_forecast_evidence, AgentForecastSummary, BinaryCalibration,
+    analyze_forecast_quality, analyze_forecast_quality_against_plan, parse_forecast_contract_plan,
+    parse_forecast_evidence, AgentForecastSummary, AgentUnresolvedSupport, BinaryCalibration,
     CalibrationBin, CommonSupport, ConfidenceCalibration, ContractDigestEncodingMismatch,
-    ContractDigestVersion, DistributionCalibration, ForecastAnalysisConfig, ForecastError,
-    ForecastEvidence, ForecastQualityReport, MetricMean, PairwiseForecastComparison,
+    ContractDigestVersion, DistributionCalibration, ForecastAnalysisConfig, ForecastContractPlan,
+    ForecastError, ForecastEvidence, ForecastQualityReport, MetricMean, PairwiseForecastComparison,
+    SettlementStatusDisagreement, SupportGap,
 };
 pub use greeks::{
     bs_greeks, bs_price, classify_greeks_risk, classify_payoff_tail, portfolio_greeks, Greeks,
@@ -140,11 +148,14 @@ pub use roles::{
     attribute_behavior_roles, attribute_roles, elicit_behavior_roles, RoleContribution,
 };
 pub use rolling::{rolling_sharpe, RollingSharpe};
-pub use run_identity::{parse_keyed_field, KeyedField, RunIdentity, RunIdentityError, RunKey};
+pub use run_identity::{
+    parse_keyed_field, KeyedField, PeriodOverlap, RunIdentity, RunIdentityError, RunKey,
+};
 pub use selection::{selection_robustness, SelectionRobustness};
 pub use selfaudit::{run_self_audit, SelfAuditReport};
 pub use sharpe_diagnostics::{
     sharpe_diagnostics, MppmDiagnostic, PsrDiagnostic, SharpeDiagnostic, SharpeDiagnostics,
+    TailRiskDiagnostic,
 };
 pub use suite_controls::{
     bind_to_suite, control_preimage, evaluate_controls, ControlBinding, ControlDigest,

@@ -15,3 +15,13 @@ A benchmark that certifies trading agents has a shorter path to harm than a benc
 \paragraph{Market effects.} The benchmark does not trade. It replays frozen historical bars through a simulator, so scoring an agent has no market impact and consumes no venue capacity. The forward arena of \cref{sec:attest} scores on data that postdates the commitment, and it likewise scores rather than executes: no window has ever placed an order.
 
 \paragraph{Release calculus.} The tension is that publishing a certification protocol for capital-allocating agents makes certification easier to claim as well as easier to check. We release because the checking half is verifiable by anyone and the claiming half is not: every number here recomputes from committed data by a listed command, the nine self-audit attacks run on every commit, and a reader who doubts a verdict can regenerate it. A protocol that only its author can execute would carry the same dual-use exposure and none of the accountability.
+
+\subsection*{Declarations}
+
+\paragraph{Use of language models.} Language models were used to draft and edit the prose and the code, to read the cited papers and extract facts from them, and to draft bibliography entries. No language model is a component of the benchmark or of any result reported here (\cref{sec:repro}). Entries in the bibliography were checked against primary sources, as the header of \texttt{paper/refs.bib} records, and every statement about another paper that this revision adds names the page of that paper's PDF on which it was checked.
+
+\paragraph{Competing interests.} The author develops SharpeBench and the companion SharpeArena \citep{toca2026sharpearena} at General Liquidity, the affiliation on the title page. As operator of the forward arena the author holds the signing key, and the policy permits the host to enter a board it hosts; \cref{sec:governance} and the conflict-of-interest paragraph above state what follows from that.
+
+\paragraph{Funding.} The datasheet records that the dataset collection received no funding (\cref{app:datasheet}). The paper makes no other funding statement.
+
+\paragraph{Data and code availability.} The code, the committed evidence records and the scripts that produce every figure and table are in the public repository \url{https://github.com/general-liquidity/sharpebench}, licensed MIT or Apache-2.0, and the packages are published to crates.io, npm and PyPI (\cref{sec:repro}). The nine frozen datasets are committed with SHA-256 sidecars, but keyless access did not establish the right to redistribute them, and that blocker is unresolved (\cref{app:datasheet}).

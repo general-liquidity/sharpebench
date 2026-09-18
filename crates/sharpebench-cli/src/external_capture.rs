@@ -185,7 +185,7 @@ pub(crate) fn run_capture_external(
     json: bool,
     launcher: &dyn SandboxLauncher,
 ) -> ExitCode {
-    use sharpebench_sim::{CostModel, ExternalAgent, HttpAgent};
+    use sharpebench_sim::{ExternalAgent, HttpAgent};
 
     let usage = "usage: sharpebench capture <out.json> (--cmd \"<prog>\" | --http <addr> | --image <repository@sha256:...>) [--data <csv>] [--json]";
     let named: Vec<&str> = TRANSPORTS
@@ -226,7 +226,17 @@ pub(crate) fn run_capture_external(
         }
     };
     let seeds: Vec<u64> = (0..8).collect();
-    let costs = CostModel::default();
+    // The same cost model `run`, reference `capture` and `verify-trajectory`
+    // build, so `--short-borrow-bps` charges the external entrant what it
+    // charges every other one and the rate is bound into the captured
+    // contract's cost-model digest.
+    let costs = match crate::cost_model_from_args(args) {
+        Ok(costs) => costs,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::from(2);
+        }
+    };
     let fault: FaultCell = Rc::new(RefCell::new(None));
 
     let (entrant, make): (Entrant, Box<dyn FnMut() -> Box<dyn Agent> + '_>) = match flag {
@@ -516,17 +526,19 @@ mod tests {
     }
 
     fn capture(out: &std::path::Path, sandbox: &FakeSandbox) -> ExitCode {
-        run_capture_external(
-            &args(&[
-                "sharpebench",
-                "capture",
-                out.to_str().unwrap(),
-                "--image",
-                IMAGE,
-            ]),
-            true,
-            sandbox,
-        )
+        capture_with(out, sandbox, &[])
+    }
+
+    fn capture_with(out: &std::path::Path, sandbox: &FakeSandbox, extra: &[&str]) -> ExitCode {
+        let mut argv = vec![
+            "sharpebench",
+            "capture",
+            out.to_str().unwrap(),
+            "--image",
+            IMAGE,
+        ];
+        argv.extend_from_slice(extra);
+        run_capture_external(&args(&argv), true, sandbox)
     }
 
     fn load(path: &std::path::Path) -> sharpebench_protocol::AgentTrajectory {
@@ -584,6 +596,88 @@ mod tests {
             (0..runs).collect::<Vec<_>>(),
             "every container is finished once, in launch order, before the next starts"
         );
+    }
+
+    /// `--short-borrow-bps` charges the external entrant what it charges every
+    /// other one, and the rate it charged is bound into the captured contract.
+    #[test]
+    fn an_external_capture_charges_the_declared_short_borrow_rate() {
+        let dir = scratch("short-borrow");
+        let (data, _) = crate::resolve_dataset(&[]).unwrap();
+        let runner = crate::current_executable_sha256().unwrap();
+        let cfg = sharpebench_core::ScoreConfig::default();
+        let borrowed = sharpebench_sim::CostModel {
+            short_borrow_bps: 25.0,
+            ..sharpebench_sim::CostModel::default()
+        };
+
+        let plain = dir.join("plain.json");
+        assert_eq!(capture(&plain, &FakeSandbox::new(CLEAN)), ExitCode::SUCCESS);
+        let charged = dir.join("charged.json");
+        assert_eq!(
+            capture_with(
+                &charged,
+                &FakeSandbox::new(CLEAN),
+                &["--short-borrow-bps", "25"]
+            ),
+            ExitCode::SUCCESS
+        );
+
+        let plain = load(&plain);
+        let charged = load(&charged);
+        let digest = |traj: &sharpebench_protocol::AgentTrajectory| {
+            traj.contract
+                .as_ref()
+                .expect("a capture binds its contract")
+                .cost_model_sha256
+                .clone()
+        };
+        assert_ne!(
+            digest(&plain),
+            digest(&charged),
+            "the captured contract must record the rate the capture charged"
+        );
+
+        // The charged capture verifies under its own rate and is refused under
+        // the default one, the rule `verify-trajectory` already applies.
+        assert!(sharpebench_harness::verify_trajectory_strict(
+            &data,
+            &charged,
+            borrowed,
+            &cfg,
+            Some(&runner),
+        )
+        .is_ok());
+        let refused = sharpebench_harness::verify_trajectory_strict(
+            &data,
+            &charged,
+            sharpebench_sim::CostModel::default(),
+            &cfg,
+            Some(&runner),
+        )
+        .expect_err("a different borrow rate is a different cost model");
+        assert!(refused.contains("cost"), "{refused}");
+        assert!(sharpebench_harness::verify_trajectory_strict(
+            &data,
+            &plain,
+            sharpebench_sim::CostModel::default(),
+            &cfg,
+            Some(&runner),
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn an_external_capture_refuses_an_out_of_domain_short_borrow_rate() {
+        let dir = scratch("short-borrow-refused");
+        let out = dir.join("traj.json");
+        let sandbox = FakeSandbox::new(CLEAN);
+        assert_eq!(
+            capture_with(&out, &sandbox, &["--short-borrow-bps", "-1"]),
+            ExitCode::from(2)
+        );
+        assert_eq!(sandbox.launched.get(), 0, "nothing runs on a refused rate");
+        assert!(!out.exists());
     }
 
     #[test]

@@ -16,8 +16,17 @@
 //! 3. every agent carries exactly the same key set,
 //! 4. that key set is the complete Cartesian product of the observed windows
 //!    and seeds, with no missing and no unexpected cell, and
-//! 5. declared period identities agree across agents for the same cell and
-//!    match the run's return length.
+//! 5. declared period identities match the run's return length, name no
+//!    period twice within a run, and agree across agents for the same cell,
+//!    and
+//! 6. no period is declared in two different windows. Execution seeds of one
+//!    window replicate the same market periods and may share them; windows are
+//!    the successive segments the pooled track concatenates, so a period in two
+//!    of them would enter that track twice.
+//!
+//! A repeated period is refused per run, before any cross-agent comparison, so
+//! a field in which every agent repeats the same period is refused too: the
+//! agents agreeing does not make one period two observations.
 //!
 //! Only then are the runs reordered into one canonical key order, so the
 //! positional reads downstream are keyed reads by construction.
@@ -60,8 +69,8 @@ impl fmt::Display for RunKey {
 /// the run's returns are indexed by.
 ///
 /// `periods` is empty when the submitter declares no period axis. When it is
-/// present it must have one entry per return, and two agents on the same cell
-/// must declare the same periods.
+/// present it must have one entry per return, no entry twice, and two agents
+/// on the same cell must declare the same periods.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunIdentity {
     #[serde(flatten)]
@@ -122,6 +131,20 @@ pub enum RunIdentityError {
         periods: usize,
         returns: usize,
     },
+    /// One run declared the same period identity at two indices, so that
+    /// period's return would count as two observations in every statistic
+    /// computed from the run.
+    DuplicatePeriod {
+        agent_id: String,
+        key: RunKey,
+        period: String,
+        first: usize,
+        second: usize,
+    },
+    /// Two different windows declare the same period identity, so the pooled
+    /// track, which concatenates the windows, would count that period's return
+    /// twice. Seeds of one window may share periods.
+    PeriodInTwoWindows(Box<PeriodOverlap>),
     /// Two agents declared different period identities for the same cell.
     PeriodMismatch {
         key: RunKey,
@@ -129,6 +152,18 @@ pub enum RunIdentityError {
         other_agent_id: String,
         index: usize,
     },
+}
+
+/// The two cells of [`RunIdentityError::PeriodInTwoWindows`]. `first` is the
+/// earlier cell in canonical order; each cell names the agent whose declaration
+/// recorded it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PeriodOverlap {
+    pub period: String,
+    pub first: RunKey,
+    pub first_agent_id: String,
+    pub second: RunKey,
+    pub second_agent_id: String,
 }
 
 impl fmt::Display for RunIdentityError {
@@ -188,6 +223,35 @@ impl fmt::Display for RunIdentityError {
                 "run identity: agent `{agent_id}` {key} declared {periods} period \
                  identity/identities for {returns} return(s)"
             ),
+            Self::DuplicatePeriod {
+                agent_id,
+                key,
+                period,
+                first,
+                second,
+            } => write!(
+                f,
+                "run identity: agent `{agent_id}` {key} declares period `{period}` at \
+                 index {first} and again at index {second}; one period cannot contribute \
+                 two returns to a run"
+            ),
+            Self::PeriodInTwoWindows(overlap) => {
+                let PeriodOverlap {
+                    period,
+                    first,
+                    first_agent_id,
+                    second,
+                    second_agent_id,
+                } = overlap.as_ref();
+                write!(
+                    f,
+                    "run identity: period `{period}` is declared in {first} by agent \
+                 `{first_agent_id}` and in {second} by agent `{second_agent_id}`; a \
+                 period belongs to one window, and the pooled track would count its \
+                 return twice. Seeds of one window may share periods, different \
+                 windows may not"
+                )
+            }
             Self::PeriodMismatch {
                 key,
                 agent_id,
@@ -240,11 +304,26 @@ fn check_window(window: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The indices of the first period identity that appears twice, as
+/// `(first, second)`, where `second` is the earliest index that repeats an
+/// earlier entry.
+fn first_repeated_period(periods: &[String]) -> Option<(usize, usize)> {
+    let mut seen: BTreeMap<&str, usize> = BTreeMap::new();
+    for (second, period) in periods.iter().enumerate() {
+        if let Some(first) = seen.insert(period.as_str(), second) {
+            return Some((first, second));
+        }
+    }
+    None
+}
+
 /// Parse a submissions field and require typed run identity throughout.
 ///
-/// Refuses a legacy unkeyed array, a partial grid, a duplicated cell, and
-/// disagreeing period identities. On success the returned submissions are
-/// reordered so positional access downstream is keyed access.
+/// Refuses a legacy unkeyed array, a partial grid, a duplicated cell, a period
+/// repeated within a run, disagreeing period identities, and a period declared
+/// in two windows. On success the
+/// returned submissions are reordered so positional access downstream is
+/// keyed access.
 pub fn parse_keyed_field(json: &str) -> Result<KeyedField, RunIdentityError> {
     let (subs, declarations) =
         parse_declared_field(json).map_err(RunIdentityError::InvalidField)?;
@@ -297,6 +376,15 @@ pub fn parse_keyed_field(json: &str) -> Result<KeyedField, RunIdentityError> {
                     key: identity.key.clone(),
                     periods: identity.periods.len(),
                     returns: sub.runs[index].returns.len(),
+                });
+            }
+            if let Some((first, second)) = first_repeated_period(&identity.periods) {
+                return Err(RunIdentityError::DuplicatePeriod {
+                    agent_id: sub.agent_id.clone(),
+                    key: identity.key.clone(),
+                    period: identity.periods[second].clone(),
+                    first,
+                    second,
                 });
             }
         }
@@ -384,6 +472,30 @@ pub fn parse_keyed_field(json: &str) -> Result<KeyedField, RunIdentityError> {
                         });
                     }
                 }
+            }
+        }
+    }
+
+    // A period belongs to one window. `declared_periods` holds every cell that
+    // any agent gave periods for, and the check above made those declarations
+    // agree, so this covers one agent repeating a period across its windows and
+    // two agents whose separate declarations do.
+    let mut period_window: BTreeMap<&str, (&RunKey, &str)> = BTreeMap::new();
+    for (key, (agent_id, periods)) in &declared_periods {
+        for period in periods {
+            let (first, first_agent_id) = *period_window
+                .entry(period.as_str())
+                .or_insert((key, agent_id.as_str()));
+            if first.window != key.window {
+                return Err(RunIdentityError::PeriodInTwoWindows(Box::new(
+                    PeriodOverlap {
+                        period: period.clone(),
+                        first: first.clone(),
+                        first_agent_id: first_agent_id.to_string(),
+                        second: key.clone(),
+                        second_agent_id: agent_id.clone(),
+                    },
+                )));
             }
         }
     }
@@ -630,6 +742,231 @@ mod tests {
                 other_agent_id: "a".to_string(),
                 index: 1,
             }
+        );
+    }
+
+    fn periods_field(entries: &[(&str, &[&str])]) -> String {
+        let docs: Vec<serde_json::Value> = entries
+            .iter()
+            .map(|(agent_id, periods)| {
+                let returns: Vec<f64> = (0..periods.len().max(2))
+                    .map(|i| 0.001 * (i as f64 + 1.0))
+                    .collect();
+                let mut key = serde_json::json!({"window": "w0", "seed": 0});
+                if !periods.is_empty() {
+                    key["periods"] = serde_json::json!(periods);
+                }
+                serde_json::json!({
+                    "agent_id": agent_id,
+                    "runs": [{"returns": returns}],
+                    "run_keys": [key],
+                })
+            })
+            .collect();
+        serde_json::to_string(&docs).expect("serialize field")
+    }
+
+    fn w0() -> RunKey {
+        RunKey {
+            window: "w0".into(),
+            seed: 0,
+        }
+    }
+
+    #[test]
+    fn a_run_repeating_a_period_is_refused_naming_the_period_and_both_indices() {
+        // Distinct periods are the control: the same shape parses.
+        let distinct = periods_field(&[("a", &["d1", "d2", "d3", "d4"])]);
+        assert!(parse_keyed_field(&distinct).is_ok());
+
+        let repeated = periods_field(&[("a", &["d1", "d2", "d3", "d2"])]);
+        let error = parse_keyed_field(&repeated).unwrap_err();
+        assert_eq!(
+            error,
+            RunIdentityError::DuplicatePeriod {
+                agent_id: "a".to_string(),
+                key: w0(),
+                period: "d2".to_string(),
+                first: 1,
+                second: 3,
+            }
+        );
+        assert_eq!(
+            error.to_string(),
+            "run identity: agent `a` (window `w0`, seed 0) declares period `d2` at \
+             index 1 and again at index 3; one period cannot contribute two returns \
+             to a run"
+        );
+    }
+
+    #[test]
+    fn the_first_repeat_is_the_one_reported() {
+        assert_eq!(first_repeated_period(&[]), None);
+        let periods: Vec<String> = ["d1", "d2", "d3", "d3", "d1"]
+            .iter()
+            .map(|p| p.to_string())
+            .collect();
+        assert_eq!(first_repeated_period(&periods), Some((2, 3)));
+    }
+
+    #[test]
+    fn a_repeated_period_is_refused_even_when_every_agent_repeats_it() {
+        // Agreement across agents is the cross-agent check, and it passes
+        // here. The repeat is still one period counted twice.
+        let shared = periods_field(&[("a", &["d1", "d1"]), ("b", &["d1", "d1"])]);
+        assert_eq!(
+            parse_keyed_field(&shared).unwrap_err(),
+            RunIdentityError::DuplicatePeriod {
+                agent_id: "a".to_string(),
+                key: w0(),
+                period: "d1".to_string(),
+                first: 0,
+                second: 1,
+            }
+        );
+
+        // With only one agent declaring periods there is nothing to compare
+        // against, and the repeat is still refused.
+        let one_declares = periods_field(&[("a", &[]), ("b", &["d1", "d1"])]);
+        assert_eq!(
+            parse_keyed_field(&one_declares).unwrap_err(),
+            RunIdentityError::DuplicatePeriod {
+                agent_id: "b".to_string(),
+                key: w0(),
+                period: "d1".to_string(),
+                first: 0,
+                second: 1,
+            }
+        );
+    }
+
+    /// One run's cell as `(window, seed, periods)`.
+    type Cell<'a> = (&'a str, u64, &'a [&'a str]);
+
+    /// A field given as cells per agent. A cell with periods has one return per
+    /// period; a cell without has two returns and declares no period axis.
+    fn cells_field(entries: &[(&str, &[Cell<'_>])]) -> String {
+        let docs: Vec<serde_json::Value> = entries
+            .iter()
+            .map(|(agent_id, cells)| {
+                serde_json::json!({
+                    "agent_id": agent_id,
+                    "runs": cells
+                        .iter()
+                        .map(|(_, seed, periods)| serde_json::json!({
+                            "returns": (0..periods.len().max(2))
+                                .map(|i| 0.001 * (i as f64 + 1.0) + *seed as f64 * 0.0001)
+                                .collect::<Vec<_>>(),
+                        }))
+                        .collect::<Vec<_>>(),
+                    "run_keys": cells
+                        .iter()
+                        .map(|(window, seed, periods)| {
+                            let mut key = serde_json::json!({"window": window, "seed": seed});
+                            if !periods.is_empty() {
+                                key["periods"] = serde_json::json!(periods);
+                            }
+                            key
+                        })
+                        .collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+        serde_json::to_string(&docs).expect("serialize field")
+    }
+
+    fn cell(window: &str, seed: u64) -> RunKey {
+        RunKey {
+            window: window.into(),
+            seed,
+        }
+    }
+
+    fn overlap(
+        period: &str,
+        first: RunKey,
+        first_agent_id: &str,
+        second: RunKey,
+        second_agent_id: &str,
+    ) -> RunIdentityError {
+        RunIdentityError::PeriodInTwoWindows(Box::new(PeriodOverlap {
+            period: period.to_string(),
+            first,
+            first_agent_id: first_agent_id.to_string(),
+            second,
+            second_agent_id: second_agent_id.to_string(),
+        }))
+    }
+
+    #[test]
+    fn seeds_of_one_window_share_its_periods() {
+        let both: &[Cell<'_>] = &[
+            ("w0", 0, &["a", "b"]),
+            ("w0", 1, &["a", "b"]),
+            ("w1", 0, &["c", "d"]),
+            ("w1", 1, &["c", "d"]),
+        ];
+        let keyed = parse_keyed_field(&cells_field(&[("x", both), ("y", both)]))
+            .expect("replicate seeds of one window are the grid, not a repeat");
+        assert_eq!(keyed.seeds, vec![0, 1]);
+        assert_eq!(keyed.windows, vec!["w0".to_string(), "w1".to_string()]);
+    }
+
+    #[test]
+    fn a_period_declared_in_two_windows_is_refused() {
+        // w1 restates b, which w0 already covers: the pooled track would hold
+        // b's return twice. Both agents declare it, so the cells agree.
+        let overlapping: &[Cell<'_>] = &[("w0", 0, &["a", "b"]), ("w1", 0, &["b", "c"])];
+        let error =
+            parse_keyed_field(&cells_field(&[("x", overlapping), ("y", overlapping)])).unwrap_err();
+        assert_eq!(error, overlap("b", cell("w0", 0), "x", cell("w1", 0), "x"));
+        assert_eq!(
+            error.to_string(),
+            "run identity: period `b` is declared in (window `w0`, seed 0) by agent `x` \
+             and in (window `w1`, seed 0) by agent `x`; a period belongs to one window, \
+             and the pooled track would count its return twice. Seeds of one window may \
+             share periods, different windows may not"
+        );
+
+        // The same windows over the same periods, the shape of a field that
+        // imported one window twice under two labels.
+        let copied: &[Cell<'_>] = &[("w0", 0, &["a", "b"]), ("w1", 0, &["a", "b"])];
+        assert_eq!(
+            parse_keyed_field(&cells_field(&[("x", copied)])).unwrap_err(),
+            overlap("a", cell("w0", 0), "x", cell("w1", 0), "x")
+        );
+
+        // Disjoint windows are the control.
+        let disjoint: &[Cell<'_>] = &[("w0", 0, &["a", "b"]), ("w1", 0, &["c", "d"])];
+        assert!(parse_keyed_field(&cells_field(&[("x", disjoint)])).is_ok());
+    }
+
+    #[test]
+    fn a_period_in_two_windows_is_refused_whatever_the_seeds() {
+        // At each seed the two windows are disjoint, but period c sits in w0
+        // at seed 1 and in w1 at seed 0.
+        let crossed: &[Cell<'_>] = &[
+            ("w0", 0, &["a", "b"]),
+            ("w0", 1, &["c", "d"]),
+            ("w1", 0, &["c", "d"]),
+            ("w1", 1, &["a", "b"]),
+        ];
+        assert_eq!(
+            parse_keyed_field(&cells_field(&[("x", crossed)])).unwrap_err(),
+            overlap("c", cell("w0", 1), "x", cell("w1", 0), "x")
+        );
+    }
+
+    #[test]
+    fn a_period_in_two_windows_is_refused_when_different_agents_declare_them() {
+        // No agent declares both windows, so no single submission repeats a
+        // period. The cells still describe the same field: w0 (from x) and w1
+        // (from y) both hold period b.
+        let x: &[Cell<'_>] = &[("w0", 0, &["a", "b"]), ("w1", 0, &[])];
+        let y: &[Cell<'_>] = &[("w0", 0, &[]), ("w1", 0, &["b", "c"])];
+        assert_eq!(
+            parse_keyed_field(&cells_field(&[("x", x), ("y", y)])).unwrap_err(),
+            overlap("b", cell("w0", 0), "x", cell("w1", 0), "y")
         );
     }
 

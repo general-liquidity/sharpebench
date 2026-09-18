@@ -214,7 +214,7 @@ mod tests {
                         symbol: s.symbol.clone(),
                         action: if w > 0.0 { Action::Buy } else { Action::Close },
                         target_weight: w,
-                        confidence: 0.5,
+                        confidence: Some(0.5),
                         rationale: "parity latch".to_string(),
                     }
                 })
