@@ -1233,12 +1233,10 @@ pub struct PairwiseForecastComparison {
     /// this comparison's block count, against the nominal 5%.
     ///
     /// It travels with the flag because the flag is not delivered at the block
-    /// counts the protocol admits: at four blocks, the first count
-    /// [`inference_support`] passes, the test rejects a true null 18.8% of the
+    /// counts the protocol admits: at four blocks, the first count the
+    /// pair-support gate passes, the test rejects a true null 18.8% of the
     /// time. Read `familywise_significant` against this, not against 0.05.
     /// `None` when the comparison carries no p-value.
-    ///
-    /// [`inference_support`]: fn@inference_support
     #[serde(skip_serializing_if = "Option::is_none")]
     pub measured_size_at_nominal_5pct: Option<f64>,
     /// Present only when the two agents did not resolve the same digests.
