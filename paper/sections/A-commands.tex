@@ -27,7 +27,7 @@ Panel (a) is read from the kernel's golden score record; panel (b) uses \texttt{
 \begin{verbatim}
 sharpebench audit
 \end{verbatim}
-The command runs the nine constructed attacks and exits non-zero unless every one is defended. A commit-time test requires all nine defended and no known gap, and a claimed defense that regresses fails it; the Sybil case also fails if the attack stops reproducing with \texttt{dedup\_clones\_for\_measured\_sr\_std} switched off. The per-case detail the command prints describes fixed synthetic constructions and is not reported as a result in this paper (\cref{sec:selfaudit}).
+The command runs the ten constructed attacks and exits non-zero unless every one is defended. A commit-time test requires all ten defended and no known gap, and a claimed defense that regresses fails it; the Sybil case also fails if the attack stops reproducing with \texttt{dedup\_clones\_for\_measured\_sr\_std} switched off. The per-case detail the command prints describes fixed synthetic constructions and is not reported as a result in this paper (\cref{sec:selfaudit}).
 
 \paragraph{The realized index Sharpe ratios quoted in \cref{sec:units}.}
 \begin{verbatim}
@@ -110,6 +110,22 @@ cargo run --release -p sharpebench-harness \
 \end{verbatim}
 Scores the risk-managed field on all nine datasets under the default verdict and under \texttt{PassMode::RelativeToBenchmark} with \texttt{buy-and-hold} as the benchmark: 81 records, one per (dataset, agent), each carrying the per-window pass vectors under both verdicts, the windows gained and lost, and the cell counts. The same verdict is selected on any field with \texttt{sharpebench run --pass-mode relative-to-benchmark [--benchmark-agent <id>]} or the same flags on \texttt{sharpebench score}.
 
+\paragraph{The declared-mandate verdict (\cref{tab:mandate}).}
+\begin{verbatim}
+cargo run --release -p sharpebench-harness \
+  --example mandate_eval -- \
+  paper/evidence/final/mandate-declaration.jsonl
+\end{verbatim}
+Scores the reference field on all nine datasets: 81 records, one per (dataset, agent), each carrying the default-verdict figures the predicate of \cref{eq:eligible} reads, and, on the 36 that declare a mandate, the declaration, the verdict it resolves to, the reliability result under that verdict and the resulting declared-mandate eligibility. The other 45 declare none, which is the shipped default. Every record repeats the command that wrote it, and the reconciliation against \cref{tab:eligibility} in \cref{sec:mandate} is read from them.
+
+\paragraph{The seed leg under execution noise (\cref{tab:seedleg}).}
+\begin{verbatim}
+cargo run --release -p sharpebench-harness \
+  --example seed_leg_eval -- \
+  paper/evidence/final/seed-leg.jsonl
+\end{verbatim}
+Re-runs the reference field on three daily datasets under the default and the opt-in execution-noise profile: 2{,}646 records, being 2{,}592 per-run rows, one per (dataset, profile, agent, window, seed), and 54 per-agent verdict rows. Every record repeats the command that wrote it. The per-seed dispersion and the refusing-leg counts of \cref{sec:seedleg} are read from these records.
+
 \paragraph{The forward arena (\cref{sec:attest}).}
 \begin{verbatim}
 sharpebench arena init <dir>
@@ -120,11 +136,12 @@ sharpebench commit <agent_id> <target_window> <artifact_digest> <salt> \
   > commitment.json
 sharpebench arena commit <dir> <window> <commitment.json>
 sharpebench arena advance <dir> <epoch>
-sharpebench arena score <dir> <window> <dataset> <entries.json>
+sharpebench arena score <dir> <window> <dataset> <entries.json> \
+  [--replay-only] [--allow-supplied-returns]
 sharpebench arena publish <dir> <window> <key>
 sharpebench arena verify <dir> [--pubkey <hex>]
 \end{verbatim}
-The opening command refuses to create a window without the exact scorer artifact digest. The standalone \texttt{commit} command produces the commitment document that \texttt{arena commit} registers; the latter does not accept the agent, artifact and salt as positional fields.
+The opening command refuses to create a window without the exact scorer artifact digest. The standalone \texttt{commit} command produces the commitment document that \texttt{arena commit} registers; the latter does not accept the agent, artifact and salt as positional fields. \texttt{arena score} re-executes every capture it ranks unless \texttt{--replay-only} is given, and refuses returns supplied in place of a capture unless \texttt{--allow-supplied-returns} is; either flag signs the board noncertifying (\cref{sec:selfaudit}).
 
 \paragraph{The prospective forecast report and formal model (\cref{sec:forecast-quality}).}
 \begin{verbatim}
@@ -135,7 +152,7 @@ cargo run -q -p sharpebench -- forecast-quality \
   --alpha 0.05 --bins 5 --json
 cd formal && lake build
 \end{verbatim}
-The first command reproduces the complete committed report from two deterministic SharpeArena \citep{toca2026sharpearena} ledgers under report schema \texttt{sharpebench.\allowbreak forecast-quality.\allowbreak v2}, including exact pair support over twelve contracts in six resolution-time blocks, empty lists of unresolved contracts, late-revision exclusion, calibration, block-bootstrap comparison and Holm adjustment. The same command over \texttt{fixtures/withheld/}, the first eight of those contracts in two blocks, reproduces the companion report in which inference is withheld with its reason recorded (\cref{sec:forecast-quality}). The second checks the separate abstract proofs of pair-support membership, the definitional rank-projection identity, Holm monotonicity and boundedness, and finite-bootstrap count bounds. Neither command produces an empirical model result; the Lean project is not an extraction of the Rust implementation, and no test references a Lean declaration.
+The first command reproduces the complete committed report from two deterministic SharpeArena \citep{toca2026sharpearena} ledgers under report schema \texttt{sharpebench.\allowbreak forecast-quality.\allowbreak v2}, including exact pair support over twelve contracts in six resolution-time blocks, empty lists of unresolved contracts, late-revision exclusion, calibration, block-bootstrap comparison and Holm adjustment. The same command over \texttt{fixtures/withheld/}, the first eight of those contracts in two blocks, reproduces the companion report in which inference is withheld with its reason recorded (\cref{sec:forecast-quality}). The second checks the separate abstract proofs that pair support is exact in both directions, with and without a declared contract plan, and that under the admission hypothesis it is each agent's whole in-scope support, together with the definitional rank-projection identity, Holm monotonicity and boundedness, and finite-bootstrap count bounds. Neither command produces an empirical model result; the Lean project is not an extraction of the Rust implementation, and no test references a Lean declaration.
 
 \paragraph{Capturing and strictly replaying a trajectory.}
 \begin{verbatim}
