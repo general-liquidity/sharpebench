@@ -78,9 +78,16 @@ The simulator builds calibration pairs by two rules:
   book decision `t` left with decision `t + 1`'s own fills, fees, financing
   and borrow, so the outcome uses the first part only: the book's value at the
   `t + 1` closes before anything trades, plus the dividends that book earns at
-  `t + 1`, against the NAV step `t` closed at. A decision that exits is graded
-  on the flat book it leaves, which gains nothing. The window's final decision
-  has no next bar inside the window and contributes no pair.
+  `t + 1`, less the financing and short borrow that book paid at the close of
+  step `t`, against the NAV it stood at before that charge. Financing and
+  borrow are charged on the book a step leaves, which is the book held over
+  the next bar, so they are what it cost to hold it and they belong to the
+  decision that chose it. A short that gains 10 bp on price while paying 25 bp
+  of borrow returned -15 bp and is graded a miss. A decision that exits is
+  graded on the flat book it leaves, which gains nothing. The window's final
+  decision has no next bar inside the window and contributes no pair, and
+  neither does a decision whose book stood at a NAV that was not positive,
+  where the ratio carries no sign a reader could act on.
 - Under execution noise, a decision whose order is delayed to the next bar, or
   whose partial fill carries a remainder to it, contributes no pair: the book
   its outcome would be measured on is not the book it chose. An order still
