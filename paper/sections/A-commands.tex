@@ -110,6 +110,22 @@ cargo run --release -p sharpebench-harness \
 \end{verbatim}
 Scores the risk-managed field on all nine datasets under the default verdict and under \texttt{PassMode::RelativeToBenchmark} with \texttt{buy-and-hold} as the benchmark: 81 records, one per (dataset, agent), each carrying the per-window pass vectors under both verdicts, the windows gained and lost, and the cell counts. The same verdict is selected on any field with \texttt{sharpebench run --pass-mode relative-to-benchmark [--benchmark-agent <id>]} or the same flags on \texttt{sharpebench score}.
 
+\paragraph{The declared-mandate verdict (\cref{tab:mandate}).}
+\begin{verbatim}
+cargo run --release -p sharpebench-harness \
+  --example mandate_eval -- \
+  paper/evidence/final/mandate-declaration.jsonl
+\end{verbatim}
+Scores the reference field on all nine datasets: 81 records, one per (dataset, agent), each carrying the default-verdict figures the predicate of \cref{eq:eligible} reads, and, on the 36 that declare a mandate, the declaration, the verdict it resolves to, the reliability result under that verdict and the resulting declared-mandate eligibility. The other 45 declare none, which is the shipped default. Every record repeats the command that wrote it, and the reconciliation against \cref{tab:eligibility} in \cref{sec:mandate} is read from them.
+
+\paragraph{The seed leg under execution noise (\cref{tab:seedleg}).}
+\begin{verbatim}
+cargo run --release -p sharpebench-harness \
+  --example seed_leg_eval -- \
+  paper/evidence/final/seed-leg.jsonl
+\end{verbatim}
+Re-runs the reference field on three daily datasets under the default and the opt-in execution-noise profile: 2{,}646 records, being 2{,}592 per-run rows, one per (dataset, profile, agent, window, seed), and 54 per-agent verdict rows. Every record repeats the command that wrote it. The per-seed dispersion and the refusing-leg counts of \cref{sec:seedleg} are read from these records.
+
 \paragraph{The forward arena (\cref{sec:attest}).}
 \begin{verbatim}
 sharpebench arena init <dir>
