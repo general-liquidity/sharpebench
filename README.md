@@ -381,7 +381,7 @@ does not run agents or own a store. See the
 | Analyze prospective forecasts | [Forecast quality](docs/book/src/forecast-quality.md) |
 | Operate the forward league or sandbox | [Arena](docs/book/src/arena.md) · [Attestation](docs/book/src/attestation.md) |
 | Scan an entrant image or account for model usage | [Image preflight](docs/book/src/image-preflight.md) · [Model gateway](docs/book/src/model-gateway.md) |
-| Audit integrity and provenance | [Integrity](docs/book/src/integrity.md) · [Evidence contracts](docs/book/src/evidence-contracts.md) · [Benchmark architecture audit: 81 source trees, 94 papers and boards](docs/BENCHMARK_ARCHITECTURE_AUDIT.md) |
+| Audit integrity and provenance | [Integrity](docs/book/src/integrity.md) · [Evidence contracts](docs/book/src/evidence-contracts.md) · [Benchmark architecture audit: 98 source trees, 107 papers and boards](docs/BENCHMARK_ARCHITECTURE_AUDIT.md) |
 | Reproduce the paper | [Paper PDF](paper/main.pdf) · [Commands](paper/sections/A-commands.tex) |
 | Contribute or propose a change | [`CONTRIBUTING.md`](CONTRIBUTING.md) · [Governance](docs/GOVERNANCE.md) |
 | Review releases and licensing | [`CHANGELOG.md`](CHANGELOG.md) · [MIT](LICENSE-MIT) · [Apache-2.0](LICENSE-APACHE) |
