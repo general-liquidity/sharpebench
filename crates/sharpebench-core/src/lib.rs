@@ -89,8 +89,8 @@ pub use comparison_sets::{
 pub use composite::{
     parse_declared_field, per_period_sr_std, per_run_passes, per_run_psr_benchmark, rank,
     rank_declared, score_agent, score_agent_declared, split_declarations, AgentSubmission,
-    CompositeScore, DeclaredMandate, DeclaredSubmission, Mandate, MandateDeclarations,
-    MandateVerdict, Run, ScoreConfig, TrialsSrStdSource,
+    CompositeScore, DeclaredMandate, DeclaredSubmission, DispersionLeverage, Mandate,
+    MandateDeclarations, MandateVerdict, Run, ScoreConfig, TrialsSrStdSource,
 };
 pub use correlation::{crowdedness, Crowdedness};
 pub use decision_stability::{

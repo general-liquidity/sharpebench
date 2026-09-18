@@ -372,7 +372,8 @@ exit code 2. Without the flag the board is unchanged.
 
 `--diagnostics <list>` also reports opt-in Sharpe diagnostics that the gate,
 eligibility and the rank do not use: `autocorrelated-psr`, `null-se-psr`,
-`mppm` and `expected-shortfall`, comma-separated, described under
+`mppm`, `expected-shortfall` and `between-window-variance`, comma-separated,
+described under
 [opt-in diagnostics](methodology-deflated-sharpe.md#opt-in-diagnostics-the-gate-does-not-use).
 The human table gains a separate block after the unchanged board; `--json`
 prints `{"board": ..., "sharpe_diagnostics": [...]}`, where `board` is the
