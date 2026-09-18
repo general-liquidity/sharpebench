@@ -76,7 +76,7 @@
     "composite": 0.0,
     "alpha": 0.0006971671073862038,
     "beta": 1.8666334227534345,
-    "calibration_brier": 0.247334919619079,
+    "calibration_brier": 0.24343824540169307,
     "calibration_observations": 234,
     "edge_half_life": null,
     "field_reality_check_p": 1.0,

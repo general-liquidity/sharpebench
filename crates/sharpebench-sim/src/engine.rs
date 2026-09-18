@@ -115,12 +115,21 @@ pub(crate) fn build_observation(
     }
 }
 
-/// What the engine records for one step: the realized return plus the conviction
-/// the step's decision stated, `None` when no order in the decision stated one.
-/// The return belongs mostly to the previous decision (see [`run_backtest`] for
-/// how the two are paired).
+/// What the engine records for one step: the realized return, the previous
+/// decision's outcome, and the conviction this step's decision opens a
+/// calibration pair with (see [`run_backtest`] for how the two are paired).
 pub(crate) struct StepOutcome {
     pub(crate) ret: f64,
+    /// The return of the book the previous decision left, over this bar: its
+    /// pre-trade mark at this bar's closes plus the dividends that book earns
+    /// here, against the NAV the previous step closed at. This bar's fills,
+    /// fees, financing and borrow belong to this step's decision and are not in
+    /// it.
+    pub(crate) held_book_return: f64,
+    /// The mean confidence over this decision's orders that state one. `None`
+    /// when no order states one, and when the execution noise carried any of
+    /// the decision's orders to the next bar, because the book the outcome
+    /// would be measured on is then not the book the decision chose.
     pub(crate) confidence: Option<f64>,
 }
 
@@ -263,6 +272,18 @@ pub(crate) fn step_once(
     decision: &Decision,
 ) -> StepOutcome {
     let cur_nav = nav(data, symbols, &book.shares, book.cash, t);
+    // The previous decision's outcome is read here, before anything at this
+    // bar trades: the book it left, marked at this bar's closes, plus the
+    // dividends that book earns at this bar, against the NAV it closed at.
+    let held_dividends: f64 = symbols
+        .iter()
+        .map(|s| book.shares[s] * data.dividend_at(s, t))
+        .sum();
+    let held_book_return = if book.prev_nav.abs() > 1e-12 {
+        (cur_nav + held_dividends) / book.prev_nav - 1.0
+    } else {
+        0.0
+    };
 
     // Orders carried from the previous bar by the execution-noise model fill
     // first, at this bar's price, unless the agent re-issues an order on the
@@ -292,6 +313,11 @@ pub(crate) fn step_once(
     // otherwise reuse one draw. Accept the first target and flag every duplicate
     // instead of making correlated same-bar execution look independent.
     let mut seen_symbols = std::collections::BTreeSet::new();
+    // Whether the execution noise carried one of this decision's orders to the
+    // next bar. The carried orders above were taken off `pending` and skip every
+    // symbol this decision orders, so a pending entry for one of those symbols
+    // can only come from this decision.
+    let mut deferred = false;
     // rebalance toward target weights with cost + seeded slippage.
     for ord in &decision.orders {
         if !seen_symbols.insert(&ord.symbol) {
@@ -322,6 +348,7 @@ pub(crate) fn step_once(
             ord.target_weight,
             false,
         );
+        deferred |= book.pending.contains_key(&ord.symbol);
         // With legacy noise-off costs, retain the historic trace contract: an
         // order/rationale event denotes an actual fill and no event is emitted
         // for a no-op target. With execution noise, an accepted delayed or
@@ -388,13 +415,17 @@ pub(crate) fn step_once(
     };
     // Capture the decision's stated conviction, so the scoring kernel's
     // calibration axis is fed from the live run. Only stated confidences count:
-    // the mean over the orders that carry one, and no value at all for a hold or
-    // for orders that state none.
+    // the mean over the orders that carry one, and no value at all for a hold,
+    // for orders that state none, or for a decision the noise deferred.
     let stated = || decision.orders.iter().filter_map(|o| o.confidence);
     let n_stated = stated().count();
-    let confidence = (n_stated > 0).then(|| stated().sum::<f64>() / n_stated as f64);
+    let confidence = (n_stated > 0 && !deferred).then(|| stated().sum::<f64>() / n_stated as f64);
     book.prev_nav = navc;
-    StepOutcome { ret, confidence }
+    StepOutcome {
+        ret,
+        held_book_return,
+        confidence,
+    }
 }
 
 /// Run a single backtest of `agent` over `window` with seeded execution noise,
@@ -431,15 +462,17 @@ pub fn run_backtest(
         }
         let out = step_once(data, &symbols, &mut book, &costs, seed, t, &decision);
         returns.push(out.ret);
-        // The return booked at step t is the price move on the holdings decision
-        // t-1 chose, plus decision t's own trading cost. A stated confidence
-        // waits for the next step's return, and the window's final decision,
-        // whose outcome lies outside the window, adds no pair. A decision that
-        // stated no confidence adds none either, so `confidences` and
+        // The return booked at step t mixes the move on the book decision t-1
+        // left with decision t's own fills, fees, financing and borrow. A
+        // stated confidence therefore waits for the next step's held-book
+        // return, which carries only the first part and the dividends that book
+        // earns. The window's final decision, whose outcome lies outside the
+        // window, adds no pair. A decision that stated no confidence, or whose
+        // orders the noise deferred, adds none either, so `confidences` and
         // `outcomes` align with each other and not with `returns`.
         if let Some(confidence) = awaiting_outcome {
             confidences.push(confidence);
-            outcomes.push(out.ret > 0.0);
+            outcomes.push(out.held_book_return > 0.0);
         }
         awaiting_outcome = out.confidence;
     }

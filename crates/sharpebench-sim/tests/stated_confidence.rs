@@ -3,9 +3,10 @@
 //! Two rules are pinned here. A decision contributes a calibration pair only when
 //! at least one of its orders states a confidence, using the mean over the orders
 //! that do: a hold, or orders that omit the field, add nothing. And the pair's
-//! outcome is the next step's return, because the return booked at step `t` is the
-//! price move on the holdings decision `t - 1` chose; the window's final decision
-//! has no outcome inside the window and adds no pair.
+//! outcome is realized at the next step, because the move booked at step `t` is on
+//! the holdings decision `t - 1` chose; the window's final decision has no outcome
+//! inside the window and adds no pair. `calibration_outcome.rs` pins what that
+//! outcome is: the return of the held book, without the next decision's costs.
 //!
 //! Decisions are built from wire JSON, the path an external entrant takes.
 
@@ -150,8 +151,6 @@ fn a_stated_confidence_still_counts() {
         "every decision but the last has its outcome inside the window"
     );
     assert_eq!(run.outcomes.len(), 59);
-    let expected_outcomes: Vec<bool> = run.returns[1..].iter().map(|r| *r > 0.0).collect();
-    assert_eq!(run.outcomes, expected_outcomes);
     let score = score(run);
     assert_eq!(score.calibration_observations, 59);
     assert!(score.calibration_brier.is_some());

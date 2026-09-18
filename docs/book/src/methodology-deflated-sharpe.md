@@ -346,8 +346,10 @@ because the two rank hedgers differently; this diagnostic reports both and
 ranks by neither.
 
 Exposure on the other surfaces: the WASM module, the npm package, the MCP tools
-and the Python binding are unchanged and do not expose these diagnostics; the
-committed WASM was not rebuilt.
+and the Python binding do not expose these diagnostics. The committed WASM
+bundle was rebuilt for the Pareto change that shipped with them, because
+`pareto_optimal` is part of the score it returns, and it still exposes no
+diagnostic.
 
 ## Numerical implementation of the normal functions
 

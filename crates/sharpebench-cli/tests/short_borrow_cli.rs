@@ -189,17 +189,19 @@ fn a_malformed_borrow_rate_is_refused_before_anything_runs() {
     }
     assert!(!fixture.path("never.json").exists());
 
-    // The external capture path would drop the flag, so it is refused there.
+    // The external capture path builds the same cost model, so a rate outside
+    // its domain is refused there too, before the entrant is contacted. The
+    // address below is the discard port, which nothing answers.
     let output = fixture.cli(&[
         "capture",
         "out.json",
         "--http",
         "127.0.0.1:9",
         "--short-borrow-bps",
-        "25",
+        "-1",
     ]);
     assert_eq!(output.status.code(), Some(2), "{}", stderr(&output));
-    assert!(stderr(&output).contains("not supported for an external capture"));
+    assert!(stderr(&output).contains("must be finite and >= 0"));
     assert!(!fixture.path("out.json").exists());
 }
 
