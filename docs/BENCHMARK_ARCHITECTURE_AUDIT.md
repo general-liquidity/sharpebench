@@ -49,8 +49,8 @@ the page was read, and the row should be checked against its source before it is
 quoted.
 
 The source-tree ledger records 12 adopted rows, 53 already stronger,
-22 future and 11 rejected. The literature ledger records 62 already covered,
-2 candidates, 20 future and 23 not transferable.
+22 future and 11 rejected. The literature ledger records 63 already covered,
+1 candidate, 20 future and 23 not transferable.
 
 ## What changed because of the audit
 
@@ -131,19 +131,23 @@ because they change SharpeBench.
   forward arena verified each commitment and then ranked returns the entrant
   supplied after the data-reveal epoch, so a track computed with hindsight
   would pass every gate, as the paper's planted look-ahead oracle passes
-  deflation with DSR 1.00. Arena intake now binds scored returns to the
-  committed artifact by trajectory contract and replay, each row discloses its
-  evidence provenance, and the self-audit carries a leakage attack
-  (PR <<SB-PR-F1>>).
+  deflation with DSR 1.00. The arena now ranks only returns it derives itself,
+  from a capture bound to the committed artifact, the revealed dataset and the
+  window's execution matrix; returns an entrant supplies are accepted only
+  behind a flag that makes the board noncertifying, every ranked row records its
+  returns provenance, and the self-audit plants a next-bar oracle and shows it
+  never reaches a certifying board (PR #153).
 - **Exposure-matched random timing** (Adaptive Alpha Weighting with PPO). The
   luck floor is a fully invested random allocator, so no report said whether a
   mostly flat entrant beats random timing at its own exposure and holding
-  periods. A rank-neutral exposure-matched random-timing reference, computed by
-  replay, now makes that comparison (PR <<SB-PR-P3>>).
+  periods. `verify-trajectory --timing-null` now places each run's per-period
+  Sharpe among draws that keep its holding periods and shuffle their timing,
+  rank-neutral (PR #151).
 - **Lagged replay** (LiveTradeBench; TradingGroup). Recorded decisions were
-  never replayed with a delay. A rank-neutral lagged replay is now reported
-  beside the board, valid only where the entrant's trades do not move the
-  price (PR <<SB-PR-P4>>).
+  never replayed with a delay. `verify-trajectory --lagged-replay` now replays
+  every run with its decisions executed k bars late and reports the result
+  beside the verification, rank-neutral and valid only where the entrant's
+  trades do not move the price (PR #151).
 - **Timing-luck floor** (What LLM Trading Agents Actually Do in Production).
   No report showed how far a result moves when only the phase of the decision
   schedule moves. A rank-neutral timing-luck floor across the phases of a
@@ -328,7 +332,7 @@ disagree, because the paper and the code do not always describe the same mechani
 | 11 | AstaBench | science | arXiv 2510.21652 | paper | Price logged token usage with a frozen cost map and report score-cost Pareto frontiers | Future | See source-tree row: SharpeArena already carries rank-neutral token accounting, but pricing it on a cost frontier needs the populated frontier-model field and touches the known gap that inference cost never enters rank. |
 | 12 | Auditing AI Investment Recommendations | trading | trading-papers corpus | paper | Frozen, replayable audit of model advice as executable actions | Already covered | Strict replay recomputes performance from recorded decisions against frozen inputs. |
 | 13 | Automated LLM Speedrunning Benchmark | science | arXiv 2506.22419 | paper | Crossed model, scaffold, hint and seed factorial at an equal search budget | Future | Its 4 models by 5 scaffolds by 6 hint regimes by 3 seeds design, with a flat best-of-M control at a fixed 20-node budget, is a template for the known gap of separating model and scaffold effects once a frontier-model field exists. |
-| 14 | AutomationBench | agents | arXiv 2604.18934 | paper | Run optimization against the grader to surface reward hacks before release | **Candidate** | See source-tree row: SharpeBench's self-audit is a regression suite over nine named attacks and says it is not a proof that no entrant can game the scorer (`docs/book/src/governance.md:22`); both scoring fail-opens closed in 2026-09 were found by review, not by the suite, so a search without model calls for submissions that pass the gates without skill would test attacks nobody has named. |
+| 14 | AutomationBench | agents | arXiv 2604.18934 | paper | Run optimization against the grader to surface reward hacks before release | **Candidate** | See source-tree row: SharpeBench's self-audit is a regression suite over ten named attacks and says it is not a proof that no entrant can game the scorer (`docs/book/src/governance.md:22`); both scoring fail-opens closed in 2026-09 were found by review, not by the suite, so a search without model calls for submissions that pass the gates without skill would test attacks nobody has named. |
 | 15 | BacktestBench | trading | arXiv 2605.17937v2, KDD 2026 | paper | Two independent implementations of the metric engine must agree before use | Already covered | SharpeBench computes every statistic in one deterministic kernel checked against cross-platform goldens, and the paper's finding that the best model computes Sharpe correctly in 31.7% of cases shows why entrants never report their own metrics; its ticker, parameter and strategy selection tasks label the in-sample best of a small sampled candidate set as correct, at zero cost, with strategies drawn from a combinatorial space of about 205,000 buy and sell rules. |
 | 16 | Backtrader-Bench | trading | arXiv 2608.11232v1, IJCAI 2026 FinLLM Workshop | paper | Questions generated at runtime under a seed so answers never appear online, each re-derived by an independent backtest re-run | Already covered | See source-tree row for its question-mining filter. SharpeArena's sealed seeds, committed before submissions close, are stronger: Backtrader-Bench regenerates from a public seed over public AAPL 2020 to 2024 prices and releases its 160-question pool, so its items are enumerable. Its re-run checker matches strict replay, and its no-tools accuracy drops tool-attempt questions from the denominator. |
 | 17 | BikeBench | other | arXiv 2508.00830 | paper | Report every score under a standardized evaluator-call budget bracket | Already covered | See source-tree row: selection-deflated budget curves and the attempt ledger already charge search effort against the evidence, whereas BikeBench's 0 to 1B evaluation brackets are only a leaderboard filter. |
@@ -369,7 +373,7 @@ disagree, because the paper and the code do not always describe the same mechani
 | 52 | FutureX | forecasting | arXiv 2508.11987, ICLR 2026 | summary | Live questions resolving after model cutoff | Already covered | Forward windows resolve after commitment; FutureX reports accuracy without inferential statistics. |
 | 53 | GenAI-Bench | other | arXiv 2406.13743 | paper | Validate an automatic metric against human ratings with tie-calibrated pairwise accuracy | Not transferable | A different artifact from the source-tree GenAI-Bench row, which audits a serving load and latency tool; this paper scores text-to-visual models with a VQA-model metric checked against Likert human ratings, a model judge SharpeBench's deterministic kernel does not need. |
 | 54 | GeneBench-Pro | science | bioRxiv 2026.06.29.735386 | paper | Tiered release: public problems, third-party-held subset, and internal holdout | Future | Maps to the known gaps of no validation data tier and non-secret historical windows, since SharpeBench's only secret tier is forward commit/reveal; GeneBench-Pro also drops infrastructure-failed attempts from the denominator, which is weaker than strict replay. |
-| 55 | Gençay, What survives honest evaluation? | trading | arXiv 2608.27734v1 | paper | A planted look-ahead oracle that clears every statistical test, beside a host-recorded trial ledger | Already covered | Nearest prior art. Deflation by declared and observed trials was already a gate, and SharpeArena, which counts every emitted candidate before validation, keeps a stricter trial ledger than the paper. The full read exposed a gap: the oracle (evaluation Sharpe 51.5, DSR 1.00) shows statistics cannot catch leakage, and SharpeBench's forward arena ranked returns supplied after the data reveal without binding them to the committed artifact. Arena intake now binds scored returns to that artifact by trajectory contract and replay, discloses provenance on each row, and the self-audit carries a leakage attack (PR <<SB-PR-F1>>). Gençay certifies individual strategies rather than ranking agents, treats repeated runs as coverage rather than a condition, and checks no mandate; its finding that every LLM-discovered strategy in its suite fails certification at the search intensity it records corroborates SharpeBench's refusals. |
+| 55 | Gençay, What survives honest evaluation? | trading | arXiv 2608.27734v1 | paper | A planted look-ahead oracle that clears every statistical test, beside a host-recorded trial ledger | Already covered | Nearest prior art. Deflation by declared and observed trials was already a gate, and SharpeArena, which counts every emitted candidate before validation, keeps a stricter trial ledger than the paper. The full read exposed a gap: the oracle (evaluation Sharpe 51.5, DSR 1.00) shows statistics cannot catch leakage, and SharpeBench's forward arena ranked returns supplied after the data reveal without binding them to the committed artifact. The arena now ranks only returns it derives from a capture bound to that artifact, the revealed dataset and the window's execution matrix, takes supplied returns only behind a flag that makes the board noncertifying, records each ranked row's returns provenance, and demotes a planted next-bar oracle in the self-audit because it reaches no certifying board (PR #153). Gençay certifies individual strategies rather than ranking agents, treats repeated runs as coverage rather than a condition, and checks no mandate; its finding that every LLM-discovered strategy in its suite fails certification at the search intensity it records corroborates SharpeBench's refusals. |
 | 56 | Harness-Bench | agents | arXiv 2605.27922 | paper | Full model-by-harness factorial under fixed tasks, budgets, timeouts and evaluator | Future | See source-tree row Harness Bench: separating model from scaffold effects is a known gap that needs a populated model field and an attested runner, and this matrix runs one trajectory per cell with an LLM process rubric inside the score. |
 | 57 | HarnessOpt-Bench | agents | arXiv 2608.06301 | paper | Development reveals traces, validation only aggregates, test stays inaccessible during search | Future | It addresses the known missing validation tier, but no disclosure policy can hide public historical windows, so the only partition that can truly be withheld is SharpeBench's committed forward windows. |
 | 58 | HealthBench | medicine | arXiv 2505.08775 | paper | Expert baselines written with and without access to model reference responses | Future | See source-tree row: the unassisted and model-assisted physician arms map directly to the known gap of no human or practitioner baseline, while the rubric score itself stays model-judged. |
@@ -381,7 +385,7 @@ disagree, because the paper and the code do not always describe the same mechani
 | 64 | KernelBench | software | arXiv 2502.10517 | paper | fast_p: share of outputs both correct and faster than baseline by threshold p | Already covered | See source-tree row: SharpeBench eligibility gates likewise come before performance and cannot be bought by it, and the paper's best-of-k variant fast_p@k is weaker than pass^k. |
 | 65 | LAB-Bench | science | arXiv 2407.10362 | paper | Incentivized expert human baseline on a matched subset of tasks | Future | See source-tree row: this targets the known gap of no human or practitioner baseline, but a trading version needs attested no-AI practitioner runs over the same windows, and LAB-Bench itself could not enforce its no-AI rule. |
 | 66 | LifeSciBench | science | OpenAI preprint, no arXiv id | paper | Derive the task taxonomy from a survey of practitioners' most frequent workflows | Future | It depends on the known gaps of no expert workflow taxonomy and no practitioner baseline, and task scores come from an automated rubric grader spot-checked against experts. |
-| 67 | LiveTradeBench | trading | arXiv 2511.03628 | paper | Replay recorded allocations lagged k steps to test dependence on timely information | **Candidate** | See source-tree row Live Trade Bench: SharpeBench has no counterfactual lagged replay, so its attribution cannot tell a policy using current observations from a static tilt that earns the same when stale. The paper plans a delay sensitivity and the stressed profile's declared two-bar delay is not applied by the backtest driver, so a rank-neutral k-bar lag of recorded decisions through the frozen engine is the concrete route, valid where the entrant's trades do not move the price. |
+| 67 | LiveTradeBench | trading | arXiv 2511.03628 | paper | Replay recorded allocations lagged k steps to test dependence on timely information | Already covered | See source-tree row Live Trade Bench: SharpeBench had no counterfactual lagged replay, so its attribution could not tell a policy using current observations from a static tilt that earns the same when stale. `verify-trajectory --lagged-replay k,...` now replays every run with its decisions executed k bars late and reports the result beside the verification, rank-neutral and valid where the entrant's trades do not move the price (PR #151). The stressed profile's declared two-bar delay is still not applied by the backtest driver, and the diagnostic is where that sensitivity is measured. |
 | 68 | LocalBench | other | arXiv 2511.10459 | paper | Closed-book and retrieval-augmented arms on identical items expose retrieval that hurts | Already covered | See source-tree row: sharpebench-memory already runs baseline, retrieval and oracle arms with paired significance, and SharpeBench applies multiplicity-adjusted tests where LocalBench uses Bonferroni-corrected paired t-tests over an LLM-judged gold set. |
 | 69 | Long-Horizon-Terminal-Bench | software | arXiv 2607.08964 | paper | Low-weight public checks; hidden, dynamically generated stress cases carry most reward | Already covered | SharpeBench already requires every disjoint window and seed to pass and binds held-out windows into public commitments, SharpeArena's disjoint seed bands supply the unseen variants, and the paper's dense partial credit would let strengths offset failures where SharpeBench's gates are all-or-nothing. |
 | 70 | MA-ProofBench | science | arXiv 2606.13782 | paper | State non-degeneracy premises explicitly so a statement cannot be satisfied vacuously | Already covered | See source-tree row: SharpeBench refuses constant return tracks by exact value equality and refuses control batteries that would pass vacuously, which is how an explicit non-degeneracy premise looks in trading. |
@@ -403,7 +407,7 @@ disagree, because the paper and the code do not always describe the same mechani
 | 86 | QuantEval | trading | arXiv 2601.08689v2 | paper | Execute generated strategy code under one released deterministic backtest configuration and score the MAE of its return, drawdown and Sharpe against an expert reference implementation | Not transferable | Scores distance to a fixed gold strategy from one greedy generation per task, with the MAE taken only over executable outputs and QA graded partly by an LLM; SharpeBench has no gold strategy and keeps failed cells in the denominator, and the released cost and fill configuration is what SweepContract already binds. |
 | 87 | QuantitativeFinance-Bench | trading | anonymous NeurIPS 2026 submission, qfbench.com | paper | Task admission gate: the reference solution must pass and a single-call baseline must fail before a task merges | Already covered | See source-tree row: SharpeBench's synthetic witness must become eligible above a sampled boundary while its luck floor and suite controls stay below the bar, and canary GUIDs already ship; the paper's headline pass@k counts a task solved if any of k rounds passes, which reorders its own Table 1 and which SharpeBench refuses, its numeric verifier grades fixed gold values, and its failure taxonomy is LLM-judged. |
 | 88 | QuantumBench | science | arXiv 2511.00092 | paper | Compare models only within human-rated difficulty and expertise strata | Not transferable | Eight-option multiple choice with fixed gold answers has no stochastic outcome, and SharpeBench already reports condition-level diagnostics by dataset and window. |
-| 89 | RAT-Bench | other | arXiv 2602.12806 | paper | Score consequence-weighted residual risk under an adaptive attacker, not equal-weight recall | Not transferable | The attacker and text generator are LLMs over fixed synthetic profiles, and SharpeBench already attacks its own scorer with nine live attacks instead of a model-based adversary. |
+| 89 | RAT-Bench | other | arXiv 2602.12806 | paper | Score consequence-weighted residual risk under an adaptive attacker, not equal-weight recall | Not transferable | The attacker and text generator are LLMs over fixed synthetic profiles, and SharpeBench already attacks its own scorer with ten live attacks instead of a model-based adversary, the tenth a next-bar oracle delivered through the forward arena, demoted because it never reaches a certifying board. |
 | 90 | ResearchCodeBench | science | arXiv 2506.02314 | paper | Contamination-safe subset: tasks first committed after every evaluated model's cutoff | Already covered | See source-tree row: forward windows postdate every entrant by construction and historical evidence is kept apart from prospective evidence, which is stronger than dating repositories against self-reported knowledge cutoffs. |
 | 91 | SEC-bench | software | arXiv 2506.11791 | paper | Deterministic sanitizer oracle: PoC fires before the patch and not after | Already covered | See source-tree row: the deterministic Rust kernel, planted invalid cases and live scorer attacks already give a judge-free oracle, and the point-in-time boundary does structurally what SEC-bench does by manually stripping leaked patches from bug reports. |
 | 92 | SEC-bench Pro | software | arXiv 2605.26548 | paper | Admit a task only if the reference reproduces unpatched and every patched rerun blocks | Future | See source-tree row SEC-bench-Pro: the two-sided admission check fits only a future pipeline for admitting community scenarios, and the headline grade is an LLM judge that counts unsure verdicts as successes. |
@@ -425,11 +429,11 @@ disagree, because the paper and the code do not always describe the same mechani
 
 ## Candidates
 
-Two mechanisms from the literature ledger are not built, and each would close a
-named gap. One stays open; the other is being built in the 16 September 2026
-round. Two further candidates from that round, a mark the scored agent cannot
-set (CoffeeBench) and a seat-removal externality (EconEvals), were built in
-SharpeArena PR #83, and their literature rows now read Already covered.
+One mechanism from the literature ledger is not built, and it would close a
+named gap. Three further candidates were built in the 16 September 2026 round
+and their literature rows now read Already covered: a mark the scored agent
+cannot set (CoffeeBench) and a seat-removal externality (EconEvals) in
+SharpeArena PR #83, and lagged replay (LiveTradeBench) in SharpeBench PR #151.
 
 **Search against the grader** (AutomationBench, arXiv 2604.18934). The self-audit
 is a regression suite over named attacks and states that it is not a proof
@@ -441,15 +445,6 @@ suite, and the unbound arena intake fixed in the 16 September 2026 round was
 found by reading a paper. A search over synthetic submissions for ones that
 clear the gates without skill needs no model calls and targets exactly that
 class of defect. This candidate stays open.
-
-**Lagged replay** (LiveTradeBench, arXiv 2511.03628). Replaying recorded
-decisions delayed by k bars through the frozen engine would separate a policy
-that uses current observations from a static tilt that earns the same when
-stale. The manuscript plans a decision-delay sensitivity, and the stressed cost
-profile declares a two-bar delay that the backtest driver does not apply; lagged
-replay is a concrete route to both. It is valid only where the entrant's trades
-do not move the price, and it would be reported, never ranked. It is now being
-built as P4 (PR <<SB-PR-P4>>).
 
 ## Ideas deliberately not built
 
