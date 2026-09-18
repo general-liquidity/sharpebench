@@ -170,6 +170,7 @@ pub const NO_WINDOW_VARIES: &str =
 /// A window that never traded is not on its own a refusal. An agent that stands
 /// aside in one regime and trades in another has a flat window and a moving one,
 /// and the moving one is what its Sharpe ratio is measured on.
+///
 /// The pooled question is asked first, so a track the concatenation already
 /// refuses keeps the error it has always carried and only a track that reaches
 /// [`observed_sharpe_ratio`] as a series that varies can meet the new one.
