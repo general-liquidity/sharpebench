@@ -54,6 +54,12 @@ jobs:
         with:
           tool: cargo-mutants@27.1.0
 
+      # `.cargo/mutants.toml` sets `test_tool = "nextest"`, so the runner must
+      # be present. Same pin as ci.yml.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nextest@0.9.143
+
       # HEAD is the PR merge commit, so the diff from the merge base is exactly
       # what the pull request adds and its `+` side matches the checked-out tree,
       # which `--in-diff` requires.

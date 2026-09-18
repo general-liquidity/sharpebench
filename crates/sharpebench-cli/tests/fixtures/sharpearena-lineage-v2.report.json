@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "evidence_class": "verified_candidate_lineage_diagnostic",
+  "verified": true,
+  "observed_trials": 1,
+  "scored_candidates": 1,
+  "invalid_trials": 0,
+  "duplicate_trials": 0,
+  "family_count": 1,
+  "ancestry_edges": 0,
+  "cited_source_count": 1,
+  "plan_bound_idea_sources": 1,
+  "generator_identity_sha256": "47be84dbe9a130f813de3b071803b55feaaa65462ac6142cd8f1c17fa05e7ba3",
+  "trial_denominator": 1,
+  "family_grouping_affects_trial_count": false,
+  "families": [
+    {
+      "family_digest": "9cda3af2624eb2328180938c4356ff391692eda7dcd9e2d54f6bae4ec1a022bc",
+      "observed_trials": 1,
+      "selectable_candidates": 1,
+      "scored_candidates": 1,
+      "best_median_deflated_sharpe": 0.5,
+      "family_median_deflated_sharpe": 0.5,
+      "best_to_median_gap": 0.0
+    }
+  ],
+  "ancestry": [
+    {
+      "trial_ordinal": 0,
+      "candidate_id": "momentum-v1",
+      "raw_candidate_sha256": "8b9dc85fd289b37a0afb808ff6e2d3311b890883cd446c7f30c0f6165edbf58c",
+      "family_digest": "9cda3af2624eb2328180938c4356ff391692eda7dcd9e2d54f6bae4ec1a022bc",
+      "parent_candidate_digests": [],
+      "idea_source_digests": [
+        "sha256:2b14c0fdd0bff097f4c691bd43e07f81f94e425a5a954bda37942263bfde8893"
+      ],
+      "lineage_status": "declared"
+    }
+  ],
+  "cited_sources": [
+    {
+      "source_type": "repository",
+      "source_digest": "sha256:2b14c0fdd0bff097f4c691bd43e07f81f94e425a5a954bda37942263bfde8893",
+      "url_or_doi": "https://github.com/example/aiuts",
+      "commit": "0123456789abcdef",
+      "authors": [
+        "Example Authors"
+      ],
+      "license": "Apache-2.0"
+    }
+  ]
+}
