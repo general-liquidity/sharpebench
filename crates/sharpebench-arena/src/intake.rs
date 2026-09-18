@@ -31,10 +31,11 @@
 //! to be inside the artifact, fixed before the deadline. That rests on the
 //! operator's custody of the data, which no file here can prove.
 //!
-//! A board certifies only when every ranked row was re-executed and supplied
-//! returns were not accepted ([`board_certifies`]). Intake computes that from
-//! the rows ([`Admission::certifying`]); no caller sets it. A replayed or
-//! supplied row therefore puts its window on a noncertifying board.
+//! A board certifies only when it ranked at least one row, every ranked row was
+//! re-executed, and supplied returns were not accepted ([`board_certifies`]).
+//! Intake computes that from the rows ([`Admission::certifying`]); no caller
+//! sets it. A replayed or supplied row therefore puts its window on a
+//! noncertifying board, and so does a window that ranked nothing.
 //!
 //! Every refusal is recorded, like a failed reveal: against the entry's agent,
 //! or against `(unnamed entry <index>)` for an entry that names none.
@@ -392,15 +393,21 @@ pub struct Admission {
     pub certifying: bool,
 }
 
-/// Whether a board certifies its rows: supplied returns were not accepted, and
-/// every ranked row was re-executed. A replayed row can hold hindsight
-/// decisions, and a supplied row holds whatever the entrant sent, so either one
-/// makes the board noncertifying. An empty field meets the rule vacuously.
+/// Whether a board certifies its rows: it has rows, supplied returns were not
+/// accepted, and every ranked row was re-executed. A replayed row can hold
+/// hindsight decisions, and a supplied row holds whatever the entrant sent, so
+/// either one makes the board noncertifying.
+///
+/// A field with no rows does not meet the rule. `certifying` is a claim about
+/// rows, and a board that ranked none has nothing to claim it of; reading the
+/// empty case as vacuously true published that claim on a board where every
+/// entry had been refused, with no notice on `board.md` saying so.
 pub fn board_certifies(
     returns_provenance: &BTreeMap<String, ReturnsProvenance>,
     supplied_returns_accepted: bool,
 ) -> bool {
     !supplied_returns_accepted
+        && !returns_provenance.is_empty()
         && returns_provenance
             .values()
             .all(|provenance| *provenance == ReturnsProvenance::ReExecuted)

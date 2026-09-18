@@ -591,3 +591,47 @@ fn a_faulted_window_does_not_ask_the_launcher_to_be_ready() {
     assert!(refusals(&arena, "alpha")[0].starts_with("no capture path applies a fault plan"));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A board that ranked nothing must not carry the mark that says its rows were
+/// re-executed. `board_certifies` was vacuously true on an empty field, so a
+/// window where every entry was refused signed `certifying: true` with zero
+/// rows and `board.md` opened with no notice. Found from the SharpeArena side,
+/// where every forward entry is refused under the default intake, which makes
+/// the empty board the expected outcome of a documented workflow rather than a
+/// corner case.
+#[test]
+fn a_board_that_ranked_nothing_does_not_certify() {
+    let dir = temp_dir("ranked-nothing");
+    let data = market(1);
+    let (_, digest) = image("committed");
+    let (mut arena, dataset) = committed(&dir, &data, &[("alpha", &digest)], None);
+    // Supplied returns are refused under the default intake, so the field is
+    // empty and every entry is on the refusals list.
+    let entry = RevealedEntry {
+        agent_id: Some("alpha".to_string()),
+        submission: Some(sharpebench_core::AgentSubmission {
+            agent_id: "alpha".to_string(),
+            runs: Vec::new(),
+            in_sample_trials: 0,
+            candidates: Vec::new(),
+        }),
+        capture: None,
+        artifact_digest: digest,
+        salt: salt("alpha"),
+        fault_plan_sha256: None,
+    };
+    let scores = arena.reveal_and_score(WINDOW, &dataset, &[entry]).unwrap();
+    assert!(scores.is_empty());
+    assert_eq!(refusals(&arena, "alpha").len(), 1);
+
+    assert_eq!(arena.window(WINDOW).unwrap().certifying, Some(false));
+    assert_eq!(window_json(&dir)["certifying"], false);
+    arena.publish(WINDOW, &SigningKey::derive(b"k")).unwrap();
+    assert_eq!(header_json(&dir)["certifying"], false);
+    let md = board_md(&dir);
+    assert!(
+        md.contains("**Noncertifying board.**"),
+        "a board with no rows must say so: {md}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

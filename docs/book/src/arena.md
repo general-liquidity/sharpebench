@@ -184,15 +184,20 @@ noncertifying board.
 
 ### Certifying boards
 
-A board certifies its rows only when supplied returns were not accepted and
-every ranked row is `re-executed`. The arena computes this from the rows when it
-scores; no option sets it. The window records it as `certifying`, the signed
-header carries it, and `arena score --json` reports it. A `replayed` or
-`supplied` row makes the board noncertifying, and `board.md` then opens with a
-notice that names the reason. A reader treats a board as certifying only when
-its header says `"certifying": true`; a header without the field, as signed
-before the field existed, certifies nothing. A window that ranks no row meets
-the rule vacuously unless it accepted supplied returns.
+A board certifies its rows only when it ranked at least one row, supplied
+returns were not accepted, and every ranked row is `re-executed`. The arena
+computes this from the rows when it scores; no option sets it. The window
+records it as `certifying`, the signed header carries it, and `arena score
+--json` reports it. A `replayed` or `supplied` row makes the board
+noncertifying, and `board.md` then opens with a notice that names the reason. A
+reader treats a board as certifying only when its header says `"certifying":
+true`; a header without the field, as signed before the field existed,
+certifies nothing.
+
+A window that ranked no row is noncertifying too. `certifying` is a claim about
+rows, so a board that has none has nothing to claim it of, and a window where
+every entry was refused would otherwise sign the mark that says its rows were
+re-executed.
 
 ### Provenance on the board
 
