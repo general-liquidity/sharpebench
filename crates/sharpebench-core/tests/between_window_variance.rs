@@ -124,3 +124,17 @@ fn an_unrequested_diagnostic_is_absent() {
         serde_json::to_value(&sharpe_diagnostics(&field, &board, &cfg, &requested)[0]).unwrap();
     assert!(row.get("between_window_variance").is_none(), "{row}");
 }
+
+/// A board row with no submission behind it says so, rather than reporting a
+/// track with too few windows that was never read.
+#[test]
+fn a_row_with_no_submission_says_so() {
+    let field = [agent("a", vec![vec![0.01, 0.03], vec![0.05, 0.07]])];
+    let cfg = ScoreConfig::default();
+    let board = rank(&field, &cfg);
+    let requested = SharpeDiagnostic::parse_list(ID).unwrap();
+    let row = serde_json::to_value(&sharpe_diagnostics(&[], &board, &cfg, &requested)[0]).unwrap();
+    let d = &row["between_window_variance"];
+    assert!(d["between_window_share"].is_null(), "{row}");
+    assert_eq!(d["error"], "no submission in the field has this agent_id");
+}

@@ -220,8 +220,9 @@ pub struct BetweenWindowVarianceDiagnostic {
     /// Absent when `error` is present.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub between_window_share: Option<f64>,
-    /// Why the share could not be computed: fewer than two windows, a
-    /// non-finite observation, or a pooled track with no variance at all.
+    /// Why the share could not be computed: no submission for the row, fewer
+    /// than two windows, a non-finite observation, or a pooled track with no
+    /// variance at all.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -292,11 +293,16 @@ pub fn sharpe_diagnostics(
                 expected_shortfall: wants(SharpeDiagnostic::ExpectedShortfall)
                     .then(|| tail_risk(&pooled)),
                 between_window_variance: wants(SharpeDiagnostic::BetweenWindowVariance).then(
-                    || {
-                        let windows = submission
-                            .map(|s| window_tracks(s, cfg.execution_seeds_per_window))
-                            .unwrap_or_default();
-                        between_window_variance(&windows)
+                    || match submission {
+                        Some(s) => between_window_variance(&window_tracks(
+                            s,
+                            cfg.execution_seeds_per_window,
+                        )),
+                        None => BetweenWindowVarianceDiagnostic {
+                            windows: 0,
+                            between_window_share: None,
+                            error: Some("no submission in the field has this agent_id".into()),
+                        },
                     },
                 ),
             }
