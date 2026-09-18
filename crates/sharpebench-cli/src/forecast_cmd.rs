@@ -1,6 +1,9 @@
 use std::fmt::Write as _;
 use std::fs;
 
+use sharpebench_core::forecast::{
+    analyze_forecast_quality_against_plan, parse_forecast_contract_plan, ForecastContractPlan,
+};
 use sharpebench_core::{
     analyze_forecast_quality, parse_forecast_evidence, ContractDigestVersion,
     ForecastAnalysisConfig, ForecastQualityReport,
@@ -11,8 +14,8 @@ pub(crate) fn run(args: &[String], json: bool) -> i32 {
     if paths.is_empty() {
         eprintln!(
             "usage: sharpebench forecast-quality <evidence.json>... \
-             [--bootstrap-samples N] [--seed N] [--confidence C] [--alpha A] [--bins N] \
-             [--output report.json] [--json]"
+             [--contracts plan.json] [--bootstrap-samples N] [--seed N] [--confidence C] \
+             [--alpha A] [--bins N] [--output report.json] [--json]"
         );
         return 2;
     }
@@ -28,6 +31,13 @@ pub(crate) fn run(args: &[String], json: bool) -> i32 {
         Err(error) => {
             eprintln!("error: {error}");
             return 2;
+        }
+    };
+    let plan = match contract_plan(args) {
+        Ok(plan) => plan,
+        Err((code, error)) => {
+            eprintln!("error: {error}");
+            return code;
         }
     };
     let mut documents = Vec::with_capacity(paths.len());
@@ -47,7 +57,11 @@ pub(crate) fn run(args: &[String], json: bool) -> i32 {
             }
         }
     }
-    match analyze_forecast_quality(&documents, config) {
+    let analyzed = match &plan {
+        Some(plan) => analyze_forecast_quality_against_plan(&documents, config, plan),
+        None => analyze_forecast_quality(&documents, config),
+    };
+    match analyzed {
         Ok(report) => {
             let serialized = serde_json::to_string_pretty(&report)
                 .expect("forecast-quality report is JSON serializable");
@@ -79,6 +93,7 @@ fn positional_paths(args: &[String]) -> Vec<&str> {
         "--alpha",
         "--bins",
         "--output",
+        "--contracts",
     ];
     let mut paths = Vec::new();
     let mut index = 2;
@@ -103,6 +118,23 @@ fn output_path(args: &[String]) -> Result<Option<&str>, &'static str> {
         Some(path) if !path.starts_with('-') => Ok(Some(path)),
         _ => Err("--output requires a file path"),
     }
+}
+
+/// The declared contract universe named by `--contracts`, if any. A missing value
+/// is a usage error (2); an unreadable or invalid plan is a failure (1).
+fn contract_plan(args: &[String]) -> Result<Option<ForecastContractPlan>, (i32, String)> {
+    let Some(index) = args.iter().position(|value| value == "--contracts") else {
+        return Ok(None);
+    };
+    let path = match args.get(index + 1).map(String::as_str) {
+        Some(path) if !path.starts_with('-') => path,
+        _ => return Err((2, "--contracts requires a plan file path".to_string())),
+    };
+    let payload =
+        fs::read_to_string(path).map_err(|error| (1, format!("cannot read {path}: {error}")))?;
+    parse_forecast_contract_plan(&payload)
+        .map(Some)
+        .map_err(|error| (1, format!("{path}: {error}")))
 }
 
 fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
@@ -159,9 +191,14 @@ fn write_report(out: &mut String, report: &ForecastQualityReport) -> std::fmt::R
         out,
         "FORECAST QUALITY (reported only; never changes trading rank)"
     )?;
+    let field = if support.outside_plan_by_agent.is_some() {
+        "in the declared plan"
+    } else {
+        "resolved by at least one agent"
+    };
     writeln!(
         out,
-        "field support: {} contract digest(s) resolved by at least one agent; dependence unit: {}",
+        "field support: {} contract digest(s) {field}; dependence unit: {}",
         support.n_contracts, report.dependence_unit
     )?;
     writeln!(out, "pairing: {}", support.rule)?;
@@ -202,6 +239,18 @@ fn write_report(out: &mut String, report: &ForecastQualityReport) -> std::fmt::R
                 gap.cancelled.len(),
                 gap.rejected.len(),
                 gap.not_claimed.len()
+            )?;
+        }
+        if let Some(outside) = support
+            .outside_plan_by_agent
+            .as_ref()
+            .and_then(|outside| outside.get(&agent.agent_id))
+            .filter(|outside| !outside.is_empty())
+        {
+            writeln!(
+                out,
+                "  outside the plan: {} resolved digest(s), not scored",
+                outside.len()
             )?;
         }
         for metric in &agent.metrics {
@@ -311,8 +360,139 @@ mod tests {
             "5",
             "--output",
             "report.json",
+            "--contracts",
+            "plan.json",
         ]);
         assert_eq!(positional_paths(&args), ["a.json", "b.json"]);
+    }
+
+    fn temp_path(tag: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock is after Unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "sharpebench-forecast-{tag}-{}-{nonce}.json",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn a_declared_plan_writes_a_v3_report_and_prints_its_support() {
+        let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/forecast-quality/fixtures");
+        let committed: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(fixtures.join("report.json")).expect("tutorial report"),
+        )
+        .expect("tutorial report is JSON");
+        let mut digests: Vec<String> = committed["common_support"]["contract_sha256"]
+            .as_array()
+            .expect("digest list")
+            .iter()
+            .map(|value| value.as_str().expect("digest").to_string())
+            .collect();
+        // One planned contract nobody answered, so both agents carry a gap.
+        digests.push("0".repeat(64));
+        let plan = temp_path("plan");
+        fs::write(
+            &plan,
+            serde_json::json!({
+                "schema_version": "sharpebench.forecast-contract-plan.v1",
+                "contract_sha256": digests,
+            })
+            .to_string(),
+        )
+        .expect("write plan");
+        let output = temp_path("planned-report");
+        let args = vec![
+            "sharpebench".to_string(),
+            "forecast-quality".to_string(),
+            fixtures
+                .join("agent-alpha.json")
+                .to_string_lossy()
+                .into_owned(),
+            "--contracts".to_string(),
+            plan.to_string_lossy().into_owned(),
+            fixtures
+                .join("agent-beta.json")
+                .to_string_lossy()
+                .into_owned(),
+            "--bootstrap-samples".to_string(),
+            "20".to_string(),
+            "--output".to_string(),
+            output.to_string_lossy().into_owned(),
+        ];
+        assert_eq!(run(&args, false), 0);
+        let report: serde_json::Value =
+            serde_json::from_slice(&fs::read(&output).expect("planned report written"))
+                .expect("--output contains JSON");
+        fs::remove_file(&output).expect("remove temporary report");
+        fs::remove_file(&plan).expect("remove temporary plan");
+        assert_eq!(report["schema_version"], "sharpebench.forecast-quality.v3");
+        assert_eq!(report["common_support"]["n_contracts"], 13);
+        assert_eq!(
+            report["common_support"]["unresolved_by_agent"]["agent-alpha"]["not_claimed"],
+            serde_json::json!(["0".repeat(64)])
+        );
+        assert_eq!(
+            report["common_support"]["outside_plan_by_agent"]["agent-beta"],
+            serde_json::json!([])
+        );
+
+        let alpha = parse_forecast_evidence(
+            &fs::read_to_string(fixtures.join("agent-alpha.json")).expect("alpha"),
+        )
+        .expect("alpha is valid");
+        let beta = parse_forecast_evidence(
+            &fs::read_to_string(fixtures.join("agent-beta.json")).expect("beta"),
+        )
+        .expect("beta is valid");
+        let only_one = parse_forecast_contract_plan(
+            &serde_json::json!({
+                "schema_version": "sharpebench.forecast-contract-plan.v1",
+                "contract_sha256": [&digests[0]],
+            })
+            .to_string(),
+        )
+        .expect("one-digest plan");
+        let rendered = render_report(
+            &analyze_forecast_quality_against_plan(
+                &[alpha, beta],
+                ForecastAnalysisConfig::default(),
+                &only_one,
+            )
+            .expect("planned report"),
+        );
+        assert!(rendered.contains("field support: 1 contract digest(s) in the declared plan"));
+        assert_eq!(
+            rendered
+                .matches("outside the plan: 11 resolved digest(s), not scored")
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn a_missing_or_invalid_plan_is_refused() {
+        let base = ["sharpebench", "forecast-quality", "a.json"];
+        let mut missing = args(&base);
+        missing.push("--contracts".to_string());
+        assert_eq!(run(&missing, false), 2);
+
+        let absent = temp_path("absent-plan");
+        let mut unreadable = args(&base);
+        unreadable.push("--contracts".to_string());
+        unreadable.push(absent.to_string_lossy().into_owned());
+        assert_eq!(run(&unreadable, false), 1);
+
+        let invalid = temp_path("invalid-plan");
+        fs::write(&invalid, r#"{"schema_version":"x","contract_sha256":[]}"#)
+            .expect("write invalid plan");
+        let mut refused = args(&base);
+        refused.push("--contracts".to_string());
+        refused.push(invalid.to_string_lossy().into_owned());
+        assert_eq!(run(&refused, false), 1);
+        fs::remove_file(&invalid).expect("remove invalid plan");
     }
 
     #[test]

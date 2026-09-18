@@ -27,8 +27,8 @@ on every fill. An edge has to survive the friction it would actually meet:
   field existed; a set rate is written to the cost model JSON and bound into the
   cost-model digest, so a checkpoint or trajectory bound under one rate is refused
   under another. A negative or non-finite rate is refused. On the CLI,
-  `--short-borrow-bps <bps>` sets it for `run`, for `capture` of the reference agents
-  and for `verify-trajectory`; an external `capture` refuses the flag.
+  `--short-borrow-bps <bps>` sets it for `run`, for `capture` of a reference agent or
+  an external entrant, and for `verify-trajectory`.
 - **Liquidity caps**: an order larger than the available depth is only partially filled.
 - **Turnover cost (TRF)**: a cost proportional to how much the portfolio weights move
   from one step to the next. `trf_factor(weights_prev, weights_new, c)` returns a

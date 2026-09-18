@@ -629,7 +629,7 @@ fn help() {
         "  sharpebench verify-trajectory <traj.json> [--data <csv>]  strictly replay the complete data/cost/engine/runner/window/seed contract"
     );
     println!("                       --allow-unbound-trajectory: explicit legacy or cross-version regrade; never the default");
-    println!("                       --short-borrow-bps <bps>: for capture (reference agents) and verify-trajectory; the rate is bound, so a different one refuses");
+    println!("                       --short-borrow-bps <bps>: for capture (reference or external entrant) and verify-trajectory; the rate is bound, so a different one refuses");
     println!("                       --reexecute [--cmd \"<prog>\"|--http <addr>|--image <ref>]: also re-run every captured run with a fresh agent and refuse the first divergent decision");
     println!("                       --timing-null [--null-draws N] [--null-seed S]: also place each run's Sharpe among seeded replays of its own holding periods at random bars (rank-neutral)");
     println!("                       --lagged-replay <k,k,...>: also report Sharpe and mean return with every decision executed k bars late (rank-neutral)");
@@ -674,7 +674,7 @@ fn help() {
         "  sharpebench arena <init|open|commit|advance|score|publish|verify> ...  drive a forward-attested scoring window (see docs/book/src/arena.md)"
     );
     println!(
-        "  sharpebench forecast-quality <evidence.json>...              score prospective forecasts on exact common support (reported only)"
+        "  sharpebench forecast-quality <evidence.json>... [--contracts <plan.json>]  score prospective forecasts on exact common support, or on a declared contract plan (reported only)"
     );
     println!(
         "  sharpebench import <csv|stockbench> ... --out subs.json     convert a rival board's return series into a scoreable field"
@@ -941,7 +941,8 @@ fn run_verify(args: &[String], json: bool) -> ExitCode {
 }
 
 fn run_audit(json: bool) -> ExitCode {
-    let report = sharpebench_core::run_self_audit();
+    let report = sharpebench_core::run_self_audit()
+        .with_case(sharpebench_arena::forward_hindsight_oracle_case());
     if json {
         emit_json(&report);
     } else {
@@ -1549,7 +1550,7 @@ fn load_retry_backoff(args: &[String], max_retries: u32) -> Result<BackoffSchedu
 /// default one, byte for byte. Present, the rate is part of the cost-model
 /// digest, so a checkpoint or trajectory bound under one rate is refused under
 /// another. A negative or non-finite rate is refused before anything runs.
-fn cost_model_from_args(args: &[String]) -> Result<sharpebench_sim::CostModel, String> {
+pub(crate) fn cost_model_from_args(args: &[String]) -> Result<sharpebench_sim::CostModel, String> {
     let mut costs = sharpebench_sim::CostModel::default();
     if !args.iter().any(|arg| arg == "--short-borrow-bps") {
         return Ok(costs);
@@ -2634,14 +2635,7 @@ fn run_capture(args: &[String], json: bool) -> ExitCode {
     use sharpebench_sim::{Agent, BuyAndHold, CostModel, Momentum};
 
     if external_capture::names_external_entrant(args) {
-        // The external capture path builds its own default cost model, so the
-        // flag would be silently dropped there. Refuse it instead.
-        if args.iter().any(|arg| arg == "--short-borrow-bps") {
-            eprintln!(
-                "error: --short-borrow-bps is not supported for an external capture; capture the reference agents or omit the flag"
-            );
-            return ExitCode::from(2);
-        }
+        // The external capture path builds the cost model from the same flags.
         return external_capture::run_capture_external(
             args,
             json,

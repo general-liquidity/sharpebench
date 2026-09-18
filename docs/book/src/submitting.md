@@ -73,18 +73,31 @@ The simulator builds calibration pairs by two rules:
   and so does a decision whose orders all omit the field. An agent that states
   0.9 on 20 trades and then holds for 230 bars reports 20 pairs, where earlier
   releases reported 250.
-- The pair's outcome is whether the return at step `t + 1` is positive. The
-  return the engine books at step `t` is the price move on the holdings that
-  decision `t - 1` chose, plus the trading cost of decision `t`, so the first
-  return a decision's holdings earn arrives one step later. The window's final
-  decision has no such return inside the window and contributes no pair.
+- The pair's outcome is whether the book the decision left gained over the
+  next bar. The return the engine books at step `t + 1` mixes the move on the
+  book decision `t` left with decision `t + 1`'s own fills, fees, financing
+  and borrow, so the outcome uses the first part only: the book's value at the
+  `t + 1` closes before anything trades, plus the dividends that book earns at
+  `t + 1`, against the NAV step `t` closed at. A decision that exits is graded
+  on the flat book it leaves, which gains nothing. The window's final decision
+  has no next bar inside the window and contributes no pair.
+- Under execution noise, a decision whose order is delayed to the next bar, or
+  whose partial fill carries a remainder to it, contributes no pair: the book
+  its outcome would be measured on is not the book it chose. An order still
+  carried from an earlier decision fills after the book is marked, so its fill
+  and cost are not part of the outcome either.
 
 `calibration_brier` is the Brier score over those pairs and
 `calibration_observations` counts them. An agent that never states a
 confidence reports no Brier score and zero observations.
 `confidence_weighted_return` weights each run by the mean of its paired
-confidences. A run with none carries no weight, unless no run in the
-submission has any; then every run weighs the same.
+confidences. A run with none weighs the mean of those per-run weights over the
+runs that have one, and every run weighs 1.0 when no run has any. A run the
+harness replaces with a failing sentinel states nothing, so it keeps a weight
+and stays in the mean. A submission that states confidences in one run only
+scores the equal-weight mean, as if it had stated none. Four runs at +0.001 stating 0.6 beside one
+sentinel run at -0.01 score -0.0012, the equal-weight mean, where a zero weight
+for the sentinel would report +0.001.
 
 Trajectory contract schema 3 marks the optional confidence. A schema-2 capture
 wrote a confidence on every order, including the 0.5 filled in for an entrant

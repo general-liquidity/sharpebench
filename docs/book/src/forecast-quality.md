@@ -131,7 +131,8 @@ documents alone: adding a document with gaps, or with contracts nobody else
 answered, never changes the support, interval or raw p-value of a pair it is not
 part of. The one exception is a settlement dispute, which refuses the whole
 report as before. An agent that abstains, or leaves settlements pending, on contracts it
-would lose cannot shrink anyone else's comparison, and cannot choose its own:
+would lose cannot shrink anyone else's comparison, and cannot choose a subset
+to be compared on (it can still withhold its own comparisons, see below):
 its pairs with agents that resolved more carry `support_gap` and an
 `inference_error` beginning `unequal resolved support`, with no interval and no
 p-value. Their `mean_loss_difference` is still printed, over the contracts both
@@ -166,6 +167,72 @@ A withheld pair stays in the Holm family, so adding any third agent, complete
 or not, enlarges the family that sets a surviving pair's Holm multiplier. The
 pair's support, interval and raw p-value do not move.
 
+### Without a plan, a document chooses its own comparisons
+
+The field support above is the union of what the documents resolved, and the
+documents are self-declared: each one embeds its own contracts. That leaves two
+moves open to a single entrant, and a v2 report cannot tell either from an
+honest gap:
+
+- **Opting out.** A document that resolves one contract nobody else resolved,
+  which it can invent, has unequal support with every other agent, so all of
+  its pairs are withheld. The same contract is charged to every other agent as
+  `not_claimed`, although they answered the full question set.
+- **Selective abstention.** A document that leaves out the contracts it
+  expects to lose also withholds its pairs, and the gap it carries is measured
+  against a union it helped define.
+
+### Declaring the question set: `--contracts`
+
+```bash
+sharpebench forecast-quality agent-a.json agent-b.json --contracts plan.json
+```
+
+`plan.json` names the contract digests every agent is asked to answer, fixed
+before resolution:
+
+```json
+{
+  "schema_version": "sharpebench.forecast-contract-plan.v1",
+  "contract_sha256": ["05e43c87...", "..."]
+}
+```
+
+The schema is exact, the list is non-empty, and every entry is a lowercase
+SHA-256 named once; anything else is refused before any document is read. The
+plan becomes the field support, and the report is
+`sharpebench.forecast-quality.v3`:
+
+- `common_support.n_contracts` and `contract_sha256` are the planned digests,
+  and `rule` says so.
+- `unresolved_by_agent` charges each agent the planned digests it did not
+  resolve, under the same statuses as v2. A planned contract nobody claimed is
+  charged to every agent, and two agents that both miss it still share their
+  support.
+- `outside_plan_by_agent` lists, per agent, the resolved digests the plan does
+  not name. They enter no loss mean, calibration, comparison or
+  `contract_digest_versions` entry. In `agents`, `n_claims`, `n_revisions`,
+  `n_eligible_claims`, the resolution counts and `resolution_rate` still
+  describe the whole document, while `blind_resolved` and
+  `consensus_exposed_resolved` count planned digests only.
+- A settlement is checked across every pair of documents before the plan drops
+  anything, so a disputed outcome on an unplanned contract still refuses the
+  report.
+
+Against a plan an invented contract changes nothing that is scored, and nobody
+else is charged for it. An abstaining agent is charged its own gaps against a
+set it did not choose, and it cannot shrink or reshape any other pair. What a
+plan does not do is force a comparison: an agent with planned gaps still has
+its own pairs withheld, because the only way to compare it on the full plan
+would be to fill in forecasts it never made, and a filled-in probability puts a
+loss nobody forecast into a proper score. Log loss and CRPS have no finite
+worst case to impute either. The abstention is disclosed contract by contract
+instead.
+
+Without `--contracts` the report stays v2, byte for byte, and keeps both
+weaknesses above. Use a plan whenever the question set was declared before
+resolution, as it is for a prospective field.
+
 The resampler treats all assets and questions with the same resolution clock as
 one block. It draws whole blocks, preserving contemporaneous dependence rather
 than pretending every forecast is independent. The report gives the observed
@@ -182,6 +249,7 @@ Relevant options are:
 --alpha A               familywise significance level inside (0, 1)
 --bins N                calibration and PIT bin count
 --output PATH           write the complete JSON report to PATH
+--contracts PATH        score against the declared contract plan at PATH (v3)
 ```
 
 `--output` is independent of display mode: the CLI writes the same complete,
@@ -229,8 +297,10 @@ no tools, memory, portfolio, or order interface. The committed
 reconstructs support, calibration, Brier loss, block resampling, and Holm
 adjustment from the imported ledgers. The committed `report.json` and that
 check are schema `sharpebench.forecast-quality.v1` and stay frozen. The field is
-complete, so its support is the same under v2, but the command below now writes
-v2, which the checker does not accept.
+complete, so its support is the same under v2, and the command below now writes
+v2. The checker verifies a v1 report and a v2 report whose ledgers resolve the
+same contract digests, and refuses a v2 report over ledgers that resolve
+different digests, because it does not reconstruct the pairs v2 withholds.
 
 The exact pipeline is:
 
