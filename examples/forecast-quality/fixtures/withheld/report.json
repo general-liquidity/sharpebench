@@ -2,6 +2,7 @@
   "schema_version": "sharpebench.forecast-quality.v2",
   "rank_effect": "reported_only_never_trading_rank",
   "dependence_unit": "whole resolution-clock block across assets and questions",
+  "familywise_size": "the paired test resamples whole blocks and centres the raw mean, not a studentised statistic, so it rejects a true null more often than its nominal 5%: measured 0.188 at 4 blocks, 0.162 at 5, 0.138 at 6, 0.096 at 10, 0.072 at 20 and 0.060 at 40 over 6000 i.i.d. normal draws of 5 contracts a block, and 0.237 at 4 blocks under lognormal contract differences; read familywise_significant against measured_size_at_nominal_5pct",
   "config": {
     "bootstrap_seed": 23,
     "bootstrap_samples": 400,

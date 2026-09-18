@@ -149,7 +149,8 @@ impl Agent for Churner {
 /// The held-book return of every step after the first, rebuilt from the
 /// open-loop environment's public state: the post-trade portfolio and cash the
 /// next observation reports, marked at the next closes with the next dividends,
-/// against the post-trade NAV the step reported.
+/// against the NAV the step reported plus the carry it charged, which is what
+/// that book stood at before paying to be held.
 fn held_book_returns(data: &Dataset, window: Window, costs: CostModel, seed: u64) -> Vec<f64> {
     let mut env = TradingEnv::new(data.clone(), window, costs, seed);
     let mut agent = Churner { decided: 0 };
@@ -168,7 +169,7 @@ fn held_book_returns(data: &Dataset, window: Window, costs: CostModel, seed: u64
                 .iter()
                 .map(|p| p.shares * data.dividend_at(&p.symbol, t + 1))
                 .sum();
-            marks.push((marked + dividends) / step.info.nav - 1.0);
+            marks.push((marked + dividends) / (step.info.nav + step.info.carry) - 1.0);
         }
         obs = step.observation;
     }
@@ -264,4 +265,98 @@ fn a_decision_the_noise_deferred_opens_no_pair() {
     );
     assert_eq!(run.confidences.len(), expected);
     assert_eq!(run.outcomes.len(), expected);
+}
+
+/// Frictionless except for the opt-in borrow, so the only carry is the one the
+/// short pays.
+fn borrow_costs(short_borrow_bps: f64) -> CostModel {
+    CostModel {
+        short_borrow_bps,
+        ..costs(0.0)
+    }
+}
+
+/// Shorts the book stating `confidence`, then restates the same target.
+struct ShortThenHold {
+    decided: usize,
+}
+impl Agent for ShortThenHold {
+    fn decide(&mut self, obs: &MarketObservation) -> Decision {
+        self.decided += 1;
+        match self.decided {
+            1 => decision(&[order(obs, 0, -1.0, 0.9)]),
+            2 => decision(&[order(obs, 0, -1.0, 0.5)]),
+            _ => decision(&[]),
+        }
+    }
+}
+
+/// The carry the held book paid is part of what it returned.
+///
+/// Financing and borrow are charged at the close of bar `t` on the book bar `t`
+/// left, which is the book held over bar `t + 1`, so the charge is the cost of
+/// holding it. It leaves `cash`, and so leaves both the mark at `t + 1` and the
+/// NAV at `t`. Dividing one by the other cancelled it and left the book's gross
+/// move: a short that gained on price while paying more than that in borrow
+/// divided to a positive number and was graded a hit.
+#[test]
+fn the_carry_the_held_book_paid_is_part_of_its_outcome() {
+    // Decision 0 shorts the whole book at 100: 0.01 shares short, cash 2.0,
+    // NAV 1.0 before carry. The borrow is 25 bp on 1.0 of short notional, so
+    // 0.0025 leaves cash and step 0 closes at NAV 0.9975.
+    //
+    // The price falls to 99.9. The held book is worth 2.0 - 0.999 = 0.9985
+    // against the 1.0 it stood at before the charge: a gross gain of 10 bp
+    // against 25 bp of borrow, so the book returned -15 bp and the decision
+    // was wrong. Dividing by the post-charge 0.9975 gives +10.03 bp instead.
+    let data = one_symbol(&[100.0, 99.9, 99.9], &[0.0; 3]);
+    let run = run_backtest(
+        &data,
+        &mut ShortThenHold { decided: 0 },
+        Window { start: 0, end: 3 },
+        1,
+        borrow_costs(25.0),
+    );
+    assert_eq!(run.confidences.first(), Some(&0.9));
+    assert_eq!(
+        run.outcomes.first(),
+        Some(&false),
+        "gross +10 bp, borrow 25 bp: the book lost 15 bp"
+    );
+
+    // Free the same book of its borrow and the same price path is a hit, so
+    // the test turns on the carry and not on the price.
+    let free = run_backtest(
+        &data,
+        &mut ShortThenHold { decided: 0 },
+        Window { start: 0, end: 3 },
+        1,
+        borrow_costs(0.0),
+    );
+    assert_eq!(free.outcomes.first(), Some(&true));
+}
+
+/// A book at a NAV that is not positive opens no pair.
+///
+/// The guard was on the magnitude, so a negative base divided through and
+/// inverted the sign: a book that fell from -0.5 to -0.6 came back as +0.2 and
+/// was graded a hit.
+#[test]
+fn a_book_at_a_non_positive_nav_opens_no_pair() {
+    // Decision 0 shorts 0.01 shares at 100, leaving cash 2.0 and NAV 1.0.
+    // The price triples to 250: the held book is worth -0.5, so decision 0 is
+    // graded against a base of 1.0 and is a miss. Decision 1 restates the
+    // target against that negative NAV and leaves a long 0.002 shares with
+    // cash -1.0, closing at -0.5 again. The price then falls to 200 and the
+    // book is worth -0.6: worse, and the old ratio made it +0.2.
+    let data = one_symbol(&[100.0, 250.0, 200.0], &[0.0; 3]);
+    let run = run_backtest(
+        &data,
+        &mut ShortThenHold { decided: 0 },
+        Window { start: 0, end: 3 },
+        1,
+        costs(0.0),
+    );
+    assert_eq!(run.confidences, vec![0.9], "{:?}", run.confidences);
+    assert_eq!(run.outcomes, vec![false]);
 }

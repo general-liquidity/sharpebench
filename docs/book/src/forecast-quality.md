@@ -240,6 +240,45 @@ mean loss difference, a percentile interval, and a two-sided block-bootstrap
 p-value. Holm adjustment controls the familywise error rate across all reported
 pairs.
 
+### What the significance flag delivers
+
+Holm controls the familywise rate across pairs only as well as each pair's own
+p-value holds its level, and this one does not. The resampler centres the raw
+mean rather than a studentised statistic, so its spread carries two small-sample
+errors at once: it divides by the block count rather than by one less, and it
+reads its quantile off a law with as many atoms as there are blocks instead of a
+`t` distribution. Both tighten the rejection region. Measured over 6,000 draws
+under the null, with i.i.d. normal per-contract differences, five contracts a
+block and the shipped 2,000 replications:
+
+| Blocks | Rejection rate at a nominal 5% | 95% interval coverage |
+|---|---|---|
+| 4 | 0.188 | 0.802 |
+| 5 | 0.162 | |
+| 6 | 0.138 | 0.858 |
+| 10 | 0.096 | 0.904 |
+| 20 | 0.072 | 0.927 |
+| 40 | 0.060 | |
+
+Four blocks is the first count the resampling gate admits, and it is where the
+flag is furthest from what it claims. Skew makes it worse: under lognormal
+contract differences the four-block rate reads 0.237. Every comparison that
+carries a p-value therefore also carries
+`measured_size_at_nominal_5pct` for its own block count, and the report states
+the whole table in `familywise_size`. Read `familywise_significant` against that
+number.
+
+Reporting the number rather than replacing the test is a choice, and the reason
+is that no available replacement holds its size across the admitted counts.
+Studentising the statistic swaps the error for its opposite: it measures 0.013
+at four blocks and rejects a half-sigma effect 12.1% of the time where this test
+rejects it 74.5% of the time. A Student-t on the block means is exact under
+normal blocks at 0.050 but reads 0.094 under skewed ones, and it tests the
+unweighted block mean rather than the contract mean this report publishes as
+`mean_loss_difference`. Raising the block floor until the shipped test holds its
+level would withhold nearly every real pair. The report is rank-neutral, so none
+of this reaches a gate or a board.
+
 Relevant options are:
 
 ```text

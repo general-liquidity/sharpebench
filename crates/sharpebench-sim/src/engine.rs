@@ -56,11 +56,27 @@ pub(crate) struct Book {
     pub(crate) rng: Rng,
     pub(crate) trace: Trace,
     pub(crate) prev_nav: f64,
+    /// Financing and short borrow charged at the previous bar's close, on the
+    /// book that bar left. That book is the one held over the next bar, so the
+    /// charge is the cost of holding it and belongs to the decision that chose
+    /// it. `prev_nav` is already net of it, which is why it is kept: the pairing
+    /// in [`run_backtest`] needs the base before it was taken.
+    ///
+    /// Zero under the default cost model, where an unlevered book pays no
+    /// financing and `short_borrow_bps` is zero, and then absent from the
+    /// serialized snapshot. A snapshot written before this field existed reads
+    /// back as zero, which is what it meant.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub(crate) prev_carry: f64,
     /// Orders carried to the next bar by the opt-in execution noise (a delayed
     /// order or the unfilled remainder of a partial fill). Empty, and absent from
     /// the serialized snapshot, under the default cost model.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub(crate) pending: BTreeMap<String, PendingOrder>,
+}
+
+fn is_zero(value: &f64) -> bool {
+    *value == 0.0
 }
 
 /// An order carried from a previous bar: the target weight still to be reached.
@@ -77,6 +93,7 @@ impl Book {
             rng: Rng::new(seed),
             trace: Trace::default(),
             prev_nav: 1.0_f64,
+            prev_carry: 0.0_f64,
             pending: BTreeMap::new(),
         }
     }
@@ -122,10 +139,15 @@ pub(crate) struct StepOutcome {
     pub(crate) ret: f64,
     /// The return of the book the previous decision left, over this bar: its
     /// pre-trade mark at this bar's closes plus the dividends that book earns
-    /// here, against the NAV the previous step closed at. This bar's fills,
-    /// fees, financing and borrow belong to this step's decision and are not in
-    /// it.
-    pub(crate) held_book_return: f64,
+    /// here, less the financing and borrow that book paid, against the NAV it
+    /// stood at before that charge. This bar's fills, fees, financing and borrow
+    /// belong to this step's decision and are not in it.
+    ///
+    /// `None` when that base is not strictly positive, where the ratio carries
+    /// no sign a reader could act on: a book at negative NAV that recovers from
+    /// -0.5 to -0.3 divides to -0.40, and one that falls to -0.8 divides to
+    /// +0.60. Such a step opens no calibration pair.
+    pub(crate) held_book_return: Option<f64>,
     /// The mean confidence over this decision's orders that state one. `None`
     /// when no order states one, and when the execution noise carried any of
     /// the decision's orders to the next bar, because the book the outcome
@@ -274,16 +296,22 @@ pub(crate) fn step_once(
     let cur_nav = nav(data, symbols, &book.shares, book.cash, t);
     // The previous decision's outcome is read here, before anything at this
     // bar trades: the book it left, marked at this bar's closes, plus the
-    // dividends that book earns at this bar, against the NAV it closed at.
+    // dividends that book earns at this bar, against the NAV it stood at before
+    // its own financing and borrow were charged.
+    //
+    // That charge is already out of `cash`, and so out of both `cur_nav` and
+    // `prev_nav`. Leaving it in the denominator alone made the outcome the
+    // book's gross move: a short book whose price move was +5 bp while it paid
+    // 25 bp of borrow divided to a positive number and was scored a hit,
+    // although the decision lost money. Adding the charge back to the base
+    // makes the ratio the move less the carry, which is what the book returned.
     let held_dividends: f64 = symbols
         .iter()
         .map(|s| book.shares[s] * data.dividend_at(s, t))
         .sum();
-    let held_book_return = if book.prev_nav.abs() > 1e-12 {
-        (cur_nav + held_dividends) / book.prev_nav - 1.0
-    } else {
-        0.0
-    };
+    let held_base = book.prev_nav + book.prev_carry;
+    let held_book_return =
+        (held_base > 1e-12).then(|| (cur_nav + held_dividends) / held_base - 1.0);
 
     // Orders carried from the previous bar by the execution-noise model fill
     // first, at this bar's price, unless the agent re-issues an order on the
@@ -381,6 +409,10 @@ pub(crate) fn step_once(
         .map(|s| book.shares[s] * price(data, s, t))
         .sum();
     let nav_now = book.cash + positions_value;
+    // What this bar's book pays to be held over the next one. Recorded rather
+    // than only deducted, because the next step's outcome is measured against
+    // the NAV before it.
+    let mut carry = 0.0_f64;
     if nav_now > 1e-12 {
         // Financing is a function of gross, not net, exposure.  Netting a long
         // against a short must not let a leveraged dollar-neutral book avoid the
@@ -390,7 +422,12 @@ pub(crate) fn step_once(
             .map(|s| (book.shares[s] * price(data, s, t)).abs())
             .sum::<f64>()
             / nav_now;
-        book.cash -= crate::costs::financing_cost_frac(costs.financing_bps, gross) * nav_now;
+        // Each charge is deducted where it always was, so the cash path keeps
+        // its floating-point operation order bit for bit; `carry` only sums the
+        // same terms for the denominator the next step reads.
+        let financing = crate::costs::financing_cost_frac(costs.financing_bps, gross) * nav_now;
+        book.cash -= financing;
+        carry += financing;
         // Short borrow: the opt-in carry on every short dollar, which the 1x
         // threshold above never reaches for an unlevered short book. A zero
         // rate skips this block, so the default path is untouched.
@@ -400,8 +437,10 @@ pub(crate) fn step_once(
                 .map(|s| (-(book.shares[s] * price(data, s, t))).max(0.0))
                 .sum::<f64>()
                 / nav_now;
-            book.cash -=
+            let borrow =
                 crate::costs::short_borrow_cost_frac(costs.short_borrow_bps, short) * nav_now;
+            book.cash -= borrow;
+            carry += borrow;
         }
     }
 
@@ -421,6 +460,7 @@ pub(crate) fn step_once(
     let n_stated = stated().count();
     let confidence = (n_stated > 0 && !deferred).then(|| stated().sum::<f64>() / n_stated as f64);
     book.prev_nav = navc;
+    book.prev_carry = carry;
     StepOutcome {
         ret,
         held_book_return,
@@ -465,14 +505,16 @@ pub fn run_backtest(
         // The return booked at step t mixes the move on the book decision t-1
         // left with decision t's own fills, fees, financing and borrow. A
         // stated confidence therefore waits for the next step's held-book
-        // return, which carries only the first part and the dividends that book
-        // earns. The window's final decision, whose outcome lies outside the
-        // window, adds no pair. A decision that stated no confidence, or whose
-        // orders the noise deferred, adds none either, so `confidences` and
-        // `outcomes` align with each other and not with `returns`.
-        if let Some(confidence) = awaiting_outcome {
+        // return, which carries the first part, the dividends that book earns
+        // and the carry that book paid to be held. The window's final decision,
+        // whose outcome lies outside the window, adds no pair. A decision that
+        // stated no confidence, whose orders the noise deferred, or whose book
+        // stood at a NAV that was not positive, adds none either, so
+        // `confidences` and `outcomes` align with each other and not with
+        // `returns`.
+        if let (Some(confidence), Some(held)) = (awaiting_outcome, out.held_book_return) {
             confidences.push(confidence);
-            outcomes.push(out.held_book_return > 0.0);
+            outcomes.push(held > 0.0);
         }
         awaiting_outcome = out.confidence;
     }
