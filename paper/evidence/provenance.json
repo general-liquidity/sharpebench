@@ -179,7 +179,7 @@
       "sha256": "1e025ac30099de23ae8455f20ae5441b557e924870d0e1475c7508512908ec0d"
     }
   ],
-  "generated_at_head": "733a9dcff269678e53caf19d7d3c62fd6ba769fd",
+  "generated_at_head": "134532349fd2283fbc8d0a80213e9ffd860324db",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -531,7 +531,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/composite.rs",
-      "sha256": "0cdf3edb11539bfbb7e3d91d6d53a32543c4623812a61b97125efd196c3468ae"
+      "sha256": "1ac6276ad4533a7de24cce357c6a9fd08479ffa70c645a8bdc080aeea29a73e6"
     },
     {
       "path": "crates/sharpebench-core/src/correlation.rs",
@@ -619,7 +619,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/sharpe_diagnostics.rs",
-      "sha256": "0d499afaf649c30f5f11496a82c1160ddb9d225f1e03e7519c2676e051b3409a"
+      "sha256": "b83e713ae3f257e11f7c282ea86ac99b3b2dbc905cb9a3cb8fb7d6c82371727b"
     },
     {
       "path": "crates/sharpebench-core/src/suite_controls.rs",
@@ -635,7 +635,7 @@
     },
     {
       "path": "crates/sharpebench-core/tests/between_window_variance.rs",
-      "sha256": "35710ee89126f6e636ff253475a09401bd4c46305904b804a522d91cd374795c"
+      "sha256": "d0eaddfcd39526531a3ab5f971b2189b78d32dd46256fb96f58676e7a47988ca"
     },
     {
       "path": "crates/sharpebench-core/tests/constant_window_tracks.rs",
@@ -643,7 +643,7 @@
     },
     {
       "path": "crates/sharpebench-core/tests/dispersion_leverage.rs",
-      "sha256": "47ada7597ecea42c3d6ecda4c08de3f3954d421280aeabe0861d770ba39616a4"
+      "sha256": "27f53909735f8847c6fc02272b9d831051cfe0f533c14b0b08071128cfdd755c"
     },
     {
       "path": "crates/sharpebench-core/tests/forecast_contract_digest_versions.rs",
@@ -823,7 +823,7 @@
     },
     {
       "path": "crates/sharpebench-harness/tests/evidence_fields_no_clone_merges.rs",
-      "sha256": "b88e96eabe4b9a41b73dfc6bcd826103568f31653ea3f548f66b78cd212d1bae"
+      "sha256": "8b92f47a04d8b69a685d4d3ab6d3ee091fd3a3e684b4adc9fa6bbf39d7ad49c5"
     },
     {
       "path": "crates/sharpebench-harness/tests/fault_injection.rs",
@@ -1435,5 +1435,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "38d394d8dc5b96b533542cb2f233a716c58ab5d780bfbcc2d745894dd0082ce3"
+  "source_snapshot_sha256": "fbad434655e67e19f1458070406259d154e420e9af65a87cc2aa5083b4fc1a53"
 }
