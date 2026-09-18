@@ -120,8 +120,7 @@ Decisions in the transfer ledger use the vocabulary of the benchmark audit's lit
 with Adopted for mechanisms built in this round:
 
 - **Adopted:** the paper's mechanism exposed a gap confirmed in the product source, and the change
-  is built in this round. The row names its pull request, or holds a placeholder in double angle
-  brackets until that pull request merges.
+  is built in this round. The row names its pull request.
 - **Already covered:** the products implement the transferable idea with equal or stronger
   evidence.
 - **Future:** useful only for a named future surface, or blocked by a known gap.
@@ -248,9 +247,8 @@ Agents Actually Do in Production (DXRG), Agentic Quantitative Trading (survey) a
 
 Each paragraph below is a change built in this round from a mechanism these papers describe. Each
 gap was confirmed in the product source before the change was made. The reference after each
-paragraph names the pull request, and a placeholder in double angle brackets stands for one not yet
-merged. The same round also includes changes that came from benchmark papers and repositories
-outside this corpus; they are not described here.
+paragraph names the pull request that carries it. The same round also includes changes that came
+from benchmark papers and repositories outside this corpus; they are not described here.
 
 **Sizing response to volatility.** The production record reports a median leverage of 5.0x in every
 volatility sextile across a 5.7x volatility spread (What LLM Trading Agents Actually Do in
@@ -273,30 +271,34 @@ holdout as a risk (p. 1) and says the isolation of its test window rests on oper
 point read from the held-out curve, p. 6) supply related evidence. SharpeArena's strategy search
 deflated each search's winner with only that run's trial count, and `sharpebench lineage` refused
 any journal with more than one record, so repeated looks at one test split were counted nowhere.
-SharpeArena now records a per-test-split census of prior consultations and cumulative trials in each
-record (evidence schema 2 to 3), and `sharpebench lineage` has a census mode over a multi-record
-journal that accepts schemas 2 and 3. (<<SB-PR-P1>>, <<SA-PR-P1>>)
+SharpeArena now stamps each record with a per-test-split census of prior consultations, cumulative
+trials and the digest of the line before it (evidence schema 2 to 3), and `sharpebench lineage` has
+a census mode that recomputes the history over a multi-record journal and refuses a record whose
+declared census or chain disagrees. (SharpeBench PR #152, SharpeArena PR #90)
 
 **Dated idea sources.** XALPHA builds its research memory from ingested reports, and its ingestion
 procedure records no publication or availability date for them (pp. 18-19). `IdeaProvenance` in
 SharpeBench and the SharpeArena edge manifest recorded no date for an idea source, so a source
 published after the test split began passed `sharpebench lineage` unflagged. Both now accept an
 optional source date and report how many sources are dated on or after each split's first day and
-how many are undated. (<<SB-PR-P2>>, <<SA-PR-P2>>)
+how many are undated. (SharpeBench PR #152, SharpeArena PR #90)
 
 **Exposure-matched random timing.** Adaptive Alpha Weighting with PPO compares its agent with a
 random entry and exit baseline matched to the agent's turnover and holding duration (p. 11).
 SharpeBench's luck floor is a fully invested random allocator, so no report said whether a mostly
-flat entrant beats random timing at its own exposure and holding periods. SharpeBench now reports a
-rank-neutral exposure-matched random-timing reference computed by replay. (<<SB-PR-P3>>)
+flat entrant beats random timing at its own exposure and holding periods.
+`verify-trajectory --timing-null` now places each run's per-period Sharpe among draws that keep its
+holding periods and shuffle their timing, rank-neutral. (SharpeBench PR #151)
 
-**Lagged replay.** The benchmark audit recorded lagged replay as a candidate from LiveTradeBench.
-TradingGroup computes per-decision counterfactual action values from the recorded decision and the
-next bar (p. 5). Two papers here trade at the bar after the decision (AlphaQuanter, p. 4; FinSMART,
-p. 6), and SBCA moves after-close news to the next session (p. 16). Recorded decisions were never
-replayed with a delay, and the stressed profile's two-bar delay was declared but not applied.
-SharpeBench now reports a rank-neutral lagged replay beside the board, valid only where the
-entrant's trades do not move the price. (<<SB-PR-P4>>)
+**Lagged replay.** The benchmark audit raised lagged replay from LiveTradeBench, whose row in that
+ledger now reads Already covered. TradingGroup computes per-decision counterfactual action values
+from the recorded decision and the next bar (p. 5). Two papers here trade at the bar after the
+decision (AlphaQuanter, p. 4; FinSMART, p. 6), and SBCA moves after-close news to the next session
+(p. 16).
+Recorded decisions were never replayed with a delay, and the stressed profile's two-bar delay was
+declared but not applied. `verify-trajectory --lagged-replay` now replays every run with its
+decisions executed k bars late and reports the result beside the verification, rank-neutral and
+valid only where the entrant's trades do not move the price. (SharpeBench PR #151)
 
 **Timing-luck floor.** The production record's methodology canon asks every study to know its
 timing-luck floor (rule 17, p. 15). No report showed how far a result moves when only the phase of
@@ -534,7 +536,7 @@ The ledger records 17 adopted, 41 already covered, 9 future and 9 not transferab
 | # | Paper | Transferable mechanism | Decision | Reason |
 |---:|---|---|---|---|
 | 1 | ABIDES-MARL | A coordinator fixes the execution order of simultaneous agents' actions (p. 4) | **Adopted** (SharpeArena PR #83) | SharpeArena's shared book matched each bar's orders by agent index (`lob_market.rs:317-322`); an opt-in seeded shuffle of seat order is built. The paper's market diagnostics are covered by the calibrated null in `realism.py`. |
-| 2 | Adaptive Alpha Weighting with PPO | Random entry and exit reference matched to the agent's turnover and holding duration (p. 11) | **Adopted** (<<SB-PR-P3>>) | The luck floor was a fully invested random allocator (`sharpebench-sim/src/agent.rs:103-112`); an exposure-matched random-timing reference by replay is built, rank-neutral. |
+| 2 | Adaptive Alpha Weighting with PPO | Random entry and exit reference matched to the agent's turnover and holding duration (p. 11) | **Adopted** (SharpeBench PR #151) | The luck floor was a fully invested random allocator (`sharpebench-sim/src/agent.rs:103-112`); an exposure-matched random-timing reference by replay is built, rank-neutral. |
 | 3 | Adaptive and Regime-Aware RL for Portfolio Optimization | Regime probabilities in the observation, with a regime-switching Monte Carlo (p. 4-8) | Already covered | SharpeArena labels regimes causally for a rank-neutral breakdown (`regime_eval.py`) and refuses reads of scenario regimes (`lookahead_guard.py`); seeded tiers and cross-regime transfer are in `EVALUATION.md`. |
 | 4 | Agentic Quantitative Trading (survey) | Match the evaluation setting to the capability claimed (p. 7) | Already covered | SharpeBench keeps historical, forward and forecast evidence apart (`docs/book/src/methodology.md`), and SharpeArena keeps forward paper trading as a separate evidence class. |
 | 5 | Agile-Quant | Inference latency reported beside task quality (p. 5) | Already covered | The SharpeArena bridge reports p50 and p95 latency with `rank_input: false` (`bench_bridge.py`). Not a trading paper. |
@@ -544,7 +546,7 @@ The ledger records 17 adopted, 41 already covered, 9 future and 9 not transferab
 | 9 | Alpha-GPT | In-sample against out-of-sample IC curve over search iterations (p. 6) | Already covered | The budget curve reports marginal gain, non-improvement onset and a selection-deflated peak (`budget_curve.rs`). Cited in support of the test-split census. |
 | 10 | AlphaNetV4 | Expanding-window retraining with early stopping on backtested Sharpe (p. 21-24) | Already covered | Checkpoint selection is declared search inside deflation (`composite.rs`), and the budget curve reports its cost. |
 | 11 | AlphaQuanter | Robustness from overlapping rolling windows (p. 16) | **Adopted** (SharpeBench PR #143, SharpeArena PR #84) | Pooled tracks concatenated windows without a disjointness check (`composite.rs:1686-1721`); strict replay and sweep contracts refuse overlap. The paper's next-close fill corroborates the lagged replay. |
-| 12 | AQuA | Cross-run search that reuses a fixed validation slice, with test isolation left to operator discipline (p. 5, p. 7-8, p. 15) | **Adopted** (<<SB-PR-P1>>, <<SA-PR-P1>>) | Repeated recorded searches against one test split were not counted (`strategy_generation.py`, `lineage_cmd.rs:65-71`); a per-split census of consultations and cumulative trials is built. |
+| 12 | AQuA | Cross-run search that reuses a fixed validation slice, with test isolation left to operator discipline (p. 5, p. 7-8, p. 15) | **Adopted** (SharpeBench PR #152, SharpeArena PR #90) | Repeated recorded searches against one test split were not counted (`strategy_generation.py`, `lineage_cmd.rs:65-71`); a per-split census of consultations, cumulative trials and the journal chain is built. |
 | 13 | Auditing AI Investment Recommendations | Validity, run-to-run stability and reference agreement as separate axes, with a per-run truncation flag (p. 3-5) | **Adopted** (SharpeBench PR #149, SharpeBench PR #146, SharpeArena PR #87) | The admissibility contract is covered by closed schemas and process gates (`sharpebench-protocol/src/lib.rs`); decision stability and finish-reason counts are built as rank-neutral reports. |
 | 14 | Automate Strategy Finding with LLM | Model factor selection from multimodal context with a chronological split (p. 5-7) | Future | The split is covered (`strategy_generation.py`). Prompt context is free text, so dating it against the test window stays with the point-in-time citation row of the benchmark audit; dated idea sources cover bound sources only. |
 | 15 | Autonomous AI Agents for Option Hedging | Shortfall probability beside expected shortfall (p. 5-6) | **Adopted** (SharpeBench PR #144) | SharpeBench had no expected shortfall (`sharpe_diagnostics.rs`); an opt-in expected-shortfall and tail-count diagnostic is built, rank-neutral. |
@@ -603,12 +605,12 @@ The ledger records 17 adopted, 41 already covered, 9 future and 9 not transferab
 | 68 | Time-Inhomogeneous Volatility Aversion | Charge each step's reward variance around that step's expected reward (p. 4, p. 8) | **Adopted** (SharpeArena PR #82) | `time_inhomogeneous_vol_aversion` (`rewards.py`) now states how it differs from the paper; training-only, no rank effect. |
 | 69 | Trade-R1 | Process-consistency score gating a market reward (p. 4-6) | Not transferable | The gate is a model judge; its deterministic residues are the closed contract (`sharpebench-protocol/src/lib.rs:282-296`) and rank-neutral confidence. |
 | 70 | Trading Confidence | Aleatoric, epistemic and distributional uncertainty legs (p. 5-12) | Already covered | Ported as a model-free decomposition in `sharpebench-core/src/calibration.rs`. |
-| 71 | TradingGroup | Per-decision counterfactual values from the recorded decision and the next bar (p. 5) | **Adopted** (<<SB-PR-P4>>) | Replaying recorded decisions through the frozen engine is built as the rank-neutral lagged replay, valid where the entrant's trades do not move the price. |
+| 71 | TradingGroup | Per-decision counterfactual values from the recorded decision and the next bar (p. 5) | **Adopted** (SharpeBench PR #151) | Replaying recorded decisions through the frozen engine is built as the rank-neutral lagged replay beside a verified trajectory, valid where the entrant's trades do not move the price. |
 | 72 | TradingMoE | Older-backbone rerun and prospective paper trading as leakage controls (p. 7-8) | Already covered | Forward windows with commit and reveal postdate every entrant (`docs/book/src/attestation.md`); pass^k requires every seed; declared trials cover a displayed grid. |
 | 73 | Unified Multi-Modal Framework for Financial Systems | Robustness table under observation noise, missing data and distribution shift (p. 28) | Future | Perturbed observations fit only a rank-neutral SharpeArena probe, as for TraderBench in the benchmark audit; SharpeArena perturbs execution, not observations (`exec_noise.rs`). |
 | 74 | What LLM Trading Agents Actually Do in Production (DXRG) | A 17-rule methodology canon, choice stability across repeats, sizing against volatility and a zero-funding paper engine (p. 3-15) | **Adopted** (SharpeBench PR #148, SharpeBench PR #149, SharpeBench PR #146, SharpeArena PR #87, SharpeBench PR #140, SharpeBench PR #139) | Sixteen canon rules were already enforced or out of scope; the timing-luck floor, decision stability, finish-reason counts, the sizing-response diagnostic and short-borrow carry are built. |
 | 75 | When AI Trading Agents Compete | Meta-order impact shape: square-root growth during execution and decay after it (p. 3-4) | **Adopted** (SharpeArena PR #81) | A rank-neutral impact-shape probe is built and the SharpeArena evaluation guide describes the compounding; the `market.rs` comment waits for a change that moves `SPEC_HASH`, and a transient-impact kernel stays Future. |
-| 76 | XALPHA | Research memory from ingested reports whose ingestion records no availability date (p. 4-5, p. 18-19) | **Adopted** (<<SB-PR-P2>>, <<SA-PR-P2>>) | Idea-source provenance carried no date (`candidate_lineage.rs:82-89`); an optional source date, with counts of sources dated on or after each split's first day and of undated sources, is built. |
+| 76 | XALPHA | Research memory from ingested reports whose ingestion records no availability date (p. 4-5, p. 18-19) | **Adopted** (SharpeBench PR #152, SharpeArena PR #90) | Idea-source provenance carried no date (`candidate_lineage.rs:82-89`); an optional source date, with counts of sources dated on or after each split's first day and of undated sources, is built. |
 
 ## Limits
 
