@@ -44,12 +44,12 @@ when a recorded one does not match.
 
 | Disposition | Rows |
 |---|---|
-| historical-only | 24 |
+| historical-only | 25 |
 | still-applicable | 18 |
 | needs-rescore | 4 |
 | needs-new-experiment | 8 |
 | unresolved | 5 |
-| **total** | **59** |
+| **total** | **60** |
 
 ## Priority queue
 
@@ -112,6 +112,7 @@ The headline claims whose present applicability is not established, worst first.
 | `SB-claims-iv` | SharpeBench | claim | paper/sections/05-experiments.tex:266 | still-applicable | SharpeBench paper/evidence owner | none |
 | `SB-claims-v` | SharpeBench | claim | paper/sections/05-experiments.tex:266 | still-applicable | SharpeBench paper/evidence owner | none |
 | `SB-claims-vi` | SharpeBench | claim | paper/sections/05-experiments.tex:266 | still-applicable | SharpeBench paper/evidence owner | P13-A: replication over independent noise draws. |
+| `SB-forecast-pilot` | SharpeBench | claim | paper/sections/07-limitations.tex:37 | historical-only | SharpeBench paper/evidence owner | none |
 | `SA-tab-f4` | SharpeArena | table | paper/sections/07-validation.tex:18, paper/sections/07-validation.tex:42, paper/sections/07-validation.tex:11 | historical-only | SharpeArena paper/evidence owner | P13-R/P14-R: the F4 positive control, which the manuscript names as available and unrun. |
 | `SA-calm-calibration` | SharpeArena | claim | paper/sections/07-validation.tex:45, paper/sections/07-validation.tex:55 | historical-only | SharpeArena paper/evidence owner | none |
 | `SA-tab-f5` | SharpeArena | table | paper/sections/07-validation.tex:69, paper/sections/07-validation.tex:104, paper/sections/07-validation.tex:110, paper/sections/07-validation.tex:58 | historical-only | SharpeArena paper/evidence owner | P13-R: re-verify the frozen F5 grid against the traded-bar validation rule, or record that the check was run. |
@@ -2160,9 +2161,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 **Source.** `paper/sections/03-benchmark.tex:53`
 
 **Artifacts.**
-- `paper/evidence/prospective-forecast-field/report.json`, sha256 `c96d7ec3e946d5cf7f5e9afcfc6004760071b3f0b9bc6ee59160d59e499aad80`, digest source: paper/evidence/provenance.json
-- `paper/evidence/prospective-forecast-field/report-check.json`, sha256 `82f28fd922221080b00c11f5d97b41d91efcff230ce94e0cb64389124614122b`, digest source: paper/evidence/provenance.json
-- `paper/evidence/prospective-forecast-field/resolution-manifest.json`, sha256 `c7f213512aa80558bd4c0ded3155798516b2a283911929a6e9c67012e2b78bbc`, digest source: paper/evidence/provenance.json
+- `examples/forecast-quality/fixtures/report.json`, sha256 `95c08f9702f4b80e40f660359724486f37e8ed0b9661f04e4750f0a77142106e`, digest source: computed for this register; the file is outside the provenance manifest scope, the complete committed report, schema sharpebench.forecast-quality.v2, bootstrap seed 23 over 400 samples
+- `examples/forecast-quality/fixtures/agent-alpha.json`, sha256 `305600d455bf8748c5c179b509311c61878fdc5db6a22cab807e12e77b1e58ad`, digest source: computed for this register; the file is outside the provenance manifest scope
+- `examples/forecast-quality/fixtures/agent-beta.json`, sha256 `6a7b7726dcd84d962cb30929e99d158f23600663bf3377b303ae71c5b272fad3`, digest source: computed for this register; the file is outside the provenance manifest scope
+- `examples/forecast-quality/fixtures/withheld/report.json`, sha256 `e57761bc74c5e22e0d802e79db8a94bab021d8e9e59b875970f52fe9ff3636d9`, digest source: computed for this register; the file is outside the provenance manifest scope, the companion report in which inference is withheld with its reason recorded
 - `paper/src/check-prospective-forecast-report.py`, sha256 `744861445c45c7d5be3bafe903be02d61e95131e4a67231af8346b19befc355b`, digest source: paper/evidence/provenance.json, recomputes the report independently in Python
 
 **Producer command.** cargo run -q -p sharpebench -- forecast-quality examples/forecast-quality/fixtures/agent-alpha.json examples/forecast-quality/fixtures/agent-beta.json --bootstrap-samples 400 --seed 23 --confidence 0.9 --alpha 0.05 --bins 5 --json (paper/sections/A-commands.tex)
@@ -2177,7 +2179,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 **Relevant later changes.**
 - paper/sections/E-repairs.tex:19 records the move to schema v2 with the same support, because both fields are complete, and that the archived v1 pilot report still verifies.
 
-**Present applicability.** Verified on 2026-09-23 for this register: python -m unittest paper/src/test_check_prospective_forecast_report.py passes, and the report's digests are in the provenance manifest.
+**Present applicability.** Verified on 2026-09-23 for this register: python -m unittest paper/src/test_check_prospective_forecast_report.py passes against the committed fixtures, and both committed reports carry schema v2 with the appendix's stated bootstrap configuration.
 
 **Disposition.** `still-applicable`. The documented comparison is the independent Python recomputation, which runs in CI against the committed report.
 
@@ -2504,3 +2506,56 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | still-applicable | Initial entry: The witness is the one field rerun under the repaired producer and the current kernel, and the claim is stated with its sampling caveat. |
+
+### `SB-forecast-pilot`
+
+**Claim.** A superseded convenience-sample lifecycle pilot is retained so its protocol history is not rewritten, and its obsolete checkpoint scores are excluded from the paper, from model comparison and from trading rank.
+
+**Source.** `paper/sections/07-limitations.tex:37`
+
+**Artifacts.**
+- `paper/evidence/prospective-forecast-field/report.json`, sha256 `c96d7ec3e946d5cf7f5e9afcfc6004760071b3f0b9bc6ee59160d59e499aad80`, digest source: paper/evidence/provenance.json, the archived pilot report, schema sharpebench.forecast-quality.v1, bootstrap seed 260904 over 2,000 samples, which is not the v2 tutorial report of SB-sec-forecast-report
+- `paper/evidence/prospective-forecast-field/report-check.json`, sha256 `82f28fd922221080b00c11f5d97b41d91efcff230ce94e0cb64389124614122b`, digest source: paper/evidence/provenance.json
+- `paper/evidence/prospective-forecast-field/source-manifest.json`, sha256 `1bcc72d55818e6aa9f9c9d8a8d7920763640f2652b7d2a22113e8d3b13f2fe88`, digest source: paper/evidence/provenance.json, records source_commit 70ff679bd7e727a89b8d7aaeee67ce62ed7591d6 in the sharpearena repository, which is the one producing commit any artifact in this register carries
+- `paper/evidence/prospective-forecast-field/resolution-manifest.json`, sha256 `c7f213512aa80558bd4c0ded3155798516b2a283911929a6e9c67012e2b78bbc`, digest source: paper/evidence/provenance.json
+- `paper/evidence/prospective-forecast-field/field-plan.json`, sha256 `61d225c357ec13dea63851afd17ca66866d841efd71dc1da18b74c85a3342a3c`, digest source: paper/evidence/provenance.json
+- `paper/evidence/prospective-forecast-field/field-plan.sha256`, sha256 `3705d58a7bc372b377e5c259b8a3afcb3782e2e1dafb3c515ca0f16d19d3bbd6`, digest source: paper/evidence/provenance.json
+- `paper/evidence/prospective-forecast-field/forecast-commit.json`, sha256 `cc0e06840ef047d2d149050f0ae410df6a3db273cae4f66da67b0e9e05bf26b9`, digest source: paper/evidence/provenance.json
+- `paper/evidence/prospective-forecast-field/observation.json`, sha256 `3657bdd797457a64207258a9804b620efe092f02b643ab6423ee254d4750d1b7`, digest source: paper/evidence/provenance.json
+- `paper/evidence/prospective-forecast-field/resolution.json`, sha256 `5b9d5530a9b2b57cdd978856dc391159f5b5e67888d057fff6d2688b3b921d3a`, digest source: paper/evidence/provenance.json
+- `paper/evidence/prospective-forecast-field/inference/phi-4.json`, sha256 `62d83067212d1f764444cc799fad3f39797001c601df763e2974072f4e7033d0`, digest source: paper/evidence/provenance.json
+- `paper/evidence/prospective-forecast-field/inference/qwen-0.5b.json`, sha256 `e673bc796b74355b715f02f87eddbf55659aa385c3e56e79d544933404f6e140`, digest source: paper/evidence/provenance.json
+- `paper/evidence/prospective-forecast-field/inference/qwen-7b.json`, sha256 `b046e7cbb77438674399377e5e4c998da99ef001f7ba7e5e9b49898cfb23bbb3`, digest source: paper/evidence/provenance.json
+- `paper/evidence/prospective-forecast-field/pending/phi-4.json`, sha256 `fa318d2d520180d35a75526ea3a0abb1025783a26978a33cd479a4d2137a267a`, digest source: paper/evidence/provenance.json
+- `paper/evidence/prospective-forecast-field/pending/qwen-0.5b.json`, sha256 `9aea81d596d0c0c09391051b86a7616b0864afedb2d6853c0265d16470e96e1c`, digest source: paper/evidence/provenance.json
+- `paper/evidence/prospective-forecast-field/pending/qwen-7b.json`, sha256 `ab0dd163998182b7a6e126aa7f737e853c293fbd1d376f2f5b9828bcaf0697a4`, digest source: paper/evidence/provenance.json
+- `paper/evidence/prospective-forecast-field/resolved/phi-4.json`, sha256 `c820b86d5c79ef9da21c1eb84614ae065e97e3bfbafb927890de3d8dafd295d1`, digest source: paper/evidence/provenance.json
+- `paper/evidence/prospective-forecast-field/resolved/qwen-0.5b.json`, sha256 `b8c4468e650e6fb6ebfaa3d1e6d26b75d2bab956bd1c335543fad259738f5bbc`, digest source: paper/evidence/provenance.json
+- `paper/evidence/prospective-forecast-field/resolved/qwen-7b.json`, sha256 `19edce59688fb607c1994b6f6b73607ba049e2108746b7cc92ba1be5b8ac9b5f`, digest source: paper/evidence/provenance.json
+
+**Producer command.** python paper/src/import-prospective-field.py, checked by python paper/src/check-prospective-forecast-report.py; the field originates in the sharpearena repository at the commit the source manifest records.
+
+**Producing commit.** sharpearena commit 70ff679bd7e727a89b8d7aaeee67ce62ed7591d6, recorded in the field's own source manifest. The SharpeBench version that scored it is not recorded.
+
+**Effective configuration.** Report schema sharpebench.forecast-quality.v1, bootstrap seed 260904, 2,000 samples, confidence 0.95, familywise alpha 0.05.
+
+**Missing provenance.**
+- The SharpeBench version behind the pilot's scores is not serialized.
+
+**Relevant later changes.**
+- paper/sections/E-repairs.tex:19 records that forecast comparisons now use each pair's own support and that the two committed tutorial reports moved to schema v2, while the archived v1 pilot report still verifies.
+- Version 1 compared every pair on the intersection over the whole field, so one partial document shrank every pair's support (paper/sections/03-benchmark.tex:59).
+
+**Present applicability.** The paper admits no number from this field, which it states outright, so nothing here is a current result. The artifact is retained as protocol history and still verifies under the v1 envelope.
+
+**Disposition.** `historical-only`. The field validly records the pilot under the superseded envelope and the manuscript already excludes its scores from every claim, which is exactly what historical-only means.
+
+**Owner.** SharpeBench paper/evidence owner
+
+**Follow-up.** none
+
+**Status history.**
+
+| Date | Disposition | Rationale |
+|---|---|---|
+| 2026-09-23 | historical-only | Initial entry: The field validly records the pilot under the superseded envelope and the manuscript already excludes its scores from every claim, which is exactly what historical-only means. |
