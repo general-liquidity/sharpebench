@@ -12,6 +12,10 @@ and links the commits it was built from.
 
 ## [Unreleased]
 
+### Added
+
+- study: `sharpebench-study`, a machine-checked contract for a study protocol, so the design of an experiment is validated before it is run rather than described in prose afterwards. A protocol declares its per-entry and whole-field false-positive estimands as distinct kinds that cannot be conflated, its null and alternative families, effect units, field composition, dependence structure, window geometry, search assumptions, dispersion policy, independent replication unit, error limits and power targets at named effects, interval method and required precision, predeclared multiplicity, expected attempted, completed and available counts with a failure policy for refusal, unavailability and infrastructure failure, its simulation count, runtime estimate and spend caps, its stopping rule, and a decision rule per claim. The validator refuses a protocol that omits an estimand, mixes raw and active effect units, leaves any of the three failure outcomes unspecified, claims independence for entrants, windows or seeds that share a market history, or carries a budget no named approver accepted. No variant substitutes zero for an unavailable result. A precision claim cannot outlive the run that earned it: `PrecisionClaim` has private fields, no `Deserialize` and one constructor that computes the interval from the realized trial count, and a report recomputes it on every call and refuses when the realized count leaves the interval wider than required, so a planned-count claim cannot be printed beside a smaller realized count. A protocol on the frozen tier is immutable: any content change without a version bump is refused, and the version may not be lowered. The crate is `publish = false` and ships an example protocol whose numbers are placeholders, because the target effects, error limits and sample counts are decisions the owner has not made.
+
 ## [0.28.0] - 2026-09-18
 
 ### Breaking
