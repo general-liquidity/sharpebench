@@ -179,7 +179,7 @@
       "sha256": "1e025ac30099de23ae8455f20ae5441b557e924870d0e1475c7508512908ec0d"
     }
   ],
-  "generated_at_head": "3eb6cc535008a32217f029b3cb88276e0e65aee0",
+  "generated_at_head": "461a76386e14f211e8ce83187392a327e6b9a003",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -1398,6 +1398,10 @@
       "sha256": "cc23fdc34ec07561a6c71664d5e4be028d42beab6f926e7739dade7d09c39956"
     },
     {
+      "path": "paper/src/joint_gate_power.py",
+      "sha256": "37ca1704f56b1967481d25e7e2c14aa53ac788b77a85a3e31949d0f712794195"
+    },
+    {
       "path": "paper/src/kernel_stats.py",
       "sha256": "836a71dc2411869de43960cb85cf8ad000762d7225053092da112973c8539191"
     },
@@ -1408,6 +1412,10 @@
     {
       "path": "paper/src/make-figures.py",
       "sha256": "a9f68ad14d4d91186b1eb8f4c8ccd884501a4fc141eaa8cb579404277f9efa30"
+    },
+    {
+      "path": "paper/src/make-joint-gate-power.py",
+      "sha256": "a75fa07c7d457e860d18a72248a96ebb7fbd9f50f28549252f038663d900f55f"
     },
     {
       "path": "paper/src/make-power-curve.py",
@@ -1436,6 +1444,10 @@
     {
       "path": "paper/src/test_import_prospective_field.py",
       "sha256": "228b7ebae80f3679036a9450c0c10026931c7f7912fc10e64df26a77cc2df0d9"
+    },
+    {
+      "path": "paper/src/test_joint_gate_power.py",
+      "sha256": "2c0e019148fa8393c56c326304efbae91b61171c4c147cf04d6347baa327b6b1"
     },
     {
       "path": "paper/src/test_kernel_stats.py",
@@ -1495,5 +1507,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "a1964a6b4caf5349499b823d286aa94b7c143fa1c64dfef7a65f1890ac572f04"
+  "source_snapshot_sha256": "e8f6351f299ac04e21fc54786097ebade229ba4897fb31fb80709de19f56d0a0"
 }
