@@ -449,6 +449,14 @@ jobs:
         run: python -m unittest paper/src/test_check_prospective_forecast_report.py
       - name: Every recorded source and artifact matches the committed scope
         run: python paper/src/check-provenance.py
+      # The provenance manifest says the committed artifacts are the ones that
+      # were hashed. The register says which paper claim each artifact still
+      # supports, which the manifest cannot: a digest that still matches says
+      # nothing about a repair that landed after the artifact was frozen.
+      - name: The register's own rules hold
+        run: python -m unittest scripts/test_check_evidence_register.py
+      - name: Every claim maps to an artifact and carries a disposition
+        run: python scripts/check-evidence-register.py
 
   paper-figures:
     name: paper figures and power analysis
