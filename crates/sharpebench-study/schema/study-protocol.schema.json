@@ -1,0 +1,529 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sharpebench.dev/schema/v1/study-protocol.schema.json",
+  "title": "StudyProtocol",
+  "description": "An executable study protocol: what a study declares before it runs. The contract is closed (additionalProperties: false everywhere), mirroring #[serde(deny_unknown_fields)] on the Rust types in the sharpebench-study crate, and a bidirectional drift guard fails the build if the two disagree. No object in this schema can carry a result: there is no property for an achieved interval, an observed rate or a half width that was reached. A precision statement is derived from the runs actually executed, by the reporting path, and refused when those runs do not reach the required half width.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "protocol_id",
+    "version",
+    "tier",
+    "frozen",
+    "identity",
+    "claims",
+    "estimands",
+    "design",
+    "replication",
+    "inference",
+    "accounting",
+    "simulation",
+    "budget",
+    "stopping_rule",
+    "notes"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": "sharpebench/study-protocol/v1",
+      "description": "The contract this document is written against. A field addition, removal or meaning change mints a new value rather than editing this one."
+    },
+    "protocol_id": {
+      "type": "string",
+      "description": "Stable identifier for this protocol across its versions. A changed value is a different protocol, not an amendment."
+    },
+    "version": { "$ref": "#/$defs/ProtocolVersion" },
+    "tier": { "$ref": "#/$defs/RunTier" },
+    "frozen": {
+      "type": "boolean",
+      "description": "True once the document is sealed. Required on the frozen_validation tier and refused on the other two. An edit to a frozen protocol must raise its version."
+    },
+    "identity": { "$ref": "#/$defs/MethodIdentity" },
+    "claims": {
+      "type": "array",
+      "description": "The claims the study is run to test. Empty only on the ci_regression tier, which tests pinned outputs rather than a claim.",
+      "items": { "$ref": "#/$defs/Claim" }
+    },
+    "estimands": {
+      "type": "array",
+      "description": "The named quantities the study estimates. Outside the ci_regression tier at least one must be a per-entry or whole-field false-positive quantity; the two are separate estimands and are never conflated.",
+      "items": { "$ref": "#/$defs/Estimand" }
+    },
+    "design": { "$ref": "#/$defs/Design" },
+    "replication": { "$ref": "#/$defs/Replication" },
+    "inference": { "$ref": "#/$defs/Inference" },
+    "accounting": { "$ref": "#/$defs/Accounting" },
+    "simulation": { "$ref": "#/$defs/SimulationPlan" },
+    "budget": { "$ref": "#/$defs/Budget" },
+    "stopping_rule": { "$ref": "#/$defs/StoppingRule" },
+    "notes": {
+      "type": "string",
+      "description": "Free text for the reader: provenance, caveats, and the decisions a placeholder document is still waiting on. Carries no meaning for the validator and no result."
+    }
+  },
+  "$defs": {
+    "ProtocolVersion": {
+      "type": "object",
+      "description": "Ordered on (major, minor, patch). An amendment to a frozen protocol must raise it.",
+      "additionalProperties": false,
+      "required": ["major", "minor", "patch"],
+      "properties": {
+        "major": { "type": "integer", "minimum": 0 },
+        "minor": { "type": "integer", "minimum": 0 },
+        "patch": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "RunTier": {
+      "description": "ci_regression: pinned-output behaviour check; it cannot establish a rare false-positive rate or population power and may not carry a claim. development_calibration: exploratory, tuning permitted and recorded. frozen_validation: fixed method on reserved seeds, tuning refused, amendments must raise the version.",
+      "enum": ["ci_regression", "development_calibration", "frozen_validation"]
+    },
+    "MethodIdentity": {
+      "type": "object",
+      "description": "Which method, at which version, under which configuration. A study that cannot name the version it evaluated has no identity.",
+      "additionalProperties": false,
+      "required": [
+        "method",
+        "method_version",
+        "configuration_id",
+        "configuration_digest",
+        "scoring_spec_hash"
+      ],
+      "properties": {
+        "method": { "type": "string" },
+        "method_version": { "type": "string" },
+        "configuration_id": { "type": "string" },
+        "configuration_digest": {
+          "type": "string",
+          "description": "Digest over the effective configuration document, lowercase hex."
+        },
+        "scoring_spec_hash": {
+          "type": "string",
+          "description": "Digest of the scoring specification the configuration resolves against."
+        }
+      }
+    },
+    "EffectUnits": {
+      "description": "raw: arithmetic returns. active: returns net of the benchmark. The two are different quantities and one document reports one of them.",
+      "enum": ["raw", "active"]
+    },
+    "EstimandKind": {
+      "description": "Per-entry and whole-field false positives are separate variants because they are separate quantities.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {
+            "kind": { "const": "per_entry_false_positive" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {
+            "kind": { "const": "whole_field_any_false_eligibility" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "effect_name", "effect_size"],
+          "properties": {
+            "kind": { "const": "power_at_effect" },
+            "effect_name": { "type": "string" },
+            "effect_size": { "type": "number" }
+          }
+        }
+      ]
+    },
+    "EstimandTarget": {
+      "description": "An error-rate estimand takes an upper limit; a power estimand takes a lower bound. The crossed pairings are refused.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "limit"],
+          "properties": {
+            "kind": { "const": "upper_error_limit" },
+            "limit": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "bound"],
+          "properties": {
+            "kind": { "const": "lower_power_bound" },
+            "bound": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        }
+      ]
+    },
+    "Estimand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "kind", "effect_units", "target"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique within the protocol. Claims reference an estimand by this name."
+        },
+        "kind": { "$ref": "#/$defs/EstimandKind" },
+        "effect_units": { "$ref": "#/$defs/EffectUnits" },
+        "target": { "$ref": "#/$defs/EstimandTarget" }
+      }
+    },
+    "DecisionRule": {
+      "description": "What would count as support for a claim, fixed before the data exists. A criterion for supporting a claim, not a requirement that the experiment produce a favourable result. unspecified is present so that omitting a rule is a refusable condition rather than a missing key.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "limit"],
+          "properties": {
+            "kind": { "const": "interval_upper_bound_at_most" },
+            "limit": { "type": "number" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "bound"],
+          "properties": {
+            "kind": { "const": "interval_lower_bound_at_least" },
+            "bound": { "type": "number" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "unspecified" } }
+        }
+      ]
+    },
+    "Claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "statement", "estimand", "decision_rule"],
+      "properties": {
+        "id": { "type": "string" },
+        "statement": {
+          "type": "string",
+          "description": "What is being asserted, bounded to the method version and configuration named in identity."
+        },
+        "estimand": {
+          "type": "string",
+          "description": "The name of the estimand this claim is decided on."
+        },
+        "decision_rule": { "$ref": "#/$defs/DecisionRule" }
+      }
+    },
+    "FieldComposition": {
+      "type": "object",
+      "description": "Control entrants test refusal behaviour; they are not a substitute for a valid zero-skill null.",
+      "additionalProperties": false,
+      "required": ["null_entrants", "planted_skill_entrants", "control_entrants"],
+      "properties": {
+        "null_entrants": { "type": "integer", "minimum": 0 },
+        "planted_skill_entrants": { "type": "integer", "minimum": 0 },
+        "control_entrants": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "DependenceStructure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["serial", "cross_entrant", "shared_market_history"],
+      "properties": {
+        "serial": { "type": "string" },
+        "cross_entrant": { "type": "string" },
+        "shared_market_history": {
+          "type": "boolean",
+          "description": "True when entrants, windows or seeds are drawn from one market history. Those units are then repeated observations, not independent market replications."
+        }
+      }
+    },
+    "WindowGeometry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["windows", "window_length_steps", "stride_steps", "overlapping"],
+      "properties": {
+        "windows": { "type": "integer", "minimum": 0 },
+        "window_length_steps": { "type": "integer", "minimum": 0 },
+        "stride_steps": { "type": "integer", "minimum": 0 },
+        "overlapping": { "type": "boolean" }
+      }
+    },
+    "SearchAssumptions": {
+      "type": "object",
+      "description": "What the study assumes about the search that produced the entries it scores. An understated trial count understates the deflation.",
+      "additionalProperties": false,
+      "required": ["trials_searched", "selection_rule", "independent_trials_assumed"],
+      "properties": {
+        "trials_searched": { "type": "integer", "minimum": 0 },
+        "selection_rule": { "type": "string" },
+        "independent_trials_assumed": { "type": "boolean" }
+      }
+    },
+    "DispersionPolicy": {
+      "description": "Whether the dispersion the deflation uses is a configured constant or measured from the field. The two give different answers and different failure modes.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "value"],
+          "properties": {
+            "kind": { "const": "configured" },
+            "value": { "type": "number" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "estimator"],
+          "properties": {
+            "kind": { "const": "measured" },
+            "estimator": { "type": "string" }
+          }
+        }
+      ]
+    },
+    "Design": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "null_family",
+        "alternative_family",
+        "effect_units",
+        "field_composition",
+        "dependence",
+        "window_geometry",
+        "search_assumptions",
+        "dispersion_policy",
+        "tuning_allowed"
+      ],
+      "properties": {
+        "null_family": {
+          "type": "string",
+          "description": "The zero-skill generating process the error rates are measured against."
+        },
+        "alternative_family": {
+          "type": "string",
+          "description": "The generating process the power targets are measured against, including alternatives below and above the deflation benchmark."
+        },
+        "effect_units": { "$ref": "#/$defs/EffectUnits" },
+        "field_composition": { "$ref": "#/$defs/FieldComposition" },
+        "dependence": { "$ref": "#/$defs/DependenceStructure" },
+        "window_geometry": { "$ref": "#/$defs/WindowGeometry" },
+        "search_assumptions": { "$ref": "#/$defs/SearchAssumptions" },
+        "dispersion_policy": { "$ref": "#/$defs/DispersionPolicy" },
+        "tuning_allowed": {
+          "type": "boolean",
+          "description": "Whether thresholds may be tuned against this tier's outputs. The frozen_validation tier refuses it."
+        }
+      }
+    },
+    "ReplicationUnit": {
+      "description": "simulated_field is the only unit that stays independent when a market history is shared.",
+      "enum": ["simulated_field", "market_history", "entrant", "window", "seed"]
+    },
+    "Replication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["independent_unit", "nested_observations", "independent_units_planned"],
+      "properties": {
+        "independent_unit": { "$ref": "#/$defs/ReplicationUnit" },
+        "nested_observations": {
+          "type": "array",
+          "description": "Units nested inside the independent one. Repeated or dependent observations, not counted in the denominator of an independent-replication rate.",
+          "items": { "$ref": "#/$defs/ReplicationUnit" }
+        },
+        "independent_units_planned": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "ConfidenceLevel": {
+      "description": "Levels are enumerated rather than free-form so that every interval uses the same pinned normal quantile, checked against published values.",
+      "enum": ["ninety", "ninety_five", "ninety_nine"]
+    },
+    "IntervalMethod": {
+      "description": "wilson_score: Wilson score interval for a binomial proportion. Named in the document so that a protocol assuming another construction is refused rather than silently reported under this one.",
+      "enum": ["wilson_score"]
+    },
+    "MultiplicityMethod": {
+      "description": "none is refused when more than one reported condition is predeclared.",
+      "enum": ["none", "bonferroni", "holm_bonferroni", "benjamini_hochberg", "romano_wolf"]
+    },
+    "Multiplicity": {
+      "type": "object",
+      "description": "Predeclared across the conditions the study will report, so that a condition added afterwards is visibly an addition.",
+      "additionalProperties": false,
+      "required": ["method", "reported_conditions"],
+      "properties": {
+        "method": { "$ref": "#/$defs/MultiplicityMethod" },
+        "reported_conditions": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "Inference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "confidence_level",
+        "interval_method",
+        "required_half_width",
+        "multiplicity"
+      ],
+      "properties": {
+        "confidence_level": { "$ref": "#/$defs/ConfidenceLevel" },
+        "interval_method": { "$ref": "#/$defs/IntervalMethod" },
+        "required_half_width": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "exclusiveMaximum": 1,
+          "description": "The half width the study requires of its reported interval. A requirement on the design, never a record of what was achieved."
+        },
+        "multiplicity": { "$ref": "#/$defs/Multiplicity" }
+      }
+    },
+    "Denominator": {
+      "description": "Which denominator a reason-coded outcome is counted against. Reporting conditional-on-availability results against the attempted denominator, or the reverse, is the silent denominator change this accounting prevents.",
+      "enum": ["attempted", "completed", "available"]
+    },
+    "FailurePolicy": {
+      "description": "What the study does with a run that refuses, is unavailable, or fails on infrastructure. There is deliberately no variant that substitutes a zero return, a zero cost or a passing statistic for a missing result: an unavailable result is not a measurement. unspecified exists so that omission is refusable rather than absent.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "unspecified" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "reason_code", "denominator"],
+          "properties": {
+            "kind": { "const": "exclude_with_reason_code" },
+            "reason_code": { "type": "string" },
+            "denominator": { "$ref": "#/$defs/Denominator" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "max_attempts", "reason_code", "denominator"],
+          "properties": {
+            "kind": { "const": "retry_then_exclude" },
+            "max_attempts": { "type": "integer", "minimum": 1 },
+            "reason_code": { "type": "string" },
+            "denominator": { "$ref": "#/$defs/Denominator" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "reason_code", "denominator"],
+          "properties": {
+            "kind": { "const": "count_as_failure" },
+            "reason_code": { "type": "string" },
+            "denominator": { "$ref": "#/$defs/Denominator" }
+          }
+        }
+      ]
+    },
+    "Accounting": {
+      "type": "object",
+      "description": "Expected counts and the handling of each way a run can fail to produce a result. Completed cannot exceed attempted, and available cannot exceed completed.",
+      "additionalProperties": false,
+      "required": [
+        "expected_attempted",
+        "expected_completed",
+        "expected_available",
+        "refusal",
+        "unavailability",
+        "infrastructure_failure"
+      ],
+      "properties": {
+        "expected_attempted": { "type": "integer", "minimum": 1 },
+        "expected_completed": { "type": "integer", "minimum": 0 },
+        "expected_available": { "type": "integer", "minimum": 0 },
+        "refusal": { "$ref": "#/$defs/FailurePolicy" },
+        "unavailability": { "$ref": "#/$defs/FailurePolicy" },
+        "infrastructure_failure": { "$ref": "#/$defs/FailurePolicy" }
+      }
+    },
+    "SimulationPlan": {
+      "type": "object",
+      "description": "The simulation count and what it was sized for. The count is checked against the precision requirement by the validator; it is not taken on trust.",
+      "additionalProperties": false,
+      "required": ["planned_runs", "anticipated_rate", "runtime_estimate_seconds_per_run"],
+      "properties": {
+        "planned_runs": { "type": "integer", "minimum": 1 },
+        "anticipated_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "The rate the count is sized for. For a rare-event bound this is the target rate itself."
+        },
+        "runtime_estimate_seconds_per_run": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Development-stage runtime estimate per run."
+        }
+      }
+    },
+    "Budget": {
+      "type": "object",
+      "description": "The resource and spend ceiling, and who approved it. A protocol whose estimates exceed its ceiling, or whose ceiling nobody approved, is refused before it can spend.",
+      "additionalProperties": false,
+      "required": [
+        "approved",
+        "approver",
+        "spend_cap_usd",
+        "compute_cap_core_hours",
+        "estimated_spend_usd",
+        "estimated_core_hours"
+      ],
+      "properties": {
+        "approved": { "type": "boolean" },
+        "approver": { "type": "string" },
+        "spend_cap_usd": { "type": "number", "exclusiveMinimum": 0 },
+        "compute_cap_core_hours": { "type": "number", "exclusiveMinimum": 0 },
+        "estimated_spend_usd": { "type": "number", "minimum": 0 },
+        "estimated_core_hours": { "type": "number", "minimum": 0 }
+      }
+    },
+    "StoppingRule": {
+      "description": "Fixed by default. An adaptive rule is refused unless it states the error-control analysis that justifies it.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "runs"],
+          "properties": {
+            "kind": { "const": "fixed_runs" },
+            "runs": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Must equal the planned simulation count."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "rule", "error_control_analysis"],
+          "properties": {
+            "kind": { "const": "adaptive" },
+            "rule": { "type": "string" },
+            "error_control_analysis": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    }
+  }
+}
