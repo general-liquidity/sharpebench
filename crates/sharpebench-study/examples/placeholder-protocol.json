@@ -1,0 +1,140 @@
+{
+  "contract_version": "sharpebench/study-protocol/v1",
+  "protocol_id": "PLACEHOLDER-eligibility-gate-calibration",
+  "version": { "major": 0, "minor": 1, "patch": 0 },
+  "tier": "development_calibration",
+  "frozen": false,
+  "identity": {
+    "method": "PLACEHOLDER-eligibility-gate",
+    "method_version": "0.0.0-placeholder",
+    "configuration_id": "PLACEHOLDER-default",
+    "configuration_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+    "scoring_spec_hash": "0000000000000000"
+  },
+  "claims": [
+    {
+      "id": "C1-per-entry-error",
+      "statement": "PLACEHOLDER. At the named method version and configuration, the per-entry false-positive rate under the stated null family stays at or below its limit.",
+      "estimand": "per_entry_false_positive_rate",
+      "decision_rule": { "kind": "interval_upper_bound_at_most", "limit": 0.1 }
+    },
+    {
+      "id": "C2-field-error",
+      "statement": "PLACEHOLDER. Under the same conditions, the probability that any entry in the field is falsely declared eligible stays at or below its limit.",
+      "estimand": "whole_field_any_false_eligibility",
+      "decision_rule": { "kind": "interval_upper_bound_at_most", "limit": 0.2 }
+    },
+    {
+      "id": "C3-power",
+      "statement": "PLACEHOLDER. At the named planted effect, the gate declares eligibility at or above the power bound.",
+      "estimand": "power_at_planted_effect",
+      "decision_rule": { "kind": "interval_lower_bound_at_least", "bound": 0.5 }
+    }
+  ],
+  "estimands": [
+    {
+      "name": "per_entry_false_positive_rate",
+      "kind": { "kind": "per_entry_false_positive" },
+      "effect_units": "raw",
+      "target": { "kind": "upper_error_limit", "limit": 0.05 }
+    },
+    {
+      "name": "whole_field_any_false_eligibility",
+      "kind": { "kind": "whole_field_any_false_eligibility" },
+      "effect_units": "raw",
+      "target": { "kind": "upper_error_limit", "limit": 0.1 }
+    },
+    {
+      "name": "power_at_planted_effect",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "PLACEHOLDER-planted-sharpe-increment",
+        "effect_size": 0.5
+      },
+      "effect_units": "raw",
+      "target": { "kind": "lower_power_bound", "bound": 0.6 }
+    }
+  ],
+  "design": {
+    "null_family": "PLACEHOLDER. Zero-skill entrants drawn from the simulator's null generator at the configured cost and carry settings.",
+    "alternative_family": "PLACEHOLDER. Planted-skill entrants at effects both below and above the deflation benchmark.",
+    "effect_units": "raw",
+    "field_composition": {
+      "null_entrants": 40,
+      "planted_skill_entrants": 8,
+      "control_entrants": 2
+    },
+    "dependence": {
+      "serial": "PLACEHOLDER. Stationary block dependence within one return series.",
+      "cross_entrant": "PLACEHOLDER. Entrants in one field share the market history and are correlated through it.",
+      "shared_market_history": true
+    },
+    "window_geometry": {
+      "windows": 12,
+      "window_length_steps": 252,
+      "stride_steps": 21,
+      "overlapping": true
+    },
+    "search_assumptions": {
+      "trials_searched": 100,
+      "selection_rule": "PLACEHOLDER. Best in-sample Sharpe over the searched trials.",
+      "independent_trials_assumed": false
+    },
+    "dispersion_policy": { "kind": "measured", "estimator": "PLACEHOLDER. Cross-entrant Sharpe dispersion measured on the field." },
+    "tuning_allowed": true
+  },
+  "replication": {
+    "independent_unit": "simulated_field",
+    "nested_observations": ["entrant", "window", "seed"],
+    "independent_units_planned": 500
+  },
+  "inference": {
+    "confidence_level": "ninety_five",
+    "interval_method": "wilson_score",
+    "required_half_width": 0.02,
+    "multiplicity": {
+      "method": "holm_bonferroni",
+      "reported_conditions": [
+        "per-entry error at the configured dispersion",
+        "whole-field error at the configured dispersion",
+        "power at the planted effect"
+      ]
+    }
+  },
+  "accounting": {
+    "expected_attempted": 500,
+    "expected_completed": 490,
+    "expected_available": 480,
+    "refusal": {
+      "kind": "exclude_with_reason_code",
+      "reason_code": "entrant_refused",
+      "denominator": "attempted"
+    },
+    "unavailability": {
+      "kind": "exclude_with_reason_code",
+      "reason_code": "result_unavailable",
+      "denominator": "completed"
+    },
+    "infrastructure_failure": {
+      "kind": "retry_then_exclude",
+      "max_attempts": 3,
+      "reason_code": "infrastructure_failure",
+      "denominator": "attempted"
+    }
+  },
+  "simulation": {
+    "planned_runs": 500,
+    "anticipated_rate": 0.05,
+    "runtime_estimate_seconds_per_run": 12.0
+  },
+  "budget": {
+    "approved": true,
+    "approver": "PLACEHOLDER-study-owner",
+    "spend_cap_usd": 50.0,
+    "compute_cap_core_hours": 8.0,
+    "estimated_spend_usd": 0.0,
+    "estimated_core_hours": 1.67
+  },
+  "stopping_rule": { "kind": "fixed_runs", "runs": 500 },
+  "notes": "PLACEHOLDER VALUES. Every number in this document is a structurally valid stand-in, not a target this project has adopted. Target effects, error limits, power targets and sample counts are owner decisions D3 and D8 in the implementation plan. Do not cite these numbers as SharpeBench targets."
+}

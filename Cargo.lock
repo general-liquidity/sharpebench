@@ -765,6 +765,14 @@ name = "sharpebench-stats"
 version = "0.28.0"
 
 [[package]]
+name = "sharpebench-study"
+version = "0.28.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "sharpebench-wasm"
 version = "0.28.0"
 dependencies = [
