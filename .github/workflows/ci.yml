@@ -447,16 +447,18 @@ jobs:
         run: python -m unittest paper/src/test_import_prospective_field.py
       - name: The forecast report recomputes independently in Python
         run: python -m unittest paper/src/test_check_prospective_forecast_report.py
-      - name: Every recorded source and artifact matches the committed scope
-        run: python paper/src/check-provenance.py
-      # The provenance manifest says the committed artifacts are the ones that
-      # were hashed. The register says which paper claim each artifact still
-      # supports, which the manifest cannot: a digest that still matches says
-      # nothing about a repair that landed after the artifact was frozen.
+      # Before the manifest check rather than after it, because the two answer
+      # different questions and neither gates the other. The manifest says the
+      # committed artifacts are the ones that were hashed. The register says
+      # which paper claim each artifact still supports, which a matching digest
+      # cannot: a repair merged after an artifact was frozen moves what the
+      # claim asserts without moving a byte of the artifact.
       - name: The register's own rules hold
         run: python -m unittest scripts/test_check_evidence_register.py
       - name: Every claim maps to an artifact and carries a disposition
         run: python scripts/check-evidence-register.py
+      - name: Every recorded source and artifact matches the committed scope
+        run: python paper/src/check-provenance.py
 
   paper-figures:
     name: paper figures and power analysis
