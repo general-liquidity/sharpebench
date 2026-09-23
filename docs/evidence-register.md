@@ -1448,7 +1448,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** cargo run --release -p sharpebench-harness --example evidence_sweep -- out.jsonl [dataset] [dsr_bar], assembled by paper/evidence/assemble_sweep.py and reduced by paper/evidence/analyze.py (paper/sections/A-commands.tex)
 
-**Producing commit.** v0.9.0 evidence snapshot. paper/evidence/provenance.json records the producing source identity as source_snapshot_sha256 c38632efb5b3cb6e9f9bd7933ccfa058326327fc01822811613f7a03ce4588d6 and was generated at commit 3f48132a269b548bb06a8e7c9c5ca8a6925f4fb8; the commit that cut v0.9.0 is not recorded and stays unknown.
+**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold.
 
 **Effective configuration.** Default cell beta = 0.95, host N = 50, field size eight; eight execution seeds, six disjoint windows, typical cost profile; 512 records per dataset over 64 host configurations, 4,608 in all.
 
@@ -1494,7 +1494,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** cargo run --release -p sharpebench-harness --example evidence_sweep -- out.jsonl [dataset] [dsr_bar], assembled by paper/evidence/assemble_sweep.py and reduced by paper/evidence/analyze.py (paper/sections/A-commands.tex)
 
-**Producing commit.** v0.9.0 evidence snapshot. paper/evidence/provenance.json records the producing source identity as source_snapshot_sha256 c38632efb5b3cb6e9f9bd7933ccfa058326327fc01822811613f7a03ce4588d6 and was generated at commit 3f48132a269b548bb06a8e7c9c5ca8a6925f4fb8; the commit that cut v0.9.0 is not recorded and stays unknown.
+**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold.
 
 **Effective configuration.** Default cell beta = 0.95, host N = 50, field size eight; eight execution seeds, six disjoint windows, typical cost profile; 512 records per dataset over 64 host configurations, 4,608 in all.
 
@@ -1542,7 +1542,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** cargo run --release -p sharpebench-harness --example evidence_sweep -- out.jsonl [dataset] [dsr_bar], assembled by paper/evidence/assemble_sweep.py and reduced by paper/evidence/analyze.py (paper/sections/A-commands.tex)
 
-**Producing commit.** v0.9.0 evidence snapshot. paper/evidence/provenance.json records the producing source identity as source_snapshot_sha256 c38632efb5b3cb6e9f9bd7933ccfa058326327fc01822811613f7a03ce4588d6 and was generated at commit 3f48132a269b548bb06a8e7c9c5ca8a6925f4fb8; the commit that cut v0.9.0 is not recorded and stays unknown.
+**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold.
 
 **Effective configuration.** Default cell beta = 0.95, host N = 50, field size eight; eight execution seeds, six disjoint windows, typical cost profile; 512 records per dataset over 64 host configurations, 4,608 in all. Preset: pass mode any-run with a per-run drawdown bound of 20 percent, edge tested on the pooled track.
 
@@ -1580,7 +1580,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** cargo run --release -p sharpebench-harness --example risk_managed_eval -- out.jsonl (paper/sections/A-commands.tex)
 
-**Producing commit.** v0.9.0 evidence snapshot. paper/evidence/provenance.json records the producing source identity as source_snapshot_sha256 c38632efb5b3cb6e9f9bd7933ccfa058326327fc01822811613f7a03ce4588d6 and was generated at commit 3f48132a269b548bb06a8e7c9c5ca8a6925f4fb8; the commit that cut v0.9.0 is not recorded and stays unknown.
+**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold.
 
 **Effective configuration.** Risk-managed agent beside buy-and-hold and the luck floor on all nine datasets at documented defaults, both reliability verdicts per row, with n_sensitivity records for weekly US indices at N in {7, 10, 25, 50, 100}.
 
@@ -1620,7 +1620,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** python paper/src/make-evidence-figures.py (paper/sections/A-commands.tex)
 
-**Producing commit.** v0.9.0 evidence snapshot. paper/evidence/provenance.json records the producing source identity as source_snapshot_sha256 c38632efb5b3cb6e9f9bd7933ccfa058326327fc01822811613f7a03ce4588d6 and was generated at commit 3f48132a269b548bb06a8e7c9c5ca8a6925f4fb8; the commit that cut v0.9.0 is not recorded and stays unknown. The figure script and its test run on the current tree.
+**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold. The figure script and its test run on the current tree.
 
 **Effective configuration.** Maximum over all windows and seeds of a panel; the records store only that maximum, so no spread is shown.
 
@@ -1660,7 +1660,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** python paper/src/make-evidence-figures.py (paper/sections/A-commands.tex)
 
-**Producing commit.** v0.9.0 evidence snapshot. paper/evidence/provenance.json records the producing source identity as source_snapshot_sha256 c38632efb5b3cb6e9f9bd7933ccfa058326327fc01822811613f7a03ce4588d6 and was generated at commit 3f48132a269b548bb06a8e7c9c5ca8a6925f4fb8; the commit that cut v0.9.0 is not recorded and stays unknown.
+**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold.
 
 **Effective configuration.** Operational DSR of the best of five luck-floor agents against the effective trial count; one agent's DSR is a pooled-track statistic with no interval in the frozen records.
 
@@ -1698,7 +1698,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** cargo run --release -p sharpebench-harness --example external_rules_eval -- paper/evidence/final/external-rules.jsonl [dataset] (paper/sections/A-commands.tex)
 
-**Producing commit.** v0.9.0 evidence snapshot. paper/evidence/provenance.json records the producing source identity as source_snapshot_sha256 c38632efb5b3cb6e9f9bd7933ccfa058326327fc01822811613f7a03ce4588d6 and was generated at commit 3f48132a269b548bb06a8e7c9c5ca8a6925f4fb8; the commit that cut v0.9.0 is not recorded and stays unknown.
+**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold.
 
 **Effective configuration.** Thirteen agents on nine datasets under three cost profiles, 351 records, default ScoreConfig per dataset's periods per year; the four rules use their published parameters with none fitted here.
 
@@ -1738,7 +1738,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** cargo run --release -p sharpebench-harness --example external_rules_eval -- paper/evidence/final/external-rules.jsonl [dataset] (paper/sections/A-commands.tex)
 
-**Producing commit.** v0.9.0 evidence snapshot. paper/evidence/provenance.json records the producing source identity as source_snapshot_sha256 c38632efb5b3cb6e9f9bd7933ccfa058326327fc01822811613f7a03ce4588d6 and was generated at commit 3f48132a269b548bb06a8e7c9c5ca8a6925f4fb8; the commit that cut v0.9.0 is not recorded and stays unknown.
+**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold.
 
 **Effective configuration.** Thirteen-agent field, default configuration, three cost profiles; the caption records that the frozen kernel let hold, and on three crypto panels faber-10m, vote on the measurement.
 
@@ -1774,7 +1774,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** cargo run --release -p sharpebench-harness --example external_rules_eval -- paper/evidence/final/external-rules.jsonl [dataset] (paper/sections/A-commands.tex)
 
-**Producing commit.** v0.9.0 evidence snapshot. paper/evidence/provenance.json records the producing source identity as source_snapshot_sha256 c38632efb5b3cb6e9f9bd7933ccfa058326327fc01822811613f7a03ce4588d6 and was generated at commit 3f48132a269b548bb06a8e7c9c5ca8a6925f4fb8; the commit that cut v0.9.0 is not recorded and stays unknown.
+**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold.
 
 **Effective configuration.** As SB-tab-external.
 
@@ -1816,7 +1816,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** cargo run --release -p sharpebench-harness --example relative_mandate_eval -- paper/evidence/final/relative-mandate.jsonl (paper/sections/A-commands.tex)
 
-**Producing commit.** v0.9.0 evidence snapshot. paper/evidence/provenance.json records the producing source identity as source_snapshot_sha256 c38632efb5b3cb6e9f9bd7933ccfa058326327fc01822811613f7a03ce4588d6 and was generated at commit 3f48132a269b548bb06a8e7c9c5ca8a6925f4fb8; the commit that cut v0.9.0 is not recorded and stays unknown.
+**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold.
 
 **Effective configuration.** Nine-agent risk-managed field, all nine datasets, default verdict and PassMode::RelativeToBenchmark with buy-and-hold as benchmark; 81 records, six windows times eight seeds per agent per dataset.
 
@@ -1855,7 +1855,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** cargo run --release -p sharpebench-harness --example mandate_eval -- paper/evidence/final/mandate-declaration.jsonl (paper/sections/A-commands.tex)
 
-**Producing commit.** v0.9.0 evidence snapshot. paper/evidence/provenance.json records the producing source identity as source_snapshot_sha256 c38632efb5b3cb6e9f9bd7933ccfa058326327fc01822811613f7a03ce4588d6 and was generated at commit 3f48132a269b548bb06a8e7c9c5ca8a6925f4fb8; the commit that cut v0.9.0 is not recorded and stays unknown.
+**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold.
 
 **Effective configuration.** Nine-agent field on nine datasets, 81 records, 36 declared and 45 undeclared; declared columns produced by the kernel's rank_declared.
 
@@ -1895,7 +1895,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** cargo run --release -p sharpebench-harness --example seed_leg_eval -- paper/evidence/final/seed-leg.jsonl (paper/sections/A-commands.tex)
 
-**Producing commit.** v0.9.0 evidence snapshot. paper/evidence/provenance.json records the producing source identity as source_snapshot_sha256 c38632efb5b3cb6e9f9bd7933ccfa058326327fc01822811613f7a03ce4588d6 and was generated at commit 3f48132a269b548bb06a8e7c9c5ca8a6925f4fb8; the commit that cut v0.9.0 is not recorded and stays unknown.
+**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold.
 
 **Effective configuration.** Nine-agent field on US indices 1d, crypto 1d and FX 1d under the default and CostProfile::Realistic; 2,646 records, being 2,592 per-run rows and 54 per-agent verdict rows.
 
@@ -1933,7 +1933,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** cargo run --release -p sharpebench-harness --example risk_managed_eval -- out.jsonl for the committed spread; cargo test -p sharpebench-harness perturb for the fragile-agent separation (paper/sections/A-commands.tex)
 
-**Producing commit.** v0.9.0 evidence snapshot. paper/evidence/provenance.json records the producing source identity as source_snapshot_sha256 c38632efb5b3cb6e9f9bd7933ccfa058326327fc01822811613f7a03ce4588d6 and was generated at commit 3f48132a269b548bb06a8e7c9c5ca8a6925f4fb8; the commit that cut v0.9.0 is not recorded and stays unknown. The perturbation unit test runs on the current tree.
+**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold. The perturbation unit test runs on the current tree.
 
 **Effective configuration.** Perturbed datasets whose bar-to-bar moves stay inside the empirical range of the original series, asserted per bar; spread is best minus worst per-run PSR.
 
@@ -2014,7 +2014,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** cargo run --release -p sharpebench-harness --example evidence_sweep -- out.jsonl [dataset] [dsr_bar], assembled by paper/evidence/assemble_sweep.py and reduced by paper/evidence/analyze.py (paper/sections/A-commands.tex)
 
-**Producing commit.** v0.9.0 evidence snapshot. paper/evidence/provenance.json records the producing source identity as source_snapshot_sha256 c38632efb5b3cb6e9f9bd7933ccfa058326327fc01822811613f7a03ce4588d6 and was generated at commit 3f48132a269b548bb06a8e7c9c5ca8a6925f4fb8; the commit that cut v0.9.0 is not recorded and stays unknown.
+**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold.
 
 **Effective configuration.** Default cell beta = 0.95, host N = 50, field size eight; eight execution seeds, six disjoint windows, typical cost profile; 512 records per dataset over 64 host configurations, 4,608 in all. The one-symbol floor draws a random gross exposure per period, flat half the time and otherwise a uniform long weight.
 
@@ -2053,7 +2053,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** cargo run --release -p sharpebench-harness --example luck_floor_1000 -- paper/evidence/final/luck-floor-1000.jsonl; figure by python paper/src/make-evidence-figures.py luck-floor-1000 (paper/sections/A-commands.tex)
 
-**Producing commit.** v0.9.0 evidence snapshot. paper/evidence/provenance.json records the producing source identity as source_snapshot_sha256 c38632efb5b3cb6e9f9bd7933ccfa058326327fc01822811613f7a03ce4588d6 and was generated at commit 3f48132a269b548bb06a8e7c9c5ca8a6925f4fb8; the commit that cut v0.9.0 is not recorded and stays unknown.
+**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold.
 
 **Effective configuration.** 1,000 distinct seeds on us-indices-1d and crypto-majors-1d under the same windows, eight execution seeds and costs as the evidence sweep; trial count fixed at 1,000.
 
@@ -2285,7 +2285,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** cargo run --release -p sharpebench-harness --example evidence_sweep -- out.jsonl [dataset] [dsr_bar], assembled by paper/evidence/assemble_sweep.py and reduced by paper/evidence/analyze.py (paper/sections/A-commands.tex); relative and never-catastrophic verdicts from the relative-mandate and risk-managed examples.
 
-**Producing commit.** v0.9.0 evidence snapshot. paper/evidence/provenance.json records the producing source identity as source_snapshot_sha256 c38632efb5b3cb6e9f9bd7933ccfa058326327fc01822811613f7a03ce4588d6 and was generated at commit 3f48132a269b548bb06a8e7c9c5ca8a6925f4fb8; the commit that cut v0.9.0 is not recorded and stays unknown.
+**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold.
 
 **Effective configuration.** Default cell beta = 0.95, host N = 50, field size eight; eight execution seeds, six disjoint windows, typical cost profile; 512 records per dataset over 64 host configurations, 4,608 in all.
 
@@ -2333,7 +2333,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** cargo run --release -p sharpebench-harness --example evidence_sweep -- out.jsonl [dataset] [dsr_bar], assembled by paper/evidence/assemble_sweep.py and reduced by paper/evidence/analyze.py (paper/sections/A-commands.tex); the thousand-agent extension from the luck_floor_1000 example.
 
-**Producing commit.** v0.9.0 evidence snapshot. paper/evidence/provenance.json records the producing source identity as source_snapshot_sha256 c38632efb5b3cb6e9f9bd7933ccfa058326327fc01822811613f7a03ce4588d6 and was generated at commit 3f48132a269b548bb06a8e7c9c5ca8a6925f4fb8; the commit that cut v0.9.0 is not recorded and stays unknown.
+**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold.
 
 **Effective configuration.** Default cell beta = 0.95, host N = 50, field size eight; eight execution seeds, six disjoint windows, typical cost profile; 512 records per dataset over 64 host configurations, 4,608 in all.
 
@@ -2369,7 +2369,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** cargo run --release -p sharpebench-harness --example external_rules_eval -- paper/evidence/final/external-rules.jsonl [dataset]
 
-**Producing commit.** v0.9.0 evidence snapshot. paper/evidence/provenance.json records the producing source identity as source_snapshot_sha256 c38632efb5b3cb6e9f9bd7933ccfa058326327fc01822811613f7a03ce4588d6 and was generated at commit 3f48132a269b548bb06a8e7c9c5ca8a6925f4fb8; the commit that cut v0.9.0 is not recorded and stays unknown.
+**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold.
 
 **Effective configuration.** As SB-tab-external.
 
