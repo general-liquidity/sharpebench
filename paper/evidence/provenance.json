@@ -179,7 +179,7 @@
       "sha256": "1e025ac30099de23ae8455f20ae5441b557e924870d0e1475c7508512908ec0d"
     }
   ],
-  "generated_at_head": "3f48132a269b548bb06a8e7c9c5ca8a6925f4fb8",
+  "generated_at_head": "780665f7f3515f94ccffa350377224c6c9c6913b",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -195,7 +195,7 @@
     },
     {
       "path": "arena/state.json",
-      "sha256": "6e7d06037135c1cdfdd43b1c3f2d64d62bc8938e1ee6424aa8a7f3357009e0f3"
+      "sha256": "de68fb4710ecd225caccca91086935387e8e21458556caf501583705b9e2d84c"
     },
     {
       "path": "arena/windows/window-001/window.json",
@@ -1338,6 +1338,10 @@
       "sha256": "cc23fdc34ec07561a6c71664d5e4be028d42beab6f926e7739dade7d09c39956"
     },
     {
+      "path": "paper/src/joint_gate_power.py",
+      "sha256": "f3417098bd96337975d4762e9a9110ae9932bb0a80e824cb191da8096d3fe089"
+    },
+    {
       "path": "paper/src/kernel_stats.py",
       "sha256": "836a71dc2411869de43960cb85cf8ad000762d7225053092da112973c8539191"
     },
@@ -1348,6 +1352,10 @@
     {
       "path": "paper/src/make-figures.py",
       "sha256": "a9f68ad14d4d91186b1eb8f4c8ccd884501a4fc141eaa8cb579404277f9efa30"
+    },
+    {
+      "path": "paper/src/make-joint-gate-power.py",
+      "sha256": "a75fa07c7d457e860d18a72248a96ebb7fbd9f50f28549252f038663d900f55f"
     },
     {
       "path": "paper/src/make-power-curve.py",
@@ -1376,6 +1384,10 @@
     {
       "path": "paper/src/test_import_prospective_field.py",
       "sha256": "228b7ebae80f3679036a9450c0c10026931c7f7912fc10e64df26a77cc2df0d9"
+    },
+    {
+      "path": "paper/src/test_joint_gate_power.py",
+      "sha256": "02e2c59debb8a9a13c62cbd2d694f338409634afbaafc153684e01e5d7390d10"
     },
     {
       "path": "paper/src/test_kernel_stats.py",
@@ -1435,5 +1447,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "c38632efb5b3cb6e9f9bd7933ccfa058326327fc01822811613f7a03ce4588d6"
+  "source_snapshot_sha256": "2dec480cf3d50910b431b268f42eb0334c935bd51b4f13d194da59fd74291bbe"
 }
