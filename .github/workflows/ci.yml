@@ -487,6 +487,25 @@ jobs:
       - name: The power analysis is deterministic and matches the kernel on its own draws
         run: python -B -m unittest paper/src/test_power_curve.py
 
+  joint-gate-power:
+    name: joint-gate power calibration
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    # Its own job rather than a step in `paper-figures`: the subprocess cases run
+    # the producer end to end several times over, which takes longer than every
+    # other paper job put together and would push that job past its budget.
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      # Only numpy: the producer and its regressions import the kernel
+      # transcription, which is standard library, and draw no figures.
+      - name: Install the pinned array stack
+        run: python -m pip install "numpy==2.5.3"
+      - name: The joint-gate calibration is deterministic and matches the kernel
+        run: python -B -m unittest paper/src/test_joint_gate_power.py
+
   llm-shim:
     name: LLM field shim (call ceiling, model identity)
     runs-on: ubuntu-latest
