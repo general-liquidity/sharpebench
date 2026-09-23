@@ -1,0 +1,22 @@
+[package]
+name = "sharpebench-study"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Executable study-protocol contract: a versioned, machine-validated study configuration, its typed refusals, and precision claims derived from the runs actually executed."
+repository.workspace = true
+keywords = ["study", "protocol", "preregistration", "power", "statistics"]
+categories = ["science", "mathematics"]
+# Not on crates.io. A workspace member that carries the workspace version but is
+# on no registry advertises a version that exists nowhere, which this repository
+# has already been bitten by once (CHANGELOG 0.19.0). Publishing this crate is a
+# release decision with its own dependency-order entry in RELEASING.md; until
+# that decision is taken, the crate declares that it is not published.
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+
+[lints]
+workspace = true

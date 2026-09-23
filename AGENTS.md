@@ -87,6 +87,7 @@ diff in the four pure crates, and the paired-boundary gate
 | Simulator, transport, external agents | `crates/sharpebench-sim/` |
 | CLI, updater, board rendering | `crates/sharpebench-cli/` |
 | Memory ablation benchmark | `crates/sharpebench-memory/` |
+| Study-protocol contract and validator | `crates/sharpebench-study/` |
 | WASM and npm surface | `crates/sharpebench-wasm/`, `npm/` |
 | Paper, producers, frozen evidence | `paper/` |
 | Forward arena records | `arena/` |

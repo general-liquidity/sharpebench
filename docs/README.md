@@ -40,6 +40,7 @@ mdbook serve docs/book
 | Release procedure | [`RELEASING.md`](../RELEASING.md) |
 | Registry authentication and recovery | [Publishing model](PUBLISHING.md) |
 | Methodology paper and committed evidence | [`paper/`](../paper/) |
+| Which paper claims their evidence still supports | [Evidence-freshness and applicability register](evidence-register.md) |
 
 ## Engineering records
 

@@ -13,6 +13,7 @@ members = [
     "crates/sharpebench-leaderboard",
     "crates/sharpebench-arena",
     "crates/sharpebench-memory",
+    "crates/sharpebench-study",
     "xtask",
     "examples/reference-agent",
 ]
