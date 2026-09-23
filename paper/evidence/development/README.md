@@ -66,8 +66,8 @@ record instead; its two-leg rows still bound the shipped predicate.
 
 Seed 20260923, 64000 replications for the two-leg conjunction and 1600 for the
 three-leg one, split into 64 fixed seeded chunks per geometry. The output bytes
-do not depend on the worker count. Wall clock on 12 workers: 87.5 seconds for
-the two-leg phase, 197.0 for the three-leg phase, 4 minutes 47 seconds end to
+do not depend on the worker count. Wall clock on 12 workers: 76.9 seconds for
+the two-leg phase, 206.2 for the three-leg phase, 4 minutes 43 seconds end to
 end. The runtime is printed and written by `--runtime-out`, never into the
 evidence file, so the file stays byte-reproducible.
 
@@ -156,7 +156,7 @@ shipped every-window rule, each solved to the same nominal per-entry rate.
 | 1e-06 | every window, six of six | 38.0 years | 56.8 years |
 | 1e-06 | four of six windows | 32.9 years | 45.7 years |
 | 1e-06 | pooled single test | 22.6 years | 31.4 years |
-| 0.05 | every window, six of six | 13.6 years | 25.6 years |
+| 0.05 | every window, six of six | 5.6 years | 14.0 years |
 | 0.05 | four of six windows | 4.0 years | 9.1 years |
 | 0.05 | pooled single test | 2.7 years | 6.2 years |
 
@@ -164,7 +164,11 @@ At the shipped rule's own nominal rate of 1e-06 the window structure costs a
 factor of 1.68 in history at 50 percent power and 1.81 at 80 percent, against a
 pooled test. Requiring four windows instead of six costs 1.15 and 1.24. The
 factor is not a property of the window structure alone: matched at 0.05 instead,
-the same three designs separate by 5.00 and 3.44.
+the every-window rule costs 2.05 and 2.25 against a pooled test and 1.41 and
+1.54 against four of six. Six conjunctive windows only reach a whole-rule rate
+of 0.05 at a per-window bar of PSR 0.393, below one half, where a window passes
+at a negative observed Sharpe and the squared PSR gate has to be solved on the
+signed branch.
 
 A superseded comparison is kept in the evidence under
 `comparison: superseded_unmatched_false_positive_rate`, labelled and never used

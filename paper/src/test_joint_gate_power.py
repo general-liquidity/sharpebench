@@ -118,6 +118,37 @@ class ClosedFormLegs(unittest.TestCase):
             self.assertTrue(kernel_passes(threshold + 1e-9 + series, bar, jg.DSR_BAR))
             self.assertFalse(kernel_passes(threshold - 1e-7 + series, bar, jg.DSR_BAR))
 
+    def test_a_psr_bar_below_one_half_passes_at_a_negative_sharpe(self):
+        """Known answer: the textbook bound z / sqrt(n - 1 - z^2 / 2) is signed,
+        and a bar below PSR 0.5 has z < 0, so the smallest passing Sharpe is
+        below zero. Squaring the gate loses that branch and returns the
+        reflection, which is a strictly stricter rule.
+        """
+        bar = 1.0 - 0.05 ** (1.0 / jg.N_WINDOWS)
+        z = k.norm_cdf_inverse(bar)
+        self.assertLess(z, 0.0)
+        for n in (234, 571, 2386):
+            threshold = float(jg.min_passing_sharpe(n, 0.0, 3.0, z, 0.0))
+            self.assertAlmostEqual(threshold, z / math.sqrt(n - 1 - z * z / 2), places=12)
+            self.assertLess(threshold, 0.0)
+            self.assertAlmostEqual(k.psr_from_moments(threshold, n, 0.0), bar, places=12)
+            self.assertLess(k.psr_from_moments(threshold * (1.0 + 1e-9), n, 0.0), bar)
+            self.assertGreaterEqual(k.psr_from_moments(threshold * (1.0 - 1e-9), n, 0.0), bar)
+            # Control: the reflected root the squared gate hands back is deep
+            # inside the passing set, so using it refuses skill the rule admits.
+            self.assertGreater(k.psr_from_moments(-threshold, n, 0.0), bar)
+
+    def test_the_signed_threshold_is_the_kernel_gate_on_a_drawn_series(self):
+        """The same branch against the kernel's own PSR rather than against the
+        closed form, on series whose sample moments are not the normal ones."""
+        bar = 1.0 - 0.05 ** (1.0 / jg.N_WINDOWS)
+        z = k.norm_cdf_inverse(bar)
+        track = jg.draw_track(np.random.default_rng(41), 30, 234, 0.0)
+        thresholds = jg.threshold_true_sharpe(track, z, 0.0)
+        for series, threshold in zip(track, thresholds):
+            self.assertTrue(kernel_passes(threshold + 1e-9 + series, 0.0, bar))
+            self.assertFalse(kernel_passes(threshold - 1e-7 + series, 0.0, bar))
+
     def test_an_infeasible_kurtosis_is_refused_rather_than_solved(self):
         with self.assertRaises(jg.PowerSupportError):
             jg.min_passing_sharpe(20, 0.0, 400.0, k.norm_cdf_inverse(0.9), 0.0)
@@ -340,13 +371,32 @@ class MatchedFalsePositiveRate(unittest.TestCase):
 
     def test_the_matched_factor_depends_on_which_rate_the_designs_are_matched_at(self):
         """Matching at 0.05 instead of 1e-6 gives a different, larger factor, so
-        the matched rate has to be stated with the number."""
+        the matched rate has to be stated with the number. Six of six matched at
+        0.05 needs a per-window bar of PSR 0.393, below one half, which is the
+        branch `min_passing_sharpe` has to take signed."""
         every_at_005 = jg.design_at_false_positive_rate("every_at_005", 6, 6, 0.05)
         pooled_at_005 = jg.design_at_false_positive_rate("pooled_at_005", 1, 1, 0.05)
+        self.assertLess(every_at_005.psr_bar, 0.5)
         matched = jg.require_matched(
             jg.compare_designs(every_at_005, pooled_at_005, self.EFFECT, self.PERIODS, 0.5)
         )
-        self.assertAlmostEqual(matched["history_factor_a_over_b"], 5.0, delta=0.1)
+        self.assertAlmostEqual(matched["history_factor_a_over_b"], 2.05, delta=0.03)
+        self.assertGreater(matched["history_factor_a_over_b"], 1.68)
+
+    def test_the_matched_005_history_agrees_with_the_monte_carlo_at_that_length(self):
+        """The design whose per-window bar is below PSR 0.5 checked the same way
+        as the pooled one: at the solved length the simulated every-window pass
+        probability must be the 50 percent the closed form asked for. Under the
+        unsigned threshold this length was 3426 bars, where the rule really
+        passes about four times in five."""
+        design = jg.design_at_false_positive_rate("every_at_005", 6, 6, 0.05)
+        s = self.EFFECT / math.sqrt(self.PERIODS)
+        bars = design.required_bars(s, 0.5)
+        rng = np.random.Generator(np.random.PCG64(20260923))
+        track = jg.draw_track(rng, 20_000, bars, 0.0)
+        thresholds = jg.window_thresholds(track, design.windows, design.z_bar)
+        self.assertAlmostEqual(float((thresholds.max(axis=1) <= s).mean()), 0.5, delta=0.02)
+        self.assertLess(bars, 3426)
 
     def test_a_design_compared_with_itself_costs_the_same_history(self):
         self.assertEqual(self.compare(self.every, 0.5)["history_factor_a_over_b"], 1.0)
@@ -632,7 +682,7 @@ class CommittedRun(unittest.TestCase):
         # bytes so the file stays reproducible.
         allowed = {
             "0.90", "0.95", "0.05", "0.10", "0.25", "0.0", "0.1", "0.2", "0.5",
-            "1.0", "2.0", "3.0", "87.5", "197.0",
+            "1.0", "2.0", "3.0", "76.9", "206.2",
             str(producer.SEED), str(producer.REPLICATIONS), str(producer.JOINT_REPLICATIONS),
         }
         for row in self.rows:
@@ -651,6 +701,8 @@ class CommittedRun(unittest.TestCase):
                     f"{row['history_factor_a_over_b']:.2f}",
                     f"{row['years_a']:.1f}",
                     f"{row['years_b']:.1f}",
+                    f"{row['per_test_psr_bar_a']:.3f}",
+                    f"{row['per_test_psr_bar_b']:.3f}",
                 }
             elif row["record"] == "panel":
                 allowed |= {f"{row['deflation_bar_annualized_equivalent']:.4f}"}

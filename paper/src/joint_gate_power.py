@@ -68,9 +68,16 @@ def min_passing_sharpe(n, skew, kurt, z_bar, benchmark):
     a u^2) with u > b squares to A u^2 + B u + C >= 0, where A = n - 1 - z^2 a,
     B = z^2 skew - 2 b (n - 1) and C = b^2 (n - 1) - z^2. The quadratic is
     -z^2 (1 - skew b + a b^2) < 0 at u = b, so b lies strictly between its roots
-    and the passing set is [larger root, infinity) whenever A > 0. Elementwise.
-    Same formula as `make-power-curve.py`; `test_joint_gate_power.py` pins the
-    two against each other and both against the kernel.
+    whenever A > 0. Squaring loses which side of b the gate is satisfied on, and
+    the sign of `z_bar` says which: a bar above PSR 0.5 has z > 0, the gate needs
+    u > b, and the passing set is [larger root, infinity); a bar below PSR 0.5
+    has z < 0, every u >= b passes outright, and the passing set reaches down to
+    the smaller root. Elementwise.
+
+    `make-power-curve.py` carries the same closed form for the [0.90, 0.95] bars
+    it is ever asked for, where z > 0 and the two agree;
+    `test_joint_gate_power.py` pins them against each other and both against the
+    kernel, and pins this branch against the kernel on its own.
     """
     n = float(n)
     a = (np.asarray(kurt, dtype=float) - 1.0) / 4.0
@@ -84,7 +91,9 @@ def min_passing_sharpe(n, skew, kurt, z_bar, benchmark):
     big_c = benchmark * benchmark * (n - 1.0) - z2
     root = np.sqrt(big_b * big_b - 4.0 * big_a * big_c)
     q = -0.5 * (big_b + np.where(big_b >= 0.0, root, -root))
-    return np.maximum(q / big_a, big_c / q)
+    if z_bar >= 0.0:
+        return np.maximum(q / big_a, big_c / q)
+    return np.minimum(q / big_a, big_c / q)
 
 
 def threshold_true_sharpe(z, z_bar, benchmark):
