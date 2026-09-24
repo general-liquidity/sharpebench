@@ -179,7 +179,7 @@
       "sha256": "1e025ac30099de23ae8455f20ae5441b557e924870d0e1475c7508512908ec0d"
     }
   ],
-  "generated_at_head": "998b60574c49bdd26f83976f0363d893044f1435",
+  "generated_at_head": "0761ad4ca3b9898a29f736be694b1b1dec9cc369",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -531,7 +531,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/composite.rs",
-      "sha256": "7d934286c3d353fcef01d0951acec2ae7702a058f936baa081c1d67377dbc371"
+      "sha256": "6c3704667f7cd3c2d900637fa80eca24cef0646bb9aa8afd5bc23c6a665f9793"
     },
     {
       "path": "crates/sharpebench-core/src/correlation.rs",
@@ -647,7 +647,7 @@
     },
     {
       "path": "crates/sharpebench-core/tests/dispersion_vote_fence.rs",
-      "sha256": "e8c9da4c70169ced7c3778d599fbff34d0c6cce7ec03eb43ed10b358ffc160b7"
+      "sha256": "b62c95c0812c9fb388bdff2ffda77a7552d59094af1ebbd83130369b86b15894"
     },
     {
       "path": "crates/sharpebench-core/tests/forecast_contract_digest_versions.rs",
@@ -1511,5 +1511,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "e378ae8daf7540d6046e840a34b69738c71b4ccc098141f8688997338de1fa05"
+  "source_snapshot_sha256": "b7c38499fc777298cb14403a033ab9bc8307d91c7e0acca019673ea22aaac4d3"
 }
