@@ -206,6 +206,181 @@ fn an_ordinary_field_is_measured_exactly_as_before() {
     }
 }
 
+// --- where the fence actually stands -----------------------------------------
+
+/// The votes the kernel measures, as the dispersion sorts them.
+fn votes_of(field: &[AgentSubmission]) -> Vec<f64> {
+    let mut v: Vec<f64> = field
+        .iter()
+        .map(|s| {
+            let pooled: Vec<f64> = s.runs.iter().flat_map(|r| r.returns.clone()).collect();
+            sharpebench_stats::deflated_sharpe::observed_sharpe_ratio(&pooled)
+                .expect("every track varies")
+        })
+        .collect();
+    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    v
+}
+
+/// How far a vote may sit from this field's median, restated from the kernel's
+/// rule so a change to the kernel's scale or constant moves the boundary the
+/// two probes below straddle.
+fn reach_of(sorted_votes: &[f64], scale_floor: f64) -> (f64, f64) {
+    let centre = median(sorted_votes);
+    let scale = pairwise_median_scale(sorted_votes).max(scale_floor);
+    (centre, FENCE_Z * scale)
+}
+
+/// The honest field, optionally one agent wider, plus a probe. Seven votes and
+/// eight are both built, because the median of an odd sample is an element and
+/// the median of an even one is the midpoint of two, and both the votes and
+/// their pairwise gaps change parity between the two fields: seven votes give
+/// twenty-one gaps and eight give twenty-eight.
+fn field_with_probe(extra_honest: usize, sharpe: f64) -> Vec<AgentSubmission> {
+    let mut field = honest_field();
+    for k in 0..extra_honest {
+        let seed = HONEST.len() + k;
+        field.push(agent(
+            &format!("honest-{seed}"),
+            track(seed, 0.70 + 0.05 * k as f64),
+        ));
+    }
+    field.push(agent("probe", track(HONEST.len() + extra_honest, sharpe)));
+    field
+}
+
+/// A probe half a percent inside the fence votes, and the field measures the
+/// dispersion of all seven votes. A probe half a percent outside it does not,
+/// and the six honest rows measure the dispersion of six.
+///
+/// The two probes straddle one boundary, so any change to the distance the
+/// kernel computes moves one of them across it: the scale, its consistency
+/// constant, the centre, the direction of the comparison and the constant
+/// itself are all pinned by this pair, not by a number copied out of a run.
+#[test]
+fn the_fence_stands_where_the_field_and_the_constant_put_it() {
+    let floor = cfg().min_measured_trials_sr_std / cfg().periods_per_year.sqrt();
+    for extra in [0, 1] {
+        let boundary = {
+            // The probe is in the sample that sets the centre and the scale, so
+            // the boundary is the fixed point of "sit exactly at the reach".
+            let mut sharpe = 1.0;
+            for _ in 0..200 {
+                let votes = votes_of(&field_with_probe(extra, sharpe));
+                let (centre, reach) = reach_of(&votes, floor);
+                let next = centre + reach;
+                if (sharpe - next).abs() < 1e-9 {
+                    break;
+                }
+                sharpe = next;
+            }
+            sharpe
+        };
+        let inside = boundary * 0.995;
+        let outside = boundary * 1.005;
+        let honest_count = HONEST.len() + extra;
+
+        let field = field_with_probe(extra, inside);
+        let all_votes = std_dev(&votes_of(&field));
+        for r in &rank(&field, &cfg()) {
+            assert_eq!(
+                r.trials_sr_std.to_bits(),
+                all_votes.to_bits(),
+                "{extra}/{}: a vote inside the fence votes",
+                r.agent_id
+            );
+        }
+
+        let field = field_with_probe(extra, outside);
+        let board = rank(&field, &cfg());
+        let mut honest_votes = votes_of(&field);
+        honest_votes.retain(|v| *v < outside / 2.0);
+        assert_eq!(
+            honest_votes.len(),
+            honest_count,
+            "{extra}: probe is the outlier"
+        );
+        let without_probe = std_dev(&honest_votes);
+        for r in &board {
+            let want = if r.agent_id == "probe" {
+                std_dev(&votes_of(&field))
+            } else {
+                without_probe
+            };
+            assert_eq!(
+                r.trials_sr_std.to_bits(),
+                want.to_bits(),
+                "{extra}/{}: a vote outside the fence must not vote",
+                r.agent_id
+            );
+        }
+    }
+}
+
+/// The robust scale is floored at the per-period dispersion the configuration
+/// already declines to measure below. On a field whose votes agree closely the
+/// unfloored scale is far smaller than that floor, and a vote that the floor
+/// admits would be many scales out without it.
+#[test]
+fn the_dispersion_floor_floors_the_fence_scale_too() {
+    let tight: Vec<AgentSubmission> = (0..6)
+        .map(|i| agent(&format!("tight-{i}"), track(i, 0.40 + 0.0005 * i as f64)))
+        .collect();
+    let floor = cfg().min_measured_trials_sr_std / cfg().periods_per_year.sqrt();
+    let mut field = tight.clone();
+    // Inside the floored fence, far outside the unfloored one.
+    field.push(agent("probe", track(6, 0.40 + 3.0 * floor)));
+    let votes = votes_of(&field);
+    let unfloored = pairwise_median_scale(&votes);
+    assert!(
+        unfloored * FENCE_Z < 3.0 * floor,
+        "without the floor this probe is outside the fence: scale {unfloored}, floor {floor}"
+    );
+    let board = rank(&field, &cfg());
+    let all_seven = std_dev(&votes);
+    for r in &board {
+        assert_eq!(
+            r.trials_sr_std.to_bits(),
+            all_seven.to_bits(),
+            "{}: the floored scale admits this probe",
+            r.agent_id
+        );
+    }
+}
+
+/// A field of exactly `min_field_for_measured_sr_std` votes measures; one vote
+/// fewer takes the configured prior. The fence runs before that count, so a
+/// field that only falls under the floor because a vote was fenced falls back
+/// to the prior rather than measuring from the rump.
+#[test]
+fn the_smallest_measurable_field_still_measures() {
+    let cfg = cfg();
+    let exactly: Vec<AgentSubmission> = HONEST
+        .iter()
+        .take(cfg.min_field_for_measured_sr_std)
+        .enumerate()
+        .map(|(i, &(id, sharpe))| agent(id, track(i, sharpe)))
+        .collect();
+    assert_eq!(exactly.len(), cfg.min_field_for_measured_sr_std);
+    for r in rank(&exactly, &cfg) {
+        assert_eq!(
+            r.trials_sr_std_source,
+            sharpebench_core::TrialsSrStdSource::Measured,
+            "{}",
+            r.agent_id
+        );
+    }
+    let one_fewer: Vec<AgentSubmission> = exactly[..exactly.len() - 1].to_vec();
+    for r in rank(&one_fewer, &cfg) {
+        assert_eq!(
+            r.trials_sr_std_source,
+            sharpebench_core::TrialsSrStdSource::Configured,
+            "{}",
+            r.agent_id
+        );
+    }
+}
+
 // --- the constant the fence borrows ------------------------------------------
 
 /// `FENCE_C_7` is the 99th percentile of the largest robust z in an honest

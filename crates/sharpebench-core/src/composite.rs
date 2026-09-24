@@ -2153,13 +2153,14 @@ fn fence_distant_votes(sorted: &mut Vec<Vote>, scale_floor: f64) -> Vec<usize> {
         return Vec::new();
     }
     let reach = DISPERSION_VOTE_FENCE_Z * scale;
-    let mut fenced: Vec<usize> = sorted
-        .iter()
-        .filter(|v| (v.sharpe - centre).abs() > reach)
-        .flat_map(|v| v.members.iter().copied())
-        .collect();
+    // One predicate, applied once: the kept votes and the fenced indices are
+    // the two sides of the same partition, so they cannot disagree.
+    let (kept, removed): (Vec<Vote>, Vec<Vote>) = sorted
+        .drain(..)
+        .partition(|v| (v.sharpe - centre).abs() <= reach);
+    *sorted = kept;
+    let mut fenced: Vec<usize> = removed.into_iter().flat_map(|v| v.members).collect();
     fenced.sort_unstable();
-    sorted.retain(|v| (v.sharpe - centre).abs() <= reach);
     fenced
 }
 
