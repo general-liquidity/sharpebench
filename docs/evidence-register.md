@@ -2086,7 +2086,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 **Source.** `paper/sections/sybil-defense-fragment.tex:4`
 
 **Artifacts.**
-- `crates/sharpebench-harness/tests/evidence_fields_no_clone_merges.rs`, sha256 `8b92f47a04d8b69a685d4d3ab6d3ee091fd3a3e684b4adc9fa6bbf39d7ad49c5`, digest source: paper/evidence/provenance.json, rebuilds every committed evidence field twice and asserts the merge counts and the stamped dispersion source
+- `crates/sharpebench-harness/tests/evidence_fields_no_clone_merges.rs`, sha256 `3d00305fb3ab5bdddf77c08466ca838cea120e40f0238b606051911ce2bfc8c8`, digest source: paper/evidence/provenance.json, rebuilds every committed evidence field twice and asserts the merge counts and the stamped dispersion source
 - `crates/sharpebench-core/src/rediscovery.rs`, sha256 `a14b70c1d1f317eee9cfec132c35a1a884875e7225497d74d66d1bcdc4db67f3`, digest source: paper/evidence/provenance.json, carries CLONE_COLLAPSE_COSINE = 0.995
 
 **Producer command.** cargo test -p sharpebench-harness --test evidence_fields_no_clone_merges (paper/sections/A-commands.tex)
@@ -2100,6 +2100,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Relevant later changes.**
 - A track with no Sharpe ratio no longer votes on another agent's deflation bar. hold voted wherever a record stamps measured or floored: 64 of the 576 default-sweep panels, all 27 panels of the externally specified sweep and four of the nine power-curve panels. How far the repaired measurement would move each bar is not established and is not estimated (paper/sections/E-repairs.tex:15, :17). The dispersion sample is now qualified before clone collapse, which changes which streams the similarity is taken over on panels containing a constant track.
+- A vote further than 10.75 robust scales from its own field's median no longer enters the measured dispersion. Nothing is fenced on any committed field, so the merge counts and the stamped dispersion source this row rests on are unchanged, and the same test now also pins the margin by which each measured panel sits inside the fence. The self-audit's sybil counterfactual, the arm computed with the clone collapse off, does move: two hundred near-identical puppets are the field there, so the honest votes are the distant minority and the fence removes them.
 
 **Present applicability.** The merge behaviour is re-established on every commit by the named test. The quoted similarity values are the test's printed output, which the register cannot pin to a stored artifact.
 
