@@ -722,6 +722,101 @@ fn the_measured_panels_disclose_the_vote_that_sets_their_bar() {
     }
 }
 
+/// The vote fence admits every vote on the three panels the engine measures,
+/// with room, so the shipped bar on each is the one the plain standard
+/// deviation of all seven votes gives and the fence changes no published
+/// number. The test above pins that dispersion bit for bit; this one pins the
+/// margin by which it is safe.
+///
+/// The fence's scale is the median of the pairwise absolute differences, not
+/// the median absolute deviation. The MAD of these fields is the spread inside
+/// the five-agent luck-floor cluster, which puts the honest hourly carrier at a
+/// robust z of 162 and would fence a legitimate entrant; the pairwise median
+/// reads every pair and puts the same vote at 5.2. The kernel's scale is
+/// restated here rather than imported, so a change to it has to move this
+/// number to pass.
+#[test]
+fn the_measured_panels_sit_inside_the_vote_fence() {
+    use sharpebench_core::composite::window_tracks;
+    use sharpebench_core::deflated_sharpe::observed_sharpe_ratio_of_windows;
+    use sharpebench_core::ScoreConfig;
+
+    for (name, periods, largest_z) in [
+        ("crypto-majors-1h", 8760.0, 5.199),
+        ("fx-majors-1d", 252.0, 4.541),
+        ("rates-1d", 252.0, 2.698),
+    ] {
+        let data = load(name);
+        let windows = windows_for(data.len());
+        let mut sweep = vec![
+            run_agent("buy-and-hold", &data, &windows, || Box::new(BuyAndHold)),
+            run_agent(
+                "momentum",
+                &data,
+                &windows,
+                || Box::new(Momentum::default()),
+            ),
+            run_agent("hold", &data, &windows, || Box::new(HoldAgent)),
+        ];
+        sweep.extend(luck_floor(
+            &data,
+            &windows,
+            &EXEC_SEEDS,
+            CostModel::default(),
+            LUCK_FLOOR_AGENTS,
+        ));
+        let cfg = ScoreConfig {
+            execution_seeds_per_window: EXEC_SEEDS.len(),
+            ..ScoreConfig::for_periods_per_year(periods)
+        };
+
+        let mut votes: Vec<f64> = sweep
+            .iter()
+            .filter_map(|s| {
+                let tracks = window_tracks(s, EXEC_SEEDS.len());
+                let slices: Vec<&[f64]> = tracks.iter().map(Vec::as_slice).collect();
+                observed_sharpe_ratio_of_windows(&slices).ok()
+            })
+            .collect();
+        votes.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+        let floor = cfg.min_measured_trials_sr_std / periods.sqrt();
+        let raw_scale = pairwise_median_scale(&votes);
+        assert!(
+            raw_scale > floor,
+            "{name}: the dispersion floor does not bind on this panel, so the pinned distance is              the measured one: scale {raw_scale}, floor {floor}"
+        );
+        let centre = median(&votes);
+        let z = votes
+            .iter()
+            .map(|v| (v - centre).abs() / raw_scale)
+            .fold(0.0_f64, f64::max);
+        eprintln!("{name}: largest vote distance {z:.3} of the fence's {FENCE_C_7}");
+        assert!(
+            (z - largest_z).abs() < 0.01,
+            "{name}: largest vote distance {z:.3}, measured {largest_z}"
+        );
+        assert!(
+            z < FENCE_C_7,
+            "{name}: an honest vote reaches the fence at {z:.3}, so the fence would move this              panel's published bar"
+        );
+    }
+}
+
+/// The kernel's robust scale for the vote fence, restated: the median of the
+/// pairwise absolute differences of a sorted sample, scaled so it estimates a
+/// normal standard deviation the way 1.4826 times the MAD does.
+fn pairwise_median_scale(sorted: &[f64]) -> f64 {
+    let mut gaps = Vec::new();
+    for (i, low) in sorted.iter().enumerate() {
+        for high in &sorted[i + 1..] {
+            gaps.push(high - low);
+        }
+    }
+    gaps.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    1.048_358_013_869_129 * median(&gaps)
+}
+
 // --- the between-window share on honest traded tracks --------------------------
 
 /// The chapter says an honest traded track's between-window share is near 0.

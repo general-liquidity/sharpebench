@@ -179,7 +179,7 @@
       "sha256": "1e025ac30099de23ae8455f20ae5441b557e924870d0e1475c7508512908ec0d"
     }
   ],
-  "generated_at_head": "461a76386e14f211e8ce83187392a327e6b9a003",
+  "generated_at_head": "ad3b14554fb99e4178f27cbe34113ced769158b4",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -195,7 +195,7 @@
     },
     {
       "path": "arena/state.json",
-      "sha256": "de68fb4710ecd225caccca91086935387e8e21458556caf501583705b9e2d84c"
+      "sha256": "473d7ea38f4292991764b444ccc8f5c60ae998f1a79e3c7498616b321d1dcaff"
     },
     {
       "path": "arena/windows/window-001/window.json",
@@ -531,7 +531,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/composite.rs",
-      "sha256": "1ac6276ad4533a7de24cce357c6a9fd08479ffa70c645a8bdc080aeea29a73e6"
+      "sha256": "6c3704667f7cd3c2d900637fa80eca24cef0646bb9aa8afd5bc23c6a665f9793"
     },
     {
       "path": "crates/sharpebench-core/src/correlation.rs",
@@ -644,6 +644,10 @@
     {
       "path": "crates/sharpebench-core/tests/dispersion_leverage.rs",
       "sha256": "27f53909735f8847c6fc02272b9d831051cfe0f533c14b0b08071128cfdd755c"
+    },
+    {
+      "path": "crates/sharpebench-core/tests/dispersion_vote_fence.rs",
+      "sha256": "00c27e051d27079877f21f0f800eb2c990252c89f998f69498cce747852c1cd7"
     },
     {
       "path": "crates/sharpebench-core/tests/forecast_contract_digest_versions.rs",
@@ -823,7 +827,7 @@
     },
     {
       "path": "crates/sharpebench-harness/tests/evidence_fields_no_clone_merges.rs",
-      "sha256": "8b92f47a04d8b69a685d4d3ab6d3ee091fd3a3e684b4adc9fa6bbf39d7ad49c5"
+      "sha256": "3d00305fb3ab5bdddf77c08466ca838cea120e40f0238b606051911ce2bfc8c8"
     },
     {
       "path": "crates/sharpebench-harness/tests/fault_injection.rs",
@@ -1507,5 +1511,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "e8f6351f299ac04e21fc54786097ebade229ba4897fb31fb80709de19f56d0a0"
+  "source_snapshot_sha256": "d3c872436087f492f476c5904bbf9994745250dcb5c0c2b62b6ff6696d532151"
 }
