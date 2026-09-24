@@ -381,6 +381,80 @@ fn the_smallest_measurable_field_still_measures() {
     }
 }
 
+/// A field whose votes agree except for one states no robust scale at all: more
+/// than half its pairwise gaps are exactly zero, so the pairwise median is
+/// zero, and an operator who set the configured minimum dispersion to zero has
+/// removed the floor that would otherwise stand in. A fence with no scale
+/// measures no distance and excludes nobody, so the one vote that differs
+/// still votes and the field measures all six.
+///
+/// The same field is the one case where a vote has no finite leverage: remove
+/// it and the five that remain are bitwise equal, so the dispersion without it
+/// is exactly zero. The disclosure reports that as an absent leverage rather
+/// than an infinity.
+///
+/// Each of the five carries the same dyadic values in its own stride order, so
+/// every sum, mean and square is exact and the five Sharpes agree bit for bit
+/// while the streams are nowhere near clones of each other.
+#[test]
+fn a_field_with_no_robust_scale_fences_nobody() {
+    let base: Vec<f64> = (1..=30)
+        .flat_map(|j| [(1 + j) as f64 / 64.0, (1 - j) as f64 / 64.0])
+        .collect();
+    let strides = [1, 7, 11, 13, 17, 19, 23, 29, 31, 37];
+    let mut field: Vec<AgentSubmission> = (0..5)
+        .map(|k| {
+            let windows: Vec<Vec<f64>> = (0..2)
+                .map(|w| {
+                    let stride = strides[2 * k + w];
+                    (0..60).map(|t| base[(t * stride + k) % 60]).collect()
+                })
+                .collect();
+            agent(&format!("agrees-{k}"), windows)
+        })
+        .collect();
+    field.push(agent("differs", track(9, 0.50)));
+
+    let votes = votes_of(&field);
+    assert!(
+        votes[..5].iter().all(|v| v.to_bits() == votes[0].to_bits()),
+        "the five agree bit for bit: {votes:?}"
+    );
+    assert_eq!(
+        pairwise_median_scale(&votes),
+        0.0,
+        "more than half the gaps are exactly zero"
+    );
+
+    let cfg = ScoreConfig {
+        min_measured_trials_sr_std: 0.0,
+        ..cfg()
+    };
+    let all_six = std_dev(&votes);
+    for r in &rank(&field, &cfg) {
+        assert_eq!(
+            r.trials_sr_std.to_bits(),
+            all_six.to_bits(),
+            "{}: a field with no scale fences nobody",
+            r.agent_id
+        );
+        let vote = r
+            .trials_sr_std_most_influential_vote
+            .as_ref()
+            .expect("a measured field with unequal votes names one");
+        assert_eq!(vote.agent_id, "differs");
+        assert_eq!(
+            vote.measured_dispersion_without_it, 0.0,
+            "the five that remain are equal"
+        );
+        assert!(
+            vote.leverage.is_none(),
+            "a vote that alone is the dispersion has no finite leverage: {:?}",
+            vote.leverage
+        );
+    }
+}
+
 // --- the constant the fence borrows ------------------------------------------
 
 /// `FENCE_C_7` is the 99th percentile of the largest robust z in an honest
