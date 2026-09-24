@@ -1936,12 +1936,19 @@ pub(crate) fn restrict_to_shared_positions(subs: &[AgentSubmission]) -> Vec<Agen
 /// is. The partition and the median are functions of the streams alone, so the
 /// result is order-independent; a field with no clones is all singletons and
 /// measures byte for byte as it would without the collapse.
+///
+/// The surviving votes are then fenced by [`DISPERSION_VOTE_FENCE_Z`]: a vote
+/// further from the field's median than that many robust scales does not enter
+/// the dispersion. `scale_floor` is the per-period dispersion the configuration
+/// already declines to measure below, and it floors the robust scale so a field
+/// whose votes agree cannot fence its own members.
 fn measured_trials_sr_std(
     tracks: &[Vec<Vec<f64>>],
     ids: &[&str],
     min_field: usize,
     dedup_clones: bool,
-) -> Option<MeasuredDispersion> {
+    scale_floor: f64,
+) -> MeasuredDispersion {
     let qualifying: Vec<(usize, Vec<f64>, f64)> = tracks
         .iter()
         .enumerate()
@@ -1950,8 +1957,7 @@ fn measured_trials_sr_std(
             Some((index, t.concat(), sharpe))
         })
         .collect();
-    // (voting agent's field index, submissions in the vote, the vote)
-    let mut votes: Vec<(usize, usize, f64)> = if dedup_clones {
+    let mut votes: Vec<Vote> = if dedup_clones {
         let streams: Vec<Vec<f64>> = qualifying.iter().map(|(_, p, _)| p.clone()).collect();
         clone_clusters(&streams, CLONE_COLLAPSE_COSINE, false)
             .iter()
@@ -1968,35 +1974,193 @@ fn measured_trials_sr_std(
                         .then_with(|| ids[a.0].cmp(ids[b.0]))
                 });
                 let (index, sharpe) = cluster[(cluster.len() - 1) / 2];
-                (index, members.len(), sharpe)
+                let mut speaks_for: Vec<usize> = cluster.iter().map(|&(i, _)| i).collect();
+                speaks_for.sort_unstable();
+                Vote {
+                    index,
+                    members: speaks_for,
+                    sharpe,
+                }
             })
             .collect()
     } else {
         qualifying
             .iter()
-            .map(|&(index, _, sharpe)| (index, 1, sharpe))
+            .map(|&(index, _, sharpe)| Vote {
+                index,
+                members: vec![index],
+                sharpe,
+            })
             .collect()
     };
-    if votes.len() < min_field.max(2) {
-        return None;
-    }
     votes.sort_by(|a, b| {
-        a.2.partial_cmp(&b.2)
+        a.sharpe
+            .partial_cmp(&b.sharpe)
             .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| ids[a.0].cmp(ids[b.0]))
+            .then_with(|| ids[a.index].cmp(ids[b.index]))
     });
-    let sharpes: Vec<f64> = votes.iter().map(|v| v.2).collect();
-    let sr_std = std_dev(&sharpes);
-    Some(MeasuredDispersion {
-        sr_std,
-        most_influential_vote: most_influential_vote(&votes, &sharpes, sr_std, ids),
-    })
+    let measurable = |sample: &[f64]| (sample.len() >= min_field.max(2)).then(|| std_dev(sample));
+    // The dispersion this field measured before the fence existed, kept for the
+    // entrants the fence removes so exclusion can never be a discount.
+    let unfenced = measurable(&votes.iter().map(|v| v.sharpe).collect::<Vec<f64>>());
+    let fenced = fence_distant_votes(&mut votes, scale_floor);
+    let sharpes: Vec<f64> = votes.iter().map(|v| v.sharpe).collect();
+    let admitted = measurable(&sharpes);
+    MeasuredDispersion {
+        admitted,
+        unfenced,
+        fenced,
+        most_influential_vote: admitted
+            .and_then(|sr_std| most_influential_vote(&votes, &sharpes, sr_std, ids)),
+    }
 }
 
 /// A field-measured dispersion and the disclosure that travels with it.
 struct MeasuredDispersion {
-    sr_std: f64,
+    /// Dispersion of the votes the fence admitted. `None` when too few were
+    /// admitted to measure one, which sends the admitted agents to the
+    /// configured prior exactly as a small field always has.
+    admitted: Option<f64>,
+    /// Dispersion of every vote, fenced ones included: what this field measured
+    /// before the fence existed, and the bar a fenced entrant keeps.
+    unfenced: Option<f64>,
+    /// Field indices of the entrants the fence excluded, ascending.
+    fenced: Vec<usize>,
     most_influential_vote: Option<DispersionLeverage>,
+}
+
+/// One entry in the dispersion sample: a field index that names it, every
+/// field index it speaks for after the clone collapse, and the Sharpe it votes.
+struct Vote {
+    /// The field index the disclosure names this vote by.
+    index: usize,
+    /// Every field index this vote speaks for, itself included. A clone cluster
+    /// votes once, so fencing that vote fences the whole cluster; otherwise a
+    /// flood of near-clone copies would put one of its own on the measured bar
+    /// and hand the rest a bar measured without them.
+    members: Vec<usize>,
+    sharpe: f64,
+}
+
+/// How far from its own field's median a vote may sit, in robust scales, and
+/// still vote on somebody else's deflation bar.
+///
+/// This is the constant the rejected dispersion cap was measured with: the 99th
+/// percentile of the largest robust z in an honest normal field of seven
+/// (`FENCE_C_7` in `sharpebench-harness/tests/evidence_fields_no_clone_merges.rs`).
+/// The cap was rejected because winsorizing at it moved a published bar; the
+/// same distance used as a *membership* test moves nothing, because on the
+/// three panels the engine measures, no honest vote reaches it: the largest
+/// honest distance is 5.199, 4.541 and 2.698, pinned by
+/// `the_measured_panels_sit_inside_the_vote_fence` in the harness.
+pub const DISPERSION_VOTE_FENCE_Z: f64 = 10.75;
+
+/// Consistency constant turning the median of the pairwise absolute
+/// differences of a normal sample into an estimate of its standard deviation.
+///
+/// For independent `N(0, s^2)` draws, `|X - Y|` is `|N(0, 2 s^2)|`, whose median
+/// is `sqrt(2) * s * norm_ppf(0.75) = 0.95387 * s`. Dividing by that recovers
+/// `s`, exactly as 1.4826 does for the median absolute deviation.
+const PAIRWISE_MEDIAN_TO_SIGMA: f64 = 1.048_358_013_869_129;
+
+/// Median of an already-sorted ascending slice; 0.0 for an empty one.
+fn median_sorted(sorted: &[f64]) -> f64 {
+    let n = sorted.len();
+    if n == 0 {
+        return 0.0;
+    }
+    if n % 2 == 1 {
+        sorted[n / 2]
+    } else {
+        0.5 * (sorted[n / 2 - 1] + sorted[n / 2])
+    }
+}
+
+/// Robust scale of a sorted vote sample: the median of its pairwise absolute
+/// differences, scaled to a standard deviation.
+///
+/// The median absolute deviation is the obvious choice and the wrong one here.
+/// A measured field is routinely a tight cluster of near-identical agents plus
+/// one or two that traded differently: five luck-floor agents within 0.004 of
+/// each other, momentum, and buy-and-hold. The MAD of such a field is the
+/// spread *inside the cluster*, so the honest agents outside it sit at a robust
+/// z of 162 and any fence that admits them admits everything. The pairwise
+/// median reads every pair, so a cluster of five contributes ten small
+/// distances out of twenty-one rather than setting the scale outright, and the
+/// same field puts its most distant honest vote at 5.2 instead.
+fn pairwise_median_scale(sorted: &[f64]) -> f64 {
+    let mut gaps: Vec<f64> = Vec::with_capacity(sorted.len() * sorted.len().saturating_sub(1) / 2);
+    for (i, low) in sorted.iter().enumerate() {
+        for high in &sorted[i + 1..] {
+            gaps.push(high - low);
+        }
+    }
+    gaps.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    PAIRWISE_MEDIAN_TO_SIGMA * median_sorted(&gaps)
+}
+
+/// Drop the votes that sit further than [`DISPERSION_VOTE_FENCE_Z`] robust
+/// scales from their own field's median. `sorted` is the vote sample in
+/// ascending Sharpe order; it stays sorted.
+///
+/// **What this excludes, and why the shape matters.** The defect this closes is
+/// a track that never moved carrying a Sharpe ratio large enough to be the
+/// whole field's dispersion: 0.001 repeated with a 1e-12 perturbation in each
+/// window has a per-period Sharpe near 2.6e10, which took the hourly crypto
+/// bar from 0.244 to 5.1e10 and zeroed every honest deflated Sharpe. Twice
+/// before, the answer was a predicate on the track's *values*: refuse a track
+/// whose observations all equal the first
+/// ([`crate::deflated_sharpe::is_constant_track`]), then refuse one whose every
+/// window is constant. Exact value equality is a knife edge on a continuum. One
+/// unit in the last place puts a track on the legal side of it while changing
+/// nothing about what the track is, which is what the 1e-12 perturbation buys:
+/// the track is no longer constant by any bit comparison and is still a track
+/// that never moved.
+///
+/// A distance has no knife edge to step off. A vote can only reach the fence by
+/// actually moving toward the field, and a vote that gets under it is, by
+/// construction, within a bounded multiple of the field's own robust spread, so
+/// the influence it can have on anybody else's bar is the influence an honest
+/// outlier already has and the disclosure already names. The fence therefore
+/// converts an unbounded attack into a bounded one rather than relying on
+/// recognizing any particular degenerate shape.
+///
+/// What it does not do is decide that an admitted vote is honest, and it reads
+/// a scale the field itself sets, so it inherits that scale's breakdown point:
+/// distant votes that are a large enough minority of the pairs stop being
+/// distant. The clone collapse folds a flood of near-identical copies into one
+/// vote before this runs, which is the shape that minority most easily takes.
+///
+/// **Exclusion is not a discount.** A fenced entrant is still scored and still
+/// ranked, and it keeps the bar this field measured *with its own vote in it*,
+/// which is the bar it had before the fence existed. Removing a vote can only
+/// lower the dispersion it dominated, so the fence can lower an admitted
+/// entrant's bar and can never lower a fenced one's: no entrant is better off
+/// for having been fenced than it was without the fence. Without that clause
+/// the fence would be an exploit of its own, handing the same near-constant
+/// track a clean bar and first place instead of the zeroed board.
+///
+/// Returns the field indices it removed, ascending. `sorted` is the vote sample
+/// in ascending Sharpe order and stays sorted.
+fn fence_distant_votes(sorted: &mut Vec<Vote>, scale_floor: f64) -> Vec<usize> {
+    let sharpes: Vec<f64> = sorted.iter().map(|v| v.sharpe).collect();
+    let centre = median_sorted(&sharpes);
+    let scale = pairwise_median_scale(&sharpes).max(scale_floor);
+    // A field with no positive scale states no distance, so it fences nobody:
+    // every vote equal measures a scale of zero, and a configuration that
+    // removes the dispersion floor removes the fallback with it.
+    if !scale.is_finite() || scale <= 0.0 {
+        return Vec::new();
+    }
+    let reach = DISPERSION_VOTE_FENCE_Z * scale;
+    let mut fenced: Vec<usize> = sorted
+        .iter()
+        .filter(|v| (v.sharpe - centre).abs() > reach)
+        .flat_map(|v| v.members.iter().copied())
+        .collect();
+    fenced.sort_unstable();
+    sorted.retain(|v| (v.sharpe - centre).abs() <= reach);
+    fenced
 }
 
 /// The vote whose presence raises the measured dispersion most. `votes` and
@@ -2011,7 +2175,7 @@ struct MeasuredDispersion {
 /// leverages go to the lower agent id, so the answer does not depend on
 /// submission order.
 fn most_influential_vote(
-    votes: &[(usize, usize, f64)],
+    votes: &[Vote],
     sharpes: &[f64],
     sr_std: f64,
     ids: &[&str],
@@ -2045,20 +2209,20 @@ fn most_influential_vote(
     for position in 0..votes.len() {
         let rest = without(position);
         let leverage = (rest > 0.0).then(|| sr_std / rest);
-        let candidate = (leverage, ids[votes[position].0]);
+        let candidate = (leverage, ids[votes[position].index]);
         let beats = best.is_none_or(|(held, _, held_leverage)| {
-            outranks(candidate, (held_leverage, ids[votes[held].0]))
+            outranks(candidate, (held_leverage, ids[votes[held].index]))
         });
         if beats {
             best = Some((position, rest, leverage));
         }
     }
     let (position, rest, leverage) = best.expect("a measured field has at least two votes");
-    let (index, agents_in_vote, vote_sharpe) = votes[position];
+    let vote = &votes[position];
     Some(DispersionLeverage {
-        agent_id: ids[index].to_string(),
-        agents_in_vote,
-        vote_sharpe,
+        agent_id: ids[vote.index].to_string(),
+        agents_in_vote: vote.members.len(),
+        vote_sharpe: vote.sharpe,
         votes: votes.len(),
         measured_dispersion_without_it: rest,
         leverage,
@@ -2084,6 +2248,12 @@ fn most_influential_vote(
 ///   near-duplicate streams (`|cosine| >= CLONE_COLLAPSE_COSINE`) vote once
 ///   on that measurement, so a sock-puppet flood cannot shrink the dispersion and
 ///   lower the bar. Clones are still scored and still appear on the board.
+/// - **Vote fence** ([`DISPERSION_VOTE_FENCE_Z`]): a vote further than that many
+///   robust scales from the field's median does not enter the dispersion, so one
+///   entrant cannot raise everybody else's bar without bound. A fenced entrant is
+///   still scored and still ranked, against the bar this field measured with its
+///   own vote in it. On a field with no distant vote the fence removes nothing
+///   and every number is what it was.
 ///
 /// ```
 /// use sharpebench_core::{rank, AgentSubmission, Run, ScoreConfig, Trace};
@@ -2208,12 +2378,21 @@ pub fn rank_declared(
         &ids,
         cfg.min_field_for_measured_sr_std,
         cfg.dedup_clones_for_measured_sr_std,
+        per_period_from_annualized(cfg.min_measured_trials_sr_std, cfg.periods_per_year),
     );
-    let defl = measured.as_ref().map_or_else(
-        || Deflation::configured(cfg),
-        |m| Deflation::measured(m.sr_std, cfg),
-    );
-    let most_influential_vote = measured.and_then(|m| m.most_influential_vote);
+    let deflation_of = |sr_std: Option<f64>| {
+        sr_std.map_or_else(
+            || Deflation::configured(cfg),
+            |s| Deflation::measured(s, cfg),
+        )
+    };
+    let defl_admitted = deflation_of(measured.admitted);
+    // A fenced entrant keeps the bar this field measured with its own vote in
+    // it. Nothing is fenced on a field with no distant vote, and then the two
+    // deflations are the same value computed from the same sample.
+    let defl_fenced = deflation_of(measured.unfenced);
+    let fenced = measured.fenced;
+    let most_influential_vote = measured.most_influential_vote;
 
     // The relative verdict's benchmark is a member of this same (restricted)
     // field, so its run `i` is every other agent's cell `i`. Looked up only
@@ -2239,6 +2418,11 @@ pub fn rank_declared(
                         .benchmark_id()
                         .and_then(|id| field.iter().find(|b| b.agent_id == id)),
                 });
+            let defl = if fenced.contains(&idx) {
+                defl_fenced
+            } else {
+                defl_admitted
+            };
             let mut cs = score_agent_with(s, &subs[idx].runs, &rank_cfg, defl, benchmark, declared);
             cs.runs_submitted = subs[idx].runs.len();
             cs.field_significance_benchmark = significance_benchmark_label.clone();
@@ -2355,10 +2539,15 @@ pub fn rank_declared(
     for (cs, p) in scores.iter_mut().zip(pareto) {
         cs.pareto_optimal = p;
     }
-    // The measured dispersion is one number for the whole field, so every row
-    // carries the same disclosure beside its `trials_sr_std_source`.
-    for cs in &mut scores {
-        cs.trials_sr_std_most_influential_vote = most_influential_vote.clone();
+    // The measured dispersion is one number for the admitted field, so every
+    // admitted row carries the same disclosure beside its `trials_sr_std_source`.
+    // A fenced row is measured against a different dispersion and would
+    // otherwise print a leave-one-out figure that does not belong to the number
+    // beside it.
+    for (idx, cs) in scores.iter_mut().enumerate() {
+        if !fenced.contains(&idx) {
+            cs.trials_sr_std_most_influential_vote = most_influential_vote.clone();
+        }
     }
 
     let sort_key = |s: &CompositeScore| match cfg.rank_key {
