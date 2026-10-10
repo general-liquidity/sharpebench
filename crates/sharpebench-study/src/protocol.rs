@@ -188,10 +188,12 @@ pub struct Estimand {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum DecisionRule {
     /// Supported when the estimand's interval upper bound is at or below the
-    /// limit. The pairing for an error-rate estimand.
+    /// limit. The pairing for an error-rate estimand. The limit must be finite
+    /// and in [0, 1]; it remains a study-owner choice.
     IntervalUpperBoundAtMost { limit: f64 },
     /// Supported when the estimand's interval lower bound is at or above the
-    /// bound. The pairing for a power estimand.
+    /// bound. The pairing for a power estimand. The bound must be finite and
+    /// in [0, 1]; it remains a study-owner choice.
     IntervalLowerBoundAtLeast { bound: f64 },
     /// Explicitly no rule. Present so that omitting a rule is a stated,
     /// refusable condition rather than a missing key that a reader has to

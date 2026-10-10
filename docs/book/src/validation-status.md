@@ -61,6 +61,14 @@ from producing an ordinary report. Valid report JSON is unchanged; the Rust
 refusal enum has an additional protocol-error variant. These checks do not
 authenticate an approver or prove the supplied counts were actually executed.
 
+Error-rate decision limits and power decision bounds must be finite values in
+`[0, 1]`. The validator and JSON schema now enforce that same domain. Invalid
+thresholds receive an existing typed parameter refusal, not an ordinary
+unsupported or supported claim. Both endpoints remain accepted. This tightens
+previous permissive input acceptance, not the wire shape; it does not choose
+owner targets, equate decision thresholds with estimand targets, or establish
+statistical calibration.
+
 The shipped placeholder protocol is explicitly unsealed and retains owner
 decisions for targets and sample counts. The development producer above is not
 an execution of that study-protocol contract: its own CLI accepts replication

@@ -183,7 +183,7 @@
           "required": ["kind", "limit"],
           "properties": {
             "kind": { "const": "interval_upper_bound_at_most" },
-            "limit": { "type": "number" }
+            "limit": { "type": "number", "minimum": 0, "maximum": 1 }
           }
         },
         {
@@ -192,7 +192,7 @@
           "required": ["kind", "bound"],
           "properties": {
             "kind": { "const": "interval_lower_bound_at_least" },
-            "bound": { "type": "number" }
+            "bound": { "type": "number", "minimum": 0, "maximum": 1 }
           }
         },
         {

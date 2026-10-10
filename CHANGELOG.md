@@ -14,6 +14,10 @@ and links the commits it was built from.
 
 ### Corrected
 
+- Study decision-rule limits and bounds must be finite probabilities in [0, 1]
+  in both the validator and JSON schema. Invalid thresholds previously validated
+  and could yield ordinary claim outcomes. Existing typed parameter refusals
+  now identify the invalid rule; valid thresholds and report JSON are unchanged.
 - Study report construction revalidates the supplied protocol and retains
   validator failures as typed report refusals. Invalid precision targets,
   prohibited tier claims, missing decision rules and stale budget declarations
