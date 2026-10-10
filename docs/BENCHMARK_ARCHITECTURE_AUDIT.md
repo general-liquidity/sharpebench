@@ -1,5 +1,11 @@
 # Benchmark architecture audit
 
+October 2026 implementation update: new stressed models now apply a versioned
+two-bar FIFO delay. Earlier ledger statements that the driver did not apply it
+describe the pre-repair implementation, not new stressed runs. Legacy captures
+and frozen evidence keep immediate execution; diagnostic replay lag is added to
+the bound model's timing. See [current timing semantics](book/src/simulator.md#decision-delay).
+
 This audit compares SharpeBench and SharpeArena with other evaluation benchmarks, in two
 ledgers kept separate because their evidence differs. It is an architecture review, not a
 leaderboard comparison. Each decision asks whether a mechanism closes a demonstrated gap in the

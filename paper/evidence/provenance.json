@@ -179,7 +179,7 @@
       "sha256": "1e025ac30099de23ae8455f20ae5441b557e924870d0e1475c7508512908ec0d"
     }
   ],
-  "generated_at_head": "147efcaa57430b09a271a5d9a809f5a84c2f80f2",
+  "generated_at_head": "82ce00de26289bc5596b5f92304569399042dc3b",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -819,7 +819,7 @@
     },
     {
       "path": "crates/sharpebench-harness/src/lib.rs",
-      "sha256": "7946a87307a4ffec2d3ebe689f43c97c0ff8795f7af85ec3fb3fe0b7774247ae"
+      "sha256": "37e178ed971833ec8501065d76c0c3f5dd3e6d0d471d47ba75aecbc185890798"
     },
     {
       "path": "crates/sharpebench-harness/src/perturb.rs",
@@ -887,7 +887,7 @@
     },
     {
       "path": "crates/sharpebench-harness/tests/short_borrow_contract.rs",
-      "sha256": "73ca8b5648926454f5057d1d411c1f120fac42fa6c3ac0c927770eadfcb0cf6b"
+      "sha256": "135b43fca277d0525337f28cab96edceb71446432ae9207b389ad6a375e79b64"
     },
     {
       "path": "crates/sharpebench-harness/tests/team_concurrency_semantics.rs",
@@ -987,7 +987,7 @@
     },
     {
       "path": "crates/sharpebench-protocol/src/lib.rs",
-      "sha256": "eee48880bfe28386e75c7efe00e5233fe9be09bb09c6180adca348f50bcaedff"
+      "sha256": "c189e2f670d05d8b261e6f2c5ca6bda1b9361b8d5e993ce9085b2cedd2a1ceb6"
     },
     {
       "path": "crates/sharpebench-protocol/src/operations.rs",
@@ -1027,7 +1027,7 @@
     },
     {
       "path": "crates/sharpebench-sim/src/costs.rs",
-      "sha256": "fbdae3561043fce9669848faff08d35f42c54314234e2835a7c631a0a6d45ce1"
+      "sha256": "1b064d04ec8b66bb6b13f2d51827b871e78540500610effcf09abce2deb9e2ba"
     },
     {
       "path": "crates/sharpebench-sim/src/data.rs",
@@ -1035,7 +1035,7 @@
     },
     {
       "path": "crates/sharpebench-sim/src/engine.rs",
-      "sha256": "3df666e61f81677d92a90f6f9de4dfdec4b5486dd524b741eea0651ec3c49ad1"
+      "sha256": "57bf8ae0631067d9047d9d66637d59bdc48d95fba12b26c3df09c081ac11e424"
     },
     {
       "path": "crates/sharpebench-sim/src/env.rs",
@@ -1047,11 +1047,11 @@
     },
     {
       "path": "crates/sharpebench-sim/src/lib.rs",
-      "sha256": "9f1af33f5c2f2402ac49769949b0307c439b70304a00d70e5079c5ce297c77c0"
+      "sha256": "f294171b9eb07e7aedab9b8c54e51923ed7920e5b9c2f74cc58dc8e8ddf4f916"
     },
     {
       "path": "crates/sharpebench-sim/src/replay_nulls.rs",
-      "sha256": "a64439904924822c7ffa6863c442fdf755b1ec9fbde1eff1c7b546a019bb1a79"
+      "sha256": "48253c66dee1cfac991ba1efc30dbd552a417d618c9ae2c7f2d610b0218dd726"
     },
     {
       "path": "crates/sharpebench-sim/src/sizing_response.rs",
@@ -1074,12 +1074,16 @@
       "sha256": "9140f2de6e63b4db264f8e22bab49b72fc7c69655eb6a27535b6dcf88c9104a8"
     },
     {
+      "path": "crates/sharpebench-sim/tests/fixed_delay.rs",
+      "sha256": "d4ba594f4598bd1de24982347f6ee46f6dcbb4bcb59945ef2ddaf8a5f56fdc2a"
+    },
+    {
       "path": "crates/sharpebench-sim/tests/golden_input.rs",
       "sha256": "a9a87bee2ffc56719d6fb7d9c53e0bee76fc4253a619167a36478bad335747f4"
     },
     {
       "path": "crates/sharpebench-sim/tests/replay_nulls.rs",
-      "sha256": "2ff610dc6cbbde476a9d7273d6de8a900055104927369f45da6f9f46b1359a96"
+      "sha256": "a91e5f7ca0601f43e7f5fcbfb8f785a433476f84d4c1117c5c48082dc3fec2fe"
     },
     {
       "path": "crates/sharpebench-sim/tests/short_borrow.rs",
@@ -1347,7 +1351,7 @@
     },
     {
       "path": "paper/sections/04-integrity.tex",
-      "sha256": "175ef4bb33d515599ecdd3d6a71bd295275fd833a3d19dd6eee797e884fae5a2"
+      "sha256": "1d716e20fd3ae17d1965f7a0c6febd45e26ef23af529a49a257c873e1c6e57c6"
     },
     {
       "path": "paper/sections/05-experiments.tex",
@@ -1391,7 +1395,7 @@
     },
     {
       "path": "paper/sections/E-repairs.tex",
-      "sha256": "73c1a5e533b7adcb440721b93973a31d27593c0fca85ef8c3665a7af5b5e5f3f"
+      "sha256": "32c500fc01f331e217c19e667e3c6cb7b28800c75666dfa4d9a90ec44231bc92"
     },
     {
       "path": "paper/sections/F-mechanism.tex",
@@ -1547,5 +1551,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "69929a2de68931a51134a4e616f222d812f5a8ca4852116b334d0edbd7c91ce3"
+  "source_snapshot_sha256": "288fef03710c7fabf32e085b60b0379a9708af035b8c4d047062c86a976d8dc9"
 }

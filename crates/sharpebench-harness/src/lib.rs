@@ -160,12 +160,15 @@ pub fn cost_model_digest(costs: CostModel) -> String {
         format!("|short-borrow:{:016x}", costs.short_borrow_bps.to_bits())
     };
     let preimage = format!(
-        "sharpebench-cost-model-v1|{:016x}|{:016x}|{:016x}|{:016x}|{:016x}|{trf}|{noise}{short_borrow}",
+        "sharpebench-cost-model-v1|{:016x}|{:016x}|{:016x}|{:016x}|{:016x}|{trf}|{noise}{short_borrow}{}",
         costs.fee_bps.to_bits(),
         costs.slippage_bps.to_bits(),
         costs.impact_bps.to_bits(),
         costs.financing_bps.to_bits(),
         costs.max_participation.to_bits(),
+        costs.fixed_delay.map_or_else(String::new, |delay| format!(
+            "|sharpebench.fixed-decision-delay.v1:{}", delay.bars()
+        )),
     );
     sharpebench_attest::content_digest(preimage.as_bytes())
 }
@@ -1986,6 +1989,48 @@ mod tests {
             serde_json::to_string(&verified.score).unwrap(),
             "strict replay must preserve the capture's replicate semantics"
         );
+    }
+
+    #[test]
+    fn fixed_delay_is_bound_to_capture_identity_without_changing_legacy_digest() {
+        use sharpebench_sim::FixedDecisionDelay;
+        let data = Dataset::synthetic(2, 40, 17);
+        let windows = [Window { start: 20, end: 40 }];
+        let legacy = CostModel::default();
+        // Reconstruct the exact historical preimage: absent delay adds no suffix.
+        let old_preimage = format!(
+            "sharpebench-cost-model-v1|{:016x}|{:016x}|{:016x}|{:016x}|{:016x}|none|none",
+            legacy.fee_bps.to_bits(),
+            legacy.slippage_bps.to_bits(),
+            legacy.impact_bps.to_bits(),
+            legacy.financing_bps.to_bits(),
+            legacy.max_participation.to_bits(),
+        );
+        assert_eq!(
+            cost_model_digest(legacy),
+            sharpebench_attest::content_digest(old_preimage.as_bytes())
+        );
+        let delayed = CostModel {
+            fixed_delay: Some(FixedDecisionDelay::Fifo { bars: 2 }),
+            ..legacy
+        };
+        let other = CostModel {
+            fixed_delay: Some(FixedDecisionDelay::Fifo { bars: 1 }),
+            ..legacy
+        };
+        assert_ne!(cost_model_digest(delayed), cost_model_digest(legacy));
+        assert_ne!(cost_model_digest(delayed), cost_model_digest(other));
+        let (_, trajectory) = run_agent_capture("hold", &data, &windows, &[7], delayed, || {
+            Box::new(BuyAndHold) as Box<dyn Agent>
+        });
+        let config = sharpebench_core::ScoreConfig::default();
+        verify_trajectory_strict(&data, &trajectory, delayed, &config, None).unwrap();
+        for mismatched in [legacy, other] {
+            assert!(
+                verify_trajectory_strict(&data, &trajectory, mismatched, &config, None).is_err(),
+                "a verifier must not silently reinterpret delayed decisions"
+            );
+        }
     }
 
     #[test]

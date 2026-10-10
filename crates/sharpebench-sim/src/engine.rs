@@ -73,6 +73,10 @@ pub(crate) struct Book {
     /// the serialized snapshot, under the default cost model.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub(crate) pending: BTreeMap<String, PendingOrder>,
+    /// FIFO submissions waiting for fixed-delay eligibility, preserved by
+    /// snapshot/restore and omitted from legacy/immediate snapshots.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(crate) delayed_decisions: BTreeMap<usize, Decision>,
 }
 
 fn is_zero(value: &f64) -> bool {
@@ -95,6 +99,7 @@ impl Book {
             prev_nav: 1.0_f64,
             prev_carry: 0.0_f64,
             pending: BTreeMap::new(),
+            delayed_decisions: BTreeMap::new(),
         }
     }
 }
@@ -285,6 +290,51 @@ fn apply_order(
 /// by [`run_backtest`] (closed loop) and [`crate::env::TradingEnv::step`] (open
 /// loop), so neither stepping surface can drift from the other.
 pub(crate) fn step_once(
+    data: &Dataset,
+    symbols: &[String],
+    book: &mut Book,
+    costs: &CostModel,
+    seed: u64,
+    t: usize,
+    decision: &Decision,
+) -> StepOutcome {
+    let delay = costs.fixed_delay.map_or(0, |delay| delay.bars());
+    if delay == 0 {
+        return step_eligible(data, symbols, book, costs, seed, t, decision);
+    }
+    let mut submitted = decision.clone();
+    let mut seen = std::collections::BTreeSet::new();
+    // Guard submissions now, even when their eligibility falls beyond the
+    // window. Invalid tail orders must not escape process accounting.
+    submitted.orders.retain(|order| {
+        if !seen.insert(order.symbol.clone())
+            || !order.target_weight.is_finite()
+            || order.target_weight.abs() > HARD_WEIGHT_CAP
+        {
+            book.trace.events.push(ProcessEvent::ManipulativeOrder);
+            false
+        } else {
+            true
+        }
+    });
+    if let Some(eligible_at) = t.checked_add(delay) {
+        book.delayed_decisions.insert(eligible_at, submitted);
+    }
+    let eligible = book
+        .delayed_decisions
+        .remove(&t)
+        .unwrap_or_else(|| Decision {
+            orders: Vec::new(),
+            reasoning: "waiting for fixed-delay eligibility".to_string(),
+            cost: None,
+        });
+    step_eligible(data, symbols, book, costs, seed, t, &eligible)
+}
+
+/// Execute the decision whose fixed-delay eligibility has arrived. The legacy
+/// path calls this directly, preserving floating-point and RNG operation order.
+#[allow(clippy::too_many_arguments)]
+fn step_eligible(
     data: &Dataset,
     symbols: &[String],
     book: &mut Book,
@@ -756,6 +806,7 @@ mod tests {
             trf_cost: None,
             noise: None,
             short_borrow_bps: 0.0,
+            fixed_delay: None,
         };
         let plain = run_backtest(&base, &mut BuyAndHold, w, 0, no_costs);
         let div = run_backtest(&paying, &mut BuyAndHold, w, 0, no_costs);
@@ -1090,6 +1141,7 @@ mod tests {
             trf_cost: None,
             noise: None,
             short_borrow_bps: 0.0,
+            fixed_delay: None,
         };
         let decision = Decision {
             orders: vec![

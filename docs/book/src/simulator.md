@@ -48,7 +48,7 @@ the paper; the Rust identifier differs and is given beside it:
 |---|---|---|
 | `frictionless` | `CostProfile::None` | 0 / 0 / 0 / 0, no fill delay |
 | `typical` | `CostProfile::Typical` | 2 / 3 / 50 / 5 |
-| `stressed` | `CostProfile::WorstCase` | 10 / 15 / 150 / 20, 10% participation cap; declares a two-bar decision delay that the backtest driver does not apply |
+| `stressed` | `CostProfile::WorstCase` | 10 / 15 / 150 / 20, 10% participation cap; new runs apply versioned two-bar FIFO decision eligibility |
 | `realistic` | `CostProfile::Realistic` | typical, plus seeded fill delay, partial fills and queue-position slippage |
 
 `CostProfile::name()` is the one place that maps a variant to its reported name.
@@ -58,18 +58,29 @@ unlevered short book.
 
 ## Decision delay
 
-`ExecutionProfile::decision_delay_bars` declares how many bars an order waits
-after its decision. The stressed profile declares two, and the backtest driver
-does not apply the delay: a run under the stressed profile executes each
-decision on the bar it was made, which is how the evidence recorded under that
-profile was produced, and that stays so. Decision-delay sensitivity is measured
-by the [lagged replay](replay-diagnostics.md#lagged-replay) instead, which
-replays a captured run's decisions `k` bars late through this engine and
-reports Sharpe and mean return beside the undelayed figures. Passing the
-stressed cost model with lag `decision_delay_bars` to the library function
-`lagged_replay` measures the declared delay without changing the profile. The
-CLI's `--lagged-replay` replays under the cost model a trajectory is bound to,
-which for CLI captures is the typical profile.
+New stressed runs carry `CostModel::fixed_delay` with schema version
+`sharpebench.fixed-decision-delay.v1` and `bars: 2`. A decision submitted at bar
+`t` becomes eligible at `t + 2`, using that bar's prices, NAV and execution
+frictions. Later submissions do not cancel decisions waiting in the FIFO.
+Existing seeded fill delay and partial-fill rules start at eligibility and can
+defer a fill further. Submissions whose eligibility is outside the window never
+fill; they remain in raw captures and their compute spend is still billed.
+Invalid targets and duplicate symbol orders are guarded at submission, including
+unfilled tail decisions. The queue is included in environment snapshots and
+cleared on reset. `ExecutionProfile::decision_delay_bars` mirrors the resolved
+setting for inspection; the engine consumes `costs.fixed_delay`.
+
+Legacy cost records without `fixed_delay` remain immediate, including historical
+stressed evidence. Their serialized bytes and execution digests stay unchanged.
+The new setting changes the execution digest, so strict verification refuses a
+capture under a different delay. Unknown timing schema versions are refused.
+Historical numerical evidence is not regenerated and does not measure the new
+stressed timing semantics. Default, typical and frictionless runs stay immediate.
+
+[Lagged replay](replay-diagnostics.md#lagged-replay) remains a separate diagnostic:
+its `k` bars are additional to the bound cost model's fixed delay. Thus lag two
+with a new stressed model means four bars to eligibility, not two. The CLI uses
+the cost model its capture is bound to, currently typical costs for CLI captures.
 
 ## Synthetic data
 

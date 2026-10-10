@@ -53,6 +53,12 @@ point-in-time trajectories using the same protocol and execution model.
 
 ## Quick start
 
+New Rust `CostProfile::WorstCase` (stressed) runs apply a versioned two-bar FIFO
+decision delay. Historical cost records without the setting retain immediate
+execution; frozen evidence is not regenerated. Typical/default execution is
+unchanged. See [execution timing](docs/book/src/simulator.md#decision-delay)
+for replay identity, unfilled tail decisions and checkpoint semantics.
+
 ```bash
 cargo install sharpebench
 sharpebench run

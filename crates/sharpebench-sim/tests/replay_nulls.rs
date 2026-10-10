@@ -907,10 +907,10 @@ fn every_shipped_profile_marks_held_positions_at_the_frozen_close() {
 }
 
 /// The book's route to the stressed profile's declared delay: its cost model
-/// and `decision_delay_bars` passed to the lagged replay. The profile itself
-/// still executes on the decision bar.
+/// and `decision_delay_bars` passed as an additional lag to replay. The new
+/// profile already has two-bar eligibility, so this diagnostic adds two more.
 #[test]
-fn the_stressed_profiles_declared_delay_is_measured_by_a_lagged_replay() {
+fn lagged_replay_adds_delay_under_the_versioned_stressed_profile() {
     let stressed = CostProfile::WorstCase.resolve();
     assert_eq!(stressed.decision_delay_bars, 2);
     let data = Dataset::synthetic(4, 160, 3);

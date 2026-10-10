@@ -21,7 +21,7 @@ pub mod transport;
 pub mod windows;
 
 pub use agent::{Agent, BuyAndHold, HoldAgent, Momentum, RandomAgent, TeamAgent};
-pub use costs::{CostModel, CostProfile, ExecutionNoise};
+pub use costs::{CostModel, CostProfile, ExecutionNoise, FixedDecisionDelay};
 pub use data::Dataset;
 pub use engine::{run_backtest, Window};
 pub use env::{EnvState, Scenario, StepInfo, StepResult, TradingEnv};
