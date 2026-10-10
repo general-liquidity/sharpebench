@@ -11,8 +11,19 @@ advancement, held-out-data custody, and non-observation before commitment.
 ## The lifecycle
 
 An arena is a plain directory: `state.json` plus one subdirectory per window
-under `windows/`. Every state transition is a file write, so the whole league is
-inspectable with `cat` and survives any crash between steps.
+under `windows/`. State transitions use a cooperating-writer OS lock and a
+checksummed redo journal. Complete files are synced and atomically replaced,
+with windows and boards before `state.json`. Loading validates and completes
+an interrupted transaction; read-only verification refuses a pending transaction
+without recovering it. A stale in-memory snapshot cannot overwrite a newer one.
+After a persistence failure, reload the arena before another mutation.
+
+This covers process interruption and injected partial-write failures, not an
+unqualified guarantee against any crash. Unix additionally syncs directory
+entries. Windows' safe standard-library implementation syncs files but cannot
+sync directories, so sudden power loss and hardware failures remain outside its
+guarantee. Writers bypassing the OS lock are outside the cooperating-writer
+contract. Existing published window and board bytes are not rewritten.
 
 Each evaluation window moves through four states:
 
