@@ -321,10 +321,13 @@ exact-pair-support comparisons (loss A minus loss B):"
                 )?,
                 _ => writeln!(
                     out,
-                    "  {} vs {}  diff={:.6} over {} contract(s)  inference withheld: {}",
+                    "  {} vs {}  diff={} over {} contract(s)  inference withheld: {}",
                     comparison.agent_a,
                     comparison.agent_b,
-                    comparison.mean_loss_difference,
+                    comparison
+                        .point_estimate()
+                        .map(|value| format!("{value:.6}"))
+                        .unwrap_or_else(|| "unavailable".to_string()),
                     comparison.n_contracts,
                     comparison
                         .inference_error
@@ -345,6 +348,27 @@ mod tests {
 
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_string()).collect()
+    }
+
+    #[test]
+    fn empty_support_prints_unavailable_not_a_numeric_tie() {
+        let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/forecast-quality/fixtures");
+        let agents = ["agent-alpha.json", "agent-beta.json"].map(|name| {
+            parse_forecast_evidence(&fs::read_to_string(fixtures.join(name)).unwrap()).unwrap()
+        });
+        let mut report =
+            analyze_forecast_quality(&agents, ForecastAnalysisConfig::default()).unwrap();
+        let pair = &mut report.comparisons[0];
+        pair.n_contracts = 0;
+        pair.mean_loss_difference = 0.0;
+        pair.confidence_lower = None;
+        pair.confidence_upper = None;
+        pair.holm_adjusted_p_value = None;
+        pair.inference_error = Some("no common resolved contracts".to_string());
+        assert!(render_report(&report).contains("diff=unavailable over 0 contract(s)"));
+        report.comparisons[0].n_contracts = 1;
+        assert!(render_report(&report).contains("diff=0.000000 over 1 contract(s)"));
     }
 
     #[test]

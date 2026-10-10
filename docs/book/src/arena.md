@@ -11,8 +11,19 @@ advancement, held-out-data custody, and non-observation before commitment.
 ## The lifecycle
 
 An arena is a plain directory: `state.json` plus one subdirectory per window
-under `windows/`. Every state transition is a file write, so the whole league is
-inspectable with `cat` and survives any crash between steps.
+under `windows/`. State transitions use a cooperating-writer OS lock and a
+checksummed redo journal. Complete files are synced and atomically replaced,
+with windows and boards before `state.json`. Loading validates and completes
+an interrupted transaction; read-only verification refuses a pending transaction
+without recovering it. A stale in-memory snapshot cannot overwrite a newer one.
+After a persistence failure, reload the arena before another mutation.
+
+This covers process interruption and injected partial-write failures, not an
+unqualified guarantee against any crash. Unix additionally syncs directory
+entries. Windows' safe standard-library implementation syncs files but cannot
+sync directories, so sudden power loss and hardware failures remain outside its
+guarantee. Writers bypassing the OS lock are outside the cooperating-writer
+contract. Existing published window and board bytes are not rewritten.
 
 Each evaluation window moves through four states:
 
@@ -193,6 +204,12 @@ noncertifying, and `board.md` then opens with a notice that names the reason. A
 reader treats a board as certifying only when its header says `"certifying":
 true`; a header without the field, as signed before the field existed,
 certifies nothing.
+
+Verification independently derives every explicit certification claim from the
+signed rows and signed supplied-returns policy. Missing row provenance, repeated
+agent identities, malformed rows, and contradictory claims fail verification,
+even when the signature, anchors and metadata agree. Legacy headers without an
+explicit claim remain noncertifying; verification does not upgrade them.
 
 A window that ranked no row is noncertifying too. `certifying` is a claim about
 rows, so a board that has none has nothing to claim it of, and a window where

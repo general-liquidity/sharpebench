@@ -165,7 +165,8 @@ pub struct BudgetCurveReport {
 /// # Errors
 ///
 /// Returns `Err` at the boundary when: the input is empty or has a single point (a
-/// curve needs at least two); the budgets are not strictly increasing; or any point
+/// curve needs at least two); a budget is nonfinite or budgets are not strictly
+/// increasing; or any point
 /// has fewer than two held-out returns (a Sharpe needs dispersion); or
 /// `periods_per_year` is not finite and positive; or the deflated Sharpe at a
 /// point could not be estimated, which includes a `trials_sr_std` that is not a
@@ -186,6 +187,9 @@ pub fn budget_curve(
 
     for i in 0..n_budget_points {
         let (budget, returns) = points[i];
+        if !budget.is_finite() {
+            return Err(format!("point {i} budget must be finite, got {budget}"));
+        }
         if returns.len() < 2 {
             return Err(format!(
                 "point {i} (budget {budget}) has {} held-out returns; at least 2 are required",
@@ -468,6 +472,36 @@ mod tests {
         assert!(budget_curve(&[(1.0, full.as_slice()), (2.0, empty.as_slice())], &opts).is_err());
         let single = vec![0.01];
         assert!(budget_curve(&[(1.0, full.as_slice()), (2.0, single.as_slice())], &opts).is_err());
+    }
+
+    #[test]
+    fn nonfinite_budgets_are_refused_at_every_point() {
+        let returns = window(0.001, 0.02, 40);
+        let opts = BudgetCurveOpts {
+            n_boot: 8,
+            ..BudgetCurveOpts::default()
+        };
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for index in 0..2 {
+                let mut points = [(1.0, returns.as_slice()), (2.0, returns.as_slice())];
+                points[index].0 = invalid;
+                let error = budget_curve(&points, &opts)
+                    .expect_err("a nonfinite budget cannot enter a budget report");
+                assert!(
+                    error.contains(&format!("point {index} budget must be finite")),
+                    "the invalid point must be refused explicitly: {error}"
+                );
+            }
+        }
+        // Do not silently redefine this numeric axis as a monetary-only domain.
+        // Zero and negative finite coordinates retain the existing contract.
+        for budgets in [[0.0, 1.0], [-2.0, -1.0]] {
+            let points = budgets.map(|budget| (budget, returns.as_slice()));
+            let report = budget_curve(&points, &opts).unwrap();
+            assert_eq!(report.points[0].budget, budgets[0]);
+            assert_eq!(report.points[1].budget, budgets[1]);
+            assert!(serde_json::to_string(&report).is_ok());
+        }
     }
 
     /// The annualized prior is deflated with in the returns' own unit:

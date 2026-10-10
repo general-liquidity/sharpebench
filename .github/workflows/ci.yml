@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Check Lean module scope declarations
         run: python3 scripts/check-lean-scope.py
       - name: Verify selected forecast invariants
@@ -44,7 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
       - name: Detect an already released HEAD
@@ -56,18 +56,18 @@ jobs:
           else
             echo "released=false" >> "$GITHUB_OUTPUT"
           fi
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         if: steps.release-head.outputs.released != 'true'
         with:
           toolchain: "1.96.0"
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2
         if: steps.release-head.outputs.released != 'true'
         with:
           tool: cargo-release@1.1.2
       # The release rebuilds the committed wasm bundle after the version bump,
       # because the bundle carries its own CARGO_PKG_VERSION and the bump cannot
       # rewrite it. The rehearsal runs that same path, so it needs the same tool.
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2
         if: steps.release-head.outputs.released != 'true'
         with:
           tool: wasm-pack@0.15.0
@@ -88,18 +88,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       # Pin the action to the same channel rust-toolchain.toml selects. With @stable the
       # runner downloads stable and installs the components onto it, then rustup redirects
       # cargo to 1.96.0 anyway, so the components land on a toolchain nothing runs.
       - name: Install Rust (matching rust-toolchain.toml)
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
           toolchain: "1.96.0"
           components: rustfmt, clippy
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
       - name: Format
         run: cargo fmt --all --check
@@ -125,23 +125,23 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Install Rust (matching rust-toolchain.toml)
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
           toolchain: "1.96.0"
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
       # Pinned release binary rather than `cargo install`: the runner downloads
       # one archive instead of compiling the runner on every OS.
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2
         with:
           tool: nextest@0.9.143
 
       - name: Build
-        run: cargo build --workspace --locked || cargo build --workspace
+        run: cargo build --workspace --locked
 
       # nextest runs every test binary's tests in one process-per-test pool, so
       # the crate-by-crate serialisation of `cargo test` no longer floors the
@@ -165,11 +165,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
           toolchain: "1.96.0"
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - name: Run the ignored clone-merge regression
         run: cargo test -p sharpebench-harness --test evidence_fields_no_clone_merges -- --ignored
 
@@ -184,19 +184,19 @@ jobs:
     # release workflow at publish time. Every command here runs from inside the
     # crate directory, which is the only way to reach an excluded crate.
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Install Rust 1.96.0 (matches rust-toolchain.toml)
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
           toolchain: "1.96.0"
           components: rustfmt, clippy
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: crates/sharpebench-py
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
 
@@ -228,11 +228,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
           toolchain: "1.96.0"
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - name: Same input → byte-identical leaderboard, twice
         shell: bash
         run: |
@@ -261,11 +261,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
           toolchain: "1.96.0"
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
       - name: Docker daemon is present and answering
         run: docker version
@@ -345,11 +345,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
           toolchain: "1.96.0"
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - name: The scorer resists every known gaming attack
         run: cargo run -q -p sharpebench -- audit
 
@@ -358,11 +358,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
           toolchain: "1.96.0"
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - name: The scoring data exhibits Cont's stylized facts
         run: |
           cargo run -q -p sharpebench -- realism --data data/us-indices-1d.csv
@@ -373,17 +373,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v6
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
         with:
           command: check
       # sharpebench-py is excluded from the Rust-only workspace, so the action
       # above cannot see its pyo3 dependency tree. Run the pinned binary from
       # that crate against the same root policy.
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
           toolchain: "1.96.0"
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2
         with:
           tool: cargo-deny@0.19.9
       - name: cargo-deny (crates/sharpebench-py, excluded from the workspace)
@@ -397,7 +397,7 @@ jobs:
     steps:
       # Full history: the test-evidence gate isolates a drift against
       # `origin/main`, which a shallow checkout cannot resolve.
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
       - name: Install mdBook
@@ -421,14 +421,18 @@ jobs:
       # Full history: the manifest records the commit it was generated at, and the
       # checker requires that commit to be an ancestor of HEAD. A shallow clone does
       # not contain it, and the checker fails rather than skipping the ancestry leg.
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
       - name: Provenance policy cannot be narrowed by its manifest
         run: python -m unittest paper/src/test_provenance.py
+      - name: Workflow action pins and strict Cargo build policy
+        run: |
+          python scripts/check-ci-policy.py --self-test
+          python scripts/check-ci-policy.py
       - name: Sweep coverage requires the declared grid, not row count
         run: python -m unittest paper/src/test_sweep_grid.py
       # Here rather than in `llm-shim`, which pins the Anthropic SDK for the
@@ -469,8 +473,8 @@ jobs:
     # copies and compare regenerations with each other, never with committed bytes,
     # so a platform's rendering cannot fail them.
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
       # The power-curve producer records the numpy it ran under in its run_config,
@@ -495,8 +499,8 @@ jobs:
     # the producer end to end several times over, which takes longer than every
     # other paper job put together and would push that job past its budget.
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
       # Only numpy: the producer and its regressions import the kernel
@@ -504,7 +508,7 @@ jobs:
       - name: Install the pinned array stack
         run: python -m pip install "numpy==2.5.3"
       - name: The joint-gate calibration is deterministic and matches the kernel
-        run: python -B -m unittest paper/src/test_joint_gate_power.py
+        run: python -B -m unittest paper/src/test_joint_gate_power.py paper/src/test_solver_domain.py
 
   llm-shim:
     name: LLM field shim (call ceiling, model identity)
@@ -516,8 +520,8 @@ jobs:
     # SDK's own retry policy. No credential and no provider are involved; the
     # transport answers every request locally.
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
       - name: Install the SDK the ceiling claim was evidenced against
@@ -559,12 +563,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
           toolchain: "1.96.0"
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-python@v7
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
       - name: Build a throwaway crate against the packaged archives and run it
@@ -575,15 +579,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Install Rust 1.96.0
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
           toolchain: "1.96.0"
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: crates/sharpebench-py
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
       - name: Build the wheel

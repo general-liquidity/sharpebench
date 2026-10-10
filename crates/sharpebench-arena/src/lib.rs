@@ -28,7 +28,9 @@
 
 pub mod audit;
 pub mod intake;
+mod persistence;
 pub mod sandbox;
+mod verify_certification;
 
 pub use audit::{forward_hindsight_oracle_case, FORWARD_HINDSIGHT_ORACLE};
 pub use intake::{
@@ -416,6 +418,11 @@ pub struct WindowVerification {
     /// serializes as it did before the check existed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub identity_mismatches: Vec<IdentityMismatch>,
+    /// An explicit certification claim disagrees with its signed rows, or the
+    /// rows do not carry the evidence needed to derive that claim. Legacy
+    /// headers without a claim remain noncertifying and have no error here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub certification_error: Option<String>,
     pub detail: String,
 }
 
@@ -574,12 +581,16 @@ pub struct ArenaVerification {
     pub windows: Vec<WindowVerification>,
 }
 
-/// The file-backed arena. All mutating methods persist before returning, so a
-/// process crash between calls loses nothing.
+/// The file-backed arena. Mutations use a cooperating OS writer lock, reject
+/// stale snapshots, and persist a redo transaction before replacing files.
+/// Loading recovers interrupted transactions. After any persistence error,
+/// discard this handle and reload before attempting another mutation.
 pub struct Arena {
     root: PathBuf,
     state: StateFile,
     windows: BTreeMap<String, WindowState>,
+    snapshot: Option<String>,
+    persistence_failed: bool,
 }
 
 fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, String> {
@@ -645,11 +656,6 @@ fn registry_for(
     Ok(reg)
 }
 
-fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
-    let text = serde_json::to_string_pretty(value).map_err(|e| format!("serialize: {e}"))?;
-    std::fs::write(path, text).map_err(|e| format!("cannot write {}: {e}", path.display()))
-}
-
 /// A window id doubles as a directory name; keep it to a safe charset.
 fn validate_window_id(id: &str) -> Result<(), String> {
     let ok = !id.is_empty()
@@ -679,22 +685,70 @@ impl Arena {
     /// records none of them is written exactly as it was before those fields
     /// existed.
     fn save(&mut self) -> Result<(), String> {
+        self.save_with(Vec::new())
+    }
+
+    fn save_with(&mut self, mut entries: Vec<persistence::Replacement>) -> Result<(), String> {
+        if self.persistence_failed {
+            return Err("arena handle must be reloaded after a persistence failure".to_string());
+        }
+        let result = (|| {
+            let lock = persistence::Lock::acquire(&self.root)?;
+            persistence::require_no_pending(&self.root)?;
+            if persistence::snapshot(&self.root)? != self.snapshot {
+                return Err("arena snapshot changed; reload before writing".to_string());
+            }
+            self.save_locked(&lock, &mut entries)
+        })();
+        if result.is_err() {
+            self.persistence_failed = true;
+        }
+        result
+    }
+
+    fn save_locked(
+        &mut self,
+        lock: &persistence::Lock,
+        entries: &mut Vec<persistence::Replacement>,
+    ) -> Result<(), String> {
         for w in self.windows.values_mut() {
             w.schema_version =
                 expected_window_schema(w.fault_plan_sha256.as_deref(), w.records_score_meaning());
         }
-        write_json(&self.root.join(STATE_FILE), &self.state)?;
         for (id, w) in &self.windows {
-            let dir = self.window_dir(id);
-            std::fs::create_dir_all(&dir)
-                .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
-            write_json(&dir.join(WINDOW_FILE), w)?;
+            let existing = self.window_dir(id).join(WINDOW_FILE);
+            if existing.exists() && read_window_state(&existing)?.status == WindowStatus::Published
+            {
+                let stored = read_window_state(&existing)?;
+                if serde_json::to_value(&stored).map_err(|e| e.to_string())?
+                    != serde_json::to_value(w).map_err(|e| e.to_string())?
+                {
+                    return Err(format!("published window `{id}` is immutable"));
+                }
+                continue;
+            }
+            entries.push(persistence::Replacement::json(
+                format!("{WINDOWS_DIR}/{id}/{WINDOW_FILE}"),
+                w,
+            )?);
         }
+        entries.push(persistence::Replacement::json(
+            STATE_FILE.to_string(),
+            &self.state,
+        )?);
+        let result = persistence::commit(lock, std::mem::take(entries));
+        if result.is_err() {
+            self.persistence_failed = true;
+        }
+        result?;
+        self.snapshot = persistence::snapshot(&self.root)?;
         Ok(())
     }
 
     /// Create a new arena directory. Fails if `dir` already holds one.
     pub fn init(dir: &Path) -> Result<Self, String> {
+        let lock = persistence::Lock::acquire(dir)?;
+        persistence::require_no_pending(&lock.root)?;
         let state_path = dir.join(STATE_FILE);
         if state_path.exists() {
             return Err(format!("{} already exists", state_path.display()));
@@ -702,16 +756,20 @@ impl Arena {
         std::fs::create_dir_all(dir.join(WINDOWS_DIR))
             .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
         let mut arena = Self {
-            root: dir.to_path_buf(),
+            root: lock.root.clone(),
             state: StateFile::default(),
             windows: BTreeMap::new(),
+            snapshot: None,
+            persistence_failed: false,
         };
-        arena.save()?;
+        arena.save_locked(&lock, &mut Vec::new())?;
         Ok(arena)
     }
 
     /// Load an existing arena directory.
     pub fn load(dir: &Path) -> Result<Self, String> {
+        let lock = persistence::Lock::acquire(dir)?;
+        persistence::recover(&lock)?;
         let state: StateFile = read_json(&dir.join(STATE_FILE))?;
         for historical in &state.superseded {
             if state
@@ -786,9 +844,11 @@ impl Arena {
             windows.insert(id.clone(), w);
         }
         Ok(Self {
-            root: dir.to_path_buf(),
+            root: lock.root.clone(),
             state,
             windows,
+            snapshot: persistence::snapshot(&lock.root)?,
+            persistence_failed: false,
         })
     }
 
@@ -984,6 +1044,9 @@ impl Arena {
         window_id: &str,
         reason: &str,
     ) -> Result<WindowSupersession, String> {
+        let lock = persistence::Lock::acquire(dir)?;
+        persistence::recover(&lock)?;
+        validate_window_id(window_id)?;
         if reason.trim().is_empty() {
             return Err("supersession reason must be non-empty".to_string());
         }
@@ -1033,7 +1096,13 @@ impl Arena {
         };
         state.window_order.remove(position);
         state.superseded.push(record.clone());
-        write_json(&dir.join(STATE_FILE), &state)?;
+        persistence::commit(
+            &lock,
+            vec![persistence::Replacement::json(
+                STATE_FILE.to_string(),
+                &state,
+            )?],
+        )?;
         Ok(record)
     }
 
@@ -1045,6 +1114,10 @@ impl Arena {
         superseded_window_id: &str,
         replacement_window_id: &str,
     ) -> Result<(), String> {
+        let lock = persistence::Lock::acquire(dir)?;
+        persistence::recover(&lock)?;
+        validate_window_id(superseded_window_id)?;
+        validate_window_id(replacement_window_id)?;
         let mut state: StateFile = read_json(&dir.join(STATE_FILE))?;
         let replacement_path = dir
             .join(WINDOWS_DIR)
@@ -1064,7 +1137,13 @@ impl Arena {
         record.replacement_window_id = Some(replacement_window_id.to_string());
         record.replacement_score_config_sha256 = Some(replacement.score_config_sha256);
         record.replacement_fault_plan_sha256 = replacement.fault_plan_sha256;
-        write_json(&dir.join(STATE_FILE), &state)
+        persistence::commit(
+            &lock,
+            vec![persistence::Replacement::json(
+                STATE_FILE.to_string(),
+                &state,
+            )?],
+        )
     }
 
     /// Register a commitment for a window. Refused at or after the commit
@@ -1241,17 +1320,21 @@ impl Arena {
         std::fs::create_dir_all(&dir)
             .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
         let board_path = dir.join(BOARD_FILE);
-        write_json(&board_path, &board)?;
-        std::fs::write(
-            dir.join(BOARD_MD_FILE),
-            render_markdown(&header, &w.scores, &rows),
-        )
-        .map_err(|e| format!("cannot write board.md: {e}"))?;
+        let entries = vec![
+            persistence::Replacement::json(
+                format!("{WINDOWS_DIR}/{window_id}/{BOARD_FILE}"),
+                &board,
+            )?,
+            persistence::Replacement::text(
+                format!("{WINDOWS_DIR}/{window_id}/{BOARD_MD_FILE}"),
+                render_markdown(&header, &w.scores, &rows),
+            ),
+        ];
 
         let w = self.windows.get_mut(window_id).expect("checked above");
         w.status = WindowStatus::Published;
         self.state.published_order.push(window_id.to_string());
-        self.save()?;
+        self.save_with(entries)?;
         Ok(board_path)
     }
 }
@@ -1324,11 +1407,16 @@ fn render_markdown(header: &WindowHeader, scores: &[CompositeScore], rows: &[Boa
 /// boards are still required to share one key. Each board's signed header must
 /// also record the identity of the window file it publishes, field by field
 /// ([`IdentityField`]); a disagreement fails the window with its
-/// [`IdentityMismatch`]es, and an unreadable window file is an `Err`.
+/// [`IdentityMismatch`]es, and an unreadable window file is an `Err`. An explicit
+/// certification claim is independently derived from the signed scored rows;
+/// legacy headers without that claim remain noncertifying.
 pub fn verify_arena(
     dir: &Path,
     pinned: Option<&VerifyingKey>,
 ) -> Result<ArenaVerification, String> {
+    let _read_lock = persistence::Lock::read_only(dir)?;
+    persistence::require_no_pending(dir)?;
+    let starting_snapshot = persistence::snapshot(dir)?;
     let state: StateFile = read_json(&dir.join(STATE_FILE))?;
     let mut windows = Vec::new();
     let mut expected_anchor = GENESIS_ANCHOR.to_string();
@@ -1362,6 +1450,10 @@ pub fn verify_arena(
             Ok(header) => identity_mismatches(header, &window)?,
             Err(()) => Vec::new(),
         };
+        let certification_error = header
+            .as_ref()
+            .ok()
+            .and_then(|header| verify_certification::certification_error(header, &board));
         let (anchor_ok, detail) = match header {
             Ok(header) if header.kind != WINDOW_HEADER_KIND => {
                 (false, format!("unexpected header kind `{}`", header.kind))
@@ -1381,9 +1473,13 @@ pub fn verify_arena(
         if let Some(last) = board.chain.last() {
             expected_anchor = last.signature.clone();
         }
-        let ok = chain_ok && anchor_ok && key_ok && identity_mismatches.is_empty();
+        let ok = chain_ok
+            && anchor_ok
+            && key_ok
+            && identity_mismatches.is_empty()
+            && certification_error.is_none();
         all_ok &= ok;
-        let detail = if ok && detail.is_empty() {
+        let mut detail = if ok && detail.is_empty() {
             "ok".to_string()
         } else if !chain_ok {
             "Ed25519 chain invalid (tampered, or key mismatch)".to_string()
@@ -1398,14 +1494,25 @@ pub fn verify_arena(
                 format!("{detail}; {identity}")
             }
         };
+        if let Some(error) = &certification_error {
+            if !detail.is_empty() {
+                detail.push_str("; ");
+            }
+            detail.push_str(&format!("certification mismatch: {error}"));
+        }
         windows.push(WindowVerification {
             window_id: id.clone(),
             chain_ok,
             anchor_ok,
             key_ok,
             identity_mismatches,
+            certification_error,
             detail,
         });
+    }
+    persistence::require_no_pending(dir)?;
+    if persistence::snapshot(dir)? != starting_snapshot {
+        return Err("arena changed during verification; retry on a coherent snapshot".to_string());
     }
     Ok(ArenaVerification {
         ok: all_ok,

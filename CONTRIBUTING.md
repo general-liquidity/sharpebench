@@ -28,6 +28,14 @@ cargo test --workspace
 
 ## Standing CI legs
 
+External `uses:` action references are full commit SHAs. Comments record the
+upstream ref resolved when pinned; updates require review of the new commit.
+`python scripts/check-ci-policy.py --self-test` and
+`python scripts/check-ci-policy.py` enforce the literal-reference policy and
+reject Cargo build fallbacks. Locked build failure stays failure, including the
+static release binary, rather than retrying with a different dependency graph.
+This does not pin transitive actions, runner images or downloaded tools.
+
 [`ci.yml`](.github/workflows/ci.yml) is the release gate: fmt, clippy, rustdoc,
 the three OS test matrices, the Lean model, byte-identical scores, the live
 container boundary, the self-audit, stylized facts, `cargo deny`, the mdBook,

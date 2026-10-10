@@ -347,14 +347,18 @@ journal under its successor. Reading takes no lock, so `sharpebench gateway` can
 inspect a sweep that is running; the report says whether the path is owned, in
 `journal_lock_held`.
 
-Underneath that, the journal carries a version and a save is a compare-and-swap
-on it: a gateway whose snapshot the file has moved past is refused, answers
+Underneath that, save compares the version, document identity and experiment
+binding from one bounded read of the file. A different document at the same
+version is refused too. A gateway whose snapshot no longer owns it answers
 `journal_ownership_lost` and starts no further call, instead of erasing a record
 it never read. That check is now the second line of defence, and what it defends
 against is named: a journal that moved under a single writer, such as one
 restored from a backup mid-sweep, and the second writer a takeover deliberately
 creates. A takeover displaces a holder that may still be alive, and a save
-consults no lock, so the version is what refuses that holder's next write.
+consults no lock, so these checks refuse that holder's next write when ownership
+has already changed. They are not an atomic filesystem compare-and-swap: a writer
+bypassing the lock can still replace the file between this read and its rename.
+Legacy identity is derived from the exact bytes loaded, not a later second read.
 
 **A settlement that cannot be written stops the gateway.** The file then holds a
 reservation whose outcome is missing, and a reservation is not what the call
@@ -368,7 +372,7 @@ sweep's `HostObservedUsage` carries the flag beside the figures.
 The two flags mean what they say. A save whose rename landed and whose
 durability could not be confirmed is the owner's own I/O fault: it keeps the
 version it wrote, so its next save is not mistaken for another writer's, and it
-publishes `journal_unwritable`. Only a version that moved under this gateway
+publishes `journal_unwritable`. A changed version, document identity or binding
 publishes `journal_ownership_lost`.
 
 ## Why answers stopped

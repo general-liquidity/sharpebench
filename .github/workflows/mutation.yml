@@ -39,24 +39,24 @@ jobs:
         shard: [0, 1, 2, 3]
     steps:
       # Full history so the merge base with the target branch is present.
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
 
       - name: Install Rust (matching rust-toolchain.toml)
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
         with:
           toolchain: "1.96.0"
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2
         with:
           tool: cargo-mutants@27.1.0
 
       # `.cargo/mutants.toml` sets `test_tool = "nextest"`, so the runner must
       # be present. Same pin as ci.yml.
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2
         with:
           tool: nextest@0.9.143
 
@@ -110,7 +110,7 @@ jobs:
       # One artifact per shard: upload-artifact@v4 rejects a repeated name.
       - name: Keep the mutants report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: mutants-out-shard-${{ matrix.shard }}
           path: ${{ runner.temp }}/mutants/mutants.out
@@ -121,8 +121,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.12"
       - name: The scanner itself is tested

@@ -41,7 +41,7 @@ of resampled means does not move when the constant is added. The joint rule
 passes at true Sharpe s exactly when s reaches the largest of the three
 thresholds, and its false-positive rate is that curve at zero.
 
-### Legs not modelled
+### Omitted gates and modelling assumptions
 
 The process gate, the mandate gate, the risk gates, the influential-vote and
 dispersion disclosure, costs and execution-seed variation, missingness and
@@ -49,9 +49,19 @@ refusal accounting, the measured bars' dependence on the field that produced
 them, cross-agent dependence within a field, and the kernel's single fixed
 bootstrap seed (the leg here is averaged over resampling noise instead).
 
-Every unmodelled leg is a further conjunct, so it can only refuse more. The
-pass probabilities below are upper bounds on the shipped predicate's, and the
-false-positive rates are upper bounds on its rate.
+Only the process, mandate and risk gates in that list are omitted conjuncts.
+Adding them cannot increase acceptance on the same inputs with the same
+modelled-leg outputs. The remaining items are modelling assumptions or
+non-gating disclosures, not further conjuncts. Changed fields, costs,
+dependence or bootstrap treatment can change those outputs in either direction.
+The simulation therefore does not establish unconditional upper bounds on the
+shipped predicate's pass probability or false-positive rate.
+
+The historical JSONL metadata described every item as a further conjunct.
+Those bytes remain unchanged, but that interpretation is superseded here.
+The corrected producer separates omitted gates, non-gating disclosures and
+modelling assumptions and explicitly disclaims an unconditional shipped-rate
+bound. No new calibration run was performed for this correction.
 
 The replay diagnostics in `crates/sharpebench-sim/src/replay_nulls.rs` are not
 legs of this rule. `rank_eligible` never reads them; they are reported beside a
@@ -60,7 +70,8 @@ verified trajectory and the CLI is their only consumer.
 The bootstrap leg is not modelled on `crypto-majors-1h`, whose pooled track of
 23940 returns costs more per replication than this tier affords at 2000
 resamples. That panel's joint rows are absent and carry a `leg_not_modelled`
-record instead; its two-leg rows still bound the shipped predicate.
+record instead; its two-leg rows bound only a conjunction with the same inputs
+and modelled-leg outputs, not the shipped predicate under changed assumptions.
 
 ### Run identity
 
@@ -76,9 +87,18 @@ with a rule measured in the other. Every record therefore names its `draws`,
 `two_leg_run` or `joint_run`, and the three-leg run reports all six rules from
 its own draws so the bootstrap leg's increment can be read within one run.
 
-False-positive rates carry exact Clopper-Pearson bounds at one-sided 0.05 on
-each side. Power points carry the Wilson score interval at the same level and
-the binomial standard error.
+The recorded run used exact Clopper-Pearson bounds with five percent in each
+tail. Its `per_entry_interval95` and `interval95_wilson` fields are therefore
+two-sided **ninety percent** intervals despite their names. Their upper endpoints
+are valid one-sided ninety-five percent bounds, as are the reported independent
+field upper bounds. The historical artifact and the tables below are unchanged.
+
+The corrected producer uses two-and-a-half percent per tail for both named
+two-sided intervals. It computes independent field upper bounds separately with
+five percent in the upper tail, preserving that one-sided contract. No fresh
+calibration run has been performed; existing bytes do not represent the repaired
+producer. Quantile-crossing confidence bands use a separate calculation and
+are not part of this interval-label correction.
 
 ### False-positive rate under the zero-skill null
 

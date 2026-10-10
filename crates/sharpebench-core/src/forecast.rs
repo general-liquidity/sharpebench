@@ -15,6 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 
+use serde::ser::SerializeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -34,8 +35,12 @@ pub const FORECAST_QUALITY_SCHEMA: &str = "sharpebench.forecast-quality.v2";
 /// The report written against a declared [`ForecastContractPlan`]: v2 with the
 /// plan as the field support and `common_support.outside_plan_by_agent` listing
 /// the resolved digests the plan does not name, which are not scored. A report
-/// without a plan stays v2.
+/// without a plan stays v2 when every pair has observations; empty-pair reports
+/// use FORECAST_QUALITY_UNAVAILABLE_SCHEMA.
 pub const FORECAST_QUALITY_PLAN_SCHEMA: &str = "sharpebench.forecast-quality.v3";
+/// Reports containing an empty pair use null rather than a numeric tie. Plan
+/// membership remains explicit in common_support; nonempty reports retain v2/v3.
+pub const FORECAST_QUALITY_UNAVAILABLE_SCHEMA: &str = "sharpebench.forecast-quality.v4";
 /// Schema of the declared contract universe file.
 pub const FORECAST_CONTRACT_PLAN_SCHEMA: &str = "sharpebench.forecast-contract-plan.v1";
 const SUPPORT_RULE: &str = "a pair is differenced on the contract digests both agents resolved \
@@ -1207,7 +1212,7 @@ pub struct SupportGap {
     pub agent_b_unresolved: usize,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug)]
 pub struct PairwiseForecastComparison {
     pub agent_a: String,
     pub agent_b: String,
@@ -1216,17 +1221,14 @@ pub struct PairwiseForecastComparison {
     pub n_settlement_blocks: usize,
     /// Mean loss(A) minus mean loss(B); negative favors A. Descriptive only when
     /// inference is withheld: under a `support_gap` it covers the contracts the
-    /// incomplete agent chose to resolve.
+    /// incomplete agent chose to resolve. For empty support this legacy Rust
+    /// scalar is only a placeholder; use point_estimate(). JSON encodes null.
     pub mean_loss_difference: f64,
     /// Absent, together with the other three inference fields, when
     /// `inference_error` says the block resampling law cannot support the claim.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub confidence_lower: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub confidence_upper: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub raw_p_value: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub holm_adjusted_p_value: Option<f64>,
     pub familywise_significant: bool,
     /// The measured rejection rate of this comparison's test under the null, at
@@ -1237,14 +1239,48 @@ pub struct PairwiseForecastComparison {
     /// pair-support gate passes, the test rejects a true null 18.8% of the
     /// time. Read `familywise_significant` against this, not against 0.05.
     /// `None` when the comparison carries no p-value.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub measured_size_at_nominal_5pct: Option<f64>,
     /// Present only when the two agents did not resolve the same digests.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub support_gap: Option<SupportGap>,
     /// Present only when inference was withheld. Omitted for a supported comparison.
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub inference_error: Option<String>,
+}
+
+impl Serialize for PairwiseForecastComparison {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut record = serializer.serialize_map(None)?;
+        record.serialize_entry("agent_a", &self.agent_a)?;
+        record.serialize_entry("agent_b", &self.agent_b)?;
+        record.serialize_entry("n_contracts", &self.n_contracts)?;
+        record.serialize_entry("n_settlement_blocks", &self.n_settlement_blocks)?;
+        record.serialize_entry("mean_loss_difference", &self.point_estimate())?;
+        macro_rules! optional_field {
+            ($field:ident) => {
+                if let Some(value) = &self.$field {
+                    record.serialize_entry(stringify!($field), value)?;
+                }
+            };
+        }
+        optional_field!(confidence_lower);
+        optional_field!(confidence_upper);
+        optional_field!(raw_p_value);
+        optional_field!(holm_adjusted_p_value);
+        record.serialize_entry("familywise_significant", &self.familywise_significant)?;
+        optional_field!(measured_size_at_nominal_5pct);
+        optional_field!(support_gap);
+        optional_field!(inference_error);
+        record.end()
+    }
+}
+
+impl PairwiseForecastComparison {
+    /// A measured descriptive estimate, or no estimate when support is empty.
+    ///
+    /// JSON encodes the same absence as null. Withheld inference on nonempty
+    /// support does not erase the observed estimate.
+    pub fn point_estimate(&self) -> Option<f64> {
+        (self.n_contracts > 0).then_some(self.mean_loss_difference)
+    }
 }
 
 /// Why a paired comparison carries no interval, no p-value and no significance.
@@ -1413,7 +1449,9 @@ pub fn analyze_forecast_quality(
 /// resolve, and a resolved digest outside the plan is listed in
 /// `outside_plan_by_agent` and enters no score, calibration or comparison. Its
 /// settlement is still checked against every other document that resolved it.
-/// The report is [`FORECAST_QUALITY_PLAN_SCHEMA`].
+/// The report uses [`FORECAST_QUALITY_PLAN_SCHEMA`] when every pair has shared
+/// support, or [`FORECAST_QUALITY_UNAVAILABLE_SCHEMA`] when any comparison is
+/// empty. Empty comparisons serialize their unavailable estimate as null.
 pub fn analyze_forecast_quality_against_plan(
     evidence: &[ForecastEvidence],
     config: ForecastAnalysisConfig,
@@ -1509,7 +1547,9 @@ fn analyze(
         .map(|row| (row.contract_sha256.clone(), row.contract_digest_version))
         .collect();
     Ok(ForecastQualityReport {
-        schema_version: if plan.is_some() {
+        schema_version: if comparisons.iter().any(|pair| pair.n_contracts == 0) {
+            FORECAST_QUALITY_UNAVAILABLE_SCHEMA
+        } else if plan.is_some() {
             FORECAST_QUALITY_PLAN_SCHEMA
         } else {
             FORECAST_QUALITY_SCHEMA
@@ -2018,6 +2058,58 @@ fn holm_adjust(comparisons: &mut [PairwiseForecastComparison], alpha: f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn no_observations_are_not_a_measured_zero_difference() {
+        let empty = compare_agents("a", &[], "b", &[], ForecastAnalysisConfig::default()).unwrap();
+        assert_eq!(empty.point_estimate(), None);
+        assert_eq!(empty.mean_loss_difference, 0.0); // Legacy Rust placeholder.
+        assert!(serde_json::to_value(&empty).unwrap()["mean_loss_difference"].is_null());
+        let left = parse_forecast_evidence(&fixture("a", &[0.5], &[1.0])).unwrap();
+        let right = parse_forecast_evidence(&fixture("b", &[0.5], &[1.0])).unwrap();
+        let measured = analyze_forecast_quality(&[left, right], ForecastAnalysisConfig::default())
+            .unwrap()
+            .comparisons
+            .remove(0);
+        assert!(measured.inference_error.is_some());
+        assert_eq!(measured.point_estimate(), Some(0.0));
+        assert_eq!(
+            serde_json::to_value(&measured).unwrap()["mean_loss_difference"],
+            0.0
+        );
+    }
+
+    #[test]
+    fn empty_pair_wire_reports_null_with_versioned_plan_and_planless_reports() {
+        let left = parse_forecast_evidence(&fixture("a", &[0.5], &[1.0])).unwrap();
+        let mut right = parse_forecast_evidence(&fixture("b", &[0.5], &[1.0])).unwrap();
+        right.contracts[0].question = "a different question".to_string();
+        right.revisions[0].contract_sha256 = contract_digests(&right.contracts[0])
+            .unwrap()
+            .canonical_json_v1;
+        let plan = ForecastContractPlan {
+            schema_version: FORECAST_CONTRACT_PLAN_SCHEMA.to_string(),
+            contract_sha256: vec![left.revisions[0].contract_sha256.clone()],
+        };
+        let documents = [left, right];
+        for report in [
+            analyze_forecast_quality(&documents, ForecastAnalysisConfig::default()).unwrap(),
+            analyze_forecast_quality_against_plan(
+                &documents,
+                ForecastAnalysisConfig::default(),
+                &plan,
+            )
+            .unwrap(),
+        ] {
+            assert_eq!(report.schema_version, "sharpebench.forecast-quality.v4");
+            let encoded = serde_json::to_value(&report).unwrap();
+            assert_eq!(encoded["comparisons"][0]["n_contracts"], 0);
+            assert!(encoded["comparisons"][0]["mean_loss_difference"].is_null());
+            assert!(!encoded["comparisons"][0]["familywise_significant"]
+                .as_bool()
+                .unwrap());
+        }
+    }
 
     fn fixture(agent: &str, probabilities: &[f64], outcomes: &[f64]) -> String {
         assert_eq!(probabilities.len(), outcomes.len());

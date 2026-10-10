@@ -67,33 +67,93 @@ def min_passing_sharpe(n, skew, kurt, z_bar, benchmark):
     With a = (kurt - 1) / 4, the gate (u - b) sqrt(n - 1) >= z sqrt(1 - skew u +
     a u^2) with u > b squares to A u^2 + B u + C >= 0, where A = n - 1 - z^2 a,
     B = z^2 skew - 2 b (n - 1) and C = b^2 (n - 1) - z^2. The quadratic is
-    -z^2 (1 - skew b + a b^2) < 0 at u = b, so b lies strictly between its roots
-    whenever A > 0. Squaring loses which side of b the gate is satisfied on, and
+    -z^2 (1 - skew b + a b^2) < 0 at u = b when the variance there is positive,
+    so b lies strictly between its roots whenever A > 0. Zero variance is the
+    floor-active exception described below. Squaring loses the side of b, and
     the sign of `z_bar` says which: a bar above PSR 0.5 has z > 0, the gate needs
     u > b, and the passing set is [larger root, infinity); a bar below PSR 0.5
     has z < 0, every u >= b passes outright, and the passing set reaches down to
     the smaller root. Elementwise.
 
-    `make-power-curve.py` carries the same closed form for the [0.90, 0.95] bars
-    it is ever asked for, where z > 0 and the two agree;
+    Inputs must be finite, n an integer >= 2, and moments satisfy Pearson's
+    kurt >= 1 + skew^2 (with an eight-epsilon roundoff allowance). A > 0 is
+    required for a single lower threshold. Unsupported floating-point roots
+    raise PowerSupportError rather than silently returning NaN. At z = 0 the
+    answer is b. Valid two-point moments may make the variance zero: the
+    kernel's radicand floor then gives the linear candidate b + z sqrt(floor /
+    (n-1)), used only when that candidate lies in the floor-active region.
+
+    `make-power-curve.py` delegates to this implementation for its [0.90, 0.95]
+    bars (and exposes the same signed and degenerate domain);
     `test_joint_gate_power.py` pins them against each other and both against the
     kernel, and pins this branch against the kernel on its own.
+    `test_solver_domain.py` covers invalid and degenerate inputs separately.
     """
-    n = float(n)
-    a = (np.asarray(kurt, dtype=float) - 1.0) / 4.0
+    # Pearson's moment inequality admits two-point samples, including equality.
+    # At a zero variance polynomial the kernel uses its fixed radicand floor;
+    # the corresponding linear candidate is checked separately below.
+    try:
+        n, z_bar, benchmark = float(n), float(z_bar), float(benchmark)
+        skew, kurt = np.broadcast_arrays(
+            np.asarray(skew, dtype=float), np.asarray(kurt, dtype=float)
+        )
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise PowerSupportError("threshold inputs must be numeric and broadcastable") from exc
+    if not all(math.isfinite(x) for x in (n, z_bar, benchmark)):
+        raise PowerSupportError("n, z threshold and benchmark must be finite")
+    if n < 2.0 or not n.is_integer():
+        raise PowerSupportError("n must be an integer number of returns of at least two")
+    if not np.all(np.isfinite(skew)) or not np.all(np.isfinite(kurt)):
+        raise PowerSupportError("skewness and kurtosis must be finite")
+    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+        a = (kurt - 1.0) / 4.0
+        pearson = 1.0 + skew * skew
+    moment_tolerance = 8.0 * np.finfo(float).eps * np.maximum(1.0, np.abs(kurt))
+    if np.any(kurt < pearson - moment_tolerance):
+        raise PowerSupportError("moments violate kurtosis >= 1 + skewness squared")
+    if z_bar == 0.0:
+        # PSR >= 0.5 iff u >= b; avoid the q=0 division at b=0.
+        return np.full(skew.shape, benchmark, dtype=float)
     z2 = z_bar * z_bar
-    big_a = (n - 1.0) - z2 * a
-    if np.any(big_a <= 0.0):
+    if not math.isfinite(z2) or z2 == 0.0:
+        raise PowerSupportError("squared z threshold is outside floating-point support")
+    with np.errstate(over="ignore", invalid="ignore"):
+        big_a = (n - 1.0) - z2 * a
+    if not np.all(np.isfinite(big_a)) or np.any(big_a <= 0.0):
         raise PowerSupportError(
             f"kurtosis too large for a closed-form threshold over {int(n)} returns"
         )
-    big_b = z2 * np.asarray(skew, dtype=float) - 2.0 * benchmark * (n - 1.0)
-    big_c = benchmark * benchmark * (n - 1.0) - z2
-    root = np.sqrt(big_b * big_b - 4.0 * big_a * big_c)
+    with np.errstate(over="ignore", invalid="ignore"):
+        big_b = z2 * skew - 2.0 * benchmark * (n - 1.0)
+        big_c = benchmark * benchmark * (n - 1.0) - z2
+    with np.errstate(over="ignore", invalid="ignore"):
+        floor_candidate = benchmark + z_bar * math.sqrt(kernel_stats.PSR_RADICAND_FLOOR / (n - 1.0))
+        floor_variance = 1.0 - skew * floor_candidate + a * floor_candidate * floor_candidate
+    floor_active = floor_variance <= kernel_stats.PSR_RADICAND_FLOOR
+    with np.errstate(over="ignore", invalid="ignore"):
+        discriminant = big_b * big_b - 4.0 * big_a * big_c
+    if not np.all(np.isfinite(discriminant)) or np.any(discriminant < 0.0):
+        raise PowerSupportError("quadratic discriminant must be finite and nonnegative")
+    if np.any((discriminant == 0.0) & ~floor_active):
+        raise PowerSupportError("a double root outside the variance floor is unsupported")
+    root = np.sqrt(discriminant)
     q = -0.5 * (big_b + np.where(big_b >= 0.0, root, -root))
-    if z_bar >= 0.0:
-        return np.maximum(q / big_a, big_c / q)
-    return np.minimum(q / big_a, big_c / q)
+    if not np.all(np.isfinite(q)):
+        raise PowerSupportError("quadratic root denominator must be finite")
+    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+        companion = np.divide(big_c, q, out=np.zeros_like(q), where=q != 0.0)
+        companion = np.where(q == 0.0, -big_b / (2.0 * big_a), companion)
+        if z_bar > 0.0:
+            threshold = np.maximum(q / big_a, companion)
+        else:
+            threshold = np.minimum(q / big_a, companion)
+        threshold = np.where(floor_active, floor_candidate, threshold)
+        variance = 1.0 - skew * threshold + a * threshold * threshold
+    if not np.all(np.isfinite(threshold)) or not np.all(np.isfinite(variance)):
+        raise PowerSupportError("threshold and its variance must be finite")
+    if np.any((threshold - benchmark) * z_bar <= 0.0):
+        raise PowerSupportError("signed threshold displacement is below floating-point support")
+    return threshold
 
 
 def threshold_true_sharpe(z, z_bar, benchmark):

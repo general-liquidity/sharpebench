@@ -149,8 +149,7 @@ jobs:
 
       - name: Build the static release binary
         run: |
-          cargo build --release --locked -p sharpebench --target x86_64-unknown-linux-musl \
-            || cargo build --release -p sharpebench --target x86_64-unknown-linux-musl
+          cargo build --release --locked -p sharpebench --target x86_64-unknown-linux-musl
 
       - name: Checksum
         run: |

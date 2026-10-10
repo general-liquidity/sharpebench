@@ -1041,7 +1041,8 @@ impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
                     },
                 );
                 match error {
-                    JournalSaveError::Conflict { .. } => {
+                    JournalSaveError::Conflict { .. }
+                    | JournalSaveError::IdentityConflict { .. } => {
                         self.journal_conflict = true;
                         return Err(GatewayErrorKind::JournalOwnershipLost);
                     }
@@ -1279,7 +1280,7 @@ impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
         };
         match self.journal.save(path) {
             Ok(()) => true,
-            Err(JournalSaveError::Conflict { .. }) => {
+            Err(JournalSaveError::Conflict { .. } | JournalSaveError::IdentityConflict { .. }) => {
                 self.journal_conflict = true;
                 false
             }

@@ -613,3 +613,12 @@ def test_budget_curve_rejects_degenerate_input():
         budget_curve([(2.0, wiggle(0.001, 0.02)), (2.0, wiggle(0.001, 0.02))])  # not increasing
     with pytest.raises(ValueError):
         budget_curve([(1.0, wiggle(0.001, 0.02)), (2.0, [])])  # empty returns
+
+
+@pytest.mark.parametrize("invalid", [float("nan"), float("inf"), float("-inf")])
+@pytest.mark.parametrize("index", [0, 1])
+def test_budget_curve_rejects_nonfinite_budgets(invalid, index):
+    points = [(1.0, wiggle(0.001, 0.02)), (2.0, wiggle(0.001, 0.02))]
+    points[index] = (invalid, points[index][1])
+    with pytest.raises(ValueError, match=f"point {index} budget must be finite"):
+        budget_curve(points, n_boot=8)

@@ -163,6 +163,19 @@ the agents that had resolved those contracts. Settlement agreement is now
 checked for every pair on every contract both resolved, so an unequal outcome or
 availability time is refused even when another document lacks that contract.
 
+A comparison with no common resolved contracts has no point estimate, not a
+measured tie. Rust callers use `point_estimate() -> Option<f64>` and the CLI
+prints `diff=unavailable`. Newly computed reports containing any empty pair use
+`sharpebench.forecast-quality.v4`, with `mean_loss_difference: null` for those
+pairs. This applies with or without a declared plan; `common_support.rule` and
+`outside_plan_by_agent` still identify the plan semantics. A nonempty comparison
+retains its descriptive estimate even when inference is withheld. Reports whose
+pairs are all nonempty retain v2/v3 and their existing JSON bytes. Readers must
+accept the v4 schema and treat null as unavailable, not coerce it to zero. Old
+v2/v3 reports can contain numeric zero placeholders at `n_contracts == 0`, so
+legacy readers still need that count guard. The public Rust scalar is retained
+for compatibility; use the optional accessor. No frozen report is rewritten.
+
 A withheld pair stays in the Holm family, so adding any third agent, complete
 or not, enlarges the family that sets a surviving pair's Holm multiplier. The
 pair's support, interval and raw p-value do not move.
@@ -201,7 +214,7 @@ before resolution:
 The schema is exact, the list is non-empty, and every entry is a lowercase
 SHA-256 named once; anything else is refused before any document is read. The
 plan becomes the field support, and the report is
-`sharpebench.forecast-quality.v3`:
+`sharpebench.forecast-quality.v3` when all pairs have observations, otherwise v4:
 
 - `common_support.n_contracts` and `contract_sha256` are the planned digests,
   and `rule` says so.

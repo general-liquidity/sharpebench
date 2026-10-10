@@ -121,9 +121,26 @@ and for the field count the floor is checked against, so a flood of
 near-duplicate submissions cannot shrink the dispersion and lower the bar
 (`dedup_clones_for_measured_sr_std`, default on; see the integrity chapter).
 
+The resulting votes also pass a membership fence before measuring the admitted
+field. A vote is retained when its distance from the field median is at most
+`DISPERSION_VOTE_FENCE_Z` (10.75) times the robust scale. That scale is the median
+of all pairwise absolute vote differences, multiplied by
+`PAIRWISE_MEDIAN_TO_SIGMA` (approximately 1.048358), and floored at the configured
+per-period dispersion floor. It is not the median absolute deviation (MAD).
+The admitted sorted votes determine the plain standard deviation used by
+admitted entrants; too few admitted votes cause their configured-prior fallback.
+
+Exclusion is not a scoring discount: an excluded entrant, and every member of
+the clone cluster its vote represents, keeps the dispersion computed with all
+qualifying votes before fencing. It cannot inherit the lighter admitted-field
+bar. The rule bounds an individual distant vote relative to the field's own
+spread, not against an absolute ceiling. Near-boundary votes retain influence;
+coalitions can change the median and scale. Small fields still use their prior.
+No admitted vote is winsorized or numerically replaced.
+
 ### Which vote sets the measured bar
 
-Every row of a measured board carries `trials_sr_std_most_influential_vote`
+An admitted row of a measured board can carry `trials_sr_std_most_influential_vote`
 beside `trials_sr_std_source`. It names the one vote whose presence raises the
 measured dispersion most: the agent (`agent_id`), how many submissions the clone collapse
 folded into that vote (`agents_in_vote`), the vote itself as a per-period Sharpe
@@ -137,7 +154,8 @@ vote named is one that raises the dispersion; a vote near the middle, whose
 removal would raise it, is never named. The field is absent on the configured
 path, where no field voted, so a board scored against the prior serializes
 exactly as it did before the field existed. It is also absent when every vote
-is equal, because then no vote raises anything.
+is equal, because then no vote raises anything. Fenced rows omit it because
+their unfenced dispersion differs from the admitted sample it describes.
 
 Three limits on reading it:
 
@@ -155,8 +173,9 @@ Three limits on reading it:
   Votes that lower it, by crowding the middle, are not reported.
 
 It is a disclosure and nothing more. It clips no vote, refuses no agent and
-moves no bar: the measured dispersion is still the plain standard deviation of
-the sorted votes, bit for bit, and a test on the three measured panels
+moves no bar by itself. The separate membership fence controls which votes enter
+the admitted sample. On the three measured reference panels no vote is fenced,
+so the measured dispersion remains bit-identical; a test on those panels
 (`the_measured_panels_disclose_the_vote_that_sets_their_bar` in
 `sharpebench-harness/tests/evidence_fields_no_clone_merges.rs`) pins that. On
 the current engine those panels name the same agent:
@@ -169,8 +188,9 @@ the current engine those panels name the same agent:
 
 ### A cap on the vote was measured and not shipped
 
-The measured dispersion has a floor and no ceiling, so one entrant whose pooled
-Sharpe sits far from the field raises everybody's bar in proportion. Winsorizing
+Before the membership fence, the measured dispersion had a floor and no
+influence bound, so one entrant whose pooled Sharpe sat far from the field raised
+everybody's bar in proportion. Winsorizing
 the dispersion sample, so that such an entrant still raises the bar but cannot
 set it alone, was designed, measured and rejected. The reason is the table
 below: on the paper's own measured fields the rule binds on honest agents, and
@@ -179,7 +199,7 @@ it binds in the unsafe direction.
 The rule measured was a median and MAD fence, `median +/- c_n * 1.4826 * MAD`,
 with its scale floored at the precommitted per-period floor so that a coalition
 crowding the centre cannot narrow it. It was applied to the vote sample each
-frozen evidence producer measures under the current engine:
+frozen evidence producer measured under the engine at that comparison:
 
 | Producer | Votes | Periods a year | Dispersion used, before and after | Bar change | Votes clipped |
 |---|---|---|---|---|---|
@@ -211,8 +231,8 @@ within 0.004 of each other. Momentum and buy-and-hold sit far from that cluster,
 and the measured dispersion is mostly that distance, which is the cost-drag
 mechanism the paper describes. A robust fence reads a vote that far from a tight
 cluster as an outlier, 162 robust standard deviations out for buy-and-hold on
-hourly crypto (the same test pins that distance), however honest it is. Any rule strict enough to stop one hostile
-entrant from setting the bar therefore overrules the reference agents on the
+hourly crypto (the same test pins that distance), however honest it is. That
+MAD-based winsorization therefore overrules the reference agents on the
 panels where they set it, and lowering the bar there admits more luck. On the
 13-agent external field, where the votes are spread out, no single vote carries
 more than 1.58 of the dispersion.
@@ -324,7 +344,10 @@ benchmark per period.
 
 The budget curve (`sharpebench_core::budget_curve`, Python `budget_curve`)
 takes the same annualized `trials_sr_std` and converts it with its own
-`periods_per_year`; until the release after 0.19.0 it too deflated with the
+`periods_per_year`. Budget coordinates must be finite and strictly increasing;
+this validation does not establish held-out disjointness or matched market
+support, which remain caller obligations. Until the release after 0.19.0 it too
+deflated with the
 prior unconverted. The raw Python primitives `deflated_sharpe_ratio`,
 `bootstrap_dsr_ci` and `selection_robustness` take `trials_sr_std` per period,
 the unit of the Rust functions they bind, and use an explicit value as given.

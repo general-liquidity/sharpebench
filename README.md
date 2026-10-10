@@ -345,6 +345,10 @@ scripts, artifacts, figures, and provenance manifest live under
 [`paper/`](paper/). The engineering status and remaining external decisions are
 in [`docs/PLAN.md`](docs/PLAN.md).
 
+[Validation status](docs/book/src/validation-status.md) distinguishes checked
+software from exploratory joint-gate calibration and remaining confirmatory
+work. Frozen artifacts are not automatically measurements of the latest engine.
+
 ## Architecture
 
 The codebase is a Rust workspace with a pure scoring center and explicit I/O at
