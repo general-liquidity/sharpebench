@@ -179,7 +179,7 @@
       "sha256": "1e025ac30099de23ae8455f20ae5441b557e924870d0e1475c7508512908ec0d"
     }
   ],
-  "generated_at_head": "1f7fb28c7b1a6efbcc6efc457bf9c1c087eaeb0e",
+  "generated_at_head": "a2b7d265bcf5f26bb959a37e37e4bc5cd86be5d2",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -679,7 +679,7 @@
     },
     {
       "path": "crates/sharpebench-core/tests/forecast_settlement_and_support.rs",
-      "sha256": "291bf7824c905e43063ae388a94a32a462f7262eb8fd6c92a5e4b08baedee817"
+      "sha256": "3d80dad0c8035d2f8180e8b7c5639833024648b7733caa2429b76cf1ad20e126"
     },
     {
       "path": "crates/sharpebench-core/tests/golden_scores.rs",
@@ -1547,5 +1547,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "6feb554cad897133b303e2c3a7008fb4bb173778f58bbf366982941eae6b3519"
+  "source_snapshot_sha256": "aa8f6c87441df88ca2da22c5216df8356a1bc516ab16d2d79e3a7fc57bde3e9c"
 }
