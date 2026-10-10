@@ -20,8 +20,9 @@ and links the commits it was built from.
   gain a directory-fsync or hardware/power-loss guarantee. Published bytes stay frozen.
 - Empty forecast comparisons expose no point estimate through the typed Rust
   accessor and print unavailable in the CLI. Nonempty withheld comparisons keep
-  their measured estimate. Legacy JSON zero placeholders and schemas are retained;
-  consumers must consult the observed contract count. Frozen reports are unchanged.
+  their measured estimate. New empty-pair reports use schema v4 and JSON null;
+  nonempty reports retain their v2/v3 bytes. Readers of historical empty-pair
+  reports must still consult the observed count. Frozen reports are unchanged.
 - Gateway journal save checks document identity and experiment binding together
   with version from one byte snapshot. Same-version replacements are refused
   without losing the caller's pending records; legacy-derived ownership is kept.
