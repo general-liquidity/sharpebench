@@ -179,7 +179,7 @@
       "sha256": "1e025ac30099de23ae8455f20ae5441b557e924870d0e1475c7508512908ec0d"
     }
   ],
-  "generated_at_head": "6fe0ea317612b16a6fa17c393f19423172b601ff",
+  "generated_at_head": "74b09f85812bbe6fa48f6835b3f34c35a2a2d41c",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -1547,5 +1547,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "4de689dccb402aa3b72833dc2812966a4cfc9ebd9d3b77c802cf13e0dba09cb6"
+  "source_snapshot_sha256": "b7028b99487c3d98228f6faff7183a5f326d4534241060da9cee1db04162a3e4"
 }
