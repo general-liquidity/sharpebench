@@ -2127,7 +2127,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 **Artifacts.**
 - `paper/evidence/final/power-curve.jsonl`, sha256 `2450017a9ac05475f7547d0fda7651a97476efff02d4e4168ae72cd78304eff5`, digest source: paper/evidence/provenance.json
 - `paper/figures/power-curve.pdf`, sha256 `44b0373da860683f3e4e87ec261d14ea4827f1b15e2635c17c9cddf1ee8bb138`, digest source: paper/evidence/provenance.json
-- `paper/src/make-power-curve.py`, sha256 `a778b53f07de9975872083db3bdee2905fbe30a9ccef182c9b5b8acf0dcc2598`, digest source: paper/evidence/provenance.json
+- `paper/src/make-power-curve.py`, sha256 `54492e966765f530cd0ec2e4270ac82fea5b1ba712b8bd781fa8eebaf81d6f58`, digest source: paper/evidence/provenance.json
 
 **Producer command.** python paper/src/make-power-curve.py compute --jobs 32 then python paper/src/make-power-curve.py figure (paper/sections/A-commands.tex)
 
@@ -2140,8 +2140,9 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Relevant later changes.**
 - A track with no Sharpe ratio no longer votes on another agent's deflation bar. hold voted wherever a record stamps measured or floored: 64 of the 576 default-sweep panels, all 27 panels of the externally specified sweep and four of the nine power-curve panels. How far the repaired measurement would move each bar is not established and is not estimated (paper/sections/E-repairs.tex:15, :17). paper/sections/E-repairs.tex:17 counts four of the nine power-curve panels among those whose bar hold voted on: commodities, hourly crypto, daily FX and daily rates.
+- 2026-10-10: producer delegates to the repaired shared PSR solver with explicit finite-input, feasible-moment and supported-root checks, zero-z handling and the kernel variance floor for valid two-point moments. Producer source digest is rebound; frozen power-curve records and figures are unchanged. Dedicated solver regressions and the 53-case combined solver/joint suite pass; this does not rescore the historical evidence.
 
-**Present applicability.** Verified on 2026-09-23 for this register: python -B -m unittest paper/src/test_power_curve.py passes, so the committed file and figure are what the current producer writes. The five panels at the configured 1.1382 bar are unaffected by the dispersion-vote repair; the four measured or floored panels read a bar the current engine would measure differently.
+**Present applicability.** The 2026-09-23 frozen-output verification applies to the producer at that date. The 2026-10-10 solver repair validates domains and changes edge-case computation without regenerating committed empirical outputs. The five configured-bar panels remain independent of dispersion-vote repair; the four measured or floored panels still require separately versioned current bars. Existing needs-rescore disposition is retained.
 
 **Disposition.** `needs-rescore`. The producer is deterministic and reads only bars, so a current-engine version of this table is a recomputation rather than a new experiment; it is blocked only on repaired bars, which SB-sec-passk and SB-sec-external own. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one.
 

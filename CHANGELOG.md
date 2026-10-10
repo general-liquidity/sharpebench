@@ -14,6 +14,14 @@ and links the commits it was built from.
 
 ### Corrected
 
+- Gateway journal save checks document identity and experiment binding together
+  with version from one byte snapshot. Same-version replacements are refused
+  without losing the caller's pending records; legacy-derived ownership is kept.
+  Cooperating writers still require the journal lock: this is not atomic CAS
+  against writers replacing the file between its read and rename.
+- Forward-board verification independently derives explicit certification from
+  signed row provenance. Contradictory claims, duplicate rows and missing
+  provenance fail verification and the CLI; legacy boards remain noncertifying.
 - PSR power-analysis solvers now validate finite inputs, feasible moments and
   supported quadratic roots. The half-probability boundary returns the benchmark
   directly, and valid two-point moments respect the kernel variance floor.

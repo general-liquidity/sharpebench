@@ -299,6 +299,12 @@ pub enum JournalSaveError {
         expected: u64,
         found: u64,
     },
+    /// The document identity or experiment binding changed without changing the
+    /// version. A version alone cannot establish that this snapshot owns it.
+    IdentityConflict {
+        expected: Option<String>,
+        found: String,
+    },
     /// The record reached the journal path and its durability is unconfirmed:
     /// the rename landed, and the parent directory sync that makes the new
     /// directory entry survive a power loss did not. The disk is a version
@@ -318,6 +324,10 @@ impl std::fmt::Display for JournalSaveError {
                 f,
                 "gateway journal on disk is at version {found}, this snapshot is at version {expected}"
             ),
+            Self::IdentityConflict { expected, found } => write!(
+                f,
+                "gateway journal document identity or binding differs (snapshot {expected:?}, disk {found})"
+            ),
             Self::Unsynced(error) => write!(
                 f,
                 "gateway journal was written and its durability is unconfirmed: {error}"
@@ -330,7 +340,7 @@ impl std::fmt::Display for JournalSaveError {
 impl std::error::Error for JournalSaveError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Conflict { .. } => None,
+            Self::Conflict { .. } | Self::IdentityConflict { .. } => None,
             Self::Unsynced(error) | Self::Io(error) => Some(error),
         }
     }
@@ -939,7 +949,7 @@ fn read_bounded(path: &Path, max_bytes: u64) -> std::io::Result<Vec<u8>> {
 /// substitute for it.
 ///
 /// A snapshot also carries the `version` it was loaded at, and
-/// [`GatewayJournal::save`] is a compare-and-swap against that version: a save
+/// [`GatewayJournal::save`] compares that version and document identity: a save
 /// from a snapshot that does not match what is on disk is refused as
 /// [`JournalSaveError::Conflict`] rather than replacing a record this process
 /// never read. That check is now a second line of defence rather than the only
@@ -975,6 +985,11 @@ pub struct GatewayJournal {
     /// bytes, which is the one its lock was already taken on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     journal_id: Option<String>,
+    /// Identity read from the same bytes as this snapshot. Kept separately so
+    /// binding a legacy document to its derived identity does not lose what the
+    /// subsequent save must compare against. This is not a persisted field.
+    #[serde(skip)]
+    source_document_id: Option<String>,
     records: Vec<JournalRecord>,
 }
 
@@ -984,6 +999,7 @@ impl GatewayJournal {
             identity,
             version: 0,
             journal_id: Some(fresh_token()),
+            source_document_id: None,
             records: Vec::new(),
         }
     }
@@ -1049,7 +1065,7 @@ impl GatewayJournal {
                 "gateway journal exceeds the accepted size",
             ));
         }
-        let journal: Self = serde_json::from_slice(&bytes).map_err(std::io::Error::other)?;
+        let mut journal: Self = serde_json::from_slice(&bytes).map_err(std::io::Error::other)?;
         if !accepts(&journal.identity) {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -1057,6 +1073,8 @@ impl GatewayJournal {
             ));
         }
         journal.validate()?;
+        journal.source_document_id =
+            Some(journal_id_in(&bytes).unwrap_or_else(|| derived_identity_of(&bytes)));
         Ok(journal)
     }
 
@@ -1313,6 +1331,7 @@ impl GatewayJournal {
 
     /// The version of the document at `path`, or `None` when no document is
     /// there. A document written before the field existed reads as version 0.
+    #[cfg(test)]
     pub(crate) fn version_on_disk(path: &Path) -> std::io::Result<Option<u64>> {
         use std::io::Read as _;
         let mut file = match std::fs::File::open(path) {
@@ -1343,9 +1362,9 @@ impl GatewayJournal {
     /// Persist through a sibling temporary file and fsync it before the rename,
     /// so a reservation is durable before the call it pays for is dispatched.
     ///
-    /// The write is a compare-and-swap on [`GatewayJournal::version`]: a save
-    /// from a snapshot the disk has moved past is refused, and the caller keeps
-    /// every record it appended. Concurrent writers are kept apart by the
+    /// The write checks [`GatewayJournal::version`], the document identity and
+    /// its route/budget/sweep binding. A different document at the same version
+    /// is refused too, and the caller keeps every record it appended. Concurrent writers are kept apart by the
     /// [`JournalLock`] a gateway holds, not by this check; see the type
     /// documentation for what each one covers.
     ///
@@ -1371,14 +1390,43 @@ impl GatewayJournal {
     /// that already holds classes is written as v2 on its next save.
     pub fn save(&mut self, path: &Path) -> Result<(), JournalSaveError> {
         use std::io::Write as _;
-        let found = Self::version_on_disk(path)
-            .map_err(JournalSaveError::Io)?
-            .unwrap_or(0);
+        // One byte snapshot supplies both version and identity. A replacement
+        // between separate reads must not combine one document's version with
+        // another's ownership identity.
+        let disk = match read_bounded(path, MAX_JOURNAL_BYTES + 1) {
+            Ok(bytes) => {
+                if bytes.len() as u64 > MAX_JOURNAL_BYTES {
+                    return Err(JournalSaveError::Io(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "gateway journal exceeds the accepted size",
+                    )));
+                }
+                let document: Self = serde_json::from_slice(&bytes)
+                    .map_err(|error| JournalSaveError::Io(std::io::Error::other(error)))?;
+                let id = journal_id_in(&bytes).unwrap_or_else(|| derived_identity_of(&bytes));
+                Some((document, id))
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(JournalSaveError::Io(error)),
+        };
+        let found = disk.as_ref().map_or(0, |(document, _)| document.version);
         if found != self.version {
             return Err(JournalSaveError::Conflict {
                 expected: self.version,
                 found,
             });
+        }
+        if let Some((document, id)) = disk {
+            let expected = self
+                .source_document_id
+                .as_ref()
+                .or(self.journal_id.as_ref());
+            if expected != Some(&id) || !self.identity.binds_same(&document.identity) {
+                return Err(JournalSaveError::IdentityConflict {
+                    expected: expected.cloned(),
+                    found: id,
+                });
+            }
         }
         self.identity.schema_version = self.required_schema_version().to_string();
         self.version += 1;
@@ -1411,6 +1459,10 @@ impl GatewayJournal {
             drop(file);
             std::fs::rename(&tmp, path)?;
             landed = true;
+            self.source_document_id = Some(
+                journal_id_in(payload.as_bytes())
+                    .unwrap_or_else(|| derived_identity_of(payload.as_bytes())),
+            );
             sync_parent_directory(parent)
         })();
         match result {
