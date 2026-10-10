@@ -179,7 +179,7 @@
       "sha256": "1e025ac30099de23ae8455f20ae5441b557e924870d0e1475c7508512908ec0d"
     }
   ],
-  "generated_at_head": "ca84a32085a3938a97a281532068ddc4c7eb78dc",
+  "generated_at_head": "6fe0ea317612b16a6fa17c393f19423172b601ff",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -1175,7 +1175,7 @@
     },
     {
       "path": "crates/sharpebench-study/schema/study-protocol.schema.json",
-      "sha256": "8f4c86f455f4f91668a9b54db12851c1c40430e7d911b1aa6784ae13673c9189"
+      "sha256": "5a1a49d0282f785783054f2b0a22872df0a11c04e16cb98b8303c7ad6a787a42"
     },
     {
       "path": "crates/sharpebench-study/src/amend.rs",
@@ -1191,7 +1191,7 @@
     },
     {
       "path": "crates/sharpebench-study/src/protocol.rs",
-      "sha256": "03120d53b36d61ebacb44646b59e84003d2362142f2f0f4328149e199ef013c0"
+      "sha256": "6417ac46cc3880a9268c6ffb7558b688bcb33f8be90dd93222172e6b00e37d49"
     },
     {
       "path": "crates/sharpebench-study/src/refusal.rs",
@@ -1199,11 +1199,15 @@
     },
     {
       "path": "crates/sharpebench-study/src/validate.rs",
-      "sha256": "79aff3eb4cf885918e38e3fbe1db8b1b4913121d2e56d479d6b4454300091742"
+      "sha256": "3b771af2161f1e35e069fc44267672b6ce55fbfd7381ff71c6d10f9538d6d9fd"
     },
     {
       "path": "crates/sharpebench-study/tests/common/mod.rs",
       "sha256": "b132b7c10774d94f6d36e7e53aee03cb66c64b4387483728d7a64105fb399fef"
+    },
+    {
+      "path": "crates/sharpebench-study/tests/decision_rule_domain.rs",
+      "sha256": "83f3618663af90f11890201d8bbf96d2f04ac82f9b5622b2da485cdb23b13ce5"
     },
     {
       "path": "crates/sharpebench-study/tests/precision_known_answers.rs",
@@ -1539,5 +1543,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "567cf9f786f832cfce9700dc2353407c80c9895842c519c21f7d2e24a8177ec7"
+  "source_snapshot_sha256": "4de689dccb402aa3b72833dc2812966a4cfc9ebd9d3b77c802cf13e0dba09cb6"
 }
