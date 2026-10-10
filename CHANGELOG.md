@@ -18,6 +18,10 @@ and links the commits it was built from.
   in both the validator and JSON schema. Invalid thresholds previously validated
   and could yield ordinary claim outcomes. Existing typed parameter refusals
   now identify the invalid rule; valid thresholds and report JSON are unchanged.
+- Budget curves also refuse overflowing consecutive budget differences and
+  marginal DSR rates. Finite input coordinates could previously produce a false
+  plateau or an infinite diagnostic. Representable extreme calculations remain
+  accepted; published numerical evidence is unchanged.
 - Study report construction revalidates the supplied protocol and retains
   validator failures as typed report refusals. Invalid precision targets,
   prohibited tier claims, missing decision rules and stale budget declarations

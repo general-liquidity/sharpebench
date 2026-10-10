@@ -74,6 +74,14 @@ deflated_sharpe_ratio(returns, n_trials=200, periods_per_year=8760)  # hourly: 0
 deflated_sharpe_ratio(returns, n_trials=200, trials_sr_std=0.02)     # your per-period value, as given
 ```
 
+### Budget-curve numeric domain
+
+`budget_curve` requires finite, strictly increasing coordinates, finite
+consecutive differences and finite computed marginal rates. Unsupported
+arithmetic raises `ValueError` rather than producing an apparent plateau or
+an infinite diagnostic. This numeric validation does not establish held-out
+disjointness or matching market support.
+
 ### Matrix orientation
 
 Two conventions, deliberately unchanged from the papers they come from:

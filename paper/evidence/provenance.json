@@ -527,7 +527,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/budget_curve.rs",
-      "sha256": "3d9e975f4a0859b8e7ca6735a546fc40c095ab09b627c800bcddd63d4724a455"
+      "sha256": "d6515ed3dc21a613da81889a8ae2267b941c7e7eb3a94dcd940de609eaccb458"
     },
     {
       "path": "crates/sharpebench-core/src/calibration.rs",
@@ -652,6 +652,10 @@
     {
       "path": "crates/sharpebench-core/tests/between_window_variance.rs",
       "sha256": "d0eaddfcd39526531a3ab5f971b2189b78d32dd46256fb96f58676e7a47988ca"
+    },
+    {
+      "path": "crates/sharpebench-core/tests/budget_arithmetic.rs",
+      "sha256": "27ec86c31ad579b2e46b53836de2a67429ef27b9b70cdb902e819e1a1905e4ba"
     },
     {
       "path": "crates/sharpebench-core/tests/constant_window_tracks.rs",

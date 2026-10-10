@@ -622,3 +622,27 @@ def test_budget_curve_rejects_nonfinite_budgets(invalid, index):
     points[index] = (invalid, points[index][1])
     with pytest.raises(ValueError, match=f"point {index} budget must be finite"):
         budget_curve(points, n_boot=8)
+
+
+def test_budget_curve_rejects_overflowing_budget_difference():
+    largest = float.fromhex("0x1.fffffffffffffp+1023")
+    with pytest.raises(ValueError, match="point 1 budget difference must be finite"):
+        budget_curve([(-largest, wiggle(0.0007, 0.02)), (largest, wiggle(0.002, 0.02))], n_boot=8)
+
+
+@pytest.mark.parametrize("means", [(0.0007, 0.002), (0.002, 0.0007)])
+def test_budget_curve_rejects_overflowing_marginal(means):
+    smallest = float.fromhex("0x0.0000000000001p-1022")
+    with pytest.raises(ValueError, match="point 1 marginal DSR per budget must be finite"):
+        budget_curve([(0.0, wiggle(means[0], 0.02)), (smallest, wiggle(means[1], 0.02))], n_boot=8)
+
+
+def test_budget_curve_keeps_representable_extreme_budget_arithmetic():
+    largest = float.fromhex("0x1.fffffffffffffp+1023")
+    smallest = float.fromhex("0x0.0000000000001p-1022")
+    a, b = wiggle(0.0007, 0.02), wiggle(0.002, 0.02)
+    large = budget_curve([(0.0, a), (largest, b)], n_boot=8)
+    assert large["points"][1]["marginal_dsr_per_budget"] > 0.0
+    assert large["is_monotone_improving"]
+    flat = budget_curve([(0.0, a), (smallest, a)], n_boot=8)
+    assert flat["points"][1]["marginal_dsr_per_budget"] == 0.0
