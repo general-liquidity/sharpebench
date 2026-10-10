@@ -318,6 +318,9 @@ impl std::error::Error for PrecisionError {}
 /// Why a study report could not be produced from the runs that were executed.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ReportRefusal {
+    /// The supplied protocol violates the existing validator contract. Correct
+    /// that refusal before reporting; an earlier validation may be stale.
+    Protocol(Box<ProtocolRefusal>),
     /// The report names an estimand the protocol does not declare.
     UndeclaredEstimand { estimand: String },
     /// The interval could not be computed.
@@ -336,6 +339,7 @@ pub enum ReportRefusal {
 impl fmt::Display for ReportRefusal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Protocol(error) => write!(f, "invalid study protocol: {error}"),
             Self::UndeclaredEstimand { estimand } => {
                 write!(f, "estimand {estimand} is not declared by this protocol")
             }
@@ -353,7 +357,21 @@ impl fmt::Display for ReportRefusal {
     }
 }
 
-impl std::error::Error for ReportRefusal {}
+impl std::error::Error for ReportRefusal {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Protocol(error) => Some(error.as_ref()),
+            Self::Precision(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+impl From<ProtocolRefusal> for ReportRefusal {
+    fn from(error: ProtocolRefusal) -> Self {
+        Self::Protocol(Box::new(error))
+    }
+}
 
 impl From<PrecisionError> for ReportRefusal {
     fn from(error: PrecisionError) -> Self {
