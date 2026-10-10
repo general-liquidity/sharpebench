@@ -1449,7 +1449,9 @@ pub fn analyze_forecast_quality(
 /// resolve, and a resolved digest outside the plan is listed in
 /// `outside_plan_by_agent` and enters no score, calibration or comparison. Its
 /// settlement is still checked against every other document that resolved it.
-/// The report is [`FORECAST_QUALITY_PLAN_SCHEMA`].
+/// The report uses [`FORECAST_QUALITY_PLAN_SCHEMA`] when every pair has shared
+/// support, or [`FORECAST_QUALITY_UNAVAILABLE_SCHEMA`] when any comparison is
+/// empty. Empty comparisons serialize their unavailable estimate as null.
 pub fn analyze_forecast_quality_against_plan(
     evidence: &[ForecastEvidence],
     config: ForecastAnalysisConfig,
