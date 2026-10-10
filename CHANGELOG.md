@@ -14,6 +14,10 @@ and links the commits it was built from.
 
 ### Corrected
 
+- PSR power-analysis solvers now validate finite inputs, feasible moments and
+  supported quadratic roots. The half-probability boundary returns the benchmark
+  directly, and valid two-point moments respect the kernel variance floor.
+  Ordinary supported roots retain their numerical path; no evidence was rerun.
 - Development joint-gate producer: the two-sided intervals named 95 percent
   now use 2.5 percent per tail. Independent field upper bounds still use a
   separate one-sided 5 percent tail. The recorded development run remains

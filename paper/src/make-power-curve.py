@@ -59,6 +59,10 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import kernel_stats  # noqa: E402
+from joint_gate_power import (  # noqa: E402
+    PowerSupportError as JointPowerSupportError,
+    min_passing_sharpe as _min_passing_sharpe,
+)
 
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 EVIDENCE_DIR = os.path.join(ROOT, "paper", "evidence", "final")
@@ -131,19 +135,10 @@ def min_passing_sharpe(n, skew, kurt, z_bar, benchmark):
     root is taken in the form that avoids cancellation. Works elementwise on
     arrays.
     """
-    n = float(n)
-    a = (np.asarray(kurt, dtype=float) - 1.0) / 4.0
-    z2 = z_bar * z_bar
-    big_a = (n - 1.0) - z2 * a
-    if np.any(big_a <= 0.0):
-        raise PowerSupportError(
-            f"kurtosis too large for a closed-form threshold over {int(n)} returns"
-        )
-    big_b = z2 * np.asarray(skew, dtype=float) - 2.0 * benchmark * (n - 1.0)
-    big_c = benchmark * benchmark * (n - 1.0) - z2
-    root = np.sqrt(big_b * big_b - 4.0 * big_a * big_c)
-    q = -0.5 * (big_b + np.where(big_b >= 0.0, root, -root))
-    return np.maximum(q / big_a, big_c / q)
+    try:
+        return _min_passing_sharpe(n, skew, kurt, z_bar, benchmark)
+    except JointPowerSupportError as exc:
+        raise PowerSupportError(str(exc)) from exc
 
 
 def threshold_true_sharpe(z, z_bar, benchmark):

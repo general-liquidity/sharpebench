@@ -504,7 +504,7 @@ jobs:
       - name: Install the pinned array stack
         run: python -m pip install "numpy==2.5.3"
       - name: The joint-gate calibration is deterministic and matches the kernel
-        run: python -B -m unittest paper/src/test_joint_gate_power.py
+        run: python -B -m unittest paper/src/test_joint_gate_power.py paper/src/test_solver_domain.py
 
   llm-shim:
     name: LLM field shim (call ceiling, model identity)
