@@ -86,11 +86,13 @@ pub fn wilson_interval(
 /// width no wider than `required_half_width`.
 ///
 /// The count is derived from the interval construction the study will actually
-/// report under, not from a separate normal approximation, so the plan and the
-/// report cannot disagree about what a given count buys. The search is a
-/// doubling scan followed by a bisection; the Wilson half width is monotone
-/// decreasing in the trial count at a fixed rate, which is what makes the
-/// bisection sound.
+/// report under, not from a separate normal approximation. Expected events are
+/// rounded to an integer, so the width can rise at an event-count transition.
+/// A monotone bisection would miss earlier feasible counts. This search visits
+/// integer ranges left first, pruning only ranges whose conservative width
+/// bound exceeds the target, and checks retained single counts with the actual
+/// interval function. The returned count is not a guarantee about an unknown
+/// population rate or the precision of a future realized sample.
 pub fn required_simulation_runs(
     anticipated_rate: f64,
     required_half_width: f64,
@@ -115,27 +117,53 @@ pub fn required_simulation_runs(
         Ok(wilson_interval(events.min(n), n, level)?.half_width())
     };
 
-    let mut high = 1u64;
-    while half_width_at(high)? > required_half_width {
-        if high >= MAX_SEARCHED_RUNS {
-            return Err(PrecisionError::RequirementUnreachable {
-                required_half_width_millionths: (required_half_width * 1e6).round() as u64,
-                searched_up_to: MAX_SEARCHED_RUNS,
-            });
-        }
-        high = (high * 2).min(MAX_SEARCHED_RUNS);
-    }
+    first_feasible_count(
+        1,
+        MAX_SEARCHED_RUNS,
+        anticipated_rate,
+        required_half_width,
+        level.two_sided_z(),
+        &half_width_at,
+    )?
+    .ok_or(PrecisionError::RequirementUnreachable {
+        required_half_width_millionths: (required_half_width * 1e6).round() as u64,
+        searched_up_to: MAX_SEARCHED_RUNS,
+    })
+}
 
-    let mut low = high / 2;
-    while low + 1 < high {
-        let middle = low + (high - low) / 2;
-        if half_width_at(middle)? <= required_half_width {
-            high = middle;
-        } else {
-            low = middle;
-        }
+fn first_feasible_count(
+    low: u64,
+    high: u64,
+    rate: f64,
+    target: f64,
+    z: f64,
+    width_at: &impl Fn(u64) -> Result<f64, PrecisionError>,
+) -> Result<Option<u64>, PrecisionError> {
+    if low == high {
+        return Ok((width_at(low)? <= target).then_some(low));
     }
-    Ok(high)
+    // For n in [low, high], q = round(rate*n)/n lies within rate +/-
+    // 0.5/low. Pad that range for floating multiplication/rounding. Since
+    // q*(1-q) is concave, its minimum on this range is at an endpoint.
+    // Wilson's half width is z*sqrt(n*q*(1-q)+z^2/4)/(n+z^2): using low
+    // in its numerator and high in its denominator bounds the entire range
+    // from below. Counts never exceed 1e9, below f64's exact-integer limit.
+    let padding = 0.5 / low as f64 + 4.0 * f64::EPSILON;
+    let q_low = (rate - padding).max(0.0);
+    let q_high = (rate + padding).min(1.0);
+    let minimum_variance = (q_low * (1.0 - q_low)).min(q_high * (1.0 - q_high));
+    let z2 = z * z;
+    let lower_bound = z * (low as f64 * minimum_variance + z2 / 4.0).sqrt() / (high as f64 + z2);
+    // Keep close boundaries for exact evaluation, including cancellation in
+    // the public interval's subtraction of upper and lower endpoints.
+    if lower_bound > target + 32.0 * f64::EPSILON {
+        return Ok(None);
+    }
+    let middle = low + (high - low) / 2;
+    if let Some(count) = first_feasible_count(low, middle, rate, target, z, width_at)? {
+        return Ok(Some(count));
+    }
+    first_feasible_count(middle + 1, high, rate, target, z, width_at)
 }
 
 /// A precision statement about runs that were executed.

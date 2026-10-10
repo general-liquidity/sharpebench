@@ -155,6 +155,52 @@ fn a_tighter_requirement_needs_more_runs() {
 }
 
 #[test]
+fn rounded_event_jumps_cannot_hide_an_earlier_feasible_count() {
+    let level = ConfidenceLevel::NinetyFive;
+    let target = wilson_interval(0, 44, level).unwrap().half_width();
+    assert_eq!(required_simulation_runs(0.01, target, level), Ok(44));
+    // The width rises when the expected event count rounds from zero to one.
+    assert!(wilson_interval(1, 50, level).unwrap().half_width() > target);
+}
+
+#[test]
+fn search_checks_its_ceiling_and_refuses_unreachable_precision() {
+    let level = ConfidenceLevel::NinetyFive;
+    let ceiling = sharpebench_study::precision::MAX_SEARCHED_RUNS;
+    let target = wilson_interval(ceiling / 2, ceiling, level)
+        .unwrap()
+        .half_width();
+    assert_eq!(required_simulation_runs(0.5, target, level), Ok(ceiling));
+    assert!(matches!(required_simulation_runs(0.5, target / 2.0, level),
+        Err(PrecisionError::RequirementUnreachable { searched_up_to, .. }) if searched_up_to == ceiling));
+}
+
+#[test]
+fn minimum_count_matches_exhaustive_finite_search_across_event_jumps() {
+    for level in [
+        ConfidenceLevel::Ninety,
+        ConfidenceLevel::NinetyFive,
+        ConfidenceLevel::NinetyNine,
+    ] {
+        for rate in [0.0, 0.001, 0.01, 0.05, 0.1, 0.2, 0.49, 0.8, 0.95, 0.99, 1.0] {
+            let width = |n: u64| {
+                let events = ((rate * n as f64).round() as u64).min(n);
+                wilson_interval(events, n, level).unwrap().half_width()
+            };
+            for witness in 1..=128 {
+                let target = width(witness);
+                let expected = (1..=witness).find(|&n| width(n) <= target).unwrap();
+                assert_eq!(
+                    required_simulation_runs(rate, target, level),
+                    Ok(expected),
+                    "level {level:?}, rate {rate}, witness {witness}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn a_nonsense_rate_or_half_width_is_refused() {
     assert_eq!(
         required_simulation_runs(1.5, 0.01, ConfidenceLevel::NinetyFive),

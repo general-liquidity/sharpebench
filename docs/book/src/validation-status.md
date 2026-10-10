@@ -53,6 +53,19 @@ The [study protocol validator](../../../crates/sharpebench-study/src/validate.rs
 can check a declared protocol contract; it does not supply missing empirical
 validation or authorize the campaign.
 
+The shipped placeholder protocol is explicitly unsealed and retains owner
+decisions for targets and sample counts. The development producer above is not
+an execution of that study-protocol contract: its own CLI accepts replication
+counts and exploratory settings, not an approved frozen protocol. A passing
+protocol validator therefore does not establish that those historical draws
+met a frozen study's acceptance criteria.
+
+The study library's minimum-count planner uses the anticipated rate and rounded
+expected events. Event-count jumps can increase a Wilson width, so the search
+must not assume monotonicity. Current code searches integer ranges with
+conservative pruning and exact leaf checks. This repairs the planning count;
+it does not guarantee that future realized counts meet the precision target.
+
 ## Reading a claim correctly
 
 Use the source/artifact identity and stated evidence tier with every number.

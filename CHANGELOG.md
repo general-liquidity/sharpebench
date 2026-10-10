@@ -14,6 +14,11 @@ and links the commits it was built from.
 
 ### Corrected
 
+- Study sample-size planning searches for the first feasible integer count
+  without assuming Wilson widths stay monotone after expected-event rounding.
+  At a one-percent anticipated rate, an earlier feasible zero-event count
+  could previously be skipped. Realized precision and scientific approval
+  remain separate from this planning calculation; frozen evidence is unchanged.
 - Budget curves refuse nonfinite coordinates at every point before scoring.
   NaN can no longer bypass the increasing-budget check and enter a report.
   This does not establish held-out disjointness or comparable market support.
