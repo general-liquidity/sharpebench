@@ -29,6 +29,10 @@ not the separate scientific calibration or study-design requirements.
   estimates, and plan exclusion/empty labels. R08's former pooling
   characterization now asserts separated results under USD/cents rescaling.
 - All 14 partial-support integration tests and 8 forecast CLI tests passed.
+- The full core package passed 588 tests plus its documentation test. The first
+  remote run caught a settlement integration fixture still pinning the older
+  comparison JSON shape; its v5 expectation now includes both labels while
+  retaining every numerical byte. Library-only checks had missed that fixture.
 - Isolated mutations removing unit separation and rule separation each failed
   the respective regression on numeric/support assertions. Restoring the source
   passed all 25 forecast-filtered tests.
