@@ -14,6 +14,13 @@ and links the commits it was built from.
 
 ### Corrected
 
+- Forecast-quality schema v5 partitions loss metrics and pairwise comparisons
+  by exact scoring rule and target unit, rather than averaging incompatible
+  losses. It emits no pooled primary estimate. Whole-pair support-gap and
+  settlement checks remain in force; Holm adjustment covers all pair/stratum
+  tests, including withheld comparisons in its family size. Single-stratum
+  numerical results remain unchanged, but consumers must migrate to the new
+  schema and labels. Frozen reports are not regenerated.
 - Study decision-rule limits and bounds must be finite probabilities in [0, 1]
   in both the validator and JSON schema. Invalid thresholds previously validated
   and could yield ordinary claim outcomes. Existing typed parameter refusals

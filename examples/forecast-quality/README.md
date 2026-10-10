@@ -22,7 +22,7 @@ floor. Four more blocks of the same forecasts are enough to clear that bar at
 the default alpha; the supported field carries six, the same count as the
 frozen prospective field under `paper/evidence/`.
 
-Run the frozen analysis of the supported field from the SharpeBench repository
+Run the analysis of the frozen supported field from the SharpeBench repository
 root:
 
 ```bash
@@ -37,17 +37,20 @@ cargo run -q -p sharpebench -- forecast-quality \
   --json
 ```
 
-The command must reproduce `fixtures/report.json`: twelve exact-common-support
+The command preserves the numerical results in historical `fixtures/report.json`
+while emitting schema v5 and explicit `binary_brier`/`binary` stratum labels:
+twelve exact-common-support
 questions in six blocks, a mean Brier loss of 0.1054 for `agent-alpha` against
 0.2474 for `agent-beta`, an observed mean-loss difference of -0.1420 with a
 90 percent percentile interval of [-0.2095, -0.0282], a two-sided
 plus-one-corrected p-value of 4/401, and a familywise-significant Holm verdict
 at alpha 0.05. The bootstrap has between-block variation to work with because
 one block goes against `agent-alpha`. Pointing the same command at
-`fixtures/withheld/` must reproduce `fixtures/withheld/report.json`, whose
+`fixtures/withheld/` preserves the numerical results in `fixtures/withheld/report.json`, whose
 comparison carries `inference_error` and no interval or p-value.
 
-The core test suite checks both reports byte-for-byte and verifies each
+The core test suite checks every historical report field after removing only
+the v5 stratum labels and restoring the historical schema tag, and verifies each
 producer artifact against its `manifest.json`.
 
 This is a deterministic compatibility fixture, not evidence that either named
