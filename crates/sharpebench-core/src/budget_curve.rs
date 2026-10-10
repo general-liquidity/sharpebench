@@ -166,7 +166,8 @@ pub struct BudgetCurveReport {
 ///
 /// Returns `Err` at the boundary when: the input is empty or has a single point (a
 /// curve needs at least two); a budget is nonfinite or budgets are not strictly
-/// increasing; or any point
+/// increasing, or a consecutive budget difference or marginal rate is nonfinite;
+/// or any point
 /// has fewer than two held-out returns (a Sharpe needs dispersion); or
 /// `periods_per_year` is not finite and positive; or the deflated Sharpe at a
 /// point could not be estimated, which includes a `trials_sr_std` that is not a
@@ -204,6 +205,9 @@ pub fn budget_curve(
                     i - 1
                 ));
             }
+            if !(budget - prev).is_finite() {
+                return Err(format!("point {i} budget difference must be finite"));
+            }
         }
     }
 
@@ -230,7 +234,11 @@ pub fn budget_curve(
             None
         } else {
             let db = budget - points[i - 1].0;
-            Some((oos_dsr - curve[i - 1].oos_dsr) / db)
+            let marginal = (oos_dsr - curve[i - 1].oos_dsr) / db;
+            if !marginal.is_finite() {
+                return Err(format!("point {i} marginal DSR per budget must be finite"));
+            }
+            Some(marginal)
         };
         curve.push(BudgetPoint {
             budget,

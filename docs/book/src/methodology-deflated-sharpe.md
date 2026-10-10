@@ -345,7 +345,12 @@ benchmark per period.
 The budget curve (`sharpebench_core::budget_curve`, Python `budget_curve`)
 takes the same annualized `trials_sr_std` and converts it with its own
 `periods_per_year`. Budget coordinates must be finite and strictly increasing;
-this validation does not establish held-out disjointness or matched market
+their consecutive differences and the computed marginal DSR per budget must
+also be finite. Finite coordinates alone do not prevent subtraction or division
+overflow. Unrepresentable calculations are refused, not recorded as a plateau
+or an infinite rate. Valid extreme coordinates remain accepted when their
+actual arithmetic is finite, including a tiny increment on a truly flat curve.
+This validation does not establish held-out disjointness or matched market
 support, which remain caller obligations. Until the release after 0.19.0 it too
 deflated with the
 prior unconverted. The raw Python primitives `deflated_sharpe_ratio`,

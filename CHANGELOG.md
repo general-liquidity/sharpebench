@@ -14,6 +14,11 @@ and links the commits it was built from.
 
 ### Corrected
 
+- Budget curves also refuse overflowing consecutive budget differences and
+  marginal DSR rates. Finite input coordinates could previously produce a false
+  plateau or an infinite diagnostic. Representable extreme calculations remain
+  accepted; published numerical evidence is unchanged.
+
 - Study sample-size planning searches for the first feasible integer count
   without assuming Wilson widths stay monotone after expected-event rounding.
   At a one-percent anticipated rate, an earlier feasible zero-event count
