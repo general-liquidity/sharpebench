@@ -179,8 +179,8 @@
       "sha256": "1e025ac30099de23ae8455f20ae5441b557e924870d0e1475c7508512908ec0d"
     }
   ],
-  "generated_at_head": "b4933372bee9343a43d929beab6bc187654c5501",
-  "generated_at_head_dirty": false,
+  "generated_at_head": "75b0c2cfa7a1806bb6d4c549f0e24910ee75dd36",
+  "generated_at_head_dirty": true,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
   "schema_version": 3,
@@ -195,7 +195,7 @@
     },
     {
       "path": "arena/state.json",
-      "sha256": "473d7ea38f4292991764b444ccc8f5c60ae998f1a79e3c7498616b321d1dcaff"
+      "sha256": "3273c1446127e80774d6be76ce8d563cfc3568f5723f7f11af3993b3e9b79467"
     },
     {
       "path": "arena/windows/window-001/window.json",
@@ -1327,7 +1327,7 @@
     },
     {
       "path": "paper/sections/07-limitations.tex",
-      "sha256": "a81e35f9611cbd6f672e903737a5cfed0c714e70b22c39d3c12ef4fddbeabbd4"
+      "sha256": "ea2c10bf805e761ada88c10c4b874e5559e496e7360e409378d693ba1fdeadf1"
     },
     {
       "path": "paper/sections/08-reproducibility.tex",
@@ -1403,7 +1403,7 @@
     },
     {
       "path": "paper/src/joint_gate_power.py",
-      "sha256": "37ca1704f56b1967481d25e7e2c14aa53ac788b77a85a3e31949d0f712794195"
+      "sha256": "a3a95a2a4700d1ed1570ee30d0edb3e81895b9e754d025db807c3897c3e5ca82"
     },
     {
       "path": "paper/src/kernel_stats.py",
@@ -1423,7 +1423,7 @@
     },
     {
       "path": "paper/src/make-power-curve.py",
-      "sha256": "a778b53f07de9975872083db3bdee2905fbe30a9ccef182c9b5b8acf0dcc2598"
+      "sha256": "dfd6bf71d0fd0ad39adbcc3b39d03dbda3a865c0deac6ca1b0810631ff7d947c"
     },
     {
       "path": "paper/src/make-provenance.py",
@@ -1486,6 +1486,10 @@
       "sha256": "6a2faf76e53bcdafaaefcc8dec8421d1cbb2c6e2888da51d91e452304fcc54af"
     },
     {
+      "path": "paper/src/test_solver_domain.py",
+      "sha256": "7faf0291cbcbf3a0fd0931a8585e86906cfa62fd83c04294582457c8e4b254b3"
+    },
+    {
       "path": "paper/src/test_sweep_grid.py",
       "sha256": "002a06d8f22880266e76a03d20c26e043eef2adc45979d2b0dfea7b3228f6a5d"
     }
@@ -1511,5 +1515,5 @@
     "data/*.csv",
     "arena/**/*.json"
   ],
-  "source_snapshot_sha256": "4db829385def8b1e67442d6ddfb4b4e26ac161ec66bb02587d9deb32c8d5c4d7"
+  "source_snapshot_sha256": "5773db22debee7914b7f130da69d49da909297f551d9f4de6799d372c0741b22"
 }
