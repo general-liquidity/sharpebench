@@ -414,8 +414,8 @@ fn across(
 /// states what happens at the window's end. A run whose rows cannot all be
 /// compared is typed unavailable and left out of the aggregate. This measures
 /// decision-delay sensitivity under whatever `costs` the caller passes, for
-/// example the stressed profile with its declared `decision_delay_bars`, which
-/// the backtest driver itself does not apply. Under execution noise a moved
+/// example two additional bars under a new stressed model whose fixed delay
+/// already adds two. "Undelayed" means no additional replay lag. Under execution noise a moved
 /// decision also meets other noise draws, so a lag row then mixes the delay
 /// with a different fill realization.
 pub fn lagged_replay(

@@ -47,6 +47,29 @@ pub struct CostModel {
     /// [`financing_bps`]: CostModel::financing_bps
     #[serde(default, skip_serializing_if = "is_zero_bps")]
     pub short_borrow_bps: f64,
+    /// Versioned fixed decision-to-eligibility delay. Absent in legacy records,
+    /// which continue to execute immediately. Distinct from seeded fill noise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fixed_delay: Option<FixedDecisionDelay>,
+}
+
+/// Explicit timing semantics, included in execution identity. Unknown versions
+/// are refused rather than silently interpreted as immediate execution.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "schema_version", deny_unknown_fields)]
+pub enum FixedDecisionDelay {
+    /// FIFO decisions become eligible after exactly `bars` steps; window-tail
+    /// decisions never fill beyond the window. Noise starts at eligibility.
+    #[serde(rename = "sharpebench.fixed-decision-delay.v1")]
+    Fifo { bars: usize },
+}
+
+impl FixedDecisionDelay {
+    pub fn bars(self) -> usize {
+        match self {
+            Self::Fifo { bars } => bars,
+        }
+    }
 }
 
 fn is_zero_bps(bps: &f64) -> bool {
@@ -64,6 +87,7 @@ impl Default for CostModel {
             trf_cost: None,
             noise: None,
             short_borrow_bps: 0.0,
+            fixed_delay: None,
         }
     }
 }
@@ -239,7 +263,8 @@ impl CostProfile {
 #[derive(Clone, Copy, Debug)]
 pub struct ExecutionProfile {
     pub costs: CostModel,
-    /// Bars an order waits after the decision before it is eligible to fill.
+    /// Inspection mirror of the resolved `costs.fixed_delay`. The engine consumes
+    /// that versioned cost-model setting, not changes to this mirror alone.
     pub decision_delay_bars: usize,
 }
 
@@ -257,6 +282,7 @@ impl CostProfile {
                     trf_cost: None,
                     noise: None,
                     short_borrow_bps: 0.0,
+                    fixed_delay: None,
                 },
                 decision_delay_bars: 0,
             },
@@ -274,6 +300,7 @@ impl CostProfile {
                     trf_cost: None,
                     noise: None,
                     short_borrow_bps: 0.0,
+                    fixed_delay: Some(FixedDecisionDelay::Fifo { bars: 2 }),
                 },
                 decision_delay_bars: 2,
             },
@@ -584,8 +611,8 @@ mod tests {
     #[test]
     fn a_zero_borrow_rate_leaves_the_serialized_cost_model_unchanged() {
         // The exact bytes these models serialized to before the borrow field
-        // existed. A zero rate is omitted, so no cost file, bundle or fixture
-        // written from a default or named profile changes.
+        // existed. A zero rate is omitted. Use the legacy immediate stressed
+        // model here; newly resolved stressed models explicitly version timing.
         let pinned = [
             (
                 CostModel::default(),
@@ -596,7 +623,10 @@ mod tests {
                 r#"{"fee_bps":0.0,"slippage_bps":0.0,"impact_bps":0.0,"financing_bps":0.0,"max_participation":null,"trf_cost":null,"noise":null}"#,
             ),
             (
-                CostProfile::WorstCase.resolve().costs,
+                CostModel {
+                    fixed_delay: None,
+                    ..CostProfile::WorstCase.resolve().costs
+                },
                 r#"{"fee_bps":10.0,"slippage_bps":15.0,"impact_bps":150.0,"financing_bps":20.0,"max_participation":0.1,"trf_cost":null,"noise":null}"#,
             ),
             (

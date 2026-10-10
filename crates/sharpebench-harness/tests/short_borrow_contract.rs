@@ -32,7 +32,7 @@ const PINNED: [(&str, &str); 4] = [
 ];
 
 fn profile(name: &str) -> CostModel {
-    [
+    let mut costs = [
         CostProfile::None,
         CostProfile::Typical,
         CostProfile::WorstCase,
@@ -42,7 +42,11 @@ fn profile(name: &str) -> CostModel {
     .find(|profile| profile.name() == name)
     .expect("a pinned name is a shipped profile")
     .resolve()
-    .costs
+    .costs;
+    // These pins describe historical models, whose stressed timing was
+    // immediate. Newly resolved stressed timing has a separate identity.
+    costs.fixed_delay = None;
+    costs
 }
 
 fn with_borrow(costs: CostModel, short_borrow_bps: f64) -> CostModel {

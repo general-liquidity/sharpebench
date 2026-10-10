@@ -151,7 +151,7 @@ pub struct PositionState {
 }
 
 /// What the agent returns.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Decision {
     pub orders: Vec<Order>,
@@ -212,7 +212,7 @@ impl DecisionCost {
 }
 
 /// A single per-instrument instruction.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Order {
     pub symbol: String,
