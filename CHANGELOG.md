@@ -14,6 +14,10 @@ and links the commits it was built from.
 
 ### Corrected
 
+- Budget curves also refuse overflowing consecutive budget differences and
+  marginal DSR rates. Finite input coordinates could previously produce a false
+  plateau or an infinite diagnostic. Representable extreme calculations remain
+  accepted; published numerical evidence is unchanged.
 - Study report construction revalidates the supplied protocol and retains
   validator failures as typed report refusals. Invalid precision targets,
   prohibited tier claims, missing decision rules and stale budget declarations
