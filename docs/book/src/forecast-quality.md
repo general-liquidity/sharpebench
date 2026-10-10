@@ -104,6 +104,33 @@ Migration notes for producers:
 
 ## Scores and calibration
 
+New reports use `sharpebench.forecast-quality.v5`. Every loss metric and pairwise
+comparison carries `scoring_rule` and `target_unit` (the contract's exact `unit`
+string). Comparisons are partitioned by this tuple in lexical order within
+each agent pair. Brier, log loss, squared error, CRPS and different units never
+enter one primary mean. No pooled primary estimate is emitted and no implicit
+currency conversion or loss normalization is applied. For example, two agents
+with binary Brier questions and USD point forecasts produce two comparisons,
+not a single mixed-unit ranking. Two point-error units also produce two rows.
+
+Whole-pair exact-support and settlement checks apply before partitioning. A
+missing contract in one stratum withholds inference in every stratum of that
+pair, so an entrant cannot select its favorable subset. Each stratum resamples
+its own whole resolution-time blocks; fewer blocks may withhold inference even
+when the former pooled set had enough. Holm adjustment runs once over every
+pair/stratum comparison in the report, counting withheld rows in the family
+size. Existing calibration summaries remain descriptive diagnostics, not a
+mixed-loss primary estimate or a trading-rank gate.
+
+Consumers must key comparisons by `(agent_a, agent_b, scoring_rule, target_unit)`
+and metrics by `(scoring_rule, target_unit)`, rather than assume one row per
+agent pair or rule. Empty shared support encodes a null estimate; a stratum
+resolved by only one agent retains its labels. If neither agent resolved any
+contract, a single unavailable row has null rule/unit labels. Plan membership
+is still explicit in `common_support`, not inferred from the schema version.
+V5 replaces newly generated v2/v3/v4 outputs. Frozen reports remain historical;
+one-stratum means, intervals and raw p-values are unchanged at the same config.
+
 SharpeBench ignores any producer-side calculation and recomputes the declared
 score from the raw prediction and outcome:
 
@@ -141,7 +168,7 @@ Two agents with the same gaps resolved the same digests, so they are compared on
 that shared support like any other pair. Missing forecasts are never imputed: a
 filled-in probability would put a loss nobody forecast into a proper score.
 
-`common_support` in the report (schema `sharpebench.forecast-quality.v2`)
+`common_support` in the report (current schema `sharpebench.forecast-quality.v5`)
 discloses the gaps and charges each one to the agent that has it:
 
 - `n_contracts` and `contract_sha256` name every digest at least one agent
@@ -165,26 +192,25 @@ availability time is refused even when another document lacks that contract.
 
 A comparison with no common resolved contracts has no point estimate, not a
 measured tie. Rust callers use `point_estimate() -> Option<f64>` and the CLI
-prints `diff=unavailable`. Newly computed reports containing any empty pair use
-`sharpebench.forecast-quality.v4`, with `mean_loss_difference: null` for those
-pairs. This applies with or without a declared plan; `common_support.rule` and
-`outside_plan_by_agent` still identify the plan semantics. A nonempty comparison
-retains its descriptive estimate even when inference is withheld. Reports whose
-pairs are all nonempty retain v2/v3 and their existing JSON bytes. Readers must
-accept the v4 schema and treat null as unavailable, not coerce it to zero. Old
+prints `diff=unavailable`. Newly computed v5 reports encode
+`mean_loss_difference: null` for empty comparisons. This applies with or without
+a declared plan; `common_support.rule` and `outside_plan_by_agent` still identify
+the plan semantics. A nonempty comparison retains its descriptive estimate even
+when inference is withheld. Readers must accept v5 and treat null as unavailable,
+not coerce it to zero. Historical v4 already encoded empty estimates as null. Old
 v2/v3 reports can contain numeric zero placeholders at `n_contracts == 0`, so
 legacy readers still need that count guard. The public Rust scalar is retained
 for compatibility; use the optional accessor. No frozen report is rewritten.
 
-A withheld pair stays in the Holm family, so adding any third agent, complete
-or not, enlarges the family that sets a surviving pair's Holm multiplier. The
-pair's support, interval and raw p-value do not move.
+A withheld pair/stratum stays in the Holm family, so adding a third agent,
+complete or not, enlarges the family that sets a surviving comparison's Holm
+multiplier. Its stratum support, interval and raw p-value do not move.
 
 ### Without a plan, a document chooses its own comparisons
 
 The field support above is the union of what the documents resolved, and the
 documents are self-declared: each one embeds its own contracts. That leaves two
-moves open to a single entrant, and a v2 report cannot tell either from an
+moves open to a single entrant, and a report without a plan cannot tell either from an
 honest gap:
 
 - **Opting out.** A document that resolves one contract nobody else resolved,
@@ -213,8 +239,8 @@ before resolution:
 
 The schema is exact, the list is non-empty, and every entry is a lowercase
 SHA-256 named once; anything else is refused before any document is read. The
-plan becomes the field support, and the report is
-`sharpebench.forecast-quality.v3` when all pairs have observations, otherwise v4:
+plan becomes the field support, and the current report uses
+`sharpebench.forecast-quality.v5` with explicit plan membership:
 
 - `common_support.n_contracts` and `contract_sha256` are the planned digests,
   and `rule` says so.
@@ -398,15 +424,13 @@ Different realized values remain incompatible even when the contract matches.
 - Calibration and proper scores describe forecast quality. Trading eligibility
   still requires the Deflated Sharpe, pass^k, significance, process, and mandate
   gates.
-- The pairwise `mean_loss_difference` pools every common contract regardless
-  of scoring rule or target unit, so a field that mixes a dimensionless Brier
-  loss with a point squared error in a currency averages incompatible units and
-  its sign can change under a unit rescale (audit finding R08, deferred).
-  Every committed field is one stratum: binary Brier, one target, one unit.
-  The core test
-  `mixed_scoring_rules_are_silently_pooled_into_one_mean_loss_difference_r08`
-  pins the pooling; the deferral reopens when a committed comparison mixes
-  strata and a stratified analysis would change its reported verdict.
+- Historical v2/v3/v4 pairwise means pooled incompatible scoring rules or units
+  if supplied a mixed field (R08). V5 partitions them instead. Every committed
+  numerical field is one stratum, so its numbers remain frozen and unaffected.
+  Unit rescaling can change the magnitude of a dimensional loss within its own
+  stratum; it cannot reverse a separate rule's reported result. Same-unit labels
+  still require meaningful compatible questions; stratification alone does not
+  establish a common causal estimand or validate the inference law.
 - A normalized next-token logit over labels `0` and `1` is an operational
   probability under that scaffold, not an unconstrained subjective probability
   from the model.

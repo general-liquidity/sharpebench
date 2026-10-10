@@ -41,6 +41,10 @@ pub const FORECAST_QUALITY_PLAN_SCHEMA: &str = "sharpebench.forecast-quality.v3"
 /// Reports containing an empty pair use null rather than a numeric tie. Plan
 /// membership remains explicit in common_support; nonempty reports retain v2/v3.
 pub const FORECAST_QUALITY_UNAVAILABLE_SCHEMA: &str = "sharpebench.forecast-quality.v4";
+/// Current output: every metric/comparison is scoped by scoring rule and target
+/// unit, with no pooled primary estimate. Empty pairs have null stratum labels.
+/// Historical v2/v3/v4 constants describe frozen reports, not current output.
+pub const FORECAST_QUALITY_STRATIFIED_SCHEMA: &str = "sharpebench.forecast-quality.v5";
 /// Schema of the declared contract universe file.
 pub const FORECAST_CONTRACT_PLAN_SCHEMA: &str = "sharpebench.forecast-contract-plan.v1";
 const SUPPORT_RULE: &str = "a pair is differenced on the contract digests both agents resolved \
@@ -899,6 +903,7 @@ struct ScoredForecast {
     instrument: String,
     resolves_at: u64,
     scoring_rule: String,
+    target_unit: String,
     /// Retained settlement identity: which outcome this loss was computed against.
     outcome_sha256: String,
     /// Retained settlement availability, when the resolution record carries one.
@@ -1056,6 +1061,7 @@ fn scored_forecasts(evidence: &ForecastEvidence) -> Result<Vec<ScoredForecast>, 
             instrument: contract.instrument.clone(),
             resolves_at: contract.resolves_at,
             scoring_rule: contract.scoring_rule.clone(),
+            target_unit: contract.unit.clone(),
             outcome_sha256: outcome_sha256(outcome)?,
             outcome_available_at: resolution.available_at,
             loss,
@@ -1093,6 +1099,7 @@ impl Default for ForecastAnalysisConfig {
 #[derive(Clone, Debug, Serialize)]
 pub struct MetricMean {
     pub scoring_rule: String,
+    pub target_unit: String,
     pub n: usize,
     pub mean_loss: f64,
 }
@@ -1216,6 +1223,10 @@ pub struct SupportGap {
 pub struct PairwiseForecastComparison {
     pub agent_a: String,
     pub agent_b: String,
+    /// Exact stratum labels. Both are None only when neither agent resolved a
+    /// contract, so no stratum can be recovered. No cross-stratum mean is emitted.
+    pub scoring_rule: Option<String>,
+    pub target_unit: Option<String>,
     /// Contracts both agents resolved, which are the contracts differenced.
     pub n_contracts: usize,
     pub n_settlement_blocks: usize,
@@ -1251,6 +1262,8 @@ impl Serialize for PairwiseForecastComparison {
         let mut record = serializer.serialize_map(None)?;
         record.serialize_entry("agent_a", &self.agent_a)?;
         record.serialize_entry("agent_b", &self.agent_b)?;
+        record.serialize_entry("scoring_rule", &self.scoring_rule)?;
+        record.serialize_entry("target_unit", &self.target_unit)?;
         record.serialize_entry("n_contracts", &self.n_contracts)?;
         record.serialize_entry("n_settlement_blocks", &self.n_settlement_blocks)?;
         record.serialize_entry("mean_loss_difference", &self.point_estimate())?;
@@ -1449,9 +1462,9 @@ pub fn analyze_forecast_quality(
 /// resolve, and a resolved digest outside the plan is listed in
 /// `outside_plan_by_agent` and enters no score, calibration or comparison. Its
 /// settlement is still checked against every other document that resolved it.
-/// The report uses [`FORECAST_QUALITY_PLAN_SCHEMA`] when every pair has shared
-/// support, or [`FORECAST_QUALITY_UNAVAILABLE_SCHEMA`] when any comparison is
-/// empty. Empty comparisons serialize their unavailable estimate as null.
+/// The report uses [`FORECAST_QUALITY_STRATIFIED_SCHEMA`]. Plan membership stays
+/// explicit in common_support. Empty comparisons encode unavailable estimates
+/// as null; no pooled primary estimate is produced.
 pub fn analyze_forecast_quality_against_plan(
     evidence: &[ForecastEvidence],
     config: ForecastAnalysisConfig,
@@ -1532,7 +1545,7 @@ fn analyze(
         .collect();
     let mut comparisons = Vec::new();
     for (left, right) in document_pairs(evidence.len()) {
-        comparisons.push(compare_agents(
+        comparisons.extend(compare_agents_by_stratum(
             &evidence[left].identity.agent_id,
             &rows[left],
             &evidence[right].identity.agent_id,
@@ -1547,13 +1560,7 @@ fn analyze(
         .map(|row| (row.contract_sha256.clone(), row.contract_digest_version))
         .collect();
     Ok(ForecastQualityReport {
-        schema_version: if comparisons.iter().any(|pair| pair.n_contracts == 0) {
-            FORECAST_QUALITY_UNAVAILABLE_SCHEMA
-        } else if plan.is_some() {
-            FORECAST_QUALITY_PLAN_SCHEMA
-        } else {
-            FORECAST_QUALITY_SCHEMA
-        },
+        schema_version: FORECAST_QUALITY_STRATIFIED_SCHEMA,
         rank_effect: "reported_only_never_trading_rank",
         dependence_unit: "whole resolution-clock block across assets and questions",
         familywise_size: FAMILYWISE_SIZE_RULE,
@@ -1704,17 +1711,18 @@ fn summarize_agent(
             .filter(|resolution| resolution.status == status)
             .count()
     };
-    let mut metrics: BTreeMap<&str, Vec<f64>> = BTreeMap::new();
+    let mut metrics: BTreeMap<(&str, &str), Vec<f64>> = BTreeMap::new();
     for row in rows {
         metrics
-            .entry(row.scoring_rule.as_str())
+            .entry((row.scoring_rule.as_str(), row.target_unit.as_str()))
             .or_default()
             .push(row.loss);
     }
     let metrics = metrics
         .into_iter()
-        .map(|(rule, values)| MetricMean {
+        .map(|((rule, unit), values)| MetricMean {
             scoring_rule: rule.to_string(),
+            target_unit: unit.to_string(),
             n: values.len(),
             mean_loss: mean(&values),
         })
@@ -1896,6 +1904,7 @@ fn check_shared_settlements(
         if left.resolves_at != right.resolves_at
             || left.instrument != right.instrument
             || left.scoring_rule != right.scoring_rule
+            || left.target_unit != right.target_unit
         {
             return Err(reject(
                 "equal contract digest resolved to unequal contract semantics",
@@ -1918,12 +1927,53 @@ fn check_shared_settlements(
     Ok(())
 }
 
+fn compare_agents_by_stratum(
+    agent_a: &str,
+    rows_a: &[ScoredForecast],
+    agent_b: &str,
+    rows_b: &[ScoredForecast],
+    config: ForecastAnalysisConfig,
+) -> Result<Vec<PairwiseForecastComparison>, ForecastError> {
+    // Check every shared settlement before partitioning. A gap in any stratum
+    // withholds inference on this whole pair, preserving the anti-selection gate.
+    check_shared_settlements(rows_a, rows_b)?;
+    let hashes_a: BTreeSet<_> = rows_a.iter().map(|row| &row.contract_sha256).collect();
+    let hashes_b: BTreeSet<_> = rows_b.iter().map(|row| &row.contract_sha256).collect();
+    let gap = SupportGap {
+        agent_a_unresolved: hashes_b.difference(&hashes_a).count(),
+        agent_b_unresolved: hashes_a.difference(&hashes_b).count(),
+    };
+    let strata: BTreeSet<_> = rows_a
+        .iter()
+        .chain(rows_b)
+        .map(|row| (row.scoring_rule.clone(), row.target_unit.clone()))
+        .collect();
+    if strata.is_empty() {
+        return Ok(vec![compare_agents(
+            agent_a, rows_a, agent_b, rows_b, config, None, gap,
+        )?]);
+    }
+    strata
+        .into_iter()
+        .map(|stratum| {
+            let belongs = |row: &&ScoredForecast| {
+                row.scoring_rule == stratum.0 && row.target_unit == stratum.1
+            };
+            let a: Vec<_> = rows_a.iter().filter(belongs).cloned().collect();
+            let b: Vec<_> = rows_b.iter().filter(belongs).cloned().collect();
+            compare_agents(agent_a, &a, agent_b, &b, config, Some(stratum), gap)
+        })
+        .collect()
+}
+
 fn compare_agents(
     agent_a: &str,
     rows_a: &[ScoredForecast],
     agent_b: &str,
     rows_b: &[ScoredForecast],
     config: ForecastAnalysisConfig,
+    stratum: Option<(String, String)>,
+    pair_gap: SupportGap,
 ) -> Result<PairwiseForecastComparison, ForecastError> {
     // Settlement agreement is checked on every contract both resolved, including a
     // pair whose inference is withheld below, so a disputed settlement is refused
@@ -1949,9 +1999,10 @@ fn compare_agents(
     }
     let observed_values: Vec<f64> = blocks.values().flatten().copied().collect();
     let block_values: Vec<&Vec<f64>> = blocks.values().collect();
-    let gap = SupportGap {
-        agent_a_unresolved: by_hash_b.len() - observed_values.len(),
-        agent_b_unresolved: by_hash_a.len() - observed_values.len(),
+    let gap = pair_gap;
+    let (scoring_rule, target_unit) = match stratum {
+        Some((rule, unit)) => (Some(rule), Some(unit)),
+        None => (None, None),
     };
     let supported = if gap.agent_a_unresolved > 0 || gap.agent_b_unresolved > 0 {
         Err(ForecastInferenceError::UnequalResolvedSupport(gap))
@@ -1962,6 +2013,8 @@ fn compare_agents(
         return Ok(PairwiseForecastComparison {
             agent_a: agent_a.to_string(),
             agent_b: agent_b.to_string(),
+            scoring_rule,
+            target_unit,
             n_contracts: observed_values.len(),
             n_settlement_blocks: block_values.len(),
             mean_loss_difference: if observed_values.is_empty() {
@@ -2004,6 +2057,8 @@ fn compare_agents(
     Ok(PairwiseForecastComparison {
         agent_a: agent_a.to_string(),
         agent_b: agent_b.to_string(),
+        scoring_rule,
+        target_unit,
         n_contracts: observed_values.len(),
         n_settlement_blocks: block_values.len(),
         mean_loss_difference: observed,
@@ -2061,7 +2116,10 @@ mod tests {
 
     #[test]
     fn no_observations_are_not_a_measured_zero_difference() {
-        let empty = compare_agents("a", &[], "b", &[], ForecastAnalysisConfig::default()).unwrap();
+        let empty =
+            compare_agents_by_stratum("a", &[], "b", &[], ForecastAnalysisConfig::default())
+                .unwrap()
+                .remove(0);
         assert_eq!(empty.point_estimate(), None);
         assert_eq!(empty.mean_loss_difference, 0.0); // Legacy Rust placeholder.
         assert!(serde_json::to_value(&empty).unwrap()["mean_loss_difference"].is_null());
@@ -2077,6 +2135,22 @@ mod tests {
             serde_json::to_value(&measured).unwrap()["mean_loss_difference"],
             0.0
         );
+    }
+
+    #[test]
+    fn a_shared_digest_with_only_a_unit_mismatch_is_refused_before_partitioning() {
+        let evidence = parse_forecast_evidence(&fixture("a", &[0.8], &[1.0])).unwrap();
+        let left = scored_forecasts(&evidence).unwrap();
+        let mut right = left.clone();
+        let config = ForecastAnalysisConfig::default();
+        assert!(compare_agents_by_stratum("a", &left, "b", &right, config).is_ok());
+
+        // Exercise the internal consistency boundary without pretending this
+        // contradictory scored row is a valid externally parsed contract.
+        right[0].target_unit = "another-unit".to_string();
+        let error = compare_agents_by_stratum("a", &left, "b", &right, config)
+            .expect_err("partitioning must not hide contradictory shared semantics");
+        assert!(error.0.contains("unequal contract semantics"));
     }
 
     #[test]
@@ -2101,7 +2175,7 @@ mod tests {
             )
             .unwrap(),
         ] {
-            assert_eq!(report.schema_version, "sharpebench.forecast-quality.v4");
+            assert_eq!(report.schema_version, "sharpebench.forecast-quality.v5");
             let encoded = serde_json::to_value(&report).unwrap();
             assert_eq!(encoded["comparisons"][0]["n_contracts"], 0);
             assert!(encoded["comparisons"][0]["mean_loss_difference"].is_null());
@@ -2263,8 +2337,8 @@ mod tests {
         );
     }
 
-    /// Verify one tutorial field against its manifest and recompute its frozen report
-    /// byte for byte with the tutorial's analysis settings.
+    /// Verify the frozen inputs and every historical report field. V5 adds
+    /// explicit strata; the frozen one-stratum v2 fixture is never regenerated.
     fn recompute_tutorial_field(
         alpha: &str,
         beta: &str,
@@ -2292,8 +2366,23 @@ mod tests {
             },
         )
         .unwrap();
-        let actual = serde_json::to_string_pretty(&report).unwrap() + "\n";
-        assert_eq!(actual, expected_report);
+        let mut actual = serde_json::to_value(&report).unwrap();
+        assert_eq!(actual["schema_version"], FORECAST_QUALITY_STRATIFIED_SCHEMA);
+        let expected: Value = serde_json::from_str(expected_report).unwrap();
+        actual["schema_version"] = expected["schema_version"].clone();
+        for agent in actual["agents"].as_array_mut().unwrap() {
+            for metric in agent["metrics"].as_array_mut().unwrap() {
+                assert_eq!(metric["target_unit"], "binary");
+                metric.as_object_mut().unwrap().remove("target_unit");
+            }
+        }
+        for comparison in actual["comparisons"].as_array_mut().unwrap() {
+            assert_eq!(comparison["scoring_rule"], "binary_brier");
+            assert_eq!(comparison["target_unit"], "binary");
+            comparison.as_object_mut().unwrap().remove("scoring_rule");
+            comparison.as_object_mut().unwrap().remove("target_unit");
+        }
+        assert_eq!(actual, expected);
         assert_eq!(report.rank_effect, "reported_only_never_trading_rank");
         report
     }
@@ -2504,7 +2593,7 @@ mod tests {
         let pending = b.revisions[3].contract_sha256.clone();
         let report = analyze_forecast_quality(&[a, b], ForecastAnalysisConfig::default()).unwrap();
         let support = &report.common_support;
-        assert_eq!(report.schema_version, "sharpebench.forecast-quality.v2");
+        assert_eq!(report.schema_version, "sharpebench.forecast-quality.v5");
         assert_eq!(support.n_contracts, 4);
         assert_eq!(
             support.unresolved_by_agent["a"],
@@ -2555,6 +2644,8 @@ mod tests {
             .map(|(index, p)| PairwiseForecastComparison {
                 agent_a: format!("a{index}"),
                 agent_b: "b".to_string(),
+                scoring_rule: Some("binary_brier".to_string()),
+                target_unit: Some("binary".to_string()),
                 n_contracts: 10,
                 n_settlement_blocks: 5,
                 mean_loss_difference: -0.1,
@@ -2723,17 +2814,213 @@ mod tests {
         assert_eq!(before, after);
         assert_eq!(report.rank_effect, "reported_only_never_trading_rank");
     }
-    /// Audit finding R08 (deferred, not repaired): the pairwise comparison pools
-    /// every common contract into one `mean_loss_difference` regardless of
-    /// scoring rule or target unit. A binary Brier loss is dimensionless and a
-    /// point squared error carries the target unit squared, so rescaling the
-    /// point contract from dollars to cents changes the sign of the pooled
-    /// difference while the forecasts are unchanged. This test pins that the
-    /// analysis averages silently today. Every committed field is one stratum,
-    /// so no reported verdict depends on it; the deferral reopens when a
-    /// committed comparison mixes strata and stratifying changes its verdict.
+    fn strata_fixture(agent: &str, probability: f64, split_rules: bool) -> ForecastEvidence {
+        let mut document =
+            parse_forecast_evidence(&fixture(agent, &[probability; 16], &[1.0; 16])).unwrap();
+        for (index, contract) in document.contracts.iter_mut().enumerate() {
+            if split_rules {
+                if index % 2 == 1 {
+                    contract.scoring_rule = "binary_log".to_string();
+                }
+            } else {
+                contract.kind = "point".to_string();
+                contract.target = "price".to_string();
+                contract.scoring_rule = "point_errors".to_string();
+                contract.unit = if index % 2 == 0 { "USD" } else { "EUR" }.to_string();
+            }
+            document.revisions[index].contract_sha256 =
+                contract_digests(contract).unwrap().canonical_json_v1;
+        }
+        document
+    }
+
     #[test]
-    fn mixed_scoring_rules_are_silently_pooled_into_one_mean_loss_difference_r08() {
+    fn comparisons_separate_units_even_with_the_same_scoring_rule() {
+        let documents = [
+            strata_fixture("a", 0.8, false),
+            strata_fixture("b", 0.4, false),
+        ];
+        let report =
+            analyze_forecast_quality(&documents, ForecastAnalysisConfig::default()).unwrap();
+        assert_eq!(report.schema_version, FORECAST_QUALITY_STRATIFIED_SCHEMA);
+        assert_eq!(report.agents[0].metrics.len(), 2);
+        assert_eq!(report.agents[0].metrics[0].target_unit, "EUR");
+        assert_eq!(report.agents[0].metrics[1].target_unit, "USD");
+        assert_eq!(report.comparisons.len(), 2);
+        assert_eq!(report.comparisons[0].target_unit.as_deref(), Some("EUR"));
+        assert_eq!(report.comparisons[1].target_unit.as_deref(), Some("USD"));
+        for comparison in &report.comparisons {
+            assert_eq!(comparison.n_contracts, 8);
+            assert_eq!(comparison.n_settlement_blocks, 8);
+            assert_eq!(comparison.scoring_rule.as_deref(), Some("point_errors"));
+            assert!(comparison.raw_p_value.is_some());
+        }
+    }
+
+    #[test]
+    fn mixed_rules_keep_one_holm_family_and_preserve_single_stratum_numbers() {
+        let documents = [
+            strata_fixture("a", 0.8, true),
+            strata_fixture("b", 0.4, true),
+        ];
+        let config = ForecastAnalysisConfig::default();
+        let mixed = analyze_forecast_quality(&documents, config).unwrap();
+        assert_eq!(mixed.comparisons.len(), 2);
+        let mut controls = Vec::new();
+        for parity in [0, 1] {
+            let mut subset = documents.clone();
+            for document in &mut subset {
+                document.contracts.retain(|row| {
+                    row.contract_id
+                        .trim_start_matches('c')
+                        .parse::<usize>()
+                        .unwrap()
+                        % 2
+                        == parity
+                });
+                document.revisions.retain(|row| {
+                    let index: usize = row.claim_id.trim_start_matches("claim-").parse().unwrap();
+                    index % 2 == parity
+                });
+                document.resolutions.retain(|row| {
+                    let index: usize = row.claim_id.trim_start_matches("claim-").parse().unwrap();
+                    index % 2 == parity
+                });
+            }
+            controls.push(
+                analyze_forecast_quality(&subset, config)
+                    .unwrap()
+                    .comparisons
+                    .remove(0),
+            );
+        }
+        for (mixed, control) in mixed.comparisons.iter().zip(&controls) {
+            assert_eq!(mixed.mean_loss_difference, control.mean_loss_difference);
+            assert_eq!(mixed.confidence_lower, control.confidence_lower);
+            assert_eq!(mixed.confidence_upper, control.confidence_upper);
+            assert_eq!(mixed.raw_p_value, control.raw_p_value);
+            assert_eq!(mixed.n_contracts, 8);
+        }
+        let mut expected = mixed.comparisons.clone();
+        holm_adjust(&mut expected, config.familywise_alpha);
+        assert_eq!(
+            mixed.comparisons[0].holm_adjusted_p_value,
+            expected[0].holm_adjusted_p_value
+        );
+        let minimum = mixed
+            .comparisons
+            .iter()
+            .min_by(|a, b| a.raw_p_value.unwrap().total_cmp(&b.raw_p_value.unwrap()))
+            .unwrap();
+        assert_eq!(
+            minimum.holm_adjusted_p_value,
+            Some((2.0 * minimum.raw_p_value.unwrap()).min(1.0))
+        );
+    }
+
+    #[test]
+    fn a_gap_in_one_stratum_withholds_the_whole_pair_and_empty_stratum_is_null() {
+        let left = strata_fixture("a", 0.8, false);
+        let mut right = strata_fixture("b", 0.4, false);
+        // B resolves only USD. EUR remains a named, empty comparison, not dropped.
+        right.contracts.retain(|row| {
+            row.contract_id
+                .trim_start_matches('c')
+                .parse::<usize>()
+                .unwrap()
+                % 2
+                == 0
+        });
+        right.revisions.retain(|row| {
+            row.claim_id
+                .trim_start_matches("claim-")
+                .parse::<usize>()
+                .unwrap()
+                % 2
+                == 0
+        });
+        right.resolutions.retain(|row| {
+            row.claim_id
+                .trim_start_matches("claim-")
+                .parse::<usize>()
+                .unwrap()
+                % 2
+                == 0
+        });
+        let report =
+            analyze_forecast_quality(&[left, right], ForecastAnalysisConfig::default()).unwrap();
+        assert_eq!(report.comparisons.len(), 2);
+        let empty = &report.comparisons[0];
+        assert_eq!(empty.target_unit.as_deref(), Some("EUR"));
+        assert_eq!(empty.point_estimate(), None);
+        let wire = serde_json::to_value(empty).unwrap();
+        assert!(wire["mean_loss_difference"].is_null());
+        assert_eq!(wire["scoring_rule"], "point_errors");
+        for comparison in &report.comparisons {
+            assert_eq!(comparison.support_gap.unwrap().agent_b_unresolved, 8);
+            assert!(comparison
+                .inference_error
+                .as_deref()
+                .unwrap()
+                .starts_with("unequal resolved support"));
+            assert!(comparison.raw_p_value.is_none());
+            assert!(comparison.holm_adjusted_p_value.is_none());
+            assert!(!comparison.familywise_significant);
+        }
+    }
+
+    #[test]
+    fn a_plan_filters_before_stratifying_and_empty_pairs_have_null_labels() {
+        let documents = [
+            strata_fixture("a", 0.8, false),
+            strata_fixture("b", 0.4, false),
+        ];
+        let plan = ForecastContractPlan {
+            schema_version: FORECAST_CONTRACT_PLAN_SCHEMA.to_string(),
+            contract_sha256: documents[0]
+                .revisions
+                .iter()
+                .step_by(2)
+                .map(|row| row.contract_sha256.clone())
+                .collect(),
+        };
+        let report = analyze_forecast_quality_against_plan(
+            &documents,
+            ForecastAnalysisConfig::default(),
+            &plan,
+        )
+        .unwrap();
+        assert_eq!(report.comparisons.len(), 1);
+        assert_eq!(report.comparisons[0].target_unit.as_deref(), Some("USD"));
+        assert_eq!(report.agents[0].metrics.len(), 1);
+        assert_eq!(
+            report
+                .common_support
+                .outside_plan_by_agent
+                .as_ref()
+                .unwrap()["a"]
+                .len(),
+            8
+        );
+        let mut empty = documents;
+        for document in &mut empty {
+            for row in &mut document.resolutions {
+                row.status = "pending".to_string();
+                row.outcome = None;
+                row.available_at = None;
+            }
+        }
+        let report = analyze_forecast_quality(&empty, ForecastAnalysisConfig::default()).unwrap();
+        assert_eq!(report.comparisons.len(), 1);
+        let wire = serde_json::to_value(&report.comparisons[0]).unwrap();
+        assert!(wire["scoring_rule"].is_null());
+        assert!(wire["target_unit"].is_null());
+        assert!(wire["mean_loss_difference"].is_null());
+    }
+
+    /// R08: a unit rescale must never reverse an unrelated scoring-rule result.
+    #[test]
+    fn mixed_scoring_rules_are_separated_without_a_pooled_estimate_r08() {
         fn field(agent: &str, probability: f64, point: f64, unit: &str) -> ForecastEvidence {
             let mut evidence = serde_json::from_str::<ForecastEvidence>(&fixture(
                 agent,
@@ -2751,31 +3038,29 @@ mod tests {
             evidence.revisions[1].contract_sha256 = digest;
             evidence
         }
-        let mut pooled = Vec::new();
         for (scale, unit) in [(1.0, "USD"), (100.0, "US_cents")] {
             let a = field("a", 0.9, 0.2 * scale, unit);
             let b = field("b", 0.1, 0.1 * scale, unit);
             let report =
                 analyze_forecast_quality(&[a, b], ForecastAnalysisConfig::default()).unwrap();
-            // Per-agent means are grouped by rule; the pairwise comparison is not.
             assert_eq!(report.agents[0].metrics.len(), 2);
-            let comparison = &report.comparisons[0];
-            assert_eq!(comparison.n_contracts, 2);
+            assert_eq!(report.comparisons.len(), 2);
+            let binary = &report.comparisons[0];
+            let point = &report.comparisons[1];
+            assert_eq!(binary.scoring_rule.as_deref(), Some("binary_brier"));
+            assert_eq!(binary.target_unit.as_deref(), Some("binary"));
+            assert_eq!(point.scoring_rule.as_deref(), Some("point_errors"));
+            assert_eq!(point.target_unit.as_deref(), Some(unit));
+            assert_eq!(binary.n_contracts, 1);
+            assert_eq!(point.n_contracts, 1);
             let brier_difference = (0.9f64 - 1.0).powi(2) - (0.1f64 - 1.0).powi(2);
             let point_difference = (0.2 * scale).powi(2) - (0.1 * scale).powi(2);
-            let expected = (brier_difference + point_difference) / 2.0;
-            assert!((comparison.mean_loss_difference - expected).abs() < 1e-9);
-            pooled.push(comparison.mean_loss_difference);
+            assert!((binary.mean_loss_difference - brier_difference).abs() < 1e-12);
+            assert!((point.mean_loss_difference - point_difference).abs() < 1e-9);
+            assert!(binary.mean_loss_difference < 0.0);
+            assert!(point.mean_loss_difference > 0.0);
+            assert!(binary.inference_error.is_some());
+            assert!(point.inference_error.is_some());
         }
-        assert!(
-            pooled[0] < 0.0,
-            "in USD agent a looks better: {}",
-            pooled[0]
-        );
-        assert!(
-            pooled[1] > 0.0,
-            "in cents agent b looks better: {}",
-            pooled[1]
-        );
     }
 }

@@ -105,6 +105,11 @@ Commands that render reports accept `--json` for structured output. Commands
 that create an artifact already write the documented JSON form. The full
 reference is in the [CLI chapter](docs/book/src/cli.md).
 
+Forecast reports use schema v5: loss metrics and pairwise comparisons are
+separated by scoring rule and target unit, with no pooled primary estimate.
+See [forecast quality](docs/book/src/forecast-quality.md) for support gates,
+global multiplicity adjustment and migration from historical report schemas.
+
 ## What makes an agent rank-eligible
 
 All hard gates are conjunctive:
