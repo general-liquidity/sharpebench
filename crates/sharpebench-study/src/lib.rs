@@ -53,6 +53,18 @@
 //! study owner. The validator checks that a document is coherent and
 //! affordable; it does not and cannot supply the targets a study is run to
 //! meet. Do not cite the placeholder numbers as this project's targets.
+//!
+//! # Reporting boundary
+//!
+//! [`StudyReport::from_realized_runs`] reruns the protocol validator before
+//! constructing a report. An invalid protocol, including one modified after a
+//! successful check, returns [`ReportRefusal::Protocol`] with the original
+//! validator refusal. This adds a Rust refusal variant; valid report JSON is
+//! unchanged. Consumers must correct the protocol before retrying, not treat a
+//! validator refusal as a failed scientific claim.
+//!
+//! Validation checks the declared contract. It does not authenticate an approver,
+//! verify that the supplied counts were actually executed, or authorize a study.
 
 pub mod amend;
 pub mod precision;
