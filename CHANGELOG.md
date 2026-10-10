@@ -14,6 +14,14 @@ and links the commits it was built from.
 
 ### Corrected
 
+- Newly resolved stressed execution applies its declared two-bar decision delay
+  through versioned FIFO eligibility in both backtests and environment steps.
+  Raw captures retain all submissions, compute is billed at submission, and
+  snapshot/restore retains the queue. Fixed timing is execution-digest bound.
+  Legacy cost records without the field remain immediate and keep their bytes
+  and digests. Lagged replay adds lag to the bound timing. Frozen historical
+  evidence is not regenerated and does not measure this new stressed behavior.
+
 - Forecast-quality schema v5 partitions loss metrics and pairwise comparisons
   by exact scoring rule and target unit, rather than averaging incompatible
   losses. It emits no pooled primary estimate. Whole-pair support-gap and

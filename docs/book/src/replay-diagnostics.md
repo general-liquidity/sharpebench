@@ -162,15 +162,14 @@ aggregate is unavailable (`no_comparable_run`).
 
 ### Decision delay
 
-The stressed profile declares a two-bar decision delay that the backtest driver
-does not apply. The lagged replay is the way to measure decision-delay
-sensitivity: `lagged_replay` with the stressed profile's cost model and lag
-`decision_delay_bars` replays every decision two bars late under the stressed
-frictions. This route is library-only: the CLI replays a trajectory under the
-cost model it is bound to, which for CLI captures is the typical profile, so
-`--lagged-replay 2` there measures the delay under typical costs. The stressed
-profile's own behaviour is unchanged, so evidence produced under it keeps its
-meaning.
+New stressed models apply a versioned two-bar FIFO eligibility delay in the
+engine. Lagged replay adds `k` bars to the cost model's timing, so lag two under
+a new stressed model means four bars to eligibility. The diagnostic's
+"undelayed" row means no additional replay lag, not necessarily immediate
+execution. Legacy models without `fixed_delay` remain immediate and retain the
+meaning of historical captures. The CLI uses the model its capture is bound to,
+currently typical costs for CLI captures, so `--lagged-replay 2` there still
+measures two bars under typical costs. See [execution timing](simulator.md#decision-delay).
 
 ## Validity
 

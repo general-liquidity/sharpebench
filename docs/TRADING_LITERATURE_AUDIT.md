@@ -1,5 +1,11 @@
 # Trading literature audit
 
+October 2026 implementation update: new stressed models now apply a versioned
+two-bar FIFO delay. The earlier audit's statements that this delay was merely
+declared describe the pre-repair driver. Legacy captures and frozen evidence
+remain immediate; lagged replay adds lag to the bound execution model. See
+[current timing semantics](book/src/simulator.md#decision-delay).
+
 This audit records how recent AI, reinforcement-learning and language-model trading papers
 evaluate their results, and what SharpeBench and SharpeArena took from them. It is a companion
 to the [benchmark architecture audit](BENCHMARK_ARCHITECTURE_AUDIT.md). That document reviews
