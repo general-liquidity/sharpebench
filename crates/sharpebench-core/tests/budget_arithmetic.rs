@@ -57,3 +57,21 @@ fn extreme_but_representable_budget_arithmetic_remains_available() {
     assert_eq!(flat.points[1].marginal_dsr_per_budget, Some(0.0));
     assert_eq!(flat.non_improvement_onset, Some(f64::from_bits(1)));
 }
+
+#[test]
+fn marginal_uses_the_coordinate_difference_not_the_sum() {
+    let a = window(0.0007);
+    let b = window(0.002);
+    let opts = BudgetCurveOpts {
+        n_boot: 8,
+        ..BudgetCurveOpts::default()
+    };
+    for (left_budget, right_budget) in [(1.0, 2.0), (-2.0, -1.0)] {
+        let report = budget_curve(&[(left_budget, &a), (right_budget, &b)], &opts).unwrap();
+        let dsr_change = report.points[1].oos_dsr - report.points[0].oos_dsr;
+        let expected = dsr_change / (right_budget - left_budget);
+        assert_eq!(report.points[1].marginal_dsr_per_budget, Some(expected));
+        assert!(report.is_monotone_improving);
+        assert_eq!(report.non_improvement_onset, None);
+    }
+}
