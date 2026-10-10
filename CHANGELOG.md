@@ -14,6 +14,11 @@ and links the commits it was built from.
 
 ### Corrected
 
+- External workflow actions use resolved full commit SHAs. CI checks reject
+  mutable literal action references and Cargo build fallbacks. Both the ordinary
+  workspace build and static release build now fail when their lockfile cannot
+  be honored, rather than retrying unlocked. Transitive downloads are not covered
+  by the action-reference check.
 - Forward arena saves use cooperating OS locks, stale-snapshot checks and a
   validated redo transaction with windows/boards before state. Load recovers
   process-interrupted writes; verification remains read-only. Windows does not
