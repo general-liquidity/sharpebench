@@ -76,9 +76,18 @@ with a rule measured in the other. Every record therefore names its `draws`,
 `two_leg_run` or `joint_run`, and the three-leg run reports all six rules from
 its own draws so the bootstrap leg's increment can be read within one run.
 
-False-positive rates carry exact Clopper-Pearson bounds at one-sided 0.05 on
-each side. Power points carry the Wilson score interval at the same level and
-the binomial standard error.
+The recorded run used exact Clopper-Pearson bounds with five percent in each
+tail. Its `per_entry_interval95` and `interval95_wilson` fields are therefore
+two-sided **ninety percent** intervals despite their names. Their upper endpoints
+are valid one-sided ninety-five percent bounds, as are the reported independent
+field upper bounds. The historical artifact and the tables below are unchanged.
+
+The corrected producer uses two-and-a-half percent per tail for both named
+two-sided intervals. It computes independent field upper bounds separately with
+five percent in the upper tail, preserving that one-sided contract. No fresh
+calibration run has been performed; existing bytes do not represent the repaired
+producer. Quantile-crossing confidence bands use a separate calculation and
+are not part of this interval-label correction.
 
 ### False-positive rate under the zero-skill null
 

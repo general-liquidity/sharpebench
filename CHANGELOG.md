@@ -12,6 +12,14 @@ and links the commits it was built from.
 
 ## [Unreleased]
 
+### Corrected
+
+- Development joint-gate producer: the two-sided intervals named 95 percent
+  now use 2.5 percent per tail. Independent field upper bounds still use a
+  separate one-sided 5 percent tail. The recorded development run remains
+  unchanged; its misnamed two-sided intervals have nominal 90 percent coverage,
+  while its one-sided upper bounds retain their 95 percent interpretation.
+
 ### Added
 
 - docs, scripts: an evidence-freshness and applicability register, `docs/evidence-register.jsonl` with the readable projection `docs/evidence-register.md`. One row per table, figure and empirical claim in the inventoried scope of both manuscripts, recording the artifact and its digest, the producer command, the producing commit and effective configuration where known, the provenance that is missing, the repairs that landed after the artifact was frozen, the present applicability, and a disposition of historical-only, still-applicable, needs-rescore, needs-new-experiment or unresolved. Sixty rows, thirty-nine for this product and twenty-one for SharpeArena, whose rows are marked as covering the other repository and carry the digests that repository's own manifest records rather than files this one can open. The provenance manifest says the committed artifacts are the ones that were hashed; the register says which claim each artifact still supports, which a matching digest cannot when a repair merged after the freeze moved what the claim asserts. Nothing was rerun, rescored or regenerated to produce it, and where an artifact could not be located the row is unresolved rather than a guess.

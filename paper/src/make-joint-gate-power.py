@@ -90,7 +90,8 @@ JOINT_REPLICATIONS = 1_600
 JOINT_CHUNKS = 64
 JOINT_BATCH = 10
 DIGITS = 6
-INTERVAL_ALPHA = 0.05
+INTERVAL_ALPHA = 0.025  # per tail: a two-sided 95 percent interval
+UPPER_BOUND_ALPHA = 0.05  # a separate one-sided 95 percent upper bound
 
 # rho = 0 is the headline; the rest are the dependence sensitivity. The joint
 # rule carries the bootstrap leg and costs about thirty times as much per
@@ -351,6 +352,7 @@ def rule_thresholds(draws, rho, panel, bar_slot, rule):
 def false_positive_record(dataset, rho, rule, sorted_ann, replications, field_size, draws):
     admitted = passes_at(sorted_ann, 0.0)
     rate, se, lower, upper = jg.rate_with_interval(admitted, replications, INTERVAL_ALPHA)
+    _, upper_one_sided = jg.clopper_pearson(admitted, replications, UPPER_BOUND_ALPHA)
     return {
         "record": "false_positive_rate",
         "tier": TIER,
@@ -366,7 +368,7 @@ def false_positive_record(dataset, rho, rule, sorted_ann, replications, field_si
         "field_size": field_size,
         "field_rate_independent_entries": jg.field_probability(rate, field_size),
         "field_rate_upper95_independent_entries": round(
-            jg.field_probability(upper, field_size), DIGITS + 4
+            jg.field_probability(upper_one_sided, field_size), DIGITS + 4
         ),
     }
 
@@ -576,8 +578,9 @@ def compute(
             "rhos_two_leg": list(rhos_two_leg),
             "rhos_joint": list(rhos_joint),
             "interval_method": (
-                "false-positive rates: Clopper-Pearson, one-sided alpha 0.05 on each side; "
-                "power points: Wilson score at the same level"
+                "two-sided 95 percent intervals: Clopper-Pearson for false-positive "
+                "rates and Wilson score for power points, alpha 0.025 per tail; "
+                "field upper bounds: separate one-sided 95 percent Clopper-Pearson, alpha 0.05"
             ),
             "numpy": np.__version__,
             "per_run_psr_bar": jg.PER_RUN_PSR_BAR,

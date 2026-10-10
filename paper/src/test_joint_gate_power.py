@@ -274,6 +274,36 @@ class SerialDependence(unittest.TestCase):
 
 
 class Intervals(unittest.TestCase):
+    def test_producer_false_positive_interval_is_two_sided_95(self):
+        record = producer.false_positive_record(
+            "synthetic", 0.0, "joint", np.array([-3., -2., -1., 1., 2., 3., 4., 5., 6., 7.]),
+            10, 8, "test",
+        )
+        lower, upper = record["per_entry_interval95"]
+        self.assertAlmostEqual(lower, 0.0667, delta=1e-4)
+        self.assertAlmostEqual(upper, 0.6525, delta=1e-4)
+
+    def test_producer_field_upper_remains_one_sided_95(self):
+        record = producer.false_positive_record(
+            "synthetic", 0.0, "joint", np.ones(10), 10, 8, "test",
+        )
+        expected_upper = 1.0 - 0.05 ** (1.0 / 10)
+        self.assertAlmostEqual(
+            record["field_rate_upper95_independent_entries"],
+            jg.field_probability(expected_upper, 8), delta=1e-10,
+        )
+
+    def test_producer_wilson_interval_is_two_sided_95(self):
+        panel = {"deflation_bar_annualized_equivalent": 1.0}
+        records = producer.power_records(
+            "synthetic", 0.0, "joint", np.array([-3., -2., -1., 1., 2., 3., 4., 5., 6., 7.]),
+            10, panel, "test",
+        )
+        record = next(row for row in records if row.get("sharpe_annualized") == 0.0)
+        lower, upper = record["interval95_wilson"]
+        self.assertAlmostEqual(lower, 0.1077912674, delta=1e-7)
+        self.assertAlmostEqual(upper, 0.6032218525, delta=1e-7)
+
     def test_the_textbook_clopper_pearson_interval(self):
         """Known answer: the exact two-sided 95 percent interval for 3 of 10 is
         (0.0667, 0.6525) in every statistics text."""
