@@ -28,6 +28,7 @@
   - [Host-observed model gateway](model-gateway.md)
 - [Importing a rival field](importing.md)
 - [Benchmark integrity](integrity.md)
+- [Validation status and frozen evidence](validation-status.md)
 - [CLI reference](cli.md)
 - [Embedding the kernel (WASM)](wasm.md)
 - [Governance](governance.md)

@@ -41,7 +41,7 @@ of resampled means does not move when the constant is added. The joint rule
 passes at true Sharpe s exactly when s reaches the largest of the three
 thresholds, and its false-positive rate is that curve at zero.
 
-### Legs not modelled
+### Omitted gates and modelling assumptions
 
 The process gate, the mandate gate, the risk gates, the influential-vote and
 dispersion disclosure, costs and execution-seed variation, missingness and
@@ -49,9 +49,19 @@ refusal accounting, the measured bars' dependence on the field that produced
 them, cross-agent dependence within a field, and the kernel's single fixed
 bootstrap seed (the leg here is averaged over resampling noise instead).
 
-Every unmodelled leg is a further conjunct, so it can only refuse more. The
-pass probabilities below are upper bounds on the shipped predicate's, and the
-false-positive rates are upper bounds on its rate.
+Only the process, mandate and risk gates in that list are omitted conjuncts.
+Adding them cannot increase acceptance on the same inputs with the same
+modelled-leg outputs. The remaining items are modelling assumptions or
+non-gating disclosures, not further conjuncts. Changed fields, costs,
+dependence or bootstrap treatment can change those outputs in either direction.
+The simulation therefore does not establish unconditional upper bounds on the
+shipped predicate's pass probability or false-positive rate.
+
+The historical JSONL metadata described every item as a further conjunct.
+Those bytes remain unchanged, but that interpretation is superseded here.
+The corrected producer separates omitted gates, non-gating disclosures and
+modelling assumptions and explicitly disclaims an unconditional shipped-rate
+bound. No new calibration run was performed for this correction.
 
 The replay diagnostics in `crates/sharpebench-sim/src/replay_nulls.rs` are not
 legs of this rule. `rank_eligible` never reads them; they are reported beside a
@@ -60,7 +70,8 @@ verified trajectory and the CLI is their only consumer.
 The bootstrap leg is not modelled on `crypto-majors-1h`, whose pooled track of
 23940 returns costs more per replication than this tier affords at 2000
 resamples. That panel's joint rows are absent and carry a `leg_not_modelled`
-record instead; its two-leg rows still bound the shipped predicate.
+record instead; its two-leg rows bound only a conjunction with the same inputs
+and modelled-leg outputs, not the shipped predicate under changed assumptions.
 
 ### Run identity
 

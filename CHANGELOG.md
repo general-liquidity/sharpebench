@@ -14,6 +14,12 @@ and links the commits it was built from.
 
 ### Corrected
 
+- Joint-gate development calibration separates omitted conjunctive gates from
+  modelling assumptions and non-gating disclosures. Removing conjuncts bounds
+  acceptance only on unchanged inputs and modelled-leg outputs, not the shipped
+  predicate under changed fields, costs or dependence. Historical simulation
+  bytes are retained and their overstated metadata is qualified in the evidence
+  README; no new calibration experiment was run.
 - External workflow actions use resolved full commit SHAs. CI checks reject
   mutable literal action references and Cargo build fallbacks. Both the ordinary
   workspace build and static release build now fail when their lockfile cannot

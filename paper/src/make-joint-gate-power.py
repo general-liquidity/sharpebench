@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Development-stage calibration of the full joint eligibility rule.
+"""Development-stage calibration of selected joint eligibility legs.
 
 Ticket P12-A, section 10.A of the remaining-product-work plan. This is
 **development-tier exploration, not frozen validation**: every number it writes
@@ -20,14 +20,14 @@ Legs modelled, as `composite.rs` builds `rank_eligible`:
 - the bootstrap leg, stationary-bootstrap p below 0.05 on the pooled track with
   the shipped 2000 resamples and 0.1 restart probability.
 
-Legs NOT modelled: the process gate, the mandate gate, the risk gates, the
-influential-vote and dispersion disclosure, costs, missingness, refusal and
-unavailability accounting, and the measured-bar path's dependence on the field
-that produced the bar (each bar is held at its committed value). Every
-unmodelled leg is a further conjunct, so it can only refuse more: the true
-Sharpe at which the shipped predicate reaches a given pass probability is at
-least the value printed here, and its false-positive rate is at most the value
-printed here.
+The process, mandate and risk gates are omitted conjuncts. Adding them cannot
+increase acceptance on the same inputs with the same modelled-leg outputs.
+Field-dependent bars, costs, execution-seed variation, missingness treatment,
+cross-agent dependence and bootstrap randomness are modelling assumptions,
+not additional conjuncts. Changing those assumptions can change the modelled
+legs themselves in either direction, so this calculation supplies no
+unconditional upper bound on the shipped predicate's rate. Influential-vote
+and dispersion disclosures are not gates.
 
 Three legs, one set of draws. Each leg is a threshold on the true Sharpe:
 adding a constant to a series leaves its dispersion and shape alone, so the
@@ -156,17 +156,41 @@ LEGS_MODELLED = (
     "bootstrap: stationary-bootstrap p < 0.05 on the pooled track, 2000 resamples, "
     "restart probability 0.1",
 )
-LEGS_NOT_MODELLED = (
+OMITTED_CONJUNCTIVE_GATES = (
     "process gate",
     "mandate gate",
     "risk gates",
+)
+NON_GATING_DISCLOSURES = (
     "influential-vote and dispersion disclosure",
+)
+MODELLING_ASSUMPTIONS = (
     "costs, slippage and execution-seed variation",
     "missingness, refusal and unavailability accounting",
     "the measured bars' dependence on the field that produced them (bars held fixed)",
     "cross-agent dependence within a field (entries are drawn independently)",
     "the kernel's single fixed bootstrap seed (the leg is averaged over resampling noise)",
 )
+LEGS_NOT_MODELLED = (
+    OMITTED_CONJUNCTIVE_GATES + NON_GATING_DISCLOSURES + MODELLING_ASSUMPTIONS
+)
+
+
+def evidence_scope():
+    """Separate omitted predicates from assumptions that change their inputs."""
+    return {
+        # Retain the historical inventory field, but classify its contents.
+        "legs_not_modelled": list(LEGS_NOT_MODELLED),
+        "omitted_conjunctive_gates": list(OMITTED_CONJUNCTIVE_GATES),
+        "non_gating_disclosures": list(NON_GATING_DISCLOSURES),
+        "modelling_assumptions": list(MODELLING_ASSUMPTIONS),
+        "unmodelled_legs_direction": (
+            "conditional only: omitted conjunctive gates cannot increase acceptance on "
+            "the same inputs with the same modelled-leg outputs; modelling assumptions "
+            "are not conjuncts and their changes can move those outputs in either direction"
+        ),
+        "unconditional_shipped_rate_upper_bound": False,
+    }
 
 
 # ---- committed bars -------------------------------------------------------------
@@ -555,12 +579,7 @@ def compute(
             "kind": "protocol_property",
             "ticket": "P12-A",
             "legs_modelled": list(LEGS_MODELLED),
-            "legs_not_modelled": list(LEGS_NOT_MODELLED),
-            "unmodelled_legs_direction": (
-                "every unmodelled leg is a further conjunct, so it can only refuse more: the "
-                "printed pass probabilities are upper bounds on the shipped predicate's and "
-                "the printed false-positive rates are upper bounds on its rate"
-            ),
+            **evidence_scope(),
             "null": "zero-skill: a true per-period Sharpe of zero",
             "alternative": (
                 "a constant true per-period Sharpe added to every window, the same in each"
@@ -631,8 +650,9 @@ def compute(
                 "reason": (
                     "the pooled track is longer than the development tier affords at "
                     f"{jg.BOOTSTRAP_N_BOOT} resamples per replication; the joint rule is not "
-                    "reported for this panel and its two-leg rows are an upper bound on the "
-                    "shipped predicate's pass probability"
+                    "reported for this panel; its two-leg rows bound only a conjunction "
+                    "using the same inputs and modelled-leg outputs, not the shipped "
+                    "predicate under changed field or execution assumptions"
                 ),
             })
             continue
