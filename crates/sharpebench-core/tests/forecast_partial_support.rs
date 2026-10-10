@@ -308,7 +308,7 @@ fn pairs_with_the_partial_agent_are_withheld_and_charged_to_it() {
     }
 
     let support = &report.common_support;
-    assert_eq!(report.schema_version, "sharpebench.forecast-quality.v2");
+    assert_eq!(report.schema_version, "sharpebench.forecast-quality.v5");
     assert_eq!(support.n_contracts, 10);
     assert_eq!(support.contract_sha256, {
         let mut all: Vec<String> = (0..10).map(digest).collect();
@@ -615,7 +615,7 @@ fn without_a_plan_extra_contracts_still_withhold_the_padded_pairs() {
         CONFIG,
     )
     .expect("field is reported");
-    assert_eq!(report.schema_version, "sharpebench.forecast-quality.v2");
+    assert_eq!(report.schema_version, "sharpebench.forecast-quality.v5");
     let comparison = pair(&report, "a", "d");
     assert_eq!(comparison.raw_p_value, None);
     assert_eq!(
@@ -650,7 +650,7 @@ fn with_a_plan_extra_contracts_are_reported_and_charge_nobody() {
         &planned,
     )
     .expect("padded field is reported");
-    assert_eq!(report.schema_version, "sharpebench.forecast-quality.v3");
+    assert_eq!(report.schema_version, "sharpebench.forecast-quality.v5");
     assert!(report.common_support.rule.contains("declared plan"));
     let two = pair(&baseline, "a", "b");
     let three = pair(&report, "a", "b");

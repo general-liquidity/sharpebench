@@ -256,8 +256,8 @@ fn write_report(out: &mut String, report: &ForecastQualityReport) -> std::fmt::R
         for metric in &agent.metrics {
             writeln!(
                 out,
-                "  {:<20} mean loss {:>10.6}  n={}",
-                metric.scoring_rule, metric.mean_loss, metric.n
+                "  {} [{}] mean loss {:>10.6}  n={}",
+                metric.scoring_rule, metric.target_unit, metric.mean_loss, metric.n
             )?;
         }
         if let Some(calibration) = &agent.binary_calibration {
@@ -309,9 +309,11 @@ exact-pair-support comparisons (loss A minus loss B):"
             ) {
                 (Some(low), Some(high), Some(p)) => writeln!(
                     out,
-                    "  {} vs {}  diff={:.6}  CI=[{low:.6}, {high:.6}]  Holm p={p:.6}{}",
+                    "  {} vs {}  {} [{}] diff={:.6}  CI=[{low:.6}, {high:.6}]  Holm p={p:.6}{}",
                     comparison.agent_a,
                     comparison.agent_b,
+                    comparison.scoring_rule.as_deref().unwrap_or("unavailable"),
+                    comparison.target_unit.as_deref().unwrap_or("unavailable"),
                     comparison.mean_loss_difference,
                     if comparison.familywise_significant {
                         "  significant"
@@ -321,9 +323,11 @@ exact-pair-support comparisons (loss A minus loss B):"
                 )?,
                 _ => writeln!(
                     out,
-                    "  {} vs {}  diff={} over {} contract(s)  inference withheld: {}",
+                    "  {} vs {}  {} [{}] diff={} over {} contract(s)  inference withheld: {}",
                     comparison.agent_a,
                     comparison.agent_b,
+                    comparison.scoring_rule.as_deref().unwrap_or("unavailable"),
+                    comparison.target_unit.as_deref().unwrap_or("unavailable"),
                     comparison
                         .point_estimate()
                         .map(|value| format!("{value:.6}"))
@@ -402,7 +406,7 @@ mod tests {
     }
 
     #[test]
-    fn a_declared_plan_writes_a_v3_report_and_prints_its_support() {
+    fn a_declared_plan_writes_a_v5_report_and_prints_its_support() {
         let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../examples/forecast-quality/fixtures");
         let committed: serde_json::Value = serde_json::from_str(
@@ -452,7 +456,7 @@ mod tests {
                 .expect("--output contains JSON");
         fs::remove_file(&output).expect("remove temporary report");
         fs::remove_file(&plan).expect("remove temporary plan");
-        assert_eq!(report["schema_version"], "sharpebench.forecast-quality.v3");
+        assert_eq!(report["schema_version"], "sharpebench.forecast-quality.v5");
         assert_eq!(report["common_support"]["n_contracts"], 13);
         assert_eq!(
             report["common_support"]["unresolved_by_agent"]["agent-alpha"]["not_claimed"],
@@ -570,7 +574,7 @@ mod tests {
         .expect("--output contains JSON");
         fs::remove_file(&output).expect("remove temporary forecast report");
 
-        assert_eq!(report["schema_version"], "sharpebench.forecast-quality.v2");
+        assert_eq!(report["schema_version"], "sharpebench.forecast-quality.v5");
         assert_eq!(report["common_support"]["n_contracts"], 12);
         assert_eq!(
             report["common_support"]["unresolved_by_agent"]["agent-beta"]["n_unresolved"],
@@ -611,7 +615,7 @@ mod tests {
         assert_eq!(rendered.matches("unresolved field support").count(), 1);
         assert!(rendered.contains("resolved by [agent-alpha]  pending for [agent-beta]"));
         assert!(rendered.contains(
-            "agent-alpha vs agent-beta  diff=-0.141809 over 11 contract(s)  inference withheld: \
+            "agent-alpha vs agent-beta  binary_brier [binary] diff=-0.141809 over 11 contract(s)  inference withheld: \
              unequal resolved support: agent_a did not resolve 0 contract(s) that agent_b \
              resolved and agent_b did not resolve 1 that agent_a resolved"
         ));
