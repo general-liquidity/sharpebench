@@ -18,6 +18,12 @@ and links the commits it was built from.
   marginal DSR rates. Finite input coordinates could previously produce a false
   plateau or an infinite diagnostic. Representable extreme calculations remain
   accepted; published numerical evidence is unchanged.
+- Study report construction revalidates the supplied protocol and retains
+  validator failures as typed report refusals. Invalid precision targets,
+  prohibited tier claims, missing decision rules and stale budget declarations
+  can no longer bypass validation through the report API. Valid report JSON is
+  unchanged; Rust callers gain a protocol-refusal variant. No study was run and
+  no historical numerical evidence was regenerated.
 
 - Study sample-size planning searches for the first feasible integer count
   without assuming Wilson widths stay monotone after expected-event rounding.

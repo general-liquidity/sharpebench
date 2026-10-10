@@ -53,6 +53,14 @@ The [study protocol validator](../../../crates/sharpebench-study/src/validate.rs
 can check a declared protocol contract; it does not supply missing empirical
 validation or authorize the campaign.
 
+The study report constructor also validates the supplied protocol before
+reporting or deciding claims. It preserves the original typed validator refusal
+and rechecks mutable fields even after an earlier successful validation. This
+prevents invalid precision requirements or forbidden tier/claim combinations
+from producing an ordinary report. Valid report JSON is unchanged; the Rust
+refusal enum has an additional protocol-error variant. These checks do not
+authenticate an approver or prove the supplied counts were actually executed.
+
 The shipped placeholder protocol is explicitly unsealed and retains owner
 decisions for targets and sample counts. The development producer above is not
 an execution of that study-protocol contract: its own CLI accepts replication

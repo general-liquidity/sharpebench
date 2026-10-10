@@ -255,6 +255,11 @@ pub struct ClaimOutcome {
 impl StudyReport {
     /// Build the report for one estimand from the runs that were executed.
     ///
+    /// Revalidates the supplied protocol before computing or deciding anything.
+    /// Protocol fields are public and may have changed since an earlier check;
+    /// a previous successful validation is not a retained approval token.
+    /// Invalid protocols return their original typed validator refusal.
+    ///
     /// Refuses when the realized count leaves the interval wider than
     /// `inference.required_half_width`. There is no path that emits the
     /// planned count's precision alongside a smaller realized count.
@@ -264,6 +269,7 @@ impl StudyReport {
         observed_events: u64,
         realized_runs: u64,
     ) -> Result<Self, ReportRefusal> {
+        crate::validate::validate(protocol)?;
         if protocol.estimand(estimand).is_none() {
             return Err(ReportRefusal::UndeclaredEstimand {
                 estimand: estimand.to_string(),
