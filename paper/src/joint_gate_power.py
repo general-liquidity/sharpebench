@@ -67,8 +67,9 @@ def min_passing_sharpe(n, skew, kurt, z_bar, benchmark):
     With a = (kurt - 1) / 4, the gate (u - b) sqrt(n - 1) >= z sqrt(1 - skew u +
     a u^2) with u > b squares to A u^2 + B u + C >= 0, where A = n - 1 - z^2 a,
     B = z^2 skew - 2 b (n - 1) and C = b^2 (n - 1) - z^2. The quadratic is
-    -z^2 (1 - skew b + a b^2) < 0 at u = b, so b lies strictly between its roots
-    whenever A > 0. Squaring loses which side of b the gate is satisfied on, and
+    -z^2 (1 - skew b + a b^2) < 0 at u = b when the variance there is positive,
+    so b lies strictly between its roots whenever A > 0. Zero variance is the
+    floor-active exception described below. Squaring loses the side of b, and
     the sign of `z_bar` says which: a bar above PSR 0.5 has z > 0, the gate needs
     u > b, and the passing set is [larger root, infinity); a bar below PSR 0.5
     has z < 0, every u >= b passes outright, and the passing set reaches down to
@@ -86,6 +87,7 @@ def min_passing_sharpe(n, skew, kurt, z_bar, benchmark):
     bars (and exposes the same signed and degenerate domain);
     `test_joint_gate_power.py` pins them against each other and both against the
     kernel, and pins this branch against the kernel on its own.
+    `test_solver_domain.py` covers invalid and degenerate inputs separately.
     """
     # Pearson's moment inequality admits two-point samples, including equality.
     # At a zero variance polynomial the kernel uses its fixed radicand floor;

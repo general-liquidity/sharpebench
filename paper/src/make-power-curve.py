@@ -133,7 +133,9 @@ def min_passing_sharpe(n, skew, kurt, z_bar, benchmark):
     -z^2 (1 - skew b + a b^2) < 0 at u = b, so b lies strictly between its roots
     and the passing set is [larger root, infinity) whenever A > 0. The larger
     root is taken in the form that avoids cancellation. Works elementwise on
-    arrays.
+    arrays. The shared solver also defines the finite-input/moment domain,
+    signed branch, zero-z threshold and kernel variance-floor exception; see
+    `joint_gate_power.min_passing_sharpe` for that boundary.
     """
     try:
         return _min_passing_sharpe(n, skew, kurt, z_bar, benchmark)
