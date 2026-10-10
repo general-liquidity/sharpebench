@@ -37,7 +37,9 @@ not the separate scientific calibration or study-design requirements.
   schema tag. Frozen fixture/report bytes were not rewritten.
 - Core and CLI Clippy passed with warnings denied; the paired-boundary gate
   passed with its existing allowlist unchanged.
-- Installed CLI behavior and exact-head remote CI remain delivery gates.
+- A separately installed release CLI emitted v5 JSON with rule/unit labels and
+  the unchanged tutorial numerical result; its human output printed those labels.
+  Exact-head remote CI remains a delivery gate.
   Forecast reports are consumed by the Rust library/CLI; this pass does not
   assert a new Python or WASM forecast-report endpoint.
 
