@@ -163,6 +163,13 @@ the agents that had resolved those contracts. Settlement agreement is now
 checked for every pair on every contract both resolved, so an unequal outcome or
 availability time is refused even when another document lacks that contract.
 
+A comparison with no common resolved contracts has no point estimate, not a
+measured tie. Rust callers use `point_estimate() -> Option<f64>` and the CLI
+prints `diff=unavailable`. Existing JSON schemas retain their numeric zero
+placeholder on empty support; consumers must check `n_contracts > 0` before
+reading it as an estimate. A nonempty comparison retains its descriptive
+estimate even when inference is withheld. No frozen report is rewritten.
+
 A withheld pair stays in the Holm family, so adding any third agent, complete
 or not, enlarges the family that sets a surviving pair's Holm multiplier. The
 pair's support, interval and raw p-value do not move.

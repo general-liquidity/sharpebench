@@ -1247,6 +1247,17 @@ pub struct PairwiseForecastComparison {
     pub inference_error: Option<String>,
 }
 
+impl PairwiseForecastComparison {
+    /// A measured descriptive estimate, or no estimate when support is empty.
+    ///
+    /// Legacy JSON retains a numeric zero placeholder for an empty comparison;
+    /// it is not a measured tie. Withheld inference on nonempty support does not
+    /// erase the observed estimate. This accessor changes no serialized schema.
+    pub fn point_estimate(&self) -> Option<f64> {
+        (self.n_contracts > 0).then_some(self.mean_loss_difference)
+    }
+}
+
 /// Why a paired comparison carries no interval, no p-value and no significance.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum ForecastInferenceError {
@@ -2018,6 +2029,21 @@ fn holm_adjust(comparisons: &mut [PairwiseForecastComparison], alpha: f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn no_observations_are_not_a_measured_zero_difference() {
+        let empty = compare_agents("a", &[], "b", &[], ForecastAnalysisConfig::default()).unwrap();
+        assert_eq!(empty.point_estimate(), None);
+        assert_eq!(empty.mean_loss_difference, 0.0); // Legacy wire placeholder.
+        let left = parse_forecast_evidence(&fixture("a", &[0.5], &[1.0])).unwrap();
+        let right = parse_forecast_evidence(&fixture("b", &[0.5], &[1.0])).unwrap();
+        let measured = analyze_forecast_quality(&[left, right], ForecastAnalysisConfig::default())
+            .unwrap()
+            .comparisons
+            .remove(0);
+        assert!(measured.inference_error.is_some());
+        assert_eq!(measured.point_estimate(), Some(0.0));
+    }
 
     fn fixture(agent: &str, probabilities: &[f64], outcomes: &[f64]) -> String {
         assert_eq!(probabilities.len(), outcomes.len());
