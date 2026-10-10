@@ -139,13 +139,13 @@ fn check_claims(protocol: &StudyProtocol) -> Result<(), ProtocolRefusal> {
                 })
             }
             (
-                DecisionRule::IntervalUpperBoundAtMost { .. },
+                DecisionRule::IntervalUpperBoundAtMost { limit },
                 EstimandKind::PerEntryFalsePositive | EstimandKind::WholeFieldAnyFalseEligibility,
-            )
-            | (
-                DecisionRule::IntervalLowerBoundAtLeast { .. },
+            ) => probability(limit, "decision rule limit")?,
+            (
+                DecisionRule::IntervalLowerBoundAtLeast { bound },
                 EstimandKind::PowerAtEffect { .. },
-            ) => {}
+            ) => probability(bound, "decision rule bound")?,
             (rule, kind) => {
                 return Err(ProtocolRefusal::DecisionRuleEstimandMismatch {
                     claim: claim.id.clone(),
