@@ -14,6 +14,14 @@ and links the commits it was built from.
 
 ### Corrected
 
+- Forward arena saves use cooperating OS locks, stale-snapshot checks and a
+  validated redo transaction with windows/boards before state. Load recovers
+  process-interrupted writes; verification remains read-only. Windows does not
+  gain a directory-fsync or hardware/power-loss guarantee. Published bytes stay frozen.
+- Empty forecast comparisons expose no point estimate through the typed Rust
+  accessor and print unavailable in the CLI. Nonempty withheld comparisons keep
+  their measured estimate. Legacy JSON zero placeholders and schemas are retained;
+  consumers must consult the observed contract count. Frozen reports are unchanged.
 - Gateway journal save checks document identity and experiment binding together
   with version from one byte snapshot. Same-version replacements are refused
   without losing the caller's pending records; legacy-derived ownership is kept.

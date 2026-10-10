@@ -1364,7 +1364,8 @@ impl GatewayJournal {
     ///
     /// The write checks [`GatewayJournal::version`], the document identity and
     /// its route/budget/sweep binding. A different document at the same version
-    /// is refused too, and the caller keeps every record it appended. Concurrent writers are kept apart by the
+    /// is refused too, and the caller keeps every record it appended.
+    /// Concurrent writers are kept apart by the
     /// [`JournalLock`] a gateway holds, not by this check; see the type
     /// documentation for what each one covers.
     ///
