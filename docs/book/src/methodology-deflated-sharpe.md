@@ -344,7 +344,10 @@ benchmark per period.
 
 The budget curve (`sharpebench_core::budget_curve`, Python `budget_curve`)
 takes the same annualized `trials_sr_std` and converts it with its own
-`periods_per_year`; until the release after 0.19.0 it too deflated with the
+`periods_per_year`. Budget coordinates must be finite and strictly increasing;
+this validation does not establish held-out disjointness or matched market
+support, which remain caller obligations. Until the release after 0.19.0 it too
+deflated with the
 prior unconverted. The raw Python primitives `deflated_sharpe_ratio`,
 `bootstrap_dsr_ci` and `selection_robustness` take `trials_sr_std` per period,
 the unit of the Rust functions they bind, and use an explicit value as given.

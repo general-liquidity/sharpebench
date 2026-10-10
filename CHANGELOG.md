@@ -14,6 +14,9 @@ and links the commits it was built from.
 
 ### Corrected
 
+- Budget curves refuse nonfinite coordinates at every point before scoring.
+  NaN can no longer bypass the increasing-budget check and enter a report.
+  This does not establish held-out disjointness or comparable market support.
 - Joint-gate development calibration separates omitted conjunctive gates from
   modelling assumptions and non-gating disclosures. Removing conjuncts bounds
   acceptance only on unchanged inputs and modelled-leg outputs, not the shipped
