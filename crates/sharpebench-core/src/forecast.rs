@@ -2138,6 +2138,22 @@ mod tests {
     }
 
     #[test]
+    fn a_shared_digest_with_only_a_unit_mismatch_is_refused_before_partitioning() {
+        let evidence = parse_forecast_evidence(&fixture("a", &[0.8], &[1.0])).unwrap();
+        let left = scored_forecasts(&evidence).unwrap();
+        let mut right = left.clone();
+        let config = ForecastAnalysisConfig::default();
+        assert!(compare_agents_by_stratum("a", &left, "b", &right, config).is_ok());
+
+        // Exercise the internal consistency boundary without pretending this
+        // contradictory scored row is a valid externally parsed contract.
+        right[0].target_unit = "another-unit".to_string();
+        let error = compare_agents_by_stratum("a", &left, "b", &right, config)
+            .expect_err("partitioning must not hide contradictory shared semantics");
+        assert!(error.0.contains("unequal contract semantics"));
+    }
+
+    #[test]
     fn empty_pair_wire_reports_null_with_versioned_plan_and_planless_reports() {
         let left = parse_forecast_evidence(&fixture("a", &[0.5], &[1.0])).unwrap();
         let mut right = parse_forecast_evidence(&fixture("b", &[0.5], &[1.0])).unwrap();

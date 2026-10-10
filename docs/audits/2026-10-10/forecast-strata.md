@@ -23,16 +23,21 @@ not the separate scientific calibration or study-design requirements.
 
 ## Verification performed
 
-- All 490 core library tests passed, including 25 forecast-filtered cases.
+- All 491 core library tests passed, including 26 forecast-filtered cases.
 - Four new controls cover same-rule/different-unit partitioning, mixed-rule
   single-stratum parity and one Holm family, cross-stratum support gaps/null
   estimates, and plan exclusion/empty labels. R08's former pooling
   characterization now asserts separated results under USD/cents rescaling.
 - All 14 partial-support integration tests and 8 forecast CLI tests passed.
-- The full core package passed 588 tests plus its documentation test. The first
+- The full core package passed 589 tests plus its documentation test. The first
   remote run caught a settlement integration fixture still pinning the older
   comparison JSON shape; its v5 expectation now includes both labels while
   retaining every numerical byte. Library-only checks had missed that fixture.
+- A later mutation shard found the shared-digest unit guard's `||` to `&&`
+  mutation survived. A contradictory internal scored-row regression now fails
+  against that exact isolated mutant, preventing partitioning from hiding the
+  unit mismatch; valid equal-row controls pass. This is an internal consistency
+  test, not evidence that contradictory digests pass external parsing.
 - Isolated mutations removing unit separation and rule separation each failed
   the respective regression on numeric/support assertions. Restoring the source
   passed all 25 forecast-filtered tests.
