@@ -45,8 +45,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::accounting::RateCard;
 use crate::gateway_journal::{
-    FinishClass, GatewayBudget, GatewayJournal, JournalIdentity, JournalLock, JournalSaveError,
-    ReleaseReason, Settlement, UnknownCostReason,
+    FinishClass, GatewayBudget, GatewayJournal, JournalIdentity, JournalLock, JournalRecord,
+    JournalSaveError, ReleaseReason, Settlement, UnknownCostReason,
 };
 
 #[path = "gateway_serve.rs"]
@@ -243,10 +243,6 @@ impl ModelRoute {
 
     pub fn rate_card(&self) -> &RateCard {
         &self.rate_card
-    }
-
-    pub fn max_output_tokens(&self) -> u32 {
-        self.max_output_tokens
     }
 
     pub fn input_token_overhead(&self) -> u64 {
@@ -808,6 +804,7 @@ impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
         // charges the reservation, and a provider may price a call above what it
         // reserved, so the resumed gateway would spend against a figure it
         // cannot know is the real one.
+        reservations_match_routes(&journal, routes)?;
         let unsettled = journal.spend().outstanding_calls;
         if unsettled > 0 {
             return Err(std::io::Error::new(
@@ -1297,6 +1294,44 @@ impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
     }
 }
 
+/// Read back the route each reservation names. The journal's identity binds the
+/// route table as a whole, so it cannot notice a record that names the wrong
+/// route of the right table, and a reservation is the only record saying which
+/// route a call's money went to. A record no route of this table explains is
+/// refused rather than resumed.
+fn reservations_match_routes(journal: &GatewayJournal, routes: &RouteTable) -> std::io::Result<()> {
+    for record in journal.records() {
+        let JournalRecord::Reserved {
+            ordinal,
+            alias,
+            provider,
+            model,
+            revision,
+            rate_card_sha256,
+            ..
+        } = record
+        else {
+            continue;
+        };
+        let explained = routes.resolve(alias).is_some_and(|route| {
+            let card = route.rate_card();
+            card.provider() == provider
+                && card.model() == model
+                && card.revision() == revision
+                && &card.digest() == rate_card_sha256
+        });
+        if !explained {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "gateway journal is malformed: reservation {ordinal} names a route this table does not hold under that rate card"
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn route_index(routes: &RouteTable, alias: &str) -> usize {
     routes
         .routes
@@ -1323,7 +1358,7 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
 
     use super::*;
-    use crate::gateway_journal::{JournalLockError, JournalRecord};
+    use crate::gateway_journal::JournalLockError;
     use crate::scratch::ScratchDir;
 
     const KEY: &str = "sk-live-test-do-not-log-0123456789";
@@ -2655,6 +2690,164 @@ mod tests {
         assert_eq!(gateway.dispatches(), 0, "no request starts");
         assert_eq!(reservations(gateway.journal()), 0, "nothing is appended");
         assert_eq!(gateway.journal().spend().committed_usd_nanos(), 0);
+    }
+
+    fn two_routes() -> RouteTable {
+        let route = |alias: &str, destination: &str, input, output| {
+            ModelRoute::new(
+                alias,
+                destination,
+                Secret::new(KEY),
+                card(input, output, alias),
+                4096,
+                TEST_OVERHEAD,
+            )
+            .expect("a valid route")
+        };
+        RouteTable::new(vec![
+            route("first.v1", "https://provider.invalid/first", 1, 1),
+            route("second.v1", "https://provider.invalid/second", 3, 7),
+        ])
+        .expect("a valid table")
+    }
+
+    fn request_for(alias: &str) -> String {
+        let mut value: serde_json::Value =
+            serde_json::from_str(&request("hello", 16)).expect("json");
+        value["model_alias"] = serde_json::Value::String(alias.into());
+        value.to_string()
+    }
+
+    /// With one route in the table, a gateway that always took the first route
+    /// would pass everything else here. Calling the second route first is what
+    /// separates them: the destination, the reservation and the price must all
+    /// come from the alias the entrant named.
+    #[test]
+    fn each_call_is_routed_reserved_and_priced_against_the_alias_it_named() {
+        let routes = two_routes();
+        assert_eq!(routes.aliases(), ["first.v1", "second.v1"]);
+        assert!(!routes.is_empty());
+        assert!(RouteTable::default().is_empty());
+        let permits = CallPermits::new(4);
+        let mut gateway = ModelGateway::new(
+            &routes,
+            &permits,
+            FakeProvider::answering(2),
+            budget(u128::MAX, 8),
+            GatewayLimits::default(),
+        );
+        assert!(parse(&gateway.serve_line(&request_for("second.v1"))).ok);
+        assert_eq!(
+            gateway.journal().spend().priced_usd_nanos,
+            10 * 3 + 5 * 7,
+            "the second route's card prices the second route's call"
+        );
+        assert!(parse(&gateway.serve_line(&request_for("first.v1"))).ok);
+        assert_eq!(
+            gateway.journal().spend().priced_usd_nanos,
+            65 + 10 + 5,
+            "and the first route's card prices the first's"
+        );
+
+        let destinations: Vec<&str> = gateway
+            .transport
+            .seen
+            .iter()
+            .map(|seen| seen.destination.as_str())
+            .collect();
+        assert_eq!(
+            destinations,
+            [
+                "https://provider.invalid/second",
+                "https://provider.invalid/first"
+            ]
+        );
+        let reserved: Vec<(&str, &str)> = gateway
+            .journal()
+            .records()
+            .iter()
+            .filter_map(|record| match record {
+                JournalRecord::Reserved {
+                    alias,
+                    rate_card_sha256,
+                    ..
+                } => Some((alias.as_str(), rate_card_sha256.as_str())),
+                JournalRecord::Settled { .. } => None,
+            })
+            .collect();
+        let digest = |alias: &str| routes.resolve(alias).expect("a route").rate_card().digest();
+        assert_eq!(
+            reserved,
+            [
+                ("second.v1", digest("second.v1").as_str()),
+                ("first.v1", digest("first.v1").as_str())
+            ],
+            "each reservation names the route the call went to"
+        );
+    }
+
+    /// The journal's identity binds the table, not the record, so a reservation
+    /// naming another route of the same table passes every identity check. Each
+    /// variant changes one field of the one reservation.
+    #[test]
+    fn a_reservation_no_route_explains_is_refused_at_reopen() {
+        let routes = two_routes();
+        let permits = CallPermits::new(4);
+        let dir = temp_dir("reservation-routes");
+        let path = dir.path().join("journal.json");
+        {
+            let mut gateway = ModelGateway::open(
+                &routes,
+                &permits,
+                FakeProvider::answering(1),
+                budget(1_000_000, 8),
+                GatewayLimits::default(),
+                &path,
+            )
+            .expect("a fresh journal");
+            assert!(parse(&gateway.serve_line(&request_for("second.v1"))).ok);
+        }
+        let open = || {
+            ModelGateway::open(
+                &routes,
+                &permits,
+                FakeProvider::answering(0),
+                budget(1_000_000, 8),
+                GatewayLimits::default(),
+                &path,
+            )
+            .map(drop)
+        };
+        open().expect("the journal as written resumes");
+        let honest: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("the journal"))
+                .expect("json");
+        let first_digest = routes
+            .resolve("first.v1")
+            .expect("a route")
+            .rate_card()
+            .digest();
+        for (field, value) in [
+            ("alias", "gone.v1"),
+            ("alias", "first.v1"),
+            ("provider", "other"),
+            ("model", "other"),
+            ("revision", "other"),
+            ("rate_card_sha256", first_digest.as_str()),
+        ] {
+            let mut tampered = honest.clone();
+            tampered["records"][0][field] = value.into();
+            std::fs::write(&path, tampered.to_string()).expect("write");
+            let refused = match open() {
+                Ok(()) => panic!("{field} {value} must be refused"),
+                Err(error) => error,
+            };
+            assert_eq!(refused.kind(), std::io::ErrorKind::InvalidData, "{field}");
+            assert!(
+                refused.to_string().contains("reservation 0 names a route"),
+                "{field}: {refused}"
+            );
+        }
     }
 
     /// A reservation bounds what this host authorizes, not what a provider may
