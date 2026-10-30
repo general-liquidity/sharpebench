@@ -179,7 +179,7 @@
       "sha256": "1e025ac30099de23ae8455f20ae5441b557e924870d0e1475c7508512908ec0d"
     }
   ],
-  "generated_at_head": "82ce00de26289bc5596b5f92304569399042dc3b",
+  "generated_at_head": "a11216fcd5174b629d1523ee546a1dfb7e783c1c",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -187,15 +187,11 @@
   "source_files": [
     {
       "path": "Cargo.lock",
-      "sha256": "62e27fb9fd59b6ef6e2e3f60067c2e7b4ed68f2259552597562e332e1bd9e9e1"
+      "sha256": "8c0f739e0252bad7bd45b6208dce2fc7c0f2d458848c3c67dd337e8426caebbb"
     },
     {
       "path": "Cargo.toml",
       "sha256": "db1159145fafe48bafce05ed6e6b59d0db1fbdc6130ad83752b09885287c3816"
-    },
-    {
-      "path": "arena/state.json",
-      "sha256": "3273c1446127e80774d6be76ce8d563cfc3568f5723f7f11af3993b3e9b79467"
     },
     {
       "path": "arena/windows/window-001/window.json",
@@ -1471,7 +1467,7 @@
     },
     {
       "path": "paper/src/provenance_common.py",
-      "sha256": "ca32940dca61606b720a699878af858137e6d94c6f5e314e86d3e7882b25d043"
+      "sha256": "00609150daabb231c38aa0a4bd8c8eaa0f5e6eb274813b87e1fc0e7794621534"
     },
     {
       "path": "paper/src/test_check_prospective_forecast_report.py",
@@ -1519,7 +1515,7 @@
     },
     {
       "path": "paper/src/test_provenance.py",
-      "sha256": "6a2faf76e53bcdafaaefcc8dec8421d1cbb2c6e2888da51d91e452304fcc54af"
+      "sha256": "512eac15fc572de6b8b8ba3e78c3d34f045c5740b5ba458c812ce70122ed4a02"
     },
     {
       "path": "paper/src/test_solver_domain.py",
@@ -1549,7 +1545,7 @@
     "paper/sections/*.tex",
     "paper/refs.bib",
     "data/*.csv",
-    "arena/**/*.json"
+    "arena/windows/**/*.json"
   ],
-  "source_snapshot_sha256": "288fef03710c7fabf32e085b60b0379a9708af035b8c4d047062c86a976d8dc9"
+  "source_snapshot_sha256": "2068eb345be824cefe813973dcc462af080f2a3eb3d0b14501d610f2fbfa4bbf"
 }
