@@ -9,8 +9,9 @@ reason: they are not paper artifacts.
 
 ## joint-gate-power.jsonl
 
-Ticket P12-A, section 10.A of the remaining-product-work plan: calibration of
-the full joint eligibility rule rather than one leg of it.
+Internal ticket P12-A: calibration of the full joint eligibility rule rather
+than one leg of it. The ticket's plan is a maintainer document and is not
+published in this repository, so this section is the public record of the work.
 
 Producer: `paper/src/make-joint-gate-power.py`, with the importable parts in
 `paper/src/joint_gate_power.py` and regressions in
