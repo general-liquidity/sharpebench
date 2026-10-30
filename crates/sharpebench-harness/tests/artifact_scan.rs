@@ -2,7 +2,7 @@ use std::io::{self, Read};
 
 use serde_json::{json, Value};
 use sharpebench_harness::artifact_scan::{
-    IncompleteReason, MatchKind, RawScanPolicy, RawScanner, POLICY_VERSION,
+    IncompleteReason, MatchKind, RawScanPolicy, RawScanner, MAX_POLICY_BYTES, POLICY_VERSION,
 };
 
 fn policy_value() -> Value {
@@ -15,6 +15,44 @@ fn policy(value: &Value) -> RawScanPolicy {
 
 fn small_limits() -> Value {
     json!({"max_files": 2, "max_file_bytes": 20, "max_total_bytes": 25, "max_seconds": 60})
+}
+
+/// Each bound on its limit and one past it, the two sides differing only in that
+/// count, so neither side can pass on another rule.
+#[test]
+fn policy_size_and_rule_counts_hold_exactly_at_their_limits() {
+    let exact = serde_json::to_vec(&policy_value()).unwrap();
+    let padded = |len: usize| {
+        let mut bytes = exact.clone();
+        bytes.resize(len, b' ');
+        RawScanPolicy::from_json(&bytes)
+    };
+    assert!(padded(MAX_POLICY_BYTES).is_ok());
+    assert_eq!(
+        padded(MAX_POLICY_BYTES + 1).err().as_deref(),
+        Some("scan policy exceeds 64 KiB")
+    );
+
+    let digests = |count: usize| -> Value {
+        json!({
+            "schema_version": POLICY_VERSION,
+            "file_sha256": (0..count).map(|i| format!("{i:064x}")).collect::<Vec<_>>(),
+        })
+    };
+    let sequences = |count: usize| -> Value {
+        json!({
+            "schema_version": POLICY_VERSION,
+            "utf8_sequences": (0..count)
+                .map(|i| format!("protected-sequence-{i:04}"))
+                .collect::<Vec<_>>(),
+        })
+    };
+    let parse = |value: Value| RawScanPolicy::from_json(&serde_json::to_vec(&value).unwrap());
+    let over = Some("scan policy exceeds the rule-count limit");
+    assert!(parse(digests(256)).is_ok());
+    assert_eq!(parse(digests(257)).err().as_deref(), over);
+    assert!(parse(sequences(32)).is_ok());
+    assert_eq!(parse(sequences(33)).err().as_deref(), over);
 }
 
 #[test]

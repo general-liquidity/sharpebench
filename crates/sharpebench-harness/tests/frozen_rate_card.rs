@@ -73,9 +73,15 @@ fn card_contract_rejects_missing_unknown_noninteger_and_invalid_identity_fields(
             .unwrap()
             .replacen('{', "{\"model\":\"other\",", 1);
     assert!(RateCard::from_json(duplicate.as_bytes()).is_err());
-    let mut oversized = serde_json::to_vec(&original).unwrap();
-    oversized.resize(MAX_RATE_CARD_BYTES + 1, b' ');
-    assert!(RateCard::from_json(&oversized).is_err());
+    let mut at_limit = serde_json::to_vec(&original).unwrap();
+    at_limit.resize(MAX_RATE_CARD_BYTES, b' ');
+    assert!(RateCard::from_json(&at_limit).is_ok());
+    let mut oversized = at_limit;
+    oversized.push(b' ');
+    assert_eq!(
+        RateCard::from_json(&oversized).unwrap_err(),
+        "rate card exceeds the 64 KiB input limit"
+    );
 }
 
 #[test]

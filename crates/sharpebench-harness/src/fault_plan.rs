@@ -924,6 +924,33 @@ mod tests {
 
     /// Row 29: the condition does not hold, so the mode is refused with the
     /// reason, never silently armed or ignored.
+    /// The limit and one past it, under plans that differ only in the count, so
+    /// the count is the only rule the second one can break.
+    #[test]
+    fn the_fault_count_holds_exactly_at_its_limit() {
+        let plan = |count: usize| {
+            let faults = (0..count)
+                .map(|index| {
+                    spec(
+                        &format!("f{index}"),
+                        None,
+                        1,
+                        FaultMode::ProjectionLag { max_lag_steps: 2 },
+                    )
+                })
+                .collect();
+            FaultPlan::new(1, vec![ContractRelaxation::ReadYourWrites], faults)
+        };
+        assert_eq!(
+            plan(MAX_FAULTS).expect("a full plan").faults().len(),
+            MAX_FAULTS
+        );
+        assert_eq!(
+            plan(MAX_FAULTS + 1).expect_err("one fault too many"),
+            FaultPlanError::Invalid(format!("a plan carries 1..={MAX_FAULTS} faults"))
+        );
+    }
+
     #[test]
     fn limit_before_sort_is_refused_while_no_paged_read_exists() {
         let refused = FaultPlan::new(
