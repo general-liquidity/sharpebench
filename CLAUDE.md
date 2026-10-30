@@ -7,18 +7,26 @@ nothing critical is lost if only this file is loaded.
 
 ## Active goal
 
-The [verification and completion checklist](docs/audits/2026-09-09/IMPLEMENTATION.md)
-is shared with the sibling product and mirrored there. Follow its current tasks
-and verification record. The 2026-09-07 audit is completed historical work, not
-the active schedule.
+Close every row of the gap programme. The row list lives in the maintainer
+workspace (`research/product-context/acceptance-map.md` and
+`implementation-gaps.md`), not in this repository, and the same goal applies to
+the sibling product. A row closes with an implementation and test reference, or
+with a recorded, evidence-backed disposition. No release happens until the owner
+approves it at the end of the programme.
+
+The audit ledgers under `docs/audits/` are finished records. Rows G01 to G34 of
+the 2026-09-09 ledger are closed, and neither that ledger nor the 2026-09-07
+audit is an active schedule.
 
 ## Non-negotiables
 
 1. Commit author is `Tiberiu Toca <tibi.toca@gmail.com>`. Never add a
    `Co-Authored-By` trailer for any agent or model.
-2. No release, tag, force push or history rewrite under this goal.
-3. No model calls, benchmark fields or market-data acquisition. Published
-   numerical evidence stays frozen.
+2. No release or tag until the owner approves it at the end of the programme.
+   No force push or history rewrite.
+3. No model downloads, model calls, benchmark fields or market-data acquisition,
+   unless the run is a declared, protocol-frozen experiment the owner has
+   approved. Published numerical evidence stays frozen.
 4. Stage explicit paths. Never `git add -A`, `git reset --hard`,
    `git checkout -- .`, `git stash` or `git clean`.
 5. Mutation-check every regression in an isolated copy, never in the production

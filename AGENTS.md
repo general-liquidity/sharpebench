@@ -6,31 +6,36 @@ agents: a pure Rust scoring kernel, a point-in-time simulator, forward
 attestation and a chained board, distributed as CLI, crates, WASM/npm, MCP and
 Python over one implementation.
 
-## Current goal: verification and completion
+## Current goal: close the gap programme
 
-The active goal is [the 2026-09-09 checklist](docs/audits/2026-09-09/IMPLEMENTATION.md),
-mirrored across both repositories. It covers independent review of Claude's
-changes, the Hyper-Tau assessment, recoverable pending implementations, verified
-repairs, documentation and delivery. [Findings](docs/audits/2026-09-09/AUDIT.md)
-and [verification](docs/audits/2026-09-09/VERIFICATION.md) are recorded separately.
+The active goal is to close every row of the gap programme across both
+repositories, with no release until the owner approves it at the end. The row
+list lives in the maintainer workspace (`research/product-context/acceptance-map.md`
+and `implementation-gaps.md`), not in this repository. An agent without that
+workspace takes its rows from the coordinator.
 
-The [2026-09-07 audit](docs/audits/2026-09-07/IMPLEMENTATION.md) is a completed
-historical checkpoint. Its old progress counts and deferred-work list are not
-the active schedule. Follow the new ledger; do not silently reopen or rewrite
-historical evidence.
+The audit ledgers are finished records. Rows G01 to G34 of the
+[2026-09-09 ledger](docs/audits/2026-09-09/IMPLEMENTATION.md) are closed, and the
+[2026-09-07 audit](docs/audits/2026-09-07/IMPLEMENTATION.md) is a completed
+historical checkpoint. Neither is an active schedule. Do not silently reopen or
+rewrite historical evidence.
 
 ## Goal rules
 
 These come from the goal, not from general practice, and they override
 convenience:
 
-1. **No release, tag, force push or history rewrite** under this goal.
-2. **No new experiments**: no model downloads, model calls, benchmark fields or
-   market-data acquisition. Synthetic regressions, existing fixtures, package
-   checks and finite diagnostics are in scope.
+1. **No release or tag until the owner approves it** at the end of the
+   programme. No force push or history rewrite at any time.
+2. **Experiments run only when declared, protocol-frozen and approved.** A run
+   needs a frozen protocol and analysis plan before it starts, and the owner's
+   approval. Without both there are no model downloads, model calls, benchmark
+   fields or market-data acquisition. Synthetic regressions, existing fixtures,
+   package checks and finite diagnostics are always in scope.
 3. **Published numerical evidence stays frozen.** Where a repair changes what a
    producer would compute, say so in the paper instead of regenerating the
-   number.
+   number. An approved experiment publishes a separately versioned result beside
+   the frozen one, never in place of it.
 4. **A suspected issue is not a confirmed bug.** Every row closes with an
    implementation or test reference, or with an evidence-backed disposition.
 5. **Mutation-check every regression.** Revert the fix in an isolated temporary
@@ -92,5 +97,5 @@ diff in the four pure crates, and the paired-boundary gate
 | Paper, producers, frozen evidence | `paper/` |
 | Forward arena records | `arena/` |
 | Product roadmap | `docs/PLAN.md` |
-| Audit goal | `docs/audits/2026-09-09/` (active), `docs/audits/2026-09-07/` (archive) |
+| Finished audit records | `docs/audits/` |
 | Release operations | `RELEASING.md`, `scripts/release.py` |

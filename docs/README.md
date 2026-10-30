@@ -4,6 +4,19 @@ The root [`README`](../README.md) is the task-first product entry point. The
 mdBook contains the benchmark reference; the documents beside it cover project
 operations and engineering assessments.
 
+## Current state
+
+The active goal is to close the gap programme, with no release until the owner
+approves it at the end. [`AGENTS.md`](../AGENTS.md) carries that goal and its
+rules. The latest tag is `v0.28.0`, and `[Unreleased]` in
+[`CHANGELOG.md`](../CHANGELOG.md) lists the work after it. No forward window has
+completed.
+
+The [plan](PLAN.md) holds current status and the remaining product work, and
+[validation status](book/src/validation-status.md) says what the evidence does
+and does not establish. The audits under [`audits/`](audits/) are finished
+records, not schedules.
+
 ## Use and methodology
 
 | Topic | Document |
