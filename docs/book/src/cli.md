@@ -306,6 +306,13 @@ the list of fields that entered nothing with the reason each is excluded. One
 digest per control is published alongside the suite digest, so a reader can see
 which row moved rather than only that one did.
 
+`control_binding.preimage_encoding` names the byte form of the digests.
+`sharpebench/evidence-preimage/v1` length-prefixes every name and value, so a
+value cannot imitate a field boundary. A document without the field predates it
+and was digested under the `legacy` separator form, which was not injective;
+such a digest no longer matches a recomputation, and
+`SuiteControlEvidence::digest_encoding` identifies which form produced it.
+
 The `detail` line is excluded by declaration: it is a rendering of fields that
 are already bound, and binding the prose would let a wording edit break a digest
 over unchanged evidence. Everything here carries `used_by_gate: false`. The

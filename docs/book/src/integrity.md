@@ -95,7 +95,8 @@ digest, which fields it binds and which are excluded **with a stated reason**.
 A test fails when a new field is neither covered nor excluded, so the
 inventory cannot silently fall behind the struct it describes. Secrets are
 redacted before hashing, so verification never depends on holding secret
-material.
+material. Preimages are framed under `sharpebench/evidence-preimage/v1`, which
+length-prefixes every name and value so no value can imitate a field boundary.
 
 ## Agreement and dissent, without a judge
 
