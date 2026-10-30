@@ -1,0 +1,434 @@
+{
+ "records": [
+  {
+   "binding_sha256": "4fcd9ecb4f05d33e29230b4d8af3833642d2626900e69c83387aae5132e93b5c",
+   "declared_lineage": null,
+   "duplicate_of_ordinal": null,
+   "evidence_class": "edge_manifest_candidate_pool",
+   "family_digest": "9cda3af2624eb2328180938c4356ff391692eda7dcd9e2d54f6bae4ec1a022bc",
+   "family_preimage": {
+    "instruments": [
+     "synthetic_panel"
+    ],
+    "long_when": {
+     "left": {
+      "indicator": "momentum",
+      "window": "parameter"
+     },
+     "op": "gt",
+     "right": {
+      "constant": "parameter"
+     }
+    },
+    "regimes": [
+     "trending"
+    ],
+    "short_when": null
+   },
+   "generator_identity": {
+    "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "generator_identity_sha256": "bcd872382fdc30b9d1ab731bff4768718b248841c73ecc50ba12153cb79e29d7",
+   "idea_provenance": [],
+   "invalid_reason": null,
+   "lineage_binding_sha256": "22fb587a87fa147bb9f0c627d17f35f0a86b5e0704679071ded1ec8c39cf8648",
+   "lineage_status": "host-derived-unreferenced",
+   "manifest": {
+    "hypothesis": "Momentum persists after explicit transaction costs.",
+    "instruments": [
+     "synthetic_panel"
+    ],
+    "invariants": [
+     {
+      "comparator": "gt",
+      "condition_id": "edge",
+      "description": "Net edge remains positive.",
+      "metric": "net_edge",
+      "threshold": {
+       "unit": "basis_points",
+       "value": 0.0
+      }
+     }
+    ],
+    "kill_conditions": [
+     {
+      "comparator": "gt",
+      "condition_id": "drawdown",
+      "description": "Retire after drawdown breach.",
+      "metric": "drawdown",
+      "threshold": {
+       "unit": "percent",
+       "value": 20.0
+      }
+     }
+    ],
+    "mechanism": "Gradual information diffusion creates short-horizon continuation.",
+    "regimes": [
+     "trending"
+    ],
+    "verification_plan": {
+     "confirmation_split": "test",
+     "minimum_observations": 8,
+     "selection_metric": "deflated_sharpe",
+     "selection_split": "validation"
+    }
+   },
+   "manifest_sha256": "ba8adfdf00c3766adfbf28bfaa05748db03e212053b7ec06f32f8cf58d923430",
+   "model_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "parent_candidate_digests": [],
+   "raw_candidate": {
+    "edge_manifest": {
+     "hypothesis": "Momentum persists after explicit transaction costs.",
+     "instruments": [
+      "synthetic_panel"
+     ],
+     "invariants": [
+      {
+       "comparator": "gt",
+       "condition_id": "edge",
+       "description": "Net edge remains positive.",
+       "metric": "net_edge",
+       "threshold": {
+        "unit": "basis_points",
+        "value": 0.0
+       }
+      }
+     ],
+     "kill_conditions": [
+      {
+       "comparator": "gt",
+       "condition_id": "drawdown",
+       "description": "Retire after drawdown breach.",
+       "metric": "drawdown",
+       "threshold": {
+        "unit": "percent",
+        "value": 20.0
+       }
+      }
+     ],
+     "mechanism": "Gradual information diffusion creates short-horizon continuation.",
+     "regimes": [
+      "trending"
+     ],
+     "verification_plan": {
+      "confirmation_split": "test",
+      "minimum_observations": 8,
+      "selection_metric": "deflated_sharpe",
+      "selection_split": "validation"
+     }
+    },
+    "gross_target": 1.0,
+    "id": "base",
+    "long_when": {
+     "left": {
+      "indicator": "momentum",
+      "window": 2
+     },
+     "op": "gt",
+     "right": {
+      "constant": 1.0
+     }
+    },
+    "thesis": "a thesis"
+   },
+   "raw_candidate_sha256": "0bba75915266898fd0098edc1cdf688c28eb37278130fa4c878b9e49e7afb85b",
+   "schema_version": 2,
+   "split_plan_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "trial_ordinal": 0
+  },
+  {
+   "binding_sha256": "75fc6d2fb3fcbcc802f37776d7d16f0488b79d199d1d53657b9ba368485d1cd3",
+   "declared_lineage": null,
+   "duplicate_of_ordinal": null,
+   "evidence_class": "edge_manifest_candidate_pool",
+   "family_digest": "9cda3af2624eb2328180938c4356ff391692eda7dcd9e2d54f6bae4ec1a022bc",
+   "family_preimage": {
+    "instruments": [
+     "synthetic_panel"
+    ],
+    "long_when": {
+     "left": {
+      "indicator": "momentum",
+      "window": "parameter"
+     },
+     "op": "gt",
+     "right": {
+      "constant": "parameter"
+     }
+    },
+    "regimes": [
+     "trending"
+    ],
+    "short_when": null
+   },
+   "generator_identity": {
+    "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "generator_identity_sha256": "bcd872382fdc30b9d1ab731bff4768718b248841c73ecc50ba12153cb79e29d7",
+   "idea_provenance": [],
+   "invalid_reason": null,
+   "lineage_binding_sha256": "3a7de640b8bce0888fe2254825d2d095a4069a8478c4d7d7368a373aa101fc53",
+   "lineage_status": "host-derived-unreferenced",
+   "manifest": {
+    "hypothesis": "Momentum persists after explicit transaction costs.",
+    "instruments": [
+     "synthetic_panel"
+    ],
+    "invariants": [
+     {
+      "comparator": "gt",
+      "condition_id": "edge",
+      "description": "Net edge remains positive.",
+      "metric": "net_edge",
+      "threshold": {
+       "unit": "basis_points",
+       "value": 0.0
+      }
+     }
+    ],
+    "kill_conditions": [
+     {
+      "comparator": "gt",
+      "condition_id": "drawdown",
+      "description": "Retire after drawdown breach.",
+      "metric": "drawdown",
+      "threshold": {
+       "unit": "percent",
+       "value": 20.0
+      }
+     }
+    ],
+    "mechanism": "Gradual information diffusion creates short-horizon continuation.",
+    "regimes": [
+     "trending"
+    ],
+    "verification_plan": {
+     "confirmation_split": "test",
+     "minimum_observations": 8,
+     "selection_metric": "deflated_sharpe",
+     "selection_split": "validation"
+    }
+   },
+   "manifest_sha256": "ba8adfdf00c3766adfbf28bfaa05748db03e212053b7ec06f32f8cf58d923430",
+   "model_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "parent_candidate_digests": [],
+   "raw_candidate": {
+    "edge_manifest": {
+     "hypothesis": "Momentum persists after explicit transaction costs.",
+     "instruments": [
+      "synthetic_panel"
+     ],
+     "invariants": [
+      {
+       "comparator": "gt",
+       "condition_id": "edge",
+       "description": "Net edge remains positive.",
+       "metric": "net_edge",
+       "threshold": {
+        "unit": "basis_points",
+        "value": 0.0
+       }
+      }
+     ],
+     "kill_conditions": [
+      {
+       "comparator": "gt",
+       "condition_id": "drawdown",
+       "description": "Retire after drawdown breach.",
+       "metric": "drawdown",
+       "threshold": {
+        "unit": "percent",
+        "value": 20.0
+       }
+      }
+     ],
+     "mechanism": "Gradual information diffusion creates short-horizon continuation.",
+     "regimes": [
+      "trending"
+     ],
+     "verification_plan": {
+      "confirmation_split": "test",
+      "minimum_observations": 8,
+      "selection_metric": "deflated_sharpe",
+      "selection_split": "validation"
+     }
+    },
+    "gross_target": 0.5,
+    "id": "other",
+    "long_when": {
+     "left": {
+      "indicator": "momentum",
+      "window": 2
+     },
+     "op": "gt",
+     "right": {
+      "constant": 1.0
+     }
+    },
+    "thesis": "a thesis"
+   },
+   "raw_candidate_sha256": "7a35754b02ed909f7148255298ac5e847d37663ac777483651c01ce89fc11b72",
+   "schema_version": 2,
+   "split_plan_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "trial_ordinal": 1
+  },
+  {
+   "binding_sha256": "e9196c4a7a13b79db7359ab06ee2339413bb388a0cdce1f8dfbb2f71293784f1",
+   "declared_lineage": null,
+   "duplicate_of_ordinal": 0,
+   "evidence_class": "edge_manifest_candidate_pool",
+   "family_digest": "9cda3af2624eb2328180938c4356ff391692eda7dcd9e2d54f6bae4ec1a022bc",
+   "family_preimage": {
+    "instruments": [
+     "synthetic_panel"
+    ],
+    "long_when": {
+     "left": {
+      "indicator": "momentum",
+      "window": "parameter"
+     },
+     "op": "gt",
+     "right": {
+      "constant": "parameter"
+     }
+    },
+    "regimes": [
+     "trending"
+    ],
+    "short_when": null
+   },
+   "generator_identity": {
+    "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "generator_identity_sha256": "bcd872382fdc30b9d1ab731bff4768718b248841c73ecc50ba12153cb79e29d7",
+   "idea_provenance": [],
+   "invalid_reason": null,
+   "lineage_binding_sha256": "b4454029738351bccf3a4aba326ee0003288957b5e317e85f58a3b203ece695b",
+   "lineage_status": "host-derived-unreferenced",
+   "manifest": {
+    "hypothesis": "Momentum persists after explicit transaction costs.",
+    "instruments": [
+     "synthetic_panel"
+    ],
+    "invariants": [
+     {
+      "comparator": "gt",
+      "condition_id": "edge",
+      "description": "Net edge remains positive.",
+      "metric": "net_edge",
+      "threshold": {
+       "unit": "basis_points",
+       "value": 0.0
+      }
+     }
+    ],
+    "kill_conditions": [
+     {
+      "comparator": "gt",
+      "condition_id": "drawdown",
+      "description": "Retire after drawdown breach.",
+      "metric": "drawdown",
+      "threshold": {
+       "unit": "percent",
+       "value": 20.0
+      }
+     }
+    ],
+    "mechanism": "Gradual information diffusion creates short-horizon continuation.",
+    "regimes": [
+     "trending"
+    ],
+    "verification_plan": {
+     "confirmation_split": "test",
+     "minimum_observations": 8,
+     "selection_metric": "deflated_sharpe",
+     "selection_split": "validation"
+    }
+   },
+   "manifest_sha256": "ba8adfdf00c3766adfbf28bfaa05748db03e212053b7ec06f32f8cf58d923430",
+   "model_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "parent_candidate_digests": [],
+   "raw_candidate": {
+    "edge_manifest": {
+     "hypothesis": "Momentum persists after explicit transaction costs.",
+     "instruments": [
+      "synthetic_panel"
+     ],
+     "invariants": [
+      {
+       "comparator": "gt",
+       "condition_id": "edge",
+       "description": "Net edge remains positive.",
+       "metric": "net_edge",
+       "threshold": {
+        "unit": "basis_points",
+        "value": 0.0
+       }
+      }
+     ],
+     "kill_conditions": [
+      {
+       "comparator": "gt",
+       "condition_id": "drawdown",
+       "description": "Retire after drawdown breach.",
+       "metric": "drawdown",
+       "threshold": {
+        "unit": "percent",
+        "value": 20.0
+       }
+      }
+     ],
+     "mechanism": "Gradual information diffusion creates short-horizon continuation.",
+     "regimes": [
+      "trending"
+     ],
+     "verification_plan": {
+      "confirmation_split": "test",
+      "minimum_observations": 8,
+      "selection_metric": "deflated_sharpe",
+      "selection_split": "validation"
+     }
+    },
+    "gross_target": 1,
+    "id": "again",
+    "long_when": {
+     "left": {
+      "indicator": "momentum"
+     },
+     "op": "gt",
+     "right": {
+      "constant": 1
+     }
+    },
+    "short_when": null,
+    "thesis": "reworded"
+   },
+   "raw_candidate_sha256": "35d4af8510f312bfbb8a10c3ffcadb9993879f24bc9652968dfdd30258065176",
+   "schema_version": 2,
+   "split_plan_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "trial_ordinal": 2
+  }
+ ],
+ "summary": {
+  "duplicates": 1,
+  "evidence_class": "edge_manifest_candidate_pool",
+  "families": [
+   {
+    "family_digest": "9cda3af2624eb2328180938c4356ff391692eda7dcd9e2d54f6bae4ec1a022bc",
+    "observed_trials": 3,
+    "selectable": 2
+   }
+  ],
+  "family_count": 1,
+  "family_grouping_role": "diagnostic-only-never-a-trial-deduplicator",
+  "generator_identity_sha256": "bcd872382fdc30b9d1ab731bff4768718b248841c73ecc50ba12153cb79e29d7",
+  "invalid": 0,
+  "model_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "n_trials_source": "ledger-counted-before-validation-and-deduplication",
+  "observed_trials": 3,
+  "plan_bound_idea_sources": 0,
+  "schema_version": 2,
+  "selectable": 2,
+  "split_plan_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+ }
+}
