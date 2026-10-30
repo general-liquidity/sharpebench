@@ -16,8 +16,8 @@
 use std::path::Path;
 
 use sharpebench_arena::{
-    verify_arena, Arena, DockerLauncher, EntrantLauncher, IntakeOptions, RevealedEntry, SigningKey,
-    VerifyingKey,
+    verify_arena_expecting, Arena, CompletenessStatus, DockerLauncher, EntrantLauncher,
+    ExpectedHead, IntakeOptions, RevealedEntry, SigningKey, VerifyingKey,
 };
 
 /// Entry point (see the module docs for the argv contract).
@@ -31,6 +31,7 @@ pub fn run(args: &[String], json: bool) -> i32 {
         Some("reference-artifact") => cmd_reference_artifact(args, json),
         Some("commit") => cmd_commit(args, json),
         Some("advance") => cmd_advance(args, json),
+        Some("expire-empty") => cmd_expire_empty(args, json),
         Some("score") => cmd_score(args, json),
         Some("publish") => cmd_publish(args, json),
         Some("verify") => cmd_verify(args, json),
@@ -51,14 +52,17 @@ fn usage() {
     eprintln!("  arena commitment <agent_id> <window> <artifact_digest> <salt> [--fault-plan <plan.json>]");
     eprintln!("                                                         print a commitment; a faulted window's must bind its plan");
     eprintln!("  arena commit <dir> <window> <commitment.json>          register a pre-deadline commitment (from `sharpebench commit` or `arena commitment`)");
-    eprintln!("  arena advance <dir> <epoch>                            advance the epoch (operator/cron/CI supplies \"now\")");
+    eprintln!("  arena advance <dir> <epoch> [--only-if-due]            advance the epoch (operator/cron/CI supplies \"now\"); --only-if-due writes nothing unless a window transition is due");
+    eprintln!("  arena expire-empty <dir> <window>                      record that a window reached its data-reveal epoch with no entrant");
     eprintln!("  arena reference-artifact <buy-and-hold|momentum> <runner_sha256>");
     eprintln!("                                                         print the artifact digest a reference entrant commits to");
     eprintln!("  arena score <dir> <window> <dataset> <entries.json> [--replay-only] [--allow-supplied-returns]");
     eprintln!("                                                         verify reveals, replay and re-execute each capture, refuse mismatches, rank the rest");
     eprintln!("                                                         --replay-only skips re-execution; --allow-supplied-returns also ranks returns as given; either marks the board noncertifying");
     eprintln!("  arena publish <dir> <window> <key>                     sign + write the window's Ed25519 board");
-    eprintln!("  arena verify <dir> [--pubkey <hex>]                    verify every published board + the cross-window chain");
+    eprintln!("  arena verify <dir> [--pubkey <hex>] [--expect-head <count>:<sha256>]");
+    eprintln!("                                                         verify every published board, the cross-window chain and the signed head;");
+    eprintln!("                                                         --expect-head also requires the history to pass through a head seen out of band");
     eprintln!("\n<key> and --pubkey accept a literal, or env:NAME / file:PATH to keep secrets out of process listings.");
 }
 
@@ -287,7 +291,7 @@ fn cmd_commit(args: &[String], json: bool) -> i32 {
 
 fn cmd_advance(args: &[String], json: bool) -> i32 {
     let (Some(dir), Some(epoch)) = (args.get(3), args.get(4)) else {
-        eprintln!("usage: sharpebench arena advance <dir> <epoch>");
+        eprintln!("usage: sharpebench arena advance <dir> <epoch> [--only-if-due]");
         return 2;
     };
     let Ok(epoch) = epoch.parse::<u64>() else {
@@ -298,6 +302,18 @@ fn cmd_advance(args: &[String], json: bool) -> i32 {
         Ok(a) => a,
         Err(e) => return fail(&e, json),
     };
+    if args.iter().any(|arg| arg == "--only-if-due") && !arena.transition_due(epoch) {
+        if json {
+            emit_json(&serde_json::json!({
+                "ok": true,
+                "epoch": arena.current_epoch(),
+                "advanced": false,
+            }));
+        } else {
+            println!("no window transition is due at epoch {epoch}; nothing written");
+        }
+        return 0;
+    }
     match arena.advance(epoch) {
         Ok(()) => {
             let committed: Vec<&String> = arena
@@ -317,6 +333,35 @@ fn cmd_advance(args: &[String], json: bool) -> i32 {
                 for id in committed {
                     println!("  window `{id}` is past its commit deadline (committed)");
                 }
+            }
+            0
+        }
+        Err(e) => fail(&e, json),
+    }
+}
+
+fn cmd_expire_empty(args: &[String], json: bool) -> i32 {
+    let (Some(dir), Some(window)) = (args.get(3), args.get(4)) else {
+        eprintln!("usage: sharpebench arena expire-empty <dir> <window>");
+        return 2;
+    };
+    let mut arena = match Arena::load(Path::new(dir)) {
+        Ok(a) => a,
+        Err(e) => return fail(&e, json),
+    };
+    match arena.expire_empty_window(window) {
+        Ok(epoch) => {
+            if json {
+                emit_json(&serde_json::json!({
+                    "ok": true,
+                    "window": window,
+                    "status": "expired-empty",
+                    "expired_at_epoch": epoch,
+                }));
+            } else {
+                println!(
+                    "window `{window}` expired empty at epoch {epoch}; no board exists for it"
+                );
             }
             0
         }
@@ -445,8 +490,25 @@ fn cmd_publish(args: &[String], json: bool) -> i32 {
 
 fn cmd_verify(args: &[String], json: bool) -> i32 {
     let Some(dir) = args.get(3) else {
-        eprintln!("usage: sharpebench arena verify <dir> [--pubkey <hex>]");
+        eprintln!(
+            "usage: sharpebench arena verify <dir> [--pubkey <hex>] [--expect-head <count>:<sha256>]"
+        );
         return 2;
+    };
+    let expected = if args.iter().any(|arg| arg == "--expect-head") {
+        match flag_value(args, "--expect-head").map(ExpectedHead::parse) {
+            Some(Ok(expected)) => Some(expected),
+            Some(Err(e)) => {
+                eprintln!("error: --expect-head: {e}");
+                return 2;
+            }
+            None => {
+                eprintln!("error: --expect-head requires <count>:<sha256>");
+                return 2;
+            }
+        }
+    } else {
+        None
     };
     let pinned = match flag_value(args, "--pubkey") {
         Some(spec) => match resolve_key(spec) {
@@ -464,8 +526,9 @@ fn cmd_verify(args: &[String], json: bool) -> i32 {
         },
         None => None,
     };
-    match verify_arena(Path::new(dir), pinned.as_ref()) {
+    match verify_arena_expecting(Path::new(dir), pinned.as_ref(), expected.as_ref()) {
         Ok(report) => {
+            let completeness = &report.completeness;
             if json {
                 emit_json(&report);
             } else if report.ok {
@@ -475,6 +538,10 @@ fn cmd_verify(args: &[String], json: bool) -> i32 {
                     if pinned.is_some() { "pinned" } else { "embedded" },
                     report.verifying_key.as_deref().unwrap_or("(none)")
                 );
+                if let Some(digest) = &completeness.head_digest {
+                    println!("head {}:{digest}", completeness.published_count);
+                }
+                println!("completeness limit: {}", completeness.detail);
             } else {
                 eprintln!("FAIL - the arena chain does not verify:");
                 for w in &report.windows {
@@ -482,6 +549,9 @@ fn cmd_verify(args: &[String], json: bool) -> i32 {
                         "  {} chain={} anchor={} key={} {}",
                         w.window_id, w.chain_ok, w.anchor_ok, w.key_ok, w.detail
                     );
+                }
+                if completeness.status == CompletenessStatus::Broken {
+                    eprintln!("  completeness: {}", completeness.detail);
                 }
             }
             i32::from(!report.ok)

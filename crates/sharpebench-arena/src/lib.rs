@@ -6,7 +6,8 @@
 //! `sharpebench_leaderboard`. Nothing drove them. This crate is the driver: a
 //! file-backed [`Arena`] that walks evaluation windows through
 //! open -> committed -> scoring -> published, refusing late commitments and
-//! failed reveals with the exact semantics the registry already defines.
+//! failed reveals with the exact semantics the registry already defines. A
+//! window nobody entered ends at `expired-empty` instead.
 //!
 //! **The kernel stays clock-free.** Time inside the arena is an explicit integer
 //! epoch, exactly as in `registry.rs`. The arena maps epochs to wall time ONLY at
@@ -24,6 +25,11 @@
 //! signature, so [`verify_arena`] catches it either as a broken chain in N or as
 //! an anchor mismatch in N+1. The whole arena history is one verifiable chain,
 //! checkable with only the public key.
+//!
+//! **Completeness.** No later board exists to expose a dropped final board, and
+//! `state.json` is unsigned, so each publish also signs a terminal anchor,
+//! `head.json`: the published count and a digest of the newest board's final
+//! signature. See [`ArenaHead`] for what it does and does not rule out.
 #![forbid(unsafe_code)]
 
 pub mod audit;
@@ -67,10 +73,22 @@ pub const WINDOWS_DIR: &str = "windows";
 pub const WINDOW_FILE: &str = "window.json";
 pub const BOARD_FILE: &str = "board.json";
 pub const BOARD_MD_FILE: &str = "board.md";
+/// The signed terminal anchor at the arena root. See [`ArenaHead`].
+pub const HEAD_FILE: &str = "head.json";
 /// Anchor value carried by the first published window's header.
 pub const GENESIS_ANCHOR: &str = "genesis";
 /// `kind` tag on a [`WindowHeader`] payload.
 pub const WINDOW_HEADER_KIND: &str = "sharpebench-arena-window";
+/// `kind` tag on an [`ArenaHead`] payload. It keeps a board link from being
+/// offered as a head.
+pub const ARENA_HEAD_KIND: &str = "sharpebench-arena-head";
+/// What `arena verify` cannot establish for boards published before the
+/// terminal anchor existed.
+pub const LEGACY_COMPLETENESS_LIMIT: &str = "legacy arena: no published board requires a signed head, so final windows dropped together with their state entries are undetectable here; pin a head with --expect-head to check a known point";
+/// What `arena verify` cannot establish for an arena with no published board.
+pub const EMPTY_COMPLETENESS_LIMIT: &str = "no published window and no signed head: the documents alone cannot show that nothing was published before; pin a head with --expect-head to check a known point";
+/// What a valid head still cannot establish from the documents alone.
+pub const ANCHORED_COMPLETENESS_LIMIT: &str = "signed head covers every published window; a rollback to an earlier head together with its windows is undetectable from the documents alone, so pin a head seen out of band with --expect-head";
 /// Canonical on-disk schema for a forward window. A version bump is required
 /// when the meaning or required fields of the frozen scoring record change.
 pub const WINDOW_SCHEMA_VERSION: u32 = 2;
@@ -154,6 +172,18 @@ pub enum WindowStatus {
     Scoring,
     /// Board signed and written; immutable from the arena's point of view.
     Published,
+    /// The window reached its data-reveal epoch with no entrant, and the
+    /// operator recorded that. Terminal and immutable: nothing was scored, no
+    /// board exists, and the epoch is in [`WindowState::expired_at_epoch`].
+    #[serde(rename = "expired-empty")]
+    ExpiredEmpty,
+}
+
+impl WindowStatus {
+    /// No later transition exists, so the window's record is immutable.
+    pub(crate) fn is_terminal(self) -> bool {
+        matches!(self, Self::Published | Self::ExpiredEmpty)
+    }
 }
 
 /// A recorded refusal: an entry that was not scored, and why. Refusals are part
@@ -235,9 +265,49 @@ pub struct WindowState {
     /// published on the board rows. Omitted when empty.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub returns_provenance: BTreeMap<String, ReturnsProvenance>,
+    /// The epoch at which an empty window was recorded as expired, present
+    /// exactly when `status` is [`WindowStatus::ExpiredEmpty`]. The schema
+    /// version stays as it was: the scoring record does not change, and a
+    /// binary that predates this field refuses the record on its status.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expired_at_epoch: Option<u64>,
 }
 
 impl WindowState {
+    /// Nothing was ever entered, refused, revealed or scored.
+    fn holds_no_entry(&self) -> bool {
+        self.commitments.is_empty()
+            && self.refusals.is_empty()
+            && self.scores.is_empty()
+            && self.dataset_hash.is_none()
+    }
+
+    /// An expiry record must be what [`Arena::expire_empty_window`] writes.
+    fn check_expiry(&self) -> Result<(), String> {
+        let id = &self.id;
+        match (self.status, self.expired_at_epoch) {
+            (WindowStatus::ExpiredEmpty, Some(epoch)) => {
+                if !self.holds_no_entry() {
+                    return Err(format!("expired window `{id}` holds an entry"));
+                }
+                if epoch < self.data_reveal_epoch {
+                    return Err(format!(
+                        "expired window `{id}` expired at epoch {epoch}, before its data-reveal epoch {}",
+                        self.data_reveal_epoch
+                    ));
+                }
+                Ok(())
+            }
+            (WindowStatus::ExpiredEmpty, None) => {
+                Err(format!("expired window `{id}` records no expiry epoch"))
+            }
+            (_, Some(_)) => Err(format!(
+                "window `{id}` records an expiry epoch but is not expired"
+            )),
+            (_, None) => Ok(()),
+        }
+    }
+
     /// Whether this record carries any of the fields that decide what its
     /// board means. See [`SCORED_WINDOW_SCHEMA_VERSION`], which is the version
     /// such a record is written under.
@@ -264,6 +334,7 @@ impl WindowState {
             certifying,
             scores: _,
             returns_provenance,
+            expired_at_epoch: _,
         } = self;
         replay_dataset_sha256.is_some()
             || *supplied_returns_accepted
@@ -362,6 +433,72 @@ pub struct WindowHeader {
     /// Final signature of the previously published window's board, or
     /// [`GENESIS_ANCHOR`] for the arena's first published window.
     pub prev_final_signature: String,
+    /// This board was published with a signed [`ArenaHead`], so a verifier
+    /// holding it must find one: deleting `head.json` cannot pass the arena off
+    /// as legacy. Omitted when false, as on every board signed before the head
+    /// existed.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub head_anchored: bool,
+}
+
+/// The signed terminal anchor (`head.json`), rewritten by every publish in the
+/// same transaction as the board. It is a one-link [`PublicChain`] under the
+/// arena key whose payload is this record.
+///
+/// The final signature transitively binds every earlier board through the
+/// cross-window chain, so count and digest together fix the whole published
+/// history. Dropping final windows and their `state.json` entries leaves a head
+/// that no longer matches, and a verifier fails it.
+///
+/// A head cannot show that it is the newest one. An earlier `head.json` is still
+/// validly signed, so restoring it with its windows is consistent in the
+/// documents. Only a head seen out of band exposes that rollback
+/// ([`ExpectedHead`]). The key holder can also sign any head; pinning the key
+/// does not limit the operator.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArenaHead {
+    /// Always [`ARENA_HEAD_KIND`].
+    pub kind: String,
+    /// Number of published windows, the newest included.
+    pub published_count: u64,
+    pub head_window_id: String,
+    /// See [`head_digest`].
+    pub head_digest: String,
+}
+
+/// The digest an [`ArenaHead`] records: SHA-256 of the newest board's final
+/// signature, hex as stored. It is taken over the signature rather than the file
+/// so that it does not depend on how `board.json` was formatted.
+pub fn head_digest(final_signature: &str) -> String {
+    content_digest(final_signature.as_bytes())
+}
+
+/// A head the verifier learned out of band: after `published_count` windows the
+/// history must have had this digest. The arena may have grown since.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExpectedHead {
+    pub published_count: u64,
+    pub head_digest: String,
+}
+
+impl ExpectedHead {
+    /// Parse `<count>:<sha256>`. A count of zero pins nothing and is refused.
+    pub fn parse(spec: &str) -> Result<Self, String> {
+        let (count, digest) = spec
+            .split_once(':')
+            .ok_or_else(|| "expected head must be <count>:<sha256>".to_string())?;
+        let published_count = count
+            .parse::<u64>()
+            .ok()
+            .filter(|count| *count > 0)
+            .ok_or_else(|| "expected head count must be a positive integer".to_string())?;
+        validate_sha256("expected head", digest)?;
+        Ok(Self {
+            published_count,
+            head_digest: digest.to_string(),
+        })
+    }
 }
 
 /// Arena-level persistent state (`state.json`).
@@ -573,12 +710,40 @@ fn identity_mismatches(
         .collect())
 }
 
+/// How far the documents show that no published window is missing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompletenessStatus {
+    /// A valid signed head names exactly the published windows.
+    Anchored,
+    /// Nothing is published and no head exists.
+    NoPublishedWindows,
+    /// Every published board predates the head, so nothing requires one.
+    LegacyUnanchored,
+    /// The head is invalid, missing where a board requires it, disagrees with
+    /// the published windows, or differs from the expected head. Fails the arena.
+    Broken,
+}
+
+/// The completeness verdict for a whole arena. `detail` states the limit that
+/// remains when the status passes, and the failure when it does not.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArenaCompleteness {
+    pub status: CompletenessStatus,
+    pub published_count: u64,
+    /// The digest of the newest board's final signature, to record and pin
+    /// later. `None` when nothing is published.
+    pub head_digest: Option<String>,
+    pub detail: String,
+}
+
 /// Verification result for a whole arena directory.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ArenaVerification {
     pub ok: bool,
     pub verifying_key: Option<String>,
     pub windows: Vec<WindowVerification>,
+    pub completeness: ArenaCompleteness,
 }
 
 /// The file-backed arena. Mutations use a cooperating OS writer lock, reject
@@ -717,13 +882,12 @@ impl Arena {
         }
         for (id, w) in &self.windows {
             let existing = self.window_dir(id).join(WINDOW_FILE);
-            if existing.exists() && read_window_state(&existing)?.status == WindowStatus::Published
-            {
+            if existing.exists() && read_window_state(&existing)?.status.is_terminal() {
                 let stored = read_window_state(&existing)?;
                 if serde_json::to_value(&stored).map_err(|e| e.to_string())?
                     != serde_json::to_value(w).map_err(|e| e.to_string())?
                 {
-                    return Err(format!("published window `{id}` is immutable"));
+                    return Err(format!("window `{id}` is terminal and immutable"));
                 }
                 continue;
             }
@@ -841,6 +1005,7 @@ impl Arena {
             if let Some(plan) = &w.fault_plan_sha256 {
                 validate_sha256("fault plan", plan)?;
             }
+            w.check_expiry()?;
             windows.insert(id.clone(), w);
         }
         Ok(Self {
@@ -886,6 +1051,56 @@ impl Arena {
             }
         }
         self.save()
+    }
+
+    /// Whether [`Arena::advance`] to `now_epoch` would change anything but the
+    /// recorded epoch: an open window reaching its commit deadline, or a
+    /// committed window's data unlocking. A scheduler consults this so that a
+    /// day with no transition writes nothing. Only active windows count; a
+    /// superseded record keeps its frozen status and is not in the lifecycle.
+    pub fn transition_due(&self, now_epoch: u64) -> bool {
+        self.windows.values().any(|w| match w.status {
+            WindowStatus::Open => now_epoch >= w.commit_deadline,
+            WindowStatus::Committed => {
+                self.state.current_epoch < w.data_reveal_epoch && now_epoch >= w.data_reveal_epoch
+            }
+            WindowStatus::Scoring | WindowStatus::Published | WindowStatus::ExpiredEmpty => false,
+        })
+    }
+
+    /// Record that a window reached its data-reveal epoch with no entrant.
+    /// Refused while anything could still happen to it and for any window that
+    /// holds an entry, a refusal or a score, so this cannot bury an entrant's
+    /// result. The window stays in the record, and no board is written. Returns
+    /// the epoch recorded, the arena's current epoch.
+    pub fn expire_empty_window(&mut self, window_id: &str) -> Result<u64, String> {
+        let current = self.state.current_epoch;
+        let w = self
+            .windows
+            .get(window_id)
+            .ok_or_else(|| format!("no such window `{window_id}`"))?;
+        if w.status != WindowStatus::Committed {
+            return Err(format!(
+                "window `{window_id}` cannot expire (status: {:?}; only a committed window can)",
+                w.status
+            ));
+        }
+        if !w.holds_no_entry() {
+            return Err(format!(
+                "window `{window_id}` holds an entry; expiry is forbidden"
+            ));
+        }
+        if current < w.data_reveal_epoch {
+            return Err(format!(
+                "window `{window_id}` has not reached its data-reveal epoch (reveal epoch {}, current {current})",
+                w.data_reveal_epoch
+            ));
+        }
+        let w = self.windows.get_mut(window_id).expect("checked above");
+        w.status = WindowStatus::ExpiredEmpty;
+        w.expired_at_epoch = Some(current);
+        self.save()?;
+        Ok(current)
     }
 
     /// Open a window. Nothing is sealed yet, but the [`ScoreConfig`] the window
@@ -1029,6 +1244,7 @@ impl Arena {
                 certifying: None,
                 scores: Vec::new(),
                 returns_provenance: BTreeMap::new(),
+                expired_at_epoch: None,
             },
         );
         self.state.window_order.push(id.to_string());
@@ -1300,6 +1516,7 @@ impl Arena {
             certifying: w.certifying,
             refusals: w.refusals.clone(),
             prev_final_signature,
+            head_anchored: true,
         };
         let rows: Vec<BoardRow> = w
             .scores
@@ -1315,6 +1532,20 @@ impl Arena {
             payloads.push(serde_json::to_string(row).map_err(|e| format!("serialize score: {e}"))?);
         }
         let board = publish_public_chain(&payloads, key);
+        let final_signature = board
+            .chain
+            .last()
+            .map(|link| link.signature.as_str())
+            .ok_or_else(|| "a published board always has its header link".to_string())?;
+        let head = ArenaHead {
+            kind: ARENA_HEAD_KIND.to_string(),
+            published_count: self.state.published_order.len() as u64 + 1,
+            head_window_id: window_id.to_string(),
+            head_digest: head_digest(final_signature),
+        };
+        let head_payload =
+            serde_json::to_string(&head).map_err(|e| format!("serialize head: {e}"))?;
+        let head_document = publish_public_chain(&[head_payload], key);
 
         let dir = self.window_dir(window_id);
         std::fs::create_dir_all(&dir)
@@ -1329,6 +1560,7 @@ impl Arena {
                 format!("{WINDOWS_DIR}/{window_id}/{BOARD_MD_FILE}"),
                 render_markdown(&header, &w.scores, &rows),
             ),
+            persistence::Replacement::json(HEAD_FILE.to_string(), &head_document)?,
         ];
 
         let w = self.windows.get_mut(window_id).expect("checked above");
@@ -1409,10 +1641,108 @@ fn render_markdown(header: &WindowHeader, scores: &[CompositeScore], rows: &[Boa
 /// ([`IdentityField`]); a disagreement fails the window with its
 /// [`IdentityMismatch`]es, and an unreadable window file is an `Err`. An explicit
 /// certification claim is independently derived from the signed scored rows;
-/// legacy headers without that claim remain noncertifying.
+/// legacy headers without that claim remain noncertifying. The signed head is
+/// checked against the published windows ([`ArenaCompleteness`]).
 pub fn verify_arena(
     dir: &Path,
     pinned: Option<&VerifyingKey>,
+) -> Result<ArenaVerification, String> {
+    verify_arena_expecting(dir, pinned, None)
+}
+
+/// The head in `document`, when it is valid: exactly one link, signed by the
+/// arena's key, carrying an [`ArenaHead`].
+fn read_signed_head(
+    document: &PublicChain,
+    pinned: Option<&VerifyingKey>,
+    arena_key: Option<&str>,
+) -> Result<ArenaHead, String> {
+    let signed = match pinned {
+        Some(vk) => verify_public_chain_with(document, vk),
+        None => verify_public_chain(document),
+    };
+    if !signed || arena_key.is_some_and(|key| key != document.verifying_key) {
+        return Err(format!("{HEAD_FILE} is not signed by the arena key"));
+    }
+    let [link] = document.chain.as_slice() else {
+        return Err(format!("{HEAD_FILE} must hold exactly one link"));
+    };
+    let head: ArenaHead = serde_json::from_str(&link.payload)
+        .map_err(|e| format!("{HEAD_FILE} payload is not a head: {e}"))?;
+    if head.kind != ARENA_HEAD_KIND {
+        return Err(format!("{HEAD_FILE} has kind `{}`", head.kind));
+    }
+    Ok(head)
+}
+
+/// Compare `head.json` with the published windows, as read from the documents.
+/// `final_signatures` runs in publish order; `head_required` is whether any
+/// board's signed header requires a head.
+fn check_head(
+    dir: &Path,
+    published_order: &[String],
+    final_signatures: &[String],
+    head_required: bool,
+    pinned: Option<&VerifyingKey>,
+    arena_key: Option<&str>,
+) -> Result<(CompletenessStatus, String), String> {
+    use CompletenessStatus::{Anchored, Broken, LegacyUnanchored, NoPublishedWindows};
+    let path = dir.join(HEAD_FILE);
+    let exists = path
+        .try_exists()
+        .map_err(|e| format!("inspect {}: {e}", path.display()))?;
+    if !exists {
+        return Ok(if head_required {
+            (
+                Broken,
+                format!("{HEAD_FILE} is missing but a published board requires it"),
+            )
+        } else if published_order.is_empty() {
+            (NoPublishedWindows, EMPTY_COMPLETENESS_LIMIT.to_string())
+        } else {
+            (LegacyUnanchored, LEGACY_COMPLETENESS_LIMIT.to_string())
+        });
+    }
+    let head = match read_json::<PublicChain>(&path)
+        .and_then(|document| read_signed_head(&document, pinned, arena_key))
+    {
+        Ok(head) => head,
+        Err(error) => return Ok((Broken, error)),
+    };
+    let count = published_order.len() as u64;
+    if head.published_count != count {
+        return Ok((
+            Broken,
+            format!(
+                "signed head records {} published window(s) but {count} are present",
+                head.published_count
+            ),
+        ));
+    }
+    let matches = published_order.last() == Some(&head.head_window_id)
+        && final_signatures
+            .last()
+            .is_some_and(|signature| head_digest(signature) == head.head_digest);
+    Ok(if matches {
+        (Anchored, ANCHORED_COMPLETENESS_LIMIT.to_string())
+    } else {
+        (
+            Broken,
+            format!(
+                "signed head names window `{}` with a digest the newest board does not have",
+                head.head_window_id
+            ),
+        )
+    })
+}
+
+/// [`verify_arena`], also requiring the history to pass through `expected`, a
+/// head seen out of band. This is the check that exposes a rollback to an
+/// earlier signed head (see [`ArenaHead`]).
+pub fn verify_arena_expecting(
+    dir: &Path,
+    pinned: Option<&VerifyingKey>,
+    expected: Option<&ExpectedHead>,
 ) -> Result<ArenaVerification, String> {
     let _read_lock = persistence::Lock::read_only(dir)?;
     persistence::require_no_pending(dir)?;
@@ -1422,6 +1752,8 @@ pub fn verify_arena(
     let mut expected_anchor = GENESIS_ANCHOR.to_string();
     let mut arena_key: Option<String> = pinned.map(VerifyingKey::to_hex);
     let mut all_ok = true;
+    let mut final_signatures = Vec::with_capacity(state.published_order.len());
+    let mut head_required = false;
 
     for id in &state.published_order {
         let board_path = dir.join(WINDOWS_DIR).join(id).join(BOARD_FILE);
@@ -1442,6 +1774,7 @@ pub fn verify_arena(
             board.chain.first().ok_or(()).and_then(|first| {
                 serde_json::from_str::<WindowHeader>(&first.payload).map_err(|_| ())
             });
+        head_required |= header.as_ref().is_ok_and(|header| header.head_anchored);
         // The header must name the identity the window file records: a board
         // signed over one config or fault plan cannot stand for a window
         // recorded under another.
@@ -1473,6 +1806,12 @@ pub fn verify_arena(
         if let Some(last) = board.chain.last() {
             expected_anchor = last.signature.clone();
         }
+        final_signatures.push(
+            board
+                .chain
+                .last()
+                .map_or_else(String::new, |last| last.signature.clone()),
+        );
         let ok = chain_ok
             && anchor_ok
             && key_ok
@@ -1510,6 +1849,38 @@ pub fn verify_arena(
             detail,
         });
     }
+    let (mut status, mut detail) = check_head(
+        dir,
+        &state.published_order,
+        &final_signatures,
+        head_required,
+        pinned,
+        arena_key.as_deref(),
+    )?;
+    if let Some(expected) = expected {
+        let reached = usize::try_from(expected.published_count - 1)
+            .ok()
+            .and_then(|index| final_signatures.get(index));
+        match reached {
+            None => {
+                status = CompletenessStatus::Broken;
+                detail = format!(
+                    "expected head records {} published window(s) but {} are present",
+                    expected.published_count,
+                    final_signatures.len()
+                );
+            }
+            Some(signature) if head_digest(signature) != expected.head_digest => {
+                status = CompletenessStatus::Broken;
+                detail = format!(
+                    "published window {} does not have the expected head digest",
+                    expected.published_count
+                );
+            }
+            Some(_) => {}
+        }
+    }
+    all_ok &= status != CompletenessStatus::Broken;
     persistence::require_no_pending(dir)?;
     if persistence::snapshot(dir)? != starting_snapshot {
         return Err("arena changed during verification; retry on a coherent snapshot".to_string());
@@ -1518,5 +1889,11 @@ pub fn verify_arena(
         ok: all_ok,
         verifying_key: arena_key,
         windows,
+        completeness: ArenaCompleteness {
+            status,
+            published_count: final_signatures.len() as u64,
+            head_digest: final_signatures.last().map(|s| head_digest(s)),
+            detail,
+        },
     })
 }

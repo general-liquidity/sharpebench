@@ -269,6 +269,7 @@ fn run_case() -> Result<AuditCase, String> {
         certifying: None,
         scores: Vec::new(),
         returns_provenance: BTreeMap::new(),
+        expired_at_epoch: None,
     };
 
     let replayed = admit_entries(

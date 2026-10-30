@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use sharpebench_attest::{content_digest, PublicChain};
 
 use crate::{
-    validate_window_id, StateFile, WindowState, WindowStatus, BOARD_FILE, BOARD_MD_FILE,
+    validate_window_id, StateFile, WindowState, WindowStatus, BOARD_FILE, BOARD_MD_FILE, HEAD_FILE,
     STATE_FILE, WINDOWS_DIR, WINDOW_FILE,
 };
 
@@ -163,6 +163,7 @@ fn validated_target(root: &Path, relative: &str) -> Result<PathBuf, String> {
         return Err(format!("invalid recovery target `{relative}`"));
     }
     let accepted = relative == STATE_FILE
+        || relative == HEAD_FILE
         || match components.as_slice() {
             [Component::Normal(group), Component::Normal(id), Component::Normal(file)] => {
                 *group == WINDOWS_DIR
@@ -275,19 +276,24 @@ fn validate_redo(root: &Path, redo: &Redo) -> Result<Vec<PathBuf>, String> {
                             .to_string(),
                     );
                 }
+                window.check_expiry()?;
                 crate::validate_sha256("recovery scorer", &window.scorer_artifact_sha256)?;
                 if let Some(plan) = &window.fault_plan_sha256 {
                     crate::validate_sha256("recovery fault plan", plan)?;
                 }
                 if target.exists() {
                     let old: WindowState = crate::read_window_state(&target)?;
-                    if old.status == WindowStatus::Published
+                    if old.status.is_terminal()
                         && std::fs::read(&target).map_err(|e| e.to_string())?
                             != entry.text.as_bytes()
                     {
-                        return Err("recovery would rewrite a published window".to_string());
+                        return Err("recovery would rewrite a terminal window".to_string());
                     }
                 }
+            }
+            Some(HEAD_FILE) => {
+                serde_json::from_str::<PublicChain>(&entry.text)
+                    .map_err(|e| format!("invalid recovery head: {e}"))?;
             }
             Some(BOARD_FILE) | Some(BOARD_MD_FILE) => {
                 if target.file_name().is_some_and(|name| name == BOARD_FILE) {
@@ -474,6 +480,11 @@ pub(crate) fn snapshot(root: &Path) -> Result<Option<String>, String> {
                 ))
             }
         }
+    }
+    match std::fs::read(validated_target(root, HEAD_FILE)?) {
+        Ok(bytes) => identity.push((HEAD_FILE.to_string(), content_digest(&bytes))),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("read head snapshot: {error}")),
     }
     if root.join(REDO_FILE).exists() {
         let bytes = std::fs::read(root.join(REDO_FILE))
