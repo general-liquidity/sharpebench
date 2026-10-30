@@ -268,12 +268,6 @@ pub fn verify_self_describing(b: &SelfDescribingBoard, key: &[u8]) -> bool {
     first.payload == spec_payload(&b.spec) && scores_match_links(&b.scores, score_links)
 }
 
-/// Persist a self-describing board to a JSON file.
-pub fn save_self_describing(b: &SelfDescribingBoard, path: &str) -> std::io::Result<()> {
-    let json = serde_json::to_string_pretty(b).map_err(std::io::Error::other)?;
-    std::fs::write(path, json)
-}
-
 /// Persist a published board to a JSON file.
 pub fn save(board: &PublishedBoard, path: &str) -> std::io::Result<()> {
     let json = serde_json::to_string_pretty(board).map_err(std::io::Error::other)?;
