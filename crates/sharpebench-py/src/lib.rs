@@ -563,8 +563,9 @@ fn pass_k(passed_per_run: Vec<bool>, mode: &str, n: Option<usize>) -> PyResult<b
 
 /// The distribution moments the Sharpe family is built on:
 /// `{"n_obs", "mean", "std_dev", "skew", "kurtosis", "downside_deviation",
-/// "sortino"}` (`sortino` is `None` when downside deviation is zero). `kurtosis`
-/// is non-excess (normal = 3), matching the deflated-Sharpe convention.
+/// "sortino"}` (`sortino` is `None` when downside deviation is zero, or when
+/// `returns` or `target` is not finite). `kurtosis` is non-excess (normal = 3),
+/// matching the deflated-Sharpe convention.
 #[pyfunction]
 #[pyo3(signature = (returns, target = 0.0))]
 fn moments<'py>(py: Python<'py>, returns: Vec<f64>, target: f64) -> PyResult<Bound<'py, PyDict>> {
