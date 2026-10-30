@@ -127,7 +127,8 @@ class ProvenancePolicyTests(unittest.TestCase):
         self.assertTrue(
             common._matches("crates/demo/src/nested/lib.rs", "crates/**/*.rs")
         )
-        self.assertTrue(common._matches("arena/state.json", "arena/**/*.json"))
+        self.assertTrue(common._matches("arena/windows/window-003/window.json", "arena/windows/**/*.json"))
+        self.assertFalse(common._matches("arena/state.json", "arena/windows/**/*.json"))
         self.assertTrue(
             common._matches(
                 "paper/evidence/prospective-forecast-field/field-plan.json",

@@ -22,7 +22,9 @@ SOURCE_SCOPE = (
     "paper/sections/*.tex",
     "paper/refs.bib",
     "data/*.csv",
-    "arena/**/*.json",
+    # arena/state.json is excluded: the daily clock rewrites it, so binding it
+    # would invalidate the manifest between any merge and any tag.
+    "arena/windows/**/*.json",
 )
 ARTIFACT_SCOPE = (
     "paper/evidence/final/*.jsonl",
