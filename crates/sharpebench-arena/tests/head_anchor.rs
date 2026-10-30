@@ -190,6 +190,28 @@ fn a_head_under_another_key_fails_with_or_without_a_pin() {
     assert_broken(&report, "not signed by the arena key");
 }
 
+/// The attack the head exists to stop, done with the file edited to match: a
+/// shortened history and a head rewritten for it, claiming the arena's own key
+/// without its signature.
+#[test]
+fn a_head_rewritten_for_the_shortened_history_fails() {
+    let fixture = Fixture::published(2);
+    let genuine: PublicChain = serde_json::from_slice(&fixture.head_bytes()).unwrap();
+    fixture.drop_final_window("w2");
+    let digest = head_digest(&fixture.board("w1").chain.last().unwrap().signature);
+    let shortened = head(1, "w1", digest);
+
+    let mut edited = genuine.clone();
+    edited.chain[0].payload = shortened.clone();
+    fixture.write_head_document(&edited);
+    assert_broken(&fixture.verify(), "not signed by the arena key");
+
+    let mut forged = publish_public_chain(&[shortened], &attacker());
+    forged.verifying_key = genuine.verifying_key;
+    fixture.write_head_document(&forged);
+    assert_broken(&fixture.verify(), "not signed by the arena key");
+}
+
 #[test]
 fn a_signed_document_that_is_not_one_head_is_refused() {
     let fixture = Fixture::published(2);
