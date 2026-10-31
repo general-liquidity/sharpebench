@@ -121,8 +121,12 @@ fn malformed_pax_records_cannot_hide_later_size_overrides() {
         b"not a record\n".to_vec(),
         [b"\n".to_vec(), pax("size", "1")].concat(),
         [pax("mtime", "1"), b"\n".to_vec(), pax("size", "1")].concat(),
+        [pax("mtime", "1"), b"\n".to_vec()].concat(),
     ] {
-        let bytes = member(b'x', b"pax", &body);
+        // The following member matters: a PAX header left dangling is refused
+        // with this same reason, so without it these cases pass on that rule
+        // and the blank-line rule can be weakened unnoticed.
+        let bytes = [member(b'x', b"pax", &body), member(b'0', b"file", b"")].concat();
         let report = scan_tar_snapshot(&bytes[..], policy());
         assert!(!report.no_known_matches());
         assert_eq!(
@@ -255,15 +259,4 @@ fn an_extension_of_exactly_64_kib_is_scanned() {
     ]
     .concat();
     assert!(scan_tar_snapshot(&bytes[..], policy()).no_known_matches());
-}
-
-#[test]
-fn a_blank_line_ending_pax_records_is_refused() {
-    let body = [pax("mtime", "1"), b"\n".to_vec()].concat();
-    let bytes = member(b'x', b"pax", &body);
-    let report = scan_tar_snapshot(&bytes[..], policy());
-    assert_eq!(
-        report.scan.incomplete_reason,
-        Some(IncompleteReason::EnumerationError)
-    );
 }
