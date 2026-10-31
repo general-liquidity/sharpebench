@@ -33,6 +33,49 @@ fn golden(name: &str) -> Vec<u8> {
         .into_bytes()
 }
 
+/// `sharpearena-census-journal-chained.jsonl` is the census journal re-stamped
+/// by SharpeArena's own `_append_with_census`, so the digests below are the
+/// producer's.
+#[test]
+fn a_producer_journal_chain_verifies_and_an_edited_one_is_refused() {
+    let journal = fixture("sharpearena-census-journal-chained.jsonl");
+    let json = lineage(&[&journal, "--census", "--json"]);
+    assert!(json.status.success(), "{json:?}");
+    let report: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert_eq!(report["journal_chains_verified"], 4);
+    let text = lineage(&[&journal, "--census"]);
+    assert!(String::from_utf8_lossy(&text.stdout)
+        .contains("journal chains:        4 recomputed from the lines before them"));
+
+    // The last line is the one edit `previous_record_sha256` cannot see.
+    let original = std::fs::read_to_string(&journal).unwrap();
+    let last: serde_json::Value = serde_json::from_str(original.lines().last().unwrap()).unwrap();
+    let chain = last["test_split_census"]["journal_chain_sha256"]
+        .as_str()
+        .unwrap();
+    let tampered = original.replace(chain, &"0".repeat(64));
+    assert_ne!(tampered, original);
+    let path = std::env::temp_dir().join(format!("sb-chain-{}.jsonl", std::process::id()));
+    std::fs::write(&path, tampered).unwrap();
+    let refused = lineage(&[path.to_str().unwrap(), "--census"]);
+    std::fs::remove_file(&path).unwrap();
+    assert_eq!(refused.status.code(), Some(1), "{refused:?}");
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("journal_chain_sha256"));
+}
+
+/// A journal older than the chain keeps its report bytes.
+#[test]
+fn a_journal_without_a_chain_reports_no_chain_field() {
+    let json = lineage(&[
+        &fixture("sharpearena-census-journal.jsonl"),
+        "--census",
+        "--json",
+    ]);
+    assert!(json.status.success(), "{json:?}");
+    let report: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert!(report.get("journal_chains_verified").is_none());
+}
+
 #[test]
 fn a_single_schema_2_record_report_is_byte_identical() {
     let evidence = fixture("sharpearena-lineage-v2.json");

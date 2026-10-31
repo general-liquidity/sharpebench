@@ -19,7 +19,14 @@ use sharpebench_core::{CompositeScore, ScoreConfig};
 /// The transaction-cost profile a board was scored under — a self-contained mirror
 /// of the simulator's cost model, inlined so a published entry is re-derivable
 /// without reaching into the sim crate.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+///
+/// No other field of [`RunSpec`] names the execution model, so this mirror is
+/// the only record of it on a self-describing board. Each optional field keeps the simulator's serialized name and
+/// is omitted when it holds the simulator's default, so a board signed before
+/// the field existed reserializes to the bytes it signed and keeps its meaning:
+/// no turnover factor, no execution noise, no short borrow, immediate execution.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct CostProfile {
     pub fee_bps: f64,
     pub slippage_bps: f64,
@@ -28,6 +35,41 @@ pub struct CostProfile {
     /// `None` encodes an unlimited (`f64::INFINITY`) liquidity cap so the profile
     /// JSON stays finite and portable.
     pub max_participation: Option<f64>,
+    /// Proportional turnover cost, when the board opted into it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trf_cost: Option<f64>,
+    /// Seed-driven execution noise, when the board opted into it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub noise: Option<ExecutionNoiseProfile>,
+    /// Per-step short borrow cost (bps). Zero is omitted.
+    #[serde(default, skip_serializing_if = "is_zero_bps")]
+    pub short_borrow_bps: f64,
+    /// Fixed decision-to-eligibility delay. Absent means immediate execution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fixed_delay: Option<FixedDelayProfile>,
+}
+
+fn is_zero_bps(bps: &f64) -> bool {
+    *bps == 0.0
+}
+
+/// Mirror of the simulator's `ExecutionNoise`.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ExecutionNoiseProfile {
+    pub delay_prob: f64,
+    pub min_fill_frac: f64,
+    pub carry_floor: f64,
+    pub queue_participation_ref: f64,
+}
+
+/// Mirror of the simulator's `FixedDecisionDelay`. An unknown timing version is
+/// refused when the board is read, never interpreted as immediate execution.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "schema_version", deny_unknown_fields)]
+pub enum FixedDelayProfile {
+    #[serde(rename = "sharpebench.fixed-decision-delay.v1")]
+    Fifo { bars: usize },
 }
 
 /// The benchmark-condition specification a leaderboard was produced from. It is
@@ -425,6 +467,7 @@ mod tests {
                 impact_bps: 50.0,
                 financing_bps: 5.0,
                 max_participation: None,
+                ..CostProfile::default()
             },
             score_config: ScoreConfig::default(),
             seeds: vec![0, 1, 2, 3],

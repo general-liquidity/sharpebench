@@ -837,6 +837,21 @@ fn validate_window_id(id: &str) -> Result<(), String> {
     }
 }
 
+/// An agent id is signed into the board header and printed one row per line in
+/// `board.md`, so a control character could forge a row. Ids may otherwise name
+/// a model, slashes and colons included.
+fn validate_agent_id(id: &str) -> Result<(), String> {
+    let ok = !id.is_empty() && id.trim() == id && !id.chars().any(char::is_control);
+    if ok {
+        Ok(())
+    } else {
+        Err(format!(
+            "invalid agent id {id:?}: it must be non-empty, with no control characters and no \
+             surrounding whitespace"
+        ))
+    }
+}
+
 impl Arena {
     fn window_dir(&self, id: &str) -> PathBuf {
         self.root.join(WINDOWS_DIR).join(id)
@@ -1370,6 +1385,7 @@ impl Arena {
         window_id: &str,
         commitment: Commitment,
     ) -> Result<(), String> {
+        validate_agent_id(&commitment.agent_id)?;
         let current = self.state.current_epoch;
         let w = self
             .windows
@@ -1896,4 +1912,19 @@ pub fn verify_arena_expecting(
             detail,
         },
     })
+}
+
+#[cfg(test)]
+mod agent_id_tests {
+    use super::validate_agent_id;
+
+    #[test]
+    fn an_agent_id_that_could_forge_a_board_row_is_refused() {
+        for id in ["", " a", "a ", "a\nb", "a\rb", "a\tb", "a\u{1b}[2J"] {
+            assert!(validate_agent_id(id).is_err(), "{id:?}");
+        }
+        for id in ["momentum", "openai/gpt-5:latest", "agent one", "café"] {
+            assert!(validate_agent_id(id).is_ok(), "{id:?}");
+        }
+    }
 }

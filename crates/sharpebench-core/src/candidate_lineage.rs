@@ -1723,6 +1723,10 @@ pub struct TestSplitCensusReport {
     pub failed_records: usize,
     pub unidentified_records: usize,
     pub declared_censuses_verified: usize,
+    /// Records whose `journal_chain_sha256` was recomputed from the lines
+    /// before them. Omitted at zero: a journal older than the chain declares none.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub journal_chains_verified: usize,
     pub splits: Vec<TestSplitConsultations>,
     pub journal: Vec<CensusJournalEntry>,
 }
@@ -1898,6 +1902,7 @@ pub fn verify_test_split_census(
         });
         previous = Some(&item.record_sha256);
     }
+    let journal_chains_verified = verify_journal_chain(journal)?;
     Ok(TestSplitCensusReport {
         schema_version: 1,
         evidence_class: "test_split_consultation_census".to_owned(),
@@ -1909,9 +1914,86 @@ pub fn verify_test_split_census(
         failed_records: failed,
         unidentified_records: unidentified,
         declared_censuses_verified: verified_claims,
+        journal_chains_verified,
         splits: splits.into_values().collect(),
         journal: entries,
     })
+}
+
+fn is_zero(count: &usize) -> bool {
+    *count == 0
+}
+
+/// Domain of SharpeArena's census chain (`_CENSUS_CHAIN_DOMAIN`).
+const CENSUS_CHAIN_DOMAIN: &str = "sharpearena/test-split-census/chain/v1";
+
+/// One fold of SharpeArena's `_chain_step`: SHA-256 over the domain, the
+/// previous chain value (empty for the first line) and the line's digest, with
+/// a NUL between each.
+fn census_chain_step(previous: Option<&str>, record_sha256: &str) -> String {
+    let mut accumulator = Sha256::new();
+    accumulator.update(CENSUS_CHAIN_DOMAIN.as_bytes());
+    accumulator.update([0]);
+    accumulator.update(previous.unwrap_or_default().as_bytes());
+    accumulator.update([0]);
+    accumulator.update(record_sha256.as_bytes());
+    crate::lower_hex(&accumulator.finalize())
+}
+
+/// Recompute every `test_split_census.journal_chain_sha256` a journal declares
+/// and return how many were checked.
+///
+/// The chain folds every nonblank line in order, including lines that carry no
+/// census, so it sees what `previous_record_sha256` cannot: a line removed or
+/// reordered before a record that declares nothing. A record's declared value
+/// covers the lines before it, and the first line declares `null`.
+///
+/// Records written before the chain existed omit the key and are not refused,
+/// but once one record declares a chain a later census that omits it is a
+/// refusal, so stripping the key from the tail cannot pass as an older journal.
+///
+/// The chain is an unkeyed digest. It shows the journal is the one its records
+/// describe, not who wrote it: lines cut from the end leave no trace, and a
+/// writer who rewrites every later line can restate it.
+pub fn verify_journal_chain(journal: &[JournalRecord]) -> Result<usize, CandidateLineageError> {
+    const FIELD: &str = "test_split_census.journal_chain_sha256";
+    let mut chain: Option<String> = None;
+    let mut chained = false;
+    let mut verified = 0;
+    for item in journal {
+        let refuse = |message: String| {
+            CandidateLineageError::at(format!("line {}.{FIELD}", item.line), message)
+        };
+        if let Some(census) = item.record.get("test_split_census") {
+            match census.get("journal_chain_sha256") {
+                None if chained => {
+                    return Err(refuse(
+                        "is missing after an earlier record declared the chain".to_owned(),
+                    ));
+                }
+                None => {}
+                Some(declared) => {
+                    let declared = match declared {
+                        Value::Null => None,
+                        Value::String(digest) => Some(digest.as_str()),
+                        other => return Err(refuse(format!("must be a digest or null: {other}"))),
+                    };
+                    if declared != chain.as_deref() {
+                        return Err(refuse(format!(
+                            "declares {}, but the lines before this record chain to {}; a line \
+                             was removed, inserted, edited or reordered",
+                            declared.unwrap_or("null"),
+                            chain.as_deref().unwrap_or("null"),
+                        )));
+                    }
+                    chained = true;
+                    verified += 1;
+                }
+            }
+        }
+        chain = Some(census_chain_step(chain.as_deref(), &item.record_sha256));
+    }
+    Ok(verified)
 }
 
 #[cfg(test)]
@@ -3091,6 +3173,77 @@ mod tests {
         );
         // Lines cut from the end leave no record to notice.
         assert!(verify_test_split_census(&[first, other]).is_ok());
+    }
+
+    /// `record` declaring `chain`, with the digest of the resulting line.
+    fn chained(line: usize, mut record: Value, chain: Option<&str>) -> JournalRecord {
+        record["test_split_census"]["journal_chain_sha256"] = json!(chain);
+        entry(line, record)
+    }
+
+    #[test]
+    fn the_journal_chain_exposes_a_removed_line_the_previous_digest_cannot_see() {
+        // Line 2 declares no census, so nothing but the chain witnesses line 1.
+        let first = entry(1, search(10, 4));
+        let bare = entry(2, json!({"evidence_class": "other"}));
+        let chain = census_chain_step(
+            Some(&census_chain_step(None, &first.record_sha256)),
+            &bare.record_sha256,
+        );
+        let census = with_census(search(10, 6), identity_of(10), true, &[], &[], 0, 0);
+        let last = chained(3, census, Some(&chain));
+        assert_eq!(
+            verify_journal_chain(&[first, bare.clone(), last.clone()]),
+            Ok(1)
+        );
+        let error = verify_journal_chain(&[bare, last]).unwrap_err();
+        assert_eq!(error.path, "line 3.test_split_census.journal_chain_sha256");
+    }
+
+    #[test]
+    fn the_journal_chain_refuses_a_stripped_or_malformed_digest_and_keeps_legacy_readable() {
+        let path = "line 2.test_split_census.journal_chain_sha256";
+        let census = || with_census(search(10, 4), identity_of(10), true, &[], &[], 0, 0);
+        let first = chained(1, census(), None);
+        let digest = census_chain_step(None, &first.record_sha256);
+        assert_eq!(
+            verify_journal_chain(&[first.clone(), chained(2, census(), Some(&digest))]),
+            Ok(2)
+        );
+
+        let stripped = entry(2, census());
+        let error = verify_journal_chain(&[first.clone(), stripped]).unwrap_err();
+        assert_eq!(error.path, path);
+        assert!(error.message.contains("is missing"), "{}", error.message);
+
+        // A null claims to be the first line, and only the first line may.
+        let error = verify_journal_chain(&[first.clone(), chained(2, census(), None)]).unwrap_err();
+        assert_eq!(error.path, path);
+
+        let upper = digest.to_uppercase();
+        let error =
+            verify_journal_chain(&[first.clone(), chained(2, census(), Some(&upper))]).unwrap_err();
+        assert_eq!(error.path, path);
+
+        let mut number = census();
+        number["test_split_census"]["journal_chain_sha256"] = json!(7);
+        let error = verify_journal_chain(&[first, entry(2, number)]).unwrap_err();
+        assert_eq!(error.path, path);
+        assert!(
+            error.message.contains("must be a digest"),
+            "{}",
+            error.message
+        );
+
+        // Records older than the chain declare none and are not refused, and
+        // a chain that starts later folds them from the first line.
+        let legacy = entry(1, census());
+        assert_eq!(verify_journal_chain(std::slice::from_ref(&legacy)), Ok(0));
+        let digest = census_chain_step(None, &legacy.record_sha256);
+        assert_eq!(
+            verify_journal_chain(&[legacy, chained(2, census(), Some(&digest))]),
+            Ok(1)
+        );
     }
 
     #[test]

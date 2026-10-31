@@ -46,6 +46,11 @@ pub const FORECAST_QUALITY_UNAVAILABLE_SCHEMA: &str = "sharpebench.forecast-qual
 /// Historical v2/v3/v4 constants describe frozen reports, not current output.
 pub const FORECAST_QUALITY_STRATIFIED_SCHEMA: &str = "sharpebench.forecast-quality.v5";
 /// Schema of the declared contract universe file.
+/// Report schema against a declared plan from the release that added
+/// `agents[].planned` and held `settlement_status_disagreements` to contracts
+/// some agent resolved. A planless report stays on
+/// [`FORECAST_QUALITY_STRATIFIED_SCHEMA`].
+pub const FORECAST_QUALITY_PLANNED_COUNTS_SCHEMA: &str = "sharpebench.forecast-quality.v6";
 pub const FORECAST_CONTRACT_PLAN_SCHEMA: &str = "sharpebench.forecast-contract-plan.v1";
 const SUPPORT_RULE: &str = "a pair is differenced on the contract digests both agents resolved \
      and receives inference only when each agent resolved every digest the other did";
@@ -1161,6 +1166,26 @@ pub struct AgentForecastSummary {
     pub binary_calibration: Option<BinaryCalibration>,
     pub categorical_confidence_calibration: Option<ConfidenceCalibration>,
     pub normal_distribution_calibration: Option<DistributionCalibration>,
+    /// Against a plan only: the document counts above, restricted to claims on
+    /// planned digests, so a row's counts and its scores can be read on one
+    /// scope. The fields above keep describing the whole document.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub planned: Option<PlannedForecastCounts>,
+}
+
+/// One agent's claim counts on the planned digests.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct PlannedForecastCounts {
+    pub n_claims: usize,
+    pub n_revisions: usize,
+    pub n_eligible_claims: usize,
+    pub n_resolved: usize,
+    pub n_pending: usize,
+    pub n_cancelled: usize,
+    pub n_rejected: usize,
+    /// `None` when the agent made no claim on a planned digest: a rate over no
+    /// claims is unavailable, not zero.
+    pub resolution_rate: Option<f64>,
 }
 
 /// The field contracts one agent did not resolve, each listed once under that agent's
@@ -1462,7 +1487,7 @@ pub fn analyze_forecast_quality(
 /// resolve, and a resolved digest outside the plan is listed in
 /// `outside_plan_by_agent` and enters no score, calibration or comparison. Its
 /// settlement is still checked against every other document that resolved it.
-/// The report uses [`FORECAST_QUALITY_STRATIFIED_SCHEMA`]. Plan membership stays
+/// The report uses [`FORECAST_QUALITY_PLANNED_COUNTS_SCHEMA`]. Plan membership stays
 /// explicit in common_support. Empty comparisons encode unavailable estimates
 /// as null; no pooled primary estimate is produced.
 pub fn analyze_forecast_quality_against_plan(
@@ -1541,7 +1566,9 @@ fn analyze(
     let agents = evidence
         .iter()
         .zip(&rows)
-        .map(|(document, rows)| summarize_agent(document, rows, config.calibration_bins))
+        .map(|(document, rows)| {
+            summarize_agent(document, rows, config.calibration_bins, planned.as_ref())
+        })
         .collect();
     let mut comparisons = Vec::new();
     for (left, right) in document_pairs(evidence.len()) {
@@ -1560,7 +1587,11 @@ fn analyze(
         .map(|row| (row.contract_sha256.clone(), row.contract_digest_version))
         .collect();
     Ok(ForecastQualityReport {
-        schema_version: FORECAST_QUALITY_STRATIFIED_SCHEMA,
+        schema_version: if plan.is_some() {
+            FORECAST_QUALITY_PLANNED_COUNTS_SCHEMA
+        } else {
+            FORECAST_QUALITY_STRATIFIED_SCHEMA
+        },
         rank_effect: "reported_only_never_trading_rank",
         dependence_unit: "whole resolution-clock block across assets and questions",
         familywise_size: FAMILYWISE_SIZE_RULE,
@@ -1641,8 +1672,11 @@ fn field_support(
             }
         }
     }
+    // A plan can name a contract nobody resolved. Leaving it pending is a gap,
+    // charged above, and not a disagreement with anyone who settled it.
     let settlement_status_disagreements = disputed
         .into_values()
+        .filter(|record| !record.resolved_by.is_empty())
         .map(|mut record| {
             record.resolved_by.sort();
             record.pending_by.sort();
@@ -1688,10 +1722,49 @@ fn claim_statuses_by_digest(document: &ForecastEvidence) -> BTreeMap<&str, BTree
     statuses
 }
 
+/// `document`'s claim counts on the planned digests.
+fn planned_counts(document: &ForecastEvidence, plan: &BTreeSet<&str>) -> PlannedForecastCounts {
+    let revisions: Vec<_> = document
+        .revisions
+        .iter()
+        .filter(|revision| plan.contains(revision.contract_sha256.as_str()))
+        .collect();
+    let claim_ids: BTreeSet<&str> = revisions
+        .iter()
+        .map(|revision| revision.claim_id.as_str())
+        .collect();
+    let eligible_ids: BTreeSet<&str> = revisions
+        .iter()
+        .filter(|revision| revision.status == "eligible")
+        .map(|revision| revision.claim_id.as_str())
+        .collect();
+    let status_count = |status: &str| {
+        document
+            .resolutions
+            .iter()
+            .filter(|resolution| {
+                resolution.status == status && claim_ids.contains(resolution.claim_id.as_str())
+            })
+            .count()
+    };
+    PlannedForecastCounts {
+        n_claims: claim_ids.len(),
+        n_revisions: revisions.len(),
+        n_eligible_claims: eligible_ids.len(),
+        n_resolved: status_count("resolved"),
+        n_pending: status_count("pending"),
+        n_cancelled: status_count("cancelled"),
+        n_rejected: status_count("rejected"),
+        resolution_rate: (!claim_ids.is_empty())
+            .then(|| status_count("resolved") as f64 / claim_ids.len() as f64),
+    }
+}
+
 fn summarize_agent(
     document: &ForecastEvidence,
     rows: &[ScoredForecast],
     calibration_bins: usize,
+    plan: Option<&BTreeSet<&str>>,
 ) -> AgentForecastSummary {
     let claim_ids: BTreeSet<&str> = document
         .revisions
@@ -1750,6 +1823,7 @@ fn summarize_agent(
         binary_calibration: binary_calibration(&binary, calibration_bins),
         categorical_confidence_calibration: confidence_calibration(&categorical, calibration_bins),
         normal_distribution_calibration: distribution_calibration(&pits, calibration_bins),
+        planned: plan.map(|plan| planned_counts(document, plan)),
     }
 }
 
@@ -2175,7 +2249,6 @@ mod tests {
             )
             .unwrap(),
         ] {
-            assert_eq!(report.schema_version, "sharpebench.forecast-quality.v5");
             let encoded = serde_json::to_value(&report).unwrap();
             assert_eq!(encoded["comparisons"][0]["n_contracts"], 0);
             assert!(encoded["comparisons"][0]["mean_loss_difference"].is_null());

@@ -10,7 +10,7 @@
 use sharpebench_core::{rank, AgentSubmission, Run, ScoreConfig};
 use sharpebench_leaderboard::{
     publish, publish_self_describing, verify_board, verify_published, verify_self_describing,
-    CostProfile, PublishedBoard, RunSpec, SelfDescribingBoard,
+    CostProfile, FixedDelayProfile, PublishedBoard, RunSpec, SelfDescribingBoard,
 };
 
 const KEY: &[u8] = b"host-board-key";
@@ -46,6 +46,7 @@ fn spec() -> RunSpec {
             impact_bps: 50.0,
             financing_bps: 5.0,
             max_participation: None,
+            ..CostProfile::default()
         },
         score_config: ScoreConfig::default(),
         seeds: vec![0, 1, 2, 3],
@@ -172,4 +173,52 @@ fn swapping_the_spec_is_still_caught_alongside_the_new_bindings() {
     let mut sdb = self_describing();
     sdb.spec.dataset_hash = sharpebench_attest::content_digest(b"a-different-dataset");
     assert!(!verify_self_describing(&sdb, KEY));
+}
+
+/// A board signed before the mirror grew must reserialize to the bytes it
+/// signed, or its spec link stops matching and it reads as tampered.
+#[test]
+fn a_legacy_cost_profile_reads_and_reserializes_to_its_signed_bytes() {
+    let legacy = r#"{"fee_bps":2.0,"slippage_bps":3.0,"impact_bps":50.0,"financing_bps":5.0,"max_participation":null}"#;
+    let profile: CostProfile = serde_json::from_str(legacy).unwrap();
+    assert_eq!(profile.fixed_delay, None);
+    assert_eq!(profile.noise, None);
+    assert_eq!(profile.trf_cost, None);
+    assert_eq!(profile.short_borrow_bps, 0.0);
+    assert_eq!(serde_json::to_string(&profile).unwrap(), legacy);
+}
+
+#[test]
+fn a_delayed_board_differs_from_an_immediate_one_and_cannot_be_relabelled() {
+    let mut delayed = spec();
+    delayed.cost_profile.fixed_delay = Some(FixedDelayProfile::Fifo { bars: 2 });
+    let sdb = publish_self_describing(delayed, &board(), KEY);
+    let text = serde_json::to_string(&sdb.spec).unwrap();
+    assert!(
+        text.contains(
+            r#""fixed_delay":{"schema_version":"sharpebench.fixed-decision-delay.v1","bars":2}"#
+        ),
+        "{text}"
+    );
+    assert_ne!(text, serde_json::to_string(&spec()).unwrap());
+    assert!(verify_self_describing(&sdb, KEY));
+
+    let back: SelfDescribingBoard =
+        serde_json::from_str(&serde_json::to_string(&sdb).unwrap()).unwrap();
+    assert!(verify_self_describing(&back, KEY));
+
+    let mut relabelled = sdb;
+    relabelled.spec.cost_profile.fixed_delay = None;
+    assert!(!verify_self_describing(&relabelled, KEY));
+}
+
+#[test]
+fn an_unknown_timing_version_or_cost_field_is_refused_when_read() {
+    let base = r#""fee_bps":2.0,"slippage_bps":3.0,"impact_bps":50.0,"financing_bps":5.0,"max_participation":null"#;
+    let future = format!(
+        r#"{{{base},"fixed_delay":{{"schema_version":"sharpebench.fixed-decision-delay.v2","bars":2}}}}"#
+    );
+    assert!(serde_json::from_str::<CostProfile>(&future).is_err());
+    let unknown = format!(r#"{{{base},"new_cost":1.0}}"#);
+    assert!(serde_json::from_str::<CostProfile>(&unknown).is_err());
 }

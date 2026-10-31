@@ -20,6 +20,39 @@ use sharpebench_sim::{
     Momentum, TradingEnv, Window,
 };
 
+/// The two diagnostics take the same refusal the engine's entry points enforce,
+/// typed, ahead of any replay that would panic or read a NaN cap as no cap.
+#[test]
+fn a_malformed_cost_model_is_a_typed_refusal() {
+    let data = iid_panel(2, 40, 7, 0.0, 0.02);
+    let window = Window { start: 5, end: 35 };
+    let (_, run) = run_backtest_capture(&data, &mut BuyAndHold, window, 0, CostModel::default());
+    let traj = AgentTrajectory {
+        agent_id: "buy-and-hold".to_string(),
+        declared_mandate: None,
+        in_sample_trials: 0,
+        contract: None,
+        runs: vec![run],
+    };
+    for max_participation in [f64::NAN, -0.5] {
+        let costs = CostModel {
+            max_participation,
+            ..CostModel::default()
+        };
+        let reason = "max_participation must be >= 0 or +infinity".to_string();
+        let expected = ReplayNullRefusal::InvalidCosts { reason };
+        assert_eq!(
+            lagged_replay(&data, &traj, costs, &[1]).unwrap_err(),
+            expected
+        );
+        let config = TimingNullConfig { draws: 1, seed: 0 };
+        assert_eq!(
+            timing_null(&data, &traj, costs, config).unwrap_err(),
+            expected
+        );
+    }
+}
+
 /// `symbols` independent price paths with uniform per-bar returns of mean
 /// `drift` and half-width `width`.
 fn iid_panel(symbols: usize, bars: usize, seed: u64, drift: f64, width: f64) -> Dataset {

@@ -76,9 +76,14 @@ stay consistent. Census mode recomputes the history from the journal and
 refuses a record whose declaration or chain disagrees. A record copied out of
 the journal that wrote it fails, and so does a journal with an earlier line
 removed, inserted or reordered, as long as a schema 3 record follows the
-change. Lines cut from the end of the journal leave nothing to disagree with,
-so the census is a lower bound unless the digest of the last line is kept
-elsewhere. Every completed schema 2 or 3 record also has its lineage verified;
+change. Where a record carries `journal_chain_sha256`, a running digest of every
+line before it, census mode recomputes that too, which also exposes a line
+removed before a record that declares no census. A record that omits the field
+is read as older than it, unless an earlier record in the same journal declared
+one. The chain is an unkeyed digest, so it does not show who wrote the journal.
+Lines cut from the end of the journal leave nothing to disagree with, so the
+census is a lower bound unless the digest of the last line is kept elsewhere.
+Every completed schema 2 or 3 record also has its lineage verified;
 any failure produces no report. A single extracted record shows its declared
 census, checked only for internal consistency, because the earlier records are
 not present.
