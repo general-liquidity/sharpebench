@@ -440,11 +440,19 @@ fn a_field_with_no_robust_scale_fences_nobody() {
         min_measured_trials_sr_std: 0.0,
         ..cfg()
     };
+    // The five streams are permutations of one another and correlate beyond
+    // sampling noise, so the independence weighting counts them for less than
+    // five votes and the measured dispersion is at least the plain one of all
+    // six. A fenced vote would be measured against a different sample from the
+    // rest, so one dispersion on every row is what shows nobody was fenced.
     let all_six = std_dev(&votes);
-    for r in &rank(&field, &cfg) {
+    let board = rank(&field, &cfg);
+    let measured = board[0].trials_sr_std;
+    assert!(measured >= all_six, "{measured} below the plain {all_six}");
+    for r in &board {
         assert_eq!(
             r.trials_sr_std.to_bits(),
-            all_six.to_bits(),
+            measured.to_bits(),
             "{}: a field with no scale fences nobody",
             r.agent_id
         );

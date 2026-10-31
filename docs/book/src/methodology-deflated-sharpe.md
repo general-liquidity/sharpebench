@@ -172,6 +172,22 @@ and for the field count the floor is checked against, so a flood of
 near-duplicate submissions cannot shrink the dispersion and lower the bar
 (`dedup_clones_for_measured_sr_std`, default on; see the integrity chapter).
 
+The same switch weights the remaining votes by how independent they are. Each
+vote weighs `1 / sum_j s_ij` over the votes measured, itself included, where
+`s_ij` is the share of variance the two pooled streams have in common beyond
+sampling noise: the squared centred correlation in excess of `9 / n` for `n`
+common bars, rescaled to `[0, 1]`. A stream independent of the rest weighs 1;
+`m` streams with pairwise share `s` weigh `m / (1 + (m - 1) s)` together, so 32
+puppets correlated at 0.97 over 120 bars, below the collapse threshold, weigh
+about 1.07 votes instead of 32. The weighted dispersion is the
+reliability-weighted standard deviation, which equals the plain sample standard
+deviation when every weight is equal, and the measured value is the larger of
+the plain and the weighted dispersion. Measurement therefore never lowers a bar
+the plain dispersion would set: a field whose streams are independent, or
+equally correlated, measures exactly what it measured before. There is no
+cosine below which a near-copy keeps a full vote, because the weight falls
+continuously as streams become alike.
+
 The resulting votes also pass a membership fence before measuring the admitted
 field. A vote is retained when its distance from the field median is at most
 `DISPERSION_VOTE_FENCE_Z` (10.75) times the robust scale. That scale is the median
