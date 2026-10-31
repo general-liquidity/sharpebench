@@ -88,8 +88,9 @@ pub use opt_in_diagnostics::{
     sharpe_variance_factor, StandardErrorAt, DEFAULT_MPPM_RISK_AVERSION,
 };
 pub use selection::{
-    percentile_selection, selection_robustness, CandidateUtility, PercentileSelection,
-    SelectionRobustness, Utility, DEFAULT_SELECTION_ALPHA, MIN_RECOMMENDED_SELECTION_ALPHA,
+    percentile_selection, selection_robustness, stationary_bootstrap_path, CandidateUtility,
+    PercentileSelection, SelectionRobustness, Utility, DEFAULT_SELECTION_ALPHA,
+    MIN_RECOMMENDED_SELECTION_ALPHA,
 };
 pub use stylized_facts::{
     stylized_facts, validate_dataset, validate_dataset_with, RealismFailure, RealismThresholds,

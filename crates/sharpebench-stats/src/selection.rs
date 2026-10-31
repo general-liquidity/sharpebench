@@ -147,6 +147,31 @@ fn fill_block_path(rng: &mut SplitMix64, idxs: &mut [usize], n: usize, block_pro
     }
 }
 
+/// One seeded stationary-bootstrap index path of `len` indices over `0..n`,
+/// drawn by the same walk the percentile selection resamples with. Exposed so
+/// a caller that resamples bars (the shape-level contamination twins in
+/// `sharpebench-sim`) uses the one generator in the crate rather than a copy.
+///
+/// Refuses `n == 0` and a `block_prob` outside `(0, 1]`.
+pub fn stationary_bootstrap_path(
+    seed: u64,
+    n: usize,
+    len: usize,
+    block_prob: f64,
+) -> Result<Vec<usize>, StatisticalError> {
+    block_probability(block_prob)?;
+    if n == 0 {
+        return Err(StatisticalError::InsufficientObservations {
+            required: 1,
+            actual: 0,
+        });
+    }
+    let mut rng = SplitMix64::new(seed);
+    let mut idxs = vec![0; len];
+    fill_block_path(&mut rng, &mut idxs, n, block_prob);
+    Ok(idxs)
+}
+
 /// Per-candidate result inside a [`PercentileSelection`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CandidateUtility {

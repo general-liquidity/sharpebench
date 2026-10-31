@@ -9,11 +9,14 @@
 #![forbid(unsafe_code)]
 
 pub mod agent;
+pub mod contamination;
 pub mod costs;
 pub mod data;
 pub mod engine;
 pub mod env;
 pub mod external;
+pub mod marks;
+pub mod presentation;
 pub mod replay_nulls;
 pub mod sizing_response;
 pub mod trajectory;
@@ -21,14 +24,20 @@ pub mod transport;
 pub mod windows;
 
 pub use agent::{Agent, BuyAndHold, HoldAgent, Momentum, RandomAgent, TeamAgent};
+pub use contamination::{
+    build_twin, shape_probe, window_sharpe, PairedScore, ProbeConfig, ProbeError, SegmentStats,
+    ShapeProbeReport, TwinError, TwinPair, TwinSpec,
+};
 pub use costs::{CostModel, CostProfile, ExecutionNoise, FixedDecisionDelay};
-pub use data::Dataset;
+pub use data::{Dataset, MaskError, MaskedSymbol, MaskedView};
 pub use engine::{run_backtest, Window};
 pub use env::{EnvState, Scenario, StepInfo, StepResult, TradingEnv};
 pub use external::{
     agent_env_identity, effective_agent_env_identity, is_credential_name, ExternalAgent, HttpAgent,
     AGENT_ENV_PASSTHROUGH, AGENT_ENV_SECRET,
 };
+pub use marks::{MarkSheet, MarkTiming, MarkTimingError, SymbolMark, MARK_SHEET_SCHEMA};
+pub use presentation::{presentation_report, PresentationComparison, PresentationReport};
 pub use sizing_response::{
     exposure_volatility_pairs, sizing_response, ExposurePair, PairCensus, QuintileMedians,
     RankCorrelation, SizingResponse, SizingResponseConfig, SizingResponseError, SizingUnavailable,

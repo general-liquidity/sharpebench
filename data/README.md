@@ -143,6 +143,12 @@ python scripts/data/fetch_fred.py fx
   [RIGHTS.md](RIGHTS.md).
 - **Raw / derived:** raw.
 - **Integrity:** `commodities-1d.csv.sha256`.
+- **Mark times:** `commodities-1d.marks.json` declares Brent as marked at the
+  London close and WTI at the New York settlement, hours later on the same date
+  label. The CLI attaches it and refuses to step the file with immediate fills,
+  because Brent would fill at a price fixed before the WTI close the decision
+  read; pass `--fill-delay-bars 1`. The declared times are not verified against
+  the price reporter.
 
 ```bash
 python scripts/data/fetch_fred.py commodities

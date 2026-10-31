@@ -12,6 +12,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::marks::MarkSheet;
+
 /// A point-in-time price dataset.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Dataset {
@@ -24,6 +26,13 @@ pub struct Dataset {
     /// construction, so only the cash dividend stream changes total return.
     #[serde(default)]
     pub dividends: BTreeMap<String, Vec<f64>>,
+    /// When each symbol's close is marked. `None` (the default, and absent from
+    /// the serialized form, so every dataset without a declaration keeps its
+    /// digest) means the marks were never declared. A declared sheet is part of
+    /// the dataset identity, and [`Dataset::check_mark_timing`] refuses to step
+    /// symbols marked at different times unless the execution timing is safe.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub marks: Option<MarkSheet>,
 }
 
 impl Dataset {
@@ -204,6 +213,7 @@ impl Dataset {
             dates,
             closes,
             dividends,
+            marks: None,
         })
     }
 
@@ -279,6 +289,7 @@ impl Dataset {
             dates,
             closes,
             dividends: BTreeMap::new(),
+            marks: None,
         }
     }
 
@@ -326,6 +337,7 @@ impl Dataset {
             dates,
             closes,
             dividends: BTreeMap::new(),
+            marks: None,
         }
     }
 
@@ -338,36 +350,174 @@ impl Dataset {
         ]
     }
 
-    /// A contamination-masked copy: symbols renamed to opaque ids and dates
-    /// replaced with plain indices, so an agent can't pattern-match a memorized
-    /// ticker or calendar window. Prices and cash dividends are preserved using
-    /// the same symbol mapping. (After KTD-Fin's data-side
-    /// masking.)
-    pub fn masked(&self) -> Dataset {
+    /// A contamination-masked copy: symbols renamed to opaque ids, dates
+    /// replaced with plain indices, and every series rebased so its first
+    /// nonzero close lies in `[64, 128)`. See [`Dataset::masked_view`], which
+    /// also returns the map back to the source symbols.
+    pub fn masked(&self) -> Result<Dataset, MaskError> {
+        self.masked_view().map(|view| view.dataset)
+    }
+
+    /// The masked view and its index map back to the source.
+    ///
+    /// Symbols become `ASSET_{i:03}` in the source's sorted order, dates become
+    /// `t{i}`, and each series (closes and per-share cash dividends together) is
+    /// multiplied by one power of two, chosen so the first nonzero close lies in
+    /// `[64, 128)`. Absolute price level, which identifies an asset and its era,
+    /// therefore no longer matches the source, while every simple return and
+    /// every backtest outcome is bit-identical: multiplying by a power of two is
+    /// exact in binary floating point whenever the result stays normal, so a
+    /// price ratio, a share count times a price and a moving average all round
+    /// the same way. The scale is checked rather than assumed: a scaled value
+    /// that would leave the normal range refuses the whole view.
+    ///
+    /// A common start level of exactly 100 is not used because it would move
+    /// returns by rounding, and the engine's outcomes with them.
+    ///
+    /// What the mask does not hide: the first close's significand survives (a
+    /// source that started at 4472.13 starts at 69.877...), the sorted order of
+    /// the source symbols survives in the opaque ids, and the shape of the path
+    /// survives entirely. The shape is what [`crate::contamination`] measures.
+    /// The dataset carries no volume, so there is no volume to normalize.
+    /// Declared mark times are carried under the renamed symbols.
+    pub fn masked_view(&self) -> Result<MaskedView, MaskError> {
         let dates: Vec<String> = (0..self.dates.len()).map(|i| format!("t{i}")).collect();
-        let closes: BTreeMap<String, Vec<f64>> = self
-            .closes
-            .values()
-            .enumerate()
-            .map(|(i, series)| (format!("ASSET_{i:03}"), series.clone()))
-            .collect();
-        let dividends = self
-            .closes
-            .keys()
-            .enumerate()
-            .filter_map(|(i, symbol)| {
-                self.dividends
-                    .get(symbol)
-                    .map(|series| (format!("ASSET_{i:03}"), series.clone()))
-            })
-            .collect();
-        Dataset {
-            dates,
-            closes,
-            dividends,
+        let mut closes = BTreeMap::new();
+        let mut dividends = BTreeMap::new();
+        let mut symbols = Vec::with_capacity(self.closes.len());
+        for (i, (symbol, series)) in self.closes.iter().enumerate() {
+            let opaque = format!("ASSET_{i:03}");
+            let exponent = rebase_exponent(symbol, series)?;
+            closes.insert(opaque.clone(), scale_series(symbol, series, exponent)?);
+            if let Some(stream) = self.dividends.get(symbol) {
+                dividends.insert(opaque.clone(), scale_series(symbol, stream, exponent)?);
+            }
+            symbols.push(MaskedSymbol {
+                source: symbol.clone(),
+                opaque,
+                scale_exponent: exponent,
+            });
+        }
+        let marks = self.marks.as_ref().map(|sheet| {
+            let mut renamed = sheet.clone();
+            renamed.symbols = symbols
+                .iter()
+                .filter_map(|m| {
+                    sheet
+                        .symbols
+                        .get(&m.source)
+                        .map(|mark| (m.opaque.clone(), mark.clone()))
+                })
+                .collect();
+            renamed
+        });
+        Ok(MaskedView {
+            dataset: Dataset {
+                dates,
+                closes,
+                dividends,
+                marks,
+            },
+            symbols,
+        })
+    }
+
+    /// Attach a declared mark-time sheet. The sheet must name exactly the
+    /// dataset's symbols, so a mark cannot be silently missing for one leg.
+    pub fn with_marks(mut self, sheet: MarkSheet) -> Result<Dataset, String> {
+        sheet.validate()?;
+        let declared: Vec<&String> = sheet.symbols.keys().collect();
+        let present: Vec<&String> = self.closes.keys().collect();
+        if declared != present {
+            return Err(format!(
+                "mark-time sheet names {declared:?}, but the dataset holds {present:?}"
+            ));
+        }
+        self.marks = Some(sheet);
+        Ok(self)
+    }
+}
+
+/// The exponent `k` for which `|first nonzero close| * 2^k` lies in `[64, 128)`.
+/// A series of zeros keeps `k = 0`: there is no level to hide.
+fn rebase_exponent(symbol: &str, series: &[f64]) -> Result<i32, MaskError> {
+    let Some(step) = series.iter().position(|x| *x != 0.0) else {
+        return Ok(0);
+    };
+    let first = series[step];
+    if !first.is_normal() {
+        return Err(MaskError::UnscalableLevel {
+            symbol: symbol.to_string(),
+            step,
+        });
+    }
+    // The unbiased binary exponent of a normal f64: |first| = m * 2^e, m in [1, 2).
+    let e = ((first.to_bits() >> 52) & 0x7ff) as i32 - 1023;
+    Ok(6 - e)
+}
+
+fn scale_series(symbol: &str, series: &[f64], exponent: i32) -> Result<Vec<f64>, MaskError> {
+    if !(-1022..=1023).contains(&exponent) {
+        return Err(MaskError::UnscalableLevel {
+            symbol: symbol.to_string(),
+            step: 0,
+        });
+    }
+    let factor = f64::from_bits(((exponent + 1023) as u64) << 52);
+    series
+        .iter()
+        .enumerate()
+        .map(|(step, &x)| {
+            let y = x * factor;
+            // Exactness needs the product to stay normal (or be an exact zero).
+            if x == 0.0 || y.is_normal() {
+                Ok(y)
+            } else {
+                Err(MaskError::UnscalableLevel {
+                    symbol: symbol.to_string(),
+                    step,
+                })
+            }
+        })
+        .collect()
+}
+
+/// One source symbol's place in a [`MaskedView`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MaskedSymbol {
+    pub source: String,
+    pub opaque: String,
+    /// The source series was multiplied by `2^scale_exponent`.
+    pub scale_exponent: i32,
+}
+
+/// A masked dataset plus the map from each opaque id back to its source.
+#[derive(Clone, Debug)]
+pub struct MaskedView {
+    pub dataset: Dataset,
+    pub symbols: Vec<MaskedSymbol>,
+}
+
+/// Why a masked view could not be built without changing a return.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MaskError {
+    /// Rebasing this value would leave the normal floating-point range, or the
+    /// first nonzero close is itself subnormal, so the scale would not be exact.
+    UnscalableLevel { symbol: String, step: usize },
+}
+
+impl std::fmt::Display for MaskError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MaskError::UnscalableLevel { symbol, step } => write!(
+                f,
+                "cannot rebase {symbol} at step {step} exactly: the scaled value leaves the normal floating-point range"
+            ),
         }
     }
 }
+
+impl std::error::Error for MaskError {}
 
 #[cfg(test)]
 mod tests {
@@ -464,24 +614,37 @@ mod tests {
         // Only the middle symbol pays: enumerating dividend keys separately
         // would falsely attach this stream to ASSET_000.
         d.dividends.insert("SYM01".into(), vec![0.0, 1.0, 2.0, 0.0]);
-        let masked = d.masked();
+        let view = d.masked_view().unwrap();
+        let masked = &view.dataset;
         assert_eq!(masked.dividends.len(), 1);
         for (i, original) in d.symbols().iter().enumerate() {
             let renamed = format!("ASSET_{i:03}");
+            assert_eq!(view.symbols[i].source, *original);
+            assert_eq!(view.symbols[i].opaque, renamed);
+            let scale = 2f64.powi(view.symbols[i].scale_exponent);
             for t in 0..d.len() {
-                assert_eq!(d.close_at(original, t), masked.close_at(&renamed, t));
-                assert_eq!(d.dividend_at(original, t), masked.dividend_at(&renamed, t));
+                // Closes and dividends share one exact power-of-two scale.
+                assert_eq!(
+                    d.close_at(original, t).map(|x| x * scale),
+                    masked.close_at(&renamed, t)
+                );
+                assert_eq!(
+                    d.dividend_at(original, t) * scale,
+                    masked.dividend_at(&renamed, t)
+                );
             }
             // Hold one share throughout, reinvesting nothing. Every step's
-            // liquidation wealth, not just the price series, must be preserved.
+            // liquidation wealth, relative to the first, must be preserved.
             let mut cash = 0.0;
             let mut masked_cash = 0.0;
+            let w0 = d.close_at(original, 0).unwrap();
+            let m0 = masked.close_at(&renamed, 0).unwrap();
             for t in 0..d.len() {
                 cash += d.dividend_at(original, t);
                 masked_cash += masked.dividend_at(&renamed, t);
                 assert_eq!(
-                    cash + d.close_at(original, t).unwrap(),
-                    masked_cash + masked.close_at(&renamed, t).unwrap()
+                    (cash + d.close_at(original, t).unwrap()) / w0,
+                    (masked_cash + masked.close_at(&renamed, t).unwrap()) / m0
                 );
             }
         }
@@ -588,16 +751,43 @@ mod tests {
     }
 
     #[test]
-    fn masking_anonymizes_but_preserves_prices() {
-        let d = Dataset::synthetic(3, 40, 1);
-        let m = d.masked();
-        assert_eq!(m.symbols().len(), 3);
+    fn masking_rebases_levels_and_keeps_every_return_bit_for_bit() {
+        // Levels far apart, as real assets are: an index near 4472, a coin
+        // near 0.31, a stock near 187.
+        let csv = "date,symbol,close\n\
+                   2020-01-02,COIN,0.3121\n2020-01-02,IDX,4472.13\n2020-01-02,STK,187.5\n\
+                   2020-01-03,COIN,0.3307\n2020-01-03,IDX,4490.01\n2020-01-03,STK,185.25\n\
+                   2020-01-06,COIN,0.2999\n2020-01-06,IDX,4401.77\n2020-01-06,STK,190.0\n";
+        let d = Dataset::from_csv(csv).unwrap();
+        let m = d.masked().unwrap();
         assert!(m.symbols().iter().all(|s| s.starts_with("ASSET_")));
         assert!(m.dates.iter().all(|s| s.starts_with('t')));
-        // Prices are preserved (BTreeMap order is stable, so first maps to first).
+        for (src, masked) in d.closes.values().zip(m.closes.values()) {
+            assert!((64.0..128.0).contains(&masked[0]), "{}", masked[0]);
+            assert_ne!(src[0], masked[0], "the level no longer matches the source");
+            for t in 1..src.len() {
+                assert_eq!(
+                    (src[t] / src[t - 1]).to_bits(),
+                    (masked[t] / masked[t - 1]).to_bits()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn masking_refuses_a_level_it_cannot_scale_exactly() {
+        let csv = format!("date,symbol,close\nd0,A,1\nd1,A,{}\n", f64::MAX);
+        let d = Dataset::from_csv(&csv).unwrap();
         assert_eq!(
-            d.closes.values().next().unwrap(),
-            m.closes.values().next().unwrap()
+            d.masked().unwrap_err(),
+            MaskError::UnscalableLevel {
+                symbol: "A".into(),
+                step: 1
+            }
         );
+        // A zero close is kept as an exact zero, and a series of zeros keeps
+        // its (zero) level.
+        let zeros = Dataset::from_csv("date,symbol,close\nd0,Z,0\nd1,Z,0\n").unwrap();
+        assert_eq!(zeros.masked().unwrap().closes["ASSET_000"], vec![0.0, 0.0]);
     }
 }

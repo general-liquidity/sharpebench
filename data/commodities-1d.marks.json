@@ -1,0 +1,17 @@
+{
+  "schema_version": "sharpebench.mark-sheet.v1",
+  "symbols": {
+    "BRENT": {
+      "venue": "Europe (Brent spot FOB, FRED DCOILBRENTEU)",
+      "basis": "Assumed London-close assessment, 16:30 London time (15:30 UTC in summer, 16:30 UTC in winter). Declared from the venue convention, not verified against the price reporter's methodology.",
+      "utc_minutes_earliest": 930,
+      "utc_minutes_latest": 990
+    },
+    "WTI": {
+      "venue": "Cushing, Oklahoma (WTI spot FOB, FRED DCOILWTICO)",
+      "basis": "Assumed New York settlement, 14:30 Eastern time (18:30 UTC in summer, 19:30 UTC in winter). Declared from the venue convention, not verified against the price reporter's methodology.",
+      "utc_minutes_earliest": 1110,
+      "utc_minutes_latest": 1170
+    }
+  }
+}
