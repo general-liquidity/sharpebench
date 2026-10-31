@@ -741,6 +741,9 @@ pub struct ModelGateway<'a, T: ProviderTransport> {
     /// the alternative: it would have to be written to the journal that could
     /// not be written.
     journal_unwritable: bool,
+    /// Gateway requests per entrant decision, as this host counted them.
+    /// Diagnostic only: nothing scores, ranks or gates on it.
+    decisions: serve::DecisionRecorder,
 }
 
 impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
@@ -766,6 +769,7 @@ impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
             dispatches: 0,
             journal_conflict: false,
             journal_unwritable: false,
+            decisions: serve::DecisionRecorder::default(),
         }
     }
 
@@ -844,6 +848,7 @@ impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
             dispatches: 0,
             journal_conflict: false,
             journal_unwritable: false,
+            decisions: serve::DecisionRecorder::default(),
         })
     }
 
@@ -3443,6 +3448,7 @@ mod tests {
             dispatches: 0,
             journal_conflict: false,
             journal_unwritable: false,
+            decisions: serve::DecisionRecorder::default(),
         };
 
         assert!(parse(&first.serve_line(&request("hello", 16))).ok);

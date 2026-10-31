@@ -166,9 +166,18 @@ short.
 ## Decisions must be deterministic under re-execution
 
 A run can be executed more than once. A runtime failure (a crashed container,
-a broken pipe, a timeout) is retried by restarting the run from its first step
-with a fresh agent; an interrupted sweep resumes by running its unfinished runs
-again; and a verifier can re-execute a captured trajectory to check it.
+a broken pipe, a timeout the harness cannot charge to the agent) is retried by
+restarting the run from its first step with a fresh agent; an interrupted sweep
+resumes by running its unfinished runs again; and a verifier can re-execute a
+captured trajectory to check it.
+
+Overrunning the per-decision time budget is not a runtime failure. When the
+observation was delivered, the agent process was still running when the budget
+ran out, and no decision had arrived, the run fails as
+`decision_budget_exceeded`: the agent's own fault, like breaching the memory
+budget. It is not retried and counts as a failing run for pass^k. A stall
+before the observation was accepted, and any HTTP endpoint timeout (a slow
+endpoint cannot be told from a slow network), stay runtime failures.
 
 **What you must guarantee.** Each decision is a deterministic function of the
 observations of the same run, up to and including the one being answered, and

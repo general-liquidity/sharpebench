@@ -76,9 +76,14 @@
 //! ## Example
 //!
 //! ```
-//! use sharpebench_memory::{ablation_report, Arm, ArmScores};
+//! use sharpebench_memory::{
+//!     ablation_report, Arm, ArmScores, ControlExposure, ControlTaskExposure,
+//! };
 //!
-//! let baseline = ArmScores::new(Arm::Baseline, vec![0.10, 0.12, 0.09, 0.11]);
+//! // The host that ran the no-memory control saw no retrieval and no memory read.
+//! let clean = ControlExposure::new(vec![ControlTaskExposure::CLEAN; 4]);
+//! let baseline = ArmScores::new(Arm::Baseline, vec![0.10, 0.12, 0.09, 0.11])
+//!     .with_control_exposure(clean);
 //! let retrieval = ArmScores::new(Arm::Retrieval, vec![0.72, 0.80, 0.75, 0.78]);
 //! let oracle = ArmScores::new(Arm::Oracle, vec![0.94, 0.96, 0.93, 0.95]);
 //!
@@ -97,6 +102,7 @@ pub mod pit;
 pub mod poisoning;
 pub mod transition;
 
+pub use activation::{ControlExposure, ControlTaskExposure};
 pub use confabulation::{confabulation_report, BeliefEvent, ConfabulationReport};
 pub use multisession::{
     multi_session_report, replicated_multi_session_report, ChainInferenceUnavailable,
@@ -233,6 +239,10 @@ pub struct ArmScores {
     /// lift by the retrieval arm's overhead *over baseline* so a layer that buys
     /// its lift with 3x the tokens or latency no longer scores like a free one.
     pub cost: ArmCost,
+    /// Host-observed evidence that this arm ran without memory. Required on the
+    /// baseline arm by [`ablation_report`]; set via
+    /// [`ArmScores::with_control_exposure`].
+    pub exposure: Option<ControlExposure>,
 }
 
 impl ArmScores {
@@ -242,7 +252,15 @@ impl ArmScores {
             arm,
             scores,
             cost: ArmCost::default(),
+            exposure: None,
         }
+    }
+
+    /// Attach the host's evidence that this arm ran without memory (builder
+    /// style). [`ablation_report`] requires it on the baseline arm.
+    pub fn with_control_exposure(mut self, exposure: ControlExposure) -> Self {
+        self.exposure = Some(exposure);
+        self
     }
 
     /// Attach a compute-overhead profile to this arm (builder style).
@@ -383,6 +401,10 @@ fn per_cost_lift(lift: f64, overhead: f64) -> Option<f64> {
 /// the wrong [`Arm`] for its position, when the three arms have mismatched task
 /// counts, when any score or reported cost is not finite, or when `alpha` is not a
 /// finite value inside `(0, 1)`.
+///
+/// It also returns `Err` when the baseline arm carries no [`ControlExposure`],
+/// when that evidence covers a different number of tasks than the arm scores, or
+/// when any task shows a retrieval or a memory read.
 pub fn ablation_report(
     baseline: &ArmScores,
     retrieval: &ArmScores,
@@ -419,6 +441,19 @@ pub fn ablation_report_with_minimum_effect(
     }
     if oracle.arm != Arm::Oracle {
         return Err(format!("oracle arm mistagged as {}", oracle.arm.as_str()));
+    }
+    // The lift is over a control that ran without memory, so the control has to
+    // show it did. A missing receipt is refused, never read as zero exposure.
+    match &baseline.exposure {
+        None => {
+            return Err(
+                "baseline arm carries no control exposure evidence: a no-memory control                  must show zero retrievals and memory reads per task"
+                    .to_string(),
+            )
+        }
+        Some(exposure) => exposure
+            .verify_clean(baseline.len())
+            .map_err(|error| format!("baseline arm: {error}"))?,
     }
     if baseline.is_empty() || retrieval.is_empty() || oracle.is_empty() {
         return Err("every arm must have at least one scored task".to_string());
@@ -525,7 +560,8 @@ mod tests {
     const EPS: f64 = 1e-9;
 
     fn baseline(scores: Vec<f64>) -> ArmScores {
-        ArmScores::new(Arm::Baseline, scores)
+        let clean = ControlExposure::new(vec![ControlTaskExposure::CLEAN; scores.len()]);
+        ArmScores::new(Arm::Baseline, scores).with_control_exposure(clean)
     }
     fn retrieval(scores: Vec<f64>) -> ArmScores {
         ArmScores::new(Arm::Retrieval, scores)

@@ -434,12 +434,17 @@ where
 /// Map an external agent's post-run [`TransportHealth`] to the failure taxonomy, so
 /// a masked degrade-to-hold surfaces as a typed failure instead of a flat (and
 /// silently mis-attributed) return series. A protocol fault is the agent's own and
-/// counts against pass^k ([`FailureKind::AgentProtocolViolation`]); an unrecovered
-/// transport blip or a tripped breaker is the harness's fault and is retried at the
-/// run level ([`FailureKind::TransportError`]). `None` when the run was clean.
+/// counts against pass^k ([`FailureKind::AgentProtocolViolation`]), and so does a
+/// live entrant overrunning its per-decision time budget
+/// ([`FailureKind::DecisionBudgetExceeded`]); an unrecovered transport blip, a
+/// timeout with no evidence against the entrant, or a tripped breaker is the
+/// harness's fault and is retried at the run level ([`FailureKind::TransportError`]).
+/// `None` when the run was clean.
 pub fn transport_failure(health: &TransportHealth) -> Option<FailureKind> {
     if health.protocol_faults > 0 {
         Some(FailureKind::AgentProtocolViolation)
+    } else if health.budget_overruns > 0 {
+        Some(FailureKind::DecisionBudgetExceeded)
     } else if health.tripped || health.transport_faults > 0 {
         Some(FailureKind::TransportError)
     } else {
@@ -614,6 +619,7 @@ fn failure_reason(record: &FailureRecord) -> String {
         FailureKind::Timeout => "timeout",
         FailureKind::AgentProtocolViolation => "agent_protocol_violation",
         FailureKind::ResourceLimitExceeded => "resource_limit_exceeded",
+        FailureKind::DecisionBudgetExceeded => "decision_budget_exceeded",
     };
     let origin = if record.runtime {
         "runtime"
@@ -1467,6 +1473,67 @@ mod tests {
             run_external_backtest(&data, &mut bad, window, 1, costs).unwrap_err(),
             FailureKind::AgentProtocolViolation,
         );
+    }
+
+    /// A live entrant overrunning its decision budget is charged to the entrant;
+    /// a timeout the harness has no evidence to charge stays the harness's.
+    #[test]
+    fn a_budget_overrun_is_an_agent_fault_and_a_bare_timeout_is_not() {
+        let data = Dataset::synthetic(3, 60, 5);
+        let window = Window { start: 20, end: 60 };
+        let costs = CostModel::default();
+
+        let mut slow = MockExternal::faulty(DecideError::BudgetOverrun);
+        let kind = run_external_backtest(&data, &mut slow, window, 1, costs).unwrap_err();
+        assert_eq!(kind, FailureKind::DecisionBudgetExceeded);
+        assert!(
+            !kind.is_runtime(),
+            "the overrun is the entrant's, not the harness's"
+        );
+
+        let mut stalled = MockExternal::faulty(DecideError::Timeout);
+        let kind = run_external_backtest(&data, &mut stalled, window, 1, costs).unwrap_err();
+        assert_eq!(kind, FailureKind::TransportError);
+        assert!(kind.is_runtime());
+    }
+
+    /// An entrant that always overruns is not respawned: every cell is charged
+    /// to it once, with a failing sentinel run, and no cell is left as an
+    /// exhausted runtime failure that would make the sweep noncertifying.
+    #[test]
+    fn an_always_slow_entrant_is_charged_once_per_cell_and_never_exhausts() {
+        let data = Dataset::synthetic(3, 60, 5);
+        let windows = [Window { start: 20, end: 60 }];
+        let seeds = [0u64, 1, 2];
+        let mut spawned = 0u32;
+        let res = run_external_agent(
+            "slow-entrant",
+            &data,
+            &windows,
+            &seeds,
+            CostModel::default(),
+            2,
+            || {
+                spawned += 1;
+                Some(MockExternal::faulty(DecideError::BudgetOverrun))
+            },
+        );
+        assert_eq!(
+            spawned, 3,
+            "one attempt per cell: an overrun is never retried"
+        );
+        assert_eq!(res.failures.runtime_failures(), 0);
+        assert_eq!(res.failures.agent_faults(), 3);
+        assert_eq!(
+            res.submission.runs.len(),
+            3,
+            "each overrun cell keeps a failing sentinel in the pass^k pool"
+        );
+        assert!(res
+            .failures
+            .records
+            .iter()
+            .all(|r| r.kind == FailureKind::DecisionBudgetExceeded && !r.runtime));
     }
 
     #[test]

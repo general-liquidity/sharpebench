@@ -4124,6 +4124,57 @@ mod tests {
         assert_eq!(status.runtime_failed_cells, 8);
     }
 
+    /// A live entrant that always overruns its decision budget used to exhaust
+    /// every cell as a retried transport fault, which made the sweep it was in
+    /// noncertifying. Driven here through a real silent subprocess: the
+    /// overrun is charged to the entrant and the sweep stays certifiable.
+    #[test]
+    fn an_always_slow_entrant_leaves_the_sweep_certifiable() {
+        let data = sharpebench_sim::Dataset::synthetic(3, 60, 5);
+        let windows = [sharpebench_sim::Window { start: 20, end: 60 }];
+        let seeds = [0u64, 1];
+        let res = sharpebench_harness::run_external_agent(
+            "always-slow",
+            &data,
+            &windows,
+            &seeds,
+            sharpebench_sim::CostModel::default(),
+            // The same retry bound the external sweep uses.
+            2,
+            || {
+                #[cfg(windows)]
+                let spawned = sharpebench_sim::ExternalAgent::spawn(
+                    "powershell",
+                    &[
+                        "-NoProfile",
+                        "-Command",
+                        "$null = [Console]::In.ReadLine(); Start-Sleep -Seconds 60",
+                    ],
+                );
+                #[cfg(not(windows))]
+                let spawned =
+                    sharpebench_sim::ExternalAgent::spawn("sh", &["-c", "read line; sleep 60"]);
+                Some(
+                    spawned
+                        .expect("the platform shell spawns")
+                        .with_decide_timeout(std::time::Duration::from_secs(2)),
+                )
+            },
+        );
+        assert!(res
+            .failures
+            .records
+            .iter()
+            .all(|r| r.kind == sharpebench_harness::FailureKind::DecisionBudgetExceeded));
+        let status = external_sweep_completeness(&res.failures, 2, res.submission.runs.len());
+        assert_eq!(status.runtime_failed_cells, 0);
+        assert_eq!(status.agent_failed_cells, 2);
+        assert!(
+            status.complete,
+            "one slow entrant must not deny certification to the sweep"
+        );
+    }
+
     #[test]
     fn agent_fault_sentinels_preserve_the_execution_denominator() {
         let mut failures = sharpebench_harness::FailureLog::default();
