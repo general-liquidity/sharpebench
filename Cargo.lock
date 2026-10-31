@@ -722,6 +722,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "sharpebench-joint-gate"
+version = "0.28.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+ "sharpebench-core",
+ "sharpebench-harness",
+ "sharpebench-protocol",
+ "sharpebench-sim",
+ "sharpebench-study",
+]
+
+[[package]]
 name = "sharpebench-leaderboard"
 version = "0.28.0"
 dependencies = [

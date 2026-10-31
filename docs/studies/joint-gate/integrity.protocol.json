@@ -1,0 +1,279 @@
+{
+  "contract_version": "sharpebench/study-protocol/v1",
+  "protocol_id": "joint-gate-integrity-legs",
+  "version": {
+    "major": 1,
+    "minor": 0,
+    "patch": 0
+  },
+  "tier": "frozen_validation",
+  "frozen": true,
+  "identity": {
+    "method": "joint eligibility rule, integrity legs and negative controls",
+    "method_version": "0.28.0",
+    "configuration_id": "joint-gate-validation-v1",
+    "configuration_digest": "14e4369b6b3ba350420eaa3e2a43ee35fda86c929c9783ba67097f57c4a19151",
+    "scoring_spec_hash": "64f0e9241b3b4aa7"
+  },
+  "claims": [
+    {
+      "id": "I-look_ahead_oracle",
+      "statement": "The control look_ahead_oracle is refused by the shipped path with probability at least 0.99, a miss rate at or below 0.01.",
+      "estimand": "miss_rate_look_ahead_oracle",
+      "decision_rule": {
+        "kind": "interval_upper_bound_at_most",
+        "limit": 0.01
+      }
+    },
+    {
+      "id": "I-fabrication",
+      "statement": "The control fabrication is refused by the shipped path with probability at least 0.99, a miss rate at or below 0.01.",
+      "estimand": "miss_rate_fabrication",
+      "decision_rule": {
+        "kind": "interval_upper_bound_at_most",
+        "limit": 0.01
+      }
+    },
+    {
+      "id": "I-process_violation",
+      "statement": "The control process_violation is refused by the shipped path with probability at least 0.99, a miss rate at or below 0.01.",
+      "estimand": "miss_rate_process_violation",
+      "decision_rule": {
+        "kind": "interval_upper_bound_at_most",
+        "limit": 0.01
+      }
+    },
+    {
+      "id": "I-mandate_breach",
+      "statement": "The control mandate_breach is refused by the shipped path with probability at least 0.99, a miss rate at or below 0.01.",
+      "estimand": "miss_rate_mandate_breach",
+      "decision_rule": {
+        "kind": "interval_upper_bound_at_most",
+        "limit": 0.01
+      }
+    },
+    {
+      "id": "I-constant_window_griefer",
+      "statement": "The control constant_window_griefer is refused by the shipped path with probability at least 0.99, a miss rate at or below 0.01.",
+      "estimand": "miss_rate_constant_window_griefer",
+      "decision_rule": {
+        "kind": "interval_upper_bound_at_most",
+        "limit": 0.01
+      }
+    },
+    {
+      "id": "I-dynamic_leverage",
+      "statement": "The control dynamic_leverage is refused by the shipped path with probability at least 0.99, a miss rate at or below 0.01.",
+      "estimand": "miss_rate_dynamic_leverage",
+      "decision_rule": {
+        "kind": "interval_upper_bound_at_most",
+        "limit": 0.01
+      }
+    },
+    {
+      "id": "I-cost_losing_random",
+      "statement": "The control cost_losing_random is refused by the shipped path with probability at least 0.99, a miss rate at or below 0.01.",
+      "estimand": "miss_rate_cost_losing_random",
+      "decision_rule": {
+        "kind": "interval_upper_bound_at_most",
+        "limit": 0.01
+      }
+    },
+    {
+      "id": "I-passive_beta",
+      "statement": "The control passive_beta is refused by the shipped path with probability at least 0.99, a miss rate at or below 0.01.",
+      "estimand": "miss_rate_passive_beta",
+      "decision_rule": {
+        "kind": "interval_upper_bound_at_most",
+        "limit": 0.01
+      }
+    }
+  ],
+  "estimands": [
+    {
+      "name": "miss_rate_look_ahead_oracle",
+      "kind": {
+        "kind": "per_entry_false_positive"
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "upper_error_limit",
+        "limit": 0.01
+      }
+    },
+    {
+      "name": "miss_rate_fabrication",
+      "kind": {
+        "kind": "per_entry_false_positive"
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "upper_error_limit",
+        "limit": 0.01
+      }
+    },
+    {
+      "name": "miss_rate_process_violation",
+      "kind": {
+        "kind": "per_entry_false_positive"
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "upper_error_limit",
+        "limit": 0.01
+      }
+    },
+    {
+      "name": "miss_rate_mandate_breach",
+      "kind": {
+        "kind": "per_entry_false_positive"
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "upper_error_limit",
+        "limit": 0.01
+      }
+    },
+    {
+      "name": "miss_rate_constant_window_griefer",
+      "kind": {
+        "kind": "per_entry_false_positive"
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "upper_error_limit",
+        "limit": 0.01
+      }
+    },
+    {
+      "name": "miss_rate_dynamic_leverage",
+      "kind": {
+        "kind": "per_entry_false_positive"
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "upper_error_limit",
+        "limit": 0.01
+      }
+    },
+    {
+      "name": "miss_rate_cost_losing_random",
+      "kind": {
+        "kind": "per_entry_false_positive"
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "upper_error_limit",
+        "limit": 0.01
+      }
+    },
+    {
+      "name": "miss_rate_passive_beta",
+      "kind": {
+        "kind": "per_entry_false_positive"
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "upper_error_limit",
+        "limit": 0.01
+      }
+    }
+  ],
+  "design": {
+    "null_family": "Planted violations and no-skill controls: look-ahead oracle, forged capture, block-severity process event, per-run drawdown breach, constant-within-window griefer, bounded dynamic leverage, cost-losing random allocators and passive beta.",
+    "alternative_family": "None. A detection rate is not a power curve; the planted high-skill twin in the process and mandate controls exists only to show the refusal is the violation's doing.",
+    "effect_units": "raw",
+    "field_composition": {
+      "null_entrants": 7,
+      "planted_skill_entrants": 0,
+      "control_entrants": 1
+    },
+    "dependence": {
+      "serial": "Independent normal and GARCH paths, and multi-symbol tapes through the simulator.",
+      "cross_entrant": "Independent peers; engine fields share one tape.",
+      "shared_market_history": true
+    },
+    "window_geometry": {
+      "windows": 6,
+      "window_length_steps": 420,
+      "stride_steps": 420,
+      "overlapping": false
+    },
+    "search_assumptions": {
+      "trials_searched": 0,
+      "selection_rule": "No search. Entrants are drawn, not selected; the deflation count is the rule's host N raised to the field size.",
+      "independent_trials_assumed": false
+    },
+    "dispersion_policy": {
+      "kind": "measured",
+      "estimator": "The shipped measured dispersion: clone-collapsed, vote-fenced sample standard deviation of pooled per-period Sharpes, floored at each rule's prior."
+    },
+    "tuning_allowed": false
+  },
+  "replication": {
+    "independent_unit": "simulated_field",
+    "nested_observations": [
+      "entrant",
+      "window",
+      "seed"
+    ],
+    "independent_units_planned": 657
+  },
+  "inference": {
+    "confidence_level": "ninety_nine",
+    "interval_method": "wilson_score",
+    "required_half_width": 0.005,
+    "multiplicity": {
+      "method": "bonferroni",
+      "reported_conditions": [
+        "look_ahead_oracle",
+        "fabrication",
+        "process_violation",
+        "mandate_breach",
+        "constant_window_griefer",
+        "dynamic_leverage",
+        "cost_losing_random",
+        "passive_beta"
+      ]
+    }
+  },
+  "accounting": {
+    "expected_attempted": 657,
+    "expected_completed": 657,
+    "expected_available": 657,
+    "refusal": {
+      "kind": "count_as_failure",
+      "reason_code": "entrant_refused_counts_as_ineligible",
+      "denominator": "attempted"
+    },
+    "unavailability": {
+      "kind": "count_as_failure",
+      "reason_code": "typed_unavailable_counts_as_ineligible",
+      "denominator": "attempted"
+    },
+    "infrastructure_failure": {
+      "kind": "retry_then_exclude",
+      "reason_code": "shard_infrastructure_failure",
+      "denominator": "attempted",
+      "max_attempts": 3
+    }
+  },
+  "simulation": {
+    "planned_runs": 657,
+    "anticipated_rate": 0.0,
+    "runtime_estimate_seconds_per_run": 13.699
+  },
+  "budget": {
+    "approved": false,
+    "approver": "",
+    "spend_cap_usd": 1.0,
+    "compute_cap_core_hours": 3.8,
+    "estimated_spend_usd": 0.0,
+    "estimated_core_hours": 2.5
+  },
+  "stopping_rule": {
+    "kind": "fixed_runs",
+    "runs": 657
+  },
+  "notes": "One run is one replicate of every control. These legs need no power: a miss is a defect, and a miss here is a separate finding from any power shortfall in the statistical protocol. 657 replicates all detected give a Wilson lower bound of 0.99 at the two-sided 99 percent level. budget.approved is false for the same reason as the statistical protocol."
+}

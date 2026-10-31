@@ -47,6 +47,14 @@ producer does not retrospectively validate its previous artifact.
 | Establish realism, agent skill or deployable profitability | Requires suitable task/market/agent evidence, not synthetic regression controls alone |
 | Propagate a repair to SharpeArena | Requires a Bench release and Arena's exact dependency-pin update; sibling source changes do not propagate automatically |
 
+The confirmatory protocol is now written and sealed, unapproved, at
+[docs/studies/joint-gate](../../studies/joint-gate/PROTOCOL.md), with its producer
+in `crates/sharpebench-joint-gate`. It fixes the estimand, candidate rules, null
+grid, controls, multiplicity, precision, stopping and stated outcomes, including a
+no-feasible-geometry result. Sealing is not running: no frozen draw has been read,
+no rate in this book comes from it, and the producer refuses a frozen run until the
+owner approves the budget and the protocol binds the merged engine.
+
 These are remaining measurement and delivery decisions. A declared,
 protocol-frozen experiment may run once the owner approves it, and its result is
 published beside the frozen evidence. Frozen results are not rewritten, and
