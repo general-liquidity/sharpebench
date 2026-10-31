@@ -104,7 +104,8 @@ Migration notes for producers:
 
 ## Scores and calibration
 
-New reports use `sharpebench.forecast-quality.v5`. Every loss metric and pairwise
+Reports use `sharpebench.forecast-quality.v5`, or v6 against a declared plan
+(see below). Every loss metric and pairwise
 comparison carries `scoring_rule` and `target_unit` (the contract's exact `unit`
 string). Comparisons are partitioned by this tuple in lexical order within
 each agent pair. Brier, log loss, squared error, CRPS and different units never
@@ -239,8 +240,9 @@ before resolution:
 
 The schema is exact, the list is non-empty, and every entry is a lowercase
 SHA-256 named once; anything else is refused before any document is read. The
-plan becomes the field support, and the current report uses
-`sharpebench.forecast-quality.v5` with explicit plan membership:
+plan becomes the field support, and a planned report uses
+`sharpebench.forecast-quality.v6` with explicit plan membership. A planless
+report stays on v5. Readers of v6 must accept the additions below:
 
 - `common_support.n_contracts` and `contract_sha256` are the planned digests,
   and `rule` says so.
@@ -253,7 +255,13 @@ plan becomes the field support, and the current report uses
   `contract_digest_versions` entry. In `agents`, `n_claims`, `n_revisions`,
   `n_eligible_claims`, the resolution counts and `resolution_rate` still
   describe the whole document, while `blind_resolved` and
-  `consensus_exposed_resolved` count planned digests only.
+  `consensus_exposed_resolved` count planned digests only. `agents[].planned`
+  restates those document counts on claims naming a planned digest, so a row
+  can be read on one scope. Its `resolution_rate` is null when the agent made
+  no planned claim.
+- `settlement_status_disagreements` lists only contracts some agent resolved. A
+  planned contract nobody resolved is a gap under `unresolved_by_agent`, not a
+  disagreement.
 - A settlement is checked across every pair of documents before the plan drops
   anything, so a disputed outcome on an unplanned contract still refuses the
   report.
