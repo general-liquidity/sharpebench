@@ -1077,8 +1077,11 @@ fn external_capture_and_image_reexecution_refuse_contradictory_or_unlaunchable_r
 /// fixture. The fixture's own entrypoint is `/bin/sh`, which does not speak
 /// the decision protocol, and the CLI launches an image's own entrypoint on
 /// purpose. So this proves the hardened launch against a real daemon, the
-/// typed transport failure for a silent entrant, and that no container is
-/// left behind; the passing comparison is covered by the fake sandbox tests.
+/// typed failure for a silent entrant, and that no container is left behind;
+/// the passing comparison is covered by the fake sandbox tests. The shell
+/// accepts each observation on stdin and keeps running without answering, so
+/// the harness charges it with `decision_budget_exceeded`, the entrant's own
+/// fault, rather than a retryable transport error.
 #[test]
 #[ignore = "needs a running Docker daemon and SHARPEBENCH_SANDBOX_FIXTURE"]
 fn live_image_capture_and_reexecution_launch_the_hardened_sandbox() {
@@ -1130,7 +1133,7 @@ fn live_image_capture_and_reexecution_launch_the_hardened_sandbox() {
         refusal["error"], "reexecution_transport_failure",
         "{refusal}"
     );
-    assert_eq!(refusal["failure"], "transport_error", "{refusal}");
+    assert_eq!(refusal["failure"], "decision_budget_exceeded", "{refusal}");
     assert_eq!(refusal["agent"], format!("sandbox:{image}"));
     assert!(!stderr(&rerun).contains("NO sandbox"));
 
@@ -1146,7 +1149,7 @@ fn live_image_capture_and_reexecution_launch_the_hardened_sandbox() {
     assert_eq!(captured.status.code(), Some(1), "{}", stderr(&captured));
     let refusal = stdout_json(&captured);
     assert_eq!(refusal["error"], "capture_transport_failure", "{refusal}");
-    assert_eq!(refusal["failure"], "transport_error", "{refusal}");
+    assert_eq!(refusal["failure"], "decision_budget_exceeded", "{refusal}");
     assert!(!fixture.path("entrant.json").exists());
 
     assert_eq!(containers(), before, "every launched container was removed");
