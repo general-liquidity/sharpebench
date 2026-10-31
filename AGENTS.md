@@ -88,6 +88,7 @@ diff in the four pure crates, and the paired-boundary gate
 | CLI, updater, board rendering | `crates/sharpebench-cli/` |
 | Memory ablation benchmark | `crates/sharpebench-memory/` |
 | Study-protocol contract and validator | `crates/sharpebench-study/` |
+| Joint-gate study producer and sealed protocol | `crates/sharpebench-joint-gate/`, `docs/studies/joint-gate/` |
 | WASM and npm surface | `crates/sharpebench-wasm/`, `npm/` |
 | Paper, producers, frozen evidence | `paper/` |
 | Forward arena records | `arena/` |
