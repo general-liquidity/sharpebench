@@ -3422,4 +3422,301 @@ mod tests {
             "the breached call is charged at its reservation"
         );
     }
+
+    /// Every token shape is scrubbed exactly, and the text around it survives:
+    /// a scrub that swallowed the separator or left a trailing byte of the
+    /// credential behind would still look redacted to a `contains` check.
+    #[test]
+    fn a_token_shaped_word_is_replaced_and_its_separators_are_kept() {
+        for prefix in ["sk-", "Bearer", "bearer", "sk_", "api-key"] {
+            let token = format!("{prefix}0123456789abcdef");
+            for (input, expected) in [
+                (token.clone(), "<redacted>".to_string()),
+                (format!("{token} next"), "<redacted> next".to_string()),
+                (format!("a,{token},b"), "a,<redacted>,b".to_string()),
+                (format!("\"{token}\""), "\"<redacted>\"".to_string()),
+            ] {
+                assert_eq!(redact(&input, &[]), expected);
+            }
+        }
+    }
+
+    /// Fifteen bytes is one short of the shape, so the separator must not be
+    /// counted as part of the word.
+    #[test]
+    fn a_separator_does_not_lengthen_a_short_word_into_a_token() {
+        for separator in [" ", ",", "\""] {
+            let input = format!("sk-0123456789ab{separator}x");
+            assert_eq!(redact(&input, &[]), input);
+        }
+    }
+
+    #[test]
+    fn a_permit_pool_reports_its_size_and_is_never_empty() {
+        assert_eq!(CallPermits::new(3).max(), 3);
+        assert_eq!(CallPermits::new(0).max(), 1);
+    }
+
+    fn gateway_with<'a, T: ProviderTransport>(
+        routes: &'a RouteTable,
+        permits: &'a CallPermits,
+        provider: T,
+        max_usd_nanos: u128,
+        limits: GatewayLimits,
+    ) -> ModelGateway<'a, T> {
+        ModelGateway::new(routes, permits, provider, budget(max_usd_nanos, 8), limits)
+    }
+
+    fn line_with(messages: usize, tools: Vec<ToolDefinition>, max_output_tokens: u32) -> String {
+        serde_json::to_string(&GatewayRequest {
+            protocol: GATEWAY_PROTOCOL.to_string(),
+            model_alias: "fake.v1".into(),
+            messages: (0..messages)
+                .map(|_| Message {
+                    role: MessageRole::User,
+                    content: "hello".into(),
+                })
+                .collect(),
+            max_output_tokens,
+            tools,
+        })
+        .expect("a request serializes")
+    }
+
+    fn tool() -> ToolDefinition {
+        ToolDefinition {
+            name: "abcd".into(),
+            schema_json: "{}".into(),
+        }
+    }
+
+    /// Serve `line` once under `limits` and return the refusal, if any.
+    fn refusal(line: &str, limits: GatewayLimits) -> Option<GatewayErrorKind> {
+        let routes = table("2026-01-01");
+        let permits = CallPermits::new(4);
+        let mut gateway = gateway_with(
+            &routes,
+            &permits,
+            FakeProvider::answering(1),
+            u128::MAX,
+            limits,
+        );
+        parse(&gateway.serve_line(line))
+            .error
+            .map(|error| error.kind)
+    }
+
+    /// Each request bound on its limit and one past it, the two sides differing
+    /// only in that one limit.
+    #[test]
+    fn every_request_bound_admits_its_limit_and_refuses_one_more() {
+        let hello = request("hello", 16);
+        let limits = GatewayLimits::default;
+        for (line, at, over, kind) in [
+            (
+                hello.clone(),
+                GatewayLimits {
+                    max_request_line_bytes: hello.len(),
+                    ..limits()
+                },
+                GatewayLimits {
+                    max_request_line_bytes: hello.len() - 1,
+                    ..limits()
+                },
+                GatewayErrorKind::RequestTooLarge,
+            ),
+            (
+                line_with(2, Vec::new(), 16),
+                GatewayLimits {
+                    max_messages: 2,
+                    ..limits()
+                },
+                GatewayLimits {
+                    max_messages: 1,
+                    ..limits()
+                },
+                GatewayErrorKind::TooManyMessages,
+            ),
+            (
+                hello.clone(),
+                GatewayLimits {
+                    max_message_bytes: 5,
+                    ..limits()
+                },
+                GatewayLimits {
+                    max_message_bytes: 4,
+                    ..limits()
+                },
+                GatewayErrorKind::MessageTooLarge,
+            ),
+            (
+                line_with(1, vec![tool()], 16),
+                GatewayLimits {
+                    max_tool_payload_bytes: 6,
+                    ..limits()
+                },
+                GatewayLimits {
+                    max_tool_payload_bytes: 5,
+                    ..limits()
+                },
+                GatewayErrorKind::ToolPayloadTooLarge,
+            ),
+            (
+                request("hello", 33),
+                GatewayLimits {
+                    max_output_tokens: 33,
+                    ..limits()
+                },
+                GatewayLimits {
+                    max_output_tokens: 32,
+                    ..limits()
+                },
+                GatewayErrorKind::OutputTokensOutOfRange,
+            ),
+        ] {
+            assert_eq!(refusal(&line, at), None);
+            assert_eq!(refusal(&line, over), Some(kind));
+        }
+    }
+
+    /// The response bounds, on the limit and one under the size of the answer.
+    /// An answer refused here was still a call, so it stays charged.
+    #[test]
+    fn every_response_bound_admits_its_limit_and_refuses_one_more() {
+        let answer = body("ok", Some((10, 5)));
+        let limits = GatewayLimits::default;
+        for (at, over) in [
+            (
+                GatewayLimits {
+                    max_response_body_bytes: answer.len(),
+                    ..limits()
+                },
+                GatewayLimits {
+                    max_response_body_bytes: answer.len() - 1,
+                    max_retries_per_request: 0,
+                    ..limits()
+                },
+            ),
+            (
+                GatewayLimits {
+                    max_response_text_bytes: 2,
+                    ..limits()
+                },
+                GatewayLimits {
+                    max_response_text_bytes: 1,
+                    max_retries_per_request: 0,
+                    ..limits()
+                },
+            ),
+        ] {
+            let hello = request("hello", 16);
+            assert_eq!(refusal(&hello, at), None);
+            let routes = table("2026-01-01");
+            let permits = CallPermits::new(4);
+            let mut gateway = gateway_with(
+                &routes,
+                &permits,
+                FakeProvider::answering(1),
+                u128::MAX,
+                over,
+            );
+            let error = parse(&gateway.serve_line(&hello)).error.expect("refused");
+            assert_eq!(error.kind, GatewayErrorKind::ProviderResponseInvalid);
+            assert_eq!(gateway.journal().spend().unknown_calls, 1);
+        }
+    }
+
+    #[test]
+    fn a_response_line_may_fill_its_limit_exactly() {
+        let hello = request("hello", 16);
+        let serve = |max_response_line_bytes: usize| {
+            let routes = table("2026-01-01");
+            let permits = CallPermits::new(4);
+            let mut gateway = gateway_with(
+                &routes,
+                &permits,
+                FakeProvider::answering(1),
+                u128::MAX,
+                GatewayLimits {
+                    max_response_line_bytes,
+                    ..GatewayLimits::default()
+                },
+            );
+            gateway.serve_line(&hello)
+        };
+        let full = serve(usize::MAX);
+        assert_eq!(serve(full.len()), full);
+        assert_ne!(serve(full.len() - 1), full);
+    }
+
+    /// `hello` is 5 bytes and the tool 6, so the reservation is
+    /// 5 + 6 + 8 overhead + 16 output = 35. A sum that dropped or distorted
+    /// either side would move it off that figure one way or the other.
+    #[test]
+    fn a_reservation_counts_every_content_byte_and_may_spend_the_last_nano() {
+        let line = line_with(1, vec![tool()], 16);
+        let serve = |max_usd_nanos: u128| {
+            let routes = table("2026-01-01");
+            let permits = CallPermits::new(4);
+            let mut gateway = gateway_with(
+                &routes,
+                &permits,
+                FakeProvider::answering(1),
+                max_usd_nanos,
+                GatewayLimits::default(),
+            );
+            parse(&gateway.serve_line(&line))
+                .error
+                .map(|error| error.kind)
+        };
+        assert_eq!(serve(35), None);
+        assert_eq!(serve(34), Some(GatewayErrorKind::BudgetExhausted));
+    }
+
+    /// A 4xx other than 429 was refused before work, so it is released, not
+    /// charged at its reservation as an ambiguous failure would be.
+    #[test]
+    fn a_client_error_from_the_provider_releases_its_reservation() {
+        let routes = table("2026-01-01");
+        let permits = CallPermits::new(4);
+        let mut gateway = gateway_with(
+            &routes,
+            &permits,
+            FakeProvider::new(vec![ProviderOutcome::Answered {
+                status: 404,
+                body: Vec::new(),
+            }]),
+            u128::MAX,
+            GatewayLimits {
+                max_retries_per_request: 0,
+                ..GatewayLimits::default()
+            },
+        );
+        let response = parse(&gateway.serve_line(&request("hello", 16)));
+        assert_eq!(
+            response.error.expect("refused").kind,
+            GatewayErrorKind::ProviderUnavailable
+        );
+        assert_eq!(
+            settlements(gateway.journal()),
+            [Settlement::Released {
+                reason: ReleaseReason::ProviderRefusedBeforeWork,
+            }]
+        );
+    }
+
+    #[test]
+    fn a_gateway_that_settled_normally_is_not_latched_unwritable() {
+        let routes = table("2026-01-01");
+        let permits = CallPermits::new(4);
+        let mut gateway = gateway_with(
+            &routes,
+            &permits,
+            FakeProvider::answering(1),
+            u128::MAX,
+            GatewayLimits::default(),
+        );
+        assert!(parse(&gateway.serve_line(&request("hello", 16))).ok);
+        assert!(!gateway.journal_unwritable());
+    }
 }
