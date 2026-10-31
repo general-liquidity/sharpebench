@@ -1153,7 +1153,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Artifacts.**
 - `crates/sharpebench-core/src/selfaudit.rs`, sha256 `579718f85fe269b33174681aad905a3803da9ff5a6a67278cb31afea2af13a16`, digest source: paper/evidence/provenance.json, carries the battery and the commit-time assertions that every case is defended and no known gap remains
-- `crates/sharpebench-arena/src/audit.rs`, sha256 `12c13aadaa1c5e0028e8d4872838ee6fb332b4fd48bb1bd9906185641620eae4`, digest source: paper/evidence/provenance.json, the tenth case, against the forward arena's intake
+- `crates/sharpebench-arena/src/audit.rs`, sha256 `5dba8da8bce47be67aaace6b7b297668026f3a038b0b136f75a9f04f4d15cb14`, digest source: paper/evidence/provenance.json, the tenth case, against the forward arena's intake
 
 **Producer command.** sharpebench audit (paper/sections/A-commands.tex); the claim is enforced by the commit-time tests in the two files above.
 
@@ -1166,6 +1166,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Relevant later changes.**
 - The ninth case was a measured known gap until ranking gained the clone collapse of sec:sybil; its test now asserts that the exploit reproduces when the defense is switched off (paper/sections/04-integrity.tex:42).
+- The 2026-10-31 integration (feat/arena-completeness, fix/verify-board-stability, fix/header-execution-identity) changed crates/sharpebench-arena/src/audit.rs for the signed head and the bound execution identity; `sharpebench audit` on the integrated tree still reports all ten attacks defended, and the forward-arena case is still refused under both intakes.
 
 **Present applicability.** Applicable to the current tree: the assertions run on every commit, so the claim is re-established rather than inherited.
 
@@ -1181,6 +1182,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 |---|---|---|
 | 2026-09-23 | still-applicable | Initial entry: The documented comparison is the commit-time test itself, which re-checks the claim against the current kernel on every commit. |
 | 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| 2026-10-31 | still-applicable | Rechecked at the gap-closure integration: crates/sharpebench-arena/src/audit.rs moved, and the recorded digest is rebound to the integrated tree. The claim still holds there, so the disposition is unchanged. |
 
 ### `SB-tab-data`
 
@@ -1479,7 +1481,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 **Source.** `paper/sections/05-experiments.tex:36`
 
 **Artifacts.**
-- `crates/sharpebench-stats/src/deflated_sharpe.rs`, sha256 `d6977b8faabac85311892dfab2509d8203514fd79293466b19cd73cd0281456f`, digest source: paper/evidence/provenance.json, carries the worked-example regression test
+- `crates/sharpebench-stats/src/deflated_sharpe.rs`, sha256 `3e1e6c2c530abd1dd57e6c6a525b006545844c0bc1893c50dd37c10f9a042cef`, digest source: paper/evidence/provenance.json, carries the worked-example regression test
 
 **Producer command.** cargo test -p sharpebench-stats worked_example (paper/sections/A-commands.tex)
 
@@ -1492,6 +1494,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Relevant later changes.**
 - The standardized-moment repair changed the estimator convention; the test runs on the current tree and reproduces the printed values through the kernel's own entry points.
+- The 2026-10-31 integration (fix/near-constant-admission) added the observed-risk refusal to crates/sharpebench-stats/src/deflated_sharpe.rs; the worked-example regression test still passes on the integrated tree, because the example track has losing bars.
 
 **Present applicability.** Applicable to the current tree, since the test executes against it.
 
@@ -1507,6 +1510,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 |---|---|---|
 | 2026-09-23 | still-applicable | Initial entry: The documented comparison is the commit-time regression test against the published example. |
 | 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| 2026-10-31 | still-applicable | Rechecked at the gap-closure integration: crates/sharpebench-stats/src/deflated_sharpe.rs moved, and the recorded digest is rebound to the integrated tree. The claim still holds there, so the disposition is unchanged. |
 
 ### `SB-tab-eligibility`
 
@@ -2559,7 +2563,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Artifacts.**
 - `crates/sharpebench-core/src/selfaudit.rs`, sha256 `579718f85fe269b33174681aad905a3803da9ff5a6a67278cb31afea2af13a16`, digest source: paper/evidence/provenance.json
-- `crates/sharpebench-arena/src/audit.rs`, sha256 `12c13aadaa1c5e0028e8d4872838ee6fb332b4fd48bb1bd9906185641620eae4`, digest source: paper/evidence/provenance.json
+- `crates/sharpebench-arena/src/audit.rs`, sha256 `5dba8da8bce47be67aaace6b7b297668026f3a038b0b136f75a9f04f4d15cb14`, digest source: paper/evidence/provenance.json
 
 **Producer command.** sharpebench audit; enforced by the commit-time tests in the two files above.
 
@@ -2572,6 +2576,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Relevant later changes.**
 - The ninth case moved from a recorded known gap to a defended case when ranking gained clone collapse (paper/sections/04-integrity.tex:42).
+- The 2026-10-31 integration (feat/arena-completeness, fix/verify-board-stability, fix/header-execution-identity) changed crates/sharpebench-arena/src/audit.rs for the signed head and the bound execution identity; `sharpebench audit` on the integrated tree still reports all ten attacks defended, and the forward-arena case is still refused under both intakes.
 
 **Present applicability.** Re-established on every commit against the current kernel.
 
@@ -2587,6 +2592,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 |---|---|---|
 | 2026-09-23 | still-applicable | Initial entry: The documented comparison is the commit-time test, which runs against the current tree rather than against the frozen snapshot. |
 | 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| 2026-10-31 | still-applicable | Rechecked at the gap-closure integration: crates/sharpebench-arena/src/audit.rs moved, and the recorded digest is rebound to the integrated tree. The claim still holds there, so the disposition is unchanged. |
 
 ### `SB-claims-v`
 
