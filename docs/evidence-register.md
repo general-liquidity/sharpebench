@@ -111,7 +111,7 @@ The headline claims whose present applicability is not established, worst first.
 | `SB-sec-power` | SharpeBench | claim | paper/sections/power-fragment.tex:7, paper/sections/power-fragment.tex:32, paper/sections/power-fragment.tex:39 | needs-rescore | SharpeBench paper/evidence owner | P12-A supplies repaired bars; then recompute this table as a separately versioned output beside the frozen one. |
 | `SB-sec-forecast-report` | SharpeBench | claim | paper/sections/03-benchmark.tex:53 | still-applicable | SharpeBench paper/evidence owner | none |
 | `SB-sec-forecast-strata` | SharpeBench | claim | paper/sections/03-benchmark.tex:59 | historical-only | SharpeBench paper/evidence owner | P15: repair paper/sections/03-benchmark.tex:59, which still calls pooling current and names v2 as the report schema. |
-| `SB-sec-forecast-size` | SharpeBench | claim | paper/sections/03-benchmark.tex:59, paper/sections/01-introduction.tex:24, paper/sections/07-limitations.tex:37 | needs-rescore | SharpeBench paper/evidence owner | Owner decision: keep the published constants beside the measured values, or update MEASURED_SIZE, FAMILYWISE_SIZE_RULE, the golden report text and the manuscript together. |
+| `SB-sec-forecast-size` | SharpeBench | claim | paper/sections/03-benchmark.tex:59, paper/sections/01-introduction.tex:24, paper/sections/07-limitations.tex:37 | needs-rescore | SharpeBench paper/evidence owner | P15: update paper/sections/03-benchmark.tex:59, paper/sections/01-introduction.tex:24 and paper/sections/07-limitations.tex:37 to the measured values, keeping 0.138 for the frozen tutorial report. |
 | `SB-sec-compute` | SharpeBench | claim | paper/sections/05-experiments.tex:5 | historical-only | SharpeBench paper/evidence owner | P15: state the measurements in the manuscript as uncommitted machine observations. |
 | `SB-claims-i` | SharpeBench | claim | paper/sections/05-experiments.tex:266 | needs-new-experiment | SharpeBench paper/evidence owner | P12-A then P13-A/P14-A. |
 | `SB-claims-ii` | SharpeBench | claim | paper/sections/05-experiments.tex:266 | historical-only | SharpeBench paper/evidence owner | none |
@@ -2282,6 +2282,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 **Relevant later changes.**
 - paper/sections/E-repairs.tex:19 records the move to schema v2 with the same support, because both fields are complete, and that the archived v1 pilot report still verifies.
 - SharpeBench #171 (352af5c) makes schema sharpebench.forecast-quality.v5 the current output, with per-stratum estimates and no pooled primary estimate. The committed tutorial reports stay at schema v2; examples/forecast-quality/README.md records that the command emits v5 and that the check strips the stratum labels and restores the historical tag before comparing. See SB-sec-forecast-strata for the manuscript sentence this overtakes.
+- MEASURED_SIZE and FAMILYWISE_SIZE_RULE moved to the 60,000-replication values. A fresh report differs from these frozen v2 reports in familywise_size and in the six-block measured_size_at_nominal_5pct, 0.140 against 0.138. The fixtures did not move; the test pins each side of those two fields and compares every other field exactly.
 
 **Present applicability.** Verified on 2026-09-23 for this register: python -m unittest paper/src/test_check_prospective_forecast_report.py passes against the committed fixtures, and both committed reports carry schema v2 with the appendix's stated bootstrap configuration.
 
@@ -2297,6 +2298,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 |---|---|---|
 | 2026-09-23 | still-applicable | Initial entry: The documented comparison is the independent Python recomputation, which runs in CI against the committed report. |
 | 2026-10-31 | still-applicable | Rechecked against #171: the fixtures are unchanged and the numerical results reproduce through the schema normalization the example records, so the row stays applicable as a statement about those two reports. It is no longer a statement about the current report schema, which is v5. |
+| 2026-10-31 | still-applicable | Rechecked after the size constants moved: both fixture digests are unchanged and every field except the two size fields still reproduces. The manuscript's statement that the tutorial comparison carries 0.138 stays true of the frozen report. |
 
 ### `SB-sec-forecast-strata`
 
@@ -2357,14 +2359,15 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Relevant later changes.**
 - SharpeBench #171 (352af5c) stratifies comparisons. The resampling law and the p-value are unchanged, and the producer runs on that code.
+- On owner approval, MEASURED_SIZE and FAMILYWISE_SIZE_RULE now state the 60,000-replication values: 0.195, 0.164, 0.140, 0.097, 0.071, 0.060 and lognormal 0.248, replacing 0.188, 0.162, 0.138, 0.096, 0.072, 0.060 and 0.237. A core test holds them to paper/evidence/forecast-size-study-60k.json. Newly computed reports state the new table under schema v5; the frozen v2 tutorial reports keep the old one.
 
-**Present applicability.** Measured at 6,000 replications: normal 4 blocks stated 0.188, measured 0.2007; normal 5 blocks stated 0.162, measured 0.1603; normal 6 blocks stated 0.138, measured 0.1438; normal 10 blocks stated 0.096, measured 0.0953; normal 20 blocks stated 0.072, measured 0.0672; normal 40 blocks stated 0.060, measured 0.0615; lognormal 4 blocks stated 0.237, measured 0.2465. Five of the seven stated values lie inside the 95 percent interval of the 60,000-replication run. The two four-block values do not: normal reads 0.1953 [0.1922, 0.1985] against 0.188 and lognormal 0.2483 [0.2449, 0.2518] against 0.237. Both stated values are low, which is the direction that flatters the test, and four blocks is the count the manuscript singles out. The differences, 0.007 and 0.011, do not change what the table says about the test. The lognormal gap may be a difference of law, since the original law is not recorded; the normal gap is not. The comparison figures for the shipped test at a half-sigma effect read 0.724 against 0.745.
+**Present applicability.** The code and the book now state the study's values, tied by a test. The manuscript sentences this row cites still print the replaced values, including 0.188, 0.237, 0.013, the 0.138 of the tutorial comparison and the 6,000 draws. The 0.138 stays true of the frozen tutorial report. The lognormal 0.248 is a new measurement of exp(Z) - exp(1/2), because the original law was not recorded and cannot be recovered.
 
-**Disposition.** `needs-rescore`. A committed seeded producer now exists and its output is recorded, so the row is no longer unresolved. It does not take still-applicable because two four-block constants sit outside the interval of the larger run. MEASURED_SIZE and FAMILYWISE_SIZE_RULE were not edited; whether to adopt the measured values is an owner decision.
+**Disposition.** `needs-rescore`. The current-method values exist and the code carries them, but the row's claim is the manuscript text, which has not been updated.
 
 **Owner.** SharpeBench paper/evidence owner
 
-**Follow-up.** Owner decision: keep the published constants beside the measured values, or update MEASURED_SIZE, FAMILYWISE_SIZE_RULE, the golden report text and the manuscript together.
+**Follow-up.** P15: update paper/sections/03-benchmark.tex:59, paper/sections/01-introduction.tex:24 and paper/sections/07-limitations.tex:37 to the measured values, keeping 0.138 for the frozen tutorial report.
 
 **Status history.**
 
@@ -2372,6 +2375,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 |---|---|---|
 | 2026-09-23 | unresolved | Initial entry: The artifact cannot be located, so no disposition can be chosen without guessing. Recorded as unresolved rather than assumed current, per the ticket's rule. |
 | 2026-10-31 | needs-rescore | The seeded producer forecast_size_study was committed and run at the stated configuration. Five of seven rates agree with the constants; the two four-block rates are 0.007 and 0.011 above them in the 60,000-replication run, so the row moves to needs-rescore pending an owner decision on the constants. |
+| 2026-10-31 | needs-rescore | The owner approved adopting the study's values, so the constants moved to the 60,000-replication rates and a test ties them to that artifact. The disposition holds because the manuscript still prints the replaced values. |
 
 ### `SB-sec-compute`
 
