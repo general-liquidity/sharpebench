@@ -179,7 +179,7 @@
       "sha256": "1e025ac30099de23ae8455f20ae5441b557e924870d0e1475c7508512908ec0d"
     }
   ],
-  "generated_at_head": "cdf1add0a83f46d69148dce56d47ff2ee886bbba",
+  "generated_at_head": "f38f4c373f56e08303834b782bfe385b4a1de739",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -567,7 +567,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/candidate_lineage.rs",
-      "sha256": "cde11e69063b8c17991fe6f22b537642ad7107289862e1597c7091624f30fea9"
+      "sha256": "8811681b5d70b4dae4c8a08c20080442d60b5fca65d90d65dae6b687a63ee67f"
     },
     {
       "path": "crates/sharpebench-core/src/certification.rs",
@@ -591,7 +591,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/decision_stability.rs",
-      "sha256": "f7fc75720c8aa11af03e9318ae935b42ba5954bc4d29336aca7f2209265dd38d"
+      "sha256": "786ef221b39c751422df17c2f0c218f5476227e121df693461a17b7e08728315"
     },
     {
       "path": "crates/sharpebench-core/src/disqualification.rs",
@@ -963,7 +963,7 @@
     },
     {
       "path": "crates/sharpebench-joint-gate/Cargo.toml",
-      "sha256": "902f021cff996cf808946a95bb5a4709cab142c674cd87ad3e9613cd312b7815"
+      "sha256": "383196f8e5798303400d9844e5903bf8bde667086b4788bc83f38b0e415f8ad7"
     },
     {
       "path": "crates/sharpebench-joint-gate/src/bin/joint_gate_study.rs",
@@ -1207,7 +1207,7 @@
     },
     {
       "path": "crates/sharpebench-stats/src/deflated_sharpe.rs",
-      "sha256": "3e1e6c2c530abd1dd57e6c6a525b006545844c0bc1893c50dd37c10f9a042cef"
+      "sha256": "bc4f817b1f1b04761ea7eec766570fabfec811e0871828805c84ac15380d115c"
     },
     {
       "path": "crates/sharpebench-stats/src/dissent.rs",
@@ -1667,5 +1667,5 @@
     "data/*.csv",
     "arena/windows/**/*.json"
   ],
-  "source_snapshot_sha256": "75ab423cb6ea251c24be9027c5c3431d4c6d9b1aacd5bc02313555fe4f864f55"
+  "source_snapshot_sha256": "2cb30ede7532535efc5d148e41aee47c1d3b4f1545fb1eea3192e53c466d5192"
 }
