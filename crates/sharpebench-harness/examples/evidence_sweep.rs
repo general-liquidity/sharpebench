@@ -33,7 +33,7 @@ use serde::Serialize;
 use sharpebench_core::composite::{rank, ScoreConfig, TrialsSrStdSource};
 use sharpebench_core::AgentSubmission;
 use sharpebench_core::PassMode;
-use sharpebench_harness::luck_floor;
+use sharpebench_harness::{luck_floor, luck_floor_controls};
 use sharpebench_sim::{
     run_backtest, tag_regime, walk_forward, Agent, BuyAndHold, CostModel, Dataset, HoldAgent,
     Momentum, Window,
@@ -252,6 +252,7 @@ fn main() {
                         dsr_bar,
                         n_trials,
                         execution_seeds_per_window: EXEC_SEEDS.len(),
+                        dispersion_controls: luck_floor_controls(LUCK_FLOOR_AGENTS),
                         ..ScoreConfig::for_periods_per_year(*ppy)
                     };
                     if let Some(x) = pinned {

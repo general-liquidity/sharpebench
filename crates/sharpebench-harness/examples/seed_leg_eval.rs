@@ -31,7 +31,7 @@ use serde::Serialize;
 use sharpebench_core::composite::{per_run_passes, rank, ScoreConfig};
 use sharpebench_core::deflated_sharpe::{probabilistic_sharpe_ratio, sharpe_ratio};
 use sharpebench_core::AgentSubmission;
-use sharpebench_harness::luck_floor;
+use sharpebench_harness::{luck_floor, luck_floor_controls};
 use sharpebench_sim::agent::RiskManaged;
 use sharpebench_sim::{
     run_backtest, tag_regime, walk_forward, Agent, BuyAndHold, CostModel, CostProfile, Dataset,
@@ -204,6 +204,7 @@ fn main() {
         );
         let cfg = ScoreConfig {
             execution_seeds_per_window: EXEC_SEEDS.len(),
+            dispersion_controls: luck_floor_controls(LUCK_FLOOR_AGENTS),
             ..ScoreConfig::for_periods_per_year(*ppy)
         };
         let n_windows = windows.len();

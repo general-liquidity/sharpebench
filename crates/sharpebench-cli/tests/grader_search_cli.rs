@@ -153,6 +153,24 @@ fn only_a_vote_inside_the_fence_demotes() {
     }
 }
 
+/// One vote inside the fence is clipped by the influence bound, so where it
+/// sits no longer sets the honest bar: before the bound the eight positions
+/// measured 0.77 to 1.48 per period, now every one measures the same bar. The
+/// honest entrants are still demoted on this six-agent fixture; the bound
+/// limits a vote to an honest field's 99th-percentile distance, and keeping all
+/// six eligible would need a reach that clips most honest fields.
+#[test]
+fn the_griefer_position_does_not_set_the_bar() {
+    let demotions = array(&doc()["demotions"]);
+    let first = demotions[0]["bar_after"].as_f64().expect("a bar");
+    for d in demotions {
+        let bar = d["bar_after"].as_f64().expect("a bar");
+        assert!((bar - first).abs() < 1e-12, "{d}");
+        assert!(bar < 0.7, "{d}");
+        assert_eq!(d["griefer_clipped"], true, "{d}");
+    }
+}
+
 /// Puppets the collapse folds do not lift a target: the copy control flips none.
 #[test]
 fn copies_are_folded_by_the_collapse() {

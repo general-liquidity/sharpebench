@@ -354,7 +354,29 @@ pub const DISPERSION_LEVERAGE_VISIBILITY: VisibilityAllowlist = VisibilityAllowl
         ("votes", V),
         ("measured_dispersion_without_it", V),
         ("leverage", V),
+        // Which agents did not vote and which votes the influence bound
+        // clipped: ids and Sharpes already on the board, as above.
+        (
+            "abstained",
+            Visibility::Nested(&DISPERSION_ABSTENTION_VISIBILITY),
+        ),
+        ("clipped", Visibility::Nested(&CLIPPED_VOTE_VISIBILITY)),
+        ("dispersion_before_clip", V),
     ],
+};
+
+/// [`crate::composite::DispersionAbstention`]: an agent on the board that cast
+/// no vote on the measured dispersion, and why.
+pub const DISPERSION_ABSTENTION_VISIBILITY: VisibilityAllowlist = VisibilityAllowlist {
+    document: "sharpebench_core::composite::DispersionAbstention",
+    fields: &[("agent_id", V), ("reason", V)],
+};
+
+/// [`crate::composite::ClippedVote`]: a vote on the board the influence bound
+/// clipped, as cast and as entered.
+pub const CLIPPED_VOTE_VISIBILITY: VisibilityAllowlist = VisibilityAllowlist {
+    document: "sharpebench_core::composite::ClippedVote",
+    fields: &[("agent_id", V), ("vote_sharpe", V), ("clipped_to", V)],
 };
 
 /// [`crate::certification::CertificationGap`], internally tagged by `property`.
@@ -566,6 +588,16 @@ mod tests {
             votes: 7,
             measured_dispersion_without_it: 0.0219,
             leverage: Some(4.89),
+            abstained: vec![crate::composite::DispersionAbstention {
+                agent_id: "luck-floor-00".to_string(),
+                reason: crate::composite::AbstentionReason::Control,
+            }],
+            clipped: vec![crate::composite::ClippedVote {
+                agent_id: "griefer".to_string(),
+                vote_sharpe: 2.2,
+                clipped_to: 0.9,
+            }],
+            dispersion_before_clip: Some(0.6),
         });
         score.certification = Some(Certification {
             mode: "lifecycle-certified/v1".to_string(),
@@ -624,6 +656,14 @@ mod tests {
             (
                 DISPERSION_LEVERAGE_VISIBILITY,
                 declared_struct_fields::<DispersionLeverage>(),
+            ),
+            (
+                DISPERSION_ABSTENTION_VISIBILITY,
+                declared_struct_fields::<crate::composite::DispersionAbstention>(),
+            ),
+            (
+                CLIPPED_VOTE_VISIBILITY,
+                declared_struct_fields::<crate::composite::ClippedVote>(),
             ),
         ] {
             let audit = allowlist.audit(fields);

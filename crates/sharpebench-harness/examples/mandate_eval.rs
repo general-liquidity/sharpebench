@@ -28,7 +28,7 @@ use sharpebench_core::composite::{
     rank_declared, DeclaredMandate, MandateDeclarations, MandateVerdict, ScoreConfig,
 };
 use sharpebench_core::AgentSubmission;
-use sharpebench_harness::{luck_floor, run_agent};
+use sharpebench_harness::{luck_floor, luck_floor_controls, run_agent};
 use sharpebench_sim::agent::RiskManaged;
 use sharpebench_sim::{
     tag_regime, walk_forward, Agent, BuyAndHold, CostModel, Dataset, HoldAgent, Momentum, Window,
@@ -182,6 +182,7 @@ fn main() {
 
         let cfg = ScoreConfig {
             execution_seeds_per_window: EXEC_SEEDS.len(),
+            dispersion_controls: luck_floor_controls(LUCK_FLOOR_AGENTS),
             ..ScoreConfig::for_periods_per_year(*ppy)
         };
         let scored = rank_declared(&subs, &declarations, &cfg);

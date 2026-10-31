@@ -25,7 +25,7 @@ use std::io::{BufWriter, Write};
 use serde::Serialize;
 use sharpebench_core::composite::{per_run_passes, rank, ScoreConfig};
 use sharpebench_core::AgentSubmission;
-use sharpebench_harness::{luck_floor, run_agent};
+use sharpebench_harness::{luck_floor, luck_floor_controls, run_agent};
 use sharpebench_sim::agent::RiskManaged;
 use sharpebench_sim::{
     tag_regime, walk_forward, Agent, BuyAndHold, CostModel, Dataset, HoldAgent, Momentum, Window,
@@ -177,11 +177,13 @@ fn main() {
 
         let cfg = ScoreConfig {
             execution_seeds_per_window: EXEC_SEEDS.len(),
+            dispersion_controls: luck_floor_controls(LUCK_FLOOR_AGENTS),
             ..ScoreConfig::for_periods_per_year(*ppy)
         };
         let mut cfg_rel = ScoreConfig::relative_to_benchmark(BENCHMARK);
         cfg_rel.periods_per_year = *ppy;
         cfg_rel.execution_seeds_per_window = EXEC_SEEDS.len();
+        cfg_rel.dispersion_controls = luck_floor_controls(LUCK_FLOOR_AGENTS);
         let scored = rank(&subs, &cfg);
         let scored_rel = rank(&subs, &cfg_rel);
 
