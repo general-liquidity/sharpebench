@@ -253,7 +253,9 @@ const PINS: [(&str, u64, u64); 8] = [
     // Was 9 before the standard-error certification: the Newey-West correction
     // refuses three of the serially correlated zero-edge points on this budget.
     ("autocorrelated", 120, 6),
-    ("tail_seller", 120, 37),
+    // Was 37 before the observed-loss refusal: a crash-free seller that never
+    // lost a bar is refused, and one that loses on ordinary bars is not.
+    ("tail_seller", 120, 26),
     ("leverage_timing", 120, 1),
     ("window_boundary", 120, 0),
     // Was 38 before the independence weighting of the dispersion votes: puppets
@@ -263,7 +265,7 @@ const PINS: [(&str, u64, u64); 8] = [
 ];
 const STRUCTURAL: u64 = 1;
 const DEMOTIONS: usize = 8;
-const DIGEST: &str = "0c37b75b32c8a9db";
+const DIGEST: &str = "035ecf8c9720261c";
 
 #[test]
 fn a_bad_invocation_is_refused() {
