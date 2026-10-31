@@ -238,7 +238,9 @@ mod tests {
     fn worst_seed_sets_the_loss() {
         let replay = assess(&[runs(
             "flash_crash",
-            vec![crash_path(1.0), crash_path(2.0)],
+            // The bad seed comes first, so a rule that keeps only the last or a
+            // typical seed reads the clean one and misses it.
+            vec![crash_path(2.0), crash_path(1.0)],
             vec![crash_path(1.0)],
         )]);
         assert_eq!(
