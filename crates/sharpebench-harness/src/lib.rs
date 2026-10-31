@@ -590,6 +590,14 @@ pub fn luck_floor_agent_id(k: usize) -> String {
     format!("luck-floor-{k:02}")
 }
 
+/// The ids of a [`luck_floor`] of `n_agents`, declared as dispersion controls
+/// (`ScoreConfig::dispersion_controls`): the host runs the luck floor to show
+/// what no skill looks like, so it is scored beside the entrants but does not
+/// vote on the deflation bar they are measured against.
+pub fn luck_floor_controls(n_agents: usize) -> Vec<String> {
+    (0..n_agents).map(luck_floor_agent_id).collect()
+}
+
 /// The published identity of one evaluation window: its `start-end` index pair
 /// over the dataset axis, which is what a [`Window`] *is* here. Used as the
 /// window axis of a declared [`sharpebench_core::TrialRoster`] and of the trial

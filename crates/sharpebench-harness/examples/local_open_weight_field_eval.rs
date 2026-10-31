@@ -47,7 +47,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use sharpebench_core::composite::{rank, ScoreConfig, TrialsSrStdSource};
 use sharpebench_core::{AgentSubmission, PassMode};
-use sharpebench_harness::luck_floor;
+use sharpebench_harness::{luck_floor, luck_floor_controls};
 use sharpebench_sim::{
     run_backtest, tag_regime, walk_forward, Agent, BuyAndHold, CostModel, Dataset, ExternalAgent,
     HoldAgent, Momentum, Window,
@@ -518,6 +518,7 @@ fn main() {
             dsr_bar: DSR_BAR,
             n_trials,
             execution_seeds_per_window: EXEC_SEEDS.len(),
+            dispersion_controls: luck_floor_controls(LUCK_FLOOR_AGENTS),
             ..ScoreConfig::for_periods_per_year(*periods_per_year)
         };
         let mut never_catastrophic = config.clone();
