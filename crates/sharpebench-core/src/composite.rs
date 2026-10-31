@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 pub use sharpebench_protocol::DeclaredMandate;
+use sharpebench_stats::exposure_path::exposure_path_evidence;
 use sharpebench_stats::StatisticalError;
 
 use crate::calibration::brier_score;
@@ -1015,6 +1016,13 @@ pub struct CompositeScore {
     /// refused on another gate reads as it did before the rule.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub standard_error_refusal: Option<String>,
+    /// Why the track's profit does not clear the risk its exposure history
+    /// implies ([`sharpebench_stats::exposure_path`]). Omitted when it clears,
+    /// and when another gate already refuses both the host and any declared
+    /// verdict, so it names the refusing term; when present, `rank_eligible` is
+    /// false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exposure_path_error: Option<String>,
     pub raw_mean_return: f64,
     pub rank_eligible: bool,
     /// The ranking key: the deflated Sharpe when eligible, else 0.0.
@@ -1797,15 +1805,21 @@ fn score_agent_with(
     // pooled result. Reported, never gating; empty when not estimable.
     let role_contributions = attribute_behavior_roles(&sub.runs, seeds_per_window);
 
-    let rank_eligible = dsr >= cfg.dsr_bar
+    let eligible_before_exposure_path = dsr >= cfg.dsr_bar
         && passed_k
         && process_ok
         && bootstrap_error.is_none()
         && deflation_error.is_none()
         && bootstrap_p < cfg.alpha
         && mandate_ok;
-    // Standard-error certification of an admitted deflated Sharpe: see
-    // `crate::standard_error`. It can only remove eligibility.
+    // Two gates added after 0.28.0 can only remove eligibility, and each is
+    // judged against the same earlier predicate, so neither hides the other:
+    // the standard-error certification of an admitted deflated Sharpe (see
+    // `crate::standard_error`), and leverage timing, where a track that stops
+    // or de-risks once ahead, or raises exposure after losses, is charged the
+    // risk its exposure history implies. Each is reported only on a row whose
+    // host or declared verdict the earlier gates admit, so it names a term
+    // that refused the row and leaves every other row's bytes as they were.
     let standard_error = standard_error_refusal(
         &window_slices(&tracks),
         effective_n_trials,
@@ -1813,8 +1827,15 @@ fn score_agent_with(
         defl.sr_std,
         cfg.dsr_bar,
     );
-    let refused_by_standard_error = rank_eligible && standard_error.is_some();
-    let rank_eligible = rank_eligible && standard_error.is_none();
+    let exposure_path_refusal = deflation_error
+        .is_none()
+        .then(|| exposure_path_evidence(&window_slices(&tracks), cfg.alpha).err())
+        .flatten()
+        .map(|e| e.to_string());
+    let refused_by_standard_error = eligible_before_exposure_path && standard_error.is_some();
+    let rank_eligible = eligible_before_exposure_path
+        && standard_error.is_none()
+        && exposure_path_refusal.is_none();
     let composite = if rank_eligible { dsr } else { 0.0 };
 
     // The declared verdict, if any: the same predicate as `rank_eligible` with
@@ -1833,7 +1854,7 @@ fn score_agent_with(
         };
         let per_run = per_run_passes(sub, d.benchmark, &verdict_cfg);
         let declared_passed_k = pass_k(&per_run, verdict_cfg.pass_mode);
-        let eligible = dsr >= cfg.dsr_bar
+        let eligible_before = dsr >= cfg.dsr_bar
             && declared_passed_k
             && process_ok
             && bootstrap_error.is_none()
@@ -1841,20 +1862,25 @@ fn score_agent_with(
             && bootstrap_p < cfg.alpha
             && mandate_ok
             && verdict.drawdown_bound_holds(worst_run_drawdown);
-        let refused = eligible && standard_error.is_some();
-        let eligible = eligible && standard_error.is_none();
+        let refused = eligible_before && standard_error.is_some();
+        let eligible =
+            eligible_before && standard_error.is_none() && exposure_path_refusal.is_none();
         (
             d.mandate.clone(),
             verdict,
             declared_passed_k,
             eligible,
             refused,
+            eligible_before,
         )
     });
     let declared_refused_by_standard_error = declared.as_ref().is_some_and(|d| d.4);
+    let declared_before_exposure_path = declared.as_ref().is_some_and(|d| d.5);
+    let exposure_path_error = exposure_path_refusal
+        .filter(|_| eligible_before_exposure_path || declared_before_exposure_path);
     let (declared_mandate, verdict_applied, declared_passed_k, declared_mandate_eligible) =
         match declared {
-            Some((m, v, p, e, _)) => (Some(m), Some(v), Some(p), Some(e)),
+            Some((m, v, p, e, _, _)) => (Some(m), Some(v), Some(p), Some(e)),
             None => (None, None, None, None),
         };
     // Reported only where it decided a verdict, so a track refused on other
@@ -1883,6 +1909,7 @@ fn score_agent_with(
         deflation_error,
         selection_error,
         standard_error_refusal,
+        exposure_path_error,
         raw_mean_return,
         rank_eligible,
         composite,
