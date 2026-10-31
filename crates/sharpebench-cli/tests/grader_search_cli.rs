@@ -163,6 +163,18 @@ fn copies_are_folded_by_the_collapse() {
     }
 }
 
+/// Puppets just below the collapse cosine lift no target either. Before the
+/// independence weighting, 32 of them at a pairwise cosine of 0.97 to 0.99 took
+/// a refused zero-edge target's bar from 0.277 to about 0.12 and admitted it;
+/// now the flood weighs about one vote and no grid point admits anybody.
+#[test]
+fn puppets_below_the_collapse_lift_no_target() {
+    assert_eq!(row("clone_threshold")["admitted_on_screen"], 0);
+    for finding in array(&doc()["findings"]) {
+        assert_ne!(finding["move"], "clone_threshold", "{finding}");
+    }
+}
+
 /// A finding is only a finding if the real scorer agrees from the report alone:
 /// the reproducer goes through `sharpebench score`, not through the search.
 #[test]
@@ -224,11 +236,14 @@ const PINS: [(&str, u64, u64); 8] = [
     ("tail_seller", 120, 37),
     ("leverage_timing", 120, 1),
     ("window_boundary", 120, 0),
-    ("clone_threshold", 3384, 38),
+    // Was 38 before the independence weighting of the dispersion votes: puppets
+    // below the collapse cosine no longer cast a full vote each, so none lifts
+    // a target the honest field refuses.
+    ("clone_threshold", 3384, 0),
 ];
-const STRUCTURAL: u64 = 2;
+const STRUCTURAL: u64 = 1;
 const DEMOTIONS: usize = 8;
-const DIGEST: &str = "718f2633a03ae454";
+const DIGEST: &str = "907c315d8a0b4ed0";
 
 #[test]
 fn a_bad_invocation_is_refused() {
