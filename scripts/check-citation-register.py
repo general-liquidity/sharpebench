@@ -19,7 +19,9 @@ Bibliography entries (``"kind": "bib"``):
 * ``mechanism`` says what the paper credits the work for, and is not empty;
 * ``locators`` lists every paper source file that cites the key, and only
   those, so a citation added to or removed from a file fails until the register
-  says so. ``pages`` lists every page locator the paper gives the key in a
+  says so. ``locators`` may be empty only for an entry that the paper does not
+  cite and that a code credit names as ``bib:<key>``: such an entry exists so
+  that a credit line in the source can resolve to a verified work. ``pages`` lists every page locator the paper gives the key in a
   citation's optional argument (``\\citep[p.~4]{key}``), and only those.
 
 Code credit lines (``"kind": "credit"``):
@@ -153,6 +155,13 @@ def credit_lines(root: pathlib.Path) -> list[tuple[str, str]]:
 def check_bib(rows: list[dict], root: pathlib.Path, problems: list[str]) -> None:
     entries = bib_entries(root)
     files, pages = citation_sites(root)
+    credited = {
+        row["identifier"][4:]
+        for row in rows
+        if row.get("kind") == "credit"
+        and isinstance(row.get("identifier"), str)
+        and row["identifier"].startswith("bib:")
+    }
     seen: dict[str, int] = {}
     for index, row in enumerate(rows):
         if row.get("kind") != "bib":
@@ -176,9 +185,11 @@ def check_bib(rows: list[dict], root: pathlib.Path, problems: list[str]) -> None
         if not isinstance(mechanism, str) or not mechanism.strip():
             problems.append(f"{where}: no credited mechanism recorded")
         locators = row.get("locators")
-        if not isinstance(locators, list) or not locators:
+        if not isinstance(locators, list):
             problems.append(f"{where}: no locator recorded")
             locators = []
+        elif not locators and key not in credited:
+            problems.append(f"{where}: no locator recorded, and no code credit names {key}")
         cited_in = files.get(key, set())
         for locator in locators:
             if not isinstance(locator, str) or not (root / locator).is_file():

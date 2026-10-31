@@ -354,7 +354,7 @@ impl Dataset {
     /// replaced with plain indices, and every series rebased so its first
     /// nonzero close lies in `[64, 128)`. See [`Dataset::masked_view`], which
     /// also returns the map back to the source symbols. (After KTD-Fin's data-side
-    /// masking.)
+    /// masking, the blinded level of arXiv:2605.28359 section 3.3.)
     pub fn masked(&self) -> Result<Dataset, MaskError> {
         self.masked_view().map(|view| view.dataset)
     }

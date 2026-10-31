@@ -1,7 +1,8 @@
 //! pass^k reliability — does the agent clear the bar on **every** run, not on
 //! average? Stochastic agents (LLMs) can win once by luck; a benchmark that
 //! ranks the lucky single run is measuring noise. For safety-relevant suites use
-//! [`PassMode::All`] (after Sierra's τ²-bench pass^k).
+//! [`PassMode::All`] (after Yao, Shinn, Razavi & Narasimhan's τ-bench pass^k,
+//! section 3 of arXiv:2406.12045, the work that introduced the metric).
 
 use serde::{Deserialize, Serialize};
 

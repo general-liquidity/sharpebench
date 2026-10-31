@@ -149,6 +149,26 @@ class Register(unittest.TestCase):
             "gives the page locator 'p.~9'",
         )
 
+    def test_an_uncited_entry_needs_a_code_credit_that_names_it(self):
+        def code_only(rows, root):
+            (root / "paper" / "sections" / "one.tex").write_text(
+                "A method \\citep[p.~4]{example2020method}.\n", encoding="utf-8"
+            )
+            rows[1]["locators"] = []
+
+        problems = problems_with(code_only)
+        self.assertFlags(problems, "no code credit names plain2021note")
+
+        def credited(rows, root):
+            code_only(rows, root)
+            rows[2]["identifier"] = "bib:plain2021note"
+
+        self.assertEqual(problems_with(credited), [])
+
+    def test_an_empty_locator_list_does_not_hide_a_citing_file(self):
+        problems = problems_with(lambda rows, root: rows[0].update(locators=[]))
+        self.assertFlags(problems, "one.tex cites example2020method but is not among")
+
     def test_a_credit_line_with_no_entry_fails(self):
         problems = problems_with(lambda rows, root: rows.pop(2))
         self.assertFlags(problems, "credit line has no register entry")

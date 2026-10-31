@@ -1,7 +1,8 @@
 //! Probability of Backtest Overfitting (PBO) via CSCV.
 //!
 //! After Bailey, Borwein, López de Prado & Zhu, *The Probability of Backtest
-//! Overfitting* (2014). Combinatorially-Symmetric Cross-Validation: split the
+//! Overfitting* (J. Computational Finance 20(4), 2017; Algorithm 2.3 and
+//! section 3.1). Combinatorially-Symmetric Cross-Validation: split the
 //! sample into `s` contiguous blocks, and over every way of choosing `s/2` of
 //! them as in-sample (IS, the complement is out-of-sample, OOS), pick the
 //! IS-best strategy and measure where it ranks OOS. PBO is the fraction of
