@@ -5,10 +5,12 @@ claim in the inventoried manuscript scope of the two products to the artifact
 that produced it, the command and version behind that artifact, the changes that
 landed afterwards, and what the claim supports today.
 
-The register maps existing evidence. It does not rerun, regenerate or authorize
-any experiment, and no frozen evidence file, golden or manuscript number was
-changed to produce it. Where an artifact could not be located the row records
-`unresolved` rather than a guess, and unknown historical versions stay unknown.
+The register maps existing evidence. It authorizes no experiment, and no frozen
+evidence file, golden or manuscript number was changed to produce it. A rescore
+or a measurement a row cites was written by its own committed producer to a new
+file beside the frozen one. Where an artifact could not be located the row
+records `unresolved` rather than a guess, and unknown historical versions stay
+unknown.
 
 `docs/evidence-register.jsonl` is the machine-readable authority; this file is
 generated from it by `scripts/make-evidence-register.py`.
@@ -16,10 +18,16 @@ generated from it by `scripts/make-evidence-register.py`.
 disposition, a manuscript table or figure with no row, and a status change with
 no recorded rationale.
 
-Rows marked with an external repository cover the companion product, whose tree
-is not part of this repository. Their artifact paths are recorded relative to
-that repository's root and are not opened by the checker, which reports coverage
-only for what it can read.
+Each product keeps its own register in this form, and SharpeBench's copy of this
+generator and of its checker is the source of both. A row marked with an external
+repository mirrors a row of the companion product's register, which is the row of
+record and which that row names. Its artifact paths are relative to that
+repository's root. The checker reports coverage only for what it can read, so it
+opens those artifacts only when it is given the companion checkout:
+`python scripts/check-evidence-register.py --companion <path>` opens every mirrored
+artifact in both directions and fails on a moved digest, a disposition that
+differs between the two registers, or a generator or checker that is no longer
+byte-identical.
 
 ## Changing a row
 
@@ -44,12 +52,12 @@ when a recorded one does not match.
 
 | Disposition | Rows |
 |---|---|
-| historical-only | 25 |
-| still-applicable | 18 |
-| needs-rescore | 4 |
+| historical-only | 28 |
+| still-applicable | 22 |
+| needs-rescore | 3 |
 | needs-new-experiment | 8 |
-| unresolved | 5 |
-| **total** | **60** |
+| unresolved | 0 |
+| **total** | **61** |
 
 ## Priority queue
 
@@ -67,8 +75,6 @@ The headline claims whose present applicability is not established, worst first.
 | `SA-tab-witness` | SharpeArena | needs-new-experiment | P13-R/P14-R: re-run the rank-eligibility witness under the corrected pin as a declared new experiment. |
 | `SB-tab-data` | SharpeBench | needs-rescore | P15: commit a realism report artifact beside the datasets so the table's verdicts have a stored producer output. |
 | `SB-sec-power` | SharpeBench | needs-rescore | P12-A supplies repaired bars; then recompute this table as a separately versioned output beside the frozen one. |
-| `SA-tab-f1` | SharpeArena | needs-rescore | P12-A/P13-R: rescore the committed per-seed returns under the corrected pin and publish the result beside, not in place of, the frozen table. |
-| `SA-tab-f3` | SharpeArena | needs-rescore | P12-A/P13-R: rescore the committed F3 return series under the corrected pin as a separately versioned output. |
 
 ## Summary
 
@@ -83,7 +89,7 @@ The headline claims whose present applicability is not established, worst first.
 | `SB-fig-demotion` | SharpeBench | figure | paper/sections/05-experiments.tex:20 | still-applicable | SharpeBench paper/evidence owner | none |
 | `SB-fig-deflation` | SharpeBench | figure | paper/sections/05-experiments.tex:28 | still-applicable | SharpeBench paper/evidence owner | none |
 | `SB-tab-units` | SharpeBench | table | paper/sections/05-experiments.tex:45 | historical-only | SharpeBench paper/evidence owner | P15: bring paper/evidence/baseline-v0.2.1/ and the FINDING records into a recorded digest scope so the historical artifacts are identified rather than merely present. |
-| `SB-sec-units-prefloor` | SharpeBench | claim | paper/sections/05-experiments.tex:33 | unresolved | SharpeBench paper/evidence owner | P15: identify which artifact the 0.984 and 0.000 pair is read from and reconcile the appendix with the frozen note, or drop the pair. |
+| `SB-sec-units-prefloor` | SharpeBench | claim | paper/sections/05-experiments.tex:33 | historical-only | SharpeBench paper/evidence owner | none |
 | `SB-sec-units-worked-example` | SharpeBench | claim | paper/sections/05-experiments.tex:36 | still-applicable | SharpeBench paper/evidence owner | none |
 | `SB-tab-eligibility` | SharpeBench | table | paper/sections/05-experiments.tex:77 | historical-only | SharpeBench paper/evidence owner | none |
 | `SB-sec-passk` | SharpeBench | claim | paper/sections/05-experiments.tex:61, paper/sections/05-experiments.tex:66 | needs-new-experiment | SharpeBench paper/evidence owner | P12-A then P13-A/P14-A: a shipped-method joint-gate producer run on the current engine, reported as a new experiment and never as a refresh of the frozen numbers. |
@@ -104,8 +110,9 @@ The headline claims whose present applicability is not established, worst first.
 | `SB-sec-sybil` | SharpeBench | claim | paper/sections/sybil-defense-fragment.tex:4 | still-applicable | SharpeBench paper/evidence owner | P15: write the per-field similarity maxima to a committed artifact so the two quoted numbers carry a digest rather than living only in test output. |
 | `SB-sec-power` | SharpeBench | claim | paper/sections/power-fragment.tex:7, paper/sections/power-fragment.tex:32, paper/sections/power-fragment.tex:39 | needs-rescore | SharpeBench paper/evidence owner | P12-A supplies repaired bars; then recompute this table as a separately versioned output beside the frozen one. |
 | `SB-sec-forecast-report` | SharpeBench | claim | paper/sections/03-benchmark.tex:53 | still-applicable | SharpeBench paper/evidence owner | none |
-| `SB-sec-forecast-size` | SharpeBench | claim | paper/sections/03-benchmark.tex:59, paper/sections/01-introduction.tex:24, paper/sections/07-limitations.tex:37 | unresolved | SharpeBench paper/evidence owner | P15: commit the size study's producer and its output, or state in the manuscript that the size table is an uncommitted measurement. |
-| `SB-sec-compute` | SharpeBench | claim | paper/sections/05-experiments.tex:5 | unresolved | SharpeBench paper/evidence owner | P15: commit a timing receipt, or state the measurements as uncommitted machine observations. |
+| `SB-sec-forecast-strata` | SharpeBench | claim | paper/sections/03-benchmark.tex:59 | historical-only | SharpeBench paper/evidence owner | P15: repair paper/sections/03-benchmark.tex:59, which still calls pooling current and names v2 as the report schema. |
+| `SB-sec-forecast-size` | SharpeBench | claim | paper/sections/03-benchmark.tex:59, paper/sections/01-introduction.tex:24, paper/sections/07-limitations.tex:37 | needs-rescore | SharpeBench paper/evidence owner | Owner decision: keep the published constants beside the measured values, or update MEASURED_SIZE, FAMILYWISE_SIZE_RULE, the golden report text and the manuscript together. |
+| `SB-sec-compute` | SharpeBench | claim | paper/sections/05-experiments.tex:5 | historical-only | SharpeBench paper/evidence owner | P15: state the measurements in the manuscript as uncommitted machine observations. |
 | `SB-claims-i` | SharpeBench | claim | paper/sections/05-experiments.tex:266 | needs-new-experiment | SharpeBench paper/evidence owner | P12-A then P13-A/P14-A. |
 | `SB-claims-ii` | SharpeBench | claim | paper/sections/05-experiments.tex:266 | historical-only | SharpeBench paper/evidence owner | none |
 | `SB-claims-iii` | SharpeBench | claim | paper/sections/05-experiments.tex:266 | needs-new-experiment | SharpeBench paper/evidence owner | P12-A then P13-A/P14-A. |
@@ -124,15 +131,15 @@ The headline claims whose present applicability is not established, worst first.
 | `SA-predictability` | SharpeArena | claim | paper/sections/07-validation.tex:273, paper/sections/07-validation.tex:285 | needs-new-experiment | SharpeArena paper/evidence owner | P13-R/P14-R: re-run the predictability producer under the corrected pin and report it as a new experiment beside the frozen artifact. |
 | `SA-seed-search` | SharpeArena | claim | paper/sections/07-validation.tex:273 | historical-only | SharpeArena paper/evidence owner | none |
 | `SA-sealed-seeds` | SharpeArena | claim | paper/sections/07-validation.tex:290 | needs-new-experiment | SharpeArena paper/evidence owner | P13-R/P14-R: re-run the sealed-seed reveal under the full-tape check and under the AP4 commitment ordering, reported as a new measurement. |
-| `SA-tab-f1` | SharpeArena | table | paper/sections/08-findings.tex:22, paper/sections/08-findings.tex:63, paper/sections/08-findings.tex:7 | needs-rescore | SharpeArena paper/evidence owner | P12-A/P13-R: rescore the committed per-seed returns under the corrected pin and publish the result beside, not in place of, the frozen table. |
+| `SA-tab-f1` | SharpeArena | table | paper/sections/08-findings.tex:22, paper/sections/08-findings.tex:63, paper/sections/08-findings.tex:7 | still-applicable | SharpeArena paper/evidence owner | Owner decision: cite the rescore in the manuscript and print the flat rows as unavailable, and update paper/sections/10-limitations.tex:15. |
 | `SA-tab-witness` | SharpeArena | table | paper/sections/08-findings.tex:78, paper/sections/08-findings.tex:99, paper/sections/08-findings.tex:66 | needs-new-experiment | SharpeArena paper/evidence owner | P13-R/P14-R: re-run the rank-eligibility witness under the corrected pin as a declared new experiment. |
 | `SA-f2-regret` | SharpeArena | claim | paper/sections/08-findings.tex:102, paper/sections/08-findings.tex:114 | still-applicable | SharpeArena paper/evidence owner | none |
-| `SA-tab-f3` | SharpeArena | table | paper/sections/08-findings.tex:124, paper/sections/08-findings.tex:117 | needs-rescore | SharpeArena paper/evidence owner | P12-A/P13-R: rescore the committed F3 return series under the corrected pin as a separately versioned output. |
+| `SA-tab-f3` | SharpeArena | table | paper/sections/08-findings.tex:124, paper/sections/08-findings.tex:117 | still-applicable | SharpeArena paper/evidence owner | none |
 | `SA-tab-f7` | SharpeArena | table | paper/sections/08-findings.tex:158, paper/sections/08-findings.tex:180, paper/sections/08-findings.tex:151 | still-applicable | SharpeArena paper/evidence owner | P15: serialize a runtime version in the artifact so the 0.29.0 attribution does not rest on prose. |
 | `SA-tab-f8` | SharpeArena | table | paper/sections/08-findings.tex:192, paper/sections/08-findings.tex:224, paper/sections/08-findings.tex:183 | historical-only | SharpeArena paper/evidence owner | none |
 | `SA-tab-throughput` | SharpeArena | table | paper/sections/06-protocol.tex:85, paper/sections/06-protocol.tex:78 | historical-only | SharpeArena paper/evidence owner | none |
-| `SA-orderbook-mark` | SharpeArena | claim | paper/sections/03-environment.tex:112 | unresolved | SharpeArena paper/evidence owner | P15: commit a producer and artifact for the order-book mark comparison, or state it in the manuscript as an uncommitted measurement. |
-| `SA-seeded-shuffle` | SharpeArena | claim | paper/sections/03-environment.tex:110 | unresolved | SharpeArena paper/evidence owner | P15: cite the seat-ordering measurement or commit it as evidence. |
+| `SA-orderbook-mark` | SharpeArena | claim | paper/sections/03-environment.tex:112 | still-applicable | SharpeArena paper/evidence owner | none |
+| `SA-seeded-shuffle` | SharpeArena | claim | paper/sections/03-environment.tex:110 | still-applicable | SharpeArena paper/evidence owner | none |
 | `SA-nonempirical-tables` | SharpeArena | table | paper/sections/03-environment.tex:20, paper/sections/03-environment.tex:55, paper/sections/06-protocol.tex:36, paper/sections/09-related.tex:12 | still-applicable | SharpeArena paper/evidence owner | P15: consider a per-cell provenance sheet for the related-work table, as the companion product keeps. |
 
 ## SharpeArena
@@ -140,6 +147,8 @@ The headline claims whose present applicability is not established, worst first.
 ### `SA-tab-f4`
 
 Covers the **sharpearena** repository, which is not part of this tree. Paths below are relative to that repository's root.
+
+**Register of record.** `docs/evidence-register.jsonl` in sharpearena, row `SA-tab-f4`.
 
 **Claim.** Stylized-facts pass rates over eight seeds per tier: the canonical generator passes 1 of 24 seeded panels, with gated pass rates 0.000 Calm, 0.000 Hard and 0.125 Extreme.
 
@@ -179,10 +188,13 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | historical-only | Initial entry: The artifact validly records the run and no later change moves its numbers, but nothing re-establishes it against the current tree: the producer is off the golden-hash path and the artifact was not rerun. |
+| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ### `SA-calm-calibration`
 
 Covers the **sharpearena** repository, which is not part of this tree. Paths below are relative to that repository's root.
+
+**Register of record.** `docs/evidence-register.jsonl` in sharpearena, row `SA-calm-calibration`.
 
 **Claim.** A 99-configuration Calm calibration sweep qualifies no cell, so there is no certified Calm preset.
 
@@ -220,10 +232,13 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | historical-only | Initial entry: The artifact validly records the sweep and its negative outcome; nothing re-establishes it against the current tree. |
+| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ### `SA-tab-f5`
 
 Covers the **sharpearena** repository, which is not part of this tree. Paths below are relative to that repository's root.
+
+**Register of record.** `docs/evidence-register.jsonl` in sharpearena, row `SA-tab-f5`.
 
 **Claim.** Manipulation boundary sweeps on three axes find no profitability boundary, and impact-attributable PnL is negative and decreasing in push size.
 
@@ -263,10 +278,13 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | historical-only | Initial entry: The artifact validly records the run; the later changes add fields and tighten configuration validation without being shown to move the frozen values, and no re-verification is recorded. |
+| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ### `SA-f5-concave`
 
 Covers the **sharpearena** repository, which is not part of this tree. Paths below are relative to that repository's root.
+
+**Register of record.** `docs/evidence-register.jsonl` in sharpearena, row `SA-f5-concave`.
 
 **Claim.** At the canonical calibration the concave-impact probe attributes negative P&L at both exponents, with seven of 23 stored sweep slots crossing zero at beta 0.5 and none at beta 0.7.
 
@@ -303,10 +321,13 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | historical-only | Initial entry: The artifact validly records the probe and the manuscript already scopes it as a stress setting rather than an estimate. |
+| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ### `SA-f5-positive-control`
 
 Covers the **sharpearena** repository, which is not part of this tree. Paths below are relative to that repository's root.
+
+**Register of record.** `docs/evidence-register.jsonl` in sharpearena, row `SA-f5-positive-control`.
 
 **Claim.** An asymmetric-schedule positive control over 135 cells finds four familywise-positive cells, the best at +21.8e-4 with familywise interval [10.0, 33.6]e-4, and the selected cell replicates on 32 fresh seeds at +26.3e-4 [23.7, 28.9]e-4.
 
@@ -343,10 +364,13 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | still-applicable | Initial entry: A documented recomputation exists in the review record, which is a comparison rather than an inference; the quantities do not pass through the scorer that later changed. |
+| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ### `SA-f5-extended-sweeps`
 
 Covers the **sharpearena** repository, which is not part of this tree. Paths below are relative to that repository's root.
+
+**Register of record.** `docs/evidence-register.jsonl` in sharpearena, row `SA-f5-extended-sweeps`.
 
 **Claim.** Sixty extension cells give 23 global-familywise positive intervals, 31 negative and six crossing zero, the largest cell at +135.0e-4 with interval [122.1, 148.0]e-4, read as descriptive rather than as simultaneous coverage.
 
@@ -383,10 +407,13 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | historical-only | Initial entry: The artifact validly records the sweep; no documented recomputation covers this leg, unlike the positive control. |
+| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ### `SA-tab-f6`
 
 Covers the **sharpearena** repository, which is not part of this tree. Paths below are relative to that repository's root.
+
+**Register of record.** `docs/evidence-register.jsonl` in sharpearena, row `SA-tab-f6`.
 
 **Claim.** Maker markout per filled unit over 24 paired episodes: the informed-uninformed gap widens from 0.072 at h = 1 to 0.436 at h = 20, with t-based 95 percent intervals at df 23.
 
@@ -426,10 +453,13 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | historical-only | Initial entry: The artifact validly records the run; the repairs named change how parity is reported rather than establishing that the frozen numbers still reproduce. |
+| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ### `SA-f6-endogenous`
 
 Covers the **sharpearena** repository, which is not part of this tree. Paths below are relative to that repository's root.
+
+**Register of record.** `docs/evidence-register.jsonl` in sharpearena, row `SA-f6-endogenous`.
 
 **Claim.** The endogenous arm's calibration arithmetic predicts a 0.933 percent displacement against a measured 0.81 percent [0.77, 0.85], and the six-value lambda sweep crosses sign in the informed level between lambda 0.2 and 0.3.
 
@@ -467,10 +497,13 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | historical-only | Initial entry: The artifact validly records the arm; the one cross-check that would strengthen it names no test that could be located. |
+| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ### `SA-predictability`
 
 Covers the **sharpearena** repository, which is not part of this tree. Paths below are relative to that repository's root.
+
+**Register of record.** `docs/evidence-register.jsonl` in sharpearena, row `SA-predictability`.
 
 **Claim.** An honest ridge AR(5) adversary reaches 55.4 percent directional accuracy on Calm against a 54.1 percent baseline, with a paired t over 16 Calm seeds of t(15) = 3.36, p = 0.004, and the known-seed oracle scores 100 percent accuracy and a deflated Sharpe of 1.00 on every tier.
 
@@ -510,10 +543,13 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | needs-new-experiment | Initial entry: The deflated-Sharpe leg cannot be rescored from the artifact, which stores scores rather than return series, so recomputing it means re-running the producer. The producer is deterministic in its seeds, which makes the run cheap, but it is a new execution rather than a correction. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
+| 2026-10-31 | needs-new-experiment | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ### `SA-seed-search`
 
 Covers the **sharpearena** repository, which is not part of this tree. Paths below are relative to that repository's root.
+
+**Register of record.** `docs/evidence-register.jsonl` in sharpearena, row `SA-seed-search`.
 
 **Claim.** A brute scan over a 2^16 band recovers the true seed in 16 of 16 trials with zero collisions from one observed bar at about 14.7 microseconds per candidate, extrapolating to roughly 8.6 million CPU-years at 2^64.
 
@@ -547,10 +583,13 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | historical-only | Initial entry: The artifact validly records the scan; the timing leg is bound to an unrecorded machine, which the missing-provenance field states rather than the disposition hiding. |
+| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ### `SA-sealed-seeds`
 
 Covers the **sharpearena** repository, which is not part of this tree. Paths below are relative to that repository's root.
+
+**Register of record.** `docs/evidence-register.jsonl` in sharpearena, row `SA-sealed-seeds`.
 
 **Claim.** On 16 tested slots the public-band scanner recovers 16 of 16 public seeds and 0 of 16 sealed seeds while the salt is withheld, and revealing the salt replays 16 of 16.
 
@@ -587,10 +626,13 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | needs-new-experiment | Initial entry: The measurement instrument changed, not just the scorer, and the artifact records the old check's outcome rather than inputs a new check could be run over. The producer is deterministic, so the new run is cheap, but it measures something the frozen record did not. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
+| 2026-10-31 | needs-new-experiment | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ### `SA-tab-f1`
 
 Covers the **sharpearena** repository, which is not part of this tree. Paths below are relative to that repository's root.
+
+**Register of record.** `docs/evidence-register.jsonl` in sharpearena, row `SA-tab-f1`.
 
 **Claim.** Eighteen baseline rows over six policies and three tiers: no policy is rank-eligible on any tier, because eligibility requires a pass^k rate of exactly 1.00 and the best rate is 0.75.
 
@@ -601,8 +643,9 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 **Artifacts.**
 - `paper/evidence/f1-baselines.json`, sha256 `ec61a9a1f4340d58d497545ce401c159bd1e61201cb7c001773dd66b9e381f67`, digest source: paper/evidence/provenance.json in the sharpearena repository, schema 5, generated at commit ddc9239ecb8938a6e75ec0a0d13c4955ef698021; read for this register on 2026-09-23 at that repository's HEAD d33b24919f0ef63fa432b7aef3694ff03e2e4797, not in this repository, the only evidence file carrying a runtime version, package_version 0.9.0; rows carry deflated_sharpe, its bootstrap interval, passed_k_rate, mean_return and per_seed_returns
 - `paper/figures/f1-baselines.pdf`, sha256 `07e253fa1d96cdef8b30aff1c1e4cebe7ef673c296ca2fa7b7e3cbad8406b624`, digest source: paper/evidence/provenance.json in the sharpearena repository, schema 5, generated at commit ddc9239ecb8938a6e75ec0a0d13c4955ef698021; read for this register on 2026-09-23 at that repository's HEAD d33b24919f0ef63fa432b7aef3694ff03e2e4797, not in this repository
+- `paper/evidence/f1-baselines.rescore-v1-sb0.28.0.json`, sha256 `33c9a3cfacba0a8deaed94c32569e98859ad3907775d18b66afb7ed68d07882c`, digest source: computed for this register, not in this repository, rescore under SharpeBench 0.28.0, sharpearena 0.31.0, SPEC_HASH 0b426f58a65094c9
 
-**Producer command.** python paper/src/make-f1-baselines.py (paper/sections/A-commands.tex)
+**Producer command.** python paper/src/make-f1-baselines.py (paper/sections/A-commands.tex) A current-method result is written by python paper/src/make-rescore-f1-f3.py, which reads the frozen file and steps no environment.
 
 **Producing commit.** sharpearena 0.9.0 is serialized in the artifact. The SharpeBench version is not; paper/sections/A-commands.tex:5 records that the commits adding the artifact lock SharpeBench 0.5.0. The producing commit is unknown.
 
@@ -617,24 +660,28 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 - A repair after release 0.29.0 withholds the flat policy's values at SharpeArena's own boundary, and the pinned scorer is now SharpeBench 0.28.0, which refuses a constant track itself. Under the repaired code the flat rows would report a deflation error instead of a deflated Sharpe, a pass^k rate and an interval; the frozen table still prints 0.0007 (paper/sections/08-findings.tex:55).
 - Apart from F7 the committed F1 to F8 artifacts were not rerun after effective-configuration readback, SPEC_HASH, canonical pre-hash fixtures, typed FFI errors, strict input decoding, path-containment checks or the prospective forecast contract were added. The manuscript states those additions strengthen present executions without changing the observations of artifacts that were not rerun (paper/sections/10-limitations.tex:13).
 - The Python reductions behind the realism, manipulation, adverse-selection, failure, ecology and predictability evidence are off the golden-hash path, so their floating-point reproducibility is the platform's rather than the paper's (paper/sections/10-limitations.tex:11).
+- The rescore of 2026-10-31 recomputed every row from per_seed_returns. paper/sections/10-limitations.tex:15 still says these artifacts have not been rescored.
 
-**Present applicability.** The table as printed is not what the current code would emit for the flat rows, which the manuscript states. The remaining deflated Sharpes and intervals carry the superseded moments.
+**Present applicability.** Rescored under the pinned 0.28.0 kernel. The largest movement in a scored deflated Sharpe is 7.9e-7, no pass^k rate moves, the kernel reproduces every interval it attaches, and no printed cell of the table changes outside the flat rows. The flat rows report the kernel's typed refusal on all three tiers, so the printed 0.00 is not what the current code emits. The claim holds: no policy is rank-eligible and the best rate is 0.75.
 
-**Disposition.** `needs-rescore`. The artifact serializes per_seed_returns, so the deflated Sharpes and their intervals are recomputable under the corrected estimator without re-running the environment. Sufficiency is evidenced by the manuscript's own worked instance, which rescores the committed F3 return series at six trials and reproduces 0.1114 exactly. Any rescore is separately versioned and does not overwrite the frozen artifact. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one.
+**Disposition.** `still-applicable`. A documented comparison now exists: the rescore stores each frozen value beside its current one. Sufficiency was checked rather than assumed, since every recorded series reproduces its cell's mean return exactly and the worked instance reads 0.1114 at six trials.
 
 **Owner.** SharpeArena paper/evidence owner
 
-**Follow-up.** P12-A/P13-R: rescore the committed per-seed returns under the corrected pin and publish the result beside, not in place of, the frozen table.
+**Follow-up.** Owner decision: cite the rescore in the manuscript and print the flat rows as unavailable, and update paper/sections/10-limitations.tex:15.
 
 **Status history.**
 
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | needs-rescore | Initial entry: The artifact serializes per_seed_returns, so the deflated Sharpes and their intervals are recomputable under the corrected estimator without re-running the environment. Sufficiency is evidenced by the manuscript's own worked instance, which rescores the committed F3 return series at six trials and reproduces 0.1114 exactly. Any rescore is separately versioned and does not overwrite the frozen artifact. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
+| 2026-10-31 | still-applicable | Rescored from the committed per_seed_returns under SharpeBench 0.28.0. Moves to still-applicable: scored values change by at most 7.9e-7 and the flat rows are typed unavailable, which the manuscript already states they would be. |
 
 ### `SA-tab-witness`
 
 Covers the **sharpearena** repository, which is not part of this tree. Paths below are relative to that repository's root.
+
+**Register of record.** `docs/evidence-register.jsonl` in sharpearena, row `SA-tab-witness`.
 
 **Claim.** The eligibility set is nonempty: observed crossings in nominal signal strength over five noise paths, and at every one of the 50 attained crossings the last failing gate is the per-run reliability gate.
 
@@ -674,10 +721,13 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | needs-new-experiment | Initial entry: Missing inputs prevent a rescore: the artifact stores crossings, not the trajectories behind them, so establishing the crossing under the corrected gates means re-running the bisection. The producer is deterministic in its seeds. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
+| 2026-10-31 | needs-new-experiment | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ### `SA-f2-regret`
 
 Covers the **sharpearena** repository, which is not part of this tree. Paths below are relative to that repository's root.
+
+**Register of record.** `docs/evidence-register.jsonl` in sharpearena, row `SA-f2-regret`.
 
 **Claim.** Regret against the closed-form reference over 16 paired episodes is U-shaped in the half-spread, 84.6 [68.2, 101.1] at 0.05, minimal at 0.5 and 58.8 [55.3, 62.3] at 4.0, with 16 episodes detecting about 12 reward units at 80 percent power.
 
@@ -714,10 +764,13 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | still-applicable | Initial entry: This is the one artifact in the manuscript with a recorded comparison against a later guard that reproduces the frozen numbers exactly, which is a check rather than an inference. |
+| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ### `SA-tab-f3`
 
 Covers the **sharpearena** repository, which is not part of this tree. Paths below are relative to that repository's root.
+
+**Register of record.** `docs/evidence-register.jsonl` in sharpearena, row `SA-tab-f3`.
 
 **Claim.** Within-tier train minus test deflated Sharpe gaps of +0.0012 Calm, -0.3388 Hard and -0.1012 Extreme, and a transfer matrix with Calm to Extreme +0.973.
 
@@ -727,8 +780,9 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Artifacts.**
 - `paper/evidence/f3-generalization.json`, sha256 `3bff445e13dd4d094a45ebe20e713ec0bc63b06e017c30a399d3aa41a8cf50e1`, digest source: paper/evidence/provenance.json in the sharpearena repository, schema 5, generated at commit ddc9239ecb8938a6e75ec0a0d13c4955ef698021; read for this register on 2026-09-23 at that repository's HEAD d33b24919f0ef63fa432b7aef3694ff03e2e4797, not in this repository, keys config, generalization_gap, cross_regime_transfer, per_seed_returns, band_dsr_ci, transfer_gap_ci
+- `paper/evidence/f3-generalization.rescore-v1-sb0.28.0.json`, sha256 `4cc288d900713ec81fec904793716d54c04672d974ae286da9d097ac23ce41ef`, digest source: computed for this register, not in this repository, rescore under SharpeBench 0.28.0, sharpearena 0.31.0, SPEC_HASH 0b426f58a65094c9
 
-**Producer command.** python paper/src/make-f3-generalization.py (paper/sections/A-commands.tex). The appendix records that the transfer matrix is reported as a table only and that the paper carries no F3 figure.
+**Producer command.** python paper/src/make-f3-generalization.py (paper/sections/A-commands.tex). The appendix records that the transfer matrix is reported as a table only and that the paper carries no F3 figure. A current-method result is written by python paper/src/make-rescore-f1-f3.py, which reads the frozen file and steps no environment.
 
 **Producing commit.** Unknown. paper/sections/A-commands.tex:5 is the paper's single provenance statement: only f1-baselines.json serializes a runtime version (sharpearena 0.9.0), no evidence file serializes a SharpeBench version, and the paper declines to reconstruct one from creation dates. No artifact carries a producing commit; the manifest records only the commit it was generated at.
 
@@ -741,24 +795,28 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 - Standardized-moment estimators mixed finite-sample normalizations, which moves deflated Sharpes and their intervals. SharpeBench corrected its estimators in 0.19.0 and SharpeArena its own confidence estimator in 0.25.0; the frozen F1, F3, witness and predictability artifacts predate both corrections and have not been rescored (paper/sections/10-limitations.tex:15). F3 is named in that group.
 - Apart from F7 the committed F1 to F8 artifacts were not rerun after effective-configuration readback, SPEC_HASH, canonical pre-hash fixtures, typed FFI errors, strict input decoding, path-containment checks or the prospective forecast contract were added. The manuscript states those additions strengthen present executions without changing the observations of artifacts that were not rerun (paper/sections/10-limitations.tex:13).
 - The Python reductions behind the realism, manipulation, adverse-selection, failure, ecology and predictability evidence are off the golden-hash path, so their floating-point reproducibility is the platform's rather than the paper's (paper/sections/10-limitations.tex:11).
+- The rescore of 2026-10-31 recomputed the gaps, the transfer matrix and every interval from per_seed_returns, on the frozen producer's RNG streams.
 
-**Present applicability.** The deflated Sharpes carry superseded moments. The artifact serializes per-seed return series, and the manuscript demonstrates rescoring them: rescoring the committed F3 return series at six trials reproduces 0.1114 exactly.
+**Present applicability.** Rescored under the pinned 0.28.0 kernel. The gaps read +0.0012, -0.3388 and -0.1012 and the transfer matrix +0.877, +0.973 and +0.096 as printed; the largest movement is 6.1e-7. The worked instance at six trials reads 0.111387, which prints as 0.1114 and differs from the frozen 0.111386 in the seventh decimal, so "exactly" holds at printed precision and not to the bit.
 
-**Disposition.** `needs-rescore`. Recorded inputs suffice: per_seed_returns is committed and the manuscript records a worked rescore of that series, so a corrected-estimator result is a recomputation rather than a new run. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one.
+**Disposition.** `still-applicable`. A documented comparison now exists: the rescore stores each frozen value beside its current one, and no printed cell changes.
 
 **Owner.** SharpeArena paper/evidence owner
 
-**Follow-up.** P12-A/P13-R: rescore the committed F3 return series under the corrected pin as a separately versioned output.
+**Follow-up.** none
 
 **Status history.**
 
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | needs-rescore | Initial entry: Recorded inputs suffice: per_seed_returns is committed and the manuscript records a worked rescore of that series, so a corrected-estimator result is a recomputation rather than a new run. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
+| 2026-10-31 | still-applicable | Rescored from the committed per_seed_returns under SharpeBench 0.28.0. Moves to still-applicable: every printed cell is unchanged and the worked instance reproduces 0.1114. |
 
 ### `SA-tab-f7`
 
 Covers the **sharpearena** repository, which is not part of this tree. Paths below are relative to that repository's root.
+
+**Register of record.** `docs/evidence-register.jsonl` in sharpearena, row `SA-tab-f7`.
 
 **Claim.** Failure-mode distributions over 384 episodes: clean rates of 0.40, 0.38 and 0.34 by tier, with 231 of 384 episodes ending in a process failure and 231 of 241 failures non-PnL.
 
@@ -795,10 +853,13 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | still-applicable | Initial entry: The documented comparison is the recorded regeneration for 0.29.0 after the taxonomy repair and the mandate draw change, which the manuscript states and the artifact's readback block supports. |
+| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ### `SA-tab-f8`
 
 Covers the **sharpearena** repository, which is not part of this tree. Paths below are relative to that repository's root.
+
+**Register of record.** `docs/evidence-register.jsonl` in sharpearena, row `SA-tab-f8`.
 
 **Claim.** Ecology outcomes over eight replicator seeds per schedule: the root winner differs between the control and shocked schedules on five of eight seeds, and a single-seed reading does not survive replication.
 
@@ -837,10 +898,13 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | historical-only | Initial entry: The artifact validly records the run and no later change reaches it, but nothing re-establishes it against the current tree. |
+| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ### `SA-tab-throughput`
 
 Covers the **sharpearena** repository, which is not part of this tree. Paths below are relative to that repository's root.
+
+**Register of record.** `docs/evidence-register.jsonl` in sharpearena, row `SA-tab-throughput`.
 
 **Claim.** Native Rust runs 747,468 steps a second, WebAssembly 508,127 and Python 14,240; the full six-policy field over the canonical held-out band takes 302 seconds.
 
@@ -876,88 +940,94 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | historical-only | Initial entry: The artifact validly records a timed run on a named host; a current measurement would be a different machine's number rather than a correction of this one. |
+| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ### `SA-orderbook-mark`
 
 Covers the **sharpearena** repository, which is not part of this tree. Paths below are relative to that repository's root.
+
+**Register of record.** `docs/evidence-register.jsonl` in sharpearena, row `SA-orderbook-mark`.
 
 **Claim.** Over seeds 0 to 31 with no inventory penalty a lone quoting agent earns a mean episode reward of 881.4 against 897.1 for cash plus inventory at the final reference mid, where the frozen mark it replaced paid 2360.3.
 
 **Source.** `paper/sections/03-environment.tex:112`
 
 **Artifacts.**
-- none located
+- `crates/sharpearena-py/tests/test_lob_env.py`, no digest recorded, digest source: no digest: a test file that may be edited, not in this repository, test_a_lone_quote_walk_is_not_booked_as_reward asserts 881.4 and 897.1 over seeds 0 to 31; its docstring and sharpearena/lob_env.py record 2360.3 under the frozen mark, which no current code path produces
 
-**Producer command.** none recorded. No producer paragraph in paper/sections/A-commands.tex covers this number, and the manuscript's reproducibility statement scopes its producer guarantee to the validation and findings sections, which this claim sits outside.
+**Producer command.** pytest crates/sharpearena-py/tests/test_lob_env.py::test_a_lone_quote_walk_is_not_booked_as_reward, run for this row on 2026-10-31 and passing.
 
-**Producing commit.** unknown; the same three numbers appear in CHANGELOG.md under release 0.31.0.
+**Producing commit.** 06fb4c0 on 2026-09-17, which added the test and the mark it measures.
 
 **Effective configuration.** Stated in prose only: seeds 0 to 31, no inventory penalty, one tick below the reference mid on the bid and twenty above on the ask, sixty steps of mid-walking. No seed serialization, no interval.
 
 **Missing provenance.**
-- No artifact in paper/evidence and none in the provenance manifest.
-- No producer command.
-- No interval and no per-seed record.
-- Whether a committed test reproduces the three numbers was not established.
+- No interval and no per-seed record: the test rounds two means to one decimal.
+- The frozen-mark figure 2360.3 belongs to code since removed, so it stands as a recorded value and is not re-executed.
 
 **Relevant later changes.**
 - The claim is itself the record of a later change: the order-book environment's default inventory mark changed twice, so rewards from earlier runs reproduce only under one mark setting and rewards under the intervening fallback do not reproduce at all; no committed artifact uses the environment (paper/sections/10-limitations.tex:15).
 
-**Present applicability.** Not established. The numbers are corroborated only by a changelog entry that states them in the same words.
+**Present applicability.** Current for 881.4 and 897.1, which a committed test asserts on the present tree. The third number is the historical comparator the sentence presents it as.
 
-**Disposition.** `unresolved`. The artifact cannot be located, so the ticket's rule applies: record unresolved rather than guess.
+**Disposition.** `still-applicable`. The artifact the 2026-09-23 entry could not locate is a committed test, which reproduces the two current numbers exactly at the printed precision.
 
 **Owner.** SharpeArena paper/evidence owner
 
-**Follow-up.** P15: commit a producer and artifact for the order-book mark comparison, or state it in the manuscript as an uncommitted measurement.
+**Follow-up.** none
 
 **Status history.**
 
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | unresolved | Initial entry: The artifact cannot be located, so the ticket's rule applies: record unresolved rather than guess. |
+| 2026-10-31 | still-applicable | Resolved as a provenance answer: test_a_lone_quote_walk_is_not_booked_as_reward asserts the numbers and passes on the current tree. The 2026-09-23 entry searched paper/evidence only. |
 
 ### `SA-seeded-shuffle`
 
 Covers the **sharpearena** repository, which is not part of this tree. Paths below are relative to that repository's root.
+
+**Register of record.** `docs/evidence-register.jsonl` in sharpearena, row `SA-seeded-shuffle`.
 
 **Claim.** Seat ordering under the default agent-index priority advantages the lower index, which the seeded shuffle removes.
 
 **Source.** `paper/sections/03-environment.tex:110`
 
 **Artifacts.**
-- none located
+- `crates/sharpearena-py/tests/test_lob_env.py`, no digest recorded, digest source: no digest: a test file that may be edited, not in this repository, test_default_priority_always_queues_seat_zero_first asserts 32 of 32 and test_seeded_shuffle_makes_identical_quoters_exchangeable asserts 15 of 32, both over seeds 0 to 31
 
-**Producer command.** none recorded. The supporting measurement, two identical quoters filling seat 0 more often on 32 of 32 seeds under the default order and 15 of 32 under a seeded shuffle, appears only in CHANGELOG.md under release 0.31.0.
+**Producer command.** pytest on those two named tests in crates/sharpearena-py/tests/test_lob_env.py, run for this row on 2026-10-31 and passing.
 
-**Producing commit.** unknown
+**Producing commit.** 4473079 on 2026-09-17, which added the rule and its tests.
 
 **Effective configuration.** Stated in the changelog only: seeds 0 to 31, two identical three-tick quoters.
 
 **Missing provenance.**
-- No artifact in paper/evidence and none in the manifest.
-- No producer command, and the manuscript states the property qualitatively without citing the measurement it rests on.
+- The manuscript states the property qualitatively and does not cite this measurement.
 
 **Relevant later changes.**
 - The seeded-shuffle priority is itself the later change; the measurement predates no repair.
 
-**Present applicability.** Not established from the paper's evidence. The manuscript's qualitative claim rests on a measurement it does not cite.
+**Present applicability.** Current: the two tests assert seat 0 filled more on 32 of 32 seeds under the default order, 14,222 units against 13,900, and on 15 of 32 under the seeded shuffle.
 
-**Disposition.** `unresolved`. The supporting measurement has no artifact in the evidence scope, so no disposition can be chosen without guessing.
+**Disposition.** `still-applicable`. The supporting measurement is held by committed tests that run on the current tree, so the qualitative claim has a recorded comparison behind it.
 
 **Owner.** SharpeArena paper/evidence owner
 
-**Follow-up.** P15: cite the seat-ordering measurement or commit it as evidence.
+**Follow-up.** none
 
 **Status history.**
 
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | unresolved | Initial entry: The supporting measurement has no artifact in the evidence scope, so no disposition can be chosen without guessing. |
+| 2026-10-31 | still-applicable | Resolved as a provenance answer: two named tests assert the measurement and pass on the current tree. The 2026-09-23 entry searched paper/evidence only. |
 
 ### `SA-nonempirical-tables`
 
 Covers the **sharpearena** repository, which is not part of this tree. Paths below are relative to that repository's root.
+
+**Register of record.** `docs/evidence-register.jsonl` in sharpearena, row `SA-nonempirical-tables`.
 
 **Claim.** The observation and action wire schemas, the leakage-channel summary and the related-work comparison.
 
@@ -993,6 +1063,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | still-applicable | Initial entry: No cell reports a measurement, so no artifact can go stale under these tables. |
+| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ## SharpeBench
 
@@ -1032,6 +1103,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | still-applicable | Initial entry: The table reports no measurement, so no artifact can go stale under it; the mechanisms it names are the current tree's, exercised by the test list in paper/sections/A-commands.tex. |
+| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-tab-leakage`
 
@@ -1069,6 +1141,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | still-applicable | Initial entry: No measurement is reported, and the controls named are properties of the current tree rather than of the frozen snapshot. |
+| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-tab-attacks`
 
@@ -1107,6 +1180,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | still-applicable | Initial entry: The documented comparison is the commit-time test itself, which re-checks the claim against the current kernel on every commit. |
+| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-tab-data`
 
@@ -1153,6 +1227,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | needs-rescore | Initial entry: The recorded inputs are sufficient: the battery is a deterministic function of the committed CSVs and the command exists on the current tree, so a current-method verdict is a recomputation rather than a new experiment. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
+| 2026-10-31 | needs-rescore | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-tab-datasheet`
 
@@ -1198,6 +1273,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | still-applicable | Initial entry: The comparison is recorded rather than inferred: all nine byte and row counts were recomputed from the committed CSVs and agree with the table exactly. |
+| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-tab-related`
 
@@ -1235,6 +1311,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | still-applicable | Initial entry: The documented comparison is the per-cell provenance sheet with its dated checks; nothing in this repository can move these cells. |
+| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-fig-demotion`
 
@@ -1275,6 +1352,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | still-applicable | Initial entry: The documented comparison is paper/sections/E-repairs.tex:17 together with the golden_scores test, which pins the record the panel reads to the current kernel. |
+| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-fig-deflation`
 
@@ -1313,6 +1391,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | still-applicable | Initial entry: The producer agrees with the current kernel under a passing pinned test, and the panel's inputs are stated constants rather than frozen measurements. |
+| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-tab-units`
 
@@ -1352,6 +1431,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | historical-only | Initial entry: The frozen note is the located artifact: it carries the table verbatim and a producing commit, so the claim is a valid record of the v0.2.1 kernel, which the caption binds it to. The upstream sweep it reduces is gone, which the missing-provenance field records rather than the disposition hiding. |
+| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-sec-units-prefloor`
 
@@ -1360,38 +1440,37 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 **Source.** `paper/sections/05-experiments.tex:33`
 
 **Artifacts.**
-- `paper/evidence/after-v0.3.0/us-indices-1w.jsonl`, sha256 `8aa2d151b33085df656342fe9cb299d72d762a7b92a534bb0e2f4b5967394887`, digest source: computed for this register; the file is outside the provenance manifest scope, the file paper/sections/A-commands.tex names as the source of the weekly figure
-- `paper/evidence/after-v0.3.0/us-indices-1d.jsonl`, sha256 `8cdf5feacbe7465d110ea3559d8d0febe5e5dd1ca2680ed02def19616ddcc120`, digest source: computed for this register; the file is outside the provenance manifest scope, the file it names as the source of the daily figure
-- `paper/evidence/FINDING-units.md`, sha256 `13c1a0d72d74a18fc04dc28d6f4df80b276cafebc6b797bb1c038468de6a2f07`, digest source: computed for this register; the file is outside the provenance manifest scope, carries the same 0.984 and 0.000 pair, attributed instead to the v0.2.1 sweep
+- `paper/evidence/after-v0.3.0/us-indices-1w.jsonl`, sha256 `8aa2d151b33085df656342fe9cb299d72d762a7b92a534bb0e2f4b5967394887`, digest source: computed for this register; the file is outside the provenance manifest scope, line 321 is the source of the weekly figure: buy-and-hold at dsr_bar 0.95, n_trials 50, measured dispersion 0.0338, deflated Sharpe 0.98419
+- `paper/evidence/after-v0.3.0/us-indices-1d.jsonl`, sha256 `8cdf5feacbe7465d110ea3559d8d0febe5e5dd1ca2680ed02def19616ddcc120`, digest source: computed for this register; the file is outside the provenance manifest scope, line 321 is the source of the daily figure: the same cell, measured dispersion 0.0704, deflated Sharpe 0.0
+- `paper/evidence/FINDING-units.md`, sha256 `13c1a0d72d74a18fc04dc28d6f4df80b276cafebc6b797bb1c038468de6a2f07`, digest source: computed for this register; the file is outside the provenance manifest scope, carries the same pair and attributes it to the small field-measured path, which agrees with what the two records stamp
 
 **Producer command.** cargo run --release -p sharpebench-harness --example evidence_sweep -- out.jsonl [dataset] [dsr_bar], assembled by paper/evidence/assemble_sweep.py and reduced by paper/evidence/analyze.py (paper/sections/A-commands.tex), run against an intermediate kernel; paper/sections/A-commands.tex states the pair is read from paper/evidence/after-v0.3.0/.
 
-**Producing commit.** unknown for the after-v0.3.0 artifacts. The competing source, paper/evidence/FINDING-units.md, records commit d0ae4f2 at v0.2.1.
+**Producing commit.** unknown for the after-v0.3.0 artifacts beyond the v0.3.0 kernel paper/evidence/FINDING-passk.md names. The same two values are also at lines 321 and 833 of paper/evidence/baseline-v0.2.1/us-indices-and-crypto-1h-partial.jsonl, from d0ae4f2 at v0.2.1, which is why the two notes could each name a different source: the measured path did not change between those versions.
 
-**Effective configuration.** Pre-floor dispersion handling; otherwise the default grid.
+**Effective configuration.** dsr_bar 0.95, n_trials 50, sr_std_pinned null, trials_sr_std_source measured, buy-and-hold: the cell that takes the field-measured dispersion rather than a configured prior. Pre-floor dispersion handling.
 
 **Missing provenance.**
-- Checked for this register on 2026-09-23: across all 64 buy-and-hold records in each of the two after-v0.3.0 files, no record carries a deflated Sharpe of 0.984. At the default cell the two files give 0.0046 and 0.0021; the maximum buy-and-hold value in each file is 1.0000, at a bar of 0.80 and a host N of 1.
-- The two sources disagree on the pair's origin: the appendix names after-v0.3.0, while paper/evidence/FINDING-units.md attributes the same pair to the v0.2.1 sweep and adds a status block stating the contrast came from the small field-measured path and must not be attributed to the configured-prior unit bug.
-- The v0.2.1 sweep the note names, paper/evidence/sweep.jsonl, is not in the tree.
-- paper/evidence/after-v0.3.0/ is outside the artifact scope of paper/evidence/provenance.json and carries no recorded digest.
+- The v0.2.1 sweep paper/evidence/FINDING-units.md names, paper/evidence/sweep.jsonl, was never committed. Its two values are present in paper/evidence/baseline-v0.2.1/, so nothing is lost.
+- paper/evidence/after-v0.3.0/ is outside the artifact scope of paper/evidence/provenance.json, so these digests are this register's own.
 
 **Relevant later changes.**
 - The dispersion floor shipped after these artifacts, which is why the appendix states they are not used for any current result.
 
-**Present applicability.** Not established. The register could not reproduce the quoted pair from the artifact the appendix names, and the other artifact carrying it warns against the reading the surrounding prose gives it.
+**Present applicability.** The pair is located and exact to the printed precision, and the appendix names the right file. It holds as a record of a pre-floor kernel on the measured path; the manuscript scopes it that way and the note warns against attributing it to the configured-prior unit bug.
 
-**Disposition.** `unresolved`. The artifact behind the quoted pair could not be located: the named file does not contain it at any cell checked, and the file that does contain it is a superseded note that disclaims the attribution. Recorded as unresolved rather than resolved by picking one of the two.
+**Disposition.** `historical-only`. The artifact is located: us-indices-1w.jsonl:321 and us-indices-1d.jsonl:321 carry the pair. The two sources do not disagree, since the value is the same at v0.2.1 and v0.3.0.
 
 **Owner.** SharpeBench paper/evidence owner
 
-**Follow-up.** P15: identify which artifact the 0.984 and 0.000 pair is read from and reconcile the appendix with the frozen note, or drop the pair.
+**Follow-up.** none
 
 **Status history.**
 
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | unresolved | Initial entry: The artifact behind the quoted pair could not be located: the named file does not contain it at any cell checked, and the file that does contain it is a superseded note that disclaims the attribution. Recorded as unresolved rather than resolved by picking one of the two. |
+| 2026-10-31 | historical-only | Corrected a mistake in the 2026-09-23 entry, which reported that no buy-and-hold record carried 0.984 and compared against the configured-prior default cell. The measured-dispersion cell carries it: 0.98419 at us-indices-1w.jsonl:321 and 0.0 at us-indices-1d.jsonl:321. |
 
 ### `SB-sec-units-worked-example`
 
@@ -1427,6 +1506,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | still-applicable | Initial entry: The documented comparison is the commit-time regression test against the published example. |
+| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-tab-eligibility`
 
@@ -1475,6 +1555,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | historical-only | Initial entry: The artifact validly records the frozen kernel's run and the manuscript binds the table to that snapshot. The separate question of what the current engine would compute is carried by SB-sec-passk. |
+| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-sec-passk`
 
@@ -1523,6 +1604,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | needs-new-experiment | Initial entry: A rescore is not defensible: generation changed (simulator and entrant repairs) and the inputs a repaired dispersion measurement needs are absent from the committed records. Re-running the field would be a new empirical run rather than a correction, which paper/sections/E-repairs.tex:7 states in those terms. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
+| 2026-10-31 | needs-new-experiment | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-sec-ablation`
 
@@ -1568,6 +1650,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | historical-only | Initial entry: The artifact validly records the v0.9.0 ablation. The drawdown figures are read from the same frozen records and the manuscript scopes them to that run; the current-engine question is carried by SB-sec-passk rather than duplicated here. |
+| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-sec-riskmanaged`
 
@@ -1606,6 +1689,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | historical-only | Initial entry: The artifact validly records the v0.9.0 run and the manuscript binds it to that snapshot; the appendix establishes only that the dispersion-vote repair does not touch these panels, not that the statistics are unchanged. |
+| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-fig-drawdowns`
 
@@ -1644,6 +1728,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | historical-only | Initial entry: Figure-to-record agreement is checked on the current tree, but the records are v0.9.0 and the simulator repair can move drawdown paths, so the figure inherits its records' historical scope. |
+| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-fig-luckdeflation`
 
@@ -1685,6 +1770,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | historical-only | Initial entry: The figure validly reduces the frozen records; the manuscript binds those records to v0.9.0 and the repairs that would move them are recorded rather than applied. |
+| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-tab-external`
 
@@ -1711,6 +1797,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 - The simulator let a zero target cross through flat into a short position and the momentum entrant ignored its declared lookback, so the current engine reconstructs different trajectories (paper/sections/E-repairs.tex:5).
 - A constant observed track is now refused for PSR and DSR, so the current kernel would refuse all 576 frozen hold records as unavailable rather than scoring them (paper/sections/E-repairs.tex:9).
 - A track with no Sharpe ratio no longer votes on another agent's deflation bar. hold voted wherever a record stamps measured or floored: 64 of the 576 default-sweep panels, all 27 panels of the externally specified sweep and four of the nine power-curve panels. How far the repaired measurement would move each bar is not established and is not estimated (paper/sections/E-repairs.tex:15, :17).
+- SharpeBench #172 (e8337a1) gives newly resolved stressed models a versioned two-bar FIFO decision delay. The frozen evidence executes stressed-profile decisions immediately and is not rerun (paper/sections/E-repairs.tex:3), so a current stressed run is not comparable with this row's stressed cells.
 
 **Present applicability.** Valid as the v0.9.0 record. paper/sections/E-repairs.tex:17 records that all 27 panels of this sweep had hold voting on the measured dispersion, and on the three crypto panels faber-10m as well, so every bar in this family is one the current engine would measure differently.
 
@@ -1725,6 +1812,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | historical-only | Initial entry: The artifact validly records the frozen run; the current-engine question is carried by SB-sec-external. |
+| 2026-10-31 | historical-only | Rechecked against #172: the stressed cells this row reports ran without the delay the current engine applies, which adds a difference to the row and does not change its disposition. #118 and #171 do not touch it. |
 
 ### `SB-tab-costsens`
 
@@ -1749,6 +1837,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 **Relevant later changes.**
 - A track with no Sharpe ratio no longer votes on another agent's deflation bar. hold voted wherever a record stamps measured or floored: 64 of the 576 default-sweep panels, all 27 panels of the externally specified sweep and four of the nine power-curve panels. How far the repaired measurement would move each bar is not established and is not estimated (paper/sections/E-repairs.tex:15, :17).
 - Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention, and how far the correction moves the frozen values is not established (paper/sections/E-repairs.tex:5).
+- SharpeBench #172 (e8337a1) gives newly resolved stressed models a versioned two-bar FIFO decision delay. The frozen evidence executes stressed-profile decisions immediately and is not rerun (paper/sections/E-repairs.tex:3), so a current stressed run is not comparable with this row's stressed cells.
 
 **Present applicability.** Every cell in the Bar columns is a field-measured dispersion that the current engine would take over a different voting set, and the caption already says so. How far each bar would move is not established and is not estimated.
 
@@ -1763,6 +1852,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | needs-new-experiment | Initial entry: This table's headline quantity is exactly the one the dispersion-vote repair changes, and The committed records serialize each agent's deflated and probabilistic Sharpe but not its pooled Sharpe, and the probabilistic Sharpe cannot be inverted without that track's skewness and kurtosis, so the frozen artifacts lack the inputs a repaired dispersion measurement would need (paper/sections/E-repairs.tex:17). A rescore from the committed records is therefore not sufficient. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
+| 2026-10-31 | needs-new-experiment | Rechecked against #172: the stressed cells this row reports ran without the delay the current engine applies, which adds a difference to the row and does not change its disposition. #118 and #171 do not touch it. |
 
 ### `SB-sec-external`
 
@@ -1788,6 +1878,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 - A constant observed track is now refused for PSR and DSR, so the current kernel would refuse all 576 frozen hold records as unavailable rather than scoring them (paper/sections/E-repairs.tex:9).
 - A track with no Sharpe ratio no longer votes on another agent's deflation bar. hold voted wherever a record stamps measured or floored: 64 of the 576 default-sweep panels, all 27 panels of the externally specified sweep and four of the nine power-curve panels. How far the repaired measurement would move each bar is not established and is not estimated (paper/sections/E-repairs.tex:15, :17).
 - The committed records serialize each agent's deflated and probabilistic Sharpe but not its pooled Sharpe, and the probabilistic Sharpe cannot be inverted without that track's skewness and kurtosis, so the frozen artifacts lack the inputs a repaired dispersion measurement would need (paper/sections/E-repairs.tex:17).
+- SharpeBench #172 (e8337a1) gives newly resolved stressed models a versioned two-bar FIFO decision delay. The frozen evidence executes stressed-profile decisions immediately and is not rerun (paper/sections/E-repairs.tex:3), so a current stressed run is not comparable with this row's stressed cells.
 
 **Present applicability.** Established for the frozen snapshot. The claim that removing every friction still admits nobody rests on bars the current engine would measure over a different voting set, so it is not established for the shipped engine today.
 
@@ -1802,6 +1893,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | needs-new-experiment | Initial entry: Generation and measurement both changed and the committed records lack the pooled Sharpes a repaired measurement needs, so no defensible rescore exists. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
+| 2026-10-31 | needs-new-experiment | Rechecked against #172: the stressed cells this row reports ran without the delay the current engine applies, which adds a difference to the row and does not change its disposition. #118 and #171 do not touch it. |
 
 ### `SB-tab-relative`
 
@@ -1842,6 +1934,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | historical-only | Initial entry: The artifact validly records the frozen run under both verdicts, and the manuscript binds it to that snapshot. |
+| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-tab-mandate`
 
@@ -1882,6 +1975,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | historical-only | Initial entry: The artifact validly records the frozen run, and the one cross-table inference it supports is already bound to the frozen kernel in the manuscript. |
+| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-tab-seedleg`
 
@@ -1920,6 +2014,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | historical-only | Initial entry: The artifact validly records the frozen run and the manuscript bounds the claim with three stated caveats. |
+| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-sec-perturb`
 
@@ -1957,6 +2052,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | historical-only | Initial entry: The reported spread comes from the frozen artifact; the current-tree test covers the separate synthetic claim, not these two numbers. |
+| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-sec-witness`
 
@@ -1995,6 +2091,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | still-applicable | Initial entry: The documented comparison is paper/sections/E-repairs.tex:7: this is the one field rerun under the repaired producer and the current kernel, and the manuscript states the resulting shift. |
+| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-sec-falsify`
 
@@ -2039,6 +2136,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | historical-only | Initial entry: The artifact validly records the frozen run under the corrected floor construction; neither effect of the later repairs on this comparison is established, so the claim stays bound to the snapshot. |
+| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-sec-luck1000`
 
@@ -2078,6 +2176,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | historical-only | Initial entry: The artifact validly records the frozen run, and the repair that does touch it has an unestablished magnitude, so the claim stays bound to the snapshot. |
+| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-sec-sybil`
 
@@ -2115,6 +2214,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | still-applicable | Initial entry: The documented comparison is the commit-time test that rebuilds every committed field and asserts the outcome; it executes against the current kernel. |
+| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-sec-power`
 
@@ -2155,6 +2255,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | needs-rescore | Initial entry: The producer is deterministic and reads only bars, so a current-engine version of this table is a recomputation rather than a new experiment; it is blocked only on repaired bars, which SB-sec-passk and SB-sec-external own. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
+| 2026-10-31 | needs-rescore | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-sec-forecast-report`
 
@@ -2180,6 +2281,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Relevant later changes.**
 - paper/sections/E-repairs.tex:19 records the move to schema v2 with the same support, because both fields are complete, and that the archived v1 pilot report still verifies.
+- SharpeBench #171 (352af5c) makes schema sharpebench.forecast-quality.v5 the current output, with per-stratum estimates and no pooled primary estimate. The committed tutorial reports stay at schema v2; examples/forecast-quality/README.md records that the command emits v5 and that the check strips the stratum labels and restores the historical tag before comparing. See SB-sec-forecast-strata for the manuscript sentence this overtakes.
 
 **Present applicability.** Verified on 2026-09-23 for this register: python -m unittest paper/src/test_check_prospective_forecast_report.py passes against the committed fixtures, and both committed reports carry schema v2 with the appendix's stated bootstrap configuration.
 
@@ -2194,6 +2296,43 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | still-applicable | Initial entry: The documented comparison is the independent Python recomputation, which runs in CI against the committed report. |
+| 2026-10-31 | still-applicable | Rechecked against #171: the fixtures are unchanged and the numerical results reproduce through the schema normalization the example records, so the row stays applicable as a statement about those two reports. It is no longer a statement about the current report schema, which is v5. |
+
+### `SB-sec-forecast-strata`
+
+**Claim.** The current analyzer pools every common contract into one difference regardless of rule, a behavior a test pins and the repository records as deferred; the report is schema sharpebench.forecast-quality.v2.
+
+**Source.** `paper/sections/03-benchmark.tex:59`
+
+**Artifacts.**
+- `examples/forecast-quality/README.md`, no digest recorded, digest source: no digest: the file is documentation that may be edited, records that the command now emits schema v5 with explicit stratum labels
+- `docs/book/src/forecast-quality.md`, no digest recorded, digest source: no digest: the file is documentation that may be edited, states New reports use sharpebench.forecast-quality.v5
+
+**Producer command.** none: the sentence describes analyzer behavior, and every committed fixture is a single stratum, so no reported comparison depended on it.
+
+**Producing commit.** 352af5c changed the behavior on 2026-10-10 and did not change the sentence.
+
+**Effective configuration.** not applicable
+
+**Missing provenance.**
+- none identified
+
+**Relevant later changes.**
+- SharpeBench #171 (352af5c): comparisons are stratified by scoring rule and target unit and the current output is schema v5. crates/sharpebench-core/src/forecast.rs no longer pools across strata.
+
+**Present applicability.** False of the current analyzer on both counts: it stratifies, and it emits v5. True of the v2 analyzer that wrote the committed tutorial reports.
+
+**Disposition.** `historical-only`. The sentence records the analyzer as it stood at the v2 report and does not describe changed current behavior. Found during this recheck; the manuscript has not been edited.
+
+**Owner.** SharpeBench paper/evidence owner
+
+**Follow-up.** P15: repair paper/sections/03-benchmark.tex:59, which still calls pooling current and names v2 as the report schema.
+
+**Status history.**
+
+| Date | Disposition | Rationale |
+|---|---|---|
+| 2026-10-31 | historical-only | Initial entry, found while rechecking against #171: the analyzer now stratifies and emits v5, so the sentence describes the code as it stood before that change. |
 
 ### `SB-sec-forecast-size`
 
@@ -2202,35 +2341,37 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 **Source.** `paper/sections/03-benchmark.tex:59`, `paper/sections/01-introduction.tex:24`, `paper/sections/07-limitations.tex:37`
 
 **Artifacts.**
-- none located
+- `paper/evidence/forecast-size-study.json`, sha256 `961ac7af88b5932ec3abe85c061d48db8acdb3febc770f57f3d6b2c0c2c31257`, digest source: computed for this register; the file is outside the provenance manifest scope, 6,000 replications, the configuration the manuscript states, seed 0x51ED2026F0ECA57A
+- `paper/evidence/forecast-size-study-60k.json`, sha256 `ec09ea1f78724a0e24d61040b7bad619710fc1406543fb2fa3b64a74d89c5f55`, digest source: computed for this register; the file is outside the provenance manifest scope, 60,000 replications from the same streams, which contain the first 6,000, run to decide whether the 6,000-replication differences are noise
 
-**Producer command.** not recorded. The values appear only as the MEASURED_SIZE constant table in crates/sharpebench-core/src/forecast.rs:1321 and in FAMILYWISE_SIZE_RULE at :1298; no producer script, seed, driver or raw draw file was found in the tree.
+**Producer command.** cargo run --release -p sharpebench-harness --example forecast_size_study -- paper/evidence/forecast-size-study.json, and the same command with a final argument of 60000 for the larger file. The producer drives the public analyze_forecast_quality, so the rejection decision is the report's own familywise_significant.
 
-**Producing commit.** unknown
+**Producing commit.** The commit that added crates/sharpebench-harness/examples/forecast_size_study.rs, on the sharpebench 0.28.0 tree. The constants themselves were written at 105e596 on 2026-09-18, whose message states the same configuration and names no producer.
 
-**Effective configuration.** Stated in prose: 6,000 null draws, five contracts a block, 2,000 replications, independent normal and lognormal per-contract differences. No seed is recorded.
+**Effective configuration.** 6,000 replications, five contracts a block, 2,000 bootstrap replications, the shipped bootstrap seed, independent normal differences; lognormal is exp(Z) - exp(1/2). A second arm redraws the bootstrap seed each replication and agrees within noise.
 
 **Missing provenance.**
-- No producer command, script or driver for the size study exists in the repository.
-- No raw draws, seed or output artifact is committed; the numbers are hard-coded constants.
-- The comparison figures for the two rejected alternatives, 0.013 for the studentised statistic and 0.050 and 0.094 for the Student-t, have the same gap.
+- The original study's seed, driver and raw draws were never committed and cannot be recovered, so this measures the same configuration and does not reproduce the same draws.
+- The original lognormal law is not recorded; exp(Z) - exp(1/2) is this producer's choice.
+- The studentised statistic and the half-sigma effect are reconstructed here, because neither has a shipped code path or a recorded definition.
 
 **Relevant later changes.**
-- None recorded; the constant table has no producer to have changed.
+- SharpeBench #171 (352af5c) stratifies comparisons. The resampling law and the p-value are unchanged, and the producer runs on that code.
 
-**Present applicability.** Not established either way. The numbers are published beside every p-value and are cited as contribution (5) in the introduction, but nothing in the tree lets a reader recompute or verify them.
+**Present applicability.** Measured at 6,000 replications: normal 4 blocks stated 0.188, measured 0.2007; normal 5 blocks stated 0.162, measured 0.1603; normal 6 blocks stated 0.138, measured 0.1438; normal 10 blocks stated 0.096, measured 0.0953; normal 20 blocks stated 0.072, measured 0.0672; normal 40 blocks stated 0.060, measured 0.0615; lognormal 4 blocks stated 0.237, measured 0.2465. Five of the seven stated values lie inside the 95 percent interval of the 60,000-replication run. The two four-block values do not: normal reads 0.1953 [0.1922, 0.1985] against 0.188 and lognormal 0.2483 [0.2449, 0.2518] against 0.237. Both stated values are low, which is the direction that flatters the test, and four blocks is the count the manuscript singles out. The differences, 0.007 and 0.011, do not change what the table says about the test. The lognormal gap may be a difference of law, since the original law is not recorded; the normal gap is not. The comparison figures for the shipped test at a half-sigma effect read 0.724 against 0.745.
 
-**Disposition.** `unresolved`. The artifact cannot be located, so no disposition can be chosen without guessing. Recorded as unresolved rather than assumed current, per the ticket's rule.
+**Disposition.** `needs-rescore`. A committed seeded producer now exists and its output is recorded, so the row is no longer unresolved. It does not take still-applicable because two four-block constants sit outside the interval of the larger run. MEASURED_SIZE and FAMILYWISE_SIZE_RULE were not edited; whether to adopt the measured values is an owner decision.
 
 **Owner.** SharpeBench paper/evidence owner
 
-**Follow-up.** P15: commit the size study's producer and its output, or state in the manuscript that the size table is an uncommitted measurement.
+**Follow-up.** Owner decision: keep the published constants beside the measured values, or update MEASURED_SIZE, FAMILYWISE_SIZE_RULE, the golden report text and the manuscript together.
 
 **Status history.**
 
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | unresolved | Initial entry: The artifact cannot be located, so no disposition can be chosen without guessing. Recorded as unresolved rather than assumed current, per the ticket's rule. |
+| 2026-10-31 | needs-rescore | The seeded producer forecast_size_study was committed and run at the stated configuration. Five of seven rates agree with the constants; the two four-block rates are 0.007 and 0.011 above them in the 60,000-replication run, so the row moves to needs-rescore pending an owner decision on the constants. |
 
 ### `SB-sec-compute`
 
@@ -2239,34 +2380,36 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 **Source.** `paper/sections/05-experiments.tex:5`
 
 **Artifacts.**
-- none located
+- `paper/evidence/final/power-curve.jsonl`, sha256 `2450017a9ac05475f7547d0fda7651a97476efff02d4e4168ae72cd78304eff5`, digest source: computed for this register, an output of a timed command, not a record of the timing
+- `paper/evidence/final/external-rules.jsonl`, sha256 `14fd1306755457d3e16162ec983eca53e7b69f6ed000fc6e9a49875589c2a9af`, digest source: computed for this register, an output of a timed command, not a record of the timing
 
 **Producer command.** the commands of paper/sections/A-commands.tex, timed on one AMD Ryzen Threadripper PRO 5975WX with 256 GiB of RAM under Windows 11.
 
-**Producing commit.** unknown for the timings; the grid regeneration is stated to have reproduced the frozen records exactly.
+**Producing commit.** The grid and external-field timings entered the manuscript at ae553a8 on 2026-08-25 and the power timing at 858332c on 2026-09-15. Neither commit, nor any other in the history, carries a log of them.
 
 **Effective configuration.** Single-threaded scoring processes; the power calculation is the one command that parallelises.
 
 **Missing provenance.**
-- No timing artifact, log or benchmark record is committed for any of these measurements.
+- No timing artifact, log or benchmark record was ever committed: the history was searched for all five numbers and they appear only in manuscript text and in this register. They are uncommitted machine observations and the manuscript does not say so.
 - The regeneration that reproduced all 4,608 deflated Sharpes left no committed receipt, so the strongest reproducibility statement in the section is unverifiable from the tree.
 
 **Relevant later changes.**
 - The repairs of paper/sections/E-repairs.tex change what the current engine computes, so the exact-reproduction claim is a statement about the frozen snapshot only.
 
-**Present applicability.** Not established. The numbers are plausible and internally consistent but no artifact in the repository records them.
+**Present applicability.** Bound to the named host and the two commits above, as observations rather than measurements a reader can check. The exact-reproduction claim is a statement about the frozen snapshot.
 
-**Disposition.** `unresolved`. No artifact could be located for any of the quoted measurements, and the ticket requires unresolved rather than a guess.
+**Disposition.** `historical-only`. The provenance question has an answer: these are uncommitted observations, dated by the commits that introduced them. That retains them as historical and validates nothing current.
 
 **Owner.** SharpeBench paper/evidence owner
 
-**Follow-up.** P15: commit a timing receipt, or state the measurements as uncommitted machine observations.
+**Follow-up.** P15: state the measurements in the manuscript as uncommitted machine observations.
 
 **Status history.**
 
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | unresolved | Initial entry: No artifact could be located for any of the quoted measurements, and the ticket requires unresolved rather than a guess. |
+| 2026-10-31 | historical-only | Resolved as a provenance answer: the origin commits are identified and the history holds no timing record, so the numbers are uncommitted observations bound to those commits. |
 
 ### `SB-claims-i`
 
@@ -2316,6 +2459,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | needs-new-experiment | Initial entry: Same reasoning as SB-sec-passk: generation changed and the committed records lack the inputs a repaired measurement needs. This is a headline claim, so it is queued rather than left implicit. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
+| 2026-10-31 | needs-new-experiment | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-claims-ii`
 
@@ -2361,6 +2505,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | historical-only | Initial entry: The artifacts validly record the frozen run; whether the simulator repair moves the comparison is not established, so the claim stays bound to the snapshot rather than being asserted of the current engine. |
+| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-claims-iii`
 
@@ -2400,6 +2545,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | needs-new-experiment | Initial entry: Inherits SB-sec-external: no defensible rescore exists from the committed records. Queued as a headline claim. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
+| 2026-10-31 | needs-new-experiment | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-claims-iv`
 
@@ -2436,6 +2582,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | still-applicable | Initial entry: The documented comparison is the commit-time test, which runs against the current tree rather than against the frozen snapshot. |
+| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-claims-v`
 
@@ -2473,6 +2620,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | still-applicable | Initial entry: The documented comparison is the golden test on three CI targets, which executes against the current kernel. |
+| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-claims-vi`
 
@@ -2508,6 +2656,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | still-applicable | Initial entry: The witness is the one field rerun under the repaired producer and the current kernel, and the claim is stated with its sampling caveat. |
+| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-forecast-pilot`
 
@@ -2561,3 +2710,4 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | Date | Disposition | Rationale |
 |---|---|---|
 | 2026-09-23 | historical-only | Initial entry: The field validly records the pilot under the superseded envelope and the manuscript already excludes its scores from every claim, which is exactly what historical-only means. |
+| 2026-10-31 | historical-only | Rechecked against #171: the archived pilot report stays at schema v1 and #171 did not touch it. #118 and #172 do not reach it. |
