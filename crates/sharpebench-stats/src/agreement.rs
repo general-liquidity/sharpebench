@@ -169,9 +169,25 @@ pub struct GateAgreement {
     /// Agreement the two would reach by guessing at their own observed rates.
     /// The gap between this and `observed_agreement` is the whole signal.
     pub chance_agreement: f64,
-    /// Cohen's kappa on the verdicts. `None` only when both sides returned the
-    /// same single verdict for every item.
+    /// Cohen's kappa on the verdicts. `None` when either side returned the same
+    /// single verdict for every item; `kappa_unavailable` then says which.
+    ///
+    /// A constant rater makes kappa uninformative rather than zero: a gate that
+    /// refuses everything has no ordering of items to agree with, and the 0.0
+    /// the formula returns for it would read as "measured, at chance". It is
+    /// withheld instead, and the trivial-rater baselines below say what a rater
+    /// with no skill would have scored.
     pub kappa: Option<f64>,
+    /// Why `kappa` is absent. `None` exactly when `kappa` is present.
+    pub kappa_unavailable: Option<KappaUnavailable>,
+    /// Raw agreement with the human of a rater that always gives the human's
+    /// majority verdict (pass on a tie). `observed_agreement` at or below this
+    /// figure is no better than ignoring every item.
+    pub majority_rater_agreement: f64,
+    /// The best raw agreement with the human that a rater reading one supplied
+    /// field alone reaches. `None` when no field was supplied (see
+    /// [`gate_vs_human_with_fields`]).
+    pub best_single_field: Option<FieldBaseline>,
     /// Spearman rho between the gate's continuous severity and the human's, when
     /// the human supplied a graded severity rather than a bare verdict. `None`
     /// when no human severity was supplied or either series is constant.
@@ -182,12 +198,35 @@ pub struct GateAgreement {
     pub gate_strict: usize,
 }
 
+/// Why kappa was withheld: one rater's marginal is degenerate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KappaUnavailable {
+    /// The gate returned one verdict for every item.
+    ConstantGate,
+    /// The human returned one verdict for every item.
+    ConstantHuman,
+    /// Both returned one verdict for every item.
+    BothConstant,
+}
+
+/// The trivial rater that reads one supplied field and nothing else.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FieldBaseline {
+    /// The field's name, as supplied.
+    pub field: String,
+    /// True when the field agrees best with the human read the other way round
+    /// (field `true` taken as "fails").
+    pub inverted: bool,
+    /// Raw agreement of that rater with the human.
+    pub agreement: f64,
+}
+
 impl GateAgreement {
     /// Whether the gate reproduces the triage well enough to stand in for it.
     ///
     /// `min_kappa` is a caller-supplied operating requirement, not a discovered
-    /// constant. An undefined kappa (both sides returned the same single verdict
-    /// throughout) is not evidence of agreement and returns `false`.
+    /// constant. An unavailable kappa (either side returned the same single
+    /// verdict throughout) is not evidence of agreement and returns `false`.
     pub fn reproduces_triage(&self, min_kappa: f64) -> bool {
         self.kappa.is_some_and(|k| k >= min_kappa)
     }
@@ -214,8 +253,36 @@ pub fn gate_vs_human(
     human_verdict: &[bool],
     human_severity: Option<&[f64]>,
 ) -> Option<GateAgreement> {
+    gate_vs_human_with_fields(
+        gate_severity,
+        gate_threshold,
+        human_verdict,
+        human_severity,
+        &[],
+    )
+}
+
+/// [`gate_vs_human`], plus the single-field baseline over `fields`: each is a
+/// named yes/no feature of the same items, and the baseline is the field (in
+/// either polarity) whose verdict agrees most with the human. Ties go to the
+/// earlier field and to the uninverted reading, so the result does not depend
+/// on anything but the input order. A gate that does no better than one field
+/// it could have read directly has not shown it learned the triage.
+///
+/// `None` under the same conditions as [`gate_vs_human`], and when any field's
+/// length differs from the item count.
+pub fn gate_vs_human_with_fields(
+    gate_severity: &[f64],
+    gate_threshold: f64,
+    human_verdict: &[bool],
+    human_severity: Option<&[f64]>,
+    fields: &[(&str, &[bool])],
+) -> Option<GateAgreement> {
     let n = gate_severity.len();
     if n == 0 || n != human_verdict.len() {
+        return None;
+    }
+    if fields.iter().any(|(_, values)| values.len() != n) {
         return None;
     }
     if !gate_threshold.is_finite() || finite_observations(gate_severity).is_err() {
@@ -251,11 +318,50 @@ pub fn gate_vs_human(
         .filter(|(g, h)| !**g && **h)
         .count();
 
+    let constant = |v: &[bool]| v.iter().all(|x| *x) || v.iter().all(|x| !*x);
+    let kappa_unavailable = match (constant(&gate_verdict), constant(human_verdict)) {
+        (true, true) => Some(KappaUnavailable::BothConstant),
+        (true, false) => Some(KappaUnavailable::ConstantGate),
+        (false, true) => Some(KappaUnavailable::ConstantHuman),
+        (false, false) => None,
+    };
+    let kappa = match kappa_unavailable {
+        Some(_) => None,
+        None => cohens_kappa_binary(&gate_verdict, human_verdict),
+    };
+    let majority_rater_agreement = ph.max(1.0 - ph);
+    let agreement_of = |field: &[bool]| {
+        field
+            .iter()
+            .zip(human_verdict)
+            .filter(|(f, h)| f == h)
+            .count() as f64
+            / nf
+    };
+    // inv: `best` is the highest agreement over the fields and polarities
+    // visited so far, the earliest on a tie. Ends after 2 * fields.len() steps.
+    let mut best: Option<FieldBaseline> = None;
+    for (name, values) in fields {
+        let plain = agreement_of(values);
+        for (inverted, agreement) in [(false, plain), (true, 1.0 - plain)] {
+            if best.as_ref().is_none_or(|b| agreement > b.agreement) {
+                best = Some(FieldBaseline {
+                    field: (*name).to_string(),
+                    inverted,
+                    agreement,
+                });
+            }
+        }
+    }
+
     Some(GateAgreement {
         n,
         observed_agreement,
         chance_agreement,
-        kappa: cohens_kappa_binary(&gate_verdict, human_verdict),
+        kappa,
+        kappa_unavailable,
+        majority_rater_agreement,
+        best_single_field: best,
         rho: human_severity.and_then(|hs| spearman_rho(gate_severity, hs)),
         gate_lenient,
         gate_strict,
@@ -447,6 +553,68 @@ mod tests {
         assert_eq!(r.kappa, Some(1.0));
         assert!((r.rho.unwrap() - 1.0).abs() < 1e-12);
         assert!(r.reproduces_triage(0.8));
+    }
+
+    /// A gate that refuses everything used to report kappa 0.0, which reads as
+    /// a measured chance-level agreement. Its kappa is now withheld, with the
+    /// side named, and the trivial baselines are reported beside it.
+    #[test]
+    fn a_constant_rater_withholds_kappa_and_reports_the_baselines() {
+        let refuse_all = [0.0; 10];
+        let human = [
+            true, true, true, true, true, true, true, false, false, false,
+        ];
+        let r = gate_vs_human(&refuse_all, 0.5, &human, None).unwrap();
+        assert_eq!(r.kappa, None);
+        assert_eq!(r.kappa_unavailable, Some(KappaUnavailable::ConstantGate));
+        assert!((r.majority_rater_agreement - 0.7).abs() < 1e-12);
+        assert!(!r.reproduces_triage(-1.0));
+
+        let varied = [0.9, 0.1, 0.9, 0.1, 0.9, 0.1, 0.9, 0.1, 0.9, 0.1];
+        let r = gate_vs_human(&varied, 0.5, &[false; 10], None).unwrap();
+        assert_eq!(r.kappa, None);
+        assert_eq!(r.kappa_unavailable, Some(KappaUnavailable::ConstantHuman));
+        assert_eq!(r.majority_rater_agreement, 1.0);
+
+        let r = gate_vs_human(&refuse_all, 0.5, &[false; 10], None).unwrap();
+        assert_eq!(r.kappa_unavailable, Some(KappaUnavailable::BothConstant));
+    }
+
+    #[test]
+    fn a_varying_pair_keeps_kappa_and_names_no_cause() {
+        let gate = [0.9, 0.8, 0.2, 0.1];
+        let r = gate_vs_human(&gate, 0.5, &[true, true, false, false], None).unwrap();
+        assert_eq!(r.kappa, Some(1.0));
+        assert_eq!(r.kappa_unavailable, None);
+        assert_eq!(r.best_single_field, None, "no field supplied");
+    }
+
+    /// The single-field rater is reported in its better polarity, so a gate
+    /// whose agreement equals one field's is visibly no better than that field.
+    #[test]
+    fn the_single_field_baseline_takes_the_best_field_and_polarity() {
+        let gate = [0.9, 0.9, 0.1, 0.1, 0.9, 0.1];
+        let human = [true, true, false, false, true, true];
+        let noise: &[bool] = &[true, false, true, false, true, false];
+        let flipped: &[bool] = &[false, false, true, true, false, true];
+        let r = gate_vs_human_with_fields(
+            &gate,
+            0.5,
+            &human,
+            None,
+            &[("noise", noise), ("flipped", flipped)],
+        )
+        .unwrap();
+        let best = r.best_single_field.unwrap();
+        assert_eq!(best.field, "flipped");
+        assert!(best.inverted);
+        assert!((best.agreement - 5.0 / 6.0).abs() < 1e-12);
+        assert!((r.observed_agreement - best.agreement).abs() < 1e-12);
+
+        assert!(
+            gate_vs_human_with_fields(&gate, 0.5, &human, None, &[("short", &[true])]).is_none(),
+            "a field of the wrong length is refused"
+        );
     }
 
     #[test]

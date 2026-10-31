@@ -108,7 +108,13 @@ why they belong in a judge-free kernel:
 
 - `agreement`: Cohen's kappa with the standard chance correction, and
   Spearman rho with tie handling. `gate_vs_human` rolls the pair up and
-  `reproduces_triage(min_kappa)` turns it into a pass or fail.
+  `reproduces_triage(min_kappa)` turns it into a pass or fail. Kappa is
+  withheld, with the side named in `kappa_unavailable`, when either rater gave
+  one verdict for every item, because a gate that refuses everything would
+  otherwise score a kappa of 0 that reads as a measurement. Beside kappa the
+  rollup reports the raw agreement of a rater that always gives the human's
+  majority verdict, and `gate_vs_human_with_fields` adds the best agreement a
+  rater reading one supplied field alone reaches.
 - `dissent`: Kendall tau-b, tie-corrected in the denominator, splitting a
   disagreement into whether the **ranking** differs or the **levels** differ.
   A single agreement number collapses those two, which are different defects
