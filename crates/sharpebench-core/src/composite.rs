@@ -35,7 +35,7 @@ use crate::roles::{attribute_behavior_roles, RoleContribution};
 use crate::rolling::rolling_sharpe;
 use crate::selection::{selection_robustness, SelectionRobustness};
 use crate::significance::bootstrap_pvalue;
-use crate::stats::{mean, std_dev};
+use crate::stats::{mean, norm_ppf, std_dev};
 
 /// One seed×window run of an agent: its per-period returns plus the decision
 /// trace and (optionally) per-decision confidences/outcomes.
@@ -538,6 +538,21 @@ pub struct ScoreConfig {
     /// public API for callers with one execution per window.
     #[serde(default = "default_execution_seeds_per_window")]
     pub execution_seeds_per_window: usize,
+    /// Agent ids the host runs as **controls**: tracks it entered itself to show
+    /// what no skill looks like, such as the luck floor. A control is scored,
+    /// ranked and reported like any entrant, against the bar the entrants
+    /// measure, but it casts no vote on that bar: the measured dispersion is the
+    /// entrants' own. Every measured board names the controls it left out (see
+    /// [`DispersionLeverage::abstained`]). Empty, the default, means every
+    /// agent is an entrant, and a configuration that declares none serializes
+    /// exactly as it did before the field existed.
+    ///
+    /// This is a scoring change introduced after release 0.28.0 (owner decision
+    /// of 2026-10-31): the host's luck-floor cluster had been most of the
+    /// sample a robust bound on one vote was read against, which is why such a
+    /// bound used to bind on honest reference agents.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dispersion_controls: Vec<String>,
 }
 
 /// Default rolling-Sharpe window length (21 periods ≈ one trading month).
@@ -757,11 +772,14 @@ pub enum TrialsSrStdSource {
 /// cluster shows a largest single-vote leverage of about 1.2 however far out
 /// the pair sits.
 ///
-/// No bound is applied to it. A cap on the vote was measured and rejected: on
-/// the paper's own measured panels one honest reference agent routinely carries
-/// the dispersion, and a cap strict enough to contain one hostile entrant would
-/// have lowered those panels' bars by up to 74.5%. The row is disclosed instead,
-/// so a reader can see when one vote sets the bar.
+/// A cap on the vote was measured and rejected in 2026-09: with the host's luck
+/// floor in the sample, one honest reference agent carried the dispersion on the
+/// paper's measured panels, and a cap strict enough to contain one hostile
+/// entrant would have lowered those bars by up to 74.5%. Since the owner's
+/// decision of 2026-10-31 only entrants vote ([`ScoreConfig::dispersion_controls`])
+/// and an influence bound clips each admitted vote to an honest field's
+/// 99th-percentile robust distance; this record names who abstained, what was
+/// clipped and the dispersion before the clip.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DispersionLeverage {
     /// The agent whose vote it is: for a collapsed cluster, the member whose
@@ -780,6 +798,49 @@ pub struct DispersionLeverage {
     /// the other votes are all equal, where the ratio has no finite value.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub leverage: Option<f64>,
+    /// Agents whose track cast no vote on this board's measured dispersion, by
+    /// field order, each with the reason. Empty when every agent voted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub abstained: Vec<DispersionAbstention>,
+    /// Votes the influence bound clipped, with the value each cast and the
+    /// value it entered the dispersion at. Empty when the bound did not bind.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub clipped: Vec<ClippedVote>,
+    /// The measured dispersion before the influence bound, per period, before
+    /// the floor. Present only when the bound lowered it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dispersion_before_clip: Option<f64>,
+}
+
+/// Why an agent cast no vote on a measured dispersion.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AbstentionReason {
+    /// Declared a host control in [`ScoreConfig::dispersion_controls`].
+    Control,
+    /// Its pooled track has no Sharpe ratio, so it has no vote to cast.
+    NoSharpeRatio,
+    /// Its vote sat beyond [`DISPERSION_VOTE_FENCE_Z`] robust scales; it is
+    /// scored against the dispersion measured with its own vote in it.
+    Fenced,
+}
+
+/// One agent that cast no vote on a measured dispersion.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DispersionAbstention {
+    pub agent_id: String,
+    pub reason: AbstentionReason,
+}
+
+/// One vote the influence bound clipped. Every member of a clipped clone
+/// cluster is listed under the Sharpe the cluster voted.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ClippedVote {
+    pub agent_id: String,
+    /// The vote as cast, a per-period Sharpe ratio.
+    pub vote_sharpe: f64,
+    /// The value it entered the dispersion at.
+    pub clipped_to: f64,
 }
 
 impl Default for ScoreConfig {
@@ -808,6 +869,7 @@ impl Default for ScoreConfig {
             dedup_clones_for_measured_sr_std: default_dedup_clones_for_measured_sr_std(),
             min_measured_trials_sr_std: default_min_measured_trials_sr_std(),
             execution_seeds_per_window: default_execution_seeds_per_window(),
+            dispersion_controls: Vec::new(),
         }
     }
 }
@@ -1959,15 +2021,26 @@ pub(crate) fn restrict_to_shared_positions(subs: &[AgentSubmission]) -> Vec<Agen
 fn measured_trials_sr_std(
     tracks: &[Vec<Vec<f64>>],
     ids: &[&str],
+    controls: &[bool],
     min_field: usize,
     dedup_clones: bool,
     scale_floor: f64,
 ) -> MeasuredDispersion {
+    // A control is left out before anything else is read, so it is in neither
+    // the clone partition, the fence's centre and scale, nor the field count.
+    let mut abstained: Vec<(usize, AbstentionReason)> = Vec::new();
     let qualifying: Vec<(usize, Vec<f64>, f64)> = tracks
         .iter()
         .enumerate()
         .filter_map(|(index, t)| {
-            let sharpe = observed_sharpe_ratio_of_windows(&window_slices(t)).ok()?;
+            if controls[index] {
+                abstained.push((index, AbstentionReason::Control));
+                return None;
+            }
+            let Ok(sharpe) = observed_sharpe_ratio_of_windows(&window_slices(t)) else {
+                abstained.push((index, AbstentionReason::NoSharpeRatio));
+                return None;
+            };
             Some((index, t.concat(), sharpe))
         })
         .collect();
@@ -2033,14 +2106,84 @@ fn measured_trials_sr_std(
     // entrants the fence removes so exclusion can never be a discount.
     let unfenced = measure(&votes);
     let fenced = fence_distant_votes(&mut votes, scale_floor);
-    let admitted = measure(&votes);
+    abstained.extend(fenced.iter().map(|&i| (i, AbstentionReason::Fenced)));
+    abstained.sort_unstable_by_key(|&(i, _)| i);
+    // The admitted votes as cast, and the dispersion they measure before the
+    // influence bound: what a clipped vote is scored against.
+    let unclipped = measure(&votes);
+    let mut bounded = votes.clone();
+    // The bound reads the independence weights, so it is one of the clone
+    // defences and the switch that turns them off turns it off: that
+    // configuration exists to reproduce the unbounded exposure.
+    let mut clips = if dedup_clones {
+        clip_distant_votes(&mut bounded, &shared, scale_floor)
+    } else {
+        Vec::new()
+    };
+    let bounded_dispersion = measure(&bounded);
+    // The bound is a cap: it applies only where it lowers the dispersion, so
+    // a field it would not lower keeps its votes and its number bit for bit.
+    let lowered = matches!((bounded_dispersion, unclipped), (Some(b), Some(u)) if b < u);
+    if lowered {
+        votes = bounded;
+    } else {
+        clips.clear();
+    }
+    let admitted = if lowered {
+        bounded_dispersion
+    } else {
+        unclipped
+    };
+    let clipped: Vec<ClipRecord> = clips
+        .iter()
+        .map(|&(position, cast)| ClipRecord {
+            members: votes[position].members.clone(),
+            cast,
+            clipped_to: votes[position].sharpe,
+        })
+        .collect();
+    let most_influential_vote = admitted.and_then(|sr_std| {
+        most_influential_vote(&votes, &shared, sr_std, ids).map(|mut lev| {
+            lev.abstained = abstained
+                .iter()
+                .map(|&(i, reason)| DispersionAbstention {
+                    agent_id: ids[i].to_string(),
+                    reason,
+                })
+                .collect();
+            lev.clipped = clipped
+                .iter()
+                .flat_map(|c| {
+                    c.members.iter().map(|&i| ClippedVote {
+                        agent_id: ids[i].to_string(),
+                        vote_sharpe: c.cast,
+                        clipped_to: c.clipped_to,
+                    })
+                })
+                .collect();
+            lev.dispersion_before_clip = if lowered { unclipped } else { None };
+            lev
+        })
+    });
     MeasuredDispersion {
         admitted,
         unfenced,
+        unclipped,
         fenced,
-        most_influential_vote: admitted
-            .and_then(|sr_std| most_influential_vote(&votes, &shared, sr_std, ids)),
+        clipped: clipped
+            .iter()
+            .flat_map(|c| c.members.iter().copied())
+            .collect(),
+        most_influential_vote,
     }
+}
+
+/// One vote the influence bound moved: the field indices it speaks for, the
+/// value it cast and the value it was clipped to.
+struct ClipRecord {
+    members: Vec<usize>,
+    cast: f64,
+    clipped_to: f64,
 }
 
 /// A field-measured dispersion and the disclosure that travels with it.
@@ -2054,11 +2197,17 @@ struct MeasuredDispersion {
     unfenced: Option<f64>,
     /// Field indices of the entrants the fence excluded, ascending.
     fenced: Vec<usize>,
+    /// Dispersion of the admitted votes as cast, before the influence bound:
+    /// the bar a clipped vote keeps, so being clipped is never a discount.
+    unclipped: Option<f64>,
+    /// Field indices of the entrants whose vote the influence bound clipped.
+    clipped: Vec<usize>,
     most_influential_vote: Option<DispersionLeverage>,
 }
 
 /// One entry in the dispersion sample: a field index that names it, every
 /// field index it speaks for after the clone collapse, and the Sharpe it votes.
+#[derive(Clone)]
 struct Vote {
     /// The field index the disclosure names this vote by.
     index: usize,
@@ -2201,16 +2350,7 @@ fn weighted_dispersion(
     if kept.len() < 2 || shared.rows.is_empty() {
         return None;
     }
-    // inv: each overlap is 1 plus the vote's shares with the other kept votes,
-    // each in [0, 1], so it lies in [1, kept.len()] and each weight in
-    // [1 / kept.len(), 1].
-    let weights: Vec<f64> = kept
-        .iter()
-        .map(|a| {
-            let overlap: f64 = kept.iter().map(|b| shared.rows[a.stream][b.stream]).sum();
-            1.0 / overlap
-        })
-        .collect();
+    let weights = independence_weights(&kept, shared);
     // Equal weights are the plain variance exactly; leaving them to the plain
     // branch keeps such a field's dispersion bit for bit, rounding included.
     if weights.iter().all(|w| w.to_bits() == weights[0].to_bits()) {
@@ -2236,6 +2376,150 @@ fn weighted_dispersion(
         return None;
     }
     Some((spread / denominator).sqrt())
+}
+
+/// Each vote's weight in a dispersion sample: `1 / sum_j s_ij` over the votes
+/// given, itself included ([`field_dispersion`]). Every weight is 1 when the
+/// field carries no shared-variance matrix (clone defences off).
+fn independence_weights(votes: &[&Vote], shared: &SharedVariance) -> Vec<f64> {
+    if shared.rows.is_empty() {
+        return vec![1.0; votes.len()];
+    }
+    // inv: each overlap is 1 plus the vote's shares with the other votes, each
+    // in [0, 1], so it lies in [1, votes.len()] and each weight in
+    // [1 / votes.len(), 1].
+    votes
+        .iter()
+        .map(|a| {
+            let overlap: f64 = votes.iter().map(|b| shared.rows[a.stream][b.stream]).sum();
+            1.0 / overlap
+        })
+        .collect()
+}
+
+/// Weighted median of `(value, weight)` pairs with positive weights: the
+/// smallest value whose cumulative weight passes half the total, or the
+/// midpoint of two values where the cumulative weight lands exactly on half.
+/// With equal weights it is the ordinary sample median, midpoint included.
+/// 0.0 for an empty slice.
+fn weighted_median(pairs: &mut [(f64, f64)]) -> f64 {
+    pairs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    let total: f64 = pairs.iter().map(|p| p.1).sum();
+    let half = total / 2.0;
+    let mut cumulative = 0.0;
+    // inv: cumulative is the weight of pairs[..k], which is below half.
+    for k in 0..pairs.len() {
+        cumulative += pairs[k].1;
+        if cumulative > half {
+            return pairs[k].0;
+        }
+        if cumulative == half {
+            return pairs
+                .get(k + 1)
+                .map_or(pairs[k].0, |next| 0.5 * (pairs[k].0 + next.0));
+        }
+    }
+    pairs.last().map_or(0.0, |p| p.0)
+}
+
+/// The influence bound's reach, in robust scales, for a sample of `votes`:
+/// the 99th percentile of the largest robust distance in an honest field.
+///
+/// An honest field here is `votes` independent normal Sharpes, the trial
+/// distribution the expected-maximum deflation formula itself assumes, with
+/// distance measured from the sample median in units of the pairwise-median
+/// scale [`pairwise_median_scale`] uses. Each entry is the larger of two
+/// independent seeds of one million draws, rounded up to two decimals, so the
+/// bound clips at most 1% of honest normal fields at every size. Under fat
+/// tails (Student `t`, five degrees of freedom) the 99th percentile is higher,
+/// 5.50 at seven votes, so such a field is clipped more often; see the
+/// deflation chapter of the book. The table starts at five votes, the
+/// default measurement minimum; a configuration that measures smaller fields
+/// takes the five-vote reach, the widest.
+const INFLUENCE_BOUND_Z: [f64; 26] = [
+    5.28, 4.42, 4.12, 4.18, 4.03, 3.95, 3.96, 3.90, 3.88, 3.87, 3.85, 3.83, 3.83, 3.83, 3.82, 3.82,
+    3.81, 3.82, 3.81, 3.82, 3.81, 3.81, 3.82, 3.82, 3.82, 3.82,
+];
+
+/// Share of honest normal fields the influence bound is calibrated to clip.
+const INFLUENCE_BOUND_CLIP_RATE: f64 = 0.01;
+
+/// [`INFLUENCE_BOUND_Z`] for any field size. Past thirty votes the scale is
+/// estimated well enough that the honest 99th percentile tracks the largest
+/// of `votes` normal draws, `norm_ppf(1 - 0.01 / votes)`, plus an allowance
+/// for the scale's own error: 0.4, which reproduces the simulated percentile
+/// to within 0.02 at thirty-one votes and exceeds it at 40, 60, 100 and 200.
+fn influence_bound_z(votes: usize) -> f64 {
+    match votes {
+        0..=4 => INFLUENCE_BOUND_Z[0],
+        5..=30 => INFLUENCE_BOUND_Z[votes - 5],
+        _ => norm_ppf(1.0 - INFLUENCE_BOUND_CLIP_RATE / votes as f64) + 0.4,
+    }
+}
+
+/// The influence bound on the measured dispersion: clip each admitted vote to
+/// `centre +/- influence_bound_z(n) * scale`, where the centre is the
+/// independence-weighted median of the votes and the scale the weighted
+/// median of their pairwise distances (pair weight `w_i * w_j`), scaled to a
+/// standard deviation and floored at `scale_floor`.
+///
+/// **Why a clip and not a threshold to stay under.** A vote anywhere past the
+/// reach enters at the reach, so the most one vote can add to the dispersion
+/// is what an honest vote at the field's own 99th percentile adds, whatever
+/// it cast. There is no position that keeps more influence than that. Several
+/// votes are each bounded the same way until they are enough of the field to
+/// move the median of the pairwise distances, about 29% of the pairs.
+///
+/// **What it costs.** The reach is calibrated so the bound binds on 1% of
+/// honest normal fields, and clipping an honest vote lowers the bar of every
+/// other entrant. On the committed evidence fields, with the host's controls
+/// out of the sample, it binds on none. The weighted centre and scale give
+/// near-copies one vote's weight between them, so crowding the middle with
+/// them does not narrow the reach.
+///
+/// `votes` is sorted ascending and stays sorted, since clipping is monotone.
+/// Returns the positions it moved and the value each cast.
+fn clip_distant_votes(
+    votes: &mut [Vote],
+    shared: &SharedVariance,
+    scale_floor: f64,
+) -> Vec<(usize, f64)> {
+    if votes.len() < 2 {
+        return Vec::new();
+    }
+    let kept: Vec<&Vote> = votes.iter().collect();
+    let weights = independence_weights(&kept, shared);
+    let mut centred: Vec<(f64, f64)> = kept
+        .iter()
+        .map(|v| v.sharpe)
+        .zip(weights.iter().copied())
+        .collect();
+    let centre = weighted_median(&mut centred);
+    let mut gaps: Vec<(f64, f64)> = Vec::with_capacity(votes.len() * (votes.len() - 1) / 2);
+    for i in 0..votes.len() {
+        for j in (i + 1)..votes.len() {
+            gaps.push((
+                (votes[j].sharpe - votes[i].sharpe).abs(),
+                weights[i] * weights[j],
+            ));
+        }
+    }
+    let scale = (PAIRWISE_MEDIAN_TO_SIGMA * weighted_median(&mut gaps)).max(scale_floor);
+    // A field with no positive scale states no distance and clips nobody, as
+    // the fence fences nobody there.
+    if !scale.is_finite() || scale <= 0.0 {
+        return Vec::new();
+    }
+    let reach = influence_bound_z(votes.len()) * scale;
+    let mut moved = Vec::new();
+    for (position, vote) in votes.iter_mut().enumerate() {
+        let bounded = vote.sharpe.clamp(centre - reach, centre + reach);
+        if bounded != vote.sharpe {
+            moved.push((position, vote.sharpe));
+            vote.sharpe = bounded;
+        }
+    }
+    moved
 }
 
 /// How far from its own field's median a vote may sit, in robust scales, and
@@ -2421,6 +2705,9 @@ fn most_influential_vote(
         votes: votes.len(),
         measured_dispersion_without_it: rest,
         leverage,
+        abstained: Vec::new(),
+        clipped: Vec::new(),
+        dispersion_before_clip: None,
     })
 }
 
@@ -2572,9 +2859,14 @@ pub fn rank_declared(
     // annualized and needs converting. A small field scores exactly as
     // `score_agent` would, so the configured path stays byte-identical.
     let ids: Vec<&str> = field.iter().map(|s| s.agent_id.as_str()).collect();
+    let controls: Vec<bool> = ids
+        .iter()
+        .map(|id| cfg.dispersion_controls.iter().any(|c| c == id))
+        .collect();
     let measured = measured_trials_sr_std(
         &tracks,
         &ids,
+        &controls,
         cfg.min_field_for_measured_sr_std,
         cfg.dedup_clones_for_measured_sr_std,
         per_period_from_annualized(cfg.min_measured_trials_sr_std, cfg.periods_per_year),
@@ -2591,6 +2883,9 @@ pub fn rank_declared(
     // deflations are the same value computed from the same sample.
     let defl_fenced = deflation_of(measured.unfenced);
     let fenced = measured.fenced;
+    // A clipped entrant keeps the bar its vote measured as cast.
+    let defl_clipped = deflation_of(measured.unclipped);
+    let clipped = measured.clipped;
     let most_influential_vote = measured.most_influential_vote;
 
     // The relative verdict's benchmark is a member of this same (restricted)
@@ -2619,6 +2914,8 @@ pub fn rank_declared(
                 });
             let defl = if fenced.contains(&idx) {
                 defl_fenced
+            } else if clipped.contains(&idx) {
+                defl_clipped
             } else {
                 defl_admitted
             };
@@ -2744,7 +3041,7 @@ pub fn rank_declared(
     // otherwise print a leave-one-out figure that does not belong to the number
     // beside it.
     for (idx, cs) in scores.iter_mut().enumerate() {
-        if !fenced.contains(&idx) {
+        if !fenced.contains(&idx) && !clipped.contains(&idx) {
             cs.trials_sr_std_most_influential_vote = most_influential_vote.clone();
         }
     }

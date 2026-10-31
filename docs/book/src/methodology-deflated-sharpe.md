@@ -186,7 +186,53 @@ never moved is kept off the board by the refusal above, which runs before any vo
 is cast, not by this fence. The rule bounds an individual distant vote relative to
 the field's own spread, not against an absolute ceiling. Near-boundary votes retain influence;
 coalitions can change the median and scale. Small fields still use their prior.
-No admitted vote is winsorized or numerically replaced.
+
+### Who votes, and how far one vote can reach
+
+Only entrants vote (owner decision of 2026-10-31). A host lists its own control
+tracks, such as the luck floor, in `ScoreConfig::dispersion_controls`. A control
+is scored, ranked and reported against the bar the entrants measure, but it is
+left out of the dispersion sample before anything else is read: the clone
+partition, the fence's centre and scale, and the field count all see entrants
+only. Every measured row names the agents that cast no vote in
+`trials_sr_std_most_influential_vote.abstained`, each with its reason
+(`control`, `no_sharpe_ratio` or `fenced`). The committed producers declare
+their five luck-floor agents as controls. The 1000-agent luck-floor producer
+does not, because there the luck floor is the field under study.
+
+The admitted votes then pass an influence bound. Each vote is clipped to
+`centre +/- z_n * scale`, where the centre is the independence-weighted median
+of the votes, the scale the weighted median of their pairwise distances (pair
+weight `w_i * w_j`) times `PAIRWISE_MEDIAN_TO_SIGMA`, floored at the dispersion
+floor, and `z_n` the 99th percentile of the largest such robust distance in an
+honest field of `n` independent normal votes: 5.28 at five votes, 4.12 at seven,
+3.95 at ten and about 3.82 from fifteen to thirty, each the larger of two
+simulations of one million fields, and `norm_ppf(1 - 0.01 / n) + 0.4` past thirty.
+So the bound binds on 1% of honest normal fields at every size, and more often
+under fat tails (5.50 is the 99th percentile at seven votes under Student `t`
+with five degrees of freedom). A vote anywhere past the reach enters at the
+reach, so there is no position that keeps more influence than an honest vote at
+the field's own 99th percentile. The bound is a cap: it applies only when it
+lowers the dispersion. A clipped entrant, like a fenced one, keeps the
+dispersion its vote measured as cast, so being clipped is never a discount, and
+every measured row records the clipped votes (`clipped`) and the dispersion
+before the clip (`dispersion_before_clip`). Turning the clone defences off
+(`dedup_clones_for_measured_sr_std: false`) turns the bound off with them.
+
+On the grader search's fixed seed, one vote at 0.5 to 0.995 of the fence beside
+six honest entrants used to take their bar from 0.21 to between 0.77 and 1.48
+per period depending on where it sat. With the bound every position measures
+0.61. The six honest entrants are still demoted on that fixture. Keeping all six
+eligible would need a reach of 1.38 robust scales, which clips 69% of honest
+seven-vote fields; keeping the strongest would need 3.17, which clips 3.2%. A
+single vote at an honest field's own 99th percentile is not distinguishable from
+an honest outlier by its value, so the bound stops at the influence an honest
+outlier already has.
+
+On every committed producer the bound binds on no field: with the luck floor out
+of the sample, every committed field measures the same numbers with and without
+the bound. What moves the committed numbers is dropping the controls, recorded in
+the change log of this release.
 
 ### Which vote sets the measured bar
 
@@ -222,13 +268,13 @@ Three limits on reading it:
 - **Upward only.** The disclosure names the vote that raises the dispersion.
   Votes that lower it, by crowding the middle, are not reported.
 
-It is a disclosure and nothing more. It clips no vote, refuses no agent and
-moves no bar by itself. The separate membership fence controls which votes enter
-the admitted sample. On the three measured reference panels no vote is fenced,
-so the measured dispersion remains bit-identical; a test on those panels
-(`the_measured_panels_disclose_the_vote_that_sets_their_bar` in
-`sharpebench-harness/tests/evidence_fields_no_clone_merges.rs`) pins that. On
-the current engine those panels name the same agent:
+The leverage itself is a disclosure: it clips no vote, refuses no agent and
+moves no bar. With the luck floor voting, the three reference panels that used
+to measure named the same agent, which is why a bound on one vote could not ship
+while the luck floor was in the sample. With it declared as controls, two
+entrant votes are left and these panels take the configured prior; the harness
+test `the_luck_floor_set_these_panels_bars_and_now_casts_no_vote` in
+`sharpebench-harness/tests/evidence_fields_no_clone_merges.rs` pins both facts:
 
 | Panel | Votes | Vote that sets the bar | Leverage |
 |---|---|---|---|

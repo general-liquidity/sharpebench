@@ -134,24 +134,36 @@ fn an_hourly_crypto_shaped_field_names_the_honest_vote_that_sets_the_bar() {
         "the fixture carries the panel's leverage: {expected_leverage}"
     );
 
+    // With the luck floor undeclared it votes, its tight cluster sets the
+    // influence bound's scale, and buy-and-hold is clipped: the shape that kept
+    // a bound from shipping in 2026-09 and why the producers now declare the
+    // luck floor as controls. The clipped row keeps the bar its vote measured
+    // as cast and carries no disclosure, as a fenced row does; every other row
+    // names what was clipped and the dispersion before the clip.
     for row in &board {
         let vote = &row[KEY];
+        if row["agent_id"] == "buy-and-hold" {
+            assert!(
+                vote.is_null(),
+                "a clipped row carries no disclosure: {vote}"
+            );
+            assert_eq!(row["trials_sr_std"].as_f64(), Some(with));
+            continue;
+        }
         assert!(
             vote.is_object(),
             "{}: no disclosure on a measured row",
             row["agent_id"]
         );
-        assert_eq!(vote["agent_id"], "buy-and-hold", "{row}");
-        assert_eq!(vote["agents_in_vote"], 1);
         assert_eq!(vote["votes"], 7);
-        assert_eq!(vote["vote_sharpe"].as_f64(), Some(sharpes[6]));
-        assert_eq!(
-            vote["measured_dispersion_without_it"].as_f64(),
-            Some(without_bh)
-        );
-        assert_eq!(vote["leverage"].as_f64(), Some(expected_leverage));
+        assert_eq!(vote["clipped"][0]["agent_id"], "buy-and-hold", "{row}");
+        assert_eq!(vote["clipped"][0]["vote_sharpe"].as_f64(), Some(sharpes[6]));
+        assert_eq!(vote["dispersion_before_clip"].as_f64(), Some(with));
+        assert!(vote.get("abstained").is_none(), "everybody voted: {vote}");
+        assert!(row["trials_sr_std"].as_f64().unwrap() < with);
         // One disclosure for the whole field: every row carries the same one.
-        assert_eq!(vote, &board[0][KEY]);
+        let first = board.iter().find(|r| r[KEY].is_object()).unwrap();
+        assert_eq!(vote, &first[KEY]);
     }
 }
 
@@ -168,37 +180,33 @@ fn the_disclosure_moves_no_bar() {
     let measured = std_dev(&sharpes);
     let floor = cfg.min_measured_trials_sr_std / cfg.periods_per_year.sqrt();
     assert!(measured > floor, "the fixture measures above the floor");
-    for row in &board {
-        assert_eq!(
-            row.trials_sr_std.to_bits(),
-            measured.to_bits(),
-            "{}: nothing clipped",
-            row.agent_id
-        );
-    }
-    for (row, sub) in board.iter().map(|row| {
-        (
-            row,
-            field.iter().find(|s| s.agent_id == row.agent_id).unwrap(),
-        )
-    }) {
-        let pooled: Vec<f64> = sub.runs.iter().flat_map(|r| r.returns.clone()).collect();
-        let dsr =
-            deflated_sharpe_ratio_against_null(&pooled, row.effective_n_trials, 0.0, measured)
-                .unwrap();
-        let bar = expected_max_sharpe(measured, row.effective_n_trials).unwrap();
-        assert_eq!(
-            row.deflated_sharpe.to_bits(),
-            dsr.to_bits(),
-            "{}",
-            row.agent_id
-        );
-        assert_eq!(
-            row.deflation_bar_per_period.to_bits(),
-            bar.to_bits(),
-            "{}",
-            row.agent_id
-        );
+    // The clipped vote is scored against the dispersion of every vote as cast,
+    // bit for bit, so the bound is never a discount to the vote it clips.
+    let clipped = board.iter().find(|r| r.agent_id == "buy-and-hold").unwrap();
+    assert_eq!(clipped.trials_sr_std.to_bits(), measured.to_bits());
+    let sub = field.iter().find(|s| s.agent_id == "buy-and-hold").unwrap();
+    let pooled: Vec<f64> = sub.runs.iter().flat_map(|r| r.returns.clone()).collect();
+    let dsr =
+        deflated_sharpe_ratio_against_null(&pooled, clipped.effective_n_trials, 0.0, measured)
+            .unwrap();
+    let bar = expected_max_sharpe(measured, clipped.effective_n_trials).unwrap();
+    assert_eq!(clipped.deflated_sharpe.to_bits(), dsr.to_bits());
+    assert_eq!(clipped.deflation_bar_per_period.to_bits(), bar.to_bits());
+}
+
+/// Declared as controls, the five luck-floor agents cast no vote. Two votes
+/// are left, below the five-vote minimum, so the panel takes the configured
+/// prior on every row, controls included.
+#[test]
+fn declared_controls_cast_no_vote() {
+    let field = hourly_crypto_field();
+    let cfg = ScoreConfig {
+        dispersion_controls: (0..5).map(|k| format!("luck-floor-{k}")).collect(),
+        ..hourly_cfg()
+    };
+    for row in board_json(&field, &cfg) {
+        assert_eq!(row["trials_sr_std_source"], "configured", "{row}");
+        assert!(row.get(KEY).is_none(), "{}", row[KEY]);
     }
 }
 
