@@ -107,10 +107,10 @@ fn trajectory_paths(args: &[String]) -> Result<Vec<String>, String> {
         if arg == "--data" {
             rest.next()
                 .ok_or_else(|| "--data requires a CSV path".to_string())?;
-        } else if arg == "--short-borrow-bps" {
+        } else if arg == "--short-borrow-bps" || arg == "--fill-delay-bars" {
             // The value is validated by `cost_model_from_args`.
             rest.next();
-        } else if arg == "--declare-identical-replicates" {
+        } else if arg == "--declare-identical-replicates" || arg == "--masked" {
             continue;
         } else if arg.starts_with("--") {
             return Err(format!("unknown option `{arg}`"));
