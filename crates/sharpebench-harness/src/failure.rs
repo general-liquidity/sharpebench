@@ -47,6 +47,13 @@ pub enum FailureKind {
     /// agent's own fault: **not** retried (the same agent against the same budget
     /// reproduces it) and counted as a genuine failure for pass^k.
     ResourceLimitExceeded,
+    /// The agent overran a published time budget: it was alive, had been
+    /// handed the observation, and did not answer within the per-decision
+    /// budget. The time-budget counterpart of [`FailureKind::ResourceLimitExceeded`]
+    /// and the agent's own fault for the same reason: **not** retried and
+    /// counted as a genuine failure for pass^k. A timeout the harness has no
+    /// evidence to charge to the agent stays [`FailureKind::TransportError`].
+    DecisionBudgetExceeded,
 }
 
 impl FailureKind {

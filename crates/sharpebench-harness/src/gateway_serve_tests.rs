@@ -846,6 +846,45 @@ fn host_serving_time_does_not_count_against_the_entrant() {
     assert_eq!(decision.orders.len(), 1);
 }
 
+/// An entrant that read its observation and is still running when its own
+/// budget runs out has overrun that budget: the run is charged to it, not
+/// retried as a transport fault, and later decisions repeat the verdict.
+#[test]
+fn a_live_entrant_that_overruns_its_budget_is_charged_with_the_overrun() {
+    let routes = table();
+    let permits = CallPermits::new(4);
+    let provider = ScriptedProvider::answering("0.25");
+    let mut gateway = ModelGateway::new(
+        &routes,
+        &permits,
+        provider,
+        budget(1_000_000, 10),
+        GatewayLimits::default(),
+    );
+    let pipes = in_thread(|input, _output| {
+        let mut line = String::new();
+        input.read_line(&mut line).expect("the observation arrives");
+        std::thread::sleep(Duration::from_millis(1_500));
+    });
+    let mut entrant =
+        GatewayEntrant::new(pipes, &mut gateway).with_decide_timeout(Duration::from_millis(200));
+    let decision = entrant.decide(&observation());
+    assert!(decision.orders.is_empty());
+    assert_eq!(
+        entrant.health().last_error,
+        Some(DecideError::BudgetOverrun)
+    );
+    entrant.decide(&observation());
+    let health = entrant.health();
+    assert_eq!(health.last_error, Some(DecideError::BudgetOverrun));
+    assert_eq!(health.budget_overruns, 2);
+    assert_eq!(health.transport_faults, 0);
+    assert_eq!(
+        crate::transport_failure(health),
+        Some(crate::FailureKind::DecisionBudgetExceeded)
+    );
+}
+
 /// No process the host starts for an entrant carries a route credential: not
 /// in its program, its arguments or its declared environment, and a launcher
 /// that inherits the host environment inherits it without them.

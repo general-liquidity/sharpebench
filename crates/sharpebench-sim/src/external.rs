@@ -239,7 +239,9 @@ pub struct ExternalAgent {
     input: SyncSender<String>,
     written: Receiver<std::io::Result<()>>,
     lines: Receiver<std::io::Result<Wire>>,
-    timed_out: bool,
+    /// The verdict of the decision that stalled the pipe, repeated for every
+    /// later decision: a late line must never answer a later observation.
+    stalled: Option<DecideError>,
     timeout: Duration,
     breaker: CircuitBreaker,
     health: TransportHealth,
@@ -485,7 +487,7 @@ impl ExternalAgent {
             input,
             written,
             lines,
-            timed_out: false,
+            stalled: None,
             timeout: STDIO_DECIDE_TIMEOUT,
             breaker: CircuitBreaker::new(DEFAULT_BREAKER_THRESHOLD),
             health: TransportHealth::default(),
@@ -545,16 +547,36 @@ impl ExternalAgent {
         Err(exited_fault(status))
     }
 
+    /// The budget ran out after the observation was delivered and before an
+    /// answer arrived. A child that is still running had the observation and
+    /// the time, so the stall is its own ([`DecideError::BudgetOverrun`]). A
+    /// child that has exited is reported as the exit, and a child whose state
+    /// cannot be read is a plain [`DecideError::Timeout`]: without evidence the
+    /// entrant was alive, the overrun is not charged to it.
+    fn read_budget_spent(
+        &mut self,
+        obs: &MarketObservation,
+        deadline: Instant,
+    ) -> Result<Decision, DecideError> {
+        match self.child.try_wait() {
+            Ok(None) => Err(DecideError::BudgetOverrun),
+            Ok(Some(status)) => self.drain_after_exit(status, obs, deadline),
+            Err(_) => Err(DecideError::Timeout),
+        }
+    }
+
     /// One decision attempt over the stdio pipe, returning a typed [`DecideError`]
     /// rather than degrading to a hold. A closed stdout (EOF) or a broken pipe is a
     /// transport fault; unparseable output is the agent's protocol fault; a
-    /// subprocess that stays silent past [`STDIO_DECIDE_TIMEOUT`] is a timeout —
+    /// subprocess that accepted the observation and stays silent past
+    /// [`STDIO_DECIDE_TIMEOUT`] while still running has overrun its budget, and
+    /// one whose stdin never took the observation is a timeout —
     /// but a subprocess that *exited* with no answer pending is reported as the
     /// exit it is, immediately, instead of spending the full budget to call a
     /// startup crash a timeout.
     fn decide_once(&mut self, obs: &MarketObservation) -> Result<Decision, DecideError> {
-        if self.timed_out {
-            return Err(DecideError::Timeout);
+        if let Some(stall) = self.stalled {
+            return Err(stall);
         }
         let deadline = Instant::now()
             .checked_add(self.timeout)
@@ -575,9 +597,11 @@ impl ExternalAgent {
             Err(RecvTimeoutError::Timeout) => return Err(DecideError::Timeout),
             Err(RecvTimeoutError::Disconnected) => return Err(DecideError::Transport),
         }
+        // The observation is delivered: from here on the budget is the
+        // entrant's to spend.
         loop {
             if Instant::now() >= deadline {
-                return Err(DecideError::Timeout);
+                return self.read_budget_spent(obs, deadline);
             }
             let slice = DEAD_CHILD_POLL.min(deadline.saturating_duration_since(Instant::now()));
             match self.lines.recv_timeout(slice) {
@@ -608,7 +632,7 @@ impl ExternalAgent {
                         return self.drain_after_exit(status, obs, deadline);
                     }
                     if Instant::now() >= deadline {
-                        return Err(DecideError::Timeout);
+                        return self.read_budget_spent(obs, deadline);
                     }
                 }
             }
@@ -669,10 +693,11 @@ impl Agent for ExternalAgent {
                 d
             }
             Err(e) => {
-                if e == DecideError::Timeout {
+                if matches!(e, DecideError::Timeout | DecideError::BudgetOverrun) {
                     // Never match a late response to a later observation. The
-                    // harness may retry only by constructing a fresh process.
-                    self.timed_out = true;
+                    // harness may retry only by constructing a fresh process,
+                    // and every later decision repeats this one's verdict.
+                    self.stalled = Some(e);
                     #[cfg(unix)]
                     signal_group(self.child.id(), "KILL");
                     let _ = self.child.kill();
@@ -1072,7 +1097,12 @@ mod tests {
         );
         let start = Instant::now();
         agent.decide(&observation);
-        assert_eq!(agent.health().last_error, Some(DecideError::Timeout));
+        assert_eq!(
+            agent.health().last_error,
+            Some(DecideError::Timeout),
+            "an observation that never got through is no evidence against the entrant"
+        );
+        assert_eq!(agent.health().budget_overruns, 0);
         assert!(
             start.elapsed() < Duration::from_secs(2),
             "the finite three-second fixture must not decide the request deadline"
@@ -1520,10 +1550,21 @@ mod tests {
         let health = agent.health();
         assert_eq!(
             health.last_error,
-            Some(DecideError::Timeout),
-            "the stall is recorded as a timeout fault, not mistaken for a deliberate hold"
+            Some(DecideError::BudgetOverrun),
+            "a live child that read the observation and stayed silent overran its own budget"
+        );
+        assert_eq!(health.budget_overruns, 1);
+        assert_eq!(
+            health.transport_faults, 0,
+            "the overrun is not filed as the harness's transport fault"
         );
         assert!(health.degraded());
+        agent.decide(&obs);
+        assert_eq!(
+            agent.health().last_error,
+            Some(DecideError::BudgetOverrun),
+            "the killed pipe repeats the overrun verdict instead of turning it into a timeout"
+        );
     }
 
     /// The HTTP transport advertises a per-decision wall-clock budget, but socket

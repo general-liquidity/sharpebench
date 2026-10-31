@@ -398,7 +398,9 @@ pub struct GatewayEntrant<'g, 'r, T: ProviderTransport> {
     written: Receiver<std::io::Result<()>>,
     lines: Receiver<std::io::Result<Wire>>,
     timeout: Duration,
-    timed_out: bool,
+    /// The verdict of the decision that stalled the pipe, repeated for every
+    /// later decision.
+    stalled: Option<DecideError>,
     breaker: CircuitBreaker,
     health: TransportHealth,
     served: u32,
@@ -432,7 +434,7 @@ impl<'g, 'r, T: ProviderTransport> GatewayEntrant<'g, 'r, T> {
             written,
             lines,
             timeout: DEFAULT_DECIDE_TIMEOUT,
-            timed_out: false,
+            stalled: None,
             breaker: CircuitBreaker::new(BREAKER_THRESHOLD),
             health: TransportHealth::default(),
             served: 0,
@@ -486,10 +488,22 @@ impl<'g, 'r, T: ProviderTransport> GatewayEntrant<'g, 'r, T> {
         }
     }
 
+    /// The budget ran out while the host waited for the entrant's next line,
+    /// after the observation or the last gateway answer was delivered. An
+    /// entrant still running had both the input and the time, so the stall is
+    /// its own ([`DecideError::BudgetOverrun`]); one that has exited is
+    /// reported as the exit.
+    fn read_budget_spent(&mut self) -> DecideError {
+        match self.process.exited() {
+            None => DecideError::BudgetOverrun,
+            Some(code) => DecideError::Exited(code),
+        }
+    }
+
     fn next_line(&mut self, deadline: Instant) -> Result<Next, DecideError> {
         loop {
             if Instant::now() >= deadline {
-                return Err(DecideError::Timeout);
+                return Err(self.read_budget_spent());
             }
             let slice = DEAD_CHILD_POLL.min(deadline.saturating_duration_since(Instant::now()));
             match self.lines.recv_timeout(slice) {
@@ -555,8 +569,8 @@ impl<'g, 'r, T: ProviderTransport> GatewayEntrant<'g, 'r, T> {
     }
 
     fn decide_once(&mut self, observation: &MarketObservation) -> Result<Decision, DecideError> {
-        if self.timed_out {
-            return Err(DecideError::Timeout);
+        if let Some(stall) = self.stalled {
+            return Err(stall);
         }
         let mut deadline = Instant::now()
             .checked_add(self.timeout)
@@ -613,9 +627,10 @@ impl<T: ProviderTransport> Agent for GatewayEntrant<'_, '_, T> {
                 decision
             }
             Err(error) => {
-                if error == DecideError::Timeout {
-                    // A late line must never answer a later observation.
-                    self.timed_out = true;
+                if matches!(error, DecideError::Timeout | DecideError::BudgetOverrun) {
+                    // A late line must never answer a later observation, and
+                    // every later decision repeats this one's verdict.
+                    self.stalled = Some(error);
                     self.process.terminate();
                 }
                 let tripped = self.breaker.record_fault();
