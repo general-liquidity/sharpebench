@@ -17,7 +17,8 @@ use std::path::Path;
 
 use sharpebench_arena::{
     verify_arena_expecting, Arena, CompletenessStatus, DockerLauncher, EntrantLauncher,
-    ExpectedHead, IntakeOptions, RevealedEntry, SigningKey, VerifyingKey,
+    ExecutionStatus, ExpectedHead, IntakeOptions, RevealedEntry, SigningKey, VerifyingKey,
+    LEGACY_EXECUTION_LIMIT,
 };
 
 /// Entry point (see the module docs for the argv contract).
@@ -542,6 +543,14 @@ fn cmd_verify(args: &[String], json: bool) -> i32 {
                     println!("head {}:{digest}", completeness.published_count);
                 }
                 println!("completeness limit: {}", completeness.detail);
+                for w in &report.windows {
+                    if w.execution == ExecutionStatus::LegacyUnbound {
+                        println!(
+                            "execution limit for {}: {LEGACY_EXECUTION_LIMIT}",
+                            w.window_id
+                        );
+                    }
+                }
             } else {
                 eprintln!("FAIL - the arena chain does not verify:");
                 for w in &report.windows {
