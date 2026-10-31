@@ -498,6 +498,74 @@ fn a_gateway_sweep_publishes_host_observed_usage_beside_the_rank() {
     );
 }
 
+/// Every decision of a sweep is recorded with its gateway request count, by
+/// cell and attempt, on its own record beside the rank. A resumed sweep runs
+/// no cell, so its record says every cell is unrecorded rather than showing
+/// cells that made no requests.
+#[test]
+fn a_gateway_sweep_records_requests_per_decision_beside_the_rank() {
+    let fixture = Fixture::new("per-decision");
+    let log = Log::default();
+    let first = outcome(fixture.run(
+        ScriptedProvider::answering("0.25"),
+        budget(1_000_000, 100),
+        &log,
+    ));
+    let record = &first.decision_requests;
+    let cells = WINDOWS.len() * SEEDS.len();
+    assert_eq!(record.schema_version, DECISION_REQUESTS_VERSION);
+    assert_eq!(record.sweep_sha256, first.host_observed.sweep_sha256);
+    assert!(record.rank_neutral);
+    assert_eq!(record.cells_unrecorded, 0);
+    let mut expected = Vec::new();
+    for seed in SEEDS {
+        for decision in 0..STEPS as u32 {
+            expected.push(DecisionRequests {
+                window_index: Some(0),
+                seed: Some(seed),
+                attempt: Some(0),
+                decision,
+                requests: 1,
+                served: 1,
+            });
+        }
+    }
+    assert_eq!(record.decisions, expected);
+    assert_eq!(record.decisions.len(), cells * STEPS);
+
+    let config = sharpebench_core::ScoreConfig {
+        execution_seeds_per_window: SEEDS.len(),
+        ..sharpebench_core::ScoreConfig::default()
+    };
+    let board = sharpebench_core::rank(std::slice::from_ref(&first.result.submission), &config);
+    let plain = serde_json::to_value(&board).expect("a board serializes");
+    let mut published = plain.clone();
+    attach_decision_requests(&mut published, "gateway:scripted", record);
+    assert_eq!(
+        published[0]["gateway_decision_requests"]["decisions"]
+            .as_array()
+            .map(Vec::len),
+        Some(cells * STEPS)
+    );
+    published[0]
+        .as_object_mut()
+        .expect("a row")
+        .remove("gateway_decision_requests");
+    assert_eq!(
+        published, plain,
+        "the record sits beside the rank, never in it"
+    );
+
+    let resumed = outcome(fixture.run(
+        ScriptedProvider::answering("0.25"),
+        budget(1_000_000, 100),
+        &Log::default(),
+    ));
+    assert!(resumed.decision_requests.decisions.is_empty());
+    assert_eq!(resumed.decision_requests.cells_unrecorded, cells);
+    assert_eq!(returns(&resumed), returns(&first));
+}
+
 /// Resuming a finished sweep makes no call at all, rewrites nothing and
 /// reports exactly what the first run reported.
 #[test]
@@ -814,6 +882,18 @@ fn requests_past_the_per_decision_ceiling_are_refused_by_type() {
         entrant.decide(&observation());
         assert_eq!(entrant.requests_served(), 2);
     }
+    assert_eq!(
+        gateway.decision_requests(),
+        [DecisionRequests {
+            window_index: None,
+            seed: None,
+            attempt: None,
+            decision: 0,
+            requests: 3,
+            served: 2,
+        }],
+        "the per-decision record keeps the refused request beside the served ones"
+    );
     let answers = log.lock().expect("log lock");
     assert!(answers[0].ok && answers[1].ok);
     assert_eq!(

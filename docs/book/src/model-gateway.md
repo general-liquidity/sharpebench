@@ -473,6 +473,19 @@ journal ownership was lost, whether a settlement could not be written
 `host_observed_usage`. The board stays an array, no score field moves, and
 removing that key gives back the unattached board exactly.
 
+A second record, `GatewayDecisionRequests`
+(`sharpebench.gateway-decision-requests.v1`), lists every entrant decision the
+sweep ran: its window, seed, attempt and ordinal, the gateway request lines the
+entrant sent for it (requests refused past the per-decision limit included) and
+how many of those the broker served. A faulted decision is recorded too, so the
+list lines up with the run's decisions. It is diagnostic only, `rank_neutral:
+true`, and no score, rank, gate or pass^k pool reads it.
+`attach_decision_requests` puts it on the entrant's row under
+`gateway_decision_requests` on the same terms as the usage record. The counts
+are not persisted, so a resumed sweep covers only the cells it ran in this
+process and reports the rest as `cells_unrecorded` rather than as cells with no
+requests.
+
 Before any answer is written to the entrant, the serving loop checks it for each
 route credential, each route destination and the journal's location, raw and
 JSON-escaped (needles of four bytes or more). A hit replaces the answer with a
