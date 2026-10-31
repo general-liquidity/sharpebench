@@ -36,5 +36,11 @@ test = true
 name = "llm_field_eval"
 test = true
 
+# Same reason: the producer's output is committed evidence, and its determinism
+# tests have to run.
+[[example]]
+name = "forecast_size_study"
+test = true
+
 [lints]
 workspace = true

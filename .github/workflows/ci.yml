@@ -215,8 +215,8 @@ jobs:
         run: |
           python -m venv .venv
           source .venv/bin/activate
-          pip install --upgrade pip maturin pytest numpy
-          maturin develop
+          pip install "pip==26.2.2" "maturin==1.15.0" "pytest==9.1.1" "numpy==2.5.3"
+          maturin develop --locked
           python -m pytest tests -q
 
   determinism:
@@ -594,8 +594,8 @@ jobs:
         working-directory: crates/sharpebench-py
         run: |
           set -euo pipefail
-          python -m pip install --upgrade pip maturin
-          maturin build --out "$RUNNER_TEMP/dist"
+          python -m pip install "pip==26.2.2" "maturin==1.15.0"
+          maturin build --locked --out "$RUNNER_TEMP/dist"
           wheels=("$RUNNER_TEMP"/dist/*.whl)
           test "${#wheels[@]}" -eq 1
           test -s "${wheels[0]}"

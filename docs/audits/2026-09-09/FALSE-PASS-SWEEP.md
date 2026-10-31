@@ -512,3 +512,43 @@ bounds, `artifact_scan.rs`'s policy limits, `artifact_tar.rs`'s scan bounds and
 sitting exactly on the limit, and the paired-boundary gate that would catch them
 covers only the kernel crates. None of them is a test passing for the wrong
 reason, so none is fixed here.
+
+## Note added 2026-10-31: the stopped harness runs were completed
+
+The two harness runs above stopped at 427 of 559 and 250 of 300 mutants. On
+branch `fix/gateway-bounds-tests` they were run to completion over
+`gateway.rs`, `gateway_journal.rs`, `fault_plan.rs`, `accounting.rs`,
+`artifact_scan.rs` and `artifact_tar.rs`, with the same cargo-mutants settings
+and the same `evidence_fields_no_clone_merges` exclusion. The files had grown
+since September, so the full set was 891 mutants, and the part the stopped runs
+had never reached was 385 mutants rather than the 182 that the counts above
+imply.
+
+| Scope | Mutants | Caught | Missed | Timeout | Unviable |
+|---|---|---|---|---|---|
+| `sharpebench-harness` gateway, journal, fault-plan, accounting, artifact-scan and artifact-tar files | 891 | 831 | 4 | 1 | 55 |
+
+Each survivor from the first pass was answered with a test on the bound or
+branch it exposed, and the survivors were run again until only the four below
+were left. The reasons come from reading the code at each line:
+
+- `gateway.rs:1098`, `>` to `>=` in `ModelGateway::dispatch_once`. The guard
+  compares a measured elapsed time with the provider deadline, and no test can
+  make the elapsed time equal the deadline exactly, so the two operators cannot
+  be told apart by a deterministic test.
+- `gateway_journal.rs:720`, the `NotFound` match guard in
+  `JournalLock::take_over` replaced with `true`. Killing it needs a removal of
+  the identity lock that fails for a reason other than `NotFound`, which the
+  Windows host the run used did not produce. A Linux run is expected to kill it
+  and has not yet been checked.
+- `gateway_journal.rs:1437`, `-=` to `+=` and to `/=` in `GatewayJournal::save`
+  (two mutants). The line rolls the version back only when serializing the
+  journal fails, and serializing that plain data structure does not fail, so no
+  test reaches it.
+
+The timeout is `artifact_scan.rs:217`, `-` to `/` in `Needle::feed`. The mutant
+turns the fallback step into `prefix[position]`, which can loop without
+advancing, and the run stopped it at its time limit. A timeout is not a pass,
+but it is also not a caught mutant, so it is counted on its own.
+
+The older sections of this audit are left as they were written.

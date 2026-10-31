@@ -16,6 +16,10 @@ const EVIDENCE_CLASS: &str = "edge_manifest_candidate_pool";
 const FAMILY_ROLE: &str = "diagnostic-only-never-a-trial-deduplicator";
 const TRIAL_SOURCE: &str = "ledger-counted-before-validation-and-deduplication";
 
+/// Newest SharpeArena edge-manifest ledger schema whose rules this verifier
+/// knows. A newer ledger is refused rather than read under older rules.
+pub const NEWEST_LEDGER_SCHEMA: u64 = 2;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CandidateLineageLedger {
     pub summary: CandidateLineageSummary,
@@ -213,6 +217,7 @@ pub fn verify_candidate_lineage(
 
     let mut earlier_by_id = BTreeMap::new();
     let mut earlier_digests = BTreeSet::new();
+    let mut first_by_content = BTreeMap::new();
     let mut selectable_ids = BTreeSet::new();
     let mut recomputed_families: BTreeMap<String, CandidateFamilyAccumulator> = BTreeMap::new();
     let mut ancestry = Vec::with_capacity(ledger.records.len());
@@ -226,6 +231,7 @@ pub fn verify_candidate_lineage(
         verify_record_header(record, index, &ledger.summary)?;
         verify_record_digests(record, index)?;
         verify_record_lineage(record, index, &earlier_by_id, &earlier_digests)?;
+        verify_duplicate_reference(record, index, &mut first_by_content)?;
 
         let candidate_id = candidate_id(&record.raw_candidate).map(str::to_owned);
         let is_selectable =
@@ -390,12 +396,7 @@ struct CandidateFamilyAccumulator {
 }
 
 fn verify_summary_header(summary: &CandidateLineageSummary) -> Result<(), CandidateLineageError> {
-    if summary.schema_version < 2 {
-        return Err(CandidateLineageError::at(
-            "summary.schema_version",
-            "lineage verification requires Arena ledger schema version 2 or newer",
-        ));
-    }
+    verify_ledger_schema(summary.schema_version, "summary.schema_version")?;
     compare_string(
         "summary.evidence_class",
         &summary.evidence_class,
@@ -413,17 +414,37 @@ fn verify_summary_header(summary: &CandidateLineageSummary) -> Result<(), Candid
     )
 }
 
+fn verify_ledger_schema(
+    version: u64,
+    path: impl Into<String>,
+) -> Result<(), CandidateLineageError> {
+    if version < 2 {
+        return Err(CandidateLineageError::at(
+            path,
+            "lineage verification requires Arena ledger schema version 2 or newer",
+        ));
+    }
+    if version > NEWEST_LEDGER_SCHEMA {
+        return Err(CandidateLineageError::at(
+            path,
+            format!(
+                "{version} is newer than Arena ledger schema {NEWEST_LEDGER_SCHEMA}, whose rules \
+                 this verifier knows"
+            ),
+        ));
+    }
+    Ok(())
+}
+
 fn verify_record_header(
     record: &CandidateLineageRecord,
     index: usize,
     summary: &CandidateLineageSummary,
 ) -> Result<(), CandidateLineageError> {
-    if record.schema_version < 2 {
-        return Err(CandidateLineageError::at(
-            format!("records[{index}].schema_version"),
-            "lineage verification requires schema version 2 or newer",
-        ));
-    }
+    verify_ledger_schema(
+        record.schema_version,
+        format!("records[{index}].schema_version"),
+    )?;
     if record.evidence_class != EVIDENCE_CLASS {
         return Err(CandidateLineageError::at(
             format!("records[{index}].evidence_class"),
@@ -818,6 +839,113 @@ fn verify_record_lineage(
         &record.lineage_binding_sha256,
         &binding,
     )
+}
+
+/// Check `duplicate_of_ordinal` against the rows themselves.
+///
+/// SharpeArena marks a valid row a duplicate of the first valid row with the
+/// same manifest and strategy. `first_by_content` maps that content to the first
+/// such row seen so far, so this holds in both directions: a reference must name
+/// exactly that row, and a row repeating it must carry the reference. Otherwise
+/// a ledger could shrink its selectable set, or inflate it, without changing a
+/// single recorded digest.
+fn verify_duplicate_reference(
+    record: &CandidateLineageRecord,
+    index: usize,
+    first_by_content: &mut BTreeMap<String, usize>,
+) -> Result<(), CandidateLineageError> {
+    let path = format!("records[{index}].duplicate_of_ordinal");
+    if record.invalid_reason.is_some() {
+        return match record.duplicate_of_ordinal {
+            Some(_) => Err(CandidateLineageError::at(
+                path,
+                "an invalid candidate is never deduplicated",
+            )),
+            None => Ok(()),
+        };
+    }
+    let content = canonical_sha256(&serde_json::json!({
+        "manifest_sha256": record.manifest_sha256,
+        "strategy": strategy_content(&record.raw_candidate),
+    }))?;
+    match (record.duplicate_of_ordinal, first_by_content.get(&content)) {
+        (None, None) => {
+            first_by_content.insert(content, index);
+            Ok(())
+        }
+        (Some(claimed), Some(first)) if claimed == *first => Ok(()),
+        (None, Some(first)) => Err(CandidateLineageError::at(
+            path,
+            format!("repeats the manifest and strategy of row {first} without saying so"),
+        )),
+        (Some(claimed), Some(first)) => Err(CandidateLineageError::at(
+            path,
+            format!("names row {claimed}, but the first row with this content is row {first}"),
+        )),
+        (Some(claimed), None) => Err(CandidateLineageError::at(
+            path,
+            format!("names row {claimed}, which does not hold this manifest and strategy"),
+        )),
+    }
+}
+
+/// The strategy half of SharpeArena's deduplication key, rebuilt from a raw
+/// candidate: the conditions and the position size, without the id or thesis.
+///
+/// Arena validates before it compares, so two differently written candidates
+/// can be the same strategy. This applies the same normal form: numbers are
+/// floats, a missing window is 2, and an absent `short_when` is null. Anything
+/// else is kept as written, because it still compares by content. Only rows
+/// that passed [`derive_arena_strategy_family`] reach this.
+fn strategy_content(candidate: &Value) -> Value {
+    serde_json::json!({
+        "long_when": candidate.get("long_when").map_or(Value::Null, condition_content),
+        "short_when": candidate.get("short_when").map_or(Value::Null, condition_content),
+        "gross_target": candidate.get("gross_target").map_or(Value::Null, float_content),
+    })
+}
+
+fn float_content(value: &Value) -> Value {
+    value.as_f64().map_or_else(|| value.clone(), Value::from)
+}
+
+/// Base case: a comparison or an unknown shape. Measure: JSON nesting depth,
+/// which every recursive call reduces.
+fn condition_content(condition: &Value) -> Value {
+    let Some(object) = condition.as_object() else {
+        return condition.clone();
+    };
+    let mut normal = object.clone();
+    for side in ["left", "right"] {
+        if let Some(value) = object.get(side) {
+            normal.insert(side.to_owned(), value_content(value));
+        }
+    }
+    if let Some(nested) = object.get("condition") {
+        normal.insert("condition".to_owned(), condition_content(nested));
+    }
+    if let Some(nested) = object.get("conditions").and_then(Value::as_array) {
+        normal.insert(
+            "conditions".to_owned(),
+            Value::Array(nested.iter().map(condition_content).collect()),
+        );
+    }
+    Value::Object(normal)
+}
+
+fn value_content(value: &Value) -> Value {
+    let Some(object) = value.as_object() else {
+        return value.clone();
+    };
+    let mut normal = object.clone();
+    if let Some(constant) = object.get("constant") {
+        normal.insert("constant".to_owned(), float_content(constant));
+    } else if object.get("indicator").and_then(Value::as_str) != Some("price") {
+        normal
+            .entry("window".to_owned())
+            .or_insert_with(|| Value::from(2));
+    }
+    Value::Object(normal)
 }
 
 fn verify_unique_declaration(
@@ -1723,6 +1851,10 @@ pub struct TestSplitCensusReport {
     pub failed_records: usize,
     pub unidentified_records: usize,
     pub declared_censuses_verified: usize,
+    /// Records whose `journal_chain_sha256` was recomputed from the lines
+    /// before them. Omitted at zero: a journal older than the chain declares none.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub journal_chains_verified: usize,
     pub splits: Vec<TestSplitConsultations>,
     pub journal: Vec<CensusJournalEntry>,
 }
@@ -1898,6 +2030,7 @@ pub fn verify_test_split_census(
         });
         previous = Some(&item.record_sha256);
     }
+    let journal_chains_verified = verify_journal_chain(journal)?;
     Ok(TestSplitCensusReport {
         schema_version: 1,
         evidence_class: "test_split_consultation_census".to_owned(),
@@ -1909,14 +2042,115 @@ pub fn verify_test_split_census(
         failed_records: failed,
         unidentified_records: unidentified,
         declared_censuses_verified: verified_claims,
+        journal_chains_verified,
         splits: splits.into_values().collect(),
         journal: entries,
     })
 }
 
+fn is_zero(count: &usize) -> bool {
+    *count == 0
+}
+
+/// Domain of SharpeArena's census chain (`_CENSUS_CHAIN_DOMAIN`).
+const CENSUS_CHAIN_DOMAIN: &str = "sharpearena/test-split-census/chain/v1";
+
+/// One fold of SharpeArena's `_chain_step`: SHA-256 over the domain, the
+/// previous chain value (empty for the first line) and the line's digest, with
+/// a NUL between each.
+fn census_chain_step(previous: Option<&str>, record_sha256: &str) -> String {
+    let mut accumulator = Sha256::new();
+    accumulator.update(CENSUS_CHAIN_DOMAIN.as_bytes());
+    accumulator.update([0]);
+    accumulator.update(previous.unwrap_or_default().as_bytes());
+    accumulator.update([0]);
+    accumulator.update(record_sha256.as_bytes());
+    crate::lower_hex(&accumulator.finalize())
+}
+
+/// Recompute every `test_split_census.journal_chain_sha256` a journal declares
+/// and return how many were checked.
+///
+/// The chain folds every nonblank line in order, including lines that carry no
+/// census, so it sees what `previous_record_sha256` cannot: a line removed or
+/// reordered before a record that declares nothing. A record's declared value
+/// covers the lines before it, and the first line declares `null`.
+///
+/// Records written before the chain existed omit the key and are not refused,
+/// but once one record declares a chain a later census that omits it is a
+/// refusal, so stripping the key from the tail cannot pass as an older journal.
+///
+/// The chain is an unkeyed digest. It shows the journal is the one its records
+/// describe, not who wrote it: lines cut from the end leave no trace, and a
+/// writer who rewrites every later line can restate it.
+pub fn verify_journal_chain(journal: &[JournalRecord]) -> Result<usize, CandidateLineageError> {
+    const FIELD: &str = "test_split_census.journal_chain_sha256";
+    let mut chain: Option<String> = None;
+    let mut chained = false;
+    let mut verified = 0;
+    for item in journal {
+        let refuse = |message: String| {
+            CandidateLineageError::at(format!("line {}.{FIELD}", item.line), message)
+        };
+        if let Some(census) = item.record.get("test_split_census") {
+            match census.get("journal_chain_sha256") {
+                None if chained => {
+                    return Err(refuse(
+                        "is missing after an earlier record declared the chain".to_owned(),
+                    ));
+                }
+                None => {}
+                Some(declared) => {
+                    let declared = match declared {
+                        Value::Null => None,
+                        Value::String(digest) => Some(digest.as_str()),
+                        other => return Err(refuse(format!("must be a digest or null: {other}"))),
+                    };
+                    if declared != chain.as_deref() {
+                        return Err(refuse(format!(
+                            "declares {}, but the lines before this record chain to {}; a line \
+                             was removed, inserted, edited or reordered",
+                            declared.unwrap_or("null"),
+                            chain.as_deref().unwrap_or("null"),
+                        )));
+                    }
+                    chained = true;
+                    verified += 1;
+                }
+            }
+        }
+        chain = Some(census_chain_step(chain.as_deref(), &item.record_sha256));
+    }
+    Ok(verified)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `journal_chains_verified` is omitted at zero, so a census of a journal
+    /// older than the chain keeps its bytes, and written at any other count.
+    #[test]
+    fn a_census_writes_the_chain_count_only_when_it_is_not_zero() {
+        let report = |journal_chains_verified| TestSplitCensusReport {
+            schema_version: 1,
+            evidence_class: "e".to_string(),
+            scope: "s".to_string(),
+            records: 2,
+            completed_records: 2,
+            failed_records: 0,
+            unidentified_records: 0,
+            declared_censuses_verified: 0,
+            journal_chains_verified,
+            splits: Vec::new(),
+            journal: Vec::new(),
+        };
+        let written = |count| serde_json::to_value(report(count)).unwrap();
+        assert!(written(0).get("journal_chains_verified").is_none());
+        assert_eq!(written(2)["journal_chains_verified"], 2);
+        let back: TestSplitCensusReport = serde_json::from_value(written(0)).unwrap();
+        assert_eq!(back.journal_chains_verified, 0);
+    }
 
     fn candidate(id: &str, threshold: f64) -> Value {
         serde_json::json!({
@@ -2101,6 +2335,153 @@ mod tests {
         assert_eq!(report.families[0].best_median_deflated_sharpe, Some(0.8));
         assert_eq!(report.families[0].family_median_deflated_sharpe, Some(0.5));
         assert!((report.families[0].best_to_median_gap.unwrap() - 0.3).abs() < f64::EPSILON);
+    }
+
+    fn rehash(row: &mut CandidateLineageRecord) {
+        row.raw_candidate_sha256 = digest(&row.raw_candidate);
+        row.lineage_binding_sha256 = digest(&serde_json::json!({
+            "family_digest": row.family_digest,
+            "generator_identity_sha256": row.generator_identity_sha256,
+            "idea_source_digests": Vec::<String>::new(),
+            "parent_candidate_digests": row.parent_candidate_digests,
+            "raw_candidate_sha256": row.raw_candidate_sha256,
+        }));
+        row.binding_sha256 = digest(&serde_json::json!({
+            "raw_candidate_sha256": row.raw_candidate_sha256,
+            "manifest_sha256": row.manifest_sha256,
+            "model_digest": row.model_digest,
+            "split_plan_sha256": row.split_plan_sha256,
+            "trial_ordinal": row.trial_ordinal,
+        }));
+    }
+
+    /// Rows `base` and `other` are selectable and row 2 is a duplicate of `base`,
+    /// once `adjust` has rewritten the raw candidates of rows 0 and 2.
+    fn ledger_with_duplicate(
+        adjust: impl FnOnce(&mut Value, &mut Value),
+    ) -> CandidateLineageLedger {
+        let mut ledger = ledger();
+        let family = ledger.records[0].family_preimage.clone();
+        let mut rows = vec![
+            record(0, "base", 0.5, family.clone(), None, vec![], vec![]),
+            record(1, "other", 0.2, family.clone(), None, vec![], vec![]),
+            record(2, "again", 0.5, family, None, vec![], vec![]),
+        ];
+        for row in &mut rows {
+            row.lineage_status = "host-derived-unreferenced".to_owned();
+        }
+        rows[2].duplicate_of_ordinal = Some(0);
+        let (first, rest) = rows.split_at_mut(2);
+        adjust(&mut first[0].raw_candidate, &mut rest[0].raw_candidate);
+        rehash(&mut rows[0]);
+        rehash(&mut rows[2]);
+        ledger.summary.observed_trials = 3;
+        ledger.summary.duplicates = 1;
+        ledger.summary.families[0].observed_trials = 3;
+        ledger.records = rows;
+        ledger
+    }
+
+    fn duplicate_scores() -> Vec<CandidateLineageScore> {
+        ["base", "other"]
+            .map(|id| CandidateLineageScore {
+                candidate_id: id.to_owned(),
+                median_deflated_sharpe: 0.1,
+            })
+            .to_vec()
+    }
+
+    /// Arena's validator reads each pair as one strategy, so a raw comparison
+    /// would refuse evidence Arena legitimately wrote.
+    #[test]
+    fn a_true_duplicate_verifies_even_when_written_differently() {
+        let ledger = ledger_with_duplicate(|first, third| {
+            first["long_when"]["left"]["window"] = serde_json::json!(2);
+            first["long_when"]["right"]["constant"] = serde_json::json!(1.0);
+            first["gross_target"] = serde_json::json!(1.0);
+            third["long_when"]["left"] = serde_json::json!({"indicator": "momentum"});
+            third["long_when"]["right"]["constant"] = serde_json::json!(1);
+            third["gross_target"] = serde_json::json!(1);
+            third["thesis"] = serde_json::json!("reworded");
+            third.as_object_mut().unwrap().remove("short_when");
+        });
+        let report = verify_candidate_lineage(&ledger, &duplicate_scores()).unwrap();
+        assert_eq!(report.duplicate_trials, 1);
+    }
+
+    #[test]
+    fn a_duplicate_reference_is_checked_against_the_named_row() {
+        let refused = |ledger: &CandidateLineageLedger| {
+            let error = verify_candidate_lineage(ledger, &duplicate_scores()).unwrap_err();
+            assert_eq!(error.path, "records[2].duplicate_of_ordinal", "{error}");
+            error.message
+        };
+
+        // An earlier row, which is all the old check asked, but not the same one.
+        let mut wrong_row = ledger_with_duplicate(|_, _| {});
+        wrong_row.records[2].duplicate_of_ordinal = Some(1);
+        assert!(refused(&wrong_row).contains("first row with this content is row 0"));
+
+        // The strategy differs from the row it names.
+        let different = ledger_with_duplicate(|_, third| {
+            third["long_when"]["right"]["constant"] = serde_json::json!(0.75);
+        });
+        assert!(refused(&different).contains("does not hold this manifest"));
+
+        // So does the position size, which the family digest erases.
+        let resized = ledger_with_duplicate(|first, third| {
+            first["gross_target"] = serde_json::json!(1.0);
+            third["gross_target"] = serde_json::json!(0.5);
+        });
+        assert!(refused(&resized).contains("does not hold this manifest"));
+
+        // The manifest is half of the key.
+        let mut other_manifest = ledger_with_duplicate(|_, _| {});
+        let manifest = serde_json::json!({"hypothesis": "other"});
+        other_manifest.records[2].manifest_sha256 = Some(digest(&manifest));
+        other_manifest.records[2].manifest = Some(manifest);
+        rehash(&mut other_manifest.records[2]);
+        assert!(refused(&other_manifest).contains("does not hold this manifest"));
+
+        // A repeat that carries no reference would inflate the selectable set.
+        let mut unmarked = ledger_with_duplicate(|_, _| {});
+        unmarked.records[2].duplicate_of_ordinal = None;
+        unmarked.summary.duplicates = 0;
+        assert!(refused(&unmarked).contains("without saying so"));
+
+        // Arena never deduplicates an invalid row.
+        let mut invalid = ledger_with_duplicate(|_, _| {});
+        let row = &mut invalid.records[2];
+        row.invalid_reason = Some("refused".to_owned());
+        row.family_preimage = serde_json::json!({
+            "unparsed_raw_candidate_sha256": row.raw_candidate_sha256
+        });
+        row.family_digest = digest(&row.family_preimage);
+        rehash(row);
+        assert!(refused(&invalid).contains("never deduplicated"));
+    }
+
+    #[test]
+    fn a_ledger_schema_outside_the_known_range_is_refused() {
+        let scores = duplicate_scores();
+        let mut future = ledger_with_duplicate(|_, _| {});
+        future.summary.schema_version = NEWEST_LEDGER_SCHEMA + 1;
+        let refused = verify_candidate_lineage(&future, &scores).unwrap_err();
+        assert_eq!(refused.path, "summary.schema_version");
+        assert!(refused.message.contains("newer than"));
+
+        let mut future_row = ledger_with_duplicate(|_, _| {});
+        future_row.records[1].schema_version = NEWEST_LEDGER_SCHEMA + 1;
+        let refused = verify_candidate_lineage(&future_row, &scores).unwrap_err();
+        assert_eq!(refused.path, "records[1].schema_version");
+        assert!(refused.message.contains("newer than"));
+
+        let mut old = ledger_with_duplicate(|_, _| {});
+        old.summary.schema_version = 1;
+        assert_eq!(
+            verify_candidate_lineage(&old, &scores).unwrap_err().path,
+            "summary.schema_version"
+        );
     }
 
     #[test]
@@ -3091,6 +3472,77 @@ mod tests {
         );
         // Lines cut from the end leave no record to notice.
         assert!(verify_test_split_census(&[first, other]).is_ok());
+    }
+
+    /// `record` declaring `chain`, with the digest of the resulting line.
+    fn chained(line: usize, mut record: Value, chain: Option<&str>) -> JournalRecord {
+        record["test_split_census"]["journal_chain_sha256"] = json!(chain);
+        entry(line, record)
+    }
+
+    #[test]
+    fn the_journal_chain_exposes_a_removed_line_the_previous_digest_cannot_see() {
+        // Line 2 declares no census, so nothing but the chain witnesses line 1.
+        let first = entry(1, search(10, 4));
+        let bare = entry(2, json!({"evidence_class": "other"}));
+        let chain = census_chain_step(
+            Some(&census_chain_step(None, &first.record_sha256)),
+            &bare.record_sha256,
+        );
+        let census = with_census(search(10, 6), identity_of(10), true, &[], &[], 0, 0);
+        let last = chained(3, census, Some(&chain));
+        assert_eq!(
+            verify_journal_chain(&[first, bare.clone(), last.clone()]),
+            Ok(1)
+        );
+        let error = verify_journal_chain(&[bare, last]).unwrap_err();
+        assert_eq!(error.path, "line 3.test_split_census.journal_chain_sha256");
+    }
+
+    #[test]
+    fn the_journal_chain_refuses_a_stripped_or_malformed_digest_and_keeps_legacy_readable() {
+        let path = "line 2.test_split_census.journal_chain_sha256";
+        let census = || with_census(search(10, 4), identity_of(10), true, &[], &[], 0, 0);
+        let first = chained(1, census(), None);
+        let digest = census_chain_step(None, &first.record_sha256);
+        assert_eq!(
+            verify_journal_chain(&[first.clone(), chained(2, census(), Some(&digest))]),
+            Ok(2)
+        );
+
+        let stripped = entry(2, census());
+        let error = verify_journal_chain(&[first.clone(), stripped]).unwrap_err();
+        assert_eq!(error.path, path);
+        assert!(error.message.contains("is missing"), "{}", error.message);
+
+        // A null claims to be the first line, and only the first line may.
+        let error = verify_journal_chain(&[first.clone(), chained(2, census(), None)]).unwrap_err();
+        assert_eq!(error.path, path);
+
+        let upper = digest.to_uppercase();
+        let error =
+            verify_journal_chain(&[first.clone(), chained(2, census(), Some(&upper))]).unwrap_err();
+        assert_eq!(error.path, path);
+
+        let mut number = census();
+        number["test_split_census"]["journal_chain_sha256"] = json!(7);
+        let error = verify_journal_chain(&[first, entry(2, number)]).unwrap_err();
+        assert_eq!(error.path, path);
+        assert!(
+            error.message.contains("must be a digest"),
+            "{}",
+            error.message
+        );
+
+        // Records older than the chain declare none and are not refused, and
+        // a chain that starts later folds them from the first line.
+        let legacy = entry(1, census());
+        assert_eq!(verify_journal_chain(std::slice::from_ref(&legacy)), Ok(0));
+        let digest = census_chain_step(None, &legacy.record_sha256);
+        assert_eq!(
+            verify_journal_chain(&[legacy, chained(2, census(), Some(&digest))]),
+            Ok(1)
+        );
     }
 
     #[test]

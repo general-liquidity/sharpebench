@@ -22,8 +22,8 @@
 
 use serde::Serialize;
 use sharpebench_core::{
-    decision_stability, observation_sha256, DecisionStabilityReport, IdenticalReplicates,
-    ObservedDecision, ReplicateRun, ScoreConfig,
+    decision_content_sha256, decision_stability, observation_sha256, DecisionStabilityReport,
+    IdenticalReplicates, ObservedDecision, ReplicateRun, ScoreConfig,
 };
 use sharpebench_protocol::{
     AgentTrajectory, Decision, DecisionStep, MarketObservation, RunTrajectory,
@@ -153,9 +153,9 @@ pub fn replay_observation_digests(
 /// seeds of one capture, and the same seeds again in a repeated capture. Each
 /// trajectory must pass [`verify_trajectory_strict`] against `data`, `costs` and
 /// `runner_artifact_sha256` (its score is discarded), and all of them must name
-/// the same agent. Runs of one window with byte-identical JSON are refused
-/// unless `identical` declares them separate executions. The report is
-/// rank-neutral.
+/// the same agent. Runs of one window with equal
+/// [`decision_content_sha256`] are refused unless `identical` declares them
+/// separate executions. The report is rank-neutral.
 pub fn decision_stability_from_trajectories(
     data: &Dataset,
     trajectories: &[AgentTrajectory],
@@ -186,19 +186,19 @@ pub fn decision_stability_from_trajectories(
         for run in &trajectory.runs {
             let digests = replay_observation_digests(data, run, costs)
                 .map_err(|error| format!("trajectory {index}: {error}"))?;
-            let bytes = serde_json::to_vec(run).expect("run trajectories serialize");
+            let steps: Vec<ObservedDecision<'_>> = digests
+                .into_iter()
+                .zip(&run.steps)
+                .map(|(observation_sha256, step)| ObservedDecision {
+                    observation_sha256,
+                    decision: &step.decision,
+                })
+                .collect();
             runs.push(ReplicateRun {
                 window_start: run.window_start,
                 window_end: run.window_end,
-                content_sha256: sharpebench_attest::content_digest(&bytes),
-                steps: digests
-                    .into_iter()
-                    .zip(&run.steps)
-                    .map(|(observation_sha256, step)| ObservedDecision {
-                        observation_sha256,
-                        decision: &step.decision,
-                    })
-                    .collect(),
+                content_sha256: decision_content_sha256(run.seed, &steps),
+                steps,
             });
         }
     }
@@ -415,6 +415,28 @@ mod tests {
         // One capture alone holds no copies: its runs differ in seed.
         let alone = measure(&data(), &[capture], IdenticalReplicates::Refused).unwrap();
         assert_eq!(alone.totals.identical_replicate_runs, 0);
+    }
+
+    /// A copy reworded where the comparison does not read still agrees with the
+    /// capture by construction, so it must not pass as a separate replicate.
+    #[test]
+    fn a_copy_edited_only_in_text_the_comparison_ignores_is_still_a_copy() {
+        let capture = momentum_capture(&[0, 1]);
+        let mut edited = capture.clone();
+        for run in &mut edited.runs {
+            let step = &mut run.steps[0];
+            step.decision.reasoning.push('.');
+            step.decision.cost = Some(sharpebench_protocol::DecisionCost {
+                tokens_in: 7,
+                ..Default::default()
+            });
+        }
+        let refused =
+            measure(&data(), &[capture, edited], IdenticalReplicates::Refused).unwrap_err();
+        assert!(
+            refused.contains("identical to another replicate"),
+            "{refused}"
+        );
     }
 
     #[test]

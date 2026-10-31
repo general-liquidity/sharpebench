@@ -2,7 +2,7 @@ use std::io::{self, Read};
 
 use serde_json::{json, Value};
 use sharpebench_harness::artifact_scan::{
-    IncompleteReason, MatchKind, RawScanPolicy, RawScanner, POLICY_VERSION,
+    IncompleteReason, MatchKind, RawScanPolicy, RawScanner, MAX_POLICY_BYTES, POLICY_VERSION,
 };
 
 fn policy_value() -> Value {
@@ -15,6 +15,44 @@ fn policy(value: &Value) -> RawScanPolicy {
 
 fn small_limits() -> Value {
     json!({"max_files": 2, "max_file_bytes": 20, "max_total_bytes": 25, "max_seconds": 60})
+}
+
+/// Each bound on its limit and one past it, the two sides differing only in that
+/// count, so neither side can pass on another rule.
+#[test]
+fn policy_size_and_rule_counts_hold_exactly_at_their_limits() {
+    let exact = serde_json::to_vec(&policy_value()).unwrap();
+    let padded = |len: usize| {
+        let mut bytes = exact.clone();
+        bytes.resize(len, b' ');
+        RawScanPolicy::from_json(&bytes)
+    };
+    assert!(padded(MAX_POLICY_BYTES).is_ok());
+    assert_eq!(
+        padded(MAX_POLICY_BYTES + 1).err().as_deref(),
+        Some("scan policy exceeds 64 KiB")
+    );
+
+    let digests = |count: usize| -> Value {
+        json!({
+            "schema_version": POLICY_VERSION,
+            "file_sha256": (0..count).map(|i| format!("{i:064x}")).collect::<Vec<_>>(),
+        })
+    };
+    let sequences = |count: usize| -> Value {
+        json!({
+            "schema_version": POLICY_VERSION,
+            "utf8_sequences": (0..count)
+                .map(|i| format!("protected-sequence-{i:04}"))
+                .collect::<Vec<_>>(),
+        })
+    };
+    let parse = |value: Value| RawScanPolicy::from_json(&serde_json::to_vec(&value).unwrap());
+    let over = Some("scan policy exceeds the rule-count limit");
+    assert!(parse(digests(256)).is_ok());
+    assert_eq!(parse(digests(257)).err().as_deref(), over);
+    assert!(parse(sequences(32)).is_ok());
+    assert_eq!(parse(sequences(33)).err().as_deref(), over);
 }
 
 #[test]
@@ -222,4 +260,85 @@ fn match_list_is_bounded_and_entry_identity_is_bounded() {
             Some(IncompleteReason::InvalidEntryName)
         );
     }
+}
+
+/// The protected bytes in order but never adjacent. A matcher that kept its
+/// place across a mismatch would call this a hit.
+#[test]
+fn a_sequence_spread_through_other_bytes_is_not_a_match() {
+    let spread: Vec<u8> = b"protected-needle"
+        .iter()
+        .flat_map(|&byte| [byte, b'.'])
+        .collect();
+    let mut scanner = RawScanner::new(policy(&policy_value()));
+    assert!(scanner.scan_file(b"file", spread.len() as u64, &spread[..]));
+    let report = scanner.finish();
+    assert!(report.completed);
+    assert!(report.matches.is_empty());
+}
+
+#[test]
+fn an_oversized_stream_is_read_one_byte_past_its_declaration_and_no_further() {
+    let stream = [b'x'; 64];
+    let mut scanner = RawScanner::new(policy(&policy_value()));
+    assert!(!scanner.scan_file(b"file", 10, Fragments(&stream, 4)));
+    let report = scanner.finish();
+    assert_eq!(
+        report.incomplete_reason,
+        Some(IncompleteReason::SizeMismatch)
+    );
+    assert_eq!(report.bytes_read, 11);
+}
+
+#[test]
+fn an_interrupted_read_is_retried_and_the_file_still_counts() {
+    struct InterruptedOnce<'a>(bool, &'a [u8]);
+    impl Read for InterruptedOnce<'_> {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            if std::mem::replace(&mut self.0, false) {
+                return Err(io::ErrorKind::Interrupted.into());
+            }
+            self.1.read(buffer)
+        }
+    }
+    let mut scanner = RawScanner::new(policy(&policy_value()));
+    assert!(scanner.scan_file(b"file", 16, InterruptedOnce(true, b"protected-needle")));
+    let report = scanner.finish();
+    assert!(report.completed);
+    assert_eq!(report.matches.len(), 1);
+}
+
+#[test]
+fn an_entry_name_and_the_byte_budget_are_usable_to_their_last_byte() {
+    let mut scanner = RawScanner::new(policy(&policy_value()));
+    assert!(scanner.scan_file(&[b'a'; 4096], 1, &b"x"[..]));
+
+    let mut value = policy_value();
+    value["limits"] = small_limits();
+    let mut scanner = RawScanner::new(policy(&value));
+    assert!(scanner.scan_file(b"one", 20, &[b'x'; 20][..]));
+    assert!(scanner.scan_file(b"two", 5, &[b'x'; 5][..]));
+    assert!(scanner.finish().completed);
+}
+
+#[test]
+fn the_total_byte_ceiling_is_four_gib_and_a_file_may_fill_the_total() {
+    let limits = |file: u64, total: u64| {
+        let mut value = policy_value();
+        value["limits"] = json!({
+            "max_files": 1, "max_file_bytes": file, "max_total_bytes": total, "max_seconds": 60,
+        });
+        RawScanPolicy::from_json(&serde_json::to_vec(&value).unwrap())
+    };
+    const FOUR_GIB: u64 = 4_294_967_296;
+    assert!(limits(1, FOUR_GIB).is_ok());
+    assert_eq!(
+        limits(1, FOUR_GIB + 1).err().as_deref(),
+        Some("scan limits are outside the supported bounded domain")
+    );
+    assert!(limits(20, 20).is_ok());
+    assert_eq!(
+        limits(21, 20).err().as_deref(),
+        Some("scan limits are outside the supported bounded domain")
+    );
 }

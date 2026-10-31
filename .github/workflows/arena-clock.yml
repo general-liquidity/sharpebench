@@ -43,24 +43,7 @@ jobs:
           set -euo pipefail
           test -f "$ARENA_DIR/state.json"
           EPOCH="${EXPLICIT_EPOCH:-$(( $(date -u +%s) / 86400 ))}"
-          mapfile -d '' WINDOWS < <(find "$ARENA_DIR/windows" -name window.json -print0)
-          if [ "${#WINDOWS[@]}" -eq 0 ]; then
-            echo "No windows have been opened."
-            exit 0
-          fi
-          # -s slurps the window files into one array; without it .[] walks each
-          # object's values and jq aborts on the first numeric field.
-          NEXT="$(jq -s -r --argjson now "$EPOCH" '
-            [.[]
-             | select((.status == "open" and .commit_deadline <= $now)
-                   or (.status == "committed" and .data_reveal_epoch <= $now))
-             | if .status == "open" then .commit_deadline else .data_reveal_epoch end]
-            | min // empty' "${WINDOWS[@]}")"
-          if [ -z "$NEXT" ]; then
-            echo "No forward-arena lifecycle transition is due at epoch $EPOCH."
-            exit 0
-          fi
-          cargo run -q -p sharpebench -- arena advance "$ARENA_DIR" "$EPOCH"
+          cargo run -q -p sharpebench -- arena advance "$ARENA_DIR" "$EPOCH" --only-if-due
       - name: Commit a lifecycle transition
         shell: bash
         run: |
@@ -78,3 +61,5 @@ jobs:
 # Scoring and publishing intentionally are not automated here. They require a
 # sealed dataset/entry bundle and an Ed25519 signing key; a workflow that guessed
 # either would turn a forward commitment into an operator-controlled backtest.
+# Expiring a window nobody entered is left to the operator as well, because it
+# forecloses publishing an empty board (`arena expire-empty`).

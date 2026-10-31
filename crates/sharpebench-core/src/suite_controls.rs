@@ -38,7 +38,9 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::composite::CompositeScore;
-use crate::evidence_coverage::{Coverage, DigestId, EvidenceInventory, PreimageError};
+use crate::evidence_coverage::{
+    Coverage, DigestId, EvidenceInventory, PreimageEncoding, PreimageError,
+};
 
 /// How far a closed accounting identity may sit from zero and still be closed.
 /// A residual is a sum of signed cash movements that should cancel exactly; this
@@ -211,12 +213,31 @@ impl SuiteControlEvidence {
     /// reordering the controls, dropping one, or changing any covered field of
     /// any one of them moves it. The excluded `detail` line moves nothing.
     pub fn binding(&self) -> Result<ControlBinding, PreimageError> {
+        self.binding_under(PreimageEncoding::V1)
+    }
+
+    /// Which encoding produced a published suite digest, if either did.
+    ///
+    /// A digest from before [`crate::EVIDENCE_PREIMAGE_VERSION`] answers
+    /// [`PreimageEncoding::Legacy`] over the same controls, so an old document
+    /// stays identifiable rather than merely failing to match. `None` means the
+    /// digest does not belong to these controls under any known encoding.
+    pub fn digest_encoding(&self, sha256: &str) -> Result<Option<PreimageEncoding>, PreimageError> {
+        for encoding in [PreimageEncoding::V1, PreimageEncoding::Legacy] {
+            if self.binding_under(encoding)?.sha256 == sha256 {
+                return Ok(Some(encoding));
+            }
+        }
+        Ok(None)
+    }
+
+    fn binding_under(&self, encoding: PreimageEncoding) -> Result<ControlBinding, PreimageError> {
         use sha2::{Digest, Sha256};
 
         let mut suite = Sha256::new();
         let mut per_control = Vec::with_capacity(self.controls.len());
         for verdict in &self.controls {
-            let preimage = control_preimage(verdict)?;
+            let preimage = control_preimage_under(encoding, verdict)?;
             suite.update(&preimage);
             let digest = Sha256::digest(&preimage);
             per_control.push(ControlDigest {
@@ -229,6 +250,7 @@ impl SuiteControlEvidence {
             used_by_gate: false,
             document: SUITE_CONTROL_INVENTORY.document.to_string(),
             digest: DigestId::RunProvenance,
+            preimage_encoding: encoding,
             covered_fields: SUITE_CONTROL_INVENTORY
                 .fields_for(DigestId::RunProvenance)
                 .into_iter()
@@ -549,6 +571,10 @@ pub struct ControlBinding {
     pub document: String,
     /// The digest identity, as the inventory names it.
     pub digest: DigestId,
+    /// The byte form the digests were taken over. A document without this field
+    /// predates [`crate::EVIDENCE_PREIMAGE_VERSION`] and is
+    /// [`PreimageEncoding::Legacy`]; see [`SuiteControlEvidence::digest_encoding`].
+    pub preimage_encoding: PreimageEncoding,
     /// The fields whose values entered the preimage, in inventory order.
     pub covered_fields: Vec<String>,
     /// The fields that entered nothing, each with the inventory's reason.
@@ -638,6 +664,15 @@ fn render_shortfall(shortfall: &ControlShortfall) -> String {
 /// compile here, so a new field cannot join the published record while the
 /// digest silently keeps covering the old set.
 pub fn control_preimage(verdict: &ControlVerdict) -> Result<Vec<u8>, PreimageError> {
+    control_preimage_under(PreimageEncoding::V1, verdict)
+}
+
+/// [`control_preimage`] under a named encoding, for identifying a digest
+/// published under [`PreimageEncoding::Legacy`].
+pub fn control_preimage_under(
+    encoding: PreimageEncoding,
+    verdict: &ControlVerdict,
+) -> Result<Vec<u8>, PreimageError> {
     let ControlVerdict {
         control_id,
         property,
@@ -655,7 +690,8 @@ pub fn control_preimage(verdict: &ControlVerdict) -> Result<Vec<u8>, PreimageErr
         .map(render_shortfall)
         .collect::<Vec<_>>()
         .join(",");
-    SUITE_CONTROL_INVENTORY.preimage(
+    SUITE_CONTROL_INVENTORY.preimage_under(
+        encoding,
         DigestId::RunProvenance,
         &[
             ("control_id", control_id.as_str()),
@@ -682,6 +718,66 @@ mod tests {
                 accounting_residual: residual,
             },
         }
+    }
+
+    fn legacy_text(verdict: &ControlVerdict) -> String {
+        let bytes = control_preimage_under(PreimageEncoding::Legacy, verdict).expect("binds");
+        String::from_utf8(bytes).expect("these records are text")
+    }
+
+    /// Reviewer finding BM10, reached through a real suite. `control_id` is free
+    /// text and the suite digest concatenates the per-control preimages, so under
+    /// the legacy form one control whose identity spells out another control's
+    /// record hashes the same as the two separate controls.
+    #[test]
+    fn one_crafted_control_cannot_pose_as_two_controls() {
+        let two = evaluate_controls(&[cash(0.0), refusal(3, 3)]).expect("evaluates");
+        let bytes = legacy_text(&two.controls[0]) + &legacy_text(&two.controls[1]);
+
+        let key = "control_id\x1f";
+        let id_start = bytes.find(key).expect("the record exists") + key.len();
+        let second = legacy_text(&two.controls[1]);
+        let id = "invalid-order";
+        let tail = &second[second.find(id).expect("the id is bound") + id.len()..];
+
+        let mut crafted = refusal(3, 3);
+        crafted.control_id = bytes[id_start..bytes.len() - tail.len()].to_string();
+        let one = evaluate_controls(&[crafted]).expect("evaluates");
+
+        assert_eq!(
+            legacy_text(&one.controls[0]),
+            bytes,
+            "the legacy suite bytes collide, which is the defect"
+        );
+        assert_eq!(
+            one.binding_under(PreimageEncoding::Legacy).unwrap().sha256,
+            two.binding_under(PreimageEncoding::Legacy).unwrap().sha256
+        );
+        assert_ne!(
+            one.binding().expect("binds").sha256,
+            two.binding().expect("binds").sha256
+        );
+    }
+
+    #[test]
+    fn a_published_digest_names_the_encoding_it_was_taken_under() {
+        let evidence = evaluate_controls(&[cash(0.0), refusal(3, 3)]).expect("evaluates");
+        let current = evidence.binding().expect("binds");
+        assert_eq!(current.preimage_encoding, PreimageEncoding::V1);
+        assert_eq!(
+            evidence.digest_encoding(&current.sha256),
+            Ok(Some(PreimageEncoding::V1))
+        );
+
+        let old = evidence
+            .binding_under(PreimageEncoding::Legacy)
+            .expect("binds");
+        assert_ne!(old.sha256, current.sha256);
+        assert_eq!(
+            evidence.digest_encoding(&old.sha256),
+            Ok(Some(PreimageEncoding::Legacy))
+        );
+        assert_eq!(evidence.digest_encoding(&"0".repeat(64)), Ok(None));
     }
 
     fn refusal(submitted: usize, refused: usize) -> ControlRun {
@@ -1153,7 +1249,7 @@ mod tests {
         let evidence = evaluate_controls(&[refusal(3, 2)]).expect("evaluates");
         let verdict = &evidence.controls[0];
         let preimage = control_preimage(verdict).expect("the inventory and the renderer agree");
-        let text = String::from_utf8(preimage).expect("the preimage is text here");
+        let text = String::from_utf8_lossy(&preimage);
 
         for field in SUITE_CONTROL_INVENTORY.fields_for(DigestId::RunProvenance) {
             assert!(

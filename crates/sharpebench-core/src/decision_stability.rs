@@ -72,11 +72,19 @@
 //!
 //! # Copies
 //!
-//! A replicate carries an identity of its recorded content. Two replicates of
-//! one window with equal identities agree by construction if one is a copy of
-//! the other, so the report counts them and refuses them unless the caller
-//! declares that they are separate executions (a deterministic agent captured
-//! twice produces equal content).
+//! A replicate carries an identity of the content this comparison reads:
+//! [`decision_content_sha256`] covers the run's execution seed, each step's
+//! observation digest and the fields of [`same_decision`], and nothing else. Two
+//! replicates of one window
+//! with equal identities agree by construction if one is a copy of the other, so
+//! the report counts them and refuses them unless the caller declares that they
+//! are separate executions (a deterministic agent captured twice produces equal
+//! content). A digest of the whole record would miss a copy with one character
+//! of `reasoning` edited, which changes no comparison. The seed stays in because
+//! it names the execution: seeds of one capture are separate runs even where
+//! they moved no fill and the decisions came out equal. A copy relabelled with
+//! another seed diverges on observations after its first seeded fill, so it can
+//! pass as a replicate only over steps where the seed moved nothing.
 //!
 //! # Rank neutrality
 //!
@@ -90,7 +98,7 @@ use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sharpebench_protocol::canonical::{versioned_preimage, CanonicalError, CANONICAL_JSON_VERSION};
-use sharpebench_protocol::{Decision, MarketObservation, Order};
+use sharpebench_protocol::{Action, Decision, MarketObservation, Order};
 
 /// Schema identifier of [`DecisionStabilityReport`].
 pub const DECISION_STABILITY_SCHEMA: &str = "sharpebench.decision-stability.v1";
@@ -170,6 +178,57 @@ fn same_number(left: f64, right: f64) -> bool {
     left == right || left.to_bits() == right.to_bits()
 }
 
+/// Domain of [`decision_content_sha256`].
+const DECISION_CONTENT_DOMAIN: &str = "sharpebench/decision-content/v1";
+
+/// A number's bits with `-0` read as `0`, so two numbers [`same_decision`] calls
+/// equal hash equal.
+fn comparison_bits(value: f64) -> u64 {
+    if value == 0.0 {
+        0
+    } else {
+        value.to_bits()
+    }
+}
+
+/// Lowercase hex SHA-256 of one run's execution seed and what the comparison
+/// reads from it, in step order: each observation digest, and each order's
+/// `symbol`, `action`, `target_weight` and `confidence` under
+/// [`DECISION_DIFFERENCE_RULE`]. Variable lengths are prefixed, so no two runs
+/// frame to the same bytes.
+pub fn decision_content_sha256(seed: u64, steps: &[ObservedDecision<'_>]) -> String {
+    let mut digest = Sha256::new();
+    let length = |digest: &mut Sha256, length: usize| digest.update((length as u64).to_le_bytes());
+    digest.update(DECISION_CONTENT_DOMAIN.as_bytes());
+    digest.update([0]);
+    digest.update(seed.to_le_bytes());
+    length(&mut digest, steps.len());
+    for step in steps {
+        length(&mut digest, step.observation_sha256.len());
+        digest.update(step.observation_sha256.as_bytes());
+        length(&mut digest, step.decision.orders.len());
+        for order in &step.decision.orders {
+            length(&mut digest, order.symbol.len());
+            digest.update(order.symbol.as_bytes());
+            digest.update([match order.action {
+                Action::Buy => 0,
+                Action::Sell => 1,
+                Action::Hold => 2,
+                Action::Close => 3,
+            }]);
+            digest.update(comparison_bits(order.target_weight).to_le_bytes());
+            match order.confidence {
+                Some(confidence) => {
+                    digest.update([1]);
+                    digest.update(comparison_bits(confidence).to_le_bytes());
+                }
+                None => digest.update([0]),
+            }
+        }
+    }
+    crate::lower_hex(&digest.finalize())
+}
+
 /// One recorded decision and the digest of the observation it answered.
 #[derive(Clone, Debug)]
 pub struct ObservedDecision<'a> {
@@ -184,7 +243,7 @@ pub struct ReplicateRun<'a> {
     pub window_start: usize,
     /// Exclusive window end.
     pub window_end: usize,
-    /// Identity of the run's recorded content, such as a digest of its bytes.
+    /// Identity of the run's content, as [`decision_content_sha256`] gives it.
     /// Two runs of one window with equal identities are counted as identical
     /// replicates.
     pub content_sha256: String,
@@ -574,6 +633,80 @@ fn decision_classes<'a>(
 mod tests {
     use super::*;
     use sharpebench_protocol::{Action, DecisionCost, PositionState, SymbolSnapshot};
+
+    /// The identity moves exactly when the comparison can see a difference.
+    #[test]
+    fn the_content_identity_reads_what_the_comparison_reads() {
+        let key = |decision: &Decision, observation: &str| {
+            decision_content_sha256(
+                0,
+                &[ObservedDecision {
+                    observation_sha256: observation.to_string(),
+                    decision,
+                }],
+            )
+        };
+        let base = decision(vec![order("AAA", Action::Buy, 0.0, 0.5)]);
+        let digest = key(&base, "o");
+
+        let mut unread = base.clone();
+        unread.reasoning = "edited".to_string();
+        unread.orders[0].rationale = "edited".to_string();
+        unread.cost = Some(DecisionCost::default());
+        unread.orders[0].target_weight = -0.0;
+        assert!(same_decision(&base, &unread));
+        assert_eq!(key(&unread, "o"), digest);
+
+        let mut unstated = base.clone();
+        unstated.orders[0].confidence = None;
+        let moved = |change: fn(&mut Order)| {
+            let mut changed = base.clone();
+            change(&mut changed.orders[0]);
+            assert!(!same_decision(&base, &changed));
+            key(&changed, "o")
+        };
+        for other in [
+            decision_content_sha256(
+                1,
+                &[ObservedDecision {
+                    observation_sha256: "o".to_string(),
+                    decision: &base,
+                }],
+            ),
+            key(&base, "p"),
+            key(&unstated, "o"),
+            key(&decision(Vec::new()), "o"),
+            moved(|order| order.symbol = "BBB".to_string()),
+            moved(|order| order.action = Action::Sell),
+            moved(|order| order.target_weight = 0.25),
+            moved(|order| order.confidence = Some(0.75)),
+        ] {
+            assert_ne!(other, digest);
+        }
+    }
+
+    /// A confidence at either end of `[0, 1]` hashes as a stated value, apart
+    /// from an unstated one, and `-0` hashes as `0` because the comparison reads
+    /// them as equal.
+    #[test]
+    fn the_content_identity_holds_confidence_at_its_boundary_values() {
+        let key = |confidence: Option<f64>| {
+            let mut stated = order("AAA", Action::Buy, 0.5, 0.0);
+            stated.confidence = confidence;
+            decision_content_sha256(
+                0,
+                &[ObservedDecision {
+                    observation_sha256: "o".to_string(),
+                    decision: &decision(vec![stated]),
+                }],
+            )
+        };
+        let (zero, one, unstated) = (key(Some(0.0)), key(Some(1.0)), key(None));
+        assert_ne!(zero, unstated);
+        assert_ne!(one, unstated);
+        assert_ne!(zero, one);
+        assert_eq!(key(Some(-0.0)), zero);
+    }
 
     fn order(symbol: &str, action: Action, target_weight: f64, confidence: f64) -> Order {
         Order {

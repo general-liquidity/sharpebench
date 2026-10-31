@@ -2354,4 +2354,198 @@ mod tests {
             other => panic!("expected an estimate, got {other:?}"),
         }
     }
+
+    fn priced(usd_nanos: u128) -> Settlement {
+        Settlement::Priced {
+            input_tokens: 1,
+            output_tokens: 1,
+            usd_nanos: usd_nanos.to_string(),
+        }
+    }
+
+    /// A price equal to its reservation overspends nothing, and committed money
+    /// equal to the ceiling has reached it without passing it.
+    #[test]
+    fn a_price_on_its_reservation_and_a_total_on_the_ceiling_are_not_breaches() {
+        let mut journal = GatewayJournal::new(identity(budget(400, 8)));
+        let ordinal = journal.reserve("alias", &card(1, 1), 400);
+        journal.settle(ordinal, priced(400));
+        assert_eq!(journal.spend().overspent_calls, 0);
+        assert!(!journal.ceiling_breached());
+    }
+
+    #[test]
+    fn an_assigned_identity_is_kept_and_read_back() {
+        let mut journal = GatewayJournal::new(identity(budget(400, 8)));
+        let assigned = journal.ensure_journal_id();
+        assert_eq!(journal.journal_id(), Some(assigned.as_str()));
+        assert_eq!(journal.ensure_journal_id(), assigned);
+    }
+
+    #[test]
+    fn only_a_plain_bounded_hex_token_is_an_identity() {
+        let of = |id: &str| journal_id_in(format!(r#"{{"journal_id":"{id}"}}"#).as_bytes());
+        let longest = "a".repeat(64);
+        assert_eq!(of(&longest).as_deref(), Some(longest.as_str()));
+        for refused in ["", "not-hex", "../up"] {
+            assert_eq!(of(refused), None, "{refused:?}");
+        }
+        assert_eq!(of(&"a".repeat(65)), None);
+    }
+
+    /// A journal padded to exactly 16 MiB is read and saved over; one byte more
+    /// is refused by both. The JSON is unchanged, so size is the only difference.
+    #[test]
+    fn a_journal_of_exactly_sixteen_mib_loads_and_saves_and_one_byte_more_does_neither() {
+        const SIXTEEN_MIB: usize = 16 * 1024 * 1024;
+        let dir = lock_dir("sizebound");
+        let path = dir.join("journal.json");
+        let identity = identity(budget(1_000, 8));
+        let mut original = GatewayJournal::new(identity.clone());
+        original.ensure_journal_id();
+        original.save(&path).expect("the first save");
+        let bytes = std::fs::read(&path).expect("the saved document");
+        let pad = |len: usize| {
+            let mut padded = bytes.clone();
+            padded.resize(len, b' ');
+            std::fs::write(&path, padded).expect("the padded document");
+        };
+
+        pad(SIXTEEN_MIB);
+        let mut snapshot = GatewayJournal::load_bound(&path, &identity).expect("at the limit");
+        let mut second = GatewayJournal::load_bound(&path, &identity).expect("at the limit");
+        snapshot
+            .save(&path)
+            .expect("a save over a document at the limit");
+
+        pad(SIXTEEN_MIB + 1);
+        let refused = GatewayJournal::load_bound(&path, &identity).expect_err("over the limit");
+        assert_eq!(refused.kind(), std::io::ErrorKind::InvalidData);
+        match second.save(&path) {
+            Err(JournalSaveError::Io(error)) => {
+                assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+            }
+            other => panic!("expected the size refusal, got {other:?}"),
+        }
+    }
+
+    /// The temporary file belongs beside the journal: a directory squatting on
+    /// that one name is what makes this write fail, and a failed write must
+    /// leave the snapshot comparing against what is still on disk.
+    #[test]
+    fn a_failed_write_keeps_the_version_and_a_later_save_succeeds() {
+        let dir = lock_dir("failedwrite");
+        let path = dir.join("journal.json");
+        let mut journal = GatewayJournal::new(identity(budget(1_000, 8)));
+        journal.ensure_journal_id();
+        journal.save(&path).expect("the first save");
+        let version = journal.version();
+
+        let blocker = dir.join(&format!("journal.json.{}.tmp", std::process::id()));
+        std::fs::create_dir(&blocker).expect("the blocking directory");
+        assert!(matches!(journal.save(&path), Err(JournalSaveError::Io(_))));
+        assert_eq!(journal.version(), version);
+
+        std::fs::remove_dir(&blocker).expect("the blocking directory goes");
+        journal
+            .save(&path)
+            .expect("the save after the fault cleared");
+        assert_eq!(journal.version(), version + 1);
+    }
+
+    #[test]
+    fn a_path_with_no_filename_is_refused_without_moving_the_version() {
+        let mut journal = GatewayJournal::new(identity(budget(1_000, 8)));
+        match journal.save(Path::new("")) {
+            Err(JournalSaveError::Io(error)) => {
+                assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+            }
+            other => panic!("expected the filename refusal, got {other:?}"),
+        }
+        assert_eq!(journal.version(), 0);
+    }
+
+    #[test]
+    fn a_lock_on_a_path_with_no_document_covers_no_document() {
+        let dir = lock_dir("nodocument");
+        let lock = JournalLock::acquire(&dir.join("journal.json")).expect("the lock");
+        assert!(!lock.covers_document());
+    }
+
+    #[test]
+    fn a_refusal_names_the_holder_and_says_so_when_it_cannot() {
+        let dir = lock_dir("holder");
+        let path = dir.join("journal.json");
+        let held = JournalLock::acquire(&path).expect("the first holder");
+        let holder = || match JournalLock::acquire(&path) {
+            Err(JournalLockError::Held { holder, .. }) => holder,
+            other => panic!("expected a refusal, got {:?}", other.map(|_| ())),
+        };
+        assert!(
+            holder().starts_with(&format!("pid {} since unix ms ", std::process::id())),
+            "{}",
+            holder()
+        );
+        std::fs::write(held.path(), b"not a lock").expect("the foreign document");
+        assert_eq!(
+            holder(),
+            "a holder whose lock document is not a gateway lock"
+        );
+    }
+
+    /// A lock that cannot be created for any reason but an existing lock is an
+    /// I/O failure. Calling it held would send the operator after a holder that
+    /// does not exist.
+    #[test]
+    fn a_lock_that_cannot_be_created_is_not_reported_as_held() {
+        let dir = lock_dir("noparent");
+        let refused = JournalLock::acquire(&dir.join("missing").join("journal.json"));
+        assert!(matches!(refused, Err(JournalLockError::Io(_))));
+    }
+
+    /// A directory at the lock path can be neither read as a lock nor removed
+    /// as one. That is not an absent lock.
+    #[test]
+    fn a_takeover_that_cannot_read_the_lock_is_not_told_nobody_holds_it() {
+        let dir = lock_dir("lockdir");
+        let path = dir.join("journal.json");
+        std::fs::create_dir(JournalLock::lock_path(&path).expect("a lock path"))
+            .expect("the directory");
+        assert!(matches!(
+            JournalLock::take_over(&path, "test"),
+            Err(JournalLockError::Io(_))
+        ));
+    }
+
+    #[test]
+    fn a_takeover_that_cannot_clear_the_identity_lock_is_an_io_failure() {
+        let dir = lock_dir("identitydir");
+        let path = dir.join("journal.json");
+        let mut journal = GatewayJournal::new(identity(budget(1_000, 8)));
+        let id = journal.ensure_journal_id();
+        journal.save(&path).expect("the document");
+        std::mem::forget(JournalLock::acquire(&path).expect("a holder that crashed"));
+
+        let identity_lock = JournalLock::identity_lock_path(&path, &id);
+        std::fs::remove_file(&identity_lock).expect("the identity lock goes");
+        std::fs::create_dir(&identity_lock).expect("a directory in its place");
+        assert!(matches!(
+            JournalLock::take_over(&path, "test"),
+            Err(JournalLockError::Io(_))
+        ));
+    }
+
+    #[test]
+    fn an_io_failure_keeps_its_cause_and_a_refusal_has_none() {
+        use std::error::Error as _;
+        let io = || std::io::Error::other("fixture");
+        assert!(JournalSaveError::Io(io()).source().is_some());
+        assert!(JournalSaveError::Unsynced(io()).source().is_some());
+        assert!(JournalLockError::Io(io()).source().is_some());
+        let conflict = JournalSaveError::Conflict {
+            expected: 1,
+            found: 2,
+        };
+        assert!(conflict.source().is_none());
+    }
 }

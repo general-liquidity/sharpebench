@@ -277,3 +277,61 @@ fn unavailable(
         rate_card_sha256: card.map(RateCard::digest),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sharpebench_protocol::DecisionCost;
+
+    fn card() -> RateCard {
+        RateCard::from_json(
+            br#"{"schema_version":"sharpebench.token-rate-card.v1","provider":"fixture",
+                "model":"model-a","revision":"test-1","input_usd_nanos_per_token":1,
+                "output_usd_nanos_per_token":1}"#,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn tokens_on_one_side_alone_are_a_priced_measurement() {
+        for (tokens_in, tokens_out) in [(7, 0), (0, 7)] {
+            let mut usage = AttemptUsage::new(card());
+            usage.observe(&Decision {
+                orders: vec![],
+                reasoning: String::new(),
+                cost: Some(DecisionCost {
+                    tokens_in,
+                    tokens_out,
+                    ..DecisionCost::default()
+                }),
+            });
+            assert!(usage.complete);
+            assert_eq!(usage.unpriced_decisions, 0);
+            assert_eq!(
+                (usage.input_tokens, usage.output_tokens),
+                (tokens_in, tokens_out)
+            );
+        }
+    }
+
+    #[test]
+    fn the_observer_reports_the_health_of_the_agent_it_wraps() {
+        struct Faulted(TransportHealth);
+        impl Agent for Faulted {
+            fn decide(&mut self, _: &MarketObservation) -> Decision {
+                unreachable!("only health is read")
+            }
+        }
+        impl TransportDiagnostics for Faulted {
+            fn health(&self) -> &TransportHealth {
+                &self.0
+            }
+        }
+        let mut inner = Faulted(TransportHealth {
+            transport_faults: 3,
+            ..TransportHealth::default()
+        });
+        let observed = UsageObservedAgent::new(&mut inner, &card());
+        assert_eq!(observed.health().transport_faults, 3);
+    }
+}

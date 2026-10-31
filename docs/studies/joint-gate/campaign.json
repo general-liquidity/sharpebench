@@ -1,0 +1,625 @@
+{
+  "contract": "sharpebench/joint-gate-campaign/v1",
+  "campaign_id": "joint-gate-validation-v1",
+  "master_seed": 2026103101,
+  "periods_per_year": 252.0,
+  "vol_per_period": 0.01,
+  "shard_replicates": 5,
+  "rules": [
+    {
+      "id": "R0-shipped",
+      "host_n": 50,
+      "dispersion_prior": 0.5,
+      "windows": 6,
+      "per_run_psr_bar": 0.9,
+      "dsr_bar": 0.95,
+      "reliability": {
+        "kind": "all_runs"
+      }
+    },
+    {
+      "id": "R1-three-windows",
+      "host_n": 50,
+      "dispersion_prior": 0.5,
+      "windows": 3,
+      "per_run_psr_bar": 0.75,
+      "dsr_bar": 0.95,
+      "reliability": {
+        "kind": "all_runs"
+      }
+    },
+    {
+      "id": "R2-pooled",
+      "host_n": 50,
+      "dispersion_prior": 0.5,
+      "windows": 1,
+      "per_run_psr_bar": 0.5,
+      "dsr_bar": 0.95,
+      "reliability": {
+        "kind": "all_runs"
+      }
+    },
+    {
+      "id": "R3-majority",
+      "host_n": 50,
+      "dispersion_prior": 0.5,
+      "windows": 6,
+      "per_run_psr_bar": 0.9,
+      "dsr_bar": 0.95,
+      "reliability": {
+        "kind": "at_least_share",
+        "share": 0.6666666666666666
+      }
+    },
+    {
+      "id": "R4-field-n",
+      "host_n": 12,
+      "dispersion_prior": 0.5,
+      "windows": 6,
+      "per_run_psr_bar": 0.75,
+      "dsr_bar": 0.95,
+      "reliability": {
+        "kind": "all_runs"
+      }
+    },
+    {
+      "id": "R5-low-prior",
+      "host_n": 50,
+      "dispersion_prior": 0.25,
+      "windows": 6,
+      "per_run_psr_bar": 0.75,
+      "dsr_bar": 0.95,
+      "reliability": {
+        "kind": "all_runs"
+      }
+    },
+    {
+      "id": "R6-field-n-low-prior-majority",
+      "host_n": 12,
+      "dispersion_prior": 0.25,
+      "windows": 6,
+      "per_run_psr_bar": 0.75,
+      "dsr_bar": 0.95,
+      "reliability": {
+        "kind": "at_least_share",
+        "share": 0.6666666666666666
+      }
+    },
+    {
+      "id": "R7-field-n-low-prior-three",
+      "host_n": 12,
+      "dispersion_prior": 0.25,
+      "windows": 3,
+      "per_run_psr_bar": 0.6,
+      "dsr_bar": 0.95,
+      "reliability": {
+        "kind": "all_runs"
+      }
+    },
+    {
+      "id": "R8-field-n-low-prior-pooled",
+      "host_n": 12,
+      "dispersion_prior": 0.25,
+      "windows": 1,
+      "per_run_psr_bar": 0.5,
+      "dsr_bar": 0.95,
+      "reliability": {
+        "kind": "all_runs"
+      }
+    },
+    {
+      "id": "R9-frontier",
+      "host_n": 12,
+      "dispersion_prior": 0.25,
+      "windows": 1,
+      "per_run_psr_bar": 0.5,
+      "dsr_bar": 0.8,
+      "reliability": {
+        "kind": "all_runs"
+      }
+    }
+  ],
+  "dgps": [
+    {
+      "id": "iid-normal",
+      "rho": 0.0,
+      "tail": {
+        "kind": "normal"
+      },
+      "garch": null,
+      "regime": null,
+      "shared_variance": 0.0
+    },
+    {
+      "id": "ar-minus-0.2",
+      "rho": -0.2,
+      "tail": {
+        "kind": "normal"
+      },
+      "garch": null,
+      "regime": null,
+      "shared_variance": 0.0
+    },
+    {
+      "id": "ar-0.2",
+      "rho": 0.2,
+      "tail": {
+        "kind": "normal"
+      },
+      "garch": null,
+      "regime": null,
+      "shared_variance": 0.0
+    },
+    {
+      "id": "ar-0.4",
+      "rho": 0.4,
+      "tail": {
+        "kind": "normal"
+      },
+      "garch": null,
+      "regime": null,
+      "shared_variance": 0.0
+    },
+    {
+      "id": "ar-0.6",
+      "rho": 0.6,
+      "tail": {
+        "kind": "normal"
+      },
+      "garch": null,
+      "regime": null,
+      "shared_variance": 0.0
+    },
+    {
+      "id": "student-t5",
+      "rho": 0.0,
+      "tail": {
+        "kind": "student_t",
+        "nu": 5
+      },
+      "garch": null,
+      "regime": null,
+      "shared_variance": 0.0
+    },
+    {
+      "id": "student-t3",
+      "rho": 0.0,
+      "tail": {
+        "kind": "student_t",
+        "nu": 3
+      },
+      "garch": null,
+      "regime": null,
+      "shared_variance": 0.0
+    },
+    {
+      "id": "garch-t5",
+      "rho": 0.0,
+      "tail": {
+        "kind": "student_t",
+        "nu": 5
+      },
+      "garch": {
+        "alpha": 0.08,
+        "beta": 0.9
+      },
+      "regime": null,
+      "shared_variance": 0.0
+    },
+    {
+      "id": "regime-break",
+      "rho": 0.0,
+      "tail": {
+        "kind": "normal"
+      },
+      "garch": null,
+      "regime": {
+        "stay_calm": 0.995,
+        "stay_stress": 0.98,
+        "calm_mean": 0.08,
+        "stress_vol_ratio": 2.0
+      },
+      "shared_variance": 0.0
+    },
+    {
+      "id": "composite",
+      "rho": 0.2,
+      "tail": {
+        "kind": "student_t",
+        "nu": 5
+      },
+      "garch": {
+        "alpha": 0.08,
+        "beta": 0.9
+      },
+      "regime": {
+        "stay_calm": 0.995,
+        "stay_stress": 0.98,
+        "calm_mean": 0.08,
+        "stress_vol_ratio": 2.0
+      },
+      "shared_variance": 0.0
+    },
+    {
+      "id": "shared-iid",
+      "rho": 0.0,
+      "tail": {
+        "kind": "normal"
+      },
+      "garch": null,
+      "regime": null,
+      "shared_variance": 0.5
+    },
+    {
+      "id": "shared-composite",
+      "rho": 0.2,
+      "tail": {
+        "kind": "student_t",
+        "nu": 5
+      },
+      "garch": {
+        "alpha": 0.08,
+        "beta": 0.9
+      },
+      "regime": {
+        "stay_calm": 0.995,
+        "stay_stress": 0.98,
+        "calm_mean": 0.08,
+        "stress_vol_ratio": 2.0
+      },
+      "shared_variance": 0.5
+    }
+  ],
+  "statistical": [
+    {
+      "id": "null-grid",
+      "role": "primary_null",
+      "replicates": 4141,
+      "dgps": [
+        "iid-normal",
+        "ar-minus-0.2",
+        "ar-0.2",
+        "ar-0.4",
+        "ar-0.6",
+        "student-t5",
+        "student-t3",
+        "garch-t5",
+        "regime-break",
+        "composite",
+        "shared-iid",
+        "shared-composite"
+      ],
+      "history_bars": [
+        2520,
+        5040
+      ],
+      "effects_annual": [
+        0.0
+      ],
+      "rules": [
+        "R0-shipped",
+        "R1-three-windows",
+        "R2-pooled",
+        "R3-majority",
+        "R4-field-n",
+        "R5-low-prior",
+        "R6-field-n-low-prior-majority",
+        "R7-field-n-low-prior-three",
+        "R8-field-n-low-prior-pooled",
+        "R9-frontier"
+      ],
+      "field_size": 12,
+      "execution_seeds": 8,
+      "seed_noise_eta": 0.1,
+      "block_probs": [
+        0.1
+      ],
+      "seed_paths": [
+        "average"
+      ]
+    },
+    {
+      "id": "power-10y",
+      "role": "primary_power",
+      "replicates": 4141,
+      "dgps": [
+        "iid-normal",
+        "ar-0.2",
+        "composite"
+      ],
+      "history_bars": [
+        2520
+      ],
+      "effects_annual": [
+        1.5,
+        2.0
+      ],
+      "rules": [
+        "R0-shipped",
+        "R1-three-windows",
+        "R2-pooled",
+        "R3-majority",
+        "R4-field-n",
+        "R5-low-prior",
+        "R6-field-n-low-prior-majority",
+        "R7-field-n-low-prior-three",
+        "R8-field-n-low-prior-pooled",
+        "R9-frontier"
+      ],
+      "field_size": 12,
+      "execution_seeds": 8,
+      "seed_noise_eta": 0.1,
+      "block_probs": [
+        0.1
+      ],
+      "seed_paths": [
+        "average"
+      ]
+    },
+    {
+      "id": "power-20y",
+      "role": "primary_power",
+      "replicates": 4141,
+      "dgps": [
+        "iid-normal",
+        "ar-0.2",
+        "composite"
+      ],
+      "history_bars": [
+        5040
+      ],
+      "effects_annual": [
+        1.0,
+        1.25
+      ],
+      "rules": [
+        "R0-shipped",
+        "R1-three-windows",
+        "R2-pooled",
+        "R3-majority",
+        "R4-field-n",
+        "R5-low-prior",
+        "R6-field-n-low-prior-majority",
+        "R7-field-n-low-prior-three",
+        "R8-field-n-low-prior-pooled",
+        "R9-frontier"
+      ],
+      "field_size": 12,
+      "execution_seeds": 8,
+      "seed_noise_eta": 0.1,
+      "block_probs": [
+        0.1
+      ],
+      "seed_paths": [
+        "average"
+      ]
+    },
+    {
+      "id": "power-curves",
+      "role": "sensitivity",
+      "replicates": 805,
+      "dgps": [
+        "iid-normal",
+        "composite"
+      ],
+      "history_bars": [
+        2520,
+        5040
+      ],
+      "effects_annual": [
+        0.5,
+        0.75,
+        1.0,
+        1.25,
+        1.5,
+        2.0,
+        3.0,
+        6.0
+      ],
+      "rules": [
+        "R0-shipped",
+        "R1-three-windows",
+        "R2-pooled",
+        "R3-majority",
+        "R4-field-n",
+        "R5-low-prior",
+        "R6-field-n-low-prior-majority",
+        "R7-field-n-low-prior-three",
+        "R8-field-n-low-prior-pooled",
+        "R9-frontier"
+      ],
+      "field_size": 12,
+      "execution_seeds": 8,
+      "seed_noise_eta": 0.1,
+      "block_probs": [
+        0.1
+      ],
+      "seed_paths": [
+        "average"
+      ]
+    },
+    {
+      "id": "block-length",
+      "role": "sensitivity",
+      "replicates": 805,
+      "dgps": [
+        "iid-normal",
+        "ar-0.2",
+        "ar-0.6",
+        "garch-t5"
+      ],
+      "history_bars": [
+        2520
+      ],
+      "effects_annual": [
+        0.0,
+        2.0
+      ],
+      "rules": [
+        "R0-shipped",
+        "R8-field-n-low-prior-pooled"
+      ],
+      "field_size": 12,
+      "execution_seeds": 8,
+      "seed_noise_eta": 0.1,
+      "block_probs": [
+        0.025,
+        0.05,
+        0.1,
+        0.2
+      ],
+      "seed_paths": [
+        "average"
+      ]
+    },
+    {
+      "id": "seed-path",
+      "role": "sensitivity",
+      "replicates": 805,
+      "dgps": [
+        "iid-normal",
+        "composite"
+      ],
+      "history_bars": [
+        2520
+      ],
+      "effects_annual": [
+        0.0,
+        2.0
+      ],
+      "rules": [
+        "R0-shipped",
+        "R8-field-n-low-prior-pooled"
+      ],
+      "field_size": 12,
+      "execution_seeds": 8,
+      "seed_noise_eta": 0.5,
+      "block_probs": [
+        0.1
+      ],
+      "seed_paths": [
+        "average",
+        "per_seed"
+      ]
+    },
+    {
+      "id": "field-50",
+      "role": "sensitivity",
+      "replicates": 805,
+      "dgps": [
+        "iid-normal",
+        "composite",
+        "shared-composite"
+      ],
+      "history_bars": [
+        2520
+      ],
+      "effects_annual": [
+        0.0,
+        2.0
+      ],
+      "rules": [
+        "R0-shipped",
+        "R8-field-n-low-prior-pooled"
+      ],
+      "field_size": 50,
+      "execution_seeds": 8,
+      "seed_noise_eta": 0.1,
+      "block_probs": [
+        0.1
+      ],
+      "seed_paths": [
+        "average"
+      ]
+    }
+  ],
+  "integrity": [
+    {
+      "kind": "look_ahead_oracle",
+      "replicates": 657,
+      "history_bars": 2520,
+      "windows": 6,
+      "execution_seeds": 2,
+      "rule": "R0-shipped"
+    },
+    {
+      "kind": "fabrication",
+      "replicates": 657,
+      "history_bars": 2520,
+      "windows": 6,
+      "execution_seeds": 2,
+      "rule": "R0-shipped"
+    },
+    {
+      "kind": "process_violation",
+      "replicates": 657,
+      "history_bars": 2520,
+      "windows": 6,
+      "execution_seeds": 2,
+      "rule": "R0-shipped"
+    },
+    {
+      "kind": "mandate_breach",
+      "replicates": 657,
+      "history_bars": 2520,
+      "windows": 6,
+      "execution_seeds": 2,
+      "rule": "R0-shipped"
+    },
+    {
+      "kind": "constant_window_griefer",
+      "replicates": 657,
+      "history_bars": 2520,
+      "windows": 6,
+      "execution_seeds": 2,
+      "rule": "R0-shipped"
+    },
+    {
+      "kind": "dynamic_leverage",
+      "replicates": 657,
+      "history_bars": 2520,
+      "windows": 6,
+      "execution_seeds": 2,
+      "rule": "R0-shipped"
+    },
+    {
+      "kind": "cost_losing_random",
+      "replicates": 657,
+      "history_bars": 2520,
+      "windows": 6,
+      "execution_seeds": 2,
+      "rule": "R0-shipped"
+    },
+    {
+      "kind": "passive_beta",
+      "replicates": 657,
+      "history_bars": 2520,
+      "windows": 6,
+      "execution_seeds": 2,
+      "rule": "R0-shipped"
+    }
+  ],
+  "decision": {
+    "whole_field_limit": 0.05,
+    "power_bound": 0.8,
+    "power_targets": [
+      {
+        "effect_annual": 2.0,
+        "history_bars": 2520
+      },
+      {
+        "effect_annual": 1.5,
+        "history_bars": 2520
+      },
+      {
+        "effect_annual": 1.25,
+        "history_bars": 5040
+      },
+      {
+        "effect_annual": 1.0,
+        "history_bars": 5040
+      }
+    ],
+    "detection_bound": 0.99
+  }
+}

@@ -520,6 +520,12 @@ fn print_census(report: &TestSplitCensusReport) {
         "declared censuses:     {} checked against the records before them",
         report.declared_censuses_verified
     );
+    if report.journal_chains_verified > 0 {
+        println!(
+            "journal chains:        {} recomputed from the lines before them",
+            report.journal_chains_verified
+        );
+    }
     println!("scope:                 {}", report.scope);
     println!("diagnostic only; never changes rank, eligibility, or any record's trial count");
     println!("\nTEST SPLITS");

@@ -41,7 +41,7 @@ workspace gains another public crate:
 3. Claim the name once with a narrowly scoped crates.io token using
    `cargo publish -p <new-crate>`.
 4. Configure the same GitHub trusted-publisher identity as the existing crates.
-5. Add it to the dependency-ordered publish loop and registry verification list
+5. Add it to `scripts/publish-order.txt`, which the publish loop and registry verification both read
    in `.github/workflows/release.yml`.
 6. Remove the local token and restore the OIDC-only path.
 

@@ -32,19 +32,21 @@ architecture sketch.
 
 ## Current engineering goal
 
-The active engineering work is the 2026-09-07 audit repair checklist at
-[`docs/audits/2026-09-07/IMPLEMENTATION.md`](audits/2026-09-07/IMPLEMENTATION.md),
-shared with SharpeArena and mirrored byte-for-byte there. It holds 100 rows in
-batches A to I, 69 of them closed as of 2026-09-08. Batches A, B, C, D and G are
-complete: the paper claims are corrected, the publish graph now refuses a
-release over a red CI run, runs are identified by key rather than by array
-position, and the producer and telemetry rows in D and G are closed. That
-checklist, not this page, is what an agent should pick up. [`AGENTS.md`](../AGENTS.md)
-carries the goal rules: no release, tag or force push, no new experiments, and
-published numerical evidence stays frozen.
+The active engineering work is the gap programme, shared with SharpeArena, and
+its goal is to close every row. [`AGENTS.md`](../AGENTS.md) carries the goal and
+its rules. No release or tag happens until the owner approves it at the end of
+the programme, there is no force push, and published numerical evidence stays
+frozen. A declared, protocol-frozen experiment may run once the owner approves
+it, and its result is published beside the frozen evidence.
 
-The items below are separate: they need external infrastructure or a product
-decision, and none of them is part of the repair goal.
+The audit ledgers are finished records, not schedules. The
+[2026-09-07 checklist](audits/2026-09-07/IMPLEMENTATION.md) is a completed
+checkpoint, and rows G01 to G34 of the
+[2026-09-09 ledger](audits/2026-09-09/IMPLEMENTATION.md) are closed.
+
+The latest tag is `v0.28.0`, and SharpeArena pins `=0.28.0`. Work listed under
+`[Unreleased]` in [`CHANGELOG.md`](../CHANGELOG.md) reaches SharpeArena only
+through a Bench release and a pin update.
 
 ## Remaining product work
 

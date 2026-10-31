@@ -107,6 +107,34 @@ material. The vocabulary is closed:
 | `decision_request_limit` | The 33rd request while answering one observation; it never reaches the provider |
 | `response_withheld` | The answer carried host material and was withheld; the call is still charged |
 
+The sentence each kind carries, which `tests/gateway_error_vocabulary.rs` holds
+equal to `GatewayErrorKind::detail`:
+
+| Kind | Detail |
+|---|---|
+| `request_too_large` | the request line exceeded the accepted size |
+| `malformed_request` | the request was not a valid gateway request |
+| `forbidden_field` | the request named a host-owned field |
+| `unknown_protocol` | the request declared an unsupported protocol |
+| `unknown_model_alias` | the model alias is not published by this host |
+| `too_many_messages` | the request carried too many messages |
+| `message_too_large` | a message exceeded the accepted size |
+| `too_many_tools` | the request carried too many tools |
+| `tool_payload_too_large` | a tool payload exceeded the accepted size |
+| `output_tokens_out_of_range` | the requested output length is outside the bound |
+| `budget_exhausted` | the sweep money budget is exhausted |
+| `call_limit_exhausted` | the sweep call budget is exhausted |
+| `concurrency_limit` | too many calls are already in flight |
+| `shutting_down` | the gateway is shutting down |
+| `journal_unwritable` | the spend journal could not be made durable |
+| `journal_ownership_lost` | the spend journal is owned by another writer |
+| `provider_rate_limited` | the provider rejected the call |
+| `provider_unavailable` | the provider could not be reached |
+| `provider_timeout` | the provider did not answer within the bound |
+| `provider_response_invalid` | the provider answer could not be read |
+| `decision_request_limit` | the decision made too many gateway requests |
+| `response_withheld` | the answer carried host material and was withheld |
+
 **Whose clock.** An entrant has 30 seconds per decision. The time the host
 spends serving a gateway request is not the entrant's: the deadline moves out by
 exactly that time, so a slow provider does not become an entrant timeout. What
@@ -236,34 +264,42 @@ configuration would not support a run.
 
 ## Bounds
 
-Every bound is checked before the allocation it governs. Defaults come from
-`GatewayLimits`.
+Defaults come from `GatewayLimits`. A bound does not always come before the
+memory it limits, so the last column says when each one is applied. "While
+reading" means the read stops at the bound and nothing past it is allocated.
+"Held" means the value was already in memory, under whichever earlier bound
+limited it, and only then measured. "Up front" means a check made before any
+money is reserved or any provider call starts, on a count rather than on memory.
 
-| What is bounded | To what |
-|---|---|
-| Request line, before parsing | 256 KiB |
-| Messages in one request | 1 to 64 |
-| Content of one message | 32 KiB |
-| Tool definitions in one request | 16 |
-| One tool payload (name plus schema) | 32 KiB |
-| Output tokens asked of a provider | 8192, and the route's own ceiling, whichever is smaller |
-| Input tokens reserved for framing the entrant never wrote | operator-set per route, required |
-| Provider response body | 1 MiB, an adapter obligation; the broker checks the length afterwards |
-| Model text handed back | 128 KiB |
-| Response line emitted | 256 KiB; an over-long line becomes a refusal |
-| Dispatches per entrant request | 1 plus 2 retries, for rate-limit, unavailable, timeout and invalid-response failures only |
-| Concurrent provider calls, across every entrant | 4 |
-| One provider socket read | 60 s, an adapter obligation the broker cannot check |
-| One dispatch, connect and all reads | 180 s, an adapter obligation; the broker refuses a late answer rather than cancelling the call |
-| Calls in the sweep, retries included | operator-set, required |
-| Money the sweep may commit | operator-set, required |
-| Gateway requests while answering one observation | 32; the next is a `decision_request_limit` refusal and never reaches the provider |
-| One entrant stdout line, request or decision | 8 MiB, the external-agent decision-line cap; a request is then held to the 256 KiB bound before it is parsed |
-| Entrant stdout per process, requests included | 64 MiB |
-| Entrant wall clock per decision | 30 s, net of the time the host spends serving its requests |
-| Journal read from disk | 16 MiB |
-| Route manifest read from disk | 256 KiB |
-| Rate card read from disk | 64 KiB |
+| What is bounded | To what | When it is applied |
+|---|---|---|
+| Request line, before parsing | 256 KiB | Held: the line was read under the 8 MiB stdout line cap and scanned for its protocol member without building a tree, then measured before JSON parsing builds anything from it |
+| Messages in one request | 1 to 64 | Held: after JSON parsing, before any reservation |
+| Content of one message | 32 KiB | Held: after JSON parsing, before any reservation |
+| Tool definitions in one request | 16 | Held: after JSON parsing, before any reservation |
+| One tool payload (name plus schema) | 32 KiB | Held: after JSON parsing, before any reservation |
+| Output tokens asked of a provider | 8192, and the route's own ceiling, whichever is smaller | Up front |
+| Input tokens reserved for framing the entrant never wrote | operator-set per route, required | When the route is built |
+| Provider response body | 1 MiB, an adapter obligation | Held: `ProviderOutcome::Answered` hands the broker a finished `Vec<u8>`, so the adapter has already allocated it. Over the bound it is settled as unknown cost, unparsed |
+| Model text handed back | 128 KiB | Held: after the body is parsed, under the body bound |
+| Response line emitted | 256 KiB; an over-long line becomes a refusal | Held: measured after encoding, and replaced before it is sent |
+| Dispatches per entrant request | 1 plus 2 retries, for rate-limit, unavailable, timeout and invalid-response failures only | Up front, before each retry |
+| Concurrent provider calls, across every entrant | 4 | Up front |
+| One provider socket read | 60 s, an adapter obligation the broker cannot check | Not applied by the broker |
+| One dispatch, connect and all reads | 180 s, an adapter obligation; the broker refuses a late answer rather than cancelling the call | Held: the answer is refused once it arrives late |
+| Calls in the sweep, retries included | operator-set, required | Up front |
+| Money the sweep may commit | operator-set, required | Up front, by the reservation |
+| Gateway requests while answering one observation | 32; the next is a `decision_request_limit` refusal and never reaches the provider | Held: the line was read, and is refused before the gateway parses it |
+| One entrant stdout line, request or decision | 8 MiB, the external-agent decision-line cap; a request is then held to the 256 KiB bound before it is parsed | While reading |
+| Entrant stdout per process, requests included | 64 MiB | Held: each complete line is counted once read, so the last line may pass the budget by up to the line cap before it is refused |
+| Entrant wall clock per decision | 30 s, net of the time the host spends serving its requests | While waiting for a line |
+| Journal read from disk | 16 MiB | While reading |
+| Route manifest read from disk | 256 KiB | While reading |
+| Rate card read from disk | 64 KiB | While reading; a card inside a route manifest is under the manifest's bound instead, and is measured held |
+
+A true streaming bound on the provider body would need the transport seam to
+hand the broker a reader rather than a buffer. It hands a buffer, and no
+networked adapter ships in this crate, so that bound stays the adapter's.
 
 The concurrency ceiling is held by the host and shared across every entrant's
 gateway, so it bounds the host's fan-out rather than any one entrant's
@@ -596,9 +632,10 @@ the gate checks that claim too.
 
 | Where | Tests | Covers |
 |---|---|---|
-| `crates/sharpebench-harness/src/gateway.rs` | 35 | forbidden fields by name, exact alias resolution, the host supplying destination, credential, revision and every bound, the envelope bounds, oversized, truncated, unparseable and unknown-field provider bodies, the shared permit pool, the reservation reaching disk before dispatch, hard money and call refusals starting no request, retries reconciled exactly once, absent usage as unknown rather than zero, framing overhead in the reservation, overspend stopping the sweep, one owner among racing gateways and a second gateway refused the journal the first owns, a settlement that cannot be persisted stopping the gateway, an unconfirmed durability published as unwritable rather than as lost ownership, a journal holding a settlement that never landed refused at reopen rather than resumed, a late answer refused and charged, resume without repricing, credential rotation excluded from identity, redaction and rank neutrality |
-| `crates/sharpebench-harness/src/gateway_journal.rs` | 23 | the fold, partial and unavailable totals, the `host_observed` label, an unsettled reservation charged rather than refunded, a released reservation still consuming a call, a sweep-bound journal resuming only under its sweep, and the ownership family: one holder per journal document, a second name for that document refused, a document written before it carried an identity owned on the identity derived from its bytes, a legacy document's identity resolved from a single read of it, a stale lock refused rather than broken, a takeover recording who it displaced, and the version check refusing the displaced holder's next write |
+| `crates/sharpebench-harness/src/gateway.rs` | 46 | forbidden fields by name, exact alias resolution, two routes each reserved and priced under the alias named, a reservation no route explains refused at reopen, the host supplying destination, credential, revision and every bound, the envelope bounds, oversized, truncated, unparseable and unknown-field provider bodies, the shared permit pool, the reservation reaching disk before dispatch, hard money and call refusals starting no request, retries reconciled exactly once, absent usage as unknown rather than zero, framing overhead in the reservation, overspend stopping the sweep, one owner among racing gateways and a second gateway refused the journal the first owns, a settlement that cannot be persisted stopping the gateway, an unconfirmed durability published as unwritable rather than as lost ownership, a journal holding a settlement that never landed refused at reopen rather than resumed, a late answer refused and charged, resume without repricing, credential rotation excluded from identity, redaction and rank neutrality |
+| `crates/sharpebench-harness/src/gateway_journal.rs` | 35 | the fold, partial and unavailable totals, the `host_observed` label, an unsettled reservation charged rather than refunded, a released reservation still consuming a call, a sweep-bound journal resuming only under its sweep, and the ownership family: one holder per journal document, a second name for that document refused, a document written before it carried an identity owned on the identity derived from its bytes, a legacy document's identity resolved from a single read of it, a stale lock refused rather than broken, a takeover recording who it displaced, and the version check refusing the displaced holder's next write |
 | `crates/sharpebench-harness/src/gateway_serve_tests.rs` | 13 | the serving loop on real OS pipes and one real child process: a call through the entrant's own pipe, a scored sweep with usage on the entrant's row, resume making no new calls, an interrupted sweep rerunning only unfinished cells, typed budget refusals, overlapping windows refused before a journal is written, the checkpoint and journal pair, gateway lines never read as decisions, the per-decision ceiling, host serving time excluded from the entrant clock, no credential in any launch, and host material withheld |
+| `crates/sharpebench-harness/tests/gateway_error_vocabulary.rs` | 2 | the detail sentence of every error kind held equal to this chapter, and the kind list held complete |
 | `crates/sharpebench-harness/tests/journal_ownership_review.rs` | 3 | the two journal-ownership findings of the [accounting review](https://github.com/general-liquidity/sharpebench/blob/main/docs/audits/2026-09-09/ACCOUNTING-REVIEW.md), through the public surface only: a holder releases the lock it holds and no other, and one journal document admits one gateway under either of two names, a document written before it carried an identity included |
 | `crates/sharpebench-harness/tests/finish_reason_accounting.rs` | 6 | stop-reason accounting: a length-stopped answer counted as `length`, the exact class vocabulary, refused and released calls in no class, the counts surviving the journal file, a journal written before the field reporting its answers as `unrecorded`, an unknown class refused at load, and a truncated sweep publishing its counts in `host_observed_usage` |
 | `crates/sharpebench-harness/tests/journal_schema_rollback.rs` | 6 | rollback safety for the class: the published version strings, a journal with no class staying v1 and passing an older binary's admission checks, the first recorded class writing v2, which those checks refuse and this binary resumes, a v1 journal that already holds classes written as v2 on its next save and not on load, unknown versions refused by both loaders, and a v2 journal keeping its route, budget and sweep binding |
