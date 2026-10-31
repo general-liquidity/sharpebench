@@ -33,6 +33,7 @@ mod lineage_cmd;
 mod regrade_cmd;
 mod replay_diagnostics_cmd;
 mod rescore_cmd;
+mod stress_replay_cmd;
 mod timing_luck_cmd;
 #[cfg(feature = "self-update")]
 mod update;
@@ -589,6 +590,9 @@ fn help() {
     println!("                       --benchmark-agent <id>: benchmark for relative-to-benchmark (default buy-and-hold)");
     println!("                       --suite-evidence: with --json, wrap the board as {{board, suite_evidence}} and");
     println!("                         carry the trial census and the control verdicts; the plain table always prints them");
+    println!("                       --stress-replay: replay every admitted row through the synthetic stress suite and mark,");
+    println!("                         beside the score, a row that loses more than the unlevered market there (a mitigation,");
+    println!("                         rank-neutral; crashes shaped unlike the stress set are not detected; relaunches --cmd/--http)");
     println!(
         "  sharpebench score <submissions.json>  rank a JSON field of pre-computed submissions"
     );
@@ -1093,38 +1097,30 @@ fn run_realism(args: &[String], json: bool) -> ExitCode {
 }
 
 fn run_stress(json: bool) -> ExitCode {
-    use sharpebench_sim::{Agent, BuyAndHold, CostModel, Dataset, Momentum, Window};
+    use sharpebench_sim::{Agent, BuyAndHold, Momentum};
 
-    let seeds: Vec<u64> = (0..6).collect();
-    let costs = CostModel::default();
     if !json {
         println!("SharpeBench — adversarial stress suite (contamination-masked, costs on)\n");
     }
     let mut scenarios: Vec<serde_json::Value> = Vec::new();
-    for (name, data) in Dataset::stress_suite(20_260_621) {
-        let masked = match data.masked() {
-            Ok(masked) => masked,
-            Err(error) => {
-                eprintln!("error: {error}");
-                return ExitCode::FAILURE;
-            }
-        };
-        let windows = [Window {
-            start: 20,
-            end: masked.len(),
-        }];
-        let bh = sharpebench_harness::run_agent(
-            "buy-and-hold",
-            &masked,
-            &windows,
-            &seeds,
-            costs,
-            || Box::new(BuyAndHold) as Box<dyn Agent>,
-        );
-        let mo =
-            sharpebench_harness::run_agent("momentum", &masked, &windows, &seeds, costs, || {
-                Box::new(Momentum::default()) as Box<dyn Agent>
+    // The declared stress set that `run --stress-replay` replays admitted rows through.
+    let stress_set = match sharpebench_harness::stress_replay::stress_scenarios() {
+        Ok(stress_set) => stress_set,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    for scenario in stress_set {
+        let (name, seeds, costs) = (scenario.name, &scenario.seeds, scenario.costs);
+        let (masked, windows) = (&scenario.data, &scenario.windows);
+        let bh =
+            sharpebench_harness::run_agent("buy-and-hold", masked, windows, seeds, costs, || {
+                Box::new(BuyAndHold) as Box<dyn Agent>
             });
+        let mo = sharpebench_harness::run_agent("momentum", masked, windows, seeds, costs, || {
+            Box::new(Momentum::default()) as Box<dyn Agent>
+        });
         let board = rank(
             &[bh, mo],
             &ScoreConfig {
@@ -2565,6 +2561,18 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
         }
     }
     let board = rank(&field, &cfg);
+    // Rank-neutral and opt-in: computed from the ranked board, attached beside it.
+    let stress = args.iter().any(|a| a == stress_replay_cmd::FLAG).then(|| {
+        let transport = stress_replay_cmd::ExternalTransport::from_args(args);
+        let label = external_accounting
+            .as_ref()
+            .map(|(label, _, _)| label.clone());
+        stress_replay_cmd::replay_admitted(
+            &board,
+            label.as_deref().zip(transport.as_ref()),
+            LUCK_FLOOR_AGENTS,
+        )
+    });
     // The controls run over the same dataset, windows and seeds the field was
     // scored on, and are bound to the board through `suite_evidence`, whose only
     // construction path refuses a control that is also a ranked entrant. The
@@ -2582,7 +2590,7 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
         }
     };
     if json {
-        let board_json = run_board_json(
+        let mut board_json = run_board_json(
             &board,
             external_accounting
                 .as_ref()
@@ -2595,6 +2603,9 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
                     cell_isolation: cell_isolation::of_entrant(label),
                 }),
         );
+        if let Some(replays) = &stress {
+            stress_replay_cmd::attach(&mut board_json, replays);
+        }
         // The board stays the whole document unless the evidence is asked for.
         // Wrapping it unconditionally would rename the top level of a machine
         // output every existing reader parses as an array, and the evidence is
@@ -2616,6 +2627,9 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
             }
         }
         print_board(&board);
+        if let Some(replays) = &stress {
+            stress_replay_cmd::print(replays);
+        }
         print_suite_evidence(&board, &evidence);
     }
     ExitCode::SUCCESS
