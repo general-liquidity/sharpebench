@@ -22,6 +22,18 @@ The three failure modes the ticket names:
   disposition between two entries without a rationale of its own, or ends on a
   disposition other than the row's current one.
 
+Every ``status_history`` entry also says who recorded it. ``recorded_by`` is an
+object whose ``kind`` is ``human`` or ``model`` with an ``id``, or ``unknown``
+when the history does not say, and ``independent`` is true only when the
+recorder is not the author of the change under review. An ``unknown`` recorder
+cannot be independent, because nothing shows who it was. Unknown recorders do
+not fail the check, but they are counted and printed, so they are never read as
+a human review that nobody recorded.
+
+An artifact recorded with zero bytes, or with the digest of the empty input, is
+refused unless the artifact declares ``"empty": true``: a matching digest of
+nothing proves only that the file is empty.
+
 Three further legs keep the register honest about itself: every source location
 must name a file that exists and a line inside it; the priority queue of headline
 claims stays under the generator's bound, so it remains a working list rather
@@ -85,6 +97,10 @@ REQUIRED_LIST_FIELDS = (
     "later_changes",
     "status_history",
 )
+
+RECORDER_KINDS = ("human", "model", "unknown")
+# SHA-256 of zero bytes. A row that records it is recording an empty file.
+EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 LOCATION = re.compile(r"^(?P<path>[^:]+):(?P<line>\d+)$")
@@ -178,6 +194,20 @@ def check_artifacts(row: dict, where: str, root: pathlib.Path, problems: list[st
             problems.append(f"{label}: {path} is not on disk")
             continue
         recorded = artifact.get("sha256")
+        declared_empty = artifact.get("empty") is True
+        if target.is_file() and not declared_empty:
+            if target.stat().st_size == 0:
+                problems.append(
+                    f"{label}: {path} is empty; an empty artifact supports no claim unless "
+                    f"the artifact declares \"empty\": true"
+                )
+                continue
+            if recorded == EMPTY_SHA256:
+                problems.append(
+                    f"{label}: the recorded digest is the digest of empty input; an empty "
+                    f"artifact supports no claim unless the artifact declares \"empty\": true"
+                )
+                continue
         if isinstance(recorded, str) and recorded:
             if target.is_dir():
                 problems.append(f"{label}: {path} is a directory and cannot carry a digest")
@@ -242,6 +272,7 @@ def check_status_history(row: dict, where: str, problems: list[str]) -> None:
             last_date = date
         if disposition not in DISPOSITIONS:
             problems.append(f"{label}: disposition {disposition!r} is not a defined value")
+        check_recorder(entry, label, problems)
         if not isinstance(rationale, str) or not rationale.strip():
             problems.append(f"{label}: no rationale recorded")
             rationale = None
@@ -261,6 +292,49 @@ def check_status_history(row: dict, where: str, problems: list[str]) -> None:
             f"{where}: status_history ends on {final.get('disposition')!r} but the row "
             f"records {row.get('disposition')!r}"
         )
+
+
+def check_recorder(entry: dict, label: str, problems: list[str]) -> None:
+    """Who recorded one history entry, and whether that recorder was independent."""
+    recorder = entry.get("recorded_by")
+    independent = entry.get("independent")
+    if not isinstance(independent, bool):
+        problems.append(f"{label}: 'independent' is missing or not a boolean")
+    if not isinstance(recorder, dict):
+        problems.append(f"{label}: 'recorded_by' is missing or not an object")
+        return
+    kind = recorder.get("kind")
+    if kind not in RECORDER_KINDS:
+        problems.append(
+            f"{label}: recorded_by.kind {kind!r} is not one of {', '.join(RECORDER_KINDS)}"
+        )
+        return
+    identifier = recorder.get("id")
+    if kind == "unknown":
+        if identifier is not None:
+            problems.append(f"{label}: an unknown recorder cannot carry an id")
+        if independent is True:
+            problems.append(
+                f"{label}: an unknown recorder cannot be independent, because nothing "
+                f"shows who recorded the entry"
+            )
+    elif not isinstance(identifier, str) or not identifier.strip():
+        problems.append(f"{label}: a {kind} recorder needs an id")
+
+
+def recorder_counts(rows: list[dict]) -> dict[str, int]:
+    """History entries by recorder kind, with entries whose kind is unreadable
+    counted as unknown rather than dropped."""
+    counts = {kind: 0 for kind in RECORDER_KINDS}
+    for row in rows:
+        history = row.get("status_history")
+        if not isinstance(history, list):
+            continue
+        for entry in history:
+            recorder = entry.get("recorded_by") if isinstance(entry, dict) else None
+            kind = recorder.get("kind") if isinstance(recorder, dict) else None
+            counts[kind if kind in RECORDER_KINDS else "unknown"] += 1
+    return counts
 
 
 def queue_bound() -> int:
@@ -372,7 +446,12 @@ def main() -> int:
             print(problem, file=sys.stderr)
         print(f"\nFAIL: {len(problems)} register problem(s)", file=sys.stderr)
         return 1
+    counts = recorder_counts(rows)
     print(f"OK: {len(rows)} register rows, every claim dispositioned")
+    print(
+        "status history recorders: "
+        f"{counts['human']} human, {counts['model']} model, {counts['unknown']} unknown"
+    )
     return 0
 
 
