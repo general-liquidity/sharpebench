@@ -135,6 +135,27 @@ is refused too. On returns alone it cannot be told from a track that never moved
 and a benchmark that admits the one admits the other. No frozen panel, golden or
 committed field contains such a track, so no published number moves.
 
+Samuelson's bound only proves a sign above a per-bar Sharpe of `(n - 1) / sqrt(n)`,
+5.3 at thirty bars, so it does not on its own refuse every track that never lost.
+A seller of tail insurance that drew no crash shows it: a premium of 2e-4 with
+noise of a quarter of it has a per-bar Sharpe of 4, never loses a bar, and was
+admitted alone and in fields (`grader-search`, 2026-10-30). The PSR's skewness
+and kurtosis terms cannot price it, because they are sample moments and the crash
+is not in the sample. So the kernel also asks the question directly: a track with
+no bar below zero in any window is refused with `must show an observed loss`. The
+test is a sign, it reads no constant, and rescaling does not move it.
+
+What no rule on the sample can do is refuse a tail seller that missed its crash
+and loses on ordinary bars. Conditional on no crash, its sample is a sample of its
+premium distribution, so any rule refuses it exactly as often as it refuses an
+honest track of that distribution (and no test of a mean has power above its size
+over every distribution with a finite mean, Bahadur and Savage 1956). A seller
+with a per-bar Sharpe near 1 loses on about one bar in six and stays admissible,
+as an honest Gaussian track of that Sharpe must. Extreme-value estimates of the
+loss tail do not help: they extrapolate from the losses in the sample, and the
+crash is not among them. A token loss posted on a fabricated series also passes:
+returns alone cannot tell it from a loss that was taken.
+
 An excluded agent is still scored, still
 ranked and still refused on its own terms. The exclusion runs before the clone
 collapse and before the field-size test, so a field that drops below

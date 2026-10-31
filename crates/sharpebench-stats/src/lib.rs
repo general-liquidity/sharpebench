@@ -57,6 +57,7 @@ pub mod agreement;
 pub mod deflated_sharpe;
 pub mod dissent;
 pub mod fdr;
+pub mod observed_loss;
 pub mod opt_in_diagnostics;
 pub mod paired_randomization;
 pub mod selection;
@@ -82,6 +83,7 @@ pub use dissent::{
     DEFAULT_MAX_LEVEL_DISSENT, DEFAULT_MAX_RANK_DISSENT,
 };
 pub use fdr::{benjamini_hochberg, fdr_verdict, FdrVerdict};
+pub use observed_loss::{shows_an_observed_loss, NO_OBSERVED_LOSS};
 pub use opt_in_diagnostics::{
     first_order_autocorrelation, manipulation_proof_performance,
     probabilistic_sharpe_ratio_autocorrelated, sharpe_standard_error_autocorrelated,
