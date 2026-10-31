@@ -3494,10 +3494,10 @@ fn print_board(board: &[CompositeScore]) {
     let certified = board.iter().any(|s| s.certification.is_some());
     let certified_header = if certified { " certified" } else { "" };
     println!(
-        "{:<4} {:<18} {:>9} {:>8} {:>7} {:>6} {:>9} {:>10}{mandate_header}{certified_header}",
+        "{:<4} {:<18} {:>9} {:>8} {:>11} {:>6} {:>9} {:>10}{mandate_header}{certified_header}",
         "#", "agent", "DSR", "PSR", "pass^k", "proc", "boot_p", "raw_ret"
     );
-    println!("{}", "-".repeat(80));
+    println!("{}", "-".repeat(84));
     for (i, s) in board.iter().enumerate() {
         let pos = if s.rank_eligible {
             format!("{}", i + 1)
@@ -3524,12 +3524,12 @@ fn print_board(board: &[CompositeScore]) {
             String::new()
         };
         println!(
-            "{:<4} {:<18} {:>9.4} {:>8.4} {:>7} {:>6} {:>9.4} {:>10.5}{mandate}{certification}",
+            "{:<4} {:<18} {:>9.4} {:>8.4} {:>11} {:>6} {:>9.4} {:>10.5}{mandate}{certification}",
             pos,
             truncate(&s.agent_id, 18),
             s.deflated_sharpe,
             s.psr,
-            yn(s.passed_k),
+            pass_k_cell(s),
             yn(s.process_ok),
             s.bootstrap_p,
             s.raw_mean_return,
@@ -3540,6 +3540,9 @@ fn print_board(board: &[CompositeScore]) {
         board.iter().filter(|s| s.rank_eligible).count(),
         board.len()
     );
+    for line in pass_floor_notes(board) {
+        println!("{line}");
+    }
     if declared {
         println!(
             "Declared mandates are reported beside the board verdict, never ranked against it: \
@@ -3547,6 +3550,51 @@ fn print_board(board: &[CompositeScore]) {
              is eligibility under this board's verdict, and # counts the latter only."
         );
     }
+}
+
+/// The pass^k cell: the verdict, then how many of the k runs passed.
+fn pass_k_cell(s: &CompositeScore) -> String {
+    match s.runs_passed {
+        Some(passed) => format!("{} {passed}/{}", yn(s.passed_k), s.runs_scored),
+        None => yn(s.passed_k).to_string(),
+    }
+}
+
+/// One line per window whose pass^k floor is out of practical reach, so an
+/// unpassable window reads apart from a field that failed. Windows are the
+/// field's shared cells, so the first row that reports floors speaks for all.
+fn pass_floor_notes(board: &[CompositeScore]) -> Vec<String> {
+    let Some(row) = board.iter().find(|s| !s.window_bars.is_empty()) else {
+        return Vec::new();
+    };
+    let bound = sharpebench_core::pass_floor::PASS_FLOOR_PLAUSIBLE_MAX_ANNUAL_SHARPE;
+    let mut notes: Vec<String> = row
+        .implausible_windows
+        .iter()
+        .map(|&w| {
+            let bars = row.window_bars.get(w).copied().unwrap_or(0);
+            match row.window_pass_floors.get(w).copied().flatten() {
+                Some(floor) => format!(
+                    "pass^k floor: window {w} ({bars} bars) needs an annualized Sharpe of \
+                     {floor:.2} per run to clear the per-run bar, above the plausibility \
+                     bound of {bound:.2}"
+                ),
+                None => format!(
+                    "pass^k floor: window {w} ({bars} bars) has no Sharpe ratio with which a \
+                     run clears the per-run bar"
+                ),
+            }
+        })
+        .collect();
+    if row.pass_k_floors_plausible == Some(false) {
+        notes.push(
+            "Under this board's pass mode pass^k needs a window listed above, so its NO is \
+             expected of almost any track: it says the window is out of practical reach, not \
+             only that the field failed."
+                .to_string(),
+        );
+    }
+    notes
 }
 
 fn yn(b: bool) -> &'static str {
@@ -3570,6 +3618,43 @@ fn truncate(s: &str, n: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The board prints how many of the k runs passed beside the verdict, and
+    /// a note for each window whose floor is out of practical reach, so an
+    /// unpassable window reads apart from a field that failed.
+    #[test]
+    fn the_board_prints_pass_counts_and_flags_unpassable_windows() {
+        let run = |n: usize, drift: f64| sharpebench_core::Run {
+            returns: (0..n)
+                .map(|i| drift + if i % 2 == 0 { 1.0 } else { -1.0 })
+                .collect(),
+            ..sharpebench_core::Run::default()
+        };
+        let sub = AgentSubmission {
+            agent_id: "mixed".into(),
+            runs: vec![run(250, 0.5), run(250, 0.0), run(78, 0.5)],
+            ..AgentSubmission::default()
+        };
+        let score = sharpebench_core::score_agent(&sub, &ScoreConfig::default());
+        assert_eq!(pass_k_cell(&score), "NO 2/3");
+        let notes = pass_floor_notes(std::slice::from_ref(&score));
+        assert_eq!(notes.len(), 2, "{notes:?}");
+        assert!(
+            notes[0].starts_with("pass^k floor: window 2 (78 bars)"),
+            "{notes:?}"
+        );
+        assert!(notes[0].contains("2.32"), "{notes:?}");
+        assert!(notes[1].contains("out of practical reach"), "{notes:?}");
+
+        let long = AgentSubmission {
+            agent_id: "long".into(),
+            runs: vec![run(250, 0.5), run(250, 0.5)],
+            ..AgentSubmission::default()
+        };
+        let score = sharpebench_core::score_agent(&long, &ScoreConfig::default());
+        assert_eq!(pass_k_cell(&score), "yes 2/2");
+        assert!(pass_floor_notes(&[score]).is_empty());
+    }
 
     #[test]
     fn attempt_metadata_preserves_failed_work_without_changing_the_board() {

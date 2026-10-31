@@ -4,6 +4,32 @@
     "deflated_sharpe": 0.9771319151979629,
     "psr": 0.9989067283995147,
     "passed_k": false,
+    "runs_passed": 2,
+    "window_bars": [
+      40,
+      40,
+      40,
+      40,
+      40,
+      40
+    ],
+    "window_pass_floors": [
+      3.2576472228400433,
+      3.2576472228400433,
+      3.2576472228400433,
+      3.2576472228400433,
+      3.2576472228400433,
+      3.2576472228400433
+    ],
+    "implausible_windows": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "pass_k_floors_plausible": false,
     "process_ok": true,
     "bootstrap_p": 0.008995502248875561,
     "raw_mean_return": 0.0003448997142150754,
@@ -69,6 +95,32 @@
     "deflated_sharpe": 0.5359195042040239,
     "psr": 0.8813785493416056,
     "passed_k": false,
+    "runs_passed": 0,
+    "window_bars": [
+      40,
+      40,
+      40,
+      40,
+      40,
+      40
+    ],
+    "window_pass_floors": [
+      3.2576472228400433,
+      3.2576472228400433,
+      3.2576472228400433,
+      3.2576472228400433,
+      3.2576472228400433,
+      3.2576472228400433
+    ],
+    "implausible_windows": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "pass_k_floors_plausible": false,
     "process_ok": true,
     "bootstrap_p": 0.09145427286356822,
     "raw_mean_return": 0.0002361501907804366,
@@ -134,6 +186,32 @@
     "deflated_sharpe": 0.0,
     "psr": 0.0,
     "passed_k": false,
+    "runs_passed": 0,
+    "window_bars": [
+      40,
+      40,
+      40,
+      40,
+      40,
+      40
+    ],
+    "window_pass_floors": [
+      3.2576472228400433,
+      3.2576472228400433,
+      3.2576472228400433,
+      3.2576472228400433,
+      3.2576472228400433,
+      3.2576472228400433
+    ],
+    "implausible_windows": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "pass_k_floors_plausible": false,
     "process_ok": true,
     "bootstrap_p": 1.0,
     "deflation_error": "returns must not be constant: a constant series has no Sharpe ratio",
@@ -197,6 +275,32 @@
     "deflated_sharpe": 0.0,
     "psr": 0.0,
     "passed_k": false,
+    "runs_passed": 0,
+    "window_bars": [
+      40,
+      40,
+      40,
+      40,
+      40,
+      40
+    ],
+    "window_pass_floors": [
+      3.2576472228400433,
+      3.2576472228400433,
+      3.2576472228400433,
+      3.2576472228400433,
+      3.2576472228400433,
+      3.2576472228400433
+    ],
+    "implausible_windows": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "pass_k_floors_plausible": false,
     "process_ok": true,
     "bootstrap_p": 1.0,
     "raw_mean_return": -0.0015689608916652571,

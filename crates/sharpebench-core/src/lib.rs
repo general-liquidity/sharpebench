@@ -52,6 +52,7 @@ pub mod evidence_coverage;
 pub mod forecast;
 pub mod greeks;
 pub mod oos;
+pub mod pass_floor;
 pub mod pass_k;
 pub mod percentile;
 pub mod process;

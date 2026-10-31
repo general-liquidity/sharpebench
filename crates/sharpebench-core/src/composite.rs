@@ -890,6 +890,34 @@ pub struct CompositeScore {
     /// refused on the same track, so `deflation_error` is then present.
     pub psr: f64,
     pub passed_k: bool,
+    /// How many of the per-run tests pass^k aggregates passed; k is
+    /// `runs_scored`. Reported beside the bool so a near miss reads apart from
+    /// a field that passed nothing. `None` in a score archived before the field
+    /// existed.
+    #[serde(default)]
+    pub runs_passed: Option<usize>,
+    /// Bars in each declared window (its shortest run), in window order.
+    #[serde(default)]
+    pub window_bars: Vec<usize>,
+    /// Per window, the annualized Sharpe a run of that length needs to clear
+    /// the per-run bar (see [`crate::pass_floor`]); `null` where no finite
+    /// floor exists.
+    #[serde(default)]
+    pub window_pass_floors: Vec<Option<f64>>,
+    /// Windows whose floor is out of practical reach (above
+    /// [`crate::pass_floor::PASS_FLOOR_PLAUSIBLE_MAX_ANNUAL_SHARPE`], or none),
+    /// by index. A NO from pass^k on such a window is the window's, not
+    /// necessarily the entrant's.
+    #[serde(default)]
+    pub implausible_windows: Vec<usize>,
+    /// Whether enough runs sit in windows with a plausible floor to meet the
+    /// count pass^k needs under the host's mode. False means pass^k asks for
+    /// an annualized Sharpe above the plausibility bound on some window it
+    /// needs: a NO is then expected of almost any track, and a yes means a run
+    /// cleared an unusually high bar. Reported, never a gate. `None` in a
+    /// score archived before the field existed.
+    #[serde(default)]
+    pub pass_k_floors_plausible: Option<bool>,
     pub process_ok: bool,
     /// Conservative 1.0 sentinel when `bootstrap_error` is present; in that case
     /// this is not an estimated p-value and eligibility is always false.
@@ -1455,6 +1483,8 @@ fn score_agent_with(
     // benchmark agent's run in the same cell.
     let per_run = per_run_passes(sub, benchmark, cfg);
     let passed_k = pass_k(&per_run, cfg.pass_mode);
+    let runs_passed = per_run.iter().filter(|passed| **passed).count();
+    let floors = crate::pass_floor::window_pass_floors(&sub.runs, cfg);
 
     // Process evidence covers every submitted run, including cells excluded
     // from the common-support comparison. A peer cannot erase a violation by
@@ -1736,6 +1766,16 @@ fn score_agent_with(
         deflated_sharpe: dsr,
         psr,
         passed_k,
+        runs_passed: Some(runs_passed),
+        window_bars: floors.iter().map(|w| w.bars).collect(),
+        window_pass_floors: floors.iter().map(|w| w.floor_annualized_sharpe).collect(),
+        implausible_windows: (0..floors.len())
+            .filter(|&i| !floors[i].plausible)
+            .collect(),
+        pass_k_floors_plausible: Some(crate::pass_floor::pass_k_floors_plausible(
+            &floors,
+            cfg.pass_mode,
+        )),
         process_ok,
         bootstrap_p,
         bootstrap_error,
