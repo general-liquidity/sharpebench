@@ -249,10 +249,7 @@ fn validate_redo(root: &Path, redo: &Redo) -> Result<Vec<PathBuf>, String> {
                 {
                     return Err("recovery window id differs from target".to_string());
                 }
-                let expected = crate::expected_window_schema(
-                    window.fault_plan_sha256.as_deref(),
-                    window.records_score_meaning(),
-                );
+                let expected = window.expected_schema();
                 let value: serde_json::Value =
                     serde_json::from_str(&entry.text).map_err(|e| e.to_string())?;
                 let expected_config = serde_json::to_value(crate::ScoreConfig::default())
@@ -277,6 +274,7 @@ fn validate_redo(root: &Path, redo: &Redo) -> Result<Vec<PathBuf>, String> {
                     );
                 }
                 window.check_expiry()?;
+                window.check_execution()?;
                 crate::validate_sha256("recovery scorer", &window.scorer_artifact_sha256)?;
                 if let Some(plan) = &window.fault_plan_sha256 {
                     crate::validate_sha256("recovery fault plan", plan)?;

@@ -33,12 +33,14 @@
 #![forbid(unsafe_code)]
 
 pub mod audit;
+pub mod execution;
 pub mod intake;
 mod persistence;
 pub mod sandbox;
 mod verify_certification;
 
 pub use audit::{forward_hindsight_oracle_case, FORWARD_HINDSIGHT_ORACLE};
+pub use execution::{ExecutionIdentity, ExecutionStatus, EXECUTION_IDENTITY_SCHEMA};
 pub use intake::{
     admit_entries, board_certifies, execution_matrix, is_reference_entrant,
     reference_entrant_digest, unnamed_entry, Admission, CapturedEntrant, DockerLauncher,
@@ -89,6 +91,9 @@ pub const LEGACY_COMPLETENESS_LIMIT: &str = "legacy arena: no published board re
 pub const EMPTY_COMPLETENESS_LIMIT: &str = "no published window and no signed head: the documents alone cannot show that nothing was published before; pin a head with --expect-head to check a known point";
 /// What a valid head still cannot establish from the documents alone.
 pub const ANCHORED_COMPLETENESS_LIMIT: &str = "signed head covers every published window; a rollback to an earlier head together with its windows is undetectable from the documents alone, so pin a head seen out of band with --expect-head";
+/// What `arena verify` cannot establish for a board whose header predates the
+/// execution identity but whose window replayed captures.
+pub const LEGACY_EXECUTION_LIMIT: &str = "the header predates the execution identity: its captures were replayed under the default cost model of the scorer artifact it names, which the documents do not bind";
 /// Canonical on-disk schema for a forward window. A version bump is required
 /// when the meaning or required fields of the frozen scoring record change.
 pub const WINDOW_SCHEMA_VERSION: u32 = 2;
@@ -119,14 +124,40 @@ pub const SCORED_WINDOW_SCHEMA_VERSION: u32 = 4;
 /// [`SCORED_WINDOW_SCHEMA_VERSION`] for a window opened under a fault plan.
 pub const SCORED_FAULTED_WINDOW_SCHEMA_VERSION: u32 = 5;
 
-/// The schema a window must carry given whether it names a fault plan and
-/// whether it records what its board means.
-fn expected_window_schema(fault_plan_sha256: Option<&str>, records_score_meaning: bool) -> u32 {
-    match (fault_plan_sha256.is_some(), records_score_meaning) {
-        (false, false) => WINDOW_SCHEMA_VERSION,
-        (true, false) => FAULTED_WINDOW_SCHEMA_VERSION,
-        (false, true) => SCORED_WINDOW_SCHEMA_VERSION,
-        (true, true) => SCORED_FAULTED_WINDOW_SCHEMA_VERSION,
+/// Schema of a scored window that records the [`ExecutionIdentity`] its
+/// captures were replayed under (`execution`).
+///
+/// The binaries that know [`SCORED_WINDOW_SCHEMA_VERSION`] include ones that
+/// do not refuse unknown keys. Under that version such a binary would load the
+/// record, drop `execution`, and write the window back without it, after which
+/// the published header names an identity the window file lacks and
+/// `verify_arena` fails the window for good. It does not know this version, so
+/// it refuses the record instead. A window that replayed nothing carries no
+/// identity and keeps the version it had.
+pub const EXECUTED_WINDOW_SCHEMA_VERSION: u32 = 6;
+
+/// [`EXECUTED_WINDOW_SCHEMA_VERSION`] for a window opened under a fault plan.
+pub const EXECUTED_FAULTED_WINDOW_SCHEMA_VERSION: u32 = 7;
+
+/// The schema a window must carry given whether it names a fault plan,
+/// whether it records what its board means, and whether it records the
+/// execution its captures were replayed under.
+fn expected_window_schema(
+    fault_plan_sha256: Option<&str>,
+    records_score_meaning: bool,
+    records_execution: bool,
+) -> u32 {
+    match (
+        fault_plan_sha256.is_some(),
+        records_score_meaning,
+        records_execution,
+    ) {
+        (false, _, true) => EXECUTED_WINDOW_SCHEMA_VERSION,
+        (true, _, true) => EXECUTED_FAULTED_WINDOW_SCHEMA_VERSION,
+        (false, false, false) => WINDOW_SCHEMA_VERSION,
+        (true, false, false) => FAULTED_WINDOW_SCHEMA_VERSION,
+        (false, true, false) => SCORED_WINDOW_SCHEMA_VERSION,
+        (true, true, false) => SCORED_FAULTED_WINDOW_SCHEMA_VERSION,
     }
 }
 
@@ -271,9 +302,41 @@ pub struct WindowState {
     /// binary that predates this field refuses the record on its status.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expired_at_epoch: Option<u64>,
+    /// What the captures were replayed under, recorded at scoring whenever the
+    /// revealed dataset was prepared for replay (`replay_dataset_sha256`), and
+    /// signed into the header. Omitted otherwise, and on every window scored
+    /// before the field existed. See [`EXECUTED_WINDOW_SCHEMA_VERSION`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution: Option<ExecutionIdentity>,
 }
 
 impl WindowState {
+    /// The schema version this record must carry.
+    fn expected_schema(&self) -> u32 {
+        expected_window_schema(
+            self.fault_plan_sha256.as_deref(),
+            self.records_score_meaning(),
+            self.execution.is_some(),
+        )
+    }
+
+    /// A recorded execution identity recomputes, and belongs to a window that
+    /// prepared a replay.
+    fn check_execution(&self) -> Result<(), String> {
+        let Some(execution) = &self.execution else {
+            return Ok(());
+        };
+        if self.replay_dataset_sha256.is_none() {
+            return Err(format!(
+                "window `{}` records an execution identity but replayed no capture",
+                self.id
+            ));
+        }
+        execution
+            .check(&self.scorer_artifact_sha256, &self.score_config)
+            .map_err(|error| format!("window `{}`: {error}", self.id))
+    }
+
     /// Nothing was ever entered, refused, revealed or scored.
     fn holds_no_entry(&self) -> bool {
         self.commitments.is_empty()
@@ -335,6 +398,7 @@ impl WindowState {
             scores: _,
             returns_provenance,
             expired_at_epoch: _,
+            execution: _,
         } = self;
         replay_dataset_sha256.is_some()
             || *supplied_returns_accepted
@@ -439,6 +503,12 @@ pub struct WindowHeader {
     /// existed.
     #[serde(default, skip_serializing_if = "is_false")]
     pub head_anchored: bool,
+    /// The window's `execution`: what its captures were replayed under.
+    /// Omitted when the window replayed nothing, and on every header signed
+    /// before the field existed, which keeps its legacy meaning
+    /// ([`ExecutionStatus::LegacyUnbound`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution: Option<ExecutionIdentity>,
 }
 
 /// The signed terminal anchor (`head.json`), rewritten by every publish in the
@@ -550,6 +620,12 @@ pub struct WindowVerification {
     /// The board is signed under the same verifying key as the rest of the
     /// arena (and the pinned key, when one is supplied).
     pub key_ok: bool,
+    /// How the board's execution is established. A bound identity that does
+    /// not recompute, or that names no replay, fails the window with
+    /// `execution_error`.
+    pub execution: ExecutionStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_error: Option<String>,
     /// Identity fields on which the signed header disagrees with the window
     /// file it publishes. Omitted when there are none, so a clean report
     /// serializes as it did before the check existed.
@@ -582,6 +658,8 @@ pub enum IdentityField {
     ReplayDatasetSha256,
     SuppliedReturnsAccepted,
     Certifying,
+    /// The [`ExecutionIdentity`], compared whole.
+    Execution,
 }
 
 impl IdentityField {
@@ -600,6 +678,7 @@ impl IdentityField {
             Self::ReplayDatasetSha256 => "replay_dataset_sha256",
             Self::SuppliedReturnsAccepted => "supplied_returns_accepted",
             Self::Certifying => "certifying",
+            Self::Execution => "execution",
         }
     }
 }
@@ -625,6 +704,14 @@ impl std::fmt::Display for IdentityMismatch {
             side(&self.window)
         )
     }
+}
+
+/// An execution identity as the mismatch report shows it: its canonical JSON,
+/// so a difference in any field is a difference here.
+fn execution_text(execution: Option<&ExecutionIdentity>) -> Result<Option<String>, String> {
+    execution
+        .map(|e| serde_json::to_string(e).map_err(|e| format!("serialize execution: {e}")))
+        .transpose()
 }
 
 /// Every identity field on which `header` and `window` disagree.
@@ -697,6 +784,11 @@ fn identity_mismatches(
             IdentityField::Certifying,
             header.certifying.map(|c| c.to_string()),
             window.certifying.map(|c| c.to_string()),
+        ),
+        (
+            IdentityField::Execution,
+            execution_text(header.execution.as_ref())?,
+            execution_text(window.execution.as_ref())?,
         ),
     ];
     Ok(pairs
@@ -892,8 +984,7 @@ impl Arena {
         entries: &mut Vec<persistence::Replacement>,
     ) -> Result<(), String> {
         for w in self.windows.values_mut() {
-            w.schema_version =
-                expected_window_schema(w.fault_plan_sha256.as_deref(), w.records_score_meaning());
+            w.schema_version = w.expected_schema();
         }
         for (id, w) in &self.windows {
             let existing = self.window_dir(id).join(WINDOW_FILE);
@@ -1000,8 +1091,7 @@ impl Arena {
         let mut windows = BTreeMap::new();
         for id in &state.window_order {
             let w = read_window_state(&dir.join(WINDOWS_DIR).join(id).join(WINDOW_FILE))?;
-            let expected_schema =
-                expected_window_schema(w.fault_plan_sha256.as_deref(), w.records_score_meaning());
+            let expected_schema = w.expected_schema();
             if w.schema_version != expected_schema {
                 return Err(format!(
                     "window `{id}` uses schema {}, expected {expected_schema} for a window with {}",
@@ -1021,6 +1111,7 @@ impl Arena {
                 validate_sha256("fault plan", plan)?;
             }
             w.check_expiry()?;
+            w.check_execution()?;
             windows.insert(id.clone(), w);
         }
         Ok(Self {
@@ -1241,7 +1332,7 @@ impl Arena {
             WindowState {
                 // An open window records nothing about a board yet; `save`
                 // re-derives this from the record before it is written.
-                schema_version: expected_window_schema(fault_plan_sha256.as_deref(), false),
+                schema_version: expected_window_schema(fault_plan_sha256.as_deref(), false, false),
                 id: id.to_string(),
                 commit_deadline,
                 data_reveal_epoch,
@@ -1260,6 +1351,7 @@ impl Arena {
                 scores: Vec::new(),
                 returns_provenance: BTreeMap::new(),
                 expired_at_epoch: None,
+                execution: None,
             },
         );
         self.state.window_order.push(id.to_string());
@@ -1478,6 +1570,7 @@ impl Arena {
         w.refusals.extend(admission.refusals);
         w.scores = scores.clone();
         w.returns_provenance = admission.returns_provenance;
+        w.execution = admission.execution;
         w.status = WindowStatus::Scoring;
         self.save()?;
         Ok(scores)
@@ -1533,6 +1626,7 @@ impl Arena {
             refusals: w.refusals.clone(),
             prev_final_signature,
             head_anchored: true,
+            execution: w.execution.clone(),
         };
         let rows: Vec<BoardRow> = w
             .scores
@@ -1623,6 +1717,18 @@ fn render_markdown(header: &WindowHeader, scores: &[CompositeScore], rows: &[Boa
             "Captures replayed against the parsed dataset `{replay}`.\n\n"
         ));
     }
+    if let Some(execution) = &header.execution {
+        let delay = execution.cost_profile.fixed_delay.map_or_else(
+            || "immediate execution".to_string(),
+            |sharpebench_leaderboard::FixedDelayProfile::Fifo { bars }| {
+                format!("a fixed {bars}-bar decision delay")
+            },
+        );
+        out.push_str(&format!(
+            "Replayed under execution SHA-256 `{}`: cost model `{}` with {delay}, engine {}.\n\n",
+            execution.execution_sha256, execution.cost_model_sha256, execution.engine_version
+        ));
+    }
     out.push_str("```\n");
     out.push_str(&sharpebench_leaderboard::render(scores));
     out.push_str("```\n");
@@ -1689,6 +1795,25 @@ fn read_signed_head(
         return Err(format!("{HEAD_FILE} has kind `{}`", head.kind));
     }
     Ok(head)
+}
+
+/// How `header` establishes its board's execution, and why it fails when it
+/// does. See [`ExecutionStatus`].
+fn execution_status(header: &WindowHeader) -> (ExecutionStatus, Option<String>) {
+    match (&header.execution, &header.replay_dataset_sha256) {
+        (Some(execution), Some(_)) => (
+            ExecutionStatus::Bound,
+            execution
+                .check(&header.scorer_artifact_sha256, &header.score_config)
+                .err(),
+        ),
+        (Some(_), None) => (
+            ExecutionStatus::Bound,
+            Some("the header binds an execution identity but replayed no capture".to_string()),
+        ),
+        (None, Some(_)) => (ExecutionStatus::LegacyUnbound, None),
+        (None, None) => (ExecutionStatus::NotReplayed, None),
+    }
 }
 
 /// Compare `head.json` with the published windows, as read from the documents.
@@ -1803,6 +1928,10 @@ pub fn verify_arena_expecting(
             .as_ref()
             .ok()
             .and_then(|header| verify_certification::certification_error(header, &board));
+        let (execution, execution_error) = match &header {
+            Ok(header) => execution_status(header),
+            Err(()) => (ExecutionStatus::NotReplayed, None),
+        };
         let (anchor_ok, detail) = match header {
             Ok(header) if header.kind != WINDOW_HEADER_KIND => {
                 (false, format!("unexpected header kind `{}`", header.kind))
@@ -1832,7 +1961,8 @@ pub fn verify_arena_expecting(
             && anchor_ok
             && key_ok
             && identity_mismatches.is_empty()
-            && certification_error.is_none();
+            && certification_error.is_none()
+            && execution_error.is_none();
         all_ok &= ok;
         let mut detail = if ok && detail.is_empty() {
             "ok".to_string()
@@ -1855,11 +1985,19 @@ pub fn verify_arena_expecting(
             }
             detail.push_str(&format!("certification mismatch: {error}"));
         }
+        if let Some(error) = &execution_error {
+            if !detail.is_empty() {
+                detail.push_str("; ");
+            }
+            detail.push_str(&format!("execution identity: {error}"));
+        }
         windows.push(WindowVerification {
             window_id: id.clone(),
             chain_ok,
             anchor_ok,
             key_ok,
+            execution,
+            execution_error,
             identity_mismatches,
             certification_error,
             detail,
