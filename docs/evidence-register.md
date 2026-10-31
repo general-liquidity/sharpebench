@@ -1481,7 +1481,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 **Source.** `paper/sections/05-experiments.tex:36`
 
 **Artifacts.**
-- `crates/sharpebench-stats/src/deflated_sharpe.rs`, sha256 `3e1e6c2c530abd1dd57e6c6a525b006545844c0bc1893c50dd37c10f9a042cef`, digest source: paper/evidence/provenance.json, carries the worked-example regression test
+- `crates/sharpebench-stats/src/deflated_sharpe.rs`, sha256 `bc4f817b1f1b04761ea7eec766570fabfec811e0871828805c84ac15380d115c`, digest source: paper/evidence/provenance.json, carries the worked-example regression test
 
 **Producer command.** cargo test -p sharpebench-stats worked_example (paper/sections/A-commands.tex)
 
@@ -1510,7 +1510,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 |---|---|---|
 | 2026-09-23 | still-applicable | Initial entry: The documented comparison is the commit-time regression test against the published example. |
 | 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
-| 2026-10-31 | still-applicable | Rechecked at the gap-closure integration: crates/sharpebench-stats/src/deflated_sharpe.rs moved, and the recorded digest is rebound to the integrated tree. The claim still holds there, so the disposition is unchanged. |
+| 2026-10-31 | still-applicable | Rechecked at the gap-closure integration: crates/sharpebench-stats/src/deflated_sharpe.rs moved, and the recorded digest is rebound to the integrated tree. The claim still holds there, so the disposition is unchanged. The digest was rebound again after unit tests for the observed-risk rule were added to the same file; the worked-example test is unchanged. |
 
 ### `SB-tab-eligibility`
 
