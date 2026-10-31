@@ -30,6 +30,18 @@ reported token/latency cost must be finite, and `alpha` must be finite and insid
 `(0, 1)`. `poisoning_report` applies the same finite-score, finite-cost and alpha
 checks to its clean and poisoned arms.
 
+`significant` requires both `lift_pvalue < alpha` and a lift of at least the
+declared minimum effect, recorded in the report as `minimum_effect` and, resolved
+to score units, `minimum_lift`. The paired bootstrap centers the per-task
+differences, so a lift that is identical on every task gets the smallest p-value
+the bootstrap can return however small it is, and a constant `1e-9` lift would
+otherwise read as significant. `ablation_report` applies 1% of the oracle ceiling
+gap. Outcome scores have no fixed unit in this crate, and the ceiling is the only
+scale it defines. When the oracle is no better than baseline that floor is
+undefined, `minimum_lift` is `None`, and the lift is not significant. Use
+`ablation_report_with_minimum_effect` to declare an absolute lift in score units
+or a different share of the ceiling.
+
 `fraction_of_ceiling` is `retrieval_lift / (mean(oracle) - mean(baseline))` and
 is floored at `0.0` whenever the oracle is no better than baseline. An oracle at
 or below the baseline has not established a ceiling, so no fraction of one was
