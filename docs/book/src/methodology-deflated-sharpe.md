@@ -105,7 +105,37 @@ collapse answers and it reaches the bar by a different route. Asking the
 question of each window closes that route: a submission qualifies only when at
 least one of its windows varies inside itself. A window that never traded is not
 on its own a refusal, because an agent that stands aside in one regime and
-trades in another is measured on the window that moves. An excluded agent is still scored, still
+trades in another is measured on the window that moves.
+
+Exact equality is not the whole refusal, because one unit in the last place steps
+over it. A window is also read as unmoved when its own moments prove that no bar
+of it reached zero. That is Samuelson's inequality: in a sample of `n`, every
+observation lies within `s * (n - 1) / sqrt(n)` of the mean, so when
+`|mean| / s > (n - 1) / sqrt(n)` the dispersion is a perturbation around a level
+and not a measurement of risk. The same question is asked again without the
+observation furthest from the median, because a flat window with one spike passes
+the bound and every statistic of it is one draw. A track with no window that
+survives both is refused with `must show observed risk`: no window contains
+a loss that its own moments allow. The threshold is a theorem about the sample, not a tuned constant,
+and it reads a ratio, so position size does not move it. Refusing a fenced vote instead was considered and not
+shipped: it would refuse a strong honest track far from its field, and it cannot
+see a track scored alone, where nobody is fenced. The rule catches near-constant
+tracks, a flat track with a spike in each window, a single trade per window, and
+windows that step between levels with jitter inside them. A discrete distribution
+with many bars away from its mode is not caught, and neither is an agent that
+trades twice in a window. On the committed goldens the only track with every
+window over the bound is the already-refused `hold`. It does not establish that a
+track below the bound has skill: a steady drift with a real dispersion is, on
+returns alone, what skill looks like.
+
+This is a scoring change after release 0.28.0, decided by the owner on
+2026-10-31. Its cost is stated rather than hidden: a genuine positive-drift
+track that never loses a bar in any window, such as a carry with a small wiggle,
+is refused too. On returns alone it cannot be told from a track that never moved,
+and a benchmark that admits the one admits the other. No frozen panel, golden or
+committed field contains such a track, so no published number moves.
+
+An excluded agent is still scored, still
 ranked and still refused on its own terms. The exclusion runs before the clone
 collapse and before the field-size test, so a field that drops below
 `min_field_for_measured_sr_std` once such tracks are removed falls back to the
@@ -133,8 +163,12 @@ admitted entrants; too few admitted votes cause their configured-prior fallback.
 Exclusion is not a scoring discount: an excluded entrant, and every member of
 the clone cluster its vote represents, keeps the dispersion computed with all
 qualifying votes before fencing. It cannot inherit the lighter admitted-field
-bar. The rule bounds an individual distant vote relative to the field's own
-spread, not against an absolute ceiling. Near-boundary votes retain influence;
+bar. Exclusion does not stop an entrant being admitted: a lone distant vote
+measures a bar of about `2 / sqrt(votes)` of its own Sharpe, so it clears the bar
+its own presence raised. That is intended for a strong honest track. A track that
+never moved is kept off the board by the refusal above, which runs before any vote
+is cast, not by this fence. The rule bounds an individual distant vote relative to
+the field's own spread, not against an absolute ceiling. Near-boundary votes retain influence;
 coalitions can change the median and scale. Small fields still use their prior.
 No admitted vote is winsorized or numerically replaced.
 
@@ -427,9 +461,10 @@ and no share.
 
 A share near 1 means the track's dispersion is almost all level differences
 between windows. That is the shape of a track whose every window is constant,
-which the kernel refuses as having no Sharpe ratio, and of its near relative the
-refusal cannot see: change one bar inside one window by 1e-12 and exact value
-equality clears, while the share still reads 1 to nine decimals. An honest
+which the kernel refuses as having no Sharpe ratio, and of its near relative:
+change one bar inside one window by 1e-12 and exact value equality clears, while
+the share still reads 1 to nine decimals. The kernel refuses that one too, because
+its other window is constant and the moved one rests on one observation. An honest
 traded track's dispersion sits inside its windows, and its share is near 0. For
 independent returns the expected share is about `(windows - 1) / (bars - 1)`,
 so short windows read higher. On the nine frozen panels, for the reference
@@ -444,9 +479,9 @@ in the pooled track.
 The diagnostic refuses nobody and changes no rank. It is published so that a
 gate on this shape, if one is ever wanted, can take its threshold from the
 distribution of the share across honest fields rather than from a number chosen
-in advance. A threshold chosen in advance would also refuse honest tracks that
-trade little in some regimes, which is why the refusal itself stays exact value
-equality.
+in advance. A threshold on this share would also refuse honest tracks that trade
+little in some regimes, which is why the refusal reads each window's own moments
+instead.
 
 **Autocorrelation-aware PSR.** The variance bracket is
 

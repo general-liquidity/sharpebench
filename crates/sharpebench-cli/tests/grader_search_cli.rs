@@ -1,8 +1,8 @@
 //! `sharpebench grader-search` through the real binary, on the fixed seed.
 //!
 //! The pins below are the search's current result, not a claim that the result
-//! is good. Near-constant tracks, autocorrelated zero-edge tracks and the rest
-//! are admitted today; the table says so, so that a change to any gate moves a
+//! is good. Autocorrelated zero-edge tracks and the rest are admitted today; the
+//! table says so, so that a change to any gate moves a
 //! pin and has to be looked at, in either direction.
 
 use std::process::{Command, Output};
@@ -126,6 +126,20 @@ fn a_constant_track_is_never_admitted() {
     assert_eq!(row("constant_track")["admitted_on_screen"], 0);
 }
 
+/// A track that never moved is refused however it was perturbed: no point of
+/// either grid gets through.
+#[test]
+fn a_track_that_never_moved_is_never_admitted() {
+    for name in ["near_constant", "single_observation"] {
+        assert_eq!(row(name)["admitted_on_screen"], 0, "{name}");
+    }
+    for finding in array(&doc()["findings"]) {
+        for variant in ["level_step_jitter", "last_bar_coin"] {
+            assert_ne!(finding["variant"], variant, "{finding}");
+        }
+    }
+}
+
 /// The fence holds: a vote outside it never costs an entrant eligibility, and
 /// the row says the griefer was not fenced when it sat inside.
 #[test]
@@ -204,17 +218,17 @@ fn the_fixed_seed_result_is_pinned() {
 
 const PINS: [(&str, u64, u64); 8] = [
     ("constant_track", 200, 0),
-    ("near_constant", 118, 118),
-    ("single_observation", 120, 73),
+    ("near_constant", 118, 0),
+    ("single_observation", 120, 0),
     ("autocorrelated", 120, 9),
     ("tail_seller", 120, 37),
-    ("leverage_timing", 120, 2),
-    ("window_boundary", 120, 67),
+    ("leverage_timing", 120, 1),
+    ("window_boundary", 120, 0),
     ("clone_threshold", 3384, 38),
 ];
-const STRUCTURAL: u64 = 8;
+const STRUCTURAL: u64 = 2;
 const DEMOTIONS: usize = 8;
-const DIGEST: &str = "2a5c27e19819a84b";
+const DIGEST: &str = "718f2633a03ae454";
 
 #[test]
 fn a_bad_invocation_is_refused() {

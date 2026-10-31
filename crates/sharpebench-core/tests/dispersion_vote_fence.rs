@@ -1,17 +1,15 @@
-//! A near-constant track no longer sets everybody else's deflation bar.
+//! A distant vote does not set everybody else's deflation bar.
 //!
-//! The attack is a track that never moved: one value repeated, with a 1e-12
-//! perturbation in each window so that no exact-value predicate recognizes it.
-//! Every window varies inside itself, so the windowed refusal passes it; the
-//! pooled Sharpe is then the level divided by the perturbation, near 1e10. That
-//! one vote became the whole field's measured Sharpe dispersion, the deflation
-//! bar followed it, and every honest entrant dropped from a deflated Sharpe of
-//! 1.0 and rank-eligible to 0.0 and not.
+//! The fence excludes a vote from the dispersion by its distance from the field,
+//! not by any property of its values, and leaves that entrant on the bar the
+//! field measures with its own vote in it, so being fenced is never a discount.
+//! It decides nothing else: a strong honest track outside it is still scored and
+//! can still be admitted.
 //!
-//! The fence excludes the vote from the dispersion by its distance from the
-//! field, not by any property of its values, and leaves the attacker on the bar
-//! the field measures with its own vote in it, so being fenced is never a
-//! discount.
+//! The near-constant track that motivated the fence no longer reaches it. Its
+//! windows are refused before any vote is cast (`near_constant_admission.rs`), so
+//! the first regression below pins the same outcome through the earlier door, and
+//! the fence's own behaviour is pinned on a strong track that does vote.
 
 use sharpebench_core::{rank, AgentSubmission, CompositeScore, Run, ScoreConfig};
 use sharpebench_stats::stats::std_dev;
@@ -112,9 +110,10 @@ fn the_honest_field_is_rank_eligible_before_the_attack() {
     }
 }
 
-/// The regression. Against the tree without the fence every one of these
-/// assertions fails: the honest bar moves from 0.09 to about 5e9, every honest
-/// deflated Sharpe goes to 0.0 and every honest entrant loses rank eligibility.
+/// The regression. Against a tree with neither the fence nor the refusal every
+/// one of these assertions fails: the honest bar moves from 0.09 to about 5e9,
+/// every honest deflated Sharpe goes to 0.0 and every honest entrant loses rank
+/// eligibility.
 #[test]
 fn a_near_constant_entrant_does_not_move_the_honest_bar() {
     let clean = rank(&honest_field(), &cfg());
@@ -144,48 +143,59 @@ fn a_near_constant_entrant_does_not_move_the_honest_bar() {
     }
 }
 
-/// Exclusion is not a discount: the fenced entrant keeps the bar the field
-/// measures with its own vote in it, which is the bar it had before the fence
-/// existed, and it is not rank-eligible on it.
+/// A strong honest track far outside the fence: about six per-period Sharpes
+/// beside a field that sits near one half. Its windows move, so it votes.
+fn strong_track(copy: usize) -> Vec<Vec<f64>> {
+    track(HONEST.len(), 6.0 + 0.01 * copy as f64)
+}
+
+/// Exclusion is not a discount and it is not a refusal: the fenced entrant keeps
+/// the bar the field measures with its own vote in it, and it is scored on it.
 #[test]
 fn the_fenced_entrant_keeps_the_bar_measured_with_its_own_vote() {
     let mut field = honest_field();
-    field.push(agent("near-constant", near_constant_track(0)));
+    field.push(agent("strong", strong_track(0)));
     let board = rank(&field, &cfg());
-    let attacker = row(&board, "near-constant");
+    let strong = row(&board, "strong");
     let honest = row(&board, "honest-0");
+    let clean = rank(&honest_field(), &cfg());
 
-    assert!(
-        attacker.trials_sr_std > 1e8,
-        "the fenced row carries the dispersion its own vote makes: {}",
-        attacker.trials_sr_std
+    assert_eq!(
+        honest.trials_sr_std.to_bits(),
+        row(&clean, "honest-0").trials_sr_std.to_bits(),
+        "the vote is outside the fence"
     );
     assert!(
-        attacker.trials_sr_std > honest.trials_sr_std,
+        strong.trials_sr_std > honest.trials_sr_std,
         "a fenced entrant must never be measured against a lighter bar than the field it was \
          excluded from"
     );
-    assert!(!attacker.rank_eligible, "{attacker:?}");
+    assert_eq!(strong.deflation_error, None, "fencing refuses nobody");
 }
 
-/// The clone collapse makes a flood of near-identical attackers one vote. That
-/// vote is fenced, and fencing it fences every stream it spoke for: otherwise
-/// one copy would carry the huge bar and the rest would inherit a bar measured
-/// without them.
+/// The clone collapse makes near-identical strong tracks one vote. That vote is
+/// fenced, and fencing it fences every stream it spoke for: otherwise one copy
+/// would carry the heavier bar and the rest would inherit a bar measured without
+/// them.
 #[test]
-fn a_flood_of_near_clone_attackers_is_fenced_whole() {
+fn a_flood_of_near_clones_is_fenced_whole() {
     let mut field = honest_field();
     for k in 0..3 {
-        field.push(agent(&format!("near-constant-{k}"), near_constant_track(k)));
+        field.push(agent(&format!("strong-{k}"), strong_track(k)));
     }
     let board = rank(&field, &cfg());
+    let clean = rank(&honest_field(), &cfg());
     let honest_bar = row(&board, "honest-0").trials_sr_std;
     assert!(honest_bar < 1.0, "the honest field still measures itself");
+    assert_eq!(
+        honest_bar.to_bits(),
+        row(&clean, "honest-0").trials_sr_std.to_bits(),
+        "the flood moved the honest bar"
+    );
     for k in 0..3 {
-        let id = format!("near-constant-{k}");
+        let id = format!("strong-{k}");
         let r = row(&board, &id);
-        assert!(r.trials_sr_std > 1e8, "{id}: {}", r.trials_sr_std);
-        assert!(!r.rank_eligible, "{id}");
+        assert!(r.trials_sr_std > honest_bar, "{id}: {}", r.trials_sr_std);
     }
 }
 

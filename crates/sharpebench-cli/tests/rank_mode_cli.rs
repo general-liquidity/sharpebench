@@ -52,7 +52,7 @@ fn field() -> Fixture {
         AgentSubmission, LifecycleStep, OrderId, Phase, ProcessEvent, Run, Subject, Trace,
     };
     let fx = Fixture::new();
-    let returns: Vec<f64> = (0..60).map(|i| 0.01 + 0.001 * (i as f64).sin()).collect();
+    let returns: Vec<f64> = (0..60).map(|i| 0.004 + 0.006 * (i as f64).sin()).collect();
     let step = |phase: Phase| {
         ProcessEvent::Lifecycle(LifecycleStep::new(
             Subject::Instrument("BTC".to_string()),

@@ -225,7 +225,7 @@ mod tests {
             runs: traces
                 .into_iter()
                 .map(|trace| Run {
-                    returns: (0..60).map(|i| 0.01 + 0.001 * (i as f64).sin()).collect(),
+                    returns: (0..60).map(|i| 0.004 + 0.006 * (i as f64).sin()).collect(),
                     trace,
                     ..Run::default()
                 })
