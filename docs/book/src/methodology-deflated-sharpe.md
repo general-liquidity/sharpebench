@@ -221,13 +221,18 @@ before the clip (`dispersion_before_clip`). Turning the clone defences off
 
 On the grader search's fixed seed, one vote at 0.5 to 0.995 of the fence beside
 six honest entrants used to take their bar from 0.21 to between 0.77 and 1.48
-per period depending on where it sat. With the bound every position measures
-0.61. The six honest entrants are still demoted on that fixture. Keeping all six
-eligible would need a reach of 1.38 robust scales, which clips 69% of honest
-seven-vote fields; keeping the strongest would need 3.17, which clips 3.2%. A
-single vote at an honest field's own 99th percentile is not distinguishable from
-an honest outlier by its value, so the bound stops at the influence an honest
-outlier already has.
+per period depending on where it sat. With the bound every one of those
+positions measures 0.61, and the six honest entrants are still not admitted. A
+vote placed inside the reach is not clipped and still raises the bar, because by
+its value it cannot be told apart from an honest outlier. A tighter bound does
+not repair that without clipping honest fields: on the same fixture all six
+honest entrants stay admitted only while the reach is at most 1.35 robust
+scales, which clips 72% of honest seven-vote fields, and the strongest one stays
+admitted only while it is at most 3.22, which clips about 3%. The bound
+therefore guarantees that where a vote sits past the reach does not change the
+bar; it does not stop a single dissimilar vote from inside the reach.
+Entrants-only voting, the independence weighting and the vote fence narrow
+that case and do not close it.
 
 On every committed producer the bound binds on no field: with the luck floor out
 of the sample, every committed field measures the same numbers with and without

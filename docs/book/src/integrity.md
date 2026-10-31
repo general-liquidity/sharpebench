@@ -39,6 +39,25 @@ stays refused. The cluster casts one dispersion vote, but all 207 visible
 submissions still count toward the observable trial floor and remain on the
 board.
 
+## Known limit: one vote inside an honest field's spread
+
+The measured dispersion is defended in four layers: only entrants vote (host
+controls such as the luck floor are scored but cast no vote), near-copies below
+the clone threshold are weighted by how independent they are, a vote beyond
+10.75 robust scales is fenced, and every admitted vote is clipped to the 99th
+percentile of the largest robust distance in an honest field, 4.12 robust scales
+at seven votes. One dissimilar vote placed inside that reach is not stopped by
+any of them, because by its value it cannot be told apart from an honest
+outlier. On the grader search's fixed-seed fixture (`sharpebench grader-search
+--seed 20261030`, move `dispersion_grief`) such a vote moves the honest bar from
+0.21 to 0.61 per period and removes all six honest admissions. Keeping all six
+admitted would need a reach of at most 1.35 robust scales, which clips 72% of
+honest seven-vote fields. The clip does guarantee that a vote anywhere past the
+reach measures the same bar, where the same fixture measured 0.77 to 1.48 before
+the clip, and it lowers no honest bar on any committed producer. See
+[the deflation chapter](methodology-deflated-sharpe.md) for the rule and its
+calibration.
+
 `sharpebench audit` fires a battery of known attacks at the live scorer and checks
 each is demoted:
 
