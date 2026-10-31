@@ -420,6 +420,18 @@ pub(crate) fn deflated_sharpe_ratio_of(
 mod tests {
     use super::*;
 
+    /// Samuelson's bound on its own: a level with a small wobble is forced to
+    /// one side of zero, a window with a losing bar is not, and one bar carries
+    /// no dispersion to compare with.
+    #[test]
+    fn sign_is_forced_only_when_the_mean_exceeds_samuelsons_bound() {
+        assert!(sign_is_forced_by_moments(&[1.0, 1.001, 0.999]));
+        assert!(sign_is_forced_by_moments(&[-1.0, -1.001, -0.999]));
+        assert!(!sign_is_forced_by_moments(&[0.02, -0.01, 0.015]));
+        assert!(!sign_is_forced_by_moments(&[0.01]));
+        assert!(!sign_is_forced_by_moments(&[]));
+    }
+
     /// A long, steady, low-vol track clears PSR vs 0 easily.
     #[test]
     fn psr_high_for_consistent_edge() {
