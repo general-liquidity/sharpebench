@@ -663,7 +663,7 @@ mod tests {
             runs: (0..4)
                 .map(|_| Run {
                     returns: (0..60)
-                        .map(|i| mean + 0.0005 * (i as f64 * 0.7).sin())
+                        .map(|i| mean + 0.004 * (i as f64 * 0.7).sin())
                         .collect(),
                     ..Run::default()
                 })

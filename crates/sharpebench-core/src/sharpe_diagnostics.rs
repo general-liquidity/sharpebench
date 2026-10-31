@@ -416,7 +416,7 @@ mod tests {
             })
             .collect();
         let steady: Vec<f64> = (0..200)
-            .map(|i| 0.001 + 0.0002 * ((i % 7) as f64 - 3.0))
+            .map(|i| 0.001 + 0.0006 * ((i % 7) as f64 - 3.0))
             .collect();
         vec![sub("wave", wave), sub("steady", steady)]
     }

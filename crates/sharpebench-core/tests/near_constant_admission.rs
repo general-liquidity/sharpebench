@@ -213,8 +213,11 @@ fn the_refusal_stands_at_samuelsons_bound() {
 
     let above = rank(&[agent("above", vec![window(bound * 1.01); 2])], &cfg());
     assert_eq!(above[0].deflation_error.as_deref(), Some(REFUSED));
+    // A window this strong still loses no bar, so the observed-loss rule
+    // (tests/tail_seller_admission.rs) refuses it under its own name. What this
+    // test pins is that the moments no longer force its sign.
     let well_below = rank(&[agent("below", vec![window(bound * 0.5); 2])], &cfg());
-    assert_eq!(well_below[0].deflation_error, None);
+    assert_ne!(well_below[0].deflation_error.as_deref(), Some(REFUSED));
 }
 
 /// The rule reads a ratio. Rescaling a track changes neither its Sharpe nor its
@@ -247,14 +250,15 @@ fn the_answer_does_not_move_with_position_size() {
 }
 
 /// The false positive the rule must not have. A truly strong honest track, far
-/// outside the fence, is not refused and is admitted.
+/// outside the fence, is not refused and is admitted. At a per-bar Sharpe of 1.8
+/// its carrier still loses on some bars: a track that never loses is refused by
+/// the observed-loss rule (tests/tail_seller_admission.rs), not by this one.
 #[test]
 fn a_strong_honest_track_far_from_the_field_is_not_refused() {
+    let windows = vec![moving(50, 60, 1.8), moving(51, 60, 1.8)];
+    assert!(windows.concat().iter().any(|x| *x < 0.0));
     let mut field = honest_field(6);
-    field.push(agent(
-        "strong",
-        vec![moving(50, 60, 6.0), moving(51, 60, 6.0)],
-    ));
+    field.push(agent("strong", windows));
     let board = rank(&field, &cfg());
     let strong = row(&board, "strong");
     assert_eq!(strong.deflation_error, None);

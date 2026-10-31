@@ -59,6 +59,7 @@ pub mod dissent;
 pub mod exposure_path;
 pub mod fdr;
 pub mod moment_credit;
+pub mod observed_loss;
 pub mod opt_in_diagnostics;
 pub mod paired_randomization;
 pub mod selection;
@@ -94,6 +95,7 @@ pub use moment_credit::{
     certify_without_moment_credit, deflated_sharpe_without_moment_credit,
     NOT_CERTIFIED_WITHOUT_MOMENT_CREDIT,
 };
+pub use observed_loss::{shows_an_observed_loss, NO_OBSERVED_LOSS};
 pub use opt_in_diagnostics::{
     first_order_autocorrelation, manipulation_proof_performance,
     probabilistic_sharpe_ratio_autocorrelated, sharpe_standard_error_autocorrelated,

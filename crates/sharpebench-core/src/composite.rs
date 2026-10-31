@@ -3339,7 +3339,7 @@ mod tests {
                 ..ScoreConfig::default()
             };
             let s = score_agent(
-                &agent("skilled", (0..5).map(|_| run(0.002, 0.0005, 60)).collect()),
+                &agent("skilled", (0..5).map(|_| run(0.002, 0.004, 60)).collect()),
                 &cfg,
             );
             assert!(
@@ -3364,7 +3364,7 @@ mod tests {
     #[test]
     fn an_invalid_frequency_disqualifies_on_the_score_and_rank_paths() {
         let skilled = || {
-            let mut sub = agent("skilled", (0..5).map(|_| run(0.002, 0.0005, 60)).collect());
+            let mut sub = agent("skilled", (0..5).map(|_| run(0.002, 0.004, 60)).collect());
             // Both candidates disperse: a constant one has no deflated Sharpe,
             // which would refuse the selection diagnostic at every frequency.
             sub.candidates = vec![
@@ -3435,7 +3435,7 @@ mod tests {
     /// diagnostic, rather than a summary of ratios that were never computed.
     #[test]
     fn an_unscorable_candidate_set_reports_no_selection_gap() {
-        let mut sub = agent("skilled", (0..5).map(|_| run(0.002, 0.0005, 60)).collect());
+        let mut sub = agent("skilled", (0..5).map(|_| run(0.002, 0.004, 60)).collect());
         sub.candidates = vec![vec![0.001, f64::NAN, 0.002], vec![0.001; 30]];
         let s = score_agent(&sub, &ScoreConfig::default());
         assert_eq!(
@@ -3453,7 +3453,7 @@ mod tests {
     #[test]
     fn valid_scoring_inputs_return_the_same_numbers() {
         let cfg = ScoreConfig::default();
-        let sub = agent("skilled", (0..5).map(|_| run(0.002, 0.0005, 60)).collect());
+        let sub = agent("skilled", (0..5).map(|_| run(0.002, 0.004, 60)).collect());
         let s = score_agent(&sub, &cfg);
         assert!(s.deflation_error.is_none() && s.selection_error.is_none());
         assert!(s.rank_eligible);
@@ -3479,7 +3479,7 @@ mod tests {
     #[test]
     fn skilled_is_eligible() {
         let s = score_agent(
-            &agent("skilled", (0..5).map(|_| run(0.002, 0.0005, 60)).collect()),
+            &agent("skilled", (0..5).map(|_| run(0.002, 0.004, 60)).collect()),
             &ScoreConfig::default(),
         );
         assert!(s.rank_eligible, "skilled should be eligible: {s:?}");
@@ -3499,7 +3499,7 @@ mod tests {
 
     #[test]
     fn process_violator_is_disqualified() {
-        let mut runs: Vec<Run> = (0..5).map(|_| run(0.002, 0.0005, 60)).collect();
+        let mut runs: Vec<Run> = (0..5).map(|_| run(0.002, 0.004, 60)).collect();
         runs[0].trace.events.push(ProcessEvent::OrderPlaced {
             risk_gate_passed: false,
         });
@@ -3511,7 +3511,7 @@ mod tests {
     #[test]
     fn shared_support_cannot_erase_a_process_violation() {
         let cfg = ScoreConfig::default();
-        let clean = agent("entrant", vec![run(0.002, 0.0005, 60); 2]);
+        let clean = agent("entrant", vec![run(0.002, 0.004, 60); 2]);
         let peer = agent("peer", vec![clean.runs[0].clone()]);
         let clean_board = rank(&[clean.clone(), peer.clone()], &cfg);
         assert!(clean_board.iter().all(|s| s.rank_eligible));
@@ -3555,7 +3555,7 @@ mod tests {
 
     #[test]
     fn shared_support_retains_warnings_from_all_submitted_runs() {
-        let mut warned = agent("warned", vec![run(0.002, 0.0005, 60); 2]);
+        let mut warned = agent("warned", vec![run(0.002, 0.004, 60); 2]);
         warned.runs[1]
             .trace
             .events
@@ -3571,7 +3571,7 @@ mod tests {
 
     #[test]
     fn unavailable_bootstrap_is_reported_and_cannot_admit_an_agent() {
-        let entrant = agent("entrant", vec![run(0.002, 0.0005, 60); 2]);
+        let entrant = agent("entrant", vec![run(0.002, 0.004, 60); 2]);
         assert!(score_agent(&entrant, &ScoreConfig::default()).rank_eligible);
         let cfg = ScoreConfig {
             n_boot: 0,
@@ -3601,7 +3601,7 @@ mod tests {
     /// the absence is asserted there too.
     #[test]
     fn an_unsupported_dsr_interval_is_absent_from_the_report() {
-        let entrant = agent("entrant", vec![run(0.002, 0.0005, 60); 2]);
+        let entrant = agent("entrant", vec![run(0.002, 0.004, 60); 2]);
         let cfg = ScoreConfig {
             n_boot: 0,
             ..ScoreConfig::default()
@@ -3916,7 +3916,7 @@ mod tests {
     #[test]
     fn a_track_with_a_sharpe_ratio_reports_its_figures_unchanged() {
         let cfg = exercised_config();
-        let dispersed = |i: usize| 0.002 + 0.0005 * (i as f64 * 0.7).sin();
+        let dispersed = |i: usize| 0.002 + 0.004 * (i as f64 * 0.7).sin();
         let tracks: [(&str, AgentSubmission); 3] = [
             ("dispersed", exercised(dispersed)),
             ("low volatility", exercised(move |i| dispersed(i) * 1e-9)),
@@ -3924,7 +3924,7 @@ mod tests {
                 "sparse",
                 exercised(|i| match i {
                     17 => 2e-9,
-                    59 => 1e-9,
+                    59 => -1e-9,
                     _ => 0.0,
                 }),
             ),
@@ -3968,7 +3968,7 @@ mod tests {
     #[test]
     fn a_constant_run_fails_its_per_run_test() {
         for (value, per_run_psr_bar) in [(0.001, 0.90), (0.0, 0.5)] {
-            let mut runs: Vec<Run> = (0..5).map(|_| run(0.002, 0.0005, 60)).collect();
+            let mut runs: Vec<Run> = (0..5).map(|_| run(0.002, 0.004, 60)).collect();
             runs.push(Run {
                 returns: vec![value; 60],
                 ..Run::default()
@@ -4069,7 +4069,7 @@ mod tests {
     /// advisory, so the agent's own eligibility does not move.
     #[test]
     fn a_constant_candidate_refuses_the_selection_diagnostic() {
-        let mut sub = agent("skilled", (0..5).map(|_| run(0.002, 0.0005, 60)).collect());
+        let mut sub = agent("skilled", (0..5).map(|_| run(0.002, 0.004, 60)).collect());
         sub.candidates = vec![
             (0..30).map(|i| 0.001 * (i % 3) as f64).collect(),
             vec![0.001; 30],
@@ -4094,7 +4094,7 @@ mod tests {
     /// that needs no benchmark and under a relative one.
     #[test]
     fn declared_eligibility_requires_available_statistics() {
-        let skilled = agent("skilled", (0..5).map(|_| run(0.002, 0.0005, 60)).collect());
+        let skilled = agent("skilled", (0..5).map(|_| run(0.002, 0.004, 60)).collect());
         let bench = agent("bench", (0..5).map(|_| run(0.0005, 0.001, 60)).collect());
         let base = ScoreConfig {
             dsr_bar: 0.0,
@@ -4173,7 +4173,7 @@ mod tests {
     /// BELOW a skilled agent, because it can't clear the luck-robust gates.
     #[test]
     fn deflation_demotes_luck() {
-        let skilled = agent("skilled", (0..5).map(|_| run(0.002, 0.0005, 60)).collect());
+        let skilled = agent("skilled", (0..5).map(|_| run(0.002, 0.004, 60)).collect());
         let lucky = {
             let mut runs = vec![run(0.02, 0.002, 60)];
             runs.extend((0..4).map(|_| run(0.0, 0.003, 60)));
@@ -4279,10 +4279,10 @@ mod tests {
 
     #[test]
     fn calibration_pairs_stop_at_each_run_boundary_and_report_support() {
-        let mut first = run(0.002, 0.0005, 30);
+        let mut first = run(0.002, 0.004, 30);
         first.confidences = vec![0.0, 1.0];
         first.outcomes = vec![false];
-        let mut second = run(0.002, 0.0005, 30);
+        let mut second = run(0.002, 0.004, 30);
         second.confidences = vec![1.0];
         second.outcomes = vec![true, false];
 
@@ -4300,14 +4300,14 @@ mod tests {
 
     #[test]
     fn cost_efficiency_reported_only_with_cost() {
-        let mut r = run(0.002, 0.0005, 30);
+        let mut r = run(0.002, 0.004, 30);
         r.cost = 4.0;
         let s = score_agent(&agent("paid", vec![r]), &ScoreConfig::default());
         assert_eq!(s.cost, 4.0);
         assert!(s.return_per_cost.is_some());
 
         let free = score_agent(
-            &agent("free", vec![run(0.002, 0.0005, 30)]),
+            &agent("free", vec![run(0.002, 0.004, 30)]),
             &ScoreConfig::default(),
         );
         assert!(free.return_per_cost.is_none());
@@ -4315,7 +4315,7 @@ mod tests {
 
     #[test]
     fn in_sample_search_raises_the_deflation_bar() {
-        let runs: Vec<Run> = (0..5).map(|_| run(0.002, 0.0005, 60)).collect();
+        let runs: Vec<Run> = (0..5).map(|_| run(0.002, 0.004, 60)).collect();
         let base = score_agent(&agent("base", runs.clone()), &ScoreConfig::default());
         let mut over = agent("over", runs);
         over.in_sample_trials = 5000;
@@ -4354,7 +4354,7 @@ mod tests {
     #[test]
     fn percentile_reported_only_with_reference() {
         let none = score_agent(
-            &agent("p", (0..5).map(|_| run(0.002, 0.0005, 60)).collect()),
+            &agent("p", (0..5).map(|_| run(0.002, 0.004, 60)).collect()),
             &ScoreConfig::default(),
         );
         assert!(none.dsr_percentile.is_none());
@@ -4363,7 +4363,7 @@ mod tests {
             ..ScoreConfig::default()
         };
         let some = score_agent(
-            &agent("p", (0..5).map(|_| run(0.002, 0.0005, 60)).collect()),
+            &agent("p", (0..5).map(|_| run(0.002, 0.004, 60)).collect()),
             &cfg,
         );
         assert!(some.dsr_percentile.is_some());
@@ -4372,7 +4372,7 @@ mod tests {
     #[test]
     fn rolling_sharpe_reported_for_long_tracks() {
         let s = score_agent(
-            &agent("roll", (0..5).map(|_| run(0.002, 0.0005, 60)).collect()),
+            &agent("roll", (0..5).map(|_| run(0.002, 0.004, 60)).collect()),
             &ScoreConfig::default(),
         );
         // 300 pooled points ≥ 21-window → both reported, steady edge is all-positive.
@@ -4391,7 +4391,7 @@ mod tests {
             rolling_window: 100,
             ..ScoreConfig::default()
         };
-        let s = score_agent(&agent("short", vec![run(0.002, 0.0005, 30)]), &cfg);
+        let s = score_agent(&agent("short", vec![run(0.002, 0.004, 30)]), &cfg);
         assert!(s.rolling_min_sharpe.is_none());
         assert!(s.rolling_frac_positive.is_none());
         assert_eq!(s.rolling_windows, 0);
@@ -4411,14 +4411,14 @@ mod tests {
 
     #[test]
     fn dsr_per_cost_reported_only_with_cost() {
-        let mut r = run(0.002, 0.0005, 60);
+        let mut r = run(0.002, 0.004, 60);
         r.cost = 5.0;
         let paid = score_agent(&agent("paid", vec![r]), &ScoreConfig::default());
         let dpc = paid.dsr_per_cost.expect("reported with cost");
         assert!((dpc - paid.deflated_sharpe / 5.0).abs() < 1e-12);
 
         let free = score_agent(
-            &agent("free", vec![run(0.002, 0.0005, 60)]),
+            &agent("free", vec![run(0.002, 0.004, 60)]),
             &ScoreConfig::default(),
         );
         assert!(free.dsr_per_cost.is_none());
@@ -4446,7 +4446,7 @@ mod tests {
     #[test]
     fn clean_process_is_not_floored() {
         let s = score_agent(
-            &agent("clean", (0..5).map(|_| run(0.002, 0.0005, 60)).collect()),
+            &agent("clean", (0..5).map(|_| run(0.002, 0.004, 60)).collect()),
             &ScoreConfig::default(),
         );
         assert!(!s.process_floored);
@@ -4499,7 +4499,7 @@ mod tests {
 
     #[test]
     fn rank_ordinal_is_one_based_among_eligible() {
-        let skilled = agent("skilled", (0..5).map(|_| run(0.002, 0.0005, 60)).collect());
+        let skilled = agent("skilled", (0..5).map(|_| run(0.002, 0.004, 60)).collect());
         let lucky = {
             let mut runs = vec![run(0.02, 0.002, 60)];
             runs.extend((0..4).map(|_| run(0.0, 0.003, 60)));
@@ -4515,7 +4515,7 @@ mod tests {
     /// the identity there, down to the last bit of every statistic.
     #[test]
     fn homogeneous_field_is_unchanged_by_shared_run_set() {
-        let skilled = agent("skilled", (0..5).map(|_| run(0.002, 0.0005, 60)).collect());
+        let skilled = agent("skilled", (0..5).map(|_| run(0.002, 0.004, 60)).collect());
         let lucky = {
             let mut runs = vec![run(0.02, 0.002, 60)];
             runs.extend((0..4).map(|_| run(0.0, 0.003, 60)));
@@ -4585,7 +4585,7 @@ mod tests {
     /// shared set for everyone else.
     #[test]
     fn empty_submission_does_not_empty_the_shared_cells() {
-        let skilled = agent("skilled", (0..5).map(|_| run(0.002, 0.0005, 60)).collect());
+        let skilled = agent("skilled", (0..5).map(|_| run(0.002, 0.004, 60)).collect());
         let ghost = agent("ghost", Vec::new());
         let board = rank(&[ghost, skilled], &ScoreConfig::default());
         let get = |id: &str| board.iter().find(|s| s.agent_id == id).unwrap();
@@ -4726,7 +4726,7 @@ mod tests {
                 let phase = i as f64 * 36.0;
                 let returns = (0..180)
                     .map(|t| {
-                        0.001 + 0.0004 * (std::f64::consts::TAU * (t as f64 + phase) / 180.0).sin()
+                        0.001 + 0.002 * (std::f64::consts::TAU * (t as f64 + phase) / 180.0).sin()
                     })
                     .collect();
                 agent(
@@ -4984,8 +4984,9 @@ mod tests {
     #[test]
     fn a_constant_candidate_is_not_a_revealed_selection_option() {
         let cfg = ScoreConfig::default();
-        let dispersed_candidate: Vec<f64> = (0..30).map(|i| 0.0001 * (i % 3) as f64).collect();
-        let mut sub = agent("skilled", (0..5).map(|_| run(0.002, 0.0005, 60)).collect());
+        let dispersed_candidate: Vec<f64> =
+            (0..30).map(|i| 0.0001 * (i % 3) as f64 - 0.00007).collect();
+        let mut sub = agent("skilled", (0..5).map(|_| run(0.002, 0.004, 60)).collect());
         sub.candidates = vec![dispersed_candidate.clone(), vec![0.001; 30]];
         let mut control = sub.clone();
         control.candidates = vec![dispersed_candidate];
@@ -5316,9 +5317,9 @@ mod tests {
     #[test]
     fn default_min_annual_sharpe_is_identical_to_the_old_per_run_test() {
         let mut runs = vec![run(0.02, 0.002, 60), run(0.0, 0.003, 60)];
-        runs.extend((0..3).map(|_| run(0.002, 0.0005, 60)));
+        runs.extend((0..3).map(|_| run(0.002, 0.004, 60)));
         let sub = agent("mixed", runs);
-        let clean = agent("clean", (0..3).map(|_| run(0.002, 0.0005, 60)).collect());
+        let clean = agent("clean", (0..3).map(|_| run(0.002, 0.004, 60)).collect());
         for ppy in [52.0, 252.0, 8760.0] {
             let cfg = ScoreConfig::for_periods_per_year(ppy);
             assert_eq!(per_run_psr_benchmark(&cfg).to_bits(), 0f64.to_bits());
@@ -5353,8 +5354,8 @@ mod tests {
     /// A mixed field: two agents that clear every run, one that fails a single
     /// run. A `Run` that fails the per-run PSR bar is the point of pass^k.
     fn field_with_one_single_run_failure() -> Vec<AgentSubmission> {
-        let clean = |id: &str| agent(id, (0..6).map(|_| run(0.002, 0.0005, 60)).collect());
-        let mut runs: Vec<Run> = (0..5).map(|_| run(0.002, 0.0005, 60)).collect();
+        let clean = |id: &str| agent(id, (0..6).map(|_| run(0.002, 0.004, 60)).collect());
+        let mut runs: Vec<Run> = (0..5).map(|_| run(0.002, 0.004, 60)).collect();
         runs.push(run(-0.002, 0.0005, 60));
         vec![clean("a"), agent("one_bad_run", runs), clean("b")]
     }
@@ -5517,7 +5518,7 @@ mod tests {
     /// restriction is the identity; five agents, so deflation stays configured.
     fn relative_field() -> Vec<AgentSubmission> {
         let bench: Vec<Run> = (0..5)
-            .map(|_| run(0.002, 0.0005, 60))
+            .map(|_| run(0.002, 0.004, 60))
             .chain(std::iter::once(run(-0.003, 0.0005, 60)))
             .collect();
         // Beats the benchmark by a steady margin in every cell, including the
@@ -5691,8 +5692,8 @@ mod tests {
     /// (zero block-severity violations) is untouched by warns.
     #[test]
     fn warn_events_lower_process_score_and_count_but_not_eligibility() {
-        let clean = agent("clean", (0..5).map(|_| run(0.002, 0.0005, 60)).collect());
-        let mut warned_runs: Vec<Run> = (0..5).map(|_| run(0.002, 0.0005, 60)).collect();
+        let clean = agent("clean", (0..5).map(|_| run(0.002, 0.004, 60)).collect());
+        let mut warned_runs: Vec<Run> = (0..5).map(|_| run(0.002, 0.004, 60)).collect();
         warned_runs[0]
             .trace
             .events
@@ -5723,7 +5724,7 @@ mod tests {
     /// A block-severity violation zeroes the graded scalar too (not just the gate).
     #[test]
     fn block_violation_zeroes_graded_process_score() {
-        let mut runs: Vec<Run> = (0..3).map(|_| run(0.002, 0.0005, 60)).collect();
+        let mut runs: Vec<Run> = (0..3).map(|_| run(0.002, 0.004, 60)).collect();
         runs[1].trace.events.push(ProcessEvent::DenylistBypass);
         runs[2].trace.events.push(ProcessEvent::ConcentrationBreach);
         let s = score_agent(&agent("blocked", runs), &ScoreConfig::default());
@@ -5803,7 +5804,7 @@ mod tests {
     #[test]
     fn econ_rationality_reported_from_declared_candidates() {
         let cfg = ScoreConfig::default();
-        let runs: Vec<Run> = (0..5).map(|_| run(0.002, 0.0005, 60)).collect();
+        let runs: Vec<Run> = (0..5).map(|_| run(0.002, 0.004, 60)).collect();
 
         // No declared candidates: nothing elicitable.
         let none = score_agent(&agent("plain", runs.clone()), &cfg);
@@ -5844,7 +5845,7 @@ mod tests {
     #[test]
     fn behavior_role_contributions_are_reported() {
         let mixed = || {
-            let mut runs: Vec<Run> = (0..3).map(|_| run(0.002, 0.0005, 60)).collect();
+            let mut runs: Vec<Run> = (0..3).map(|_| run(0.002, 0.004, 60)).collect();
             for r in &mut runs {
                 r.trace.events.push(ProcessEvent::OrderPlaced {
                     risk_gate_passed: true,
@@ -5937,7 +5938,7 @@ mod tests {
     #[test]
     fn archived_scores_without_new_fields_deserialize_with_defaults() {
         let s = score_agent(
-            &agent("archived", (0..3).map(|_| run(0.002, 0.0005, 60)).collect()),
+            &agent("archived", (0..3).map(|_| run(0.002, 0.004, 60)).collect()),
             &ScoreConfig::default(),
         );
         let mut v = serde_json::to_value(&s).expect("serialize");

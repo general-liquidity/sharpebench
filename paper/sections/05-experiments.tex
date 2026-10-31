@@ -10,7 +10,7 @@ No command in this paper calls a network service, holds an API key or uses a GPU
 
 \subsection{The demonstration that motivated the benchmark}\label{sec:demo}
 
-\Cref{fig:demotion} shows the three-agent field the benchmark shipped with: a skilled momentum agent, a lucky agent with twice its raw return that fails $\passk$, and a bot that matched the skilled return but placed one order that never passed its risk gate and is zeroed by the process gate. The agent with the highest raw return is refused and holds no rank: only the skilled agent is eligible, and the two refused agents follow it in raw-return order for display only. \Cref{fig:deflation} shows why: one fixed track, scored against a growing pool of trials, crosses the eligibility bar between 32 and 64 trials and collapses past a few hundred. Both figures are computed on synthetic returns.
+\Cref{fig:demotion} shows the three-agent field the benchmark shipped with: a skilled momentum agent, a lucky agent with nearly twice its raw return that fails $\passk$, and a bot that matched the skilled return but placed one order that never passed its risk gate and is zeroed by the process gate. The agent with the highest raw return is refused and holds no rank: only the skilled agent is eligible, and the two refused agents follow it in raw-return order for display only. \Cref{fig:deflation} shows why: one fixed track, scored against a growing pool of trials, crosses the eligibility bar between 32 and 64 trials and collapses past a few hundred. Both figures are computed on synthetic returns.
 
 \begin{figure}[tbp]
 \centering

@@ -200,6 +200,12 @@ pub fn observed_sharpe_ratio_of_windows(windows: &[&[f64]]) -> Result<f64, Stati
             requirement: NO_RESOLVED_MOTION,
         });
     }
+    if !crate::observed_loss::shows_an_observed_loss(windows) {
+        return Err(StatisticalError::InvalidParameter {
+            name: "returns",
+            requirement: crate::observed_loss::NO_OBSERVED_LOSS,
+        });
+    }
     Ok(sharpe)
 }
 
