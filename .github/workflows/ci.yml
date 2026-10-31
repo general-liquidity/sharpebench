@@ -461,6 +461,13 @@ jobs:
         run: python -m unittest scripts/test_check_evidence_register.py
       - name: Every claim maps to an artifact and carries a disposition
         run: python scripts/check-evidence-register.py
+      # The evidence register binds the paper's own claims; this binds what it
+      # credits to others, in refs.bib and in the code's credit lines. It reads
+      # files only and fetches nothing.
+      - name: The citation register's own rules hold
+        run: python -m unittest scripts/test_check_citation_register.py
+      - name: Every bibliography key and code credit is in the citation register
+        run: python scripts/check-citation-register.py
       - name: Every recorded source and artifact matches the committed scope
         run: python paper/src/check-provenance.py
 

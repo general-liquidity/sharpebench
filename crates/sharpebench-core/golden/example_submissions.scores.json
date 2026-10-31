@@ -4,6 +4,29 @@
     "deflated_sharpe": 1.0,
     "psr": 1.0,
     "passed_k": true,
+    "runs_passed": 5,
+    "window_bars": [
+      60,
+      60,
+      60,
+      60,
+      60
+    ],
+    "window_pass_floors": [
+      2.648563255262966,
+      2.648563255262966,
+      2.648563255262966,
+      2.648563255262966,
+      2.648563255262966
+    ],
+    "implausible_windows": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "pass_k_floors_plausible": false,
     "process_ok": true,
     "bootstrap_p": 0.0004997501249375312,
     "raw_mean_return": 0.0020197983333333325,
@@ -69,6 +92,29 @@
     "deflated_sharpe": 1.0,
     "psr": 1.0,
     "passed_k": false,
+    "runs_passed": 1,
+    "window_bars": [
+      60,
+      60,
+      60,
+      60,
+      60
+    ],
+    "window_pass_floors": [
+      2.648563255262966,
+      2.648563255262966,
+      2.648563255262966,
+      2.648563255262966,
+      2.648563255262966
+    ],
+    "implausible_windows": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "pass_k_floors_plausible": false,
     "process_ok": true,
     "bootstrap_p": 0.02348825587206397,
     "raw_mean_return": 0.004110875100000008,
@@ -134,6 +180,29 @@
     "deflated_sharpe": 1.0,
     "psr": 1.0,
     "passed_k": true,
+    "runs_passed": 5,
+    "window_bars": [
+      60,
+      60,
+      60,
+      60,
+      60
+    ],
+    "window_pass_floors": [
+      2.648563255262966,
+      2.648563255262966,
+      2.648563255262966,
+      2.648563255262966,
+      2.648563255262966
+    ],
+    "implausible_windows": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "pass_k_floors_plausible": false,
     "process_ok": false,
     "bootstrap_p": 0.0004997501249375312,
     "raw_mean_return": 0.0020197983333333325,

@@ -107,6 +107,23 @@ window it reaches 0.71. pass^k in `All` mode therefore fails whenever any
 out-of-sample window is shorter than roughly 1300 daily bars, for the market
 itself and for any agent with a market-like edge.
 
+Every scored row computes this floor for the windows it declared. The row
+carries `window_bars` (each window's shortest run) and `window_pass_floors`
+(the annualized Sharpe above, per window, with `null` where no finite floor
+exists), lists in `implausible_windows` each window whose floor is above the
+plausibility bound `sharpebench_core::pass_floor::PASS_FLOOR_PLAUSIBLE_MAX_ANNUAL_SHARPE`
+(2.0, a stated bound and not a measurement), and sets `pass_k_floors_plausible`
+to false when the board's pass mode needs one of those windows. A NO from
+pass^k on such a board is expected of almost any track, so the board says so
+in a note under the table, which keeps "the window is unpassable" apart from
+"the field failed". Beside the bool, `runs_passed` counts how many of the k
+per-run tests passed, k being `runs_scored`, and the board prints it as, for
+example, `NO 2/6`. The floor ignores PSR's skew and kurtosis term; under normal
+moments that term only raises the requirement, and a positively skewed run can
+clear the bar slightly below the floor. A test reads the table above from this
+file and checks that the code reproduces each row. None of these fields moves a
+score or a rank.
+
 This is a property of the statistic, not a unit error and not a bug. A short
 track carries little evidence, and a gate that demands 90% confidence from little
 evidence will withhold it. There are two honest responses: score longer windows,

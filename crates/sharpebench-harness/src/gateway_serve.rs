@@ -725,6 +725,14 @@ pub struct HostObservedUsage {
     /// Parsed answers by why they stopped. A `length` count is a truncated
     /// completion that may still have become a decision or an abstention.
     pub finish_reasons: FinishReasonCounts,
+    /// Provider-reported prompt-cache reads summed over the priced calls, when
+    /// every priced call reported the count. Absent means unreported, never
+    /// zero; it is not priced (rate card v1 does not model cache discounts).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_read_input_tokens: Option<u64>,
+    /// Provider-reported prompt-cache writes, on the same rule.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_write_input_tokens: Option<u64>,
     pub ceiling_breached: bool,
     /// The gateway lost its journal file to another writer and stopped
     /// spending. The figures above are this process's in-memory record.
@@ -738,9 +746,20 @@ pub struct HostObservedUsage {
 }
 
 impl HostObservedUsage {
+    /// The model calls this sweep's gateway saw reach, or possibly reach, a
+    /// provider: priced calls plus calls charged at their reservation. A
+    /// released call returned nothing from a model and is not counted. This is
+    /// the observation [`crate::evidence_mode`] applies the advisory rule from.
+    pub fn model_calls(&self) -> crate::evidence_mode::ModelCalls {
+        crate::evidence_mode::ModelCalls::Observed(
+            self.priced_calls.saturating_add(self.unknown_calls),
+        )
+    }
+
     fn of<T: ProviderTransport>(gateway: &ModelGateway<'_, T>, sweep_sha256: String) -> Self {
         let journal = gateway.journal();
         let state = journal.spend();
+        let (cache_read_input_tokens, cache_write_input_tokens) = journal.cache_token_totals();
         Self {
             schema_version: HOST_USAGE_VERSION,
             route_table_sha256: journal.identity.route_table_sha256.clone(),
@@ -753,6 +772,8 @@ impl HostObservedUsage {
             overspent_usd_nanos: state.overspent_usd_nanos.to_string(),
             overspent_calls: state.overspent_calls,
             finish_reasons: journal.finish_reasons(),
+            cache_read_input_tokens,
+            cache_write_input_tokens,
             ceiling_breached: journal.ceiling_breached(),
             journal_ownership_lost: gateway.journal_conflict(),
             journal_unwritable: gateway.journal_unwritable(),

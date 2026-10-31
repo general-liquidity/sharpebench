@@ -30,6 +30,9 @@ def load_checker():
 
 CHECK = load_checker()
 
+# What the migration wrote on every entry whose history did not say who recorded it.
+UNKNOWN_RECORDER = {"recorded_by": {"kind": "unknown"}, "independent": False}
+
 
 LINK = {
     "repository": "sharpearena",
@@ -63,6 +66,7 @@ def good_row(**overrides) -> dict:
                 "date": "2026-09-23",
                 "disposition": "still-applicable",
                 "rationale": "Initial entry.",
+                **UNKNOWN_RECORDER,
             }
         ],
     }
@@ -124,6 +128,42 @@ class MissingArtifact(unittest.TestCase):
             del row["no_measurement"]
             self.assertEqual(CHECK.validate([row], root), [])
 
+    def empty_artifact_row(self, root, **artifact):
+        (root / "paper" / "empty.jsonl").write_bytes(b"")
+        row = good_row(artifacts=[{"path": "paper/empty.jsonl", "in_repo": True, **artifact}])
+        del row["no_measurement"]
+        return row
+
+    def test_an_empty_artifact_with_the_empty_digest_fails(self):
+        # Regression: the empty-input digest matched the empty file, so a row
+        # pointing at nothing read as a verified artifact.
+        with TemporaryRoot() as root:
+            row = self.empty_artifact_row(root, sha256=CHECK.EMPTY_SHA256)
+            problems = CHECK.validate([row], root)
+            self.assertTrue(any("is empty" in p for p in problems), problems)
+
+    def test_an_empty_artifact_with_no_digest_fails(self):
+        with TemporaryRoot() as root:
+            problems = CHECK.validate([self.empty_artifact_row(root)], root)
+            self.assertTrue(any("is empty" in p for p in problems), problems)
+
+    def test_the_empty_digest_on_a_nonempty_file_fails(self):
+        with TemporaryRoot() as root:
+            (root / "paper" / "full.jsonl").write_bytes(b"present\n")
+            row = good_row(
+                artifacts=[
+                    {"path": "paper/full.jsonl", "sha256": CHECK.EMPTY_SHA256, "in_repo": True}
+                ]
+            )
+            del row["no_measurement"]
+            problems = CHECK.validate([row], root)
+            self.assertTrue(any("digest of empty input" in p for p in problems), problems)
+
+    def test_a_declared_empty_artifact_passes(self):
+        with TemporaryRoot() as root:
+            row = self.empty_artifact_row(root, sha256=CHECK.EMPTY_SHA256, empty=True)
+            self.assertEqual(CHECK.validate([row], root), [])
+
     def test_no_artifact_and_no_stated_reason_fails(self):
         with TemporaryRoot() as root:
             row = good_row()
@@ -141,6 +181,7 @@ class MissingArtifact(unittest.TestCase):
                         "date": "2026-09-23",
                         "disposition": "unresolved",
                         "rationale": "Initial entry.",
+                        **UNKNOWN_RECORDER,
                     }
                 ],
             )
@@ -173,6 +214,56 @@ class MissingArtifact(unittest.TestCase):
             del row["no_measurement"]
             problems = CHECK.validate([row], root)
             self.assertTrue(any("cannot be marked in_repo" in p for p in problems), problems)
+
+
+class MissingLabelSource(unittest.TestCase):
+    """A label source that disappears fails coverage instead of leaving it with
+    nothing to check. Each case deletes one file from a copy of the paper."""
+
+    def coverage_without(self, relative: str | None) -> list[str]:
+        import shutil
+
+        with tempfile.TemporaryDirectory() as directory:
+            paper = pathlib.Path(directory) / "paper"
+            shutil.copytree(ROOT / "paper" / "sections", paper / "sections")
+            shutil.copy(ROOT / "paper" / "main.tex", paper / "main.tex")
+            if relative is not None:
+                (paper / relative).unlink()
+            rows = [
+                json.loads(line)
+                for line in CHECK.REGISTER_JSONL.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            original = CHECK.LABEL_SOURCES
+            CHECK.LABEL_SOURCES = [paper / "main.tex"] + sorted(
+                (paper / "sections").glob("*.tex")
+            )
+            try:
+                problems: list[str] = []
+                CHECK.check_coverage(rows, problems)
+            finally:
+                CHECK.LABEL_SOURCES = original
+            return problems
+
+    def test_the_full_copy_has_no_coverage_problem(self):
+        self.assertEqual(self.coverage_without(None), [])
+
+    def test_a_deleted_main_file_fails(self):
+        problems = self.coverage_without("main.tex")
+        self.assertTrue(any("main.tex is not on disk" in p for p in problems), problems)
+
+    def test_a_deleted_nested_fragment_fails(self):
+        # Named only by an \input inside a section, not by main.tex.
+        problems = self.coverage_without("sections/power-fragment.tex")
+        self.assertTrue(any("power-fragment.tex is not on disk" in p for p in problems), problems)
+
+    def test_a_deleted_input_section_fails(self):
+        # The glob no longer lists the deleted file, so only the \input in
+        # main.tex can say that it is missing.
+        problems = self.coverage_without("sections/05-experiments.tex")
+        self.assertTrue(
+            any("05-experiments.tex is not on disk" in p for p in problems), problems
+        )
 
 
 class MissingDisposition(unittest.TestCase):
@@ -236,11 +327,13 @@ class StatusChangeWithoutRationale(unittest.TestCase):
                 "date": "2026-09-23",
                 "disposition": "historical-only",
                 "rationale": "Initial entry: bound to the frozen snapshot.",
+                **UNKNOWN_RECORDER,
             },
             {
                 "date": "2026-10-01",
                 "disposition": "needs-rescore",
                 "rationale": second_rationale,
+                **UNKNOWN_RECORDER,
             },
         ]
 
@@ -279,6 +372,7 @@ class StatusChangeWithoutRationale(unittest.TestCase):
                         "date": "2026-09-23",
                         "disposition": "historical-only",
                         "rationale": "Initial entry.",
+                        **UNKNOWN_RECORDER,
                     }
                 ],
             )
@@ -298,16 +392,70 @@ class StatusChangeWithoutRationale(unittest.TestCase):
                         "date": "2026-10-01",
                         "disposition": "still-applicable",
                         "rationale": "Initial entry.",
+                        **UNKNOWN_RECORDER,
                     },
                     {
                         "date": "2026-09-23",
                         "disposition": "still-applicable",
                         "rationale": "A later look.",
+                        **UNKNOWN_RECORDER,
                     },
                 ]
             )
             problems = CHECK.validate([row], root)
             self.assertTrue(any("is before the previous entry" in p for p in problems), problems)
+
+
+class Recorder(unittest.TestCase):
+    def entry(self, **fields):
+        base = {"date": "2026-09-23", "disposition": "still-applicable", "rationale": "Initial."}
+        base.update(fields)
+        return base
+
+    def problems(self, **fields):
+        with TemporaryRoot() as root:
+            return CHECK.validate([good_row(status_history=[self.entry(**fields)])], root)
+
+    def test_an_entry_with_no_recorder_fails(self):
+        problems = self.problems()
+        self.assertTrue(any("'recorded_by' is missing" in p for p in problems), problems)
+        self.assertTrue(any("'independent' is missing" in p for p in problems), problems)
+
+    def test_a_named_recorder_without_an_id_fails(self):
+        for kind in ("human", "model"):
+            problems = self.problems(recorded_by={"kind": kind}, independent=False)
+            self.assertTrue(any(f"a {kind} recorder needs an id" in p for p in problems), kind)
+
+    def test_an_unknown_recorder_cannot_be_independent(self):
+        problems = self.problems(recorded_by={"kind": "unknown"}, independent=True)
+        self.assertTrue(any("cannot be independent" in p for p in problems), problems)
+
+    def test_an_undefined_recorder_kind_fails(self):
+        problems = self.problems(recorded_by={"kind": "reviewer", "id": "x"}, independent=True)
+        self.assertTrue(any("is not one of" in p for p in problems), problems)
+
+    def test_named_and_unknown_recorders_pass_and_are_counted_apart(self):
+        rows = [
+            good_row(
+                claim_id="R-1",
+                status_history=[
+                    self.entry(recorded_by={"kind": "human", "id": "reviewer-a"}, independent=True)
+                ],
+            ),
+            good_row(
+                claim_id="R-2",
+                status_history=[
+                    self.entry(recorded_by={"kind": "model", "id": "author-agent"}, independent=False)
+                ],
+            ),
+            good_row(claim_id="R-3", status_history=[self.entry(**UNKNOWN_RECORDER)]),
+            good_row(claim_id="R-4", status_history=[self.entry()]),
+        ]
+        with TemporaryRoot() as root:
+            problems = CHECK.validate(rows[:3], root)
+        self.assertEqual(problems, [])
+        # The entry with no recorder at all counts as unknown, never as human.
+        self.assertEqual(CHECK.recorder_counts(rows), {"human": 1, "model": 1, "unknown": 2})
 
 
 class ReferenceIntegrity(unittest.TestCase):
@@ -361,6 +509,7 @@ class PriorityQueue(unittest.TestCase):
                         "date": "2026-09-23",
                         "disposition": "needs-new-experiment",
                         "rationale": "Initial entry.",
+                        **UNKNOWN_RECORDER,
                     }
                 ],
             )

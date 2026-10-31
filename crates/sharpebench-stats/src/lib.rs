@@ -69,7 +69,8 @@ pub mod validation;
 pub use validation::StatisticalError;
 
 pub use agreement::{
-    binarize, cohens_kappa, cohens_kappa_binary, gate_vs_human, spearman_rho, GateAgreement,
+    binarize, cohens_kappa, cohens_kappa_binary, gate_vs_human, gate_vs_human_with_fields,
+    spearman_rho, FieldBaseline, GateAgreement, KappaUnavailable,
 };
 pub use deflated_sharpe::{
     deflated_sharpe_ratio, expected_max_sharpe, is_constant_track, observed_sharpe_ratio,

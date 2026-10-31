@@ -60,6 +60,17 @@ impl CellIsolation {
     pub const fn runner_discards_state(self) -> bool {
         matches!(self, Self::ContainerPerCell)
     }
+
+    /// Whether the entrant can reach a network from inside a cell, so whether
+    /// it can read information the point-in-time observations withhold, such
+    /// as prices published after a historical window. Only the container
+    /// runner is launched with `--network none`; a host process and an
+    /// operator endpoint keep whatever network their host has. Like the class
+    /// itself this discloses what the runner allows and detects nothing, and
+    /// it is rank-neutral.
+    pub const fn network_reachable(self) -> bool {
+        !matches!(self, Self::ContainerPerCell)
+    }
 }
 
 /// Cap on bytes read from an external agent's HTTP response, so a hostile or buggy

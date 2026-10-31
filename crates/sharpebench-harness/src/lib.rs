@@ -11,6 +11,7 @@ pub mod artifact_scan;
 pub mod artifact_tar;
 pub mod checkpoint;
 pub mod decision_stability;
+pub mod evidence_mode;
 pub mod failure;
 pub mod fault_plan;
 pub mod gateway;

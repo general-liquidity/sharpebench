@@ -148,11 +148,21 @@ fn an_http_row_discloses_the_operator_endpoint_whatever_the_entrant_claims() {
         .find(|row| row["agent_id"] == label.as_str())
         .expect("the entrant is ranked");
     let disclosed = &entrant["cell_isolation"];
-    assert_eq!(disclosed["schema_version"], "sharpebench.cell-isolation.v1");
+    assert_eq!(disclosed["schema_version"], "sharpebench.cell-isolation.v2");
     assert_eq!(disclosed["class"], "operator_endpoint");
     assert_eq!(disclosed["runner_discards_state_between_cells"], false);
+    assert_eq!(disclosed["network_reachable"], true);
     assert_eq!(disclosed["detects_state_carryover"], false);
     assert_eq!(disclosed["rank_neutral"], true);
+    // A historical window scored with a network-reachable entrant: the row
+    // does not certify, and model use the host cannot observe is not read as
+    // a plain backtest.
+    let evidence = &entrant["evidence_mode"];
+    assert_eq!(evidence["schema_version"], "sharpebench.evidence-mode.v1");
+    assert_eq!(evidence["window"], "historical");
+    assert_eq!(evidence["mode"], "backtest_unobserved");
+    assert_eq!(evidence["certifying"], false);
+    assert_eq!(evidence["rank_neutral"], true);
     for row in rows.iter().filter(|row| row["agent_id"] != label.as_str()) {
         assert!(
             row.get("cell_isolation").is_none(),

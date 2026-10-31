@@ -90,6 +90,8 @@ impl ProviderTransport for ScriptedProvider {
                     .map(|(input_tokens, output_tokens)| ProviderUsage {
                         input_tokens,
                         output_tokens,
+                        cache_read_input_tokens: None,
+                        cache_write_input_tokens: None,
                     }),
             })
             .expect("a provider body serializes"),
@@ -482,6 +484,14 @@ fn a_gateway_sweep_publishes_host_observed_usage_beside_the_rank() {
         .find(|row| row["agent_id"] == "gateway:scripted")
         .expect("the entrant is ranked");
     assert_eq!(row["host_observed_usage"]["calls_started"], 12);
+    // The paper's advisory rule, from what the gateway saw: this historical
+    // fixture window plus observed model calls is a backtest-advisory verdict.
+    let calls = usage.model_calls();
+    assert_eq!(calls, crate::evidence_mode::ModelCalls::Observed(12));
+    assert_eq!(
+        crate::evidence_mode::evidence_mode(crate::evidence_mode::WindowTiming::Historical, calls),
+        crate::evidence_mode::EvidenceMode::BacktestAdvisory
+    );
     assert_eq!(
         row["host_observed_usage"]["monetary_cost"]["usage_source"],
         "host_observed"

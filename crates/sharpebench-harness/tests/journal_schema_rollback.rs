@@ -22,7 +22,7 @@ use sharpebench_harness::gateway::{
 };
 use sharpebench_harness::gateway_journal::{
     FinishClass, GatewayBudget, GatewayJournal, JournalIdentity, Settlement,
-    JOURNAL_SCHEMA_VERSION, JOURNAL_SCHEMA_VERSION_V2,
+    JOURNAL_SCHEMA_VERSION, JOURNAL_SCHEMA_VERSION_V2, JOURNAL_SCHEMA_VERSION_V3,
 };
 
 const KEY: &str = "sk-live-rollback-test-do-not-log-0123456789";
@@ -268,7 +268,7 @@ fn a_journal_under_an_unknown_schema_version_is_refused() {
     let path = dir.join("journal.json");
     serve(&path, &[Answer::Length]);
     for version in [
-        "sharpebench.gateway-journal.v3",
+        "sharpebench.gateway-journal.v4",
         "sharpebench.gateway-journal.v0",
         "",
     ] {
@@ -299,6 +299,8 @@ fn a_v2_journal_keeps_its_route_budget_and_sweep_binding() {
             input_tokens: 10,
             output_tokens: 5,
             usd_nanos: "15".into(),
+            cache_read_input_tokens: None,
+            cache_write_input_tokens: None,
         },
         FinishClass::Length,
     );
@@ -322,11 +324,42 @@ fn a_v2_journal_keeps_its_route_budget_and_sweep_binding() {
         )
         .for_sweep(sweep.clone()),
         JournalIdentity {
-            schema_version: "sharpebench.gateway-journal.v3".into(),
+            schema_version: "sharpebench.gateway-journal.v4".into(),
             ..mine.clone()
         },
     ] {
         assert!(GatewayJournal::load_bound(&path, &other).is_err());
     }
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// A journal that records a provider-reported cache count is written as v3,
+/// which a binary from before the count refuses instead of dropping the count
+/// on its next save, and which this binary still resumes under its binding.
+#[test]
+fn a_journal_with_a_cache_count_is_written_as_v3() {
+    let dir = scratch("cache-v3");
+    let path = dir.join("journal.json");
+    let sweep = "7".repeat(64);
+    let routes = table().identity_digest();
+    let mine = JournalIdentity::new(routes, budget()).for_sweep(sweep.clone());
+    let mut journal = GatewayJournal::new(mine.clone());
+    let ordinal = journal.reserve(ALIAS, &card(), 40);
+    journal.settle_answered(
+        ordinal,
+        Settlement::Priced {
+            input_tokens: 10,
+            output_tokens: 5,
+            usd_nanos: "15".into(),
+            cache_read_input_tokens: Some(4),
+            cache_write_input_tokens: None,
+        },
+        FinishClass::Stop,
+    );
+    journal.save(&path).expect("save");
+    assert_eq!(schema_version(&path), JOURNAL_SCHEMA_VERSION_V3);
+    assert_eq!(older_binary_admits(&path, Some(&sweep)), (false, false));
+    let resumed = GatewayJournal::load_bound(&path, &mine).expect("this binary resumes v3");
+    assert_eq!(resumed.cache_token_totals(), (Some(4), None));
     std::fs::remove_dir_all(&dir).ok();
 }

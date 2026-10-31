@@ -2427,6 +2427,8 @@ mod tests {
                     usage: Some(ProviderUsage {
                         input_tokens: 10,
                         output_tokens: 5,
+                        cache_read_input_tokens: None,
+                        cache_write_input_tokens: None,
                     }),
                 })
                 .expect("a provider body serializes"),
