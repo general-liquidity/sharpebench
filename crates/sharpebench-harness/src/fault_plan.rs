@@ -1143,4 +1143,80 @@ mod tests {
         assert_eq!(a.len(), 64);
         assert_eq!(a, bind_invocation(&invocation, Some(&sample_plan(7))));
     }
+
+    #[test]
+    fn a_plan_read_from_bytes_may_fill_exactly_64_kib() {
+        let exact = serde_json::to_vec(&sample_plan(1)).unwrap();
+        let padded = |len: usize| {
+            let mut bytes = exact.clone();
+            bytes.resize(len, b' ');
+            FaultPlan::from_json(&bytes)
+        };
+        assert!(padded(65_536).is_ok());
+        assert_eq!(
+            padded(65_537).expect_err("one byte too many"),
+            "fault plan exceeds the 64 KiB input limit"
+        );
+    }
+
+    #[test]
+    fn a_fault_name_may_carry_underscores_and_hyphens() {
+        for id in ["under_score", "hy-phen"] {
+            let faults = vec![spec(
+                id,
+                None,
+                1,
+                FaultMode::ProjectionLag { max_lag_steps: 2 },
+            )];
+            assert!(
+                FaultPlan::new(1, vec![ContractRelaxation::ReadYourWrites], faults).is_ok(),
+                "{id}"
+            );
+        }
+    }
+
+    /// A draw equal to a cohort's width lies outside that cohort, in the band
+    /// after it: the bands partition `0..COHORT_SCALE`, so no cell gets two
+    /// faults of one group.
+    #[test]
+    fn a_draw_on_a_cohort_boundary_belongs_to_the_next_band() {
+        const DIGEST: &str = "fixture-plan";
+        let lag = FaultMode::ProjectionLag { max_lag_steps: 2 };
+        let cell = CellId {
+            window_start: 0,
+            window_end: 1,
+            seed: 0,
+        };
+        let ids = |faults: &[FaultSpec]| -> Vec<String> {
+            assign(DIGEST, 7, faults, cell)
+                .iter()
+                .map(|spec| spec.id.clone())
+                .collect()
+        };
+
+        let draw = cohort_draw(DIGEST, DrawScope::Independent("solo"), 7, cell);
+        assert!(ids(&[spec("solo", None, draw, lag.clone())]).is_empty());
+        assert_eq!(ids(&[spec("solo", None, draw + 1, lag.clone())]), ["solo"]);
+
+        let draw = cohort_draw(DIGEST, DrawScope::Group("book"), 7, cell);
+        let group = [
+            spec("first", Some("book"), draw, lag.clone()),
+            spec("second", Some("book"), 1, lag),
+        ];
+        assert_eq!(ids(&group), ["second"]);
+    }
+
+    #[test]
+    fn a_sign_is_recorded_for_each_side_of_zero_and_nan_is_not_a_direction() {
+        for (value, sign) in [
+            (1.0, Sign::Positive),
+            (f64::MIN_POSITIVE, Sign::Positive),
+            (-1.0, Sign::Negative),
+            (0.0, Sign::Zero),
+            (-0.0, Sign::Zero),
+            (f64::NAN, Sign::Zero),
+        ] {
+            assert_eq!(Sign::of(value), sign, "{value}");
+        }
+    }
 }

@@ -1,6 +1,4 @@
-use sharpebench_harness::accounting::{
-    summarize_usage, AttemptUsage, RateCard, MAX_RATE_CARD_BYTES,
-};
+use sharpebench_harness::accounting::{summarize_usage, AttemptUsage, RateCard};
 use sharpebench_harness::{
     failing_sentinel_run, run_external_backtest_observed, run_resumable_sweep_observed,
     run_with_observed_retries, AttemptObservation, FailureKind, ResumePolicy, SweepCheckpoint,
@@ -74,7 +72,7 @@ fn card_contract_rejects_missing_unknown_noninteger_and_invalid_identity_fields(
             .replacen('{', "{\"model\":\"other\",", 1);
     assert!(RateCard::from_json(duplicate.as_bytes()).is_err());
     let mut at_limit = serde_json::to_vec(&original).unwrap();
-    at_limit.resize(MAX_RATE_CARD_BYTES, b' ');
+    at_limit.resize(65_536, b' ');
     assert!(RateCard::from_json(&at_limit).is_ok());
     let mut oversized = at_limit;
     oversized.push(b' ');
