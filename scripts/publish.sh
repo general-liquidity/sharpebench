@@ -10,8 +10,13 @@
 set -euo pipefail
 
 # Dependency-topological order: a crate must be live before its dependents resolve.
-# Mirror of the release.yml publish loop — keep the two lists in sync.
-ORDER=(sharpebench-stats sharpebench-edge sharpebench-protocol sharpebench-core sharpebench-attest sharpebench-sim sharpebench-leaderboard sharpebench-wasm sharpebench-harness sharpebench-arena sharpebench)
+# publish-order.txt is the one inventory, shared with release.yml; scripts/test_release.py
+# holds it to the workspace graph.
+mapfile -t ORDER < "$(dirname "${BASH_SOURCE[0]}")/publish-order.txt"
+if [ "${#ORDER[@]}" -eq 0 ]; then
+  echo "publish-order.txt is empty; refusing to report a publish of nothing" >&2
+  exit 1
+fi
 
 # The leaf crates (no internal deps) can be package-verified standalone.
 LEAVES=(sharpebench-stats sharpebench-protocol sharpebench-attest)

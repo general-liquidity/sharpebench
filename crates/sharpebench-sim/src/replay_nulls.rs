@@ -64,6 +64,9 @@ pub const MAX_TIMING_NULL_DRAWS: usize = 100_000;
 /// Why a replay diagnostic was not computed at all.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ReplayNullRefusal {
+    /// The cost model fails [`CostModel::validate`], the refusal every engine
+    /// entry point enforces.
+    InvalidCosts { reason: String },
     /// The trajectory has no runs.
     EmptyTrajectory,
     /// A run's window reaches past the dataset, so the replay would be cut short.
@@ -104,6 +107,7 @@ pub enum ReplayNullRefusal {
 impl std::fmt::Display for ReplayNullRefusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::InvalidCosts { reason } => write!(f, "invalid cost model: {reason}"),
             Self::EmptyTrajectory => write!(f, "the trajectory has no runs to replay"),
             Self::WindowOutsideData {
                 run,
@@ -424,6 +428,9 @@ pub fn lagged_replay(
     costs: CostModel,
     lags: &[usize],
 ) -> Result<LaggedReplayReport, ReplayNullRefusal> {
+    costs
+        .validate()
+        .map_err(|reason| ReplayNullRefusal::InvalidCosts { reason })?;
     check_runs(data, traj)?;
     let declared: Vec<usize> = lags
         .iter()
@@ -701,7 +708,10 @@ fn gross_path(
                     (position.shares * data.close_at(&position.symbol, bar).unwrap_or(0.0)).abs()
                 })
                 .sum();
-            let nav = stepped.info.nav.abs();
+            // At or below zero NAV no ratio measures the book. Taking the
+            // magnitude of a negative NAV would report a finite exposure that
+            // falls as the deficit grows.
+            let nav = stepped.info.nav;
             if nav > 0.0 {
                 value / nav
             } else if value > 0.0 {
@@ -997,6 +1007,9 @@ pub fn timing_null(
     costs: CostModel,
     config: TimingNullConfig,
 ) -> Result<TimingNullReport, ReplayNullRefusal> {
+    costs
+        .validate()
+        .map_err(|reason| ReplayNullRefusal::InvalidCosts { reason })?;
     check_runs(data, traj)?;
     if config.draws == 0 {
         return Err(ReplayNullRefusal::NoDraws);
@@ -1067,6 +1080,48 @@ pub fn timing_null(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One symbol that quadruples after a full short entered on the first bar,
+    /// which leaves NAV at about -2 while the short is worth 4.
+    #[test]
+    fn a_book_below_zero_nav_has_no_finite_gross_exposure() {
+        let data = Dataset::from_csv(
+            "date,symbol,close\n2024-01-01,AAA,100\n2024-01-02,AAA,100\n2024-01-03,AAA,400\n2024-01-04,AAA,400\n",
+        )
+        .unwrap();
+        let free = CostModel {
+            fee_bps: 0.0,
+            slippage_bps: 0.0,
+            impact_bps: 0.0,
+            financing_bps: 0.0,
+            ..CostModel::default()
+        };
+        let window = Window { start: 0, end: 4 };
+        let mut env = TradingEnv::new(data.clone(), window, free, 0);
+        let short = Decision {
+            orders: vec![sharpebench_protocol::Order {
+                symbol: "AAA".to_string(),
+                action: sharpebench_protocol::Action::Sell,
+                target_weight: -1.0,
+                confidence: None,
+                rationale: String::new(),
+            }],
+            reasoning: String::new(),
+            cost: None,
+        };
+        let flat = Decision {
+            orders: Vec::new(),
+            reasoning: String::new(),
+            cost: None,
+        };
+        let path = gross_path(
+            &mut env,
+            &data,
+            0,
+            &[short, flat.clone(), flat.clone(), flat],
+        );
+        assert!(path.contains(&f64::INFINITY), "{path:?}");
+    }
 
     #[test]
     fn holding_periods_are_the_maximal_invested_runs() {

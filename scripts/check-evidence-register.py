@@ -29,10 +29,17 @@ than a second copy of the register; and the Markdown register must be what
 ``make-evidence-register.py`` writes from the JSONL, so the readable copy cannot
 drift away from the machine-readable one.
 
-Rows for the companion product are marked ``external_repo`` and their artifacts
-are recorded but not opened: this repository does not contain that tree, and a
-check that silently passed on an unreadable path would report coverage it never
-verified.
+Rows for the companion product are marked ``external_repo`` and mirror a row of
+that product's own register, which each one names in ``companion_register``. On its
+own this check does not open their artifacts: this repository does not contain
+that tree, and a check that silently passed on an unreadable path would report
+coverage it never verified. Given the companion checkout, ``--companion <path>``
+opens them, in both directions, and fails on a moved digest, a mirrored row that
+is gone, a disposition the two registers disagree on, or a generator or checker
+that is no longer byte-identical between the two products.
+
+SharpeBench's copies of this file, its test and the generator are the source. The
+SharpeArena copies are byte-identical, and the companion check holds them so.
 
 Exit 0 when the register is consistent, 1 otherwise.
 """
@@ -84,6 +91,13 @@ REQUIRED_LIST_FIELDS = (
     "missing_provenance",
     "later_changes",
     "status_history",
+)
+
+# The files the two products share byte for byte.
+SHARED_SCRIPTS = (
+    "scripts/make-evidence-register.py",
+    "scripts/check-evidence-register.py",
+    "scripts/test_check_evidence_register.py",
 )
 
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -187,6 +201,26 @@ def check_artifacts(row: dict, where: str, root: pathlib.Path, problems: list[st
                 problems.append(
                     f"{label}: {path} hashes to {actual}, the row records {recorded}"
                 )
+
+
+def check_companion_link(row: dict, where: str, problems: list[str]) -> None:
+    """A mirrored row names the row of record, so a reader can find the opened digest."""
+    external = row.get("external_repo")
+    if not external:
+        return
+    link = row.get("companion_register")
+    if not isinstance(link, dict):
+        problems.append(f"{where}: row covers {external} but names no companion_register")
+        return
+    if link.get("repository") != external:
+        problems.append(
+            f"{where}: companion_register names {link.get('repository')!r}, "
+            f"the row covers {external!r}"
+        )
+    for field in ("path", "claim_id"):
+        value = link.get(field)
+        if not isinstance(value, str) or not value.strip():
+            problems.append(f"{where}: companion_register has no {field}")
 
 
 def check_locations(row: dict, where: str, root: pathlib.Path, problems: list[str]) -> None:
@@ -353,12 +387,86 @@ def validate(rows: list[dict], root: pathlib.Path) -> list[str]:
         check_fields(row, where, problems)
         check_disposition(row, where, problems)
         check_artifacts(row, where, root, problems)
+        check_companion_link(row, where, problems)
         check_locations(row, where, root, problems)
         check_status_history(row, where, problems)
     return problems
 
 
-def main() -> int:
+def text_bytes(path: pathlib.Path) -> bytes:
+    """A checkout's line endings are not a difference between the two products."""
+    return path.read_bytes().replace(b"\r\n", b"\n")
+
+
+def check_shared_scripts(root: pathlib.Path, companion: pathlib.Path, problems: list[str]) -> None:
+    for name in SHARED_SCRIPTS:
+        ours, theirs = root / name, companion / name
+        if not ours.exists() or not theirs.exists():
+            problems.append(f"companion: {name} is missing from one of the two products")
+        elif text_bytes(ours) != text_bytes(theirs):
+            problems.append(f"companion: {name} differs between the two products")
+
+
+def check_mirrored_rows(rows: list[dict], companion: pathlib.Path, problems: list[str]) -> None:
+    """Open what ``rows`` could only record, against the register of record."""
+    for row in rows:
+        if not row.get("external_repo"):
+            continue
+        claim_id = row.get("claim_id")
+        link = row.get("companion_register") or {}
+        register = companion / str(link.get("path", "docs/evidence-register.jsonl"))
+        if not register.is_file():
+            problems.append(f"companion: {claim_id}: {register} is missing")
+            continue
+        theirs = {other.get("claim_id"): other for other in load_rows(register)}
+        target = theirs.get(link.get("claim_id"))
+        if target is None:
+            problems.append(f"companion: {claim_id}: no row {link.get('claim_id')!r} of record")
+            continue
+        if target.get("disposition") != row.get("disposition"):
+            problems.append(
+                f"companion: {claim_id}: disposition {row.get('disposition')!r} here, "
+                f"{target.get('disposition')!r} in the register of record"
+            )
+        for artifact in row.get("artifacts", []):
+            path = artifact.get("path")
+            target_path = companion / str(path)
+            if not target_path.exists():
+                problems.append(f"companion: {claim_id}: {path} is not on disk")
+                continue
+            recorded = artifact.get("sha256")
+            if isinstance(recorded, str) and recorded:
+                actual = sha256_of(target_path)
+                if actual != recorded:
+                    problems.append(
+                        f"companion: {claim_id}: {path} hashes to {actual}, "
+                        f"the row records {recorded}"
+                    )
+
+
+def check_companion(
+    rows: list[dict], root: pathlib.Path, companion: pathlib.Path, problems: list[str]
+) -> None:
+    check_shared_scripts(root, companion, problems)
+    check_mirrored_rows(rows, companion, problems)
+    theirs = companion / "docs" / "evidence-register.jsonl"
+    if theirs.is_file():
+        check_mirrored_rows(load_rows(theirs), root, problems)
+    else:
+        problems.append(f"companion: {theirs} is missing")
+
+
+def companion_argument(argv: list[str]) -> pathlib.Path | None:
+    if "--companion" not in argv:
+        return None
+    index = argv.index("--companion")
+    if index + 1 >= len(argv):
+        raise SystemExit("--companion needs the companion product's checkout")
+    return pathlib.Path(argv[index + 1])
+
+
+def main(argv: list[str] | None = None) -> int:
+    companion = companion_argument(sys.argv[1:] if argv is None else argv)
     if not REGISTER_JSONL.exists():
         print(f"FAIL: {REGISTER_JSONL} is missing", file=sys.stderr)
         return 1
@@ -367,12 +475,15 @@ def main() -> int:
     check_coverage(rows, problems)
     check_queue_bound(rows, problems, queue_bound())
     check_markdown(rows, problems)
+    if companion is not None:
+        check_companion(rows, ROOT, companion, problems)
     if problems:
         for problem in problems:
             print(problem, file=sys.stderr)
         print(f"\nFAIL: {len(problems)} register problem(s)", file=sys.stderr)
         return 1
-    print(f"OK: {len(rows)} register rows, every claim dispositioned")
+    opened = " and the companion's mirrored artifacts opened" if companion else ""
+    print(f"OK: {len(rows)} register rows, every claim dispositioned{opened}")
     return 0
 
 

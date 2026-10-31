@@ -650,7 +650,7 @@ fn with_a_plan_extra_contracts_are_reported_and_charge_nobody() {
         &planned,
     )
     .expect("padded field is reported");
-    assert_eq!(report.schema_version, "sharpebench.forecast-quality.v5");
+    assert_eq!(report.schema_version, "sharpebench.forecast-quality.v6");
     assert!(report.common_support.rule.contains("declared plan"));
     let two = pair(&baseline, "a", "b");
     let three = pair(&report, "a", "b");
@@ -839,4 +839,49 @@ fn a_malformed_plan_is_refused() {
     ] {
         assert!(parse(value).is_err(), "{label}");
     }
+}
+
+/// CODE S9 and S10, 2026-10-30. `a` also resolves a contract outside the plan, and
+/// nobody resolves planned contract 2.
+#[test]
+fn a_planned_row_counts_one_scope_and_an_unsettled_contract_is_no_dispute() {
+    let mut a = resolved([0, 1, 2, 5], true);
+    a[2].status = Status::Pending;
+    let mut b = resolved([0, 1, 2], false);
+    b[2].status = Status::Cancelled;
+    let c = resolved([5], true);
+    let report = analyze_forecast_quality_against_plan(
+        &[document("a", &a), document("b", &b), document("c", &c)],
+        CONFIG,
+        &plan(0..3),
+    )
+    .expect("planned report");
+    assert_eq!(report.schema_version, "sharpebench.forecast-quality.v6");
+
+    let support = &report.common_support;
+    assert_eq!(support.settlement_status_disagreements, Vec::new());
+    assert_eq!(support.unresolved_by_agent["a"].pending, vec![digest(2)]);
+    assert_eq!(support.unresolved_by_agent["b"].cancelled, vec![digest(2)]);
+
+    let row = &report.agents[0];
+    assert_eq!((row.n_claims, row.n_resolved), (4, 3));
+    let planned = row.planned.as_ref().expect("a planned row");
+    assert_eq!(planned.n_claims, 3);
+    assert_eq!(planned.n_revisions, 3);
+    assert_eq!(planned.n_eligible_claims, 3);
+    assert_eq!(planned.n_resolved, 2);
+    assert_eq!(planned.n_pending, 1);
+    assert_eq!(planned.resolution_rate, Some(2.0 / 3.0));
+
+    // A rate over no planned claims is unavailable on the wire, not zero.
+    let idle = &report.agents[2];
+    assert_eq!(idle.planned.as_ref().unwrap().n_claims, 0);
+    let wire = serde_json::to_value(idle).unwrap();
+    assert!(wire["planned"]["resolution_rate"].is_null());
+
+    let unplanned = analyze_forecast_quality(&[document("a", &a)], CONFIG).unwrap();
+    assert_eq!(unplanned.schema_version, "sharpebench.forecast-quality.v5");
+    assert!(unplanned.agents[0].planned.is_none());
+    let wire = serde_json::to_value(&unplanned.agents[0]).unwrap();
+    assert!(wire.get("planned").is_none());
 }

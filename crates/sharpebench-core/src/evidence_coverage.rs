@@ -29,6 +29,20 @@
 //! The preimage is a byte string, not a hash: this crate is pure and carries no
 //! cryptographic dependency. Feed the output to a digest function such as
 //! `sharpebench_attest::content_digest`.
+//!
+//! # Preimage encodings
+//!
+//! [`EVIDENCE_PREIMAGE_VERSION`] is the current form. The frame is `version |
+//! 0x00 | big-endian u64 body length | body`, and the body holds one record per
+//! field, each a big-endian u64 length and the bytes of the name, then the same
+//! for the value. Every byte of a value is counted, so the encoding is injective
+//! and one frame can follow another without ambiguity.
+//!
+//! [`PreimageEncoding::Legacy`] is the earlier `name\x1fvalue\x1e` form. It is
+//! not injective: a value may contain both separators, so distinct field
+//! assignments can serialize to the same bytes. It stays available only so a
+//! digest published before the change can be identified. A new digest is never
+//! taken under it.
 
 use std::collections::BTreeSet;
 
@@ -37,6 +51,33 @@ use serde::Serialize;
 /// The token substituted for a redacted value. Fixed and public, so a verifier
 /// reconstructs the preimage without the secret.
 pub const REDACTED: &str = "<redacted>";
+
+/// The version tag framing every current evidence preimage.
+pub const EVIDENCE_PREIMAGE_VERSION: &str = "sharpebench/evidence-preimage/v1";
+
+/// The byte encoding of an evidence preimage, published beside the digest so a
+/// reader knows which form to recompute. Mirrors the `contract_digest_encoding`
+/// labels of the forecast contract digest: a document that predates this field
+/// was digested under [`PreimageEncoding::Legacy`].
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+pub enum PreimageEncoding {
+    /// [`EVIDENCE_PREIMAGE_VERSION`], the injective length-framed form.
+    #[serde(rename = "sharpebench/evidence-preimage/v1")]
+    V1,
+    /// The separator form, kept to identify old digests only.
+    #[serde(rename = "legacy")]
+    Legacy,
+}
+
+impl PreimageEncoding {
+    /// The label this encoding is published under.
+    pub fn label(self) -> &'static str {
+        match self {
+            PreimageEncoding::V1 => EVIDENCE_PREIMAGE_VERSION,
+            PreimageEncoding::Legacy => "legacy",
+        }
+    }
+}
 
 /// Which digest binds a field.
 ///
@@ -175,23 +216,36 @@ impl EvidenceInventory {
         }
     }
 
-    /// Build the canonical bytes to hash for one digest.
+    /// Build the canonical bytes to hash for one digest, under
+    /// [`EVIDENCE_PREIMAGE_VERSION`].
     ///
     /// `values` supplies every field of the document as an already-rendered
     /// string; the caller owns the rendering so that number formatting stays a
     /// decision of the producer rather than of this module. Fields bound by
     /// other digests, and excluded fields, are simply not consulted.
     ///
-    /// The output is `name\x1fvalue\x1e` per field, in inventory order, with the
-    /// document name and digest as the first record. The unit separators cannot
-    /// appear in a field name, so no value can be crafted to look like a field
-    /// boundary.
+    /// Records run in inventory order, with the document name and digest as the
+    /// first two. Each name and value is length-prefixed, so a value holding any
+    /// bytes at all stays inside its own record; see the module documentation
+    /// for the frame.
     ///
     /// Fails when a value is supplied for an undeclared field (the inventory is
     /// out of date), when a bound field has no value (the digest would silently
     /// cover less than it claims), or when a field is supplied twice.
     pub fn preimage(
         &self,
+        digest: DigestId,
+        values: &[(&str, &str)],
+    ) -> Result<Vec<u8>, PreimageError> {
+        self.preimage_under(PreimageEncoding::V1, digest, values)
+    }
+
+    /// [`Self::preimage`] under a named encoding. The only reason to pass
+    /// [`PreimageEncoding::Legacy`] is to recompute a digest published before
+    /// [`EVIDENCE_PREIMAGE_VERSION`] and identify it.
+    pub fn preimage_under(
+        &self,
+        encoding: PreimageEncoding,
         digest: DigestId,
         values: &[(&str, &str)],
     ) -> Result<Vec<u8>, PreimageError> {
@@ -209,10 +263,13 @@ impl EvidenceInventory {
             }
         }
 
-        let mut out = Vec::new();
-        push_record(&mut out, "sharpebench.document", self.document);
-        push_record(&mut out, "sharpebench.digest", digest_name(digest));
+        let mut records: Vec<(&str, &str)> = vec![
+            ("sharpebench.document", self.document),
+            ("sharpebench.digest", digest_name(digest)),
+        ];
 
+        // inv: `records` holds the two header records, then every field of
+        // `self.fields` before this one that `digest` binds, in inventory order.
         for (name, coverage) in self.fields {
             if coverage.digest() != Some(digest) {
                 continue;
@@ -223,20 +280,50 @@ impl EvidenceInventory {
                 });
             };
             match coverage {
-                Coverage::Covered { .. } => push_record(&mut out, name, value),
-                Coverage::Redacted { .. } => push_record(&mut out, name, REDACTED),
+                Coverage::Covered { .. } => records.push((name, value)),
+                Coverage::Redacted { .. } => records.push((name, REDACTED)),
                 Coverage::Excluded { .. } => unreachable!("filtered by digest match"),
             }
         }
-        Ok(out)
+        Ok(match encoding {
+            PreimageEncoding::V1 => framed_preimage(&records),
+            PreimageEncoding::Legacy => legacy_preimage(&records),
+        })
     }
 }
 
-fn push_record(out: &mut Vec<u8>, name: &str, value: &str) {
-    out.extend_from_slice(name.as_bytes());
-    out.push(0x1f);
-    out.extend_from_slice(value.as_bytes());
-    out.push(0x1e);
+/// `version | 0x00 | u64 body length | body`, where the body is each record's
+/// length-prefixed name and value.
+fn framed_preimage(records: &[(&str, &str)]) -> Vec<u8> {
+    fn push_counted(out: &mut Vec<u8>, bytes: &[u8]) {
+        out.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
+        out.extend_from_slice(bytes);
+    }
+
+    let mut body = Vec::new();
+    // inv: `body` is the encoding of every record before this one.
+    for (name, value) in records {
+        push_counted(&mut body, name.as_bytes());
+        push_counted(&mut body, value.as_bytes());
+    }
+    let mut out = Vec::with_capacity(EVIDENCE_PREIMAGE_VERSION.len() + 9 + body.len());
+    out.extend_from_slice(EVIDENCE_PREIMAGE_VERSION.as_bytes());
+    out.push(0x00);
+    push_counted(&mut out, &body);
+    out
+}
+
+/// The separator form. Not injective; see [`PreimageEncoding::Legacy`].
+fn legacy_preimage(records: &[(&str, &str)]) -> Vec<u8> {
+    let mut out = Vec::new();
+    // inv: `out` is the encoding of every record before this one.
+    for (name, value) in records {
+        out.extend_from_slice(name.as_bytes());
+        out.push(0x1f);
+        out.extend_from_slice(value.as_bytes());
+        out.push(0x1e);
+    }
+    out
 }
 
 fn digest_name(d: DigestId) -> &'static str {
@@ -620,7 +707,10 @@ mod tests {
         let bytes = COMPOSITE_SCORE_INVENTORY
             .preimage(DigestId::AgentScore, &values)
             .unwrap();
-        let record = b"selection_error\x1f0\x1e";
+        let mut record = 15u64.to_be_bytes().to_vec();
+        record.extend_from_slice(b"selection_error");
+        record.extend_from_slice(&1u64.to_be_bytes());
+        record.push(b'0');
         assert!(bytes.windows(record.len()).any(|w| w == record));
     }
 
@@ -737,7 +827,7 @@ mod tests {
         let bytes = RUN_PROVENANCE_INVENTORY
             .preimage(DigestId::RunProvenance, &provenance_values())
             .expect("complete value set");
-        let text = String::from_utf8(bytes).unwrap();
+        let text = String::from_utf8_lossy(&bytes);
         assert!(
             !text.contains("SUPER-SECRET-CANARY-42"),
             "the canary leaked into the bytes that get hashed"
@@ -834,7 +924,7 @@ mod tests {
             .collect();
         for digest in [DigestId::AgentScore, DigestId::FieldContext] {
             let bytes = COMPOSITE_SCORE_INVENTORY.preimage(digest, &values).unwrap();
-            let text = String::from_utf8(bytes).unwrap();
+            let text = String::from_utf8_lossy(&bytes);
             for (name, _) in COMPOSITE_SCORE_INVENTORY.exclusions() {
                 assert!(
                     !text.contains(name),
@@ -842,6 +932,81 @@ mod tests {
                 );
             }
         }
+    }
+
+    const PAIR: EvidenceInventory = EvidenceInventory {
+        document: "doc",
+        fields: &[
+            (
+                "x",
+                Coverage::Covered {
+                    digest: DigestId::RunProvenance,
+                },
+            ),
+            (
+                "y",
+                Coverage::Covered {
+                    digest: DigestId::RunProvenance,
+                },
+            ),
+        ],
+    };
+
+    /// Reviewer finding BM10. The two assignments share every legacy byte, which
+    /// is the defect; the current frame keeps them apart.
+    #[test]
+    fn a_value_holding_the_separators_cannot_imitate_a_field_boundary() {
+        let shifted = [("x", "p\x1ey\x1fq"), ("y", "r")];
+        let plain = [("x", "p"), ("y", "q\x1ey\x1fr")];
+        let under = |encoding, values: &[(&str, &str)]| {
+            PAIR.preimage_under(encoding, DigestId::RunProvenance, values)
+                .unwrap()
+        };
+        assert_eq!(
+            under(PreimageEncoding::Legacy, &shifted),
+            under(PreimageEncoding::Legacy, &plain),
+            "the legacy form is the collision this version exists to end"
+        );
+        assert_ne!(
+            under(PreimageEncoding::V1, &shifted),
+            under(PreimageEncoding::V1, &plain)
+        );
+    }
+
+    /// Both byte layouts are published contracts, so a restatement in another
+    /// language can be written from these two values.
+    #[test]
+    fn the_two_encodings_keep_their_exact_bytes() {
+        let values = [("x", "1"), ("y", "")];
+        assert_eq!(
+            PAIR.preimage_under(PreimageEncoding::Legacy, DigestId::RunProvenance, &values)
+                .unwrap(),
+            b"sharpebench.document\x1fdoc\x1e\
+              sharpebench.digest\x1frun_provenance\x1e\
+              x\x1f1\x1ey\x1f\x1e"
+        );
+
+        let mut body = Vec::new();
+        for (text, width) in [
+            ("sharpebench.document", 20u64),
+            ("doc", 3),
+            ("sharpebench.digest", 18),
+            ("run_provenance", 14),
+            ("x", 1),
+            ("1", 1),
+            ("y", 1),
+            ("", 0),
+        ] {
+            body.extend_from_slice(&width.to_be_bytes());
+            body.extend_from_slice(text.as_bytes());
+        }
+        let mut expected = b"sharpebench/evidence-preimage/v1\x00".to_vec();
+        expected.extend_from_slice(&(body.len() as u64).to_be_bytes());
+        expected.extend_from_slice(&body);
+        assert_eq!(
+            PAIR.preimage(DigestId::RunProvenance, &values).unwrap(),
+            expected
+        );
     }
 
     #[test]

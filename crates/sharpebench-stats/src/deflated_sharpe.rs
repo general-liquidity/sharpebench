@@ -426,6 +426,46 @@ pub(crate) fn deflated_sharpe_ratio_of(
 mod tests {
     use super::*;
 
+    /// Samuelson's bound on its own: a level with a small wobble is forced to
+    /// one side of zero, a window with a losing bar is not, and one bar carries
+    /// no dispersion to compare with.
+    #[test]
+    fn sign_is_forced_only_when_the_mean_exceeds_samuelsons_bound() {
+        assert!(sign_is_forced_by_moments(&[1.0, 1.001, 0.999]));
+        assert!(sign_is_forced_by_moments(&[-1.0, -1.001, -0.999]));
+        // Mean 1, standard deviation 0.7, three bars: |mean| sqrt(3) = 1.73
+        // clears 0.7 * 2 = 1.4, and would not clear 0.7 * 3 = 2.1.
+        assert!(sign_is_forced_by_moments(&[0.3, 1.0, 1.7]));
+        assert!(!sign_is_forced_by_moments(&[0.02, -0.01, 0.015]));
+        // A flat window has no dispersion and no mean: zero against zero is
+        // not strictly greater.
+        assert!(!sign_is_forced_by_moments(&[0.0, 0.0]));
+        assert!(!sign_is_forced_by_moments(&[0.01]));
+        assert!(!sign_is_forced_by_moments(&[]));
+    }
+
+    /// A window resolves its dispersion when it has losing and winning bars,
+    /// and not when a level, a single spike or a single outlier carries all of
+    /// it.
+    #[test]
+    fn a_window_resolves_its_dispersion_only_without_one_dominant_bar() {
+        assert!(window_resolves_its_dispersion(&[
+            0.02, -0.01, 0.015, -0.005
+        ]));
+        assert!(window_resolves_its_dispersion(&[0.01, -0.02]));
+        // Forced to one side by its moments, at two bars and at three.
+        assert!(!window_resolves_its_dispersion(&[1.0, 1.001]));
+        assert!(!window_resolves_its_dispersion(&[1.0, 1.001, 0.999]));
+        // A single spike in a flat window: without it the rest is constant.
+        assert!(!window_resolves_its_dispersion(&[0.0, 0.0, 1.0]));
+        // The bar set aside is the one furthest from the median, not from the
+        // smallest bar and not by ratio or sum.
+        assert!(!window_resolves_its_dispersion(&[1.0, 1.0, 1.0, -5.0]));
+        assert!(!window_resolves_its_dispersion(&[2.0, 2.0, 2.0, -1.0]));
+        assert!(!window_resolves_its_dispersion(&[-1.0, 2.0, 2.0, 2.0]));
+        assert!(!window_resolves_its_dispersion(&[0.5, 0.01, 0.01, 0.01]));
+    }
+
     /// A long, steady, low-vol track clears PSR vs 0 easily.
     #[test]
     fn psr_high_for_consistent_edge() {

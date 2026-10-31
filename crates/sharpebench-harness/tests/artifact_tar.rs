@@ -121,8 +121,12 @@ fn malformed_pax_records_cannot_hide_later_size_overrides() {
         b"not a record\n".to_vec(),
         [b"\n".to_vec(), pax("size", "1")].concat(),
         [pax("mtime", "1"), b"\n".to_vec(), pax("size", "1")].concat(),
+        [pax("mtime", "1"), b"\n".to_vec()].concat(),
     ] {
-        let bytes = member(b'x', b"pax", &body);
+        // The following member matters: a PAX header left dangling is refused
+        // with this same reason, so without it these cases pass on that rule
+        // and the blank-line rule can be weakened unnoticed.
+        let bytes = [member(b'x', b"pax", &body), member(b'0', b"file", b"")].concat();
         let report = scan_tar_snapshot(&bytes[..], policy());
         assert!(!report.no_known_matches());
         assert_eq!(
@@ -222,4 +226,37 @@ fn corrupt_truncated_empty_and_read_failed_archives_never_pass() {
         report.scan.incomplete_reason,
         Some(IncompleteReason::ReadError)
     );
+}
+
+#[test]
+fn every_supported_member_kind_scans_to_a_complete_report() {
+    for kind in [b'0', 0, b'1', b'2', b'3', b'4', b'5', b'6', b'7'] {
+        let bytes = member(kind, b"entry", b"");
+        let report = scan_tar_snapshot(&bytes[..], policy());
+        assert!(report.no_known_matches(), "member kind {kind}");
+    }
+}
+
+/// Regression: the bug this names would stop the scan after any PAX body and
+/// still report it complete, with the rest of the archive never read.
+#[test]
+fn members_after_a_pax_header_are_still_scanned() {
+    let bytes = [
+        member(b'x', b"pax", &pax("mtime", "1")),
+        member(b'0', b"file", b"protected-needle"),
+    ]
+    .concat();
+    let report = scan_tar_snapshot(&bytes[..], policy());
+    assert_eq!(report.scan.incomplete_reason, None);
+    assert_eq!(report.scan.matches.len(), 1);
+}
+
+#[test]
+fn an_extension_of_exactly_64_kib_is_scanned() {
+    let bytes = [
+        member(b'L', b"long", &[b'a'; 65_536]),
+        member(b'0', b"file", b""),
+    ]
+    .concat();
+    assert!(scan_tar_snapshot(&bytes[..], policy()).no_known_matches());
 }

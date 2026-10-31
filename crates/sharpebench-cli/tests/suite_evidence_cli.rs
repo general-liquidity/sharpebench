@@ -126,6 +126,10 @@ fn the_emitted_controls_carry_the_digest_that_binds_them() {
     assert_eq!(binding["used_by_gate"], serde_json::Value::Bool(false));
     assert_eq!(binding["digest"], "run_provenance");
     assert_eq!(
+        binding["preimage_encoding"],
+        "sharpebench/evidence-preimage/v1"
+    );
+    assert_eq!(
         binding["document"],
         "sharpebench_core::suite_controls::ControlVerdict"
     );

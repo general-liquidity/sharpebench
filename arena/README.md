@@ -10,29 +10,37 @@ chain verifiable with only the key below.
 
 Epochs are integer **days since the Unix epoch, UTC**: `epoch = floor(unix_time / 86400)`.
 The operator (or CI) advances the clock with `sharpebench arena advance arena <epoch>`.
-Epochs are monotonic; the kernel never reads a wall clock.
+Epochs are monotonic; the kernel never reads a wall clock. The daily workflow
+passes `--only-if-due`, so `current_epoch` in `state.json` moves only when a
+window transition falls due and otherwise stays at its last value.
 
-## Window 003 (open)
+## Window 003 (expired empty)
+
+`window-003` reached its data reveal with no commitment, refusal or score. The
+operator recorded that with `sharpebench arena expire-empty arena window-003` at
+epoch 20756 (2026-10-30 UTC). No board exists for it and no forward result came
+from it. The record stays in `windows/window-003/window.json`.
 
 | Field | Value |
 |---|---|
 | Window id | `window-003` |
 | Opened at epoch | 20690 (2026-08-25 UTC) |
-| Commit deadline | epoch 20711 (2026-09-15 UTC), commitments at or after this epoch are refused |
-| Data reveal / resolution | epoch 20720 (2026-09-24 UTC), scoring runs on data revealed here |
+| Commit deadline | epoch 20711 (2026-09-15 UTC), commitments at or after this epoch were refused |
+| Data reveal / resolution | epoch 20720 (2026-09-24 UTC), scoring would have run on data revealed here |
+| Expired | epoch 20756 (2026-10-30 UTC), status `expired-empty` |
 | Scorer artifact SHA-256 | `263fadcd4376ca2d1c63435b885f9809fea3748a9091e30c9d72a577463c2fa1` (`sharpebench-x86_64-linux-musl` attached to the v0.9.0 GitHub release, SLSA provenance verifiable with `gh attestation verify`) |
 | Scoring config SHA-256 | `8c59e511ea2a9e572d8fb7901fd2951da1221ca9323bfe8e2fdbfa9395a89f07` (schema v2; the complete typed `score_config` is inside `windows/window-003/window.json`) |
 
-The scorer that will grade the reveal is the published, attested v0.9.0 release
-binary; any entrant can retrieve it byte for byte before committing. The config
-is the shipped default for daily bars under the v0.9.0 kernel (seed-averaged
+The scorer named for the reveal was the published, attested v0.9.0 release
+binary, retrievable byte for byte before committing. The config was the shipped
+default for daily bars under the v0.9.0 kernel (seed-averaged
 pooling, effective-N floor, measured-dispersion floor 0.5 annualized).
 
 ## Superseded pre-entry records
 
 Two earlier windows were opened and withdrawn before any commitment, refusal
 or score existed. Both records remain in `windows/` and `state.json` as
-history; `window-003` above is the live window.
+history. No window is open now; the next one waits for the next release.
 
 | Window id | Opened at epoch | Superseded at epoch | Reason |
 |---|---|---|---|
@@ -66,9 +74,10 @@ committed here.
 
 ## How to enter
 
-Produce a commitment before the deadline with `sharpebench commit` and deliver
-the JSON out of band (a PR against this directory is fine); the operator
-registers it with `sharpebench arena commit arena window-003 <commitment.json>`.
+No window is open at present. Once one is, produce a commitment before its
+deadline with `sharpebench commit` and deliver the JSON out of band (a PR
+against this directory is fine); the operator registers it with
+`sharpebench arena commit arena <window> <commitment.json>`.
 At the reveal epoch, reveals that do not match their registered commitment are
 refused and the refusal is part of the permanent signed record.
 

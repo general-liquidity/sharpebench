@@ -1,0 +1,269 @@
+{
+  "schema": "sharpebench.forecast-size-study.v1",
+  "purpose": "seeded producer for the rejection rates MEASURED_SIZE and FAMILYWISE_SIZE_RULE state; the constants are not edited by this run",
+  "master_seed": 5903410038175475066,
+  "replications": 6000,
+  "contracts_per_block": 5,
+  "bootstrap_samples": 2000,
+  "bootstrap_seed": 264899179192358,
+  "nominal": 0.05,
+  "rejection_rule": "familywise_significant of a one-pair analyze_forecast_quality report, which with a family of one is raw_p_value <= familywise_alpha",
+  "lognormal_law": "exp(Z) - exp(1/2) with Z standard normal; the original study's parameters were not recorded, so this law is this producer's choice",
+  "float_note": "draws use sqrt and ln only; the JSON is byte-stable on one platform and the counts are integers",
+  "size": [
+    {
+      "law": "normal",
+      "blocks": 4,
+      "contracts": 20,
+      "stated": 0.188,
+      "measured": {
+        "hits": 1204,
+        "rate": 0.20066666666666666,
+        "wilson_lower": 0.19072578233306683,
+        "wilson_upper": 0.21099059798161926
+      },
+      "measured_fresh_seed": {
+        "hits": 1206,
+        "rate": 0.201,
+        "wilson_lower": 0.19105261118871092,
+        "wilson_upper": 0.21133000923698336
+      },
+      "difference_from_stated": 0.01266666666666666,
+      "stated_inside_wilson_95": false,
+      "percentile_interval_coverage": {
+        "hits": 4771,
+        "rate": 0.7951666666666667,
+        "wilson_lower": 0.7847675400485481,
+        "wilson_upper": 0.8051880782491638
+      }
+    },
+    {
+      "law": "normal",
+      "blocks": 5,
+      "contracts": 25,
+      "stated": 0.162,
+      "measured": {
+        "hits": 962,
+        "rate": 0.16033333333333333,
+        "wilson_lower": 0.15126703209552503,
+        "wilson_upper": 0.16983429478717557
+      },
+      "measured_fresh_seed": {
+        "hits": 952,
+        "rate": 0.15866666666666668,
+        "wilson_lower": 0.1496406018701321,
+        "wilson_upper": 0.16812952445752785
+      },
+      "difference_from_stated": -0.0016666666666666774,
+      "stated_inside_wilson_95": true,
+      "percentile_interval_coverage": {
+        "hits": 5028,
+        "rate": 0.838,
+        "wilson_lower": 0.8284612899839611,
+        "wilson_upper": 0.8471061825782974
+      }
+    },
+    {
+      "law": "normal",
+      "blocks": 6,
+      "contracts": 30,
+      "stated": 0.138,
+      "measured": {
+        "hits": 863,
+        "rate": 0.14383333333333334,
+        "wilson_lower": 0.13518178247930238,
+        "wilson_upper": 0.1529406589084951
+      },
+      "measured_fresh_seed": {
+        "hits": 864,
+        "rate": 0.144,
+        "wilson_lower": 0.13534406983625755,
+        "wilson_upper": 0.153111491607044
+      },
+      "difference_from_stated": 0.005833333333333329,
+      "stated_inside_wilson_95": true,
+      "percentile_interval_coverage": {
+        "hits": 5133,
+        "rate": 0.8555,
+        "wilson_lower": 0.8463760345882744,
+        "wilson_upper": 0.8641690438019117
+      }
+    },
+    {
+      "law": "normal",
+      "blocks": 10,
+      "contracts": 50,
+      "stated": 0.096,
+      "measured": {
+        "hits": 572,
+        "rate": 0.09533333333333334,
+        "wilson_lower": 0.08815925811669632,
+        "wilson_upper": 0.10302524711941614
+      },
+      "measured_fresh_seed": {
+        "hits": 581,
+        "rate": 0.09683333333333333,
+        "wilson_lower": 0.08960635937369774,
+        "wilson_upper": 0.10457622636195135
+      },
+      "difference_from_stated": -0.0006666666666666626,
+      "stated_inside_wilson_95": true,
+      "percentile_interval_coverage": {
+        "hits": 5432,
+        "rate": 0.9053333333333333,
+        "wilson_lower": 0.8976642561724001,
+        "wilson_upper": 0.9124837188135037
+      }
+    },
+    {
+      "law": "normal",
+      "blocks": 20,
+      "contracts": 100,
+      "stated": 0.072,
+      "measured": {
+        "hits": 403,
+        "rate": 0.06716666666666667,
+        "wilson_lower": 0.06110596963409144,
+        "wilson_upper": 0.07378124622183278
+      },
+      "measured_fresh_seed": {
+        "hits": 416,
+        "rate": 0.06933333333333333,
+        "wilson_lower": 0.06317756118219507,
+        "wilson_upper": 0.07604021539528209
+      },
+      "difference_from_stated": -0.004833333333333328,
+      "stated_inside_wilson_95": true,
+      "percentile_interval_coverage": {
+        "hits": 5584,
+        "rate": 0.9306666666666666,
+        "wilson_lower": 0.9239597846047178,
+        "wilson_upper": 0.9368224388178048
+      }
+    },
+    {
+      "law": "normal",
+      "blocks": 40,
+      "contracts": 200,
+      "stated": 0.06,
+      "measured": {
+        "hits": 369,
+        "rate": 0.0615,
+        "wilson_lower": 0.05569710850074846,
+        "wilson_upper": 0.06786402546803731
+      },
+      "measured_fresh_seed": {
+        "hits": 377,
+        "rate": 0.06283333333333334,
+        "wilson_lower": 0.05696853499765113,
+        "wilson_upper": 0.06925755941516724
+      },
+      "difference_from_stated": 0.0015000000000000013,
+      "stated_inside_wilson_95": true,
+      "percentile_interval_coverage": {
+        "hits": 5627,
+        "rate": 0.9378333333333333,
+        "wilson_lower": 0.9314391081087042,
+        "wilson_upper": 0.9436672777004936
+      }
+    },
+    {
+      "law": "lognormal",
+      "blocks": 4,
+      "contracts": 20,
+      "stated": 0.237,
+      "measured": {
+        "hits": 1479,
+        "rate": 0.2465,
+        "wilson_lower": 0.23575955863533823,
+        "wilson_upper": 0.2575648369429678
+      },
+      "measured_fresh_seed": {
+        "hits": 1490,
+        "rate": 0.24833333333333332,
+        "wilson_lower": 0.237564594325495,
+        "wilson_upper": 0.25942412186335573
+      },
+      "difference_from_stated": 0.009500000000000008,
+      "stated_inside_wilson_95": true,
+      "percentile_interval_coverage": {
+        "hits": 4549,
+        "rate": 0.7581666666666667,
+        "wilson_lower": 0.7471690899992974,
+        "wilson_upper": 0.7688338759765104
+      }
+    }
+  ],
+  "comparators": [
+    {
+      "name": "shipped test at a half-sigma effect",
+      "code_path": "shipped analyzer",
+      "law": "normal",
+      "effect": 0.5,
+      "blocks": 4,
+      "stated": 0.745,
+      "measured": {
+        "hits": 4365,
+        "rate": 0.7275,
+        "wilson_lower": 0.7160910379363956,
+        "wilson_upper": 0.738617837826663
+      }
+    },
+    {
+      "name": "studentised block bootstrap, size",
+      "code_path": "reconstructed here; no shipped code path",
+      "law": "normal",
+      "effect": 0.0,
+      "blocks": 4,
+      "stated": 0.013,
+      "measured": {
+        "hits": 132,
+        "rate": 0.022,
+        "wilson_lower": 0.018582912033179227,
+        "wilson_upper": 0.026028768781141427
+      }
+    },
+    {
+      "name": "studentised block bootstrap at a half-sigma effect",
+      "code_path": "reconstructed here; no shipped code path",
+      "law": "normal",
+      "effect": 0.5,
+      "blocks": 4,
+      "stated": 0.121,
+      "measured": {
+        "hits": 852,
+        "rate": 0.142,
+        "wilson_lower": 0.13339689069600935,
+        "wilson_upper": 0.15106123008124328
+      }
+    },
+    {
+      "name": "Student-t on block means, size",
+      "code_path": "reconstructed here; no shipped code path",
+      "law": "normal",
+      "effect": 0.0,
+      "blocks": 4,
+      "stated": 0.05,
+      "measured": {
+        "hits": 338,
+        "rate": 0.05633333333333333,
+        "wilson_lower": 0.050778194146076386,
+        "wilson_upper": 0.06245621810208314
+      }
+    },
+    {
+      "name": "Student-t on block means, size",
+      "code_path": "reconstructed here; no shipped code path",
+      "law": "lognormal",
+      "effect": 0.0,
+      "blocks": 4,
+      "stated": 0.094,
+      "measured": {
+        "hits": 581,
+        "rate": 0.09683333333333333,
+        "wilson_lower": 0.08960635937369774,
+        "wilson_upper": 0.10457622636195135
+      }
+    }
+  ]
+}

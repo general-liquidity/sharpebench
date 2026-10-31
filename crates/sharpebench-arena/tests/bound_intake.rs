@@ -423,6 +423,66 @@ fn a_capture_over_a_different_dataset_is_refused() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `sharpebench capture --short-borrow-bps 25` binds the rate into the
+/// capture's cost model digest. The arena replays every capture under the
+/// default cost model and signs that as the window's execution identity, so a
+/// capture made under another rate is refused, never replayed under costs it
+/// did not run.
+#[test]
+fn a_capture_made_under_a_non_default_short_borrow_rate_is_refused() {
+    let dir = temp_dir("short-borrow");
+    let data = market(1);
+    let (reference, digest) = image("alpha");
+    let (mut arena, dataset) = committed(
+        &dir,
+        &data,
+        &[("borrow", &digest), ("default", &digest)],
+        None,
+    );
+    let replay = ReplayWindow::parse(csv(&data).as_bytes(), &config()).unwrap();
+    let borrow_costs = sharpebench_sim::CostModel {
+        short_borrow_bps: 25.0,
+        ..sharpebench_sim::CostModel::default()
+    };
+    let (_, mut borrow) = sharpebench_harness::run_agent_capture(
+        &format!("sandbox:{reference}"),
+        &replay.data,
+        &replay.windows,
+        &replay.seeds,
+        borrow_costs,
+        momentum,
+    );
+    borrow.contract.as_mut().unwrap().runner_artifact_sha256 = Some(scorer());
+    let current = capture(&format!("sandbox:{reference}"), &data, momentum);
+    let borrow_digest = borrow.contract.as_ref().unwrap().cost_model_sha256.clone();
+    let default_digest = current.contract.as_ref().unwrap().cost_model_sha256.clone();
+    assert_ne!(
+        borrow_digest, default_digest,
+        "the borrow rate is bound into the capture's cost model digest"
+    );
+
+    let scores = arena
+        .reveal_and_score(
+            WINDOW,
+            &dataset,
+            &[
+                reveal("borrow", &digest, borrow),
+                reveal("default", &digest, current),
+            ],
+        )
+        .unwrap();
+    assert_eq!(scores.len(), 1);
+    assert_eq!(scores[0].agent_id, "default");
+    assert_eq!(
+        refusal(&arena, "borrow"),
+        format!(
+            "trajectory cost model {borrow_digest} does not match verifier cost model {default_digest}"
+        )
+    );
+    assert_eq!(provenance(&arena, "borrow"), None);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn a_capture_must_run_the_forward_execution_matrix_under_the_frozen_scorer() {
     let dir = temp_dir("matrix");

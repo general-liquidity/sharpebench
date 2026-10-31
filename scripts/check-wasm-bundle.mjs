@@ -2,10 +2,10 @@
 // The committed npm WASM bundle (`npm/pkg`) is a checked-in build artifact: check that it
 // still answers like the bundle this source tree builds.
 //
-// Nothing in this repository compared the two. CI (`npm.yml`) and the release workflow each
-// run `wasm-pack build` into `npm/pkg` before testing or publishing, so both always test a
-// bundle they just built and never look at the committed one. The committed copy therefore
-// drifted to `sharpebench-stats/0.21.0`, three minor versions behind the workspace, with
+// Nothing in this repository used to compare the two. CI (`npm.yml`) and the release workflow
+// each ran `wasm-pack build` into `npm/pkg` before testing or publishing, so both always tested
+// a bundle they had just built and never looked at the committed one. The committed copy
+// therefore drifted to `sharpebench-stats/0.21.0`, three minor versions behind the workspace, with
 // every gate green; the first thing to notice was a working-tree `npm test` run by hand.
 //
 // WHAT THIS ASSERTS, AND WHY IT IS NOT BYTE EQUALITY.

@@ -924,6 +924,33 @@ mod tests {
 
     /// Row 29: the condition does not hold, so the mode is refused with the
     /// reason, never silently armed or ignored.
+    /// The limit and one past it, under plans that differ only in the count, so
+    /// the count is the only rule the second one can break.
+    #[test]
+    fn the_fault_count_holds_exactly_at_its_limit() {
+        let plan = |count: usize| {
+            let faults = (0..count)
+                .map(|index| {
+                    spec(
+                        &format!("f{index}"),
+                        None,
+                        1,
+                        FaultMode::ProjectionLag { max_lag_steps: 2 },
+                    )
+                })
+                .collect();
+            FaultPlan::new(1, vec![ContractRelaxation::ReadYourWrites], faults)
+        };
+        assert_eq!(
+            plan(MAX_FAULTS).expect("a full plan").faults().len(),
+            MAX_FAULTS
+        );
+        assert_eq!(
+            plan(MAX_FAULTS + 1).expect_err("one fault too many"),
+            FaultPlanError::Invalid(format!("a plan carries 1..={MAX_FAULTS} faults"))
+        );
+    }
+
     #[test]
     fn limit_before_sort_is_refused_while_no_paged_read_exists() {
         let refused = FaultPlan::new(
@@ -1115,5 +1142,81 @@ mod tests {
         assert_ne!(a, b);
         assert_eq!(a.len(), 64);
         assert_eq!(a, bind_invocation(&invocation, Some(&sample_plan(7))));
+    }
+
+    #[test]
+    fn a_plan_read_from_bytes_may_fill_exactly_64_kib() {
+        let exact = serde_json::to_vec(&sample_plan(1)).unwrap();
+        let padded = |len: usize| {
+            let mut bytes = exact.clone();
+            bytes.resize(len, b' ');
+            FaultPlan::from_json(&bytes)
+        };
+        assert!(padded(65_536).is_ok());
+        assert_eq!(
+            padded(65_537).expect_err("one byte too many"),
+            "fault plan exceeds the 64 KiB input limit"
+        );
+    }
+
+    #[test]
+    fn a_fault_name_may_carry_underscores_and_hyphens() {
+        for id in ["under_score", "hy-phen"] {
+            let faults = vec![spec(
+                id,
+                None,
+                1,
+                FaultMode::ProjectionLag { max_lag_steps: 2 },
+            )];
+            assert!(
+                FaultPlan::new(1, vec![ContractRelaxation::ReadYourWrites], faults).is_ok(),
+                "{id}"
+            );
+        }
+    }
+
+    /// A draw equal to a cohort's width lies outside that cohort, in the band
+    /// after it: the bands partition `0..COHORT_SCALE`, so no cell gets two
+    /// faults of one group.
+    #[test]
+    fn a_draw_on_a_cohort_boundary_belongs_to_the_next_band() {
+        const DIGEST: &str = "fixture-plan";
+        let lag = FaultMode::ProjectionLag { max_lag_steps: 2 };
+        let cell = CellId {
+            window_start: 0,
+            window_end: 1,
+            seed: 0,
+        };
+        let ids = |faults: &[FaultSpec]| -> Vec<String> {
+            assign(DIGEST, 7, faults, cell)
+                .iter()
+                .map(|spec| spec.id.clone())
+                .collect()
+        };
+
+        let draw = cohort_draw(DIGEST, DrawScope::Independent("solo"), 7, cell);
+        assert!(ids(&[spec("solo", None, draw, lag.clone())]).is_empty());
+        assert_eq!(ids(&[spec("solo", None, draw + 1, lag.clone())]), ["solo"]);
+
+        let draw = cohort_draw(DIGEST, DrawScope::Group("book"), 7, cell);
+        let group = [
+            spec("first", Some("book"), draw, lag.clone()),
+            spec("second", Some("book"), 1, lag),
+        ];
+        assert_eq!(ids(&group), ["second"]);
+    }
+
+    #[test]
+    fn a_sign_is_recorded_for_each_side_of_zero_and_nan_is_not_a_direction() {
+        for (value, sign) in [
+            (1.0, Sign::Positive),
+            (f64::MIN_POSITIVE, Sign::Positive),
+            (-1.0, Sign::Negative),
+            (0.0, Sign::Zero),
+            (-0.0, Sign::Zero),
+            (f64::NAN, Sign::Zero),
+        ] {
+            assert_eq!(Sign::of(value), sign, "{value}");
+        }
     }
 }
