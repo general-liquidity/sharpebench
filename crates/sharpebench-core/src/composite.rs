@@ -302,7 +302,7 @@ fn default_max_run_drawdown() -> f64 {
 }
 
 /// Maximum drawdown of the equity curve implied by a return series, in [0, 1].
-fn max_drawdown(returns: &[f64]) -> f64 {
+pub(crate) fn max_drawdown(returns: &[f64]) -> f64 {
     let mut nav = 1.0;
     let mut peak = 1.0;
     let mut mdd = 0.0;

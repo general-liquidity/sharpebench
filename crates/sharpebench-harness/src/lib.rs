@@ -18,6 +18,7 @@ pub mod gateway_journal;
 pub mod perturb;
 #[cfg(test)]
 mod scratch;
+pub mod stress_replay;
 pub mod timing_luck;
 
 pub use checkpoint::{
@@ -569,17 +570,23 @@ pub fn luck_floor(
 ) -> Vec<AgentSubmission> {
     (0..n_agents)
         .map(|k| {
-            let base = 0xF100_0000_0000_0000 ^ (k as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
             run_seeded_agent(
                 &luck_floor_agent_id(k),
                 data,
                 windows,
                 seeds,
                 costs,
-                move |seed| Box::new(RandomAgent::new(base ^ seed)) as Box<dyn Agent>,
+                move |seed| luck_floor_agent(k, seed),
             )
         })
         .collect()
+}
+
+/// The `k`-th luck-floor monkey for execution `seed`, the agent [`luck_floor`]
+/// runs in that cell. Exposed so a stress replay drives the same agent.
+pub fn luck_floor_agent(k: usize, seed: u64) -> Box<dyn Agent> {
+    let base = 0xF100_0000_0000_0000 ^ (k as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    Box::new(RandomAgent::new(base ^ seed))
 }
 
 /// The agent id of the `k`-th luck-floor monkey. A producer that declares its

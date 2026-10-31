@@ -62,6 +62,7 @@ pub mod rolling;
 pub mod run_identity;
 pub mod selfaudit;
 pub mod sharpe_diagnostics;
+pub mod stress_replay;
 pub mod suite_controls;
 pub mod suite_evidence;
 pub mod trial_census;
