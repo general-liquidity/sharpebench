@@ -306,8 +306,51 @@ N+1's recorded anchor exposes it. `arena verify` checks both.
 
 The header also binds the window's rules (`ScoreConfig`), the revealed
 dataset's SHA-256, the parsed dataset identity captures were replayed against,
-whether supplied returns were accepted, and the list of refused entries, so
-none of those can be quietly rewritten after publication either.
+the execution the captures were replayed under, whether supplied returns were
+accepted, and the list of refused entries, so none of those can be quietly
+rewritten after publication either.
+
+### Execution identity
+
+A replayed row's returns depend on the execution model as much as on the
+recorded decisions. A window that prepared a replay records, and its header
+signs, `execution`:
+
+| Field | Meaning |
+|---|---|
+| `schema_version` | `sharpebench.arena-execution.v1`; any other value is refused |
+| `cost_profile` | The replay cost model in the leaderboard's `CostProfile` form, `fixed_delay`, `trf_cost`, `noise` and `short_borrow_bps` included |
+| `cost_model_sha256` | Bit-exact digest of the same model, the value every admitted capture's contract names |
+| `engine_version` | The fill engine version every admitted capture's contract names |
+| `windows`, `seeds` | The execution matrix |
+| `execution_sha256` | SHA-256 over the scorer artifact, the cost model digest, the engine version and the matrix, to compare two boards' execution by one value |
+
+`arena verify` recomputes the cost digest from the profile, rebuilds the
+matrix a forward window scores under the signed `ScoreConfig`, recomputes
+`execution_sha256` under the signed scorer artifact, and compares the identity
+with `window.json` like any other identity field. A failure is reported as the
+window's `execution_error` and exits 1. Every window in the report carries
+`execution`:
+
+| Status | Meaning | Passes |
+|---|---|---|
+| `bound` | The header binds an identity that recomputes and matches the window file | Yes |
+| `not_replayed` | No capture was replayed; the window ranked supplied returns or nothing | Yes |
+| `legacy_unbound` | The header predates the identity but the window replayed captures | Yes, with a limit |
+
+A legacy header keeps the meaning it was signed with: its captures were
+replayed under the default cost model of the scorer artifact it names, the only
+cost model the arena has replayed under. The documents do not bind that, so two
+legacy boards are not shown to share execution. No `arena` path sets other
+replay costs: intake parses its own replay window from the revealed bytes under
+the default model, and a capture made under another model (`capture
+--short-borrow-bps`) is refused because its contract names another cost digest.
+
+A window recording the identity is written as schema 6, or 7 under a fault
+plan, which no binary that predates the field loads, so a rollback cannot drop
+it on save. As with every signed field, the key holder can sign any identity;
+the verifier checks that it is consistent and that the window file agrees, and
+cannot re-derive the rows without the captures.
 
 ### Completeness: the signed head
 
@@ -359,8 +402,8 @@ requires the header to record the same identity, field by field:
 `score_config` (compared by the digest recomputed on each side, so a config
 edited under its old digest is caught), `score_config_sha256`,
 `scorer_artifact_sha256`, `sealed_eval_salt_sha256`, `fault_plan_sha256`,
-`dataset_hash`, `replay_dataset_sha256`, `supplied_returns_accepted` and
-`certifying`. An optional field present on one side and absent on the other is
+`dataset_hash`, `replay_dataset_sha256`, `supplied_returns_accepted`,
+`certifying` and `execution` (compared whole). An optional field present on one side and absent on the other is
 a disagreement like two different values, so a window file that drops or
 invents a fault plan fails, and so does one that changes, adds or drops a
 certification mark. Refusals and scores are outcomes rather than
@@ -372,7 +415,7 @@ window's `identity_mismatches` as `{"field", "header", "window"}`, with `null`
 for an absent value; the text report names the field and both values; the exit
 code is 1. A published window whose file cannot be read is an error, also
 exit 1. When every field agrees the report carries no `identity_mismatches`
-key and is byte-identical to the report before the check existed.
+key.
 
 ## Faulted windows
 
