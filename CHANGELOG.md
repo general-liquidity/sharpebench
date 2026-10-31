@@ -25,6 +25,13 @@ and links the commits it was built from.
 - release: release rehearsal, execute and verify-tag refuse a SharpeBench pin that is not exact, not unanimous across manifests and lockfiles, not sourced from crates.io, unpublished, yanked, or served under a different checksum. A failed index read refuses the release.
 - ci: the CI policy check rejects piped installers and pip requirements without an exact version, and CI pins pip to 26.2.2.
 - build: the committed npm wasm bundle is rebuilt on wasm-bindgen 0.2.130.
+- core, breaking: `Dataset::masked` returns `Result`, and the paper checklist states what the masked view does not hide.
+- harness: journals that hold provider-reported prompt-cache read and write counts are gateway-journal v3. The counts are recorded and not priced, and absent means unreported.
+- harness: a live entrant that overruns its per-decision time budget is charged with the new agent fault `decision_budget_exceeded`, which is not retried, instead of a retryable transport fault that left the sweep noncertifying. HTTP timeouts and undelivered observations stay runtime faults. Under `--image`, a stalled Docker daemon is charged to the entrant.
+- memory: an ablation lift is significant only if it also reaches a declared minimum effect, by default 1 percent of the oracle ceiling gap. A constant 1e-9 lift read as significant before.
+- memory: `ablation_report` refuses a baseline arm without `ControlExposure` evidence showing zero retrievals and memory reads on every task.
+- stats: `GateAgreement` withholds kappa on a constant rater (`kappa_unavailable`) and reports always-majority and single-field baselines.
+- register: status entries record `recorded_by` and `independent`. Every earlier entry is migrated as unknown and not independent, apart from the integration rechecks, which record the model that wrote them. Empty artifacts and the empty-input digest are refused unless declared, and a missing manuscript label source now fails coverage.
 
 ### Corrected
 
@@ -123,6 +130,19 @@ and links the commits it was built from.
 - harness: `forecast_size_study`, a seeded producer for the forecast size table.
 - tests: the gateway, journal, fault-plan, artifact-scan and tar suites were mutated to completion over 891 mutants. Four survive with recorded reasons, and every request, response, policy and journal bound is now tested at its limit.
 - tests: arena intake refuses a capture made with a non-default `--short-borrow-bps`, by name and with no recorded provenance.
+- sim: `Dataset::masked_view` rebases each series by an exact power of two, so returns and backtests are bit-identical, and returns the map back to the source symbols. `--masked` is accepted by run, capture, verify-trajectory, decision-stability and timing-luck.
+- harness: a shape-level contamination probe (`build_twin`, `shape_probe`) with moment- and regime-matched stationary-bootstrap twins, a real-minus-twin edge per window, and a whole-window sign-flip test with a minimum-edge floor. It is validated offline with a planted memorizer.
+- harness: a paired presentation-stability report, masked against unmasked and reordered against canonical, with decisions mapped back to source symbols.
+- sim: a per-symbol mark-time sheet in the dataset contract and `data/commodities-1d.marks.json`. Trading commands refuse asynchronous marks unless `--fill-delay-bars` is at least 1. Brent and WTI mark times follow venue convention.
+- core, cli: rows publish `runs_passed` beside `passed_k`, each declared window's bars, and the annualized Sharpe floor its per-run PSR bar requires. Windows whose floor is above a stated bound of 2.0 are listed and flagged on the board. The fields are rank-neutral, and the golden fixtures gain these fields only.
+- sim, harness, cli: `CellIsolation::network_reachable` (cell-isolation v2) and a derived `evidence_mode` row object. A historical window with a network-reachable entrant is noncertifying, and gateway-observed model calls on a historical window mark the verdict backtest-advisory.
+- gateway: sweeps publish a rank-neutral per-decision record of gateway requests (`sharpebench.gateway-decision-requests.v1`) beside host-observed usage.
+- paper: `docs/citation-register.jsonl` registers every `refs.bib` key and code credit line, and CI checks it with `scripts/check-citation-register.py`.
+- Lean model: CI pins every theorem's elaborated statement in `formal/statements.txt`, refuses extra axioms and `sorryAx` with a check this repository owns, and runs negative controls that plant a sorry, an axiom, an undeclared variable, a weakened statement and a wrong case row.
+- Lean model: `autoImplicit false` and warnings as errors, and every theorem has a decided non-vacuity witness and a refuted wrong definition.
+- Lean model: shared conformance cases in `formal/cases/forecast.json` are checked by Lean and by the production tests for pair support and the inference gate.
+- Lean model: Samuelson's inequality and the soundness of the near-constant refusal are proved over the reals in `formal/samuelson`, in a separate CI job. f64 rounding is out of scope.
+- scripts: `check-lean-scope.py` checks that named production symbols, main results and non-vacuity entries exist, and has its own tests.
 
 ### Fixed
 
