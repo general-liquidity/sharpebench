@@ -186,6 +186,32 @@ fn a_short_shard_is_refused() {
     assert!(load_rows(&c, &identity, &dir).is_err());
 }
 
+/// Losing the last line fails at the footer parse. Losing a row from the middle
+/// leaves a well-formed footer, and only its count can see that.
+#[test]
+fn a_shard_missing_a_row_under_an_intact_footer_is_refused() {
+    let c = campaign();
+    let identity = smoke_identity(&c);
+    let dir = scratch();
+    run_all(&c, &identity, &dir, 2, None).unwrap();
+    let shard = fs::read_dir(dir.join("shards"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let text = fs::read_to_string(&shard).unwrap();
+    let mut lines: Vec<&str> = text.lines().collect();
+    assert!(lines.len() >= 4, "header, two rows and a footer");
+    lines.remove(1);
+    fs::write(&shard, lines.join("\n") + "\n").unwrap();
+    let error = load_rows(&c, &identity, &dir).unwrap_err();
+    assert!(
+        matches!(&error, RunError::Refused(d) if d.contains("is short")),
+        "{error}"
+    );
+}
+
 #[test]
 fn a_report_needs_every_shard() {
     let c = campaign();
