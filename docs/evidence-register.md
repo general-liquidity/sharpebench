@@ -1330,7 +1330,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Artifacts.**
 - `paper/figures/sharpebench-luck-demotion.pdf`, sha256 `1e025ac30099de23ae8455f20ae5441b557e924870d0e1475c7508512908ec0d`, digest source: paper/evidence/provenance.json
-- `crates/sharpebench-core/golden/example_submissions.scores.json`, sha256 `00cc54e484c5193e424d46c649d05378a5f5eb3bafc8d5a42a880dac8f7e54f6`, digest source: computed for this register; the file is outside the provenance manifest scope, the golden score record the panel is read from
+- `crates/sharpebench-core/golden/example_submissions.scores.json`, sha256 `28fae98151c032eeb33c3d4a0e0d892c94f415bc39b034c0d98d80306b07dabf`, digest source: computed for this register; the file is outside the provenance manifest scope, the golden score record the panel is read from
 - `suites/example_submissions.json`, sha256 `909775dd86084682cfee7b723b64ce67529fe9b1111a5054f1ef6c8437c4ba96`, digest source: computed for this register; the file is outside the provenance manifest scope, the field the golden record scores
 
 **Producer command.** sharpebench score suites/example_submissions.json; the figure is drawn by python paper/src/make-figures.py (paper/sections/A-commands.tex)
@@ -1345,6 +1345,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 **Relevant later changes.**
 - The golden fields changed in the Pareto flag of hold and later in calibration counts, Brier scores and confidence-weighted return; no gate reads those fields (paper/sections/E-repairs.tex:19).
 - paper/sections/E-repairs.tex:17 records that the two committed golden fields hold four and three agents and take the configured path, so the dispersion-vote repair does not move them, and that sharpebench score --json on the example submissions is byte-identical.
+- The 2026-10-31 fix-round integration (fix/row-disclosures) added runs_passed, window_bars, window_pass_floors, implausible_windows and pass_k_floors_plausible to every row of crates/sharpebench-core/golden/example_submissions.scores.json; no existing field or value changed.
 
 **Present applicability.** Applicable to the current kernel: the golden record is the current tree's and the repairs that touched it are recorded as leaving the gate outcomes the panel plots unchanged.
 
@@ -1360,6 +1361,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 |---|---|---|---|---|
 | 2026-09-23 | still-applicable | unknown | no | Initial entry: The documented comparison is paper/sections/E-repairs.tex:17 together with the golden_scores test, which pins the record the panel reads to the current kernel. |
 | 2026-10-31 | still-applicable | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| 2026-11-01 | still-applicable | model: claude-opus-5-5 | no | Rechecked at the fix-round integration: crates/sharpebench-core/golden/example_submissions.scores.json gained five additive fields and the recorded digest is rebound. Every existing field and value is unchanged, so the claim and its disposition stand. |
 
 ### `SB-fig-deflation`
 
@@ -2606,8 +2608,8 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 **Source.** `paper/sections/05-experiments.tex:266`
 
 **Artifacts.**
-- `crates/sharpebench-core/golden/example_submissions.scores.json`, sha256 `00cc54e484c5193e424d46c649d05378a5f5eb3bafc8d5a42a880dac8f7e54f6`, digest source: computed for this register; the file is outside the provenance manifest scope
-- `crates/sharpebench-core/golden/synthetic_field.scores.json`, sha256 `678a9783017cb1c783daaf6a14a82bf86bf089c9469a4f41ab1567b0fe613e8c`, digest source: computed for this register; the file is outside the provenance manifest scope
+- `crates/sharpebench-core/golden/example_submissions.scores.json`, sha256 `28fae98151c032eeb33c3d4a0e0d892c94f415bc39b034c0d98d80306b07dabf`, digest source: computed for this register; the file is outside the provenance manifest scope
+- `crates/sharpebench-core/golden/synthetic_field.scores.json`, sha256 `c9b899e58c9d0f59d338f2d331afd49b56c9dcdbd33d310c105eb8fd047b206d`, digest source: computed for this register; the file is outside the provenance manifest scope
 - `crates/sharpebench-core/golden/synthetic_field.input.json`, sha256 `b5d298d72a68fb5922fbcbd252a7922fe1033f133d38203f2c15a4ec01cd8b61`, digest source: computed for this register; the file is outside the provenance manifest scope
 
 **Producer command.** cargo test -p sharpebench-core --test golden_scores; cargo test -p sharpebench-sim --test golden_input; cargo test -p sharpebench-wasm --test native_parity (paper/sections/A-commands.tex)
@@ -2621,6 +2623,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Relevant later changes.**
 - The golden fields changed in the Pareto flag of hold and in calibration counts, Brier scores and confidence-weighted return; no gate reads those fields (paper/sections/E-repairs.tex:19).
+- The 2026-10-31 fix-round integration (fix/row-disclosures) added runs_passed, window_bars, window_pass_floors, implausible_windows and pass_k_floors_plausible to every row of crates/sharpebench-core/golden/example_submissions.scores.json, crates/sharpebench-core/golden/synthetic_field.scores.json; no existing field or value changed.
 
 **Present applicability.** Re-established on every CI run across the three targets.
 
@@ -2636,6 +2639,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 |---|---|---|---|---|
 | 2026-09-23 | still-applicable | unknown | no | Initial entry: The documented comparison is the golden test on three CI targets, which executes against the current kernel. |
 | 2026-10-31 | still-applicable | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| 2026-11-01 | still-applicable | model: claude-opus-5-5 | no | Rechecked at the fix-round integration: crates/sharpebench-core/golden/example_submissions.scores.json, crates/sharpebench-core/golden/synthetic_field.scores.json gained five additive fields and the recorded digest is rebound. Every existing field and value is unchanged, so the claim and its disposition stand. |
 
 ### `SB-claims-vi`
 
