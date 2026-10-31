@@ -2440,6 +2440,8 @@ mod tests {
         Settlement::Priced {
             input_tokens: 1,
             output_tokens: 1,
+            cache_read_input_tokens: None,
+            cache_write_input_tokens: None,
             usd_nanos: usd_nanos.to_string(),
         }
     }

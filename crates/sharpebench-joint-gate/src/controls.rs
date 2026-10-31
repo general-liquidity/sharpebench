@@ -159,6 +159,7 @@ fn engine_tape(stream: &mut Stream, bars: usize, sharpe_annual: f64, ppy: f64) -
         dates: (0..bars).map(|d| format!("S{d:06}")).collect(),
         closes,
         dividends: BTreeMap::new(),
+        marks: None,
     }
 }
 
