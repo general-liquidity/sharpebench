@@ -1,0 +1,8 @@
+{
+  "campaign_digest": "14e4369b6b3ba350420eaa3e2a43ee35fda86c929c9783ba67097f57c4a19151",
+  "engine_fingerprint": "64f0e9241b3b4aa7",
+  "protocol_digests": {
+    "joint-gate-integrity-legs": "a379bb77bac4c182c18cededf6cc46a695c48adf3daab4962884e1373888e2bb",
+    "joint-gate-statistical-legs": "823becc02aec56441672be2d66fafff00a1c206514bc6c530a1729ab8111c561"
+  }
+}
