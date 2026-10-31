@@ -6,8 +6,11 @@
 //! by cherry-picking — the *selection* axis that pass^k (the reliability axis)
 //! and the Deflated Sharpe (the deflation axis) do not directly cover.
 //!
-//! After ALE-Bench's median-of-candidates selection: a robust agent has a
-//! family of edges (small `selection_gap`); a lucky one has a single spike.
+//! A robust agent has a family of edges (small `selection_gap`); a lucky one has
+//! a single spike. After ALE-Bench's comparison of one refined solution against
+//! the spread of 150 independent one-shot attempts (arXiv:2506.09050 section 5.4,
+//! Table 5). ALE-Bench has no median-of-candidates selection rule, so the
+//! best-versus-median gap reported here is this module's own construction.
 //!
 //! [`selection_robustness`] diagnoses the search after the fact. The second half
 //! of this module changes the *choice*: [`percentile_selection`] picks the

@@ -6,7 +6,9 @@
 //! multiplying framing. Pairs with the ordinal rank mode (see `composite`), a
 //! scale-invariant complement to the cardinal Deflated Sharpe.
 //!
-//! After ALE-Bench's percentile-against-a-human-population framing.
+//! After ALE-Bench's percentile-against-a-human-population framing: it ranks a
+//! model's rating among the human contestants of each contest and reports the
+//! top-percentile position (arXiv:2506.09050 sections 3.3 and 5.4).
 
 use sharpebench_stats::StatisticalError;
 

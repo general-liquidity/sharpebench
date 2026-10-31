@@ -5,7 +5,11 @@
 //! returns on a market proxy (CAPM-style) and report the intercept (alpha — the
 //! skill component) and slope (beta — market exposure). Computed field-relative in
 //! [`crate::rank`], with the market proxy = the equal-weight average of all
-//! submitted agents' returns. (After KTD-Fin's Barra-style attribution.)
+//! submitted agents' returns. (After KTD-Fin's attribution-aware evaluation,
+//! arXiv:2605.28359 section 4.5, which splits returns into common exposure and a
+//! residual stock-selection alpha. KTD-Fin regresses on nine cross-sectional
+//! style factors; this is a single-factor regression on the field average, so
+//! only the alpha-versus-exposure split is taken, not the factor model.)
 
 use crate::stats::{mean, variance};
 

@@ -342,7 +342,7 @@ impl Dataset {
     /// replaced with plain indices, so an agent can't pattern-match a memorized
     /// ticker or calendar window. Prices and cash dividends are preserved using
     /// the same symbol mapping. (After KTD-Fin's data-side
-    /// masking.)
+    /// masking, the blinded level of arXiv:2605.28359 section 3.3.)
     pub fn masked(&self) -> Dataset {
         let dates: Vec<String> = (0..self.dates.len()).map(|i| format!("t{i}")).collect();
         let closes: BTreeMap<String, Vec<f64>> = self
