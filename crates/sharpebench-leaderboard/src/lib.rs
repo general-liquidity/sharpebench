@@ -408,7 +408,7 @@ mod tests {
             agent_id: id.to_string(),
             runs: (0..3)
                 .map(|_| Run {
-                    returns: (0..60).map(|i| 0.01 + 0.001 * (i as f64).sin()).collect(),
+                    returns: (0..60).map(|i| 0.004 + 0.006 * (i as f64).sin()).collect(),
                     trace: Default::default(),
                     confidences: Vec::new(),
                     outcomes: Vec::new(),

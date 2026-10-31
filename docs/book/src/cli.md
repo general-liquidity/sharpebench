@@ -344,6 +344,44 @@ protocol and the dataset. The report (`sharpebench.timing-luck.v2`) carries
 output is unchanged. A cadence longer than a declared window exits 1 with
 `window_shorter_than_cadence`. See [Timing-luck floor](timing-luck.md).
 
+## `grader-search`
+
+```bash
+sharpebench grader-search [--seed N] [--budget N] [--replicates N] [--max-findings N] [--threads N] [--out <report.json>] [--json]
+```
+
+A seeded search for submissions that clear the eligibility gates without skill,
+run against the real kernel with no model calls and no market data. `audit`
+checks the attacks somebody named; this looks for the ones nobody did. It
+searches exact and near-constant tracks, single-observation evasion,
+autocorrelated tracks, tail sellers, leverage timing, window-boundary
+concentration, clones around the 0.995 collapse threshold and griefing votes
+around the 10.75 fence.
+
+The scorer is never the oracle. A move counts only if the generator establishes
+that it has no skill: the track never moves inside a window by more than 0.01
+basis points, or at most one bar per window differs from the rest, or every
+bar has a conditional expected return of zero. A track with a real positive
+mean is outside the search, because on returns alone it cannot be told from
+skill.
+
+Every parameter set that admits a submission is confirmed under the default
+configuration and redrawn on held-out seeds beside an iid Gaussian null on the
+same layout. `structural` means the lower Wilson bound clears 1% and the
+control's upper bound, or the move is deterministic. Anything else is
+`selection_luck` and is still reported. Each finding carries the exact return
+series, as JSON and as `f64` bits, and a `reproducer` field that
+`sharpebench score` accepts as it stands. `--max-findings` caps the findings
+kept per move and variant; every move's row counts everything it admitted.
+Griefing votes cost other entrants eligibility rather than buying any, so they
+are listed apart as `demotions`.
+
+The report (`sharpebench.grader-search.v1`) carries `rank_input: false`, and no
+gate, board or self-audit reads it. The command exits 0 when nothing was
+admitted, 1 when a finding is reported and 2 on a bad invocation. Series are
+drawn with additions and square roots only, so a seed gives the same bits on
+every platform.
+
 ## `score`
 
 Ranks a JSON field of pre-computed submissions (see
