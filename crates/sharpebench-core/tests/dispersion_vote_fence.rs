@@ -34,11 +34,26 @@ const HONEST: [(&str, f64); 6] = [
 /// Each agent's carrier has its own frequency and phase, so no two agents are
 /// near-clones and every window varies inside itself.
 fn track(seed: usize, sharpe: f64) -> Vec<Vec<f64>> {
+    shaped_track(seed, sharpe, 0.0)
+}
+
+/// [`track`] with one drawdown bar of `drop` carrier units in each window. The
+/// carrier alone never goes below -1.41 standard deviations, so a track whose
+/// Sharpe is above that would never lose a bar and is refused as having no
+/// observed loss. A strong track gets a real losing bar instead, and its Sharpe
+/// is still `sharpe` to rounding.
+fn track_with_loss(seed: usize, sharpe: f64) -> Vec<Vec<f64>> {
+    shaped_track(seed, sharpe, 5.0)
+}
+
+fn shaped_track(seed: usize, sharpe: f64, drop: f64) -> Vec<Vec<f64>> {
     let k = seed as f64;
     let raw: Vec<f64> = (0..120)
         .map(|t| {
+            let shock = if t % 60 == 7 { drop } else { 0.0 };
             let t = t as f64;
             (t * (0.37 + 0.113 * k) + 0.9 * k).sin() + 0.5 * (t * (1.61 + 0.07 * k) + k).cos()
+                - shock
         })
         .collect();
     let mean = raw.iter().sum::<f64>() / raw.len() as f64;
@@ -143,10 +158,11 @@ fn a_near_constant_entrant_does_not_move_the_honest_bar() {
     }
 }
 
-/// A strong honest track far outside the fence: about six per-period Sharpes
-/// beside a field that sits near one half. Its windows move, so it votes.
+/// A strong honest track far outside the fence: about three per-period Sharpes
+/// beside a field that sits near one half, with a losing bar in each window.
+/// Its windows move, so it votes.
 fn strong_track(copy: usize) -> Vec<Vec<f64>> {
-    track(HONEST.len(), 6.0 + 0.01 * copy as f64)
+    track_with_loss(HONEST.len(), 3.0 + 0.01 * copy as f64)
 }
 
 /// Exclusion is not a discount and it is not a refusal: the fenced entrant keeps
@@ -255,7 +271,10 @@ fn field_with_probe(extra_honest: usize, sharpe: f64) -> Vec<AgentSubmission> {
             track(seed, 0.70 + 0.05 * k as f64),
         ));
     }
-    field.push(agent("probe", track(HONEST.len() + extra_honest, sharpe)));
+    field.push(agent(
+        "probe",
+        track_with_loss(HONEST.len() + extra_honest, sharpe),
+    ));
     field
 }
 

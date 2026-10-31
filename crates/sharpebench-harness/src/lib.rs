@@ -1611,7 +1611,7 @@ mod tests {
             runs: (0..seeds.len())
                 .map(|_| Run {
                     returns: (0..100)
-                        .map(|i| 0.002 + 0.0005 * (i as f64 * 0.7).sin())
+                        .map(|i| 0.002 + 0.004 * (i as f64 * 0.7).sin())
                         .collect(),
                     ..Run::default()
                 })

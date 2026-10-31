@@ -129,11 +129,10 @@ track below the bound has skill: a steady drift with a real dispersion is, on
 returns alone, what skill looks like.
 
 This is a scoring change after release 0.28.0, decided by the owner on
-2026-10-31. Its cost is stated rather than hidden: a genuine positive-drift
-track that never loses a bar in any window, such as a carry with a small wiggle,
-is refused too. On returns alone it cannot be told from a track that never moved,
-and a benchmark that admits the one admits the other. No frozen panel, golden or
-committed field contains such a track, so no published number moves.
+2026-10-31. The Samuelson refusal alone does not refuse every track that never
+lost: it fires only when the moments prove the sign, so a carry with a small
+wiggle below the bound keeps its Sharpe under it. The observed-loss refusal
+below is what refuses such a track.
 
 Samuelson's bound only proves a sign above a per-bar Sharpe of `(n - 1) / sqrt(n)`,
 5.3 at thirty bars, so it does not on its own refuse every track that never lost.
@@ -144,6 +143,16 @@ and kurtosis terms cannot price it, because they are sample moments and the cras
 is not in the sample. So the kernel also asks the question directly: a track with
 no bar below zero in any window is refused with `must show an observed loss`. The
 test is a sign, it reads no constant, and rescaling does not move it.
+
+Its cost is stated rather than hidden: a genuine positive-drift track that never
+loses a bar in any window, such as a carry with a small wiggle, is refused too.
+On returns alone it cannot be told from a seller whose crash has not yet come,
+and a benchmark that admits the one admits the other. The shipped demonstration
+field was such a track: `skilled-momentum` and `ungated-bot` drifted at 0.002 a
+bar with a wiggle of 0.0005 and never lost. Both were rewritten with a wiggle of
+0.004, which loses on 90 of 300 bars, and the golden board was regenerated; the
+demonstration keeps its verdicts. No frozen evidence panel contains such a track,
+so no frozen number moves.
 
 What no rule on the sample can do is refuse a tail seller that missed its crash
 and loses on ordinary bars. Conditional on no crash, its sample is a sample of its

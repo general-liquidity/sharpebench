@@ -833,7 +833,7 @@ mod tests {
     #[test]
     fn classify_disqualification_json_names_reasons_over_the_score_field() {
         let steady: Vec<f64> = (0..60)
-            .map(|i| 0.002 + 0.0005 * (i as f64 * 0.7).sin())
+            .map(|i| 0.002 + 0.004 * (i as f64 * 0.7).sin())
             .collect();
         let noisy: Vec<f64> = (0..60).map(|i| 0.02 * (i as f64 * 0.7).sin()).collect();
         let subs = serde_json::json!([

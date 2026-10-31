@@ -1245,9 +1245,9 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 **Labels.** `fig:demotion`
 
 **Artifacts.**
-- `paper/figures/sharpebench-luck-demotion.pdf`, sha256 `1e025ac30099de23ae8455f20ae5441b557e924870d0e1475c7508512908ec0d`, digest source: paper/evidence/provenance.json
-- `crates/sharpebench-core/golden/example_submissions.scores.json`, sha256 `00cc54e484c5193e424d46c649d05378a5f5eb3bafc8d5a42a880dac8f7e54f6`, digest source: computed for this register; the file is outside the provenance manifest scope, the golden score record the panel is read from
-- `suites/example_submissions.json`, sha256 `909775dd86084682cfee7b723b64ce67529fe9b1111a5054f1ef6c8437c4ba96`, digest source: computed for this register; the file is outside the provenance manifest scope, the field the golden record scores
+- `paper/figures/sharpebench-luck-demotion.pdf`, sha256 `beaa2054f85384b12334267e10b7981a22967b6983f65bd75b0b1bfbcc262e86`, digest source: paper/evidence/provenance.json
+- `crates/sharpebench-core/golden/example_submissions.scores.json`, sha256 `ae40aa1cdc1ebe48721b09216906df82e1fe4ef522da7603c8007ea2d7c0ba5a`, digest source: computed for this register; the file is outside the provenance manifest scope, the golden score record the panel is read from
+- `suites/example_submissions.json`, sha256 `2de7950cd4f536d87a2e0f5e7328a4c5cc0de0c6c9c8a684fdb31fcb1af0a815`, digest source: computed for this register; the file is outside the provenance manifest scope, the field the golden record scores
 
 **Producer command.** sharpebench score suites/example_submissions.json; the figure is drawn by python paper/src/make-figures.py (paper/sections/A-commands.tex)
 
@@ -2444,7 +2444,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 **Source.** `paper/sections/05-experiments.tex:266`
 
 **Artifacts.**
-- `crates/sharpebench-core/golden/example_submissions.scores.json`, sha256 `00cc54e484c5193e424d46c649d05378a5f5eb3bafc8d5a42a880dac8f7e54f6`, digest source: computed for this register; the file is outside the provenance manifest scope
+- `crates/sharpebench-core/golden/example_submissions.scores.json`, sha256 `ae40aa1cdc1ebe48721b09216906df82e1fe4ef522da7603c8007ea2d7c0ba5a`, digest source: computed for this register; the file is outside the provenance manifest scope
 - `crates/sharpebench-core/golden/synthetic_field.scores.json`, sha256 `678a9783017cb1c783daaf6a14a82bf86bf089c9469a4f41ab1567b0fe613e8c`, digest source: computed for this register; the file is outside the provenance manifest scope
 - `crates/sharpebench-core/golden/synthetic_field.input.json`, sha256 `b5d298d72a68fb5922fbcbd252a7922fe1033f133d38203f2c15a4ec01cd8b61`, digest source: computed for this register; the file is outside the provenance manifest scope
 

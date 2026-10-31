@@ -1485,7 +1485,7 @@ fn run_controls(spec: &SearchSpec) -> Control {
     let skilled: Vec<Vec<f64>> = (0..5)
         .map(|w| {
             let mut rng = Rng::new(0x5B11_1ED0 + w);
-            (0..60).map(|_| 0.002 + 0.0005 * rng.gauss()).collect()
+            (0..60).map(|_| 0.002 + 0.004 * rng.gauss()).collect()
         })
         .collect();
     let n_boot = ScoreConfig::default().n_boot;

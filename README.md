@@ -77,11 +77,11 @@ The resulting board makes the rank rule concrete:
 
 | Entrant | Raw mean return | pass^k | Process | Eligible |
 |:--|--:|:--:|:--:|:--:|
-| `skilled-momentum` | 0.2020% | yes | pass | **yes** |
+| `skilled-momentum` | 0.2158% | yes | pass | **yes** |
 | `lucky-yolo` | **0.4111%** | no | pass | no |
-| `ungated-bot` | 0.2020% | yes | fail | no |
+| `ungated-bot` | 0.2158% | yes | fail | no |
 
-The lucky entrant earns roughly twice the raw mean return and still cannot
+The lucky entrant earns nearly twice the raw mean return and still cannot
 rank. The process violator reproduces the skilled return but is floored. The
 table is pinned to the
 [committed golden board](crates/sharpebench-core/golden/example_submissions.scores.json).

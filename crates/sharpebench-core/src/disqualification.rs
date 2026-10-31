@@ -238,7 +238,7 @@ mod tests {
     #[test]
     fn skilled_agent_has_no_reasons() {
         let s = score_agent(
-            &agent("skilled", (0..5).map(|_| run(0.002, 0.0005, 60)).collect()),
+            &agent("skilled", (0..5).map(|_| run(0.002, 0.004, 60)).collect()),
             &ScoreConfig::default(),
         );
         assert!(s.rank_eligible);
@@ -256,7 +256,7 @@ mod tests {
             dsr_ci_level: 1.5,
             ..ScoreConfig::default()
         };
-        let score = score_agent(&agent("strong", vec![run(0.002, 0.0005, 60)]), &cfg);
+        let score = score_agent(&agent("strong", vec![run(0.002, 0.004, 60)]), &cfg);
         assert!(score.deflation_error.is_some());
         assert!(!score.rank_eligible);
         let reasons = classify_disqualification(
@@ -275,7 +275,7 @@ mod tests {
             ("selection", "selection_unavailable"),
         ] {
             let mut score = score_agent(
-                &agent("strong", vec![run(0.002, 0.0005, 60)]),
+                &agent("strong", vec![run(0.002, 0.004, 60)]),
                 &ScoreConfig::default(),
             );
             assert!(score.rank_eligible);
@@ -310,7 +310,7 @@ mod tests {
     /// as a disqualification.
     #[test]
     fn a_refusing_candidate_set_does_not_disqualify_a_ranked_agent() {
-        let mut sub = agent("strong", vec![run(0.002, 0.0005, 60)]);
+        let mut sub = agent("strong", vec![run(0.002, 0.004, 60)]);
         sub.candidates = vec![vec![1e308, 1e308, 1e308]];
         let score = score_agent(&sub, &ScoreConfig::default());
         assert!(score.selection_error.is_some());
@@ -342,7 +342,7 @@ mod tests {
 
     #[test]
     fn process_violation_is_named() {
-        let mut runs: Vec<Run> = (0..5).map(|_| run(0.002, 0.0005, 60)).collect();
+        let mut runs: Vec<Run> = (0..5).map(|_| run(0.002, 0.004, 60)).collect();
         runs[0].trace.events.push(ProcessEvent::OrderPlaced {
             risk_gate_passed: false,
         });
@@ -373,7 +373,7 @@ mod tests {
     #[test]
     fn advisory_flags_require_evidence() {
         let mut s = score_agent(
-            &agent("s", (0..5).map(|_| run(0.002, 0.0005, 60)).collect()),
+            &agent("s", (0..5).map(|_| run(0.002, 0.004, 60)).collect()),
             &ScoreConfig::default(),
         );
         // Selection gap is on the score itself; inject a large one.
@@ -410,7 +410,7 @@ mod tests {
     #[test]
     fn rollup_counts_across_the_field() {
         let skilled = score_agent(
-            &agent("skilled", (0..5).map(|_| run(0.002, 0.0005, 60)).collect()),
+            &agent("skilled", (0..5).map(|_| run(0.002, 0.004, 60)).collect()),
             &ScoreConfig::default(),
         );
         let noise1 = score_agent(

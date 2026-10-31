@@ -116,7 +116,7 @@ fn analysis_commands_reject_independently_missing_observations() {
 fn a_refusing_candidate_set_is_marked_advisory_next_to_an_eligible_verdict() {
     let fixture = Fixture::new();
     let track: Vec<f64> = (0..60)
-        .map(|i| 0.002 + 0.0005 * (i as f64 * 0.7).sin())
+        .map(|i| 0.004 + 0.006 * (i as f64 * 0.7).sin())
         .collect();
     let field = serde_json::json!([{
         "agent_id": "refusing-candidates",
