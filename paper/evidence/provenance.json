@@ -179,7 +179,7 @@
       "sha256": "1e025ac30099de23ae8455f20ae5441b557e924870d0e1475c7508512908ec0d"
     }
   ],
-  "generated_at_head": "a11216fcd5174b629d1523ee546a1dfb7e783c1c",
+  "generated_at_head": "c09b8586af5ecb144ef1a017253c472bbc331168",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -187,11 +187,11 @@
   "source_files": [
     {
       "path": "Cargo.lock",
-      "sha256": "8c0f739e0252bad7bd45b6208dce2fc7c0f2d458848c3c67dd337e8426caebbb"
+      "sha256": "fb0034421dac77fe27265fe833bcb14536e06944554ea0f01546614ee5d916a5"
     },
     {
       "path": "Cargo.toml",
-      "sha256": "db1159145fafe48bafce05ed6e6b59d0db1fbdc6130ad83752b09885287c3816"
+      "sha256": "a3901fdea37c047db27fcd58f044f2e8bd01715a4cf5b2fcc74b0cbbdd074348"
     },
     {
       "path": "arena/windows/window-001/window.json",
@@ -203,7 +203,7 @@
     },
     {
       "path": "arena/windows/window-003/window.json",
-      "sha256": "d0e3aafeaced07706df549df5478706bbcc80a9a0f7803c82e9f678b6bf5cf32"
+      "sha256": "c9202467496e66e7c1bbab94b4b969601a9c424aa3294ba2576ea6c301dfa90a"
     },
     {
       "path": "crates/sharpebench-arena/Cargo.toml",
@@ -211,19 +211,23 @@
     },
     {
       "path": "crates/sharpebench-arena/src/audit.rs",
-      "sha256": "12c13aadaa1c5e0028e8d4872838ee6fb332b4fd48bb1bd9906185641620eae4"
+      "sha256": "5dba8da8bce47be67aaace6b7b297668026f3a038b0b136f75a9f04f4d15cb14"
+    },
+    {
+      "path": "crates/sharpebench-arena/src/execution.rs",
+      "sha256": "e1013247906b46689f8eb6a4df4e738efddda1318481876e76c10cab1ee5f6ab"
     },
     {
       "path": "crates/sharpebench-arena/src/intake.rs",
-      "sha256": "b83e6caba976898f823230bcb92dac28d8fc7a59ecc1b96d797bb075e6d59869"
+      "sha256": "db0cccabcfe2cf1ccbc0b86121c903f7ef6bb188ae2ebf9ab8f8d318f06f9684"
     },
     {
       "path": "crates/sharpebench-arena/src/lib.rs",
-      "sha256": "005162a67374a9b72289f64fbbd7a97d7fd6f614a616f752a58724e9256e81c4"
+      "sha256": "88b410e30629ca1cb753c8efee3aa9a67fb2f36d717161eaa7872c37f0526678"
     },
     {
       "path": "crates/sharpebench-arena/src/persistence.rs",
-      "sha256": "e57d482435b677fdb7a1b94edb7d67668457cec9022ce5954dd57721ddc9c543"
+      "sha256": "8ede76e43dfccdfa433a7475fc115a32aeef2c8408bc26911a3cf22ab9882845"
     },
     {
       "path": "crates/sharpebench-arena/src/sandbox.rs",
@@ -234,20 +238,36 @@
       "sha256": "97f95c70f269b10488113646784ba43f4188eb44fcda3463c7ffec08d6ea0a1c"
     },
     {
+      "path": "crates/sharpebench-arena/tests/agent_id_registration.rs",
+      "sha256": "7f0565adce9162a0820e0cc228b088009e8152ad1edb82ca72d7c5942e5c8d47"
+    },
+    {
       "path": "crates/sharpebench-arena/tests/bound_intake.rs",
-      "sha256": "1ab27f3ef8034756efbc7dc38ec56354cb3a03a10f95e110954759534969fd3a"
+      "sha256": "b97bfb29565070161c39a448253865fc1a7250ec12e93430b414011895a0a198"
     },
     {
       "path": "crates/sharpebench-arena/tests/cli_arena_cmd.rs",
       "sha256": "bf485bda54789329b6497c789741fd617758d1ff2668540e9dd5a12adaff0ba0"
     },
     {
+      "path": "crates/sharpebench-arena/tests/cost_profile_mirror.rs",
+      "sha256": "041cbb124425a012b311dd6639deb49f8eb16103bf6c025c1e0ee6dfa7a71060"
+    },
+    {
       "path": "crates/sharpebench-arena/tests/duplicate_reveal_knockout.rs",
       "sha256": "88263ed836c30b553a4b1ea58dcab13c0991e7e9bdf4639354222549d3d680a3"
     },
     {
+      "path": "crates/sharpebench-arena/tests/execution_identity.rs",
+      "sha256": "d9161d02d47c91d7ab24ef988944c89d6018cb9871a9a977d615240895eed462"
+    },
+    {
       "path": "crates/sharpebench-arena/tests/fault_plan_identity.rs",
       "sha256": "4b6409f41c660fcda0471d2108c2943efd1816d5002b7c37341e38c186256f0a"
+    },
+    {
+      "path": "crates/sharpebench-arena/tests/head_anchor.rs",
+      "sha256": "f39650cd71c82fee4a8583c51d044acc17ea892174fab4a866c966b2da05eae1"
     },
     {
       "path": "crates/sharpebench-arena/tests/hindsight_returns.rs",
@@ -267,11 +287,15 @@
     },
     {
       "path": "crates/sharpebench-arena/tests/verify_certification.rs",
-      "sha256": "4baf06e4241c2d910df13fd9794f2af9cd1b01ba14ddf2f6d4e51b9ceb88f97d"
+      "sha256": "b55527c89dec287dd696f4fec19324cbed1c1e589e7673b31caae13bf1c2380a"
     },
     {
       "path": "crates/sharpebench-arena/tests/verify_identity.rs",
       "sha256": "423a66e3fc66fe257059fba6fe9129e06911f499a07c2da7449679475156a738"
+    },
+    {
+      "path": "crates/sharpebench-arena/tests/window_expiry.rs",
+      "sha256": "fe212a4a07f2daea3f499d40a9fe65b8779142c57a28d1070fe0ab927b51d8c0"
     },
     {
       "path": "crates/sharpebench-arena/tests/window_schema_rollback.rs",
@@ -299,7 +323,7 @@
     },
     {
       "path": "crates/sharpebench-attest/src/registry.rs",
-      "sha256": "06c80e4b0b227924dc37b609c1187d900afe5fcb8fe9367db923b4645d8b61aa"
+      "sha256": "9b0cdc9e752d541dd0ec3bf4ef79314c0aef615699214dbfc3df15e837640c2d"
     },
     {
       "path": "crates/sharpebench-attest/src/sealed.rs",
@@ -331,7 +355,7 @@
     },
     {
       "path": "crates/sharpebench-cli/src/arena_cmd.rs",
-      "sha256": "48ee74936b3853c295c9238996904532349f866731875f4852aa1a12dec0975a"
+      "sha256": "218dcabbabf22d542698b30fe1b41eeb0b7d0b1a0af0717dbe00413f4c2c1a59"
     },
     {
       "path": "crates/sharpebench-cli/src/artifact_preflight.rs",
@@ -359,11 +383,15 @@
     },
     {
       "path": "crates/sharpebench-cli/src/forecast_cmd.rs",
-      "sha256": "26ab9a8d42f37a720b030452e9bff491079a51c1e19dab538dc03d989784396a"
+      "sha256": "1d9fc2314a8671e2f84a73b4a3c4462f2ef49f56705b9b2323d27b316abef589"
     },
     {
       "path": "crates/sharpebench-cli/src/gateway_cli.rs",
       "sha256": "a919176546d1c08b3a517854e8a063cdac0736b5eb539173aba46ee15ce511a2"
+    },
+    {
+      "path": "crates/sharpebench-cli/src/grader_search_cmd.rs",
+      "sha256": "bdd0e4d521c6a0662885709aa89e618fc851ea1a16aaaab5435dd2d2ad42d02e"
     },
     {
       "path": "crates/sharpebench-cli/src/import_cmd.rs",
@@ -371,11 +399,11 @@
     },
     {
       "path": "crates/sharpebench-cli/src/lineage_cmd.rs",
-      "sha256": "422778883f96321ec4c0334119f30c8e43ec34de2ae702fc4768a050d3351b15"
+      "sha256": "878d3a9091ce88c69bac7d13c5fe670c9ad78e9d5191e9760d2389456c0758f5"
     },
     {
       "path": "crates/sharpebench-cli/src/main.rs",
-      "sha256": "786f09bad0952ad8310e1e1609f775cc8dd1a417144b0d40b95777efa70a59b8"
+      "sha256": "a52052037a7d3ca7011983ff9e0d5e1b2d4ea0a34c0638680dec3a98eb68b64b"
     },
     {
       "path": "crates/sharpebench-cli/src/regrade_cmd.rs",
@@ -387,7 +415,7 @@
     },
     {
       "path": "crates/sharpebench-cli/src/rescore_cmd.rs",
-      "sha256": "e62ee66ae8c591751ba04b2ef2f3c8865b469f420307c76592248088a37bb6cf"
+      "sha256": "afecaa2b4efc5aac86a453c47ca42c6c5bde341aa272faa5719acf547ad46553"
     },
     {
       "path": "crates/sharpebench-cli/src/timing_luck_cmd.rs",
@@ -400,6 +428,10 @@
     {
       "path": "crates/sharpebench-cli/tests/analysis_support.rs",
       "sha256": "b98778a52650cea30e2a016202388c958b6b66edc9d7f0132801820426777c3a"
+    },
+    {
+      "path": "crates/sharpebench-cli/tests/arena_clock_cli.rs",
+      "sha256": "2d114343579ad91acf9b751173cece242f14824867a94c1b1113daf937ca70d3"
     },
     {
       "path": "crates/sharpebench-cli/tests/arena_identity_cli.rs",
@@ -446,12 +478,16 @@
       "sha256": "65e23d4d71cd9c4e36a468340e3dcd1bb34fbeeab5bf280f23dcb64e7fc79d3e"
     },
     {
+      "path": "crates/sharpebench-cli/tests/grader_search_cli.rs",
+      "sha256": "baf4c4a826fd480a07d6038ee6d46281fe9dd5f4ec714c1c3b26e7c179423d0f"
+    },
+    {
       "path": "crates/sharpebench-cli/tests/honesty_units.rs",
       "sha256": "5e628339284b5595413ea461a5d0fdfa491b3b3328b34fa380ff5ff783d7a069"
     },
     {
       "path": "crates/sharpebench-cli/tests/lineage_census_cli.rs",
-      "sha256": "7037bb16f835c6b3b545607daf34bd6db7a3d63e7a313abb91d2dcff82b813b2"
+      "sha256": "3a9c0e920f00e67473b33fb2edf0b26612f7dc10c34bf523424fed32fb3ce213"
     },
     {
       "path": "crates/sharpebench-cli/tests/options_boundaries.rs",
@@ -467,7 +503,7 @@
     },
     {
       "path": "crates/sharpebench-cli/tests/rank_mode_cli.rs",
-      "sha256": "2c471327a64c025ebda8798e41b1a52fd59a1133cbf4ca38ee22eb48c674fa45"
+      "sha256": "50d6d53f2114a7694b3167d6894191a676043c1d75add016ef297458a40646cf"
     },
     {
       "path": "crates/sharpebench-cli/tests/regrade_cli.rs",
@@ -495,7 +531,7 @@
     },
     {
       "path": "crates/sharpebench-cli/tests/suite_evidence_cli.rs",
-      "sha256": "41aae7cba723b0b37bead09bdcdfff729d173a9b37a8528df1220533b6cbee58"
+      "sha256": "f35d1284d944834bc0b95e457aff914a6e4ca9c84aaae1fd06754bb232c15f36"
     },
     {
       "path": "crates/sharpebench-cli/tests/tail_risk_cli.rs",
@@ -531,11 +567,11 @@
     },
     {
       "path": "crates/sharpebench-core/src/candidate_lineage.rs",
-      "sha256": "8628584edbad3b1cf547db0a3e6090dac0de6fdf57607c9e97b7e160f335b888"
+      "sha256": "8811681b5d70b4dae4c8a08c20080442d60b5fca65d90d65dae6b687a63ee67f"
     },
     {
       "path": "crates/sharpebench-core/src/certification.rs",
-      "sha256": "dbedf39df67afa8cafe1a287cfa0ea75eaf5c4480544cdd0459dd6eb0442c7f6"
+      "sha256": "eb0dc3f7a8e6032b23fde5fd389df3632b09bc3547a0b9c6b385f0e903b5bc6e"
     },
     {
       "path": "crates/sharpebench-core/src/comparison_sets.rs",
@@ -543,7 +579,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/composite.rs",
-      "sha256": "6c3704667f7cd3c2d900637fa80eca24cef0646bb9aa8afd5bc23c6a665f9793"
+      "sha256": "c71ebd50b515b52ec2cd49c08f95c68541aad30bc304e2c230d299ec96d3e78a"
     },
     {
       "path": "crates/sharpebench-core/src/correlation.rs",
@@ -555,7 +591,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/decision_stability.rs",
-      "sha256": "4a4e930a9f4d15499535dd4e280dabc3780a695dd70640a39afe916047881e58"
+      "sha256": "786ef221b39c751422df17c2f0c218f5476227e121df693461a17b7e08728315"
     },
     {
       "path": "crates/sharpebench-core/src/disqualification.rs",
@@ -575,11 +611,11 @@
     },
     {
       "path": "crates/sharpebench-core/src/evidence_coverage.rs",
-      "sha256": "cb70a98c403285f6ff30a38e846873f2fc3bc8026d1de7170a19fb86a4c5a960"
+      "sha256": "0a4f1f8941d2554f82359fbeb27af6c01fb65fb0925d9b5ef129c3519dfecedd"
     },
     {
       "path": "crates/sharpebench-core/src/forecast.rs",
-      "sha256": "fd55a469f01b91ae61eeac6b5ba543fbc3b30f5c9e13f171ae21b05b8150214b"
+      "sha256": "0b1901dbc8393b4c328df883936256fadc2ae814783c849e40abc671d5c951e6"
     },
     {
       "path": "crates/sharpebench-core/src/greeks.rs",
@@ -587,7 +623,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/lib.rs",
-      "sha256": "5f3de56421edae854562ad4152301b94c4837118027255eb6f309706b3c461fa"
+      "sha256": "33fd7572fe7020078541accf640cd46e4f6435c233af4c16c188653f67456e6c"
     },
     {
       "path": "crates/sharpebench-core/src/oos.rs",
@@ -635,7 +671,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/suite_controls.rs",
-      "sha256": "fdd2479e1f355579b2c9fd625ebe7b72beda751ceb3f6f6dcd6d75f3eb6869de"
+      "sha256": "3a907d80c14fcf23207546a6d9421f84837a17eac07775381666f95eebb6c70e"
     },
     {
       "path": "crates/sharpebench-core/src/suite_evidence.rs",
@@ -663,7 +699,7 @@
     },
     {
       "path": "crates/sharpebench-core/tests/dispersion_vote_fence.rs",
-      "sha256": "00c27e051d27079877f21f0f800eb2c990252c89f998f69498cce747852c1cd7"
+      "sha256": "1e6d4c8cc9ae021c6a64785fc0faf2fedbef2e29c9df8d110430be8107ef6f52"
     },
     {
       "path": "crates/sharpebench-core/tests/forecast_contract_digest_versions.rs",
@@ -671,11 +707,11 @@
     },
     {
       "path": "crates/sharpebench-core/tests/forecast_partial_support.rs",
-      "sha256": "cb0d8fabde93083d1c5d08ae0e4e51b6d9dcd29aaf44c196aa06eb0eb1ffc681"
+      "sha256": "d292e7e68ba4db7da9a716c2b92911ff247181919c4b7eef7be0e948dfc873e7"
     },
     {
       "path": "crates/sharpebench-core/tests/forecast_settlement_and_support.rs",
-      "sha256": "3d80dad0c8035d2f8180e8b7c5639833024648b7733caa2429b76cf1ad20e126"
+      "sha256": "d96bbca1eb51a521e33ea6131b0c36a28ef7e001c595d1485e5f513e2700773b"
     },
     {
       "path": "crates/sharpebench-core/tests/golden_scores.rs",
@@ -684,6 +720,14 @@
     {
       "path": "crates/sharpebench-core/tests/greeks_boundaries.rs",
       "sha256": "9d0d4c5ac8321463435a3f245fe1692e11a1d1dbc4ccd0295397f4a7b9fd7794"
+    },
+    {
+      "path": "crates/sharpebench-core/tests/lineage_arena_duplicate.rs",
+      "sha256": "5e56a629c799b05ad90eaa5297df303e00cd1ec9940c7fe555d2538ec4377d80"
+    },
+    {
+      "path": "crates/sharpebench-core/tests/near_constant_admission.rs",
+      "sha256": "35502193c0dd3d2e9d2a7c324d1d49e745cadba760bf8fa8d53f8116204da936"
     },
     {
       "path": "crates/sharpebench-core/tests/pareto_refused_tracks.rs",
@@ -719,15 +763,19 @@
     },
     {
       "path": "crates/sharpebench-harness/Cargo.toml",
-      "sha256": "fccd922c156669c29c3f6ee31031b562f466ae7c36eb0aeab4560010fe36a79a"
+      "sha256": "f373aa4a8424828d09d6e3f836ce1a4d9f500854013590b4195704af1119e0db"
     },
     {
       "path": "crates/sharpebench-harness/examples/evidence_sweep.rs",
-      "sha256": "4a85f1602667da0fd2a83e68d93a7960f89f0f227b49766d77ee10fb4797d548"
+      "sha256": "9bc8f104078cd491ff21aecbf26567ba3d69ca29834a1b9d7c4f25ab438e5c67"
     },
     {
       "path": "crates/sharpebench-harness/examples/external_rules_eval.rs",
-      "sha256": "3ffac713e52b6485cfb597446a509aa35232706a44350f03f6bee429d87f17b4"
+      "sha256": "f1e1511f1a9af341113f6c2cf7b8a9db9a302502812c537b7d18be9163156d74"
+    },
+    {
+      "path": "crates/sharpebench-harness/examples/forecast_size_study.rs",
+      "sha256": "a3a59bd37fe32712484ea0625b0f4847b710fbdaa1a458ee72150e206188927f"
     },
     {
       "path": "crates/sharpebench-harness/examples/llm_field_eval.rs",
@@ -766,8 +814,12 @@
       "sha256": "1ac8fc620698d1474ead9186f2740155ddb49809f2e6489876ed4f3859d1b22f"
     },
     {
+      "path": "crates/sharpebench-harness/examples/support/dispersion_votes.rs",
+      "sha256": "7b50d2068af3247e1fcb37ef94c27c0d1aa09a486670891885578f2e0e2fe15c"
+    },
+    {
       "path": "crates/sharpebench-harness/src/accounting.rs",
-      "sha256": "2c0ec278d39e2b92116df3f489c14d5743cf9b847c919db428a1aba2a46788e3"
+      "sha256": "d09ccf87771c6c5601c8135b1aad56a96069d98834dfdaab8ce761151a1b86dc"
     },
     {
       "path": "crates/sharpebench-harness/src/artifact_scan.rs",
@@ -775,7 +827,7 @@
     },
     {
       "path": "crates/sharpebench-harness/src/artifact_tar.rs",
-      "sha256": "47357781f1a4f09bf5d4519374739786a863e4e703d05acf68da72b3c2c97688"
+      "sha256": "cfdceef910ca5466c788da68379980b45264eebfcdb84a2e7564320f53f93bb5"
     },
     {
       "path": "crates/sharpebench-harness/src/checkpoint.rs",
@@ -783,7 +835,7 @@
     },
     {
       "path": "crates/sharpebench-harness/src/decision_stability.rs",
-      "sha256": "c9c2c54fb47a58f93b9b2f566514a04e3fb929635e5a90a837bb370132a32025"
+      "sha256": "d697f2f8ea7dc4d597e747318c7525e9e59624067d67905cc8e2bc442b3717f2"
     },
     {
       "path": "crates/sharpebench-harness/src/failure.rs",
@@ -795,15 +847,15 @@
     },
     {
       "path": "crates/sharpebench-harness/src/fault_plan.rs",
-      "sha256": "43494b220e135960618a45830da3d7e8ac73a7e4e9bf469ab787c74dcd28e752"
+      "sha256": "c47865657717464506524d0fd5d14571e7a3b9d8ead84129256a3c1d6efff6b8"
     },
     {
       "path": "crates/sharpebench-harness/src/gateway.rs",
-      "sha256": "06854f7297a77db06589143bf67ac0967f4ee277a1c7df2832ec724785ec1482"
+      "sha256": "1c8e1d8a13c18bf9fc32db8d39c2930c6a206e5664c4d69911810ab507e7420a"
     },
     {
       "path": "crates/sharpebench-harness/src/gateway_journal.rs",
-      "sha256": "f2ad92e081c0425142c0c096ffba861e0e64bea822399b3da10da3dc1b83bd28"
+      "sha256": "d80d7c31f8c40e7c97d172a7c46a7ab98311c900d352d85107fb1cfe9869473b"
     },
     {
       "path": "crates/sharpebench-harness/src/gateway_serve.rs",
@@ -831,15 +883,19 @@
     },
     {
       "path": "crates/sharpebench-harness/tests/artifact_scan.rs",
-      "sha256": "82cb7352ec3a624f0d2b5731c2d186de1679fb5b2001e2c0cfeac71addf4a435"
+      "sha256": "51ade09a1d381a03c6a1e6f40721748eea85629577f43e0af3c40a8e5d21e036"
     },
     {
       "path": "crates/sharpebench-harness/tests/artifact_tar.rs",
-      "sha256": "98b652ac55b197b4a8685fd1976b383e80af1067ed7289e3c3b93dd192e257ea"
+      "sha256": "25a6b1e25f75fa4c3342fd00efcdb6a095daf5a908aa74675661003e2d5aee8c"
     },
     {
       "path": "crates/sharpebench-harness/tests/attempt_ledger_preserves_failed_cost.rs",
       "sha256": "c56dbc646a971a49492e87b353584436f6574f8cd6cc0de12fda6cd5fa63c034"
+    },
+    {
+      "path": "crates/sharpebench-harness/tests/dispersion_vote_columns.rs",
+      "sha256": "b9c97f03def1f1af5ec7e7da73645d3e1b77f1e650c93619f78c273112d59535"
     },
     {
       "path": "crates/sharpebench-harness/tests/evidence_fields_no_clone_merges.rs",
@@ -855,7 +911,11 @@
     },
     {
       "path": "crates/sharpebench-harness/tests/frozen_rate_card.rs",
-      "sha256": "075968706f7e0bd6caa807f520ab2c01127bb64c019aaf44ab93b4855f2659a4"
+      "sha256": "a468aaa9279f3383201dfedd3e2f15817357e7fe6edcd10400bb0a0ef9b159cb"
+    },
+    {
+      "path": "crates/sharpebench-harness/tests/gateway_error_vocabulary.rs",
+      "sha256": "b1ee32275c62560db577a1dd25a416875fc201eb0c76c2b7f8ceb15891ed7bce"
     },
     {
       "path": "crates/sharpebench-harness/tests/journal_ownership_review.rs",
@@ -902,16 +962,60 @@
       "sha256": "34e325de5b207c3a837880a7b463b4e5b4c5f8d0a7de6a9c6ac788b5bc255f02"
     },
     {
+      "path": "crates/sharpebench-joint-gate/Cargo.toml",
+      "sha256": "383196f8e5798303400d9844e5903bf8bde667086b4788bc83f38b0e415f8ad7"
+    },
+    {
+      "path": "crates/sharpebench-joint-gate/src/bin/joint_gate_study.rs",
+      "sha256": "4cd9c7c9388b77166901ed8b18db6c0f96c54f744f861d9802cc9da1ff5c6264"
+    },
+    {
+      "path": "crates/sharpebench-joint-gate/src/campaign.rs",
+      "sha256": "309ba41a49234d7ab8c5b079547279de2fa7c14772b3ebbcbfcae674687ec2d0"
+    },
+    {
+      "path": "crates/sharpebench-joint-gate/src/controls.rs",
+      "sha256": "73d1d86e4864bc7b02c843152649e50dda2547e3522d8bb565c41acf7340abeb"
+    },
+    {
+      "path": "crates/sharpebench-joint-gate/src/dgp.rs",
+      "sha256": "3794c082ee557f9f88b1666f759338bedd7b385258eb4b89d958950be49cc263"
+    },
+    {
+      "path": "crates/sharpebench-joint-gate/src/fields.rs",
+      "sha256": "2e66a47f8a218312aededc3a76a9f9eb6351a64d9a0b24683e92b8cafb56c24f"
+    },
+    {
+      "path": "crates/sharpebench-joint-gate/src/gate.rs",
+      "sha256": "3aa007f6b45f69f400a7e41144aefe2337cf618c3663c9fd7fe55ceec01e17a1"
+    },
+    {
+      "path": "crates/sharpebench-joint-gate/src/lib.rs",
+      "sha256": "e9ad6743402ab40631922a3493de2a3ed1a3b2c13eb214b85a2dc9e8b2cf314c"
+    },
+    {
+      "path": "crates/sharpebench-joint-gate/src/report.rs",
+      "sha256": "00c5f81d32f2657ea9f332e131154a980ced38ffa4313144775b61db0e2d4011"
+    },
+    {
+      "path": "crates/sharpebench-joint-gate/src/shards.rs",
+      "sha256": "42a3327f65151e97533755a80b378cb9f242538f059321676b5e250b894c2bba"
+    },
+    {
+      "path": "crates/sharpebench-joint-gate/tests/producer.rs",
+      "sha256": "cde737fc71de5902f6d6a780447cad164ae5d7abce4d7dcd1eda38b5e4493f52"
+    },
+    {
       "path": "crates/sharpebench-leaderboard/Cargo.toml",
       "sha256": "d05a4c1cb3cec4c933af3811384974018c7808a22384072931eddd52606f3c91"
     },
     {
       "path": "crates/sharpebench-leaderboard/src/lib.rs",
-      "sha256": "faf02dce1740e62e8c1b4143cc1c70673d080d8c57497540b40eaf02d749e981"
+      "sha256": "3347943a8c5f3176d45b07691b8da37435e5375e40e19eb16c92d5c60c58e60a"
     },
     {
       "path": "crates/sharpebench-leaderboard/tests/board_binding.rs",
-      "sha256": "8e6e1f84442763349880aa7e5500ec6e320146c5aac8ec9b783849b3c1d77734"
+      "sha256": "3be88b1e32667a6991f08d85be72097f49964b2ed617ceb3d2bb851037cf2515"
     },
     {
       "path": "crates/sharpebench-memory/Cargo.toml",
@@ -1011,7 +1115,7 @@
     },
     {
       "path": "crates/sharpebench-py/src/lib.rs",
-      "sha256": "a74e3f6344c2c90a6cb3f918bdf8e6a1d08b3e39d744b5d661739b51dbf9a957"
+      "sha256": "d4c14b8519af337b3164f0cb3682f14c3d4f96081a0fdc8d9febb763ea1dd7ee"
     },
     {
       "path": "crates/sharpebench-sim/Cargo.toml",
@@ -1023,7 +1127,7 @@
     },
     {
       "path": "crates/sharpebench-sim/src/costs.rs",
-      "sha256": "1b064d04ec8b66bb6b13f2d51827b871e78540500610effcf09abce2deb9e2ba"
+      "sha256": "2a21a1556f9fd54f0c1d7e14468b2c38b66ec319a681e4edca445a56e69afdb9"
     },
     {
       "path": "crates/sharpebench-sim/src/data.rs",
@@ -1035,7 +1139,7 @@
     },
     {
       "path": "crates/sharpebench-sim/src/env.rs",
-      "sha256": "ad759c70663af4842cc414e998461acecf6acf63bf00e60ada2b27b31138e07e"
+      "sha256": "605f82162ab3a7f63b217785386a4145e822c5c40c360a07403f41ec6dc7ad11"
     },
     {
       "path": "crates/sharpebench-sim/src/external.rs",
@@ -1047,7 +1151,7 @@
     },
     {
       "path": "crates/sharpebench-sim/src/replay_nulls.rs",
-      "sha256": "48253c66dee1cfac991ba1efc30dbd552a417d618c9ae2c7f2d610b0218dd726"
+      "sha256": "7dfd2be26187837bef7be69dd3b4555f93f5483be0e7a6ec69187bf534a76df6"
     },
     {
       "path": "crates/sharpebench-sim/src/sizing_response.rs",
@@ -1079,7 +1183,7 @@
     },
     {
       "path": "crates/sharpebench-sim/tests/replay_nulls.rs",
-      "sha256": "a91e5f7ca0601f43e7f5fcbfb8f785a433476f84d4c1117c5c48082dc3fec2fe"
+      "sha256": "d07a248fd10f752553b56c0ce7c27d62e7cf6af270b415158e008e057c6adeb0"
     },
     {
       "path": "crates/sharpebench-sim/tests/short_borrow.rs",
@@ -1103,7 +1207,7 @@
     },
     {
       "path": "crates/sharpebench-stats/src/deflated_sharpe.rs",
-      "sha256": "d6977b8faabac85311892dfab2509d8203514fd79293466b19cd73cd0281456f"
+      "sha256": "bc4f817b1f1b04761ea7eec766570fabfec811e0871828805c84ac15380d115c"
     },
     {
       "path": "crates/sharpebench-stats/src/dissent.rs",
@@ -1115,7 +1219,7 @@
     },
     {
       "path": "crates/sharpebench-stats/src/lib.rs",
-      "sha256": "0971c41f3bffa037d3f4c0e15a185170fb599178c3f5d3382601099ed86eb37a"
+      "sha256": "6e0c2e4d606e949a7e1794b9917463b27d0865342e65e401ce1dfd8f6dd53459"
     },
     {
       "path": "crates/sharpebench-stats/src/opt_in_diagnostics.rs",
@@ -1212,6 +1316,10 @@
     {
       "path": "crates/sharpebench-study/tests/decision_rule_domain.rs",
       "sha256": "83f3618663af90f11890201d8bbf96d2f04ac82f9b5622b2da485cdb23b13ce5"
+    },
+    {
+      "path": "crates/sharpebench-study/tests/joint_gate_protocol.rs",
+      "sha256": "2d867f6485cb5f9b11b6b25e2df5bada30ed78238673d40895c0de1b82a989c7"
     },
     {
       "path": "crates/sharpebench-study/tests/precision_known_answers.rs",
@@ -1359,7 +1467,7 @@
     },
     {
       "path": "paper/sections/07-limitations.tex",
-      "sha256": "ea2c10bf805e761ada88c10c4b874e5559e496e7360e409378d693ba1fdeadf1"
+      "sha256": "87c2e84719d5b903753c695a174ed2e2eb83bb0450e31d72bf050e2d7f748d7c"
     },
     {
       "path": "paper/sections/08-reproducibility.tex",
@@ -1442,6 +1550,10 @@
       "sha256": "836a71dc2411869de43960cb85cf8ad000762d7225053092da112973c8539191"
     },
     {
+      "path": "paper/src/make-current-engine-rerun.py",
+      "sha256": "bfaa9f6141807f95d724c46df84564adc7e1d0b4d00ea5872ab623277d4c6b1e"
+    },
+    {
       "path": "paper/src/make-evidence-figures.py",
       "sha256": "65fdbb7db3330508bf24cb6421b219f05d97e37eca8dffd0388a111e3c28e746"
     },
@@ -1452,6 +1564,10 @@
     {
       "path": "paper/src/make-joint-gate-power.py",
       "sha256": "ebd6cbfc2f15d19f8559d3f5a46b872183cdad60474d747106d75c4e1a18081c"
+    },
+    {
+      "path": "paper/src/make-joint-gate-protocol-power.py",
+      "sha256": "79549ba9fedd119ca75710b59b1a600ae8337e218d561bd82fcb44b5c0d46117"
     },
     {
       "path": "paper/src/make-power-curve.py",
@@ -1472,6 +1588,10 @@
     {
       "path": "paper/src/test_check_prospective_forecast_report.py",
       "sha256": "76b291173adbc9077e3af3ab97ab1c9ded5aa8daa497297307a65bebfef5cd2e"
+    },
+    {
+      "path": "paper/src/test_current_engine_rerun.py",
+      "sha256": "0618d8f592b3700b53cd87be52c3c8d9c82433a9e42bac2b37fb98322110815f"
     },
     {
       "path": "paper/src/test_evidence_figures.py",
@@ -1547,5 +1667,5 @@
     "data/*.csv",
     "arena/windows/**/*.json"
   ],
-  "source_snapshot_sha256": "2068eb345be824cefe813973dcc462af080f2a3eb3d0b14501d610f2fbfa4bbf"
+  "source_snapshot_sha256": "2cb30ede7532535efc5d148e41aee47c1d3b4f1545fb1eea3192e53c466d5192"
 }

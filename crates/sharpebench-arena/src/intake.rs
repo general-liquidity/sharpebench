@@ -60,7 +60,8 @@ use sharpebench_sim::{
 };
 
 use crate::{
-    describe_fault_plan, registry_for, validate_sha256, Refusal, RevealedEntry, WindowState,
+    describe_fault_plan, registry_for, validate_sha256, ExecutionIdentity, Refusal, RevealedEntry,
+    WindowState,
 };
 
 /// How the returns behind one scored arena row were obtained. Rank-neutral:
@@ -226,6 +227,11 @@ pub fn execution_matrix(
 /// capture must run.
 pub struct ReplayWindow {
     pub data: Dataset,
+    /// Always [`CostModel::default`] from [`ReplayWindow::parse`], the only
+    /// constructor the arena uses. [`admit_entries`] parses its own replay
+    /// window from the revealed bytes, so setting this on a caller's copy
+    /// changes nothing the arena scores; the costs it does replay under are
+    /// recorded and signed as the window's [`ExecutionIdentity`].
     pub costs: CostModel,
     /// The dataset identity a capture's contract names
     /// (`TrajectoryContract::dataset_sha256`): the harness digest of the parsed
@@ -391,6 +397,10 @@ pub struct Admission {
     pub replay_dataset_sha256: Option<String>,
     /// [`board_certifies`] for this admission, computed from its rows.
     pub certifying: bool,
+    /// What the captures were replayed under, when an entry carried a capture:
+    /// the replay contract each one was checked against, under the window's
+    /// scorer artifact.
+    pub execution: Option<ExecutionIdentity>,
 }
 
 /// Whether a board certifies its rows: it has rows, supplied returns were not
@@ -525,6 +535,9 @@ pub fn admit_entries(
         dataset_hash: content_digest(dataset_bytes),
         replay_dataset_sha256: replay.as_ref().map(|r| r.dataset_sha256.clone()),
         certifying: false,
+        execution: replay
+            .as_ref()
+            .map(|r| ExecutionIdentity::of(r, &window.scorer_artifact_sha256)),
     };
     // A window holds one commitment per agent and the registry opens each one
     // once, so an agent reaches this loop with at most one admitted entry. The

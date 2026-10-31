@@ -175,8 +175,13 @@ impl CostModel {
     /// Reject malformed optional execution noise and a malformed short borrow
     /// rate at the public simulation boundary. A config without noise or borrow
     /// remains backwards compatible. A negative borrow rate would pay an agent
-    /// for shorting, so it is refused rather than read as a rebate.
+    /// for shorting, so it is refused rather than read as a rebate. A NaN
+    /// liquidity cap would read as no cap and a negative one has no clamp, so
+    /// both are refused; `+infinity` is the documented unlimited setting.
     pub fn validate(&self) -> Result<(), String> {
+        if self.max_participation.is_nan() || self.max_participation < 0.0 {
+            return Err("max_participation must be >= 0 or +infinity".to_string());
+        }
         if let Some(noise) = self.noise {
             noise.validate()?;
         }

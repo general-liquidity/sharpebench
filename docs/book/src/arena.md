@@ -10,8 +10,8 @@ advancement, held-out-data custody, and non-observation before commitment.
 
 ## The lifecycle
 
-An arena is a plain directory: `state.json` plus one subdirectory per window
-under `windows/`. State transitions use a cooperating-writer OS lock and a
+An arena is a plain directory: `state.json`, one subdirectory per window under
+`windows/`, and `head.json` once a board is published. State transitions use a cooperating-writer OS lock and a
 checksummed redo journal. Complete files are synced and atomically replaced,
 with windows and boards before `state.json`. Loading validates and completes
 an interrupted transaction; read-only verification refuses a pending transaction
@@ -25,10 +25,13 @@ sync directories, so sudden power loss and hardware failures remain outside its
 guarantee. Writers bypassing the OS lock are outside the cooperating-writer
 contract. Existing published window and board bytes are not rewritten.
 
-Each evaluation window moves through four states:
+Each evaluation window moves through four states, or ends early if nobody
+entered it:
 
 ```
 open -> committed -> scoring -> published
+             |
+             +-> expired-empty
 ```
 
 1. **`arena init <dir>`** creates the arena.
@@ -50,7 +53,12 @@ open -> committed -> scoring -> published
    or `sharpebench commit ... --fault-plan <plan.json>`, which prints the same
    commitment, so that it binds the plan (see [faulted windows](#faulted-windows));
    without `--fault-plan` both print the same plan-less commitment.
-4. **`arena advance <dir> <epoch>`** advances the clock. See below.
+4. **`arena advance <dir> <epoch> [--only-if-due]`** advances the clock. See
+   below. With `--only-if-due` it writes nothing unless a window would change:
+   an open window reaching its commit deadline, or a committed window reaching
+   its data-reveal epoch. A scheduler should pass it, so a day with no
+   transition leaves the directory untouched. Superseded records are not in
+   the lifecycle and never count, whatever status they were frozen at.
 5. **`arena score <dir> <window> <dataset> <entries.json> [--replay-only]
    [--allow-supplied-returns]`** runs after the data-reveal epoch. Each entry
    reveals its pre-image (artifact digest plus salt) and a strict trajectory
@@ -67,8 +75,10 @@ open -> committed -> scoring -> published
 6. **`arena publish <dir> <window> <key>`** signs the board and writes
    `board.json` (the document of record) and `board.md` (human-readable) into
    the window directory.
-7. **`arena verify <dir> [--pubkey <hex>]`** re-checks every published board
-   and the cross-window chain from the documents alone. With `--pubkey` the
+7. **`arena verify <dir> [--pubkey <hex>] [--expect-head <count>:<sha256>]`**
+   re-checks every published board, the cross-window chain and the signed head
+   from the documents alone (see [completeness](#completeness-the-signed-head)).
+   With `--pubkey` the
    host's advertised key is pinned; without it each board is checked under its
    embedded key (consistency, not identity; see the attestation chapter). Each
    board's header is also checked against its window file (see
@@ -267,6 +277,17 @@ alone cannot disprove it. A credible deployment therefore needs an external
 wall-time record, controlled custody of the target data, and evidence that
 entrants could not observe it before their commitments were accepted.
 
+A window that reaches its data-reveal epoch with no entrant ends differently.
+**`arena expire-empty <dir> <window>`** records the terminal status
+`expired-empty` and the arena's current epoch in the window file. It refuses a
+window that is not `committed`, one that has not reached its data-reveal epoch,
+and one holding a commitment, a refusal, a score or a dataset hash, so it cannot
+remove an entrant's result from the record. Loading refuses an expiry record
+this command could not have written. An expired window takes no commitment,
+score, board or further transition, and writes no board. It stays an operator
+step because it forecloses publishing an empty board. Run `arena advance` first
+if the recorded epoch should be today's; `--only-if-due` does not move it.
+
 ## Cross-window chaining
 
 Each published window is an Ed25519 public chain: a signed window header
@@ -285,8 +306,92 @@ N+1's recorded anchor exposes it. `arena verify` checks both.
 
 The header also binds the window's rules (`ScoreConfig`), the revealed
 dataset's SHA-256, the parsed dataset identity captures were replayed against,
-whether supplied returns were accepted, and the list of refused entries, so
-none of those can be quietly rewritten after publication either.
+the execution the captures were replayed under, whether supplied returns were
+accepted, and the list of refused entries, so none of those can be quietly
+rewritten after publication either.
+
+### Execution identity
+
+A replayed row's returns depend on the execution model as much as on the
+recorded decisions. A window that prepared a replay records, and its header
+signs, `execution`:
+
+| Field | Meaning |
+|---|---|
+| `schema_version` | `sharpebench.arena-execution.v1`; any other value is refused |
+| `cost_profile` | The replay cost model in the leaderboard's `CostProfile` form, `fixed_delay`, `trf_cost`, `noise` and `short_borrow_bps` included |
+| `cost_model_sha256` | Bit-exact digest of the same model, the value every admitted capture's contract names |
+| `engine_version` | The fill engine version every admitted capture's contract names |
+| `windows`, `seeds` | The execution matrix |
+| `execution_sha256` | SHA-256 over the scorer artifact, the cost model digest, the engine version and the matrix, to compare two boards' execution by one value |
+
+`arena verify` recomputes the cost digest from the profile, rebuilds the
+matrix a forward window scores under the signed `ScoreConfig`, recomputes
+`execution_sha256` under the signed scorer artifact, and compares the identity
+with `window.json` like any other identity field. A failure is reported as the
+window's `execution_error` and exits 1. Every window in the report carries
+`execution`:
+
+| Status | Meaning | Passes |
+|---|---|---|
+| `bound` | The header binds an identity that recomputes and matches the window file | Yes |
+| `not_replayed` | No capture was replayed; the window ranked supplied returns or nothing | Yes |
+| `legacy_unbound` | The header predates the identity but the window replayed captures | Yes, with a limit |
+
+A legacy header keeps the meaning it was signed with: its captures were
+replayed under the default cost model of the scorer artifact it names, the only
+cost model the arena has replayed under. The documents do not bind that, so two
+legacy boards are not shown to share execution. No `arena` path sets other
+replay costs: intake parses its own replay window from the revealed bytes under
+the default model, and a capture made under another model (`capture
+--short-borrow-bps`) is refused because its contract names another cost digest.
+
+A window recording the identity is written as schema 6, or 7 under a fault
+plan, which no binary that predates the field loads, so a rollback cannot drop
+it on save. As with every signed field, the key holder can sign any identity;
+the verifier checks that it is consistent and that the window file agrees, and
+cannot re-derive the rows without the captures.
+
+### Completeness: the signed head
+
+The cross-window chain exposes a changed or missing interior board, because a
+later board's anchor names it. Nothing later names the final board, and
+`state.json` is unsigned, so removing final windows together with their state
+entries leaves a shorter arena whose chain is intact.
+
+Each `publish` therefore rewrites `head.json` in the same transaction as the
+board: a one-link public chain under the arena key whose payload records
+`published_count`, `head_window_id` and `head_digest`, the SHA-256 of the newest
+board's final signature. That signature binds every earlier board through the
+chain, so the count and digest fix the whole published history. The board's
+signed header also carries `head_anchored: true`, which is what stops a reader
+mistaking a deleted head for an old arena.
+
+`arena verify` reports the result as `completeness`, and the plain output prints
+the current head as `head <count>:<digest>`:
+
+| Status | Meaning | Passes |
+|---|---|---|
+| `anchored` | A valid signed head names exactly the published windows | Yes |
+| `no_published_windows` | Nothing is published and no head exists | Yes, with a limit |
+| `legacy_unanchored` | No published board requires a head, because all predate it | Yes, with a limit |
+| `broken` | The head is invalid, under another key, missing where a board requires it, disagrees with the windows, or differs from `--expect-head` | No |
+
+The limits are real. A legacy arena has no anchor, so its final windows can be
+dropped undetected until the next `publish` anchors the whole history, legacy
+boards included. An arena showing nothing published cannot prove it never
+published anything.
+
+An anchored arena has a limit too. A head cannot show that it is the newest one:
+an earlier `head.json` is still validly signed, so restoring it together with
+its windows gives a shorter arena that is consistent in the documents.
+`--expect-head <count>:<sha256>` closes that for a reader who holds a head from
+somewhere else. It requires the published history to reach that count with that
+digest at that position, so a head recorded earlier keeps passing as the arena
+grows and fails once the history is cut below it. Publish each head somewhere
+the arena's repository does not control, as with the verifying key. None of this
+limits the operator: the key holder can sign any head, and only a head already
+held by someone else shows that the history changed.
 
 ### The header and the window file
 
@@ -297,8 +402,8 @@ requires the header to record the same identity, field by field:
 `score_config` (compared by the digest recomputed on each side, so a config
 edited under its old digest is caught), `score_config_sha256`,
 `scorer_artifact_sha256`, `sealed_eval_salt_sha256`, `fault_plan_sha256`,
-`dataset_hash`, `replay_dataset_sha256`, `supplied_returns_accepted` and
-`certifying`. An optional field present on one side and absent on the other is
+`dataset_hash`, `replay_dataset_sha256`, `supplied_returns_accepted`,
+`certifying` and `execution` (compared whole). An optional field present on one side and absent on the other is
 a disagreement like two different values, so a window file that drops or
 invents a fault plan fails, and so does one that changes, adds or drops a
 certification mark. Refusals and scores are outcomes rather than
@@ -310,7 +415,7 @@ window's `identity_mismatches` as `{"field", "header", "window"}`, with `null`
 for an absent value; the text report names the field and both values; the exit
 code is 1. A published window whose file cannot be read is an error, also
 exit 1. When every field agrees the report carries no `identity_mismatches`
-key and is byte-identical to the report before the check existed.
+key.
 
 ## Faulted windows
 
@@ -456,6 +561,9 @@ Honestly, quite a lot; deliberately so:
   the operator feeds them to the CLI.
 - **No wall-clock scheduler.** The arena never advances itself. Drive it with
   cron, CI, or by hand; the `advance` call is the entire integration surface.
+- **No proof of freshness from the documents alone.** A rollback to an earlier
+  signed head needs a head held out of band to show (see
+  [completeness](#completeness-the-signed-head)).
 - **No dataset feed.** Producing the frozen forward dataset (and optionally
   sealing it with `sharpebench-attest`'s [authenticated dataset seal](sealed-datasets.md) until reveal time) is
   the host's job.

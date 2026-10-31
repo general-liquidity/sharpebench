@@ -232,4 +232,18 @@ mod tests {
         drop(checked);
         assert!(r.reveal("gordon", "2025-Q4", "digest", "salt").is_ok());
     }
+
+    #[test]
+    fn registrations_are_held_per_agent_and_per_window() {
+        let mut r = Registry::new();
+        assert!(r.register(commit(), 5).is_ok());
+        let other_agent = make_commitment("other", "2025-Q4", "digest", "salt");
+        assert!(r.register(other_agent, 5).is_ok());
+        let other_window = make_commitment("gordon", "2026-Q1", "digest", "salt");
+        assert!(r.register(other_window, 5).is_ok());
+        assert_eq!(
+            r.register(commit(), 5).unwrap_err(),
+            "already registered for this window"
+        );
+    }
 }

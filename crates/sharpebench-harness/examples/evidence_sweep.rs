@@ -41,9 +41,12 @@ use sharpebench_sim::{
 
 #[path = "support/declared_support.rs"]
 mod declared_support;
+#[path = "support/dispersion_votes.rs"]
+mod dispersion_votes;
 use declared_support::{
     or_refuse, refuse, require_evaluated, require_grid, resolve_numeric_selector, resolve_selector,
 };
+use dispersion_votes::{config_digest, dispersion_votes};
 
 /// Frozen datasets, their asset class and bar size. Timeframe is what the deflation
 /// depends on: the same annualized Sharpe has a different track length at 1h and 1d.
@@ -120,6 +123,14 @@ struct Record<'a> {
     deflation_bar_per_period: f64,
     deflation_bar_annualized_equivalent: f64,
     pooled_observations: usize,
+    /// The kernel's vote for this entrant: with `dispersion_clone_cluster`, what
+    /// a later dispersion estimator needs without re-simulating the field. Null
+    /// with `pooled_sharpe_unavailable` set when the track has no Sharpe ratio.
+    pooled_sharpe_per_period: Option<f64>,
+    pooled_sharpe_unavailable: Option<String>,
+    dispersion_clone_cluster: Option<usize>,
+    /// Digest of the exact `ScoreConfig` this cell was scored under.
+    effective_config_sha256: String,
 }
 
 type AgentFactory = Box<dyn Fn() -> Box<dyn Agent>>;
@@ -229,6 +240,7 @@ fn main() {
             windows.len()
         );
         let subs = field(&data, &windows);
+        let votes = dispersion_votes(&subs, EXEC_SEEDS.len());
 
         for &dsr_bar in DSR_BARS {
             if !planned_bars.iter().any(|b| (dsr_bar - b).abs() <= 1e-9) {
@@ -251,11 +263,15 @@ fn main() {
                     cfg_nc.pass_mode = PassMode::Any;
                     cfg_nc.mandate.max_run_drawdown = NEVER_CATASTROPHIC_RUN_DD;
                     let scored_nc = rank(&subs, &cfg_nc);
+                    let effective_config_sha256 = config_digest(&cfg);
                     for s in rank(&subs, &cfg) {
                         let nc = scored_nc
                             .iter()
                             .find(|x| x.agent_id == s.agent_id)
                             .expect("same field under both gates");
+                        let vote = votes
+                            .get(&s.agent_id)
+                            .expect("every scored agent has a vote record");
                         let rec = Record {
                             dataset: name,
                             asset_class: class,
@@ -301,6 +317,10 @@ fn main() {
                             deflation_bar_annualized_equivalent: s
                                 .deflation_bar_annualized_equivalent,
                             pooled_observations: s.pooled_observations,
+                            pooled_sharpe_per_period: vote.pooled_sharpe_per_period,
+                            pooled_sharpe_unavailable: vote.pooled_sharpe_unavailable.clone(),
+                            dispersion_clone_cluster: vote.clone_cluster,
+                            effective_config_sha256: effective_config_sha256.clone(),
                         };
                         serde_json::to_writer(&mut w, &rec).expect("write record");
                         w.write_all(b"\n").expect("newline");

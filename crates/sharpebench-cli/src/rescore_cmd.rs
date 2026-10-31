@@ -582,6 +582,11 @@ pub fn frozen_cost_model(bytes: &[u8]) -> Result<CostModel, RescoreRefusal> {
     if unlimited {
         costs.max_participation = f64::INFINITY;
     }
+    // Every engine entry point panics on a malformed model; a bundle is
+    // refused instead.
+    costs
+        .validate()
+        .map_err(|reason| refuse("frozen cost model", reason))?;
     Ok(costs)
 }
 
@@ -1180,6 +1185,26 @@ mod tests {
         assert_eq!(role, "dataset");
         assert_eq!(path, "prices.csv");
         assert_ne!(declared, actual);
+    }
+
+    /// The engine panics on these, so the bundle has to be refused first.
+    #[test]
+    fn a_malformed_frozen_cost_model_is_refused_instead_of_panicking() {
+        for body in [
+            r#""max_participation":-0.5"#,
+            r#""max_participation":1.0,"short_borrow_bps":-1.0"#,
+        ] {
+            let text = format!(
+                r#"{{"fee_bps":2.0,"slippage_bps":3.0,"impact_bps":50.0,"financing_bps":5.0,{body}}}"#
+            );
+            assert!(matches!(
+                frozen_cost_model(text.as_bytes()),
+                Err(RescoreRefusal::Recompute {
+                    stage: "frozen cost model",
+                    ..
+                })
+            ));
+        }
     }
 
     #[test]

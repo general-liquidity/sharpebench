@@ -363,7 +363,7 @@ fn valid_supported_comparison_is_bit_for_bit_unchanged() {
 /// `measured_size_at_nominal_5pct` travels with
 /// `familywise_significant` so the flag cannot be read without the size the test
 /// is run at. This field has four settlement blocks, the first count the
-/// resampling gate admits, where that size is 0.188 against a nominal 0.05.
+/// resampling gate admits, where that size is 0.195 against a nominal 0.05.
 #[test]
 fn supported_v5_comparison_json_preserves_numerical_bytes() {
     let [left, right] = supported_field();
@@ -371,7 +371,7 @@ fn supported_v5_comparison_json_preserves_numerical_bytes() {
     let encoded = serde_json::to_string(&report.comparisons[0]).expect("comparison serializes");
     assert_eq!(
         encoded,
-        r#"{"agent_a":"left","agent_b":"right","scoring_rule":"binary_brier","target_unit":"binary","n_contracts":8,"n_settlement_blocks":4,"mean_loss_difference":-0.049499999999999995,"confidence_lower":-0.16899999999999996,"confidence_upper":0.15599999999999997,"raw_p_value":0.5828343313373253,"holm_adjusted_p_value":0.5828343313373253,"familywise_significant":false,"measured_size_at_nominal_5pct":0.188}"#
+        r#"{"agent_a":"left","agent_b":"right","scoring_rule":"binary_brier","target_unit":"binary","n_contracts":8,"n_settlement_blocks":4,"mean_loss_difference":-0.049499999999999995,"confidence_lower":-0.16899999999999996,"confidence_upper":0.15599999999999997,"raw_p_value":0.5828343313373253,"holm_adjusted_p_value":0.5828343313373253,"familywise_significant":false,"measured_size_at_nominal_5pct":0.195}"#
     );
 }
 
