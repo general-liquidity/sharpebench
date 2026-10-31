@@ -164,5 +164,165 @@ class ReleaseDriverTests(unittest.TestCase):
             )
 
 
+def _workspace_crates() -> dict[str, dict]:
+    """Every workspace member's manifest, keyed by package name."""
+    workspace = tomllib.loads((release.ROOT / "Cargo.toml").read_text(encoding="utf-8"))
+    crates = {}
+    for member in workspace["workspace"]["members"]:
+        path = release.ROOT / member / "Cargo.toml"
+        manifest = tomllib.loads(path.read_text(encoding="utf-8"))
+        crates[manifest["package"]["name"]] = manifest
+    return crates
+
+
+def _internal_deps(manifest: dict, names: set[str]) -> set[str]:
+    """Workspace crates that must already be on the registry for this one to publish.
+
+    A path-only dev-dependency is stripped at publish time, so it orders nothing. One
+    that carries a version is resolved by the registry and does.
+    """
+    deps = set(manifest.get("dependencies", {})) | set(manifest.get("build-dependencies", {}))
+    deps |= {
+        name
+        for name, spec in manifest.get("dev-dependencies", {}).items()
+        if isinstance(spec, str) or "version" in spec
+    }
+    return deps & names
+
+
+class PublishInventoryTests(unittest.TestCase):
+    def setUp(self) -> None:
+        path = release.ROOT / "scripts/publish-order.txt"
+        self.order = path.read_text(encoding="utf-8").split()
+        self.crates = _workspace_crates()
+        self.publishable = {
+            name
+            for name, manifest in self.crates.items()
+            if manifest["package"].get("publish", True) is not False
+        }
+
+    def test_the_inventory_is_exactly_the_publishable_workspace(self) -> None:
+        self.assertEqual(len(self.order), len(set(self.order)))
+        self.assertEqual(set(self.order), self.publishable)
+
+    def test_the_inventory_lists_a_crate_after_its_dependencies(self) -> None:
+        names = set(self.crates)
+        for index, name in enumerate(self.order):
+            earlier = set(self.order[:index])
+            with self.subTest(crate=name):
+                self.assertLessEqual(_internal_deps(self.crates[name], names), earlier)
+
+    def test_each_publisher_reads_the_inventory_and_keeps_no_copy(self) -> None:
+        readers = {
+            ".github/workflows/release.yml": 2,
+            "scripts/publish.sh": 1,
+        }
+        for path, reads in readers.items():
+            text = (release.ROOT / path).read_text(encoding="utf-8")
+            with self.subTest(path=path):
+                self.assertEqual(len(re.findall(r"mapfile -t \w+ < .*publish-order\.txt", text)), reads)
+                self.assertNotRegex(text, r"\bsharpebench-(?:memory|leaderboard)\b")
+
+    def test_the_package_check_only_names_crates_with_no_internal_dependency(self) -> None:
+        text = (release.ROOT / "scripts/publish.sh").read_text(encoding="utf-8")
+        leaves = re.search(r"(?m)^LEAVES=\(([^)]*)\)", text)
+        assert leaves is not None
+        names = set(self.crates)
+        for name in leaves.group(1).split():
+            with self.subTest(crate=name):
+                self.assertEqual(_internal_deps(self.crates[name], names), set())
+
+
+class NpmReleaseGateTests(unittest.TestCase):
+    def test_the_published_bytes_pass_the_suite_before_either_publish(self) -> None:
+        text = (release.ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        job = text.split("\n  npm:\n", 1)[1].split("\n  pypi:\n", 1)[0]
+
+        self.assertNotIn("wasm-pack build", job)
+        main_steps = [
+            "node scripts/check-wasm-bundle.mjs",
+            "npm ci",
+            "npm test",
+            "npm run smoke-install",
+            "npm publish --access public",
+        ]
+        positions = [job.find(step) for step in main_steps]
+        self.assertNotIn(-1, positions)
+        self.assertEqual(positions, sorted(positions))
+        mcp = job.split("sharpebench-mcp (skip if version exists)", 1)[1]
+        self.assertLess(mcp.index("npm test"), mcp.index("npm publish --access public"))
+
+
+class ArenaClockRaceTests(unittest.TestCase):
+    """The daily clock commits to main; it must not be able to harm a release."""
+
+    @staticmethod
+    def _commit(root: Path, path: str, text: str, message: str) -> str:
+        (root / path).parent.mkdir(parents=True, exist_ok=True)
+        (root / path).write_text(text, encoding="utf-8")
+        release.run(root, "git", "add", "--", path)
+        release.git(root, "commit", "--quiet", "-m", message)
+        return release.git(root, "rev-parse", "HEAD")
+
+    def setUp(self) -> None:
+        holder = tempfile.TemporaryDirectory(prefix="sharpebench-clock-")
+        self.addCleanup(holder.cleanup)
+        base = Path(holder.name)
+        self.origin = base / "origin.git"
+        self.origin.mkdir()
+        release.run(self.origin, "git", "init", "--quiet", "--bare", "--initial-branch=main")
+        self.tree = base / "tree"
+        self.clock = base / "clock"
+        self.tree.mkdir()
+        release.run(self.tree, "git", "init", "--quiet", "--initial-branch=main")
+        release.run(self.tree, "git", "remote", "add", "origin", str(self.origin))
+        self._commit(self.tree, "arena/state.json", "{}\n", "initial")
+        release.run(self.tree, "git", "push", "--quiet", "origin", "HEAD:main")
+        release.run(base, "git", "clone", "--quiet", str(self.origin), str(self.clock))
+
+    def _clock_tick(self) -> None:
+        self._commit(self.clock, "arena/state.json", '{"t":1}\n', "chore(arena): tick")
+        release.run(self.clock, "git", "push", "--quiet", "origin", "HEAD:main")
+
+    def test_a_clock_commit_during_the_cut_refuses_commits_and_tag_together(self) -> None:
+        self._commit(self.tree, "release.txt", "cut\n", "release commit")
+        release.git(self.tree, "tag", "-a", "v9.9.9", "-m", "candidate")
+        self._clock_tick()
+
+        with self.assertRaises(release.ReleaseError):
+            release.push_release(self.tree, "v9.9.9")
+
+        self.assertEqual(
+            release.git(self.origin, "tag", "--list"), "", "the tag reached origin alone"
+        )
+        self.assertNotIn(
+            "release commit", release.git(self.origin, "log", "--format=%s", "main")
+        )
+
+    def test_a_clock_commit_after_the_push_leaves_the_tag_on_main(self) -> None:
+        tagged = self._commit(self.tree, "release.txt", "cut\n", "release commit")
+        release.git(self.tree, "tag", "-a", "v9.9.9", "-m", "candidate")
+        release.push_release(self.tree, "v9.9.9")
+        release.run(self.clock, "git", "pull", "--quiet", "--ff-only", "origin", "main")
+        self._clock_tick()
+
+        release.run(self.tree, "git", "fetch", "--quiet", "origin", "main:refs/remotes/origin/main")
+        problems, commit = release.verify_tag(self.tree, "v9.9.9")
+
+        self.assertEqual(commit, tagged)
+        self.assertFalse([p for p in problems if "origin/main" in p], problems)
+
+    def test_the_clock_state_file_stays_outside_the_provenance_scope(self) -> None:
+        spec = importlib.util.spec_from_file_location(
+            "provenance_common", release.ROOT / "paper/src/provenance_common.py"
+        )
+        assert spec is not None and spec.loader is not None
+        common = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(common)
+        scope = (*common.SOURCE_SCOPE, *common.ARTIFACT_SCOPE)
+        self.assertNotIn("arena/state.json", scope)
+        self.assertFalse([p for p in scope if p in ("arena/*", "arena/**", "arena/**/*")])
+
+
 if __name__ == "__main__":
     unittest.main()

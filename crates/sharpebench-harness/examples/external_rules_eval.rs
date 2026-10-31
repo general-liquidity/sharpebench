@@ -36,6 +36,11 @@
 //! Deterministic: no clock, no ambient RNG. Run with
 //!
 //!   cargo run --release -p sharpebench-harness --example external_rules_eval -- <out.jsonl> [dataset]
+//!
+//! The selector is resolved against the declared datasets before anything is
+//! written, the run is staged through `<out>.partial`, and the file is published
+//! under the requested name only when the planned datasets all loaded and the
+//! records equal the declared grid, the contract `evidence_sweep` already holds.
 
 use std::collections::BTreeMap;
 use std::env;
@@ -69,8 +74,19 @@ const DATASETS: &[(&str, &str, f64, usize)] = &[
 
 const EXEC_SEEDS: [u64; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
 const LUCK_FLOOR_AGENTS: usize = 5;
+/// The eight entrants of `entrants` plus the luck floor: rows per cost profile.
+const FIELD_AGENTS: usize = 8 + LUCK_FLOOR_AGENTS;
+/// The cost profiles every dataset is scored under.
+const COST_PROFILES: usize = 3;
 /// Closes the protocol's observation carries, so the history every rule starts with.
 const OBSERVATION_LOOKBACK: usize = 20;
+
+#[path = "support/declared_support.rs"]
+mod declared_support;
+#[path = "support/dispersion_votes.rs"]
+mod dispersion_votes;
+use declared_support::{or_refuse, refuse, require_evaluated, require_grid, resolve_selector};
+use dispersion_votes::{config_digest, dispersion_votes};
 
 // ---------------------------------------------------------------------------
 // Shared per-symbol history accumulator.
@@ -326,6 +342,13 @@ struct Record<'a> {
     raw_mean_return: f64,
     worst_run_drawdown: f64,
     rank_eligible: bool,
+    /// See `evidence_sweep`: the vote and cluster a later dispersion estimator
+    /// needs, typed unavailable when the track has no Sharpe ratio.
+    pooled_sharpe_per_period: Option<f64>,
+    pooled_sharpe_unavailable: Option<String>,
+    dispersion_clone_cluster: Option<usize>,
+    /// Digest of the exact `ScoreConfig` this cell was scored under.
+    effective_config_sha256: String,
 }
 
 type AgentFactory = Box<dyn Fn() -> Box<dyn Agent>>;
@@ -416,23 +439,28 @@ fn main() {
         eprintln!("usage: external_rules_eval <out.jsonl> [dataset]");
         std::process::exit(2);
     });
-    let only = env::args().nth(2);
-    let mut w = BufWriter::new(File::create(&out).expect("create output"));
+    let declared: Vec<&str> = DATASETS.iter().map(|(name, ..)| *name).collect();
+    let planned = or_refuse(resolve_selector(
+        "dataset",
+        &declared,
+        env::args().nth(2).as_deref(),
+    ));
+    let partial = format!("{out}.partial");
+    let mut w = BufWriter::new(File::create(&partial).expect("create partial output"));
     let mut n_records = 0usize;
+    let mut evaluated: Vec<String> = Vec::new();
 
     for (name, tf, ppy, faber_bars) in DATASETS {
-        if let Some(ref o) = only {
-            if o != name {
-                continue;
-            }
+        if !planned.iter().any(|d| d == name) {
+            continue;
         }
+        let before = n_records;
         let path = format!("data/{name}.csv");
         let data = match Dataset::from_csv_file(&path) {
             Ok(d) => d,
-            Err(e) => {
-                eprintln!("skip {name}: {e}");
-                continue;
-            }
+            // A planned dataset that does not load is missing support, not a
+            // cell to skip: the rest would still reach the requested filename.
+            Err(e) => refuse(format!("declared dataset {name} did not load: {e}")),
         };
         let n = data.len();
         let (windows, window_len) = windows_for(n);
@@ -476,7 +504,12 @@ fn main() {
                 execution_seeds_per_window: EXEC_SEEDS.len(),
                 ..ScoreConfig::for_periods_per_year(*ppy)
             };
+            let votes = dispersion_votes(&subs, EXEC_SEEDS.len());
+            let effective_config_sha256 = config_digest(&cfg);
             for s in rank(&subs, &cfg) {
+                let vote = votes
+                    .get(&s.agent_id)
+                    .expect("every scored agent has a vote record");
                 let (origin, source, need) =
                     meta.get(&s.agent_id)
                         .copied()
@@ -519,13 +552,28 @@ fn main() {
                     raw_mean_return: s.raw_mean_return,
                     worst_run_drawdown: s.worst_run_drawdown,
                     rank_eligible: s.rank_eligible,
+                    pooled_sharpe_per_period: vote.pooled_sharpe_per_period,
+                    pooled_sharpe_unavailable: vote.pooled_sharpe_unavailable.clone(),
+                    dispersion_clone_cluster: vote.clone_cluster,
+                    effective_config_sha256: effective_config_sha256.clone(),
                 };
                 serde_json::to_writer(&mut w, &rec).expect("write record");
                 w.write_all(b"\n").expect("newline");
                 n_records += 1;
             }
         }
+        if n_records > before {
+            evaluated.push((*name).to_string());
+        }
     }
     w.flush().expect("flush");
+    drop(w);
+
+    or_refuse(require_evaluated("dataset", &planned, &evaluated));
+    or_refuse(require_grid(
+        planned.len() * COST_PROFILES * FIELD_AGENTS,
+        n_records,
+    ));
+    std::fs::rename(&partial, &out).expect("publish complete run atomically");
     eprintln!("wrote {n_records} records to {out}");
 }

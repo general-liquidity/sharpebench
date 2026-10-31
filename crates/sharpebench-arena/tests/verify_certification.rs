@@ -8,8 +8,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::{json, Value};
 use sharpebench_arena::{
-    verify_arena, Arena, IntakeOptions, RevealedEntry, SigningKey, BOARD_FILE, WINDOWS_DIR,
-    WINDOW_FILE,
+    head_digest, verify_arena, Arena, ArenaHead, IntakeOptions, RevealedEntry, SigningKey,
+    ARENA_HEAD_KIND, BOARD_FILE, HEAD_FILE, WINDOWS_DIR, WINDOW_FILE,
 };
 use sharpebench_attest::{content_digest, make_commitment, publish_public_chain, PublicChain};
 use sharpebench_core::{AgentSubmission, Run, ScoreConfig};
@@ -113,6 +113,20 @@ impl Fixture {
             .collect();
         let board = publish_public_chain(&strings, &self.key);
         std::fs::write(base.join(BOARD_FILE), serde_json::to_vec(&board).unwrap()).unwrap();
+        // The board was re-signed, so its head must be too, or every case here
+        // would fail on completeness instead of on what it tests.
+        let head = ArenaHead {
+            kind: ARENA_HEAD_KIND.to_string(),
+            published_count: 1,
+            head_window_id: "w1".to_string(),
+            head_digest: head_digest(&board.chain.last().unwrap().signature),
+        };
+        let document = publish_public_chain(&[serde_json::to_string(&head).unwrap()], &self.key);
+        std::fs::write(
+            self.dir.join(HEAD_FILE),
+            serde_json::to_vec(&document).unwrap(),
+        )
+        .unwrap();
     }
 
     fn rejected(&self, reason: &str) {
@@ -229,6 +243,10 @@ fn legacy_headers_stay_valid_but_never_gain_certification() {
     fixture.claim(None, false);
     fixture.window["schema_version"] = json!(2);
     fixture.payloads[0]["schema_version"] = json!(2);
+    fixture.payloads[0]
+        .as_object_mut()
+        .unwrap()
+        .remove("head_anchored");
     fixture
         .window
         .as_object_mut()
@@ -239,6 +257,7 @@ fn legacy_headers_stay_valid_but_never_gain_certification() {
         .unwrap()
         .remove("returns_provenance");
     fixture.write();
+    std::fs::remove_file(fixture.dir.join(HEAD_FILE)).unwrap();
     let report = verify_arena(&fixture.dir, None).unwrap();
     assert!(report.ok, "{report:?}");
     let header: sharpebench_arena::WindowHeader =

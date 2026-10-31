@@ -60,10 +60,12 @@ claim in the inventoried manuscript scope of the two products to the artifact
 that produced it, the command and version behind that artifact, the changes that
 landed afterwards, and what the claim supports today.
 
-The register maps existing evidence. It does not rerun, regenerate or authorize
-any experiment, and no frozen evidence file, golden or manuscript number was
-changed to produce it. Where an artifact could not be located the row records
-`unresolved` rather than a guess, and unknown historical versions stay unknown.
+The register maps existing evidence. It authorizes no experiment, and no frozen
+evidence file, golden or manuscript number was changed to produce it. A rescore
+or a measurement a row cites was written by its own committed producer to a new
+file beside the frozen one. Where an artifact could not be located the row
+records `unresolved` rather than a guess, and unknown historical versions stay
+unknown.
 
 `docs/evidence-register.jsonl` is the machine-readable authority; this file is
 generated from it by `scripts/make-evidence-register.py`.
@@ -71,10 +73,16 @@ generated from it by `scripts/make-evidence-register.py`.
 disposition, a manuscript table or figure with no row, and a status change with
 no recorded rationale.
 
-Rows marked with an external repository cover the companion product, whose tree
-is not part of this repository. Their artifact paths are recorded relative to
-that repository's root and are not opened by the checker, which reports coverage
-only for what it can read.
+Each product keeps its own register in this form, and SharpeBench's copy of this
+generator and of its checker is the source of both. A row marked with an external
+repository mirrors a row of the companion product's register, which is the row of
+record and which that row names. Its artifact paths are relative to that
+repository's root. The checker reports coverage only for what it can read, so it
+opens those artifacts only when it is given the companion checkout:
+`python scripts/check-evidence-register.py --companion <path>` opens every mirrored
+artifact in both directions and fails on a moved digest, a disposition that
+differs between the two registers, or a generator or checker that is no longer
+byte-identical.
 
 ## Changing a row
 
@@ -187,6 +195,11 @@ def render(rows: list[dict]) -> str:
                 out.append(
                     f"Covers the **{row['external_repo']}** repository, which is not part of "
                     "this tree. Paths below are relative to that repository's root.\n\n"
+                )
+                link = row.get("companion_register") or {}
+                out.append(
+                    f"**Register of record.** `{link.get('path', '')}` in "
+                    f"{link.get('repository', '')}, row `{link.get('claim_id', '')}`.\n\n"
                 )
             out.append(f"**Claim.** {row.get('claim', '')}\n\n")
             out.append(

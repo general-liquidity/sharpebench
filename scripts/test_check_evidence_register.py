@@ -31,6 +31,13 @@ def load_checker():
 CHECK = load_checker()
 
 
+LINK = {
+    "repository": "sharpearena",
+    "path": "docs/evidence-register.jsonl",
+    "claim_id": "SA-tab-f1",
+}
+
+
 def good_row(**overrides) -> dict:
     row = {
         "claim_id": "T-1",
@@ -144,6 +151,7 @@ class MissingArtifact(unittest.TestCase):
         with TemporaryRoot() as root:
             row = good_row(
                 external_repo="sharpearena",
+                companion_register=LINK,
                 artifacts=[
                     {
                         "path": "paper/evidence/f1-baselines.json",
@@ -159,6 +167,7 @@ class MissingArtifact(unittest.TestCase):
         with TemporaryRoot() as root:
             row = good_row(
                 external_repo="sharpearena",
+                companion_register=LINK,
                 artifacts=[{"path": "paper/evidence/f1-baselines.json", "in_repo": True}],
             )
             del row["no_measurement"]
@@ -379,9 +388,113 @@ class PriorityQueue(unittest.TestCase):
         self.assertIsInstance(CHECK.queue_bound(), int)
 
 
+class CompanionRegister(unittest.TestCase):
+    """The mirrored rows open against the register of record."""
+
+    def setUp(self):
+        self._dir = tempfile.TemporaryDirectory()
+        base = pathlib.Path(self._dir.name)
+        self.ours, self.theirs = base / "ours", base / "theirs"
+        for root in (self.ours, self.theirs):
+            (root / "scripts").mkdir(parents=True)
+            (root / "docs").mkdir()
+            for name in CHECK.SHARED_SCRIPTS:
+                (root / name).write_bytes(b"shared\n")
+        artifact = self.theirs / "paper" / "evidence.json"
+        artifact.parent.mkdir()
+        artifact.write_bytes(b"frozen\n")
+        self.digest = hashlib.sha256(b"frozen\n").hexdigest()
+        self.write_theirs(disposition="still-applicable")
+        (self.ours / "docs" / "evidence-register.jsonl").write_text("", encoding="utf-8")
+
+    def tearDown(self):
+        self._dir.cleanup()
+
+    def write_theirs(self, disposition):
+        row = good_row(claim_id="SA-tab-f1", disposition=disposition)
+        (self.theirs / "docs" / "evidence-register.jsonl").write_text(
+            json.dumps(row) + "\n", encoding="utf-8"
+        )
+
+    def mirrored(self, **overrides):
+        values = dict(
+            claim_id="SA-tab-f1",
+            external_repo="sharpearena",
+            companion_register=LINK,
+            artifacts=[{"path": "paper/evidence.json", "sha256": self.digest, "in_repo": False}],
+        )
+        values.update(overrides)
+        return good_row(**values)
+
+    def problems(self, row):
+        found: list[str] = []
+        CHECK.check_companion([row], self.ours, self.theirs, found)
+        return found
+
+    def test_a_matching_companion_passes(self):
+        self.assertEqual(self.problems(self.mirrored()), [])
+
+    def test_a_moved_digest_fails(self):
+        (self.theirs / "paper" / "evidence.json").write_bytes(b"moved\n")
+        problems = self.problems(self.mirrored())
+        self.assertTrue(any("hashes to" in problem for problem in problems), problems)
+
+    def test_an_artifact_gone_from_the_companion_fails(self):
+        (self.theirs / "paper" / "evidence.json").unlink()
+        problems = self.problems(self.mirrored())
+        self.assertTrue(any("is not on disk" in problem for problem in problems), problems)
+
+    def test_a_disposition_the_two_registers_disagree_on_fails(self):
+        self.write_theirs(disposition="historical-only")
+        problems = self.problems(self.mirrored())
+        self.assertTrue(any("register of record" in problem for problem in problems), problems)
+
+    def test_a_mirrored_row_with_no_row_of_record_fails(self):
+        link = dict(LINK, claim_id="SA-gone")
+        problems = self.problems(self.mirrored(companion_register=link))
+        self.assertTrue(any("of record" in problem for problem in problems), problems)
+
+    def test_a_generator_that_drifted_between_the_products_fails(self):
+        (self.theirs / "scripts" / "make-evidence-register.py").write_bytes(b"forked\n")
+        problems = self.problems(self.mirrored())
+        self.assertTrue(any("differs between" in problem for problem in problems), problems)
+
+    def test_line_endings_alone_are_not_drift(self):
+        (self.theirs / "scripts" / "make-evidence-register.py").write_bytes(b"shared\r\n")
+        self.assertEqual(self.problems(self.mirrored()), [])
+
+    def test_the_other_products_mirrored_rows_are_opened_too(self):
+        row = self.mirrored(artifacts=[{"path": "gone.json", "in_repo": False}])
+        row["companion_register"] = dict(LINK, claim_id="SB-1")
+        (self.theirs / "docs" / "evidence-register.jsonl").write_text(
+            json.dumps(row) + "\n", encoding="utf-8"
+        )
+        (self.ours / "docs" / "evidence-register.jsonl").write_text(
+            json.dumps(good_row(claim_id="SB-1")) + "\n", encoding="utf-8"
+        )
+        found: list[str] = []
+        CHECK.check_companion([], self.ours, self.theirs, found)
+        self.assertTrue(any("gone.json" in problem for problem in found), found)
+
+    def test_a_mirrored_row_with_no_link_fails(self):
+        with TemporaryRoot() as root:
+            row = self.mirrored(source_location=["paper/sections/05-experiments.tex:1"])
+            del row["companion_register"]
+            del row["no_measurement"]
+            problems = CHECK.validate([row], root)
+            self.assertTrue(any("names no companion_register" in p for p in problems), problems)
+
+    def test_a_link_to_another_repository_fails(self):
+        with TemporaryRoot() as root:
+            row = self.mirrored(companion_register=dict(LINK, repository="elsewhere"))
+            del row["no_measurement"]
+            problems = CHECK.validate([row], root)
+            self.assertTrue(any("companion_register names" in p for p in problems), problems)
+
+
 class CommittedRegister(unittest.TestCase):
     def test_the_committed_register_passes(self):
-        self.assertEqual(CHECK.main(), 0)
+        self.assertEqual(CHECK.main([]), 0)
 
 
 if __name__ == "__main__":

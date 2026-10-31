@@ -95,9 +95,10 @@ pub use composite::{
 };
 pub use correlation::{crowdedness, Crowdedness};
 pub use decision_stability::{
-    decision_stability, observation_sha256, same_decision, DecisionStabilityError,
-    DecisionStabilityReport, DifferingGroup, IdenticalReplicates, ObservedDecision, ReplicateRun,
-    StabilityCounts, StabilityRate, StabilityUnavailable, WindowStability,
+    decision_content_sha256, decision_stability, observation_sha256, same_decision,
+    DecisionStabilityError, DecisionStabilityReport, DifferingGroup, IdenticalReplicates,
+    ObservedDecision, ReplicateRun, StabilityCounts, StabilityRate, StabilityUnavailable,
+    WindowStability,
 };
 pub use disqualification::{classify_disqualification, rollup, DisqualThresholds, FailReason};
 pub use econrationality::{
@@ -116,8 +117,9 @@ pub use entrants::{
     Side, TrendRegime,
 };
 pub use evidence_coverage::{
-    Coverage, DigestId, EvidenceInventory, InventoryAudit, PreimageError, RunProvenance,
-    COMPOSITE_SCORE_INVENTORY, REDACTED, RUN_PROVENANCE_INVENTORY,
+    Coverage, DigestId, EvidenceInventory, InventoryAudit, PreimageEncoding, PreimageError,
+    RunProvenance, COMPOSITE_SCORE_INVENTORY, EVIDENCE_PREIMAGE_VERSION, REDACTED,
+    RUN_PROVENANCE_INVENTORY,
 };
 pub use forecast::{
     analyze_forecast_quality, analyze_forecast_quality_against_plan, parse_forecast_contract_plan,
@@ -159,8 +161,8 @@ pub use sharpe_diagnostics::{
     TailRiskDiagnostic,
 };
 pub use suite_controls::{
-    bind_to_suite, control_preimage, evaluate_controls, ControlBinding, ControlDigest,
-    ControlError, ControlObservation, ControlProperty, ControlRun, ControlShortfall,
+    bind_to_suite, control_preimage, control_preimage_under, evaluate_controls, ControlBinding,
+    ControlDigest, ControlError, ControlObservation, ControlProperty, ControlRun, ControlShortfall,
     ControlVerdict, SuiteControlEvidence, UnboundField, ACCOUNTING_RESIDUAL_TOLERANCE,
     SUITE_CONTROL_INVENTORY,
 };

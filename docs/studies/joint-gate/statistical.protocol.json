@@ -1,0 +1,1401 @@
+{
+  "contract_version": "sharpebench/study-protocol/v1",
+  "protocol_id": "joint-gate-statistical-legs",
+  "version": {
+    "major": 1,
+    "minor": 0,
+    "patch": 0
+  },
+  "tier": "frozen_validation",
+  "frozen": true,
+  "identity": {
+    "method": "joint eligibility rule, statistical legs",
+    "method_version": "0.28.0",
+    "configuration_id": "joint-gate-validation-v1",
+    "configuration_digest": "14e4369b6b3ba350420eaa3e2a43ee35fda86c929c9783ba67097f57c4a19151",
+    "scoring_spec_hash": "64f0e9241b3b4aa7"
+  },
+  "claims": [
+    {
+      "id": "S-R0",
+      "statement": "Rule R0-shipped: in every primary null cell, the probability that any of twelve zero-skill entrants is declared eligible stays at or below 0.05.",
+      "estimand": "whole_field_false_eligibility_R0",
+      "decision_rule": {
+        "kind": "interval_upper_bound_at_most",
+        "limit": 0.05
+      }
+    },
+    {
+      "id": "E-R0",
+      "statement": "Rule R0-shipped: in every primary null cell, the fixed focal entrant's false-eligibility rate stays at or below 0.004167, the twelve-entrant share of the whole-field limit. Reported beside S-R0; the outcome reads S-R0.",
+      "estimand": "focal_false_positive_R0",
+      "decision_rule": {
+        "kind": "interval_upper_bound_at_most",
+        "limit": 0.004167
+      }
+    },
+    {
+      "id": "P-R0-2.0_2520",
+      "statement": "Rule R0-shipped: at a planted annualized Sharpe of 2.0 over 2520 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R0_2.0_2520",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "P-R0-1.5_2520",
+      "statement": "Rule R0-shipped: at a planted annualized Sharpe of 1.5 over 2520 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R0_1.5_2520",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "P-R0-1.25_5040",
+      "statement": "Rule R0-shipped: at a planted annualized Sharpe of 1.25 over 5040 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R0_1.25_5040",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "P-R0-1.0_5040",
+      "statement": "Rule R0-shipped: at a planted annualized Sharpe of 1.0 over 5040 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R0_1.0_5040",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "S-R1",
+      "statement": "Rule R1-three-windows: in every primary null cell, the probability that any of twelve zero-skill entrants is declared eligible stays at or below 0.05.",
+      "estimand": "whole_field_false_eligibility_R1",
+      "decision_rule": {
+        "kind": "interval_upper_bound_at_most",
+        "limit": 0.05
+      }
+    },
+    {
+      "id": "E-R1",
+      "statement": "Rule R1-three-windows: in every primary null cell, the fixed focal entrant's false-eligibility rate stays at or below 0.004167, the twelve-entrant share of the whole-field limit. Reported beside S-R1; the outcome reads S-R1.",
+      "estimand": "focal_false_positive_R1",
+      "decision_rule": {
+        "kind": "interval_upper_bound_at_most",
+        "limit": 0.004167
+      }
+    },
+    {
+      "id": "P-R1-2.0_2520",
+      "statement": "Rule R1-three-windows: at a planted annualized Sharpe of 2.0 over 2520 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R1_2.0_2520",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "P-R1-1.5_2520",
+      "statement": "Rule R1-three-windows: at a planted annualized Sharpe of 1.5 over 2520 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R1_1.5_2520",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "P-R1-1.25_5040",
+      "statement": "Rule R1-three-windows: at a planted annualized Sharpe of 1.25 over 5040 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R1_1.25_5040",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "P-R1-1.0_5040",
+      "statement": "Rule R1-three-windows: at a planted annualized Sharpe of 1.0 over 5040 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R1_1.0_5040",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "S-R2",
+      "statement": "Rule R2-pooled: in every primary null cell, the probability that any of twelve zero-skill entrants is declared eligible stays at or below 0.05.",
+      "estimand": "whole_field_false_eligibility_R2",
+      "decision_rule": {
+        "kind": "interval_upper_bound_at_most",
+        "limit": 0.05
+      }
+    },
+    {
+      "id": "E-R2",
+      "statement": "Rule R2-pooled: in every primary null cell, the fixed focal entrant's false-eligibility rate stays at or below 0.004167, the twelve-entrant share of the whole-field limit. Reported beside S-R2; the outcome reads S-R2.",
+      "estimand": "focal_false_positive_R2",
+      "decision_rule": {
+        "kind": "interval_upper_bound_at_most",
+        "limit": 0.004167
+      }
+    },
+    {
+      "id": "P-R2-2.0_2520",
+      "statement": "Rule R2-pooled: at a planted annualized Sharpe of 2.0 over 2520 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R2_2.0_2520",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "P-R2-1.5_2520",
+      "statement": "Rule R2-pooled: at a planted annualized Sharpe of 1.5 over 2520 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R2_1.5_2520",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "P-R2-1.25_5040",
+      "statement": "Rule R2-pooled: at a planted annualized Sharpe of 1.25 over 5040 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R2_1.25_5040",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "P-R2-1.0_5040",
+      "statement": "Rule R2-pooled: at a planted annualized Sharpe of 1.0 over 5040 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R2_1.0_5040",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "S-R3",
+      "statement": "Rule R3-majority: in every primary null cell, the probability that any of twelve zero-skill entrants is declared eligible stays at or below 0.05.",
+      "estimand": "whole_field_false_eligibility_R3",
+      "decision_rule": {
+        "kind": "interval_upper_bound_at_most",
+        "limit": 0.05
+      }
+    },
+    {
+      "id": "E-R3",
+      "statement": "Rule R3-majority: in every primary null cell, the fixed focal entrant's false-eligibility rate stays at or below 0.004167, the twelve-entrant share of the whole-field limit. Reported beside S-R3; the outcome reads S-R3.",
+      "estimand": "focal_false_positive_R3",
+      "decision_rule": {
+        "kind": "interval_upper_bound_at_most",
+        "limit": 0.004167
+      }
+    },
+    {
+      "id": "P-R3-2.0_2520",
+      "statement": "Rule R3-majority: at a planted annualized Sharpe of 2.0 over 2520 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R3_2.0_2520",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "P-R3-1.5_2520",
+      "statement": "Rule R3-majority: at a planted annualized Sharpe of 1.5 over 2520 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R3_1.5_2520",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "P-R3-1.25_5040",
+      "statement": "Rule R3-majority: at a planted annualized Sharpe of 1.25 over 5040 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R3_1.25_5040",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "P-R3-1.0_5040",
+      "statement": "Rule R3-majority: at a planted annualized Sharpe of 1.0 over 5040 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R3_1.0_5040",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "S-R4",
+      "statement": "Rule R4-field-n: in every primary null cell, the probability that any of twelve zero-skill entrants is declared eligible stays at or below 0.05.",
+      "estimand": "whole_field_false_eligibility_R4",
+      "decision_rule": {
+        "kind": "interval_upper_bound_at_most",
+        "limit": 0.05
+      }
+    },
+    {
+      "id": "E-R4",
+      "statement": "Rule R4-field-n: in every primary null cell, the fixed focal entrant's false-eligibility rate stays at or below 0.004167, the twelve-entrant share of the whole-field limit. Reported beside S-R4; the outcome reads S-R4.",
+      "estimand": "focal_false_positive_R4",
+      "decision_rule": {
+        "kind": "interval_upper_bound_at_most",
+        "limit": 0.004167
+      }
+    },
+    {
+      "id": "P-R4-2.0_2520",
+      "statement": "Rule R4-field-n: at a planted annualized Sharpe of 2.0 over 2520 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R4_2.0_2520",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "P-R4-1.5_2520",
+      "statement": "Rule R4-field-n: at a planted annualized Sharpe of 1.5 over 2520 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R4_1.5_2520",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "P-R4-1.25_5040",
+      "statement": "Rule R4-field-n: at a planted annualized Sharpe of 1.25 over 5040 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R4_1.25_5040",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "P-R4-1.0_5040",
+      "statement": "Rule R4-field-n: at a planted annualized Sharpe of 1.0 over 5040 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R4_1.0_5040",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "S-R5",
+      "statement": "Rule R5-low-prior: in every primary null cell, the probability that any of twelve zero-skill entrants is declared eligible stays at or below 0.05.",
+      "estimand": "whole_field_false_eligibility_R5",
+      "decision_rule": {
+        "kind": "interval_upper_bound_at_most",
+        "limit": 0.05
+      }
+    },
+    {
+      "id": "E-R5",
+      "statement": "Rule R5-low-prior: in every primary null cell, the fixed focal entrant's false-eligibility rate stays at or below 0.004167, the twelve-entrant share of the whole-field limit. Reported beside S-R5; the outcome reads S-R5.",
+      "estimand": "focal_false_positive_R5",
+      "decision_rule": {
+        "kind": "interval_upper_bound_at_most",
+        "limit": 0.004167
+      }
+    },
+    {
+      "id": "P-R5-2.0_2520",
+      "statement": "Rule R5-low-prior: at a planted annualized Sharpe of 2.0 over 2520 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R5_2.0_2520",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "P-R5-1.5_2520",
+      "statement": "Rule R5-low-prior: at a planted annualized Sharpe of 1.5 over 2520 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R5_1.5_2520",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "P-R5-1.25_5040",
+      "statement": "Rule R5-low-prior: at a planted annualized Sharpe of 1.25 over 5040 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R5_1.25_5040",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "P-R5-1.0_5040",
+      "statement": "Rule R5-low-prior: at a planted annualized Sharpe of 1.0 over 5040 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R5_1.0_5040",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "S-R6",
+      "statement": "Rule R6-field-n-low-prior-majority: in every primary null cell, the probability that any of twelve zero-skill entrants is declared eligible stays at or below 0.05.",
+      "estimand": "whole_field_false_eligibility_R6",
+      "decision_rule": {
+        "kind": "interval_upper_bound_at_most",
+        "limit": 0.05
+      }
+    },
+    {
+      "id": "E-R6",
+      "statement": "Rule R6-field-n-low-prior-majority: in every primary null cell, the fixed focal entrant's false-eligibility rate stays at or below 0.004167, the twelve-entrant share of the whole-field limit. Reported beside S-R6; the outcome reads S-R6.",
+      "estimand": "focal_false_positive_R6",
+      "decision_rule": {
+        "kind": "interval_upper_bound_at_most",
+        "limit": 0.004167
+      }
+    },
+    {
+      "id": "P-R6-2.0_2520",
+      "statement": "Rule R6-field-n-low-prior-majority: at a planted annualized Sharpe of 2.0 over 2520 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R6_2.0_2520",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "P-R6-1.5_2520",
+      "statement": "Rule R6-field-n-low-prior-majority: at a planted annualized Sharpe of 1.5 over 2520 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R6_1.5_2520",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "P-R6-1.25_5040",
+      "statement": "Rule R6-field-n-low-prior-majority: at a planted annualized Sharpe of 1.25 over 5040 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R6_1.25_5040",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "P-R6-1.0_5040",
+      "statement": "Rule R6-field-n-low-prior-majority: at a planted annualized Sharpe of 1.0 over 5040 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R6_1.0_5040",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "S-R7",
+      "statement": "Rule R7-field-n-low-prior-three: in every primary null cell, the probability that any of twelve zero-skill entrants is declared eligible stays at or below 0.05.",
+      "estimand": "whole_field_false_eligibility_R7",
+      "decision_rule": {
+        "kind": "interval_upper_bound_at_most",
+        "limit": 0.05
+      }
+    },
+    {
+      "id": "E-R7",
+      "statement": "Rule R7-field-n-low-prior-three: in every primary null cell, the fixed focal entrant's false-eligibility rate stays at or below 0.004167, the twelve-entrant share of the whole-field limit. Reported beside S-R7; the outcome reads S-R7.",
+      "estimand": "focal_false_positive_R7",
+      "decision_rule": {
+        "kind": "interval_upper_bound_at_most",
+        "limit": 0.004167
+      }
+    },
+    {
+      "id": "P-R7-2.0_2520",
+      "statement": "Rule R7-field-n-low-prior-three: at a planted annualized Sharpe of 2.0 over 2520 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R7_2.0_2520",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "P-R7-1.5_2520",
+      "statement": "Rule R7-field-n-low-prior-three: at a planted annualized Sharpe of 1.5 over 2520 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R7_1.5_2520",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "P-R7-1.25_5040",
+      "statement": "Rule R7-field-n-low-prior-three: at a planted annualized Sharpe of 1.25 over 5040 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R7_1.25_5040",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "P-R7-1.0_5040",
+      "statement": "Rule R7-field-n-low-prior-three: at a planted annualized Sharpe of 1.0 over 5040 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R7_1.0_5040",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "S-R8",
+      "statement": "Rule R8-field-n-low-prior-pooled: in every primary null cell, the probability that any of twelve zero-skill entrants is declared eligible stays at or below 0.05.",
+      "estimand": "whole_field_false_eligibility_R8",
+      "decision_rule": {
+        "kind": "interval_upper_bound_at_most",
+        "limit": 0.05
+      }
+    },
+    {
+      "id": "E-R8",
+      "statement": "Rule R8-field-n-low-prior-pooled: in every primary null cell, the fixed focal entrant's false-eligibility rate stays at or below 0.004167, the twelve-entrant share of the whole-field limit. Reported beside S-R8; the outcome reads S-R8.",
+      "estimand": "focal_false_positive_R8",
+      "decision_rule": {
+        "kind": "interval_upper_bound_at_most",
+        "limit": 0.004167
+      }
+    },
+    {
+      "id": "P-R8-2.0_2520",
+      "statement": "Rule R8-field-n-low-prior-pooled: at a planted annualized Sharpe of 2.0 over 2520 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R8_2.0_2520",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "P-R8-1.5_2520",
+      "statement": "Rule R8-field-n-low-prior-pooled: at a planted annualized Sharpe of 1.5 over 2520 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R8_1.5_2520",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "P-R8-1.25_5040",
+      "statement": "Rule R8-field-n-low-prior-pooled: at a planted annualized Sharpe of 1.25 over 5040 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R8_1.25_5040",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "P-R8-1.0_5040",
+      "statement": "Rule R8-field-n-low-prior-pooled: at a planted annualized Sharpe of 1.0 over 5040 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R8_1.0_5040",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "S-R9",
+      "statement": "Rule R9-frontier: in every primary null cell, the probability that any of twelve zero-skill entrants is declared eligible stays at or below 0.05.",
+      "estimand": "whole_field_false_eligibility_R9",
+      "decision_rule": {
+        "kind": "interval_upper_bound_at_most",
+        "limit": 0.05
+      }
+    },
+    {
+      "id": "E-R9",
+      "statement": "Rule R9-frontier: in every primary null cell, the fixed focal entrant's false-eligibility rate stays at or below 0.004167, the twelve-entrant share of the whole-field limit. Reported beside S-R9; the outcome reads S-R9.",
+      "estimand": "focal_false_positive_R9",
+      "decision_rule": {
+        "kind": "interval_upper_bound_at_most",
+        "limit": 0.004167
+      }
+    },
+    {
+      "id": "P-R9-2.0_2520",
+      "statement": "Rule R9-frontier: at a planted annualized Sharpe of 2.0 over 2520 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R9_2.0_2520",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "P-R9-1.5_2520",
+      "statement": "Rule R9-frontier: at a planted annualized Sharpe of 1.5 over 2520 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R9_1.5_2520",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "P-R9-1.25_5040",
+      "statement": "Rule R9-frontier: at a planted annualized Sharpe of 1.25 over 5040 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R9_1.25_5040",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    },
+    {
+      "id": "P-R9-1.0_5040",
+      "statement": "Rule R9-frontier: at a planted annualized Sharpe of 1.0 over 5040 bars, in every primary power cell, the focal entrant is declared eligible with probability at least 0.8.",
+      "estimand": "power_R9_1.0_5040",
+      "decision_rule": {
+        "kind": "interval_lower_bound_at_least",
+        "bound": 0.8
+      }
+    }
+  ],
+  "estimands": [
+    {
+      "name": "whole_field_false_eligibility_R0",
+      "kind": {
+        "kind": "whole_field_any_false_eligibility"
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "upper_error_limit",
+        "limit": 0.05
+      }
+    },
+    {
+      "name": "focal_false_positive_R0",
+      "kind": {
+        "kind": "per_entry_false_positive"
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "upper_error_limit",
+        "limit": 0.004167
+      }
+    },
+    {
+      "name": "power_R0_2.0_2520",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 2520 bars",
+        "effect_size": 2.0
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "power_R0_1.5_2520",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 2520 bars",
+        "effect_size": 1.5
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "power_R0_1.25_5040",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 5040 bars",
+        "effect_size": 1.25
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "power_R0_1.0_5040",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 5040 bars",
+        "effect_size": 1.0
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "whole_field_false_eligibility_R1",
+      "kind": {
+        "kind": "whole_field_any_false_eligibility"
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "upper_error_limit",
+        "limit": 0.05
+      }
+    },
+    {
+      "name": "focal_false_positive_R1",
+      "kind": {
+        "kind": "per_entry_false_positive"
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "upper_error_limit",
+        "limit": 0.004167
+      }
+    },
+    {
+      "name": "power_R1_2.0_2520",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 2520 bars",
+        "effect_size": 2.0
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "power_R1_1.5_2520",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 2520 bars",
+        "effect_size": 1.5
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "power_R1_1.25_5040",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 5040 bars",
+        "effect_size": 1.25
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "power_R1_1.0_5040",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 5040 bars",
+        "effect_size": 1.0
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "whole_field_false_eligibility_R2",
+      "kind": {
+        "kind": "whole_field_any_false_eligibility"
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "upper_error_limit",
+        "limit": 0.05
+      }
+    },
+    {
+      "name": "focal_false_positive_R2",
+      "kind": {
+        "kind": "per_entry_false_positive"
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "upper_error_limit",
+        "limit": 0.004167
+      }
+    },
+    {
+      "name": "power_R2_2.0_2520",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 2520 bars",
+        "effect_size": 2.0
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "power_R2_1.5_2520",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 2520 bars",
+        "effect_size": 1.5
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "power_R2_1.25_5040",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 5040 bars",
+        "effect_size": 1.25
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "power_R2_1.0_5040",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 5040 bars",
+        "effect_size": 1.0
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "whole_field_false_eligibility_R3",
+      "kind": {
+        "kind": "whole_field_any_false_eligibility"
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "upper_error_limit",
+        "limit": 0.05
+      }
+    },
+    {
+      "name": "focal_false_positive_R3",
+      "kind": {
+        "kind": "per_entry_false_positive"
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "upper_error_limit",
+        "limit": 0.004167
+      }
+    },
+    {
+      "name": "power_R3_2.0_2520",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 2520 bars",
+        "effect_size": 2.0
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "power_R3_1.5_2520",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 2520 bars",
+        "effect_size": 1.5
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "power_R3_1.25_5040",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 5040 bars",
+        "effect_size": 1.25
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "power_R3_1.0_5040",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 5040 bars",
+        "effect_size": 1.0
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "whole_field_false_eligibility_R4",
+      "kind": {
+        "kind": "whole_field_any_false_eligibility"
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "upper_error_limit",
+        "limit": 0.05
+      }
+    },
+    {
+      "name": "focal_false_positive_R4",
+      "kind": {
+        "kind": "per_entry_false_positive"
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "upper_error_limit",
+        "limit": 0.004167
+      }
+    },
+    {
+      "name": "power_R4_2.0_2520",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 2520 bars",
+        "effect_size": 2.0
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "power_R4_1.5_2520",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 2520 bars",
+        "effect_size": 1.5
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "power_R4_1.25_5040",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 5040 bars",
+        "effect_size": 1.25
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "power_R4_1.0_5040",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 5040 bars",
+        "effect_size": 1.0
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "whole_field_false_eligibility_R5",
+      "kind": {
+        "kind": "whole_field_any_false_eligibility"
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "upper_error_limit",
+        "limit": 0.05
+      }
+    },
+    {
+      "name": "focal_false_positive_R5",
+      "kind": {
+        "kind": "per_entry_false_positive"
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "upper_error_limit",
+        "limit": 0.004167
+      }
+    },
+    {
+      "name": "power_R5_2.0_2520",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 2520 bars",
+        "effect_size": 2.0
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "power_R5_1.5_2520",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 2520 bars",
+        "effect_size": 1.5
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "power_R5_1.25_5040",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 5040 bars",
+        "effect_size": 1.25
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "power_R5_1.0_5040",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 5040 bars",
+        "effect_size": 1.0
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "whole_field_false_eligibility_R6",
+      "kind": {
+        "kind": "whole_field_any_false_eligibility"
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "upper_error_limit",
+        "limit": 0.05
+      }
+    },
+    {
+      "name": "focal_false_positive_R6",
+      "kind": {
+        "kind": "per_entry_false_positive"
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "upper_error_limit",
+        "limit": 0.004167
+      }
+    },
+    {
+      "name": "power_R6_2.0_2520",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 2520 bars",
+        "effect_size": 2.0
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "power_R6_1.5_2520",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 2520 bars",
+        "effect_size": 1.5
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "power_R6_1.25_5040",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 5040 bars",
+        "effect_size": 1.25
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "power_R6_1.0_5040",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 5040 bars",
+        "effect_size": 1.0
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "whole_field_false_eligibility_R7",
+      "kind": {
+        "kind": "whole_field_any_false_eligibility"
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "upper_error_limit",
+        "limit": 0.05
+      }
+    },
+    {
+      "name": "focal_false_positive_R7",
+      "kind": {
+        "kind": "per_entry_false_positive"
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "upper_error_limit",
+        "limit": 0.004167
+      }
+    },
+    {
+      "name": "power_R7_2.0_2520",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 2520 bars",
+        "effect_size": 2.0
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "power_R7_1.5_2520",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 2520 bars",
+        "effect_size": 1.5
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "power_R7_1.25_5040",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 5040 bars",
+        "effect_size": 1.25
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "power_R7_1.0_5040",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 5040 bars",
+        "effect_size": 1.0
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "whole_field_false_eligibility_R8",
+      "kind": {
+        "kind": "whole_field_any_false_eligibility"
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "upper_error_limit",
+        "limit": 0.05
+      }
+    },
+    {
+      "name": "focal_false_positive_R8",
+      "kind": {
+        "kind": "per_entry_false_positive"
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "upper_error_limit",
+        "limit": 0.004167
+      }
+    },
+    {
+      "name": "power_R8_2.0_2520",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 2520 bars",
+        "effect_size": 2.0
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "power_R8_1.5_2520",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 2520 bars",
+        "effect_size": 1.5
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "power_R8_1.25_5040",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 5040 bars",
+        "effect_size": 1.25
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "power_R8_1.0_5040",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 5040 bars",
+        "effect_size": 1.0
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "whole_field_false_eligibility_R9",
+      "kind": {
+        "kind": "whole_field_any_false_eligibility"
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "upper_error_limit",
+        "limit": 0.05
+      }
+    },
+    {
+      "name": "focal_false_positive_R9",
+      "kind": {
+        "kind": "per_entry_false_positive"
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "upper_error_limit",
+        "limit": 0.004167
+      }
+    },
+    {
+      "name": "power_R9_2.0_2520",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 2520 bars",
+        "effect_size": 2.0
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "power_R9_1.5_2520",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 2520 bars",
+        "effect_size": 1.5
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "power_R9_1.25_5040",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 5040 bars",
+        "effect_size": 1.25
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    },
+    {
+      "name": "power_R9_1.0_5040",
+      "kind": {
+        "kind": "power_at_effect",
+        "effect_name": "planted annualized Sharpe over 5040 bars",
+        "effect_size": 1.0
+      },
+      "effect_units": "raw",
+      "target": {
+        "kind": "lower_power_bound",
+        "bound": 0.8
+      }
+    }
+  ],
+  "design": {
+    "null_family": "Twelve zero-skill generators, each a zero-mean unit-variance path: independent normal, AR(1) at rho -0.2, 0.2, 0.4 and 0.6, Student t with 3 and 5 degrees of freedom, GARCH(1,1) with t innovations, a two-state regime break, a composite of AR, GARCH, t and regime, and two shared-history cells at half the variance common across the field. Each is a campaign entry; the campaign digest binds them.",
+    "alternative_family": "The same generators with a constant planted on the focal entrant. Primary effects are annualized Sharpes 1.5 and 2 over 2520 bars and 1 and 1.25 over 5040, on independent normal, AR 0.2 and composite paths. Curves run from 0.5 to 6, below and above the deflation benchmark.",
+    "effect_units": "raw",
+    "field_composition": {
+      "null_entrants": 11,
+      "planted_skill_entrants": 1,
+      "control_entrants": 0
+    },
+    "dependence": {
+      "serial": "Per generator, see null_family. Windows are contiguous slices of one path, so dependence crosses window boundaries.",
+      "cross_entrant": "Independent except in the two shared-history cells, where half of each entrant's variance is one common path.",
+      "shared_market_history": true
+    },
+    "window_geometry": {
+      "windows": 6,
+      "window_length_steps": 420,
+      "stride_steps": 420,
+      "overlapping": false
+    },
+    "search_assumptions": {
+      "trials_searched": 0,
+      "selection_rule": "No search. Entrants are drawn, not selected; the deflation count is the rule's host N raised to the field size.",
+      "independent_trials_assumed": false
+    },
+    "dispersion_policy": {
+      "kind": "measured",
+      "estimator": "The shipped measured dispersion: clone-collapsed, vote-fenced sample standard deviation of pooled per-period Sharpes, floored at each rule's prior."
+    },
+    "tuning_allowed": false
+  },
+  "replication": {
+    "independent_unit": "simulated_field",
+    "nested_observations": [
+      "entrant",
+      "window",
+      "seed"
+    ],
+    "independent_units_planned": 4141
+  },
+  "inference": {
+    "confidence_level": "ninety_nine",
+    "interval_method": "wilson_score",
+    "required_half_width": 0.02,
+    "multiplicity": {
+      "method": "bonferroni",
+      "reported_conditions": [
+        "R0-shipped",
+        "R1-three-windows",
+        "R2-pooled",
+        "R3-majority",
+        "R4-field-n",
+        "R5-low-prior",
+        "R6-field-n-low-prior-majority",
+        "R7-field-n-low-prior-three",
+        "R8-field-n-low-prior-pooled",
+        "R9-frontier"
+      ]
+    }
+  },
+  "accounting": {
+    "expected_attempted": 4141,
+    "expected_completed": 4141,
+    "expected_available": 4141,
+    "refusal": {
+      "kind": "count_as_failure",
+      "reason_code": "entrant_refused_counts_as_ineligible",
+      "denominator": "attempted"
+    },
+    "unavailability": {
+      "kind": "count_as_failure",
+      "reason_code": "typed_unavailable_counts_as_ineligible",
+      "denominator": "attempted"
+    },
+    "infrastructure_failure": {
+      "kind": "retry_then_exclude",
+      "reason_code": "shard_infrastructure_failure",
+      "denominator": "attempted",
+      "max_attempts": 3
+    }
+  },
+  "simulation": {
+    "planned_runs": 4141,
+    "anticipated_rate": 0.5,
+    "runtime_estimate_seconds_per_run": 1025.665
+  },
+  "budget": {
+    "approved": false,
+    "approver": "",
+    "spend_cap_usd": 1.0,
+    "compute_cap_core_hours": 1769.7,
+    "estimated_spend_usd": 0.0,
+    "estimated_core_hours": 1179.8
+  },
+  "stopping_rule": {
+    "kind": "fixed_runs",
+    "runs": 4141
+  },
+  "notes": "One run is one replicate of the primary blocks: every primary cell once on one drawn field per generator and history. planned_runs is therefore the per-cell count the precision requirement is checked against, and the per-run runtime covers every cell of that replicate plus the sensitivity blocks' share. The campaign digest in configuration_digest binds all rules, generators and blocks. The fingerprint in scoring_spec_hash binds the engine; a merged engine that moves it needs a raised version before any run. budget.approved is false: the owner approves the campaign by raising the version with a named approver. Targets are the proposal in docs/studies/joint-gate/PROTOCOL.md, not adopted thresholds; nothing here changes a shipped default."
+}

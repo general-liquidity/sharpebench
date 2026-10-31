@@ -230,4 +230,34 @@ mod tests {
         assert_eq!(reader.failure, Some(IncompleteReason::Deadline));
         assert_eq!(reader.inner, b"byte");
     }
+
+    fn bounded(input: &[u8], limit: u64) -> Bounded<&[u8]> {
+        Bounded {
+            inner: input,
+            bytes: 0,
+            limit,
+            deadline: Instant::now() + Duration::from_secs(60),
+            hash: Sha256::new(),
+            failure: None,
+        }
+    }
+
+    #[test]
+    fn an_input_of_exactly_the_limit_reaches_eof_without_failing() {
+        let mut reader = bounded(b"byte", 4);
+        let mut buffer = [0; 16];
+        assert_eq!(reader.read(&mut buffer).unwrap(), 4);
+        assert_eq!(reader.read(&mut buffer).unwrap(), 0);
+        assert_eq!(reader.failure, None);
+    }
+
+    #[test]
+    fn an_oversized_input_is_read_one_byte_past_the_limit_and_no_further() {
+        let mut reader = bounded(&[b'x'; 64], 4);
+        let mut buffer = [0; 16];
+        assert_eq!(reader.read(&mut buffer[..2]).unwrap(), 2);
+        assert!(reader.read(&mut buffer).is_err());
+        assert_eq!(reader.failure, Some(IncompleteReason::ByteLimit));
+        assert_eq!(reader.bytes, 5);
+    }
 }
