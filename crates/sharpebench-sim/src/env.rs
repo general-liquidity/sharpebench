@@ -138,7 +138,7 @@ impl TradingEnv {
     /// with [`restore_state`](Self::restore_state) to fork the env from this exact
     /// point (e.g. tree search / what-if rollouts over the same frozen data). The
     /// immutable config (data, window, costs, seed) is not snapshotted — it never
-    /// changes — so a snapshot is cheap and a restore is exact.
+    /// changes — so a snapshot costs one book clone and a restore is exact.
     pub fn clone_state(&self) -> EnvState {
         EnvState {
             cursor: self.cursor,

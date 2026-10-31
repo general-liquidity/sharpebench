@@ -1,9 +1,11 @@
 # Claude continuation handoff
 
-Start with the [detailed Sharpe suite handoff](audits/2026-09-09/CLAUDE-HANDOFF.md).
-It records recoverable branches, completed repairs, all remaining goal tasks,
-lost uncommitted prototype work, acceptance tests and safe delivery commands.
+Start with [`AGENTS.md`](../AGENTS.md), which carries the current goal and its
+rules.
 
-The [active ledger](audits/2026-09-09/IMPLEMENTATION.md) remains authoritative.
-The goal is not complete. This pointer and the detailed handoff are mirrored in
-SharpeBench and SharpeArena.
+Rows G01 to G34 of the [2026-09-09 ledger](audits/2026-09-09/IMPLEMENTATION.md)
+are closed, so that handoff is finished. The
+[detailed handoff](audits/2026-09-09/CLAUDE-HANDOFF.md) stays as a historical
+record, and its task lists, branch names and version pins describe the state at
+the time it was written. Do not pick up work from it. This pointer and the
+detailed handoff are mirrored in SharpeBench and SharpeArena.

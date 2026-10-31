@@ -196,6 +196,16 @@ fixed decimals, and write no timestamps, so a re-run over the same upstream data
 reproduces the bytes. FRED and Binance windows are pinned with `--start`/`--end`
 defaults because both sources keep appending.
 
+## Survivorship and universe selection
+
+These are fixed universes chosen with hindsight, so they do not close
+survivorship bias. The crypto universe is the five majors by capitalization at
+collection time, and the index universe is three headline US indices. Both were
+selected from instruments that survived into the collection period, and no file
+here holds a delisted or failed instrument. A score on these files carries that
+bias. The paper records the same limit in `paper/sections/04-integrity.tex` and
+`paper/sections/D-datasheet.tex`.
+
 ## Adding sources
 
 Any source that produces aligned `date,symbol,close[,dividend]` rows works. Live now:
