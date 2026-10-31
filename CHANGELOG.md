@@ -13,9 +13,23 @@ and links the commits it was built from.
 
 ## [Unreleased]
 
+### Breaking (scoring)
+
+The six scorer stages that answer the `grader-search` admissions. Stages 1, 2 and 5 close what they name; stages 3, 4 and 6, and the residual of stage 5, are mitigations, and the residuals are stated with each. On the fixed seed (20261030, default budget) the search's admissions move as follows: autocorrelated 499 to 271, tail_seller 1648 to 1286, leverage_timing 39 to 20, window_boundary 18 to 1, clone_threshold 62 to 0, and near_constant and single_observation stay at 0.
+
+- Stage 1, core: a track with no observed risk in any window is refused with "must show observed risk". The rule closes the near-constant, single-spike, one-trade and level-step admissions. A genuine track that never loses a bar is refused too.
+- Stage 2, core: only entrants vote on a measured deflation dispersion. `ScoreConfig::dispersion_controls` names host control tracks, which are scored and ranked against the entrants' bar but cast no vote, and every measured row records who abstained and why.
+- Stage 2, core: an influence bound clips each admitted vote to an honest field's 99th-percentile robust distance, using an independence-weighted centre and scale. A clipped vote keeps the bar it measured as cast, and rows record clipped votes and the dispersion before the clip. On the fixed seed one griefing vote now sets the same honest bar, 0.61, wherever it sits inside the fence, where it used to set 0.77 to 1.48. The bound changes nothing on any committed producer.
+- Stage 2, harness: producers declare their luck floor as dispersion controls. The hourly crypto, daily FX and daily rates sweep and risk-managed panels now take the configured prior, and external-rules dispersions fall on six panels. No eligibility verdict changes. Committed frozen evidence is not regenerated.
+- Stage 2, known limit: honest entrants on the six-agent griefing fixture are still demoted. One entrant vote inside an honest field's 99th-percentile robust distance moves the fixed-seed honest bar from 0.21 to 0.61; keeping all six honest entrants would need a reach of 1.35 robust scales, which clips 72 percent of honest seven-vote fields.
+- Stage 3, core (mitigation): a deflated Sharpe that clears its bar must also clear it with a Newey-West standard error for the serial correlation inside its windows (Lo 2002), and with the bracket floored at the Gaussian one; otherwise it is refused with `standard_error_refusal` and the hard reason `StandardErrorUncertified`. Near-unit-root persistence in 30 to 120 bar windows is a residual.
+- Stage 4, core (mitigation): a track must clear the risk its exposure history implies. Each window is charged its length times its largest running mean square after the first quarter, and the profit must reach Phi^-1(1 - alpha/2), the reflection-principle bound; otherwise it is refused with `exposure_path_error` and the hard reason `ExposurePathUnproven`. A stopped zero-edge coin clears on 31 of 4,000 seeds, down from 94, against 16 for an unstopped one. Volatility targeting and fixed-fraction sizing stay eligible.
+- Stages 3 and 4 are judged against the same earlier eligibility predicate, so a row that both refuse reports both reasons.
+- Stage 5, core: a track with no bar below zero in any window is refused with "must show an observed loss". This closes crash-free tail sellers that never lost a bar. A crash-free tail seller that loses on ordinary bars cannot be told apart in-sample and stays admitted, which is the residual mitigation. The demonstration agents `skilled-momentum` and `ungated-bot` and the self-audit skilled fixture were rewritten to carry losing bars; their verdicts, deflated Sharpe, PSR, pass^k, eligibility and rank are unchanged, and the golden board, demotion figure and README table were regenerated.
+- Stage 6, cli (mitigation, rank-neutral): `sharpebench run --stress-replay` replays every admitted row through the synthetic stress suite and marks a row whose worst drawdown there exceeds the unlevered market's loss on the same path. Rank, score and eligibility do not move. It does not close `crash_unseen_in_sample`, and crashes shaped unlike the stress set are not detected.
+
 ### Changed
 
-- core, breaking (scoring): a track with no observed risk in any window is refused with "must show observed risk". The rule closes the near-constant, single-spike, one-trade and level-step admissions that `grader-search` found. A genuine track that never loses a bar is refused too.
 - core, breaking (digest bytes): evidence preimages are framed as `sharpebench/evidence-preimage/v1` with length-prefixed names and values, so a value can no longer imitate a field boundary (BM10). `ControlBinding` publishes `preimage_encoding`, and `SuiteControlEvidence::digest_encoding` identifies digests under the non-injective `legacy` form. Suite control digests change.
 - arena: `ArenaVerification` gains a required `completeness` field, and `WindowHeader` gains `head_anchored`.
 - arena: a window that records an execution identity is written as schema 6, or 7 under a fault plan. Binaries that predate it refuse such windows instead of stripping the field, and `arena verify` text output states the limit for legacy boards that replayed captures without a bound execution identity.
@@ -172,6 +186,7 @@ and links the commits it was built from.
 - docs: the pass-floor plausibility bound of 2.0 annualized Sharpe is stated as a declared choice, not a measurement.
 - paper: the paper says `GateAgreement` withholds kappa for a constant rater.
 - stats: the `agreement` module and the integrity chapter no longer describe a human-triaged gold set as existing. Both say what exists and what a gold set would need before kappa, rho or per-class rates could be reported over it. An older CHANGELOG entry that said the same is corrected.
+- docs: the paper and book state the residual dispersion-griefing limit and the mitigations, and the vote-fence documentation describes entrant-only voting and the influence bound.
 
 ## [0.28.0] - 2026-09-18
 
