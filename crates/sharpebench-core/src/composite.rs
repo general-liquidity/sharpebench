@@ -35,6 +35,7 @@ use crate::roles::{attribute_behavior_roles, RoleContribution};
 use crate::rolling::rolling_sharpe;
 use crate::selection::{selection_robustness, SelectionRobustness};
 use crate::significance::bootstrap_pvalue;
+use crate::standard_error::standard_error_refusal;
 use crate::stats::{mean, norm_ppf, std_dev};
 
 /// One seed×window run of an agent: its per-period returns plus the decision
@@ -1007,6 +1008,13 @@ pub struct CompositeScore {
     /// present, `selection_median_dsr` and `selection_gap` are both `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selection_error: Option<String>,
+    /// Why a track that cleared every other gate was refused by the standard
+    /// error certification of its deflated Sharpe ([`crate::standard_error`]):
+    /// its serial correlation, or the precision its sample skewness or kurtosis
+    /// credits. Omitted when the certification decided no verdict, so a track
+    /// refused on another gate reads as it did before the rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub standard_error_refusal: Option<String>,
     pub raw_mean_return: f64,
     pub rank_eligible: bool,
     /// The ranking key: the deflated Sharpe when eligible, else 0.0.
@@ -1796,6 +1804,17 @@ fn score_agent_with(
         && deflation_error.is_none()
         && bootstrap_p < cfg.alpha
         && mandate_ok;
+    // Standard-error certification of an admitted deflated Sharpe: see
+    // `crate::standard_error`. It can only remove eligibility.
+    let standard_error = standard_error_refusal(
+        &window_slices(&tracks),
+        effective_n_trials,
+        defl.null_mean_per_period,
+        defl.sr_std,
+        cfg.dsr_bar,
+    );
+    let refused_by_standard_error = rank_eligible && standard_error.is_some();
+    let rank_eligible = rank_eligible && standard_error.is_none();
     let composite = if rank_eligible { dsr } else { 0.0 };
 
     // The declared verdict, if any: the same predicate as `rank_eligible` with
@@ -1822,13 +1841,26 @@ fn score_agent_with(
             && bootstrap_p < cfg.alpha
             && mandate_ok
             && verdict.drawdown_bound_holds(worst_run_drawdown);
-        (d.mandate.clone(), verdict, declared_passed_k, eligible)
+        let refused = eligible && standard_error.is_some();
+        let eligible = eligible && standard_error.is_none();
+        (
+            d.mandate.clone(),
+            verdict,
+            declared_passed_k,
+            eligible,
+            refused,
+        )
     });
+    let declared_refused_by_standard_error = declared.as_ref().is_some_and(|d| d.4);
     let (declared_mandate, verdict_applied, declared_passed_k, declared_mandate_eligible) =
         match declared {
-            Some((m, v, p, e)) => (Some(m), Some(v), Some(p), Some(e)),
+            Some((m, v, p, e, _)) => (Some(m), Some(v), Some(p), Some(e)),
             None => (None, None, None, None),
         };
+    // Reported only where it decided a verdict, so a track refused on other
+    // gates reads exactly as it did.
+    let standard_error_refusal =
+        standard_error.filter(|_| refused_by_standard_error || declared_refused_by_standard_error);
 
     CompositeScore {
         agent_id: sub.agent_id.clone(),
@@ -1850,6 +1882,7 @@ fn score_agent_with(
         bootstrap_error,
         deflation_error,
         selection_error,
+        standard_error_refusal,
         raw_mean_return,
         rank_eligible,
         composite,

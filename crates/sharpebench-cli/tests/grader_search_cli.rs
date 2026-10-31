@@ -250,7 +250,9 @@ const PINS: [(&str, u64, u64); 8] = [
     ("constant_track", 200, 0),
     ("near_constant", 118, 0),
     ("single_observation", 120, 0),
-    ("autocorrelated", 120, 9),
+    // Was 9 before the standard-error certification: the Newey-West correction
+    // refuses three of the serially correlated zero-edge points on this budget.
+    ("autocorrelated", 120, 6),
     ("tail_seller", 120, 37),
     ("leverage_timing", 120, 1),
     ("window_boundary", 120, 0),
@@ -261,7 +263,7 @@ const PINS: [(&str, u64, u64); 8] = [
 ];
 const STRUCTURAL: u64 = 1;
 const DEMOTIONS: usize = 8;
-const DIGEST: &str = "907c315d8a0b4ed0";
+const DIGEST: &str = "0c37b75b32c8a9db";
 
 #[test]
 fn a_bad_invocation_is_refused() {

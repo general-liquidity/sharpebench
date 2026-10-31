@@ -22,7 +22,8 @@ use crate::rediscovery::RediscoveryVerdict;
 
 /// A single reason an agent was (or should be) demoted. The first five mirror the
 /// original eligibility gates in [`crate::composite::score_agent`]; two more name
-/// the unavailability of a statistic the scorer does gate on. The last four are
+/// the unavailability of a statistic the scorer does gate on, and one the standard
+/// error certification of an admitted deflated Sharpe. The last four are
 /// advisory quality flags the scorer reports but does not gate on, surfaced here so
 /// they are legible alongside the hard failures. `SelectionUnavailable` is advisory
 /// because the whole selection axis is: the scorer reports `selection_gap` and never
@@ -48,6 +49,10 @@ pub enum FailReason {
     DeflationUnavailable,
     /// The bootstrap significance test could not be computed.
     BootstrapUnavailable,
+    /// The deflated Sharpe cleared its bar only with a standard error the
+    /// certification refused: serial correlation, or skewness and kurtosis
+    /// credit (`CompositeScore::standard_error_refusal`).
+    StandardErrorUncertified,
     /// Advisory: candidate-selection statistics could not be computed, so the
     /// selection-gap flag below could not be evaluated. The scorer does not gate
     /// on the selection axis, so this never demotes an agent.
@@ -154,6 +159,9 @@ pub fn classify_disqualification(
     }
     if score.bootstrap_error.is_some() {
         reasons.push(FailReason::BootstrapUnavailable);
+    }
+    if score.standard_error_refusal.is_some() {
+        reasons.push(FailReason::StandardErrorUncertified);
     }
 
     // Advisory quality flags (reported by the scorer / supplied out of band).

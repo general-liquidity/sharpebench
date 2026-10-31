@@ -33,6 +33,48 @@ available as an opt-in diagnostic (see
 [below](#opt-in-diagnostics-the-gate-does-not-use)); the gate keeps the 2014
 variance.
 
+### Certifying the standard error before admission
+
+The reported DSR keeps the 2014 variance, so no published number moves. A DSR
+that clears `dsr_bar` must also clear it twice more before the track is
+admitted, and a track that fails either is refused with the reason in
+`standard_error_refusal` (fail reason `standard_error_uncertified`). Both are
+scoring changes after release 0.28.0, from `grader-search` findings of
+2026-10-30.
+
+- **Serial correlation.** The bracket is multiplied by the Newey-West
+  long-run variance ratio `1 + 2 * sum (1 - k / (L + 1)) rho_k`, the correction
+  Lo (2002) gives for non-i.i.d. returns, floored at one so serial correlation
+  never buys precision. The autocorrelations are measured inside windows only,
+  each window centred on its own mean, so neither the join between two windows
+  nor a level difference between regimes is read as persistence, and the
+  bandwidth `L` follows
+  Andrews (1991), growing with the lag-one persistence it sees. The estimate is
+  model-free: an AR(1) bracket would read a periodic track, whose
+  autocorrelations change sign, as several times less precise when its mean is
+  more precise. Zero-edge AR(1) and smoothed tracks were admitted on up to 24
+  of 64 held-out seeds against 0 to 2 for an i.i.d. null. The rule is a
+  mitigation, not a closure: on the fixed search seed it takes the admitted
+  autocorrelated points from 499 to 361. When the correlation time is
+  comparable to the window, centring a thirty to 120 bar window absorbs the
+  persistence, and the window's returns cannot reveal it.
+- **Moment credit.** The DSR is recomputed with the bracket floored at the
+  Gaussian `1 + SR^2 / 2`, so a sample skewness or kurtosis can widen the
+  standard error but not narrow it. Three zero-mean draws of one sign in a flat
+  window make a large positive skewness, and the bracket credited it. The
+  search placed the draws at the end of each window; the bars' order does not
+  enter the DSR, and the same draws scattered through one window were admitted
+  more often, because only the block bootstrap had protected the edge. The
+  floor reads moments only, so it holds wherever the bars and the window
+  boundaries sit. It costs a genuine positively skewed track the precision the
+  skewness credited. It too is a mitigation: the search's admitted
+  `window_boundary` points fell from 18 to 3, each at the i.i.d. control's
+  held-out rate, and a sparse track whose Gaussian-bracket DSR still clears the
+  bar is admitted.
+
+Neither can admit a track. The opt-in `autocorrelated-psr` diagnostic below is
+unchanged: it still reports the AR(1) bracket on the pooled lag-one estimate.
+
 The **Deflated Sharpe Ratio (DSR)** goes further: it is the PSR evaluated against
 a benchmark Sharpe that accounts for **how many strategies were tried**. Search
 1000 configurations and the best one will look good by chance; the DSR subtracts
