@@ -49,9 +49,10 @@ const NOMINAL: f64 = 0.05;
 /// Upper 2.5% point of Student-t on three degrees of freedom.
 const T_975_DF3: f64 = 3.182_446_305_284_263;
 
-/// The hard-coded values under measurement, restated so the output sits beside
-/// them. `MEASURED_SIZE` is private to `sharpebench-core`, so a test below holds this
-/// list to the source text and to `FAMILYWISE_SIZE_RULE`.
+/// The hard-coded values this study was run against, kept so its committed output
+/// reproduces byte for byte. `MEASURED_SIZE` and `FAMILYWISE_SIZE_RULE` have since
+/// taken their values from the 60,000-replication output, and a test in
+/// `sharpebench-core` holds them to it; a test below holds this list to that file.
 const STATED: &[(&str, Law, usize, f64)] = &[
     ("normal", Law::Normal, 4, 0.188),
     ("normal", Law::Normal, 5, 0.162),
@@ -587,18 +588,20 @@ mod tests {
     use sharpebench_core::parse_forecast_evidence;
 
     #[test]
-    fn the_stated_values_are_the_ones_the_source_states() {
-        let source = include_str!("../../sharpebench-core/src/forecast.rs");
-        let (rule, table) = source
-            .split_once("const MEASURED_SIZE")
-            .expect("the size table is in the source");
-        for (name, _, blocks, stated) in STATED {
-            let text = format!("{stated:.3}");
-            assert!(rule.contains(&text), "the rule must state {text}");
-            if *name == "normal" {
-                let entry = format!("({blocks}, {text})");
-                assert!(table.contains(&entry), "MEASURED_SIZE must hold {entry}");
-            }
+    fn the_committed_output_is_this_producers() {
+        let study: Value = serde_json::from_str(include_str!(
+            "../../../paper/evidence/forecast-size-study-60k.json"
+        ))
+        .unwrap();
+        assert_eq!(study["master_seed"], MASTER_SEED);
+        assert_eq!(study["contracts_per_block"], CONTRACTS_PER_BLOCK);
+        assert_eq!(study["nominal"], NOMINAL);
+        let rows = study["size"].as_array().unwrap();
+        assert_eq!(rows.len(), STATED.len());
+        for (row, (name, _, blocks, stated)) in rows.iter().zip(STATED) {
+            assert_eq!(row["law"], *name);
+            assert_eq!(row["blocks"], *blocks);
+            assert_eq!(row["stated"], *stated);
         }
     }
 
