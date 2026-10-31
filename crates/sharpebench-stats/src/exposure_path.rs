@@ -148,6 +148,39 @@ mod tests {
     }
 
     #[test]
+    fn the_first_quarter_is_not_read_as_an_exposure_rate() {
+        // One 0.04 bar then flat, over 8 bars: the burn-in is 2 bars, so the
+        // rate is read from t = 2 (16e-4 / 2) and never from the single draw at
+        // t = 1 (16e-4). The charge is 8 * 8e-4 and the statistic exactly 0.5.
+        let mut window = vec![0.0; 8];
+        window[0] = 0.04;
+        let z = forgone_risk_z(&[&window]).unwrap();
+        assert!((z - 0.5).abs() < 1e-12, "{z}");
+    }
+
+    #[test]
+    fn the_bound_is_the_reflection_bound_at_half_alpha() {
+        // Bars of equal size keep the rate at s^2 throughout, so the statistic
+        // is (wins - losses) / sqrt(n): 1.8 clears the one-sided 1.645 and not
+        // the reflection bound 1.96 at alpha 0.05; 2.0 clears both.
+        let track = |wins: usize| -> Vec<f64> {
+            (0..100)
+                .map(|i| if i < wins { 0.01 } else { -0.01 })
+                .collect()
+        };
+        let (below, above) = (track(59), track(60));
+        assert!(matches!(
+            exposure_path_evidence(&[&below], 0.05),
+            Err(StatisticalError::InvalidParameter {
+                requirement: EXPOSURE_PATH_UNPROVEN,
+                ..
+            })
+        ));
+        let z = exposure_path_evidence(&[&above], 0.05).unwrap();
+        assert!((z - 2.0).abs() < 1e-12, "{z}");
+    }
+
+    #[test]
     fn no_exposure_and_bad_alpha_are_refused_by_name() {
         assert_eq!(forgone_risk_z(&[&[0.0, 0.0]]), None);
         assert_eq!(forgone_risk_z(&[]), None);
