@@ -1348,31 +1348,40 @@ impl Error for ForecastInferenceError {}
 pub const FAMILYWISE_SIZE_RULE: &str =
     "the paired test resamples whole blocks and centres the raw \
      mean, not a studentised statistic, so it rejects a true null more often than its nominal 5%: \
-     measured 0.188 at 4 blocks, 0.162 at 5, 0.138 at 6, 0.096 at 10, 0.072 at 20 and 0.060 at 40 \
-     over 6000 i.i.d. normal draws of 5 contracts a block, and 0.237 at 4 blocks under lognormal \
-     contract differences; read familywise_significant against measured_size_at_nominal_5pct";
+     measured 0.195 at 4 blocks, 0.164 at 5, 0.140 at 6, 0.097 at 10, 0.071 at 20 and 0.060 at 40 \
+     over 60000 replications of i.i.d. normal differences with 5 contracts a block, and 0.248 at \
+     4 blocks under the lognormal law exp(Z) - exp(1/2), a new measurement of a law chosen for \
+     that study; producer forecast_size_study, seed 0x51ED2026F0ECA57A; read \
+     familywise_significant against measured_size_at_nominal_5pct";
 
 /// The measured size of the block bootstrap at a block count, against a nominal
 /// 5%, under i.i.d. normal per-contract differences with five contracts a block
 /// and the shipped 2000 replications. Entries are `(blocks, size)` ascending.
 ///
+/// Produced by `crates/sharpebench-harness/examples/forecast_size_study.rs`, seed
+/// `0x51ED2026F0ECA57A`, at 60,000 replications; the output is
+/// `paper/evidence/forecast-size-study-60k.json` and a test holds this table to it.
+/// The values these replaced were measured over 6,000 draws by a study that left
+/// no seed, driver or recorded lognormal law, so this is a new measurement.
+///
 /// These are measurements of this implementation, not properties of a block
 /// bootstrap in general, and the data-generating process is named because the
-/// number moves with it: the same table under lognormal differences reads 0.237
-/// at four blocks rather than 0.188. The table is reported rather than corrected
-/// because no available replacement holds its size across the admitted counts.
-/// Studentising the statistic swaps the error for the opposite one, measuring
-/// 0.013 at four blocks and rejecting a half-sigma effect 12.1% of the time
-/// against this test's 74.5%; a Student-t on the block means is exact under
-/// normal blocks (0.050) but reads 0.094 under skewed ones, and it tests the
-/// unweighted block mean rather than the contract mean this report publishes as
-/// `mean_loss_difference`.
+/// number moves with it: under the lognormal law `exp(Z) - exp(1/2)`, with `Z`
+/// standard normal, four blocks reads 0.248 rather than 0.195. The table is
+/// reported rather than corrected because no available replacement holds its size
+/// across the admitted counts. In the same study the shipped test rejects a
+/// half-sigma effect 72.4% of the time. A studentised block bootstrap, as that
+/// study reconstructs it, swaps the error for the opposite one, measuring 0.018 at
+/// four blocks and rejecting the same effect 13.7% of the time; a Student-t on the
+/// block means, also reconstructed there, measures 0.049 under normal blocks and
+/// 0.093 under skewed ones, and it tests the unweighted block mean rather than the
+/// contract mean this report publishes as `mean_loss_difference`.
 const MEASURED_SIZE: &[(usize, f64)] = &[
-    (4, 0.188),
-    (5, 0.162),
-    (6, 0.138),
-    (10, 0.096),
-    (20, 0.072),
+    (4, 0.195),
+    (5, 0.164),
+    (6, 0.140),
+    (10, 0.097),
+    (20, 0.071),
     (40, 0.060),
 ];
 
@@ -2185,6 +2194,15 @@ mod tests {
         }
     }
 
+    /// The rule the two frozen v2 tutorial reports carry, which they keep.
+    const FROZEN_FAMILYWISE_SIZE_RULE: &str =
+        "the paired test resamples whole blocks and centres the raw \
+         mean, not a studentised statistic, so it rejects a true null more often than its \
+         nominal 5%: measured 0.188 at 4 blocks, 0.162 at 5, 0.138 at 6, 0.096 at 10, 0.072 at \
+         20 and 0.060 at 40 over 6000 i.i.d. normal draws of 5 contracts a block, and 0.237 at \
+         4 blocks under lognormal contract differences; read familywise_significant against \
+         measured_size_at_nominal_5pct";
+
     fn fixture(agent: &str, probabilities: &[f64], outcomes: &[f64]) -> String {
         assert_eq!(probabilities.len(), outcomes.len());
         let contracts: Vec<_> = probabilities
@@ -2370,6 +2388,28 @@ mod tests {
         assert_eq!(actual["schema_version"], FORECAST_QUALITY_STRATIFIED_SCHEMA);
         let expected: Value = serde_json::from_str(expected_report).unwrap();
         actual["schema_version"] = expected["schema_version"].clone();
+        // Frozen reports keep the size table they were written with. The current
+        // report states the current one, and every other field must still agree.
+        assert_eq!(actual["familywise_size"], FAMILYWISE_SIZE_RULE);
+        assert_eq!(expected["familywise_size"], FROZEN_FAMILYWISE_SIZE_RULE);
+        actual["familywise_size"] = expected["familywise_size"].clone();
+        for (comparison, frozen) in actual["comparisons"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .zip(expected["comparisons"].as_array().unwrap())
+        {
+            let Some(size) = frozen.get("measured_size_at_nominal_5pct") else {
+                continue;
+            };
+            let blocks = comparison["n_settlement_blocks"].as_u64().unwrap() as usize;
+            assert_eq!(
+                comparison["measured_size_at_nominal_5pct"],
+                measured_size(blocks)
+            );
+            assert_eq!(size, 0.138, "the frozen six-block size");
+            comparison["measured_size_at_nominal_5pct"] = size.clone();
+        }
         for agent in actual["agents"].as_array_mut().unwrap() {
             for metric in agent["metrics"].as_array_mut().unwrap() {
                 assert_eq!(metric["target_unit"], "binary");
@@ -2678,11 +2718,11 @@ mod tests {
     #[test]
     fn the_measured_size_travels_with_the_familywise_flag() {
         // The table is the one the book prints and the report states.
-        assert_eq!(measured_size(4), 0.188);
-        assert_eq!(measured_size(5), 0.162);
-        assert_eq!(measured_size(6), 0.138);
-        assert_eq!(measured_size(10), 0.096);
-        assert_eq!(measured_size(20), 0.072);
+        assert_eq!(measured_size(4), 0.195);
+        assert_eq!(measured_size(5), 0.164);
+        assert_eq!(measured_size(6), 0.140);
+        assert_eq!(measured_size(10), 0.097);
+        assert_eq!(measured_size(20), 0.071);
         assert_eq!(measured_size(40), 0.060);
         // Every entry overstates the error that a nominal 5% claims.
         for (blocks, size) in MEASURED_SIZE {
@@ -2703,11 +2743,92 @@ mod tests {
 
         // The statement the report carries names the same numbers.
         for number in [
-            "0.188", "0.162", "0.138", "0.096", "0.072", "0.060", "0.237",
+            "0.195", "0.164", "0.140", "0.097", "0.071", "0.060", "0.248",
         ] {
             assert!(
                 FAMILYWISE_SIZE_RULE.contains(number),
                 "the report statement must name {number}"
+            );
+        }
+    }
+
+    /// The stated sizes are the committed study's, so neither can move alone.
+    #[test]
+    fn the_size_table_and_rule_are_the_committed_studys_output() {
+        let study: Value = serde_json::from_str(include_str!(
+            "../../../paper/evidence/forecast-size-study-60k.json"
+        ))
+        .unwrap();
+        assert_eq!(study["schema"], "sharpebench.forecast-size-study.v1");
+        let replications = study["replications"].as_u64().unwrap();
+        assert_eq!(replications, 60_000);
+        assert_eq!(study["contracts_per_block"], 5);
+        assert!(FAMILYWISE_SIZE_RULE.contains("5 contracts a block"));
+        assert_eq!(study["bootstrap_samples"], 2_000);
+        let shipped = ForecastAnalysisConfig::default();
+        assert_eq!(study["bootstrap_seed"], shipped.bootstrap_seed);
+        let seed = format!("0x{:X}", study["master_seed"].as_u64().unwrap());
+        assert!(
+            FAMILYWISE_SIZE_RULE.contains(&seed),
+            "the rule names {seed}"
+        );
+        assert!(FAMILYWISE_SIZE_RULE.contains("forecast_size_study"));
+        assert!(FAMILYWISE_SIZE_RULE.contains("exp(Z) - exp(1/2)"));
+        assert!(study["lognormal_law"]
+            .as_str()
+            .unwrap()
+            .starts_with("exp(Z) - exp(1/2)"));
+        assert!(FAMILYWISE_SIZE_RULE.contains(&format!("over {replications} replications")));
+
+        let rate = |row: &Value| {
+            format!(
+                "{:.3}",
+                row["measured"]["hits"].as_u64().unwrap() as f64 / replications as f64
+            )
+        };
+        let rows = study["size"].as_array().unwrap();
+        let normal: Vec<_> = rows.iter().filter(|row| row["law"] == "normal").collect();
+        assert_eq!(normal.len(), MEASURED_SIZE.len());
+        for ((blocks, size), row) in MEASURED_SIZE.iter().zip(normal) {
+            assert_eq!(row["blocks"].as_u64(), Some(*blocks as u64));
+            assert_eq!(format!("{size:.3}"), rate(row), "{blocks} blocks");
+            let stated = format!("{size:.3} at {blocks}");
+            assert!(
+                FAMILYWISE_SIZE_RULE.contains(&stated),
+                "the rule must state {stated}"
+            );
+        }
+        let skewed = rows.iter().find(|row| row["law"] == "lognormal").unwrap();
+        assert_eq!(skewed["blocks"], 4);
+        let stated = format!("{} at 4 blocks under the lognormal", rate(skewed));
+        assert!(
+            FAMILYWISE_SIZE_RULE.contains(&stated),
+            "the rule must state {stated}"
+        );
+
+        // The comparison figures in the table's documentation are the study's too.
+        let source = include_str!("forecast.rs");
+        let comparator = |index: usize| {
+            study["comparators"][index]["measured"]["rate"]
+                .as_f64()
+                .unwrap()
+        };
+        let documented = [
+            format!("half-sigma effect {:.1}%", 100.0 * comparator(0)),
+            format!("measuring {:.3} at", comparator(1)),
+            format!("same effect {:.1}%", 100.0 * comparator(2)),
+            format!("measures {:.3} under normal blocks", comparator(3)),
+            format!("{:.3} under skewed ones", comparator(4)),
+        ];
+        let prose = source
+            .lines()
+            .map(|line| line.trim_start_matches([' ', '/']))
+            .collect::<Vec<_>>()
+            .join(" ");
+        for figure in documented {
+            assert!(
+                prose.contains(&figure),
+                "the documentation must state {figure}"
             );
         }
     }
