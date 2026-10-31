@@ -21,6 +21,11 @@
 //! via [`sharpebench_stats::significance::bootstrap_pvalue`]), the remaining headroom to the
 //! oracle ceiling, what fraction of the achievable ceiling the retrieval layer
 //! has captured - plus a significance verdict at a caller-chosen `alpha`.
+//! The verdict also requires the lift to reach a declared [`MinimumEffect`]
+//! (by default 1% of the oracle ceiling gap, [`DEFAULT_MINIMUM_EFFECT`]), because
+//! the paired bootstrap p-value measures only whether the lift is consistent, not
+//! whether it is large: a constant lift of `1e-9` on every task has the smallest
+//! p-value the bootstrap can return.
 //!
 //! It also reports **cost-normalized lift** - the lift per extra token and per
 //! extra unit of latency the retrieval arm spent over baseline. This is what
@@ -71,9 +76,14 @@
 //! ## Example
 //!
 //! ```
-//! use sharpebench_memory::{ablation_report, Arm, ArmScores};
+//! use sharpebench_memory::{
+//!     ablation_report, Arm, ArmScores, ControlExposure, ControlTaskExposure,
+//! };
 //!
-//! let baseline = ArmScores::new(Arm::Baseline, vec![0.10, 0.12, 0.09, 0.11]);
+//! // The host that ran the no-memory control saw no retrieval and no memory read.
+//! let clean = ControlExposure::new(vec![ControlTaskExposure::CLEAN; 4]);
+//! let baseline = ArmScores::new(Arm::Baseline, vec![0.10, 0.12, 0.09, 0.11])
+//!     .with_control_exposure(clean);
 //! let retrieval = ArmScores::new(Arm::Retrieval, vec![0.72, 0.80, 0.75, 0.78]);
 //! let oracle = ArmScores::new(Arm::Oracle, vec![0.94, 0.96, 0.93, 0.95]);
 //!
@@ -92,6 +102,7 @@ pub mod pit;
 pub mod poisoning;
 pub mod transition;
 
+pub use activation::{ControlExposure, ControlTaskExposure};
 pub use confabulation::{confabulation_report, BeliefEvent, ConfabulationReport};
 pub use multisession::{
     multi_session_report, replicated_multi_session_report, ChainInferenceUnavailable,
@@ -148,6 +159,51 @@ impl Arm {
     }
 }
 
+/// The smallest retrieval lift that [`AblationReport::significant`] accepts.
+///
+/// A p-value below `alpha` says the paired lift is unlikely to be luck. It says
+/// nothing about size: the stationary bootstrap centers the paired differences, so
+/// a lift that is identical on every task resamples to exactly zero and returns
+/// the smallest p-value the bootstrap can produce, however small the lift is. The
+/// verdict therefore also needs a declared effect floor.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MinimumEffect {
+    /// An absolute lift, in the arms' own outcome-score units. Must be finite and
+    /// strictly positive.
+    Lift(f64),
+    /// A share of the oracle ceiling gap `mean(oracle) - mean(baseline)`, so the
+    /// floor is in the same units as the scores whatever those units are. Must be
+    /// finite and in `(0, 1]`. When the oracle is no better than baseline there is
+    /// no ceiling to take a share of, and the lift cannot be called significant.
+    FractionOfCeiling(f64),
+}
+
+/// The effect floor [`ablation_report`] applies: 1% of the oracle ceiling gap.
+///
+/// The crate documents outcome scores only as "decision quality, realized reward,
+/// ..." in a caller-fixed unit, so an absolute default would mean different things
+/// for different callers. The one scale the crate does define is the oracle
+/// ceiling, the most a retrieval layer could ever add on these tasks, and it is
+/// what [`AblationReport::fraction_of_ceiling`] already reports against. A layer
+/// that captures less than one hundredth of that headroom has not moved decisions
+/// by an amount the report should call significant. Callers with a smallest effect
+/// of interest in score units pass it with [`ablation_report_with_minimum_effect`].
+pub const DEFAULT_MINIMUM_EFFECT: MinimumEffect = MinimumEffect::FractionOfCeiling(0.01);
+
+fn validate_minimum_effect(minimum: MinimumEffect) -> Result<(), String> {
+    match minimum {
+        MinimumEffect::Lift(lift) if !lift.is_finite() || lift <= 0.0 => {
+            Err("minimum effect lift must be finite and > 0".to_string())
+        }
+        MinimumEffect::FractionOfCeiling(fraction)
+            if !fraction.is_finite() || fraction <= 0.0 || fraction > 1.0 =>
+        {
+            Err("minimum effect fraction of ceiling must be finite and in (0, 1]".to_string())
+        }
+        _ => Ok(()),
+    }
+}
+
 /// The compute overhead of running an arm, split into the two axes a retrieval
 /// layer trades outcome quality against. Mirrors `Run.cost` in the core scorer
 /// (`sharpebench-core`), but broken out so lift can be normalized per token and
@@ -183,6 +239,10 @@ pub struct ArmScores {
     /// lift by the retrieval arm's overhead *over baseline* so a layer that buys
     /// its lift with 3x the tokens or latency no longer scores like a free one.
     pub cost: ArmCost,
+    /// Host-observed evidence that this arm ran without memory. Required on the
+    /// baseline arm by [`ablation_report`]; set via
+    /// [`ArmScores::with_control_exposure`].
+    pub exposure: Option<ControlExposure>,
 }
 
 impl ArmScores {
@@ -192,7 +252,15 @@ impl ArmScores {
             arm,
             scores,
             cost: ArmCost::default(),
+            exposure: None,
         }
+    }
+
+    /// Attach the host's evidence that this arm ran without memory (builder
+    /// style). [`ablation_report`] requires it on the baseline arm.
+    pub fn with_control_exposure(mut self, exposure: ControlExposure) -> Self {
+        self.exposure = Some(exposure);
+        self
     }
 
     /// Attach a compute-overhead profile to this arm (builder style).
@@ -234,10 +302,17 @@ pub struct AblationReport {
     /// 0.0 whenever the oracle is no better than baseline: that ceiling gap is
     /// degenerate, so the captured fraction is floored rather than inverted.
     pub fraction_of_ceiling: f64,
-    /// Whether the lift is significant at `alpha` (i.e. `lift_pvalue < alpha`).
+    /// Whether the lift is significant: `lift_pvalue < alpha` **and**
+    /// `retrieval_lift >= minimum_lift`. False when `minimum_lift` is `None`.
     pub significant: bool,
     /// The significance threshold used for the verdict.
     pub alpha: f64,
+    /// The declared effect floor the verdict applied.
+    pub minimum_effect: MinimumEffect,
+    /// `minimum_effect` resolved to an absolute lift in score units. `None` when
+    /// the floor is a [`MinimumEffect::FractionOfCeiling`] and the oracle is no
+    /// better than baseline, so no ceiling exists to take a share of.
+    pub minimum_lift: Option<f64>,
     /// Extra tokens the retrieval arm spent over baseline (`retrieval - baseline`).
     /// The denominator of [`AblationReport::lift_per_token`]; negative/zero means
     /// no measurable token overhead.
@@ -317,17 +392,40 @@ fn per_cost_lift(lift: f64, overhead: f64) -> Option<f64> {
 ///
 /// Deterministic: the bootstrap seed and sample count are fixed constants.
 ///
+/// The verdict applies [`DEFAULT_MINIMUM_EFFECT`]; use
+/// [`ablation_report_with_minimum_effect`] to declare a different floor.
+///
 /// # Errors
 ///
 /// Returns `Err` at the boundary when any arm is empty, when an arm is tagged with
 /// the wrong [`Arm`] for its position, when the three arms have mismatched task
 /// counts, when any score or reported cost is not finite, or when `alpha` is not a
 /// finite value inside `(0, 1)`.
+///
+/// It also returns `Err` when the baseline arm carries no [`ControlExposure`],
+/// when that evidence covers a different number of tasks than the arm scores, or
+/// when any task shows a retrieval or a memory read.
 pub fn ablation_report(
     baseline: &ArmScores,
     retrieval: &ArmScores,
     oracle: &ArmScores,
     alpha: f64,
+) -> Result<AblationReport, String> {
+    ablation_report_with_minimum_effect(baseline, retrieval, oracle, alpha, DEFAULT_MINIMUM_EFFECT)
+}
+
+/// [`ablation_report`] with a caller-declared effect floor for the verdict.
+///
+/// # Errors
+///
+/// Every error of [`ablation_report`], and `Err` when `minimum_effect` is not a
+/// finite positive lift or a finite fraction in `(0, 1]`.
+pub fn ablation_report_with_minimum_effect(
+    baseline: &ArmScores,
+    retrieval: &ArmScores,
+    oracle: &ArmScores,
+    alpha: f64,
+    minimum_effect: MinimumEffect,
 ) -> Result<AblationReport, String> {
     if baseline.arm != Arm::Baseline {
         return Err(format!(
@@ -343,6 +441,19 @@ pub fn ablation_report(
     }
     if oracle.arm != Arm::Oracle {
         return Err(format!("oracle arm mistagged as {}", oracle.arm.as_str()));
+    }
+    // The lift is over a control that ran without memory, so the control has to
+    // show it did. A missing receipt is refused, never read as zero exposure.
+    match &baseline.exposure {
+        None => {
+            return Err(
+                "baseline arm carries no control exposure evidence: a no-memory control                  must show zero retrievals and memory reads per task"
+                    .to_string(),
+            )
+        }
+        Some(exposure) => exposure
+            .verify_clean(baseline.len())
+            .map_err(|error| format!("baseline arm: {error}"))?,
     }
     if baseline.is_empty() || retrieval.is_empty() || oracle.is_empty() {
         return Err("every arm must have at least one scored task".to_string());
@@ -367,6 +478,7 @@ pub fn ablation_report(
     validate_arm_values(retrieval)?;
     validate_arm_values(oracle)?;
     validate_alpha(alpha)?;
+    validate_minimum_effect(minimum_effect)?;
 
     let base_mean = baseline.mean();
     let retr_mean = retrieval.mean();
@@ -414,13 +526,26 @@ pub fn ablation_report(
     let lift_per_token = per_cost_lift(retrieval_lift, token_overhead);
     let lift_per_latency = per_cost_lift(retrieval_lift, latency_overhead);
 
+    // A relative floor needs a ceiling. Without one the floor is unknown, and an
+    // unknown floor fails the verdict rather than defaulting to no floor.
+    let minimum_lift = match minimum_effect {
+        MinimumEffect::Lift(lift) => Some(lift),
+        MinimumEffect::FractionOfCeiling(fraction) => {
+            (ceiling_gap > CEILING_EPSILON).then_some(fraction * ceiling_gap)
+        }
+    };
+    let significant =
+        lift_pvalue < alpha && minimum_lift.is_some_and(|floor| retrieval_lift >= floor);
+
     Ok(AblationReport {
         retrieval_lift,
         lift_pvalue,
         headroom_to_oracle,
         fraction_of_ceiling,
-        significant: lift_pvalue < alpha,
+        significant,
         alpha,
+        minimum_effect,
+        minimum_lift,
         token_overhead,
         latency_overhead,
         lift_per_token,
@@ -435,7 +560,8 @@ mod tests {
     const EPS: f64 = 1e-9;
 
     fn baseline(scores: Vec<f64>) -> ArmScores {
-        ArmScores::new(Arm::Baseline, scores)
+        let clean = ControlExposure::new(vec![ControlTaskExposure::CLEAN; scores.len()]);
+        ArmScores::new(Arm::Baseline, scores).with_control_exposure(clean)
     }
     fn retrieval(scores: Vec<f64>) -> ArmScores {
         ArmScores::new(Arm::Retrieval, scores)
@@ -479,6 +605,90 @@ mod tests {
         assert!((rep.lift_pvalue - 1.0).abs() < EPS);
         // No lift captured, so zero fraction of the ceiling.
         assert!((rep.fraction_of_ceiling - 0.0).abs() < EPS);
+    }
+
+    #[test]
+    fn tiny_constant_lift_is_not_significant() {
+        // A lift of 1e-9 on every task: the paired differences are identical, the
+        // centered bootstrap resamples to exactly zero, and the p-value is the
+        // smallest the bootstrap returns. The lift is real but far below 1% of the
+        // 0.5 ceiling gap, so the verdict must not call it significant.
+        let base = vec![0.40, 0.42, 0.38, 0.41, 0.39, 0.40];
+        let b = baseline(base.clone());
+        let r = retrieval(base.iter().map(|x| x + 1e-9).collect());
+        let o = oracle(base.iter().map(|x| x + 0.5).collect());
+
+        let rep = ablation_report(&b, &r, &o, 0.05).unwrap();
+
+        assert!(rep.lift_pvalue < 0.05, "pvalue {}", rep.lift_pvalue);
+        assert!(
+            !rep.significant,
+            "lift {} is below the floor",
+            rep.retrieval_lift
+        );
+        assert_eq!(rep.minimum_effect, DEFAULT_MINIMUM_EFFECT);
+        let floor = rep.minimum_lift.expect("the ceiling is established");
+        assert!((floor - 0.005).abs() < EPS, "floor {floor}");
+
+        // The same tiny lift is significant only under a floor below it, so the
+        // floor, not the p-value, is what refused it above.
+        let lenient =
+            ablation_report_with_minimum_effect(&b, &r, &o, 0.05, MinimumEffect::Lift(1e-10))
+                .unwrap();
+        assert!(lenient.significant);
+    }
+
+    #[test]
+    fn real_lift_clears_the_default_floor() {
+        let b = baseline(vec![0.10, 0.12, 0.09, 0.11, 0.08, 0.10]);
+        let r = retrieval(vec![0.20, 0.23, 0.18, 0.21, 0.19, 0.20]);
+        let o = oracle(vec![0.94, 0.96, 0.93, 0.95, 0.92, 0.97]);
+
+        let rep = ablation_report(&b, &r, &o, 0.05).unwrap();
+
+        assert!(rep.lift_pvalue < 0.05, "pvalue {}", rep.lift_pvalue);
+        assert!(rep.retrieval_lift >= rep.minimum_lift.unwrap());
+        assert!(rep.significant);
+    }
+
+    #[test]
+    fn relative_floor_without_a_ceiling_is_not_significant() {
+        // Oracle no better than baseline: no ceiling, so 1% of it is undefined and
+        // the verdict fails closed. An absolute floor still applies.
+        let b = baseline(vec![0.50, 0.51, 0.49, 0.50]);
+        let r = retrieval(vec![0.70, 0.72, 0.69, 0.71]);
+        let o = oracle(vec![0.50, 0.51, 0.49, 0.50]);
+
+        let rep = ablation_report(&b, &r, &o, 0.05).unwrap();
+        assert!(rep.lift_pvalue < 0.05, "pvalue {}", rep.lift_pvalue);
+        assert_eq!(rep.minimum_lift, None);
+        assert!(!rep.significant);
+
+        let absolute =
+            ablation_report_with_minimum_effect(&b, &r, &o, 0.05, MinimumEffect::Lift(0.1))
+                .unwrap();
+        assert_eq!(absolute.minimum_lift, Some(0.1));
+        assert!(absolute.significant);
+    }
+
+    #[test]
+    fn invalid_minimum_effect_is_rejected() {
+        let b = baseline(vec![0.1, 0.2]);
+        let r = retrieval(vec![0.5, 0.6]);
+        let o = oracle(vec![0.9, 0.9]);
+        for minimum in [
+            MinimumEffect::Lift(0.0),
+            MinimumEffect::Lift(-0.1),
+            MinimumEffect::Lift(f64::NAN),
+            MinimumEffect::FractionOfCeiling(0.0),
+            MinimumEffect::FractionOfCeiling(1.5),
+            MinimumEffect::FractionOfCeiling(f64::INFINITY),
+        ] {
+            assert!(
+                ablation_report_with_minimum_effect(&b, &r, &o, 0.05, minimum).is_err(),
+                "{minimum:?}"
+            );
+        }
     }
 
     #[test]

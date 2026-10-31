@@ -459,6 +459,19 @@ other, and still requires the same routes, budget and sweep. A journal moves to
 v2 on the save that records its first class, which is the settlement of the
 first parsed answer. Loading a journal never rewrites it.
 
+Provider usage can also carry `cache_read_input_tokens` and
+`cache_write_input_tokens`, the prompt-cache reads and writes the provider
+reported. Each is optional, and an absent count means the provider did not
+report it, never zero. A priced settlement records both as reported, and they
+are not priced: rate card v1 prices `input_tokens` as the provider reported
+them and does not model cache discounts, and providers differ on whether
+`input_tokens` already includes cached tokens, which is why the counts are kept
+apart. A journal in which any settlement holds a cache count is written as
+`sharpebench.gateway-journal.v3`, on the same rollback rule as v2: an older
+binary would drop the count, so it refuses the document instead. The
+host-observed usage on the row sums each count over the priced calls, and
+publishes the sum only when every priced call reported that count.
+
 After a sweep records a class, only a binary that reads v2 can resume its
 journal. To run an older binary, start it on a fresh journal and checkpoint
 pair.
@@ -508,6 +521,19 @@ journal ownership was lost, whether a settlement could not be written
 `attach_host_observed_usage` puts it on the entrant's row of a JSON board under
 `host_observed_usage`. The board stays an array, no score field moves, and
 removing that key gives back the unattached board exactly.
+
+A second record, `GatewayDecisionRequests`
+(`sharpebench.gateway-decision-requests.v1`), lists every entrant decision the
+sweep ran: its window, seed, attempt and ordinal, the gateway request lines the
+entrant sent for it (requests refused past the per-decision limit included) and
+how many of those the broker served. A faulted decision is recorded too, so the
+list lines up with the run's decisions. It is diagnostic only, `rank_neutral:
+true`, and no score, rank, gate or pass^k pool reads it.
+`attach_decision_requests` puts it on the entrant's row under
+`gateway_decision_requests` on the same terms as the usage record. The counts
+are not persisted, so a resumed sweep covers only the cells it ran in this
+process and reports the rest as `cells_unrecorded` rather than as cells with no
+requests.
 
 Before any answer is written to the entrant, the serving loop checks it for each
 route credential, each route destination and the journal's location, raw and
@@ -632,13 +658,13 @@ the gate checks that claim too.
 
 | Where | Tests | Covers |
 |---|---|---|
-| `crates/sharpebench-harness/src/gateway.rs` | 46 | forbidden fields by name, exact alias resolution, two routes each reserved and priced under the alias named, a reservation no route explains refused at reopen, the host supplying destination, credential, revision and every bound, the envelope bounds, oversized, truncated, unparseable and unknown-field provider bodies, the shared permit pool, the reservation reaching disk before dispatch, hard money and call refusals starting no request, retries reconciled exactly once, absent usage as unknown rather than zero, framing overhead in the reservation, overspend stopping the sweep, one owner among racing gateways and a second gateway refused the journal the first owns, a settlement that cannot be persisted stopping the gateway, an unconfirmed durability published as unwritable rather than as lost ownership, a journal holding a settlement that never landed refused at reopen rather than resumed, a late answer refused and charged, resume without repricing, credential rotation excluded from identity, redaction and rank neutrality |
+| `crates/sharpebench-harness/src/gateway.rs` | 47 | forbidden fields by name, exact alias resolution, two routes each reserved and priced under the alias named, a reservation no route explains refused at reopen, the host supplying destination, credential, revision and every bound, the envelope bounds, oversized, truncated, unparseable and unknown-field provider bodies, the shared permit pool, the reservation reaching disk before dispatch, hard money and call refusals starting no request, retries reconciled exactly once, absent usage as unknown rather than zero, framing overhead in the reservation, overspend stopping the sweep, one owner among racing gateways and a second gateway refused the journal the first owns, a settlement that cannot be persisted stopping the gateway, an unconfirmed durability published as unwritable rather than as lost ownership, a journal holding a settlement that never landed refused at reopen rather than resumed, a late answer refused and charged, resume without repricing, credential rotation excluded from identity, provider-reported cache counts recorded and unreported ones left absent, redaction and rank neutrality |
 | `crates/sharpebench-harness/src/gateway_journal.rs` | 35 | the fold, partial and unavailable totals, the `host_observed` label, an unsettled reservation charged rather than refunded, a released reservation still consuming a call, a sweep-bound journal resuming only under its sweep, and the ownership family: one holder per journal document, a second name for that document refused, a document written before it carried an identity owned on the identity derived from its bytes, a legacy document's identity resolved from a single read of it, a stale lock refused rather than broken, a takeover recording who it displaced, and the version check refusing the displaced holder's next write |
-| `crates/sharpebench-harness/src/gateway_serve_tests.rs` | 13 | the serving loop on real OS pipes and one real child process: a call through the entrant's own pipe, a scored sweep with usage on the entrant's row, resume making no new calls, an interrupted sweep rerunning only unfinished cells, typed budget refusals, overlapping windows refused before a journal is written, the checkpoint and journal pair, gateway lines never read as decisions, the per-decision ceiling, host serving time excluded from the entrant clock, no credential in any launch, and host material withheld |
+| `crates/sharpebench-harness/src/gateway_serve_tests.rs` | 15 | the serving loop on real OS pipes and one real child process: a call through the entrant's own pipe, a scored sweep with usage on the entrant's row, resume making no new calls, an interrupted sweep rerunning only unfinished cells, typed budget refusals, overlapping windows refused before a journal is written, the checkpoint and journal pair, gateway lines never read as decisions, the per-decision ceiling, host serving time excluded from the entrant clock, no credential in any launch, host material withheld, gateway requests recorded per decision beside the rank, and a live entrant that overruns its decision budget charged with the overrun |
 | `crates/sharpebench-harness/tests/gateway_error_vocabulary.rs` | 2 | the detail sentence of every error kind held equal to this chapter, and the kind list held complete |
 | `crates/sharpebench-harness/tests/journal_ownership_review.rs` | 3 | the two journal-ownership findings of the [accounting review](https://github.com/general-liquidity/sharpebench/blob/main/docs/audits/2026-09-09/ACCOUNTING-REVIEW.md), through the public surface only: a holder releases the lock it holds and no other, and one journal document admits one gateway under either of two names, a document written before it carried an identity included |
 | `crates/sharpebench-harness/tests/finish_reason_accounting.rs` | 6 | stop-reason accounting: a length-stopped answer counted as `length`, the exact class vocabulary, refused and released calls in no class, the counts surviving the journal file, a journal written before the field reporting its answers as `unrecorded`, an unknown class refused at load, and a truncated sweep publishing its counts in `host_observed_usage` |
-| `crates/sharpebench-harness/tests/journal_schema_rollback.rs` | 6 | rollback safety for the class: the published version strings, a journal with no class staying v1 and passing an older binary's admission checks, the first recorded class writing v2, which those checks refuse and this binary resumes, a v1 journal that already holds classes written as v2 on its next save and not on load, unknown versions refused by both loaders, and a v2 journal keeping its route, budget and sweep binding |
+| `crates/sharpebench-harness/tests/journal_schema_rollback.rs` | 7 | rollback safety for the class: the published version strings, a journal with no class staying v1 and passing an older binary's admission checks, the first recorded class writing v2, which those checks refuse and this binary resumes, a v1 journal that already holds classes written as v2 on its next save and not on load, unknown versions refused by both loaders, a v2 journal keeping its route, budget and sweep binding, and a journal holding a cache count written as v3 |
 | `crates/sharpebench-cli/src/gateway_cli.rs` | 8 | the operator report, including `limits.max_requests_per_decision`, `journal_lock_held` and `finish_reasons`, a sweep-bound journal reported with its sweep, and the refusals: a malformed manifest, a missing credential, a missing or zero budget, and a journal bound to another route table |
 
 The arena's sandbox is not one of those files. Most of its tests are the

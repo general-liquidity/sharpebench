@@ -6,8 +6,11 @@
 //! by cherry-picking — the *selection* axis that pass^k (the reliability axis)
 //! and the Deflated Sharpe (the deflation axis) do not directly cover.
 //!
-//! After ALE-Bench's median-of-candidates selection: a robust agent has a
-//! family of edges (small `selection_gap`); a lucky one has a single spike.
+//! A robust agent has a family of edges (small `selection_gap`); a lucky one has
+//! a single spike. After ALE-Bench's comparison of one refined solution against
+//! the spread of 150 independent one-shot attempts (arXiv:2506.09050 section 5.4,
+//! Table 5). ALE-Bench has no median-of-candidates selection rule, so the
+//! best-versus-median gap reported here is this module's own construction.
 //!
 //! [`selection_robustness`] diagnoses the search after the fact. The second half
 //! of this module changes the *choice*: [`percentile_selection`] picks the
@@ -145,6 +148,31 @@ fn fill_block_path(rng: &mut SplitMix64, idxs: &mut [usize], n: usize, block_pro
             idx = (idx + 1) % n;
         }
     }
+}
+
+/// One seeded stationary-bootstrap index path of `len` indices over `0..n`,
+/// drawn by the same walk the percentile selection resamples with. Exposed so
+/// a caller that resamples bars (the shape-level contamination twins in
+/// `sharpebench-sim`) uses the one generator in the crate rather than a copy.
+///
+/// Refuses `n == 0` and a `block_prob` outside `(0, 1]`.
+pub fn stationary_bootstrap_path(
+    seed: u64,
+    n: usize,
+    len: usize,
+    block_prob: f64,
+) -> Result<Vec<usize>, StatisticalError> {
+    block_probability(block_prob)?;
+    if n == 0 {
+        return Err(StatisticalError::InsufficientObservations {
+            required: 1,
+            actual: 0,
+        });
+    }
+    let mut rng = SplitMix64::new(seed);
+    let mut idxs = vec![0; len];
+    fill_block_path(&mut rng, &mut idxs, n, block_prob);
+    Ok(idxs)
 }
 
 /// Per-candidate result inside a [`PercentileSelection`].
@@ -323,6 +351,23 @@ fn percentile_selection_checked(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The path has the requested length, stays inside `0..n`, repeats under
+    /// its seed, moves with the seed, and refuses an empty source.
+    #[test]
+    fn a_stationary_bootstrap_path_has_its_length_and_range() {
+        let path = stationary_bootstrap_path(7, 5, 40, 0.2).unwrap();
+        assert_eq!(path.len(), 40);
+        assert!(path.iter().all(|&i| i < 5));
+        assert!(path.iter().any(|&i| i > 1), "the walk reaches past index 1");
+        assert_eq!(stationary_bootstrap_path(7, 5, 40, 0.2).unwrap(), path);
+        assert_ne!(stationary_bootstrap_path(8, 5, 40, 0.2).unwrap(), path);
+        assert!(stationary_bootstrap_path(7, 0, 40, 0.2).is_err());
+        assert_eq!(
+            stationary_bootstrap_path(7, 1, 3, 0.2).unwrap(),
+            vec![0, 0, 0]
+        );
+    }
 
     #[test]
     fn unavailable_candidates_never_win_percentile_selection() {

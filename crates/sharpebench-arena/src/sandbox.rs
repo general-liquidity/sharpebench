@@ -2146,7 +2146,8 @@ mod tests {
     /// transport health: a container that never started closes stdout at once
     /// and the reader channel disconnects (`DecideError::Transport`), while a
     /// container that *ran* and simply does not speak the protocol keeps
-    /// consuming stdin and stays silent (`DecideError::Timeout`). This test
+    /// consuming stdin and stays silent past its budget
+    /// (`DecideError::BudgetOverrun`). This test
     /// requires the latter, so it fails if the image did not execute.
     #[test]
     #[ignore = "needs a running Docker daemon and SHARPEBENCH_SANDBOX_FIXTURE"]
@@ -2180,7 +2181,7 @@ mod tests {
         );
         assert_eq!(
             health.last_error,
-            Some(DecideError::Timeout),
+            Some(DecideError::BudgetOverrun),
             "the container must be alive and silent (it ran but does not speak the protocol); \
              a Transport fault here means it never started"
         );
@@ -2427,6 +2428,8 @@ mod tests {
                     usage: Some(ProviderUsage {
                         input_tokens: 10,
                         output_tokens: 5,
+                        cache_read_input_tokens: None,
+                        cache_write_input_tokens: None,
                     }),
                 })
                 .expect("a provider body serializes"),

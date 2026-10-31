@@ -166,9 +166,18 @@ short.
 ## Decisions must be deterministic under re-execution
 
 A run can be executed more than once. A runtime failure (a crashed container,
-a broken pipe, a timeout) is retried by restarting the run from its first step
-with a fresh agent; an interrupted sweep resumes by running its unfinished runs
-again; and a verifier can re-execute a captured trajectory to check it.
+a broken pipe, a timeout the harness cannot charge to the agent) is retried by
+restarting the run from its first step with a fresh agent; an interrupted sweep
+resumes by running its unfinished runs again; and a verifier can re-execute a
+captured trajectory to check it.
+
+Overrunning the per-decision time budget is not a runtime failure. When the
+observation was delivered, the agent process was still running when the budget
+ran out, and no decision had arrived, the run fails as
+`decision_budget_exceeded`: the agent's own fault, like breaching the memory
+budget. It is not retried and counts as a failing run for pass^k. A stall
+before the observation was accepted, and any HTTP endpoint timeout (a slow
+endpoint cannot be told from a slow network), stay runtime failures.
 
 **What you must guarantee.** Each decision is a deterministic function of the
 observations of the same run, up to and including the one being answered, and
@@ -205,7 +214,7 @@ Execution seeds of one window replay the same bars. An agent that keeps what it
 saw in one (window, seed) cell can act on it in the next, and its seed runs are
 then not independent. How much a runner lets through depends on the transport,
 and the entrant's JSON board row says which applied, in `cell_isolation`
-(`sharpebench.cell-isolation.v1`):
+(`sharpebench.cell-isolation.v2`):
 
 | Transport | `class` | What carries over |
 |---|---|---|
@@ -226,6 +235,34 @@ This is a disclosure, not a detector: `detects_state_carryover` is always
 `false`. An agent under a runner that allows carryover may carry nothing, and no
 check here looks for it. Human output prints the class beside the attempt
 accounting.
+
+## Network reach and evidence mode
+
+Point-in-time observations close one information channel. The network is
+another: an entrant that can reach it can fetch prices published after a
+historical window. `cell_isolation.network_reachable` (added in v2) is false
+only for `--image`, which the sandbox launches with `--network none`, and true
+for `--cmd` and `--http`, whose network is the host's or the operator's. It
+discloses what the runner allows and detects nothing.
+
+The entrant row also carries `evidence_mode` (`sharpebench.evidence-mode.v1`),
+derived from facts the host holds, never from a declaration:
+
+| `mode` | When |
+|---|---|
+| `forward` | the window's bars were revealed after the entrant was committed |
+| `backtest` | a historical window, and the host observed no model call or the runner gave the entrant no route to a model |
+| `backtest_advisory` | a historical window on which the host's model gateway observed model calls: advisory only, by the protocol rule for pretrained models |
+| `backtest_unobserved` | a historical window on which the host could not observe model use, so it is not reported as `backtest` |
+
+`certifying` is false, with the reason in `noncertifying_reasons`, for any
+network-reachable entrant on a historical window. Every window `sharpebench
+run` scores is historical, so a `--cmd` or `--http` row there is
+noncertifying and an `--image` row may certify; a forward window is unaffected
+by network reach. A gateway-attached sweep takes its model-call count from the
+host-observed usage (`HostObservedUsage::model_calls`, priced calls plus calls
+charged at their reservation). Like the class, the evidence mode moves no score
+or rank.
 
 ## Faulted observations under a declared plan
 

@@ -49,6 +49,7 @@ fn one_symbol(closes: &[f64], dividends: &[f64]) -> Dataset {
             .collect(),
         closes: BTreeMap::from([("A".to_string(), closes.to_vec())]),
         dividends: BTreeMap::from([("A".to_string(), dividends.to_vec())]),
+        marks: None,
     }
 }
 

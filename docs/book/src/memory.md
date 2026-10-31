@@ -30,12 +30,33 @@ reported token/latency cost must be finite, and `alpha` must be finite and insid
 `(0, 1)`. `poisoning_report` applies the same finite-score, finite-cost and alpha
 checks to its clean and poisoned arms.
 
+`significant` requires both `lift_pvalue < alpha` and a lift of at least the
+declared minimum effect, recorded in the report as `minimum_effect` and, resolved
+to score units, `minimum_lift`. The paired bootstrap centers the per-task
+differences, so a lift that is identical on every task gets the smallest p-value
+the bootstrap can return however small it is, and a constant `1e-9` lift would
+otherwise read as significant. `ablation_report` applies 1% of the oracle ceiling
+gap. Outcome scores have no fixed unit in this crate, and the ceiling is the only
+scale it defines. When the oracle is no better than baseline that floor is
+undefined, `minimum_lift` is `None`, and the lift is not significant. Use
+`ablation_report_with_minimum_effect` to declare an absolute lift in score units
+or a different share of the ceiling.
+
 `fraction_of_ceiling` is `retrieval_lift / (mean(oracle) - mean(baseline))` and
 is floored at `0.0` whenever the oracle is no better than baseline. An oracle at
 or below the baseline has not established a ceiling, so no fraction of one was
 captured. Dividing by a negative gap instead returns a sign-flipped ratio, which
 reports a retrieval arm that also lost ground as having captured a favorable
 positive share of the ceiling.
+
+The baseline arm must also carry control exposure evidence
+(`ArmScores::with_control_exposure`): one host-observed record per scored task
+counting the retrievals the memory layer served and the memory reads the host
+saw. "No memory" is otherwise a configuration claim, and a control that retrieved
+or read a store makes the lift a comparison between two treated arms. The report
+is refused when the evidence is missing, covers a different number of tasks, or
+shows any retrieval or read. A host that cannot count memory use cannot certify a
+control arm, so missing evidence is never read as zero exposure.
 
 #### Migration from the unmatched-oracle report
 

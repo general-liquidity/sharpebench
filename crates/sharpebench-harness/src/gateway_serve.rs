@@ -79,6 +79,9 @@ pub const GATEWAY_SWEEP_VERSION: &str = "sharpebench.gateway-sweep.v1";
 /// Schema of the usage record published beside the scored pool.
 pub const HOST_USAGE_VERSION: &str = "sharpebench.host-observed-usage.v1";
 
+/// Schema of the per-decision gateway request record a sweep publishes.
+pub const DECISION_REQUESTS_VERSION: &str = "sharpebench.gateway-decision-requests.v1";
+
 /// Bytes accepted for one entrant stdout line, decision or request. The same
 /// cap the external-agent transport puts on a decision line; a request line is
 /// then held to the broker's much smaller bound before it is parsed.
@@ -398,10 +401,16 @@ pub struct GatewayEntrant<'g, 'r, T: ProviderTransport> {
     written: Receiver<std::io::Result<()>>,
     lines: Receiver<std::io::Result<Wire>>,
     timeout: Duration,
-    timed_out: bool,
+    /// The verdict of the decision that stalled the pipe, repeated for every
+    /// later decision.
+    stalled: Option<DecideError>,
     breaker: CircuitBreaker,
     health: TransportHealth,
     served: u32,
+    /// Decisions this entrant has been asked for: the ordinal of the next one.
+    decisions: u32,
+    /// Gateway request lines the current decision has sent so far.
+    decision_requests: u32,
 }
 
 impl<'g, 'r, T: ProviderTransport> GatewayEntrant<'g, 'r, T> {
@@ -432,10 +441,12 @@ impl<'g, 'r, T: ProviderTransport> GatewayEntrant<'g, 'r, T> {
             written,
             lines,
             timeout: DEFAULT_DECIDE_TIMEOUT,
-            timed_out: false,
+            stalled: None,
             breaker: CircuitBreaker::new(BREAKER_THRESHOLD),
             health: TransportHealth::default(),
             served: 0,
+            decisions: 0,
+            decision_requests: 0,
         }
     }
 
@@ -486,10 +497,22 @@ impl<'g, 'r, T: ProviderTransport> GatewayEntrant<'g, 'r, T> {
         }
     }
 
+    /// The budget ran out while the host waited for the entrant's next line,
+    /// after the observation or the last gateway answer was delivered. An
+    /// entrant still running had both the input and the time, so the stall is
+    /// its own ([`DecideError::BudgetOverrun`]); one that has exited is
+    /// reported as the exit.
+    fn read_budget_spent(&mut self) -> DecideError {
+        match self.process.exited() {
+            None => DecideError::BudgetOverrun,
+            Some(code) => DecideError::Exited(code),
+        }
+    }
+
     fn next_line(&mut self, deadline: Instant) -> Result<Next, DecideError> {
         loop {
             if Instant::now() >= deadline {
-                return Err(DecideError::Timeout);
+                return Err(self.read_budget_spent());
             }
             let slice = DEAD_CHILD_POLL.min(deadline.saturating_duration_since(Instant::now()));
             match self.lines.recv_timeout(slice) {
@@ -555,8 +578,8 @@ impl<'g, 'r, T: ProviderTransport> GatewayEntrant<'g, 'r, T> {
     }
 
     fn decide_once(&mut self, observation: &MarketObservation) -> Result<Decision, DecideError> {
-        if self.timed_out {
-            return Err(DecideError::Timeout);
+        if let Some(stall) = self.stalled {
+            return Err(stall);
         }
         let mut deadline = Instant::now()
             .checked_add(self.timeout)
@@ -578,6 +601,7 @@ impl<'g, 'r, T: ProviderTransport> GatewayEntrant<'g, 'r, T> {
                 return Err(DecideError::Exited(code));
             }
             requests = requests.saturating_add(1);
+            self.decision_requests = requests;
             let started = Instant::now();
             let response = if requests > self.gateway.limits.max_requests_per_decision {
                 encode_refusal(GatewayErrorKind::DecisionRequestLimit)
@@ -602,7 +626,24 @@ impl<'g, 'r, T: ProviderTransport> GatewayEntrant<'g, 'r, T> {
 }
 
 impl<T: ProviderTransport> Agent for GatewayEntrant<'_, '_, T> {
+    /// Every decision is recorded with the gateway requests it made, a faulted
+    /// one included, so the record lines up with the run's decisions.
     fn decide(&mut self, observation: &MarketObservation) -> Decision {
+        let served_before = self.served;
+        self.decision_requests = 0;
+        let decision = self.decide_unrecorded(observation);
+        self.gateway.decisions.record(
+            self.decisions,
+            self.decision_requests,
+            self.served.saturating_sub(served_before),
+        );
+        self.decisions = self.decisions.saturating_add(1);
+        decision
+    }
+}
+
+impl<T: ProviderTransport> GatewayEntrant<'_, '_, T> {
+    fn decide_unrecorded(&mut self, observation: &MarketObservation) -> Decision {
         if self.breaker.is_tripped() {
             self.health.record(DecideError::Transport, true);
             return error_hold("gateway entrant circuit open -> hold");
@@ -613,9 +654,10 @@ impl<T: ProviderTransport> Agent for GatewayEntrant<'_, '_, T> {
                 decision
             }
             Err(error) => {
-                if error == DecideError::Timeout {
-                    // A late line must never answer a later observation.
-                    self.timed_out = true;
+                if matches!(error, DecideError::Timeout | DecideError::BudgetOverrun) {
+                    // A late line must never answer a later observation, and
+                    // every later decision repeats this one's verdict.
+                    self.stalled = Some(error);
                     self.process.terminate();
                 }
                 let tripped = self.breaker.record_fault();
@@ -725,6 +767,14 @@ pub struct HostObservedUsage {
     /// Parsed answers by why they stopped. A `length` count is a truncated
     /// completion that may still have become a decision or an abstention.
     pub finish_reasons: FinishReasonCounts,
+    /// Provider-reported prompt-cache reads summed over the priced calls, when
+    /// every priced call reported the count. Absent means unreported, never
+    /// zero; it is not priced (rate card v1 does not model cache discounts).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_read_input_tokens: Option<u64>,
+    /// Provider-reported prompt-cache writes, on the same rule.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_write_input_tokens: Option<u64>,
     pub ceiling_breached: bool,
     /// The gateway lost its journal file to another writer and stopped
     /// spending. The figures above are this process's in-memory record.
@@ -738,9 +788,20 @@ pub struct HostObservedUsage {
 }
 
 impl HostObservedUsage {
+    /// The model calls this sweep's gateway saw reach, or possibly reach, a
+    /// provider: priced calls plus calls charged at their reservation. A
+    /// released call returned nothing from a model and is not counted. This is
+    /// the observation [`crate::evidence_mode`] applies the advisory rule from.
+    pub fn model_calls(&self) -> crate::evidence_mode::ModelCalls {
+        crate::evidence_mode::ModelCalls::Observed(
+            self.priced_calls.saturating_add(self.unknown_calls),
+        )
+    }
+
     fn of<T: ProviderTransport>(gateway: &ModelGateway<'_, T>, sweep_sha256: String) -> Self {
         let journal = gateway.journal();
         let state = journal.spend();
+        let (cache_read_input_tokens, cache_write_input_tokens) = journal.cache_token_totals();
         Self {
             schema_version: HOST_USAGE_VERSION,
             route_table_sha256: journal.identity.route_table_sha256.clone(),
@@ -753,12 +814,83 @@ impl HostObservedUsage {
             overspent_usd_nanos: state.overspent_usd_nanos.to_string(),
             overspent_calls: state.overspent_calls,
             finish_reasons: journal.finish_reasons(),
+            cache_read_input_tokens,
+            cache_write_input_tokens,
             ceiling_breached: journal.ceiling_breached(),
             journal_ownership_lost: gateway.journal_conflict(),
             journal_unwritable: gateway.journal_unwritable(),
             rank_neutral: true,
         }
     }
+}
+
+/// Where the gateway files a decision's request count: the sweep cell and
+/// attempt being run, stamped by [`run_gateway_sweep`], or none outside one.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct DecisionRecorder {
+    cell: Option<(usize, u64, u32)>,
+    records: Vec<DecisionRequests>,
+}
+
+impl DecisionRecorder {
+    fn record(&mut self, decision: u32, requests: u32, served: u32) {
+        let (window_index, seed, attempt) = match self.cell {
+            Some((window, seed, attempt)) => (Some(window), Some(seed), Some(attempt)),
+            None => (None, None, None),
+        };
+        self.records.push(DecisionRequests {
+            window_index,
+            seed,
+            attempt,
+            decision,
+            requests,
+            served,
+        });
+    }
+}
+
+/// One entrant decision as the host saw it at the gateway.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct DecisionRequests {
+    /// The sweep cell's window, `None` for a decision made outside
+    /// [`run_gateway_sweep`].
+    pub window_index: Option<usize>,
+    /// The sweep cell's seed, `None` outside a sweep.
+    pub seed: Option<u64>,
+    /// Which attempt at the cell, from 0, counted in this process.
+    pub attempt: Option<u32>,
+    /// The decision's ordinal within its attempt, from 0.
+    pub decision: u32,
+    /// Gateway request lines the entrant sent for this decision, including any
+    /// refused for exceeding the per-decision limit.
+    pub requests: u32,
+    /// Of those, the requests handed to the broker.
+    pub served: u32,
+}
+
+impl<T: ProviderTransport> ModelGateway<'_, T> {
+    /// Every decision an entrant on this gateway has made, in order, with its
+    /// gateway request count.
+    pub fn decision_requests(&self) -> &[DecisionRequests] {
+        &self.decisions.records
+    }
+}
+
+/// Per-decision gateway request counts for one sweep. Published beside the
+/// scored pool and read by no score, rank, gate or pass^k pool: it says how an
+/// entrant used the gateway, decision by decision, not how well it traded.
+///
+/// It covers the cells run by this process. A resumed sweep skips its finished
+/// cells, and their per-decision counts were not persisted, so
+/// `cells_unrecorded` names how many cells the record does not cover rather
+/// than letting them read as cells with no requests.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct GatewayDecisionRequests {
+    pub schema_version: &'static str,
+    pub sweep_sha256: String,
+    pub decisions: Vec<DecisionRequests>,
+    pub cells_unrecorded: usize,
+    pub rank_neutral: bool,
 }
 
 /// A finished gateway-attached sweep.
@@ -769,6 +901,8 @@ pub struct GatewaySweepOutcome {
     /// The host-observed usage, kept apart from `result` so no scoring path
     /// can read it.
     pub host_observed: HostObservedUsage,
+    /// The per-decision request record, diagnostic in the same way.
+    pub decision_requests: GatewayDecisionRequests,
     /// The contract the checkpoint is bound to, gateway binding included.
     pub contract: SweepContract,
 }
@@ -864,19 +998,40 @@ where
         dispatches: 0,
         journal_conflict: false,
         journal_unwritable: false,
+        decisions: DecisionRecorder::default(),
     };
+    // Attempts per cell in this process, so the record can say which attempt
+    // a decision belonged to and which cells it never saw.
+    let mut attempts: std::collections::BTreeMap<(usize, u64), u32> =
+        std::collections::BTreeMap::new();
     let result = crate::run_resumable_sweep_observed(
         sweep.checkpoint,
         sweep.agent_id,
         &contract,
         sweep.windows,
         sweep.policy,
-        |window, seed| attempt(window, seed, &mut gateway),
+        |window, seed| {
+            let attempt_index = attempts.entry((window, seed)).or_insert(0);
+            gateway.decisions.cell = Some((window, seed, *attempt_index));
+            *attempt_index = attempt_index.saturating_add(1);
+            let observed = attempt(window, seed, &mut gateway);
+            gateway.decisions.cell = None;
+            observed
+        },
     )?;
+    let cells = sweep.windows.len().saturating_mul(sweep.seeds.len());
+    let decision_requests = GatewayDecisionRequests {
+        schema_version: DECISION_REQUESTS_VERSION,
+        sweep_sha256: sweep_sha256.clone(),
+        decisions: std::mem::take(&mut gateway.decisions.records),
+        cells_unrecorded: cells.saturating_sub(attempts.len()),
+        rank_neutral: true,
+    };
     let host_observed = HostObservedUsage::of(&gateway, sweep_sha256);
     Ok(GatewaySweepOutcome {
         result,
         host_observed,
+        decision_requests,
         contract,
     })
 }
@@ -893,6 +1048,24 @@ pub fn attach_host_observed_usage(
         for row in rows {
             if row["agent_id"].as_str() == Some(agent_id) {
                 row["host_observed_usage"] = usage.clone();
+            }
+        }
+    }
+}
+
+/// Put the per-decision request record on the entrant's row of a JSON board
+/// under `gateway_decision_requests`. Like [`attach_host_observed_usage`], it
+/// adds one key and moves no score field.
+pub fn attach_decision_requests(
+    board: &mut serde_json::Value,
+    agent_id: &str,
+    record: &GatewayDecisionRequests,
+) {
+    let record = serde_json::to_value(record).expect("a decision request record serializes");
+    if let Some(rows) = board.as_array_mut() {
+        for row in rows {
+            if row["agent_id"].as_str() == Some(agent_id) {
+                row["gateway_decision_requests"] = record.clone();
             }
         }
     }

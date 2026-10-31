@@ -1,0 +1,14 @@
+{
+  "schema_version": "sharpe.formal-cases.v1",
+  "description": "Pair support and the inference gate. Contracts are indices; each test maps an index to one contract. pair_support is listed in the model's order (the plan's order under a plan, the first agent's otherwise); admitted is whether neither agent resolved an in-scope contract the other did not.",
+  "pair_support": [
+    {"name": "equal support, no plan", "plan": null, "left": [0, 1, 2, 3], "right": [3, 2, 1, 0], "pair_support": [0, 1, 2, 3], "admitted": true},
+    {"name": "second agent missing two, no plan", "plan": null, "left": [0, 1, 2, 3, 4, 5], "right": [0, 1, 2, 3], "pair_support": [0, 1, 2, 3], "admitted": false},
+    {"name": "first agent missing one, no plan", "plan": null, "left": [0, 1], "right": [0, 1, 2], "pair_support": [0, 1], "admitted": false},
+    {"name": "one shared contract, no plan", "plan": null, "left": [0, 1, 2], "right": [2, 3, 4], "pair_support": [2], "admitted": false},
+    {"name": "resolutions outside the plan are not differenced", "plan": [0, 1, 2, 3, 4, 5], "left": [0, 1, 2, 3, 4, 5, 8], "right": [0, 1, 2, 3, 4, 5, 9], "pair_support": [0, 1, 2, 3, 4, 5], "admitted": true},
+    {"name": "planned contract missing for one agent", "plan": [0, 1, 2, 3], "left": [0, 1, 2, 3], "right": [0, 1, 2], "pair_support": [0, 1, 2], "admitted": false},
+    {"name": "full plan in reverse order", "plan": [0, 1, 2, 3, 4, 5, 6, 7], "left": [0, 1, 2, 3, 4, 5, 6, 7], "right": [7, 6, 5, 4, 3, 2, 1, 0], "pair_support": [0, 1, 2, 3, 4, 5, 6, 7], "admitted": true},
+    {"name": "plan restricted to a subset both resolved", "plan": [4, 2, 0], "left": [0, 1, 2, 3, 4], "right": [0, 2, 4, 6], "pair_support": [4, 2, 0], "admitted": true}
+  ]
+}

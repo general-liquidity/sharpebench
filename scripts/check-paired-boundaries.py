@@ -84,7 +84,6 @@ ALLOWLIST: frozenset[str] = frozenset(
         "stats::significance::runs_for_power",
         "stats::significance::reality_check_pvalue",
         "stats::significance::step_down_significant",
-        "stats::stats::kurtosis",
         "stats::validation::dispersion",
         "stats::validation::block_probability",
     }

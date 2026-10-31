@@ -34,7 +34,12 @@ byte-identical.
 Edit the JSONL row, then run `python scripts/make-evidence-register.py` to
 rewrite this file and `python scripts/check-evidence-register.py` to validate
 both. A disposition that changes gets a new `status_history` entry with its own
-rationale; repeating the previous entry's text fails the check. An artifact's
+rationale; repeating the previous entry's text fails the check. Every entry
+names its recorder in `recorded_by` (`human` or `model` with an `id`, or
+`unknown` when the history does not say) and states in `independent` whether
+the recorder was someone other than the author of the change under review. An
+unknown recorder is never independent, and the checker prints how many entries
+have one. An artifact's
 `sha256` is over the file's bytes, and the checker prints the digest it computed
 when a recorded one does not match.
 
@@ -185,10 +190,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | historical-only | Initial entry: The artifact validly records the run and no later change moves its numbers, but nothing re-establishes it against the current tree: the producer is off the golden-hash path and the artifact was not rerun. |
-| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | historical-only | unknown | no | Initial entry: The artifact validly records the run and no later change moves its numbers, but nothing re-establishes it against the current tree: the producer is off the golden-hash path and the artifact was not rerun. |
+| 2026-10-31 | historical-only | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ### `SA-calm-calibration`
 
@@ -229,10 +234,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | historical-only | Initial entry: The artifact validly records the sweep and its negative outcome; nothing re-establishes it against the current tree. |
-| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | historical-only | unknown | no | Initial entry: The artifact validly records the sweep and its negative outcome; nothing re-establishes it against the current tree. |
+| 2026-10-31 | historical-only | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ### `SA-tab-f5`
 
@@ -275,10 +280,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | historical-only | Initial entry: The artifact validly records the run; the later changes add fields and tighten configuration validation without being shown to move the frozen values, and no re-verification is recorded. |
-| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | historical-only | unknown | no | Initial entry: The artifact validly records the run; the later changes add fields and tighten configuration validation without being shown to move the frozen values, and no re-verification is recorded. |
+| 2026-10-31 | historical-only | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ### `SA-f5-concave`
 
@@ -318,10 +323,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | historical-only | Initial entry: The artifact validly records the probe and the manuscript already scopes it as a stress setting rather than an estimate. |
-| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | historical-only | unknown | no | Initial entry: The artifact validly records the probe and the manuscript already scopes it as a stress setting rather than an estimate. |
+| 2026-10-31 | historical-only | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ### `SA-f5-positive-control`
 
@@ -361,10 +366,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | still-applicable | Initial entry: A documented recomputation exists in the review record, which is a comparison rather than an inference; the quantities do not pass through the scorer that later changed. |
-| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | still-applicable | unknown | no | Initial entry: A documented recomputation exists in the review record, which is a comparison rather than an inference; the quantities do not pass through the scorer that later changed. |
+| 2026-10-31 | still-applicable | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ### `SA-f5-extended-sweeps`
 
@@ -404,10 +409,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | historical-only | Initial entry: The artifact validly records the sweep; no documented recomputation covers this leg, unlike the positive control. |
-| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | historical-only | unknown | no | Initial entry: The artifact validly records the sweep; no documented recomputation covers this leg, unlike the positive control. |
+| 2026-10-31 | historical-only | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ### `SA-tab-f6`
 
@@ -450,10 +455,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | historical-only | Initial entry: The artifact validly records the run; the repairs named change how parity is reported rather than establishing that the frozen numbers still reproduce. |
-| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | historical-only | unknown | no | Initial entry: The artifact validly records the run; the repairs named change how parity is reported rather than establishing that the frozen numbers still reproduce. |
+| 2026-10-31 | historical-only | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ### `SA-f6-endogenous`
 
@@ -494,10 +499,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | historical-only | Initial entry: The artifact validly records the arm; the one cross-check that would strengthen it names no test that could be located. |
-| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | historical-only | unknown | no | Initial entry: The artifact validly records the arm; the one cross-check that would strengthen it names no test that could be located. |
+| 2026-10-31 | historical-only | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ### `SA-predictability`
 
@@ -540,10 +545,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | needs-new-experiment | Initial entry: The deflated-Sharpe leg cannot be rescored from the artifact, which stores scores rather than return series, so recomputing it means re-running the producer. The producer is deterministic in its seeds, which makes the run cheap, but it is a new execution rather than a correction. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
-| 2026-10-31 | needs-new-experiment | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | needs-new-experiment | unknown | no | Initial entry: The deflated-Sharpe leg cannot be rescored from the artifact, which stores scores rather than return series, so recomputing it means re-running the producer. The producer is deterministic in its seeds, which makes the run cheap, but it is a new execution rather than a correction. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
+| 2026-10-31 | needs-new-experiment | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ### `SA-seed-search`
 
@@ -580,10 +585,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | historical-only | Initial entry: The artifact validly records the scan; the timing leg is bound to an unrecorded machine, which the missing-provenance field states rather than the disposition hiding. |
-| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | historical-only | unknown | no | Initial entry: The artifact validly records the scan; the timing leg is bound to an unrecorded machine, which the missing-provenance field states rather than the disposition hiding. |
+| 2026-10-31 | historical-only | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ### `SA-sealed-seeds`
 
@@ -623,10 +628,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | needs-new-experiment | Initial entry: The measurement instrument changed, not just the scorer, and the artifact records the old check's outcome rather than inputs a new check could be run over. The producer is deterministic, so the new run is cheap, but it measures something the frozen record did not. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
-| 2026-10-31 | needs-new-experiment | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | needs-new-experiment | unknown | no | Initial entry: The measurement instrument changed, not just the scorer, and the artifact records the old check's outcome rather than inputs a new check could be run over. The producer is deterministic, so the new run is cheap, but it measures something the frozen record did not. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
+| 2026-10-31 | needs-new-experiment | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ### `SA-tab-f1`
 
@@ -672,10 +677,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | needs-rescore | Initial entry: The artifact serializes per_seed_returns, so the deflated Sharpes and their intervals are recomputable under the corrected estimator without re-running the environment. Sufficiency is evidenced by the manuscript's own worked instance, which rescores the committed F3 return series at six trials and reproduces 0.1114 exactly. Any rescore is separately versioned and does not overwrite the frozen artifact. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
-| 2026-10-31 | still-applicable | Rescored from the committed per_seed_returns under SharpeBench 0.28.0. Moves to still-applicable: scored values change by at most 7.9e-7 and the flat rows are typed unavailable, which the manuscript already states they would be. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | needs-rescore | unknown | no | Initial entry: The artifact serializes per_seed_returns, so the deflated Sharpes and their intervals are recomputable under the corrected estimator without re-running the environment. Sufficiency is evidenced by the manuscript's own worked instance, which rescores the committed F3 return series at six trials and reproduces 0.1114 exactly. Any rescore is separately versioned and does not overwrite the frozen artifact. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
+| 2026-10-31 | still-applicable | unknown | no | Rescored from the committed per_seed_returns under SharpeBench 0.28.0. Moves to still-applicable: scored values change by at most 7.9e-7 and the flat rows are typed unavailable, which the manuscript already states they would be. |
 
 ### `SA-tab-witness`
 
@@ -718,10 +723,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | needs-new-experiment | Initial entry: Missing inputs prevent a rescore: the artifact stores crossings, not the trajectories behind them, so establishing the crossing under the corrected gates means re-running the bisection. The producer is deterministic in its seeds. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
-| 2026-10-31 | needs-new-experiment | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | needs-new-experiment | unknown | no | Initial entry: Missing inputs prevent a rescore: the artifact stores crossings, not the trajectories behind them, so establishing the crossing under the corrected gates means re-running the bisection. The producer is deterministic in its seeds. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
+| 2026-10-31 | needs-new-experiment | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ### `SA-f2-regret`
 
@@ -761,10 +766,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | still-applicable | Initial entry: This is the one artifact in the manuscript with a recorded comparison against a later guard that reproduces the frozen numbers exactly, which is a check rather than an inference. |
-| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | still-applicable | unknown | no | Initial entry: This is the one artifact in the manuscript with a recorded comparison against a later guard that reproduces the frozen numbers exactly, which is a check rather than an inference. |
+| 2026-10-31 | still-applicable | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ### `SA-tab-f3`
 
@@ -807,10 +812,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | needs-rescore | Initial entry: Recorded inputs suffice: per_seed_returns is committed and the manuscript records a worked rescore of that series, so a corrected-estimator result is a recomputation rather than a new run. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
-| 2026-10-31 | still-applicable | Rescored from the committed per_seed_returns under SharpeBench 0.28.0. Moves to still-applicable: every printed cell is unchanged and the worked instance reproduces 0.1114. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | needs-rescore | unknown | no | Initial entry: Recorded inputs suffice: per_seed_returns is committed and the manuscript records a worked rescore of that series, so a corrected-estimator result is a recomputation rather than a new run. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
+| 2026-10-31 | still-applicable | unknown | no | Rescored from the committed per_seed_returns under SharpeBench 0.28.0. Moves to still-applicable: every printed cell is unchanged and the worked instance reproduces 0.1114. |
 
 ### `SA-tab-f7`
 
@@ -850,10 +855,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | still-applicable | Initial entry: The documented comparison is the recorded regeneration for 0.29.0 after the taxonomy repair and the mandate draw change, which the manuscript states and the artifact's readback block supports. |
-| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | still-applicable | unknown | no | Initial entry: The documented comparison is the recorded regeneration for 0.29.0 after the taxonomy repair and the mandate draw change, which the manuscript states and the artifact's readback block supports. |
+| 2026-10-31 | still-applicable | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ### `SA-tab-f8`
 
@@ -895,10 +900,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | historical-only | Initial entry: The artifact validly records the run and no later change reaches it, but nothing re-establishes it against the current tree. |
-| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | historical-only | unknown | no | Initial entry: The artifact validly records the run and no later change reaches it, but nothing re-establishes it against the current tree. |
+| 2026-10-31 | historical-only | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ### `SA-tab-throughput`
 
@@ -937,10 +942,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | historical-only | Initial entry: The artifact validly records a timed run on a named host; a current measurement would be a different machine's number rather than a correction of this one. |
-| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | historical-only | unknown | no | Initial entry: The artifact validly records a timed run on a named host; a current measurement would be a different machine's number rather than a correction of this one. |
+| 2026-10-31 | historical-only | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ### `SA-orderbook-mark`
 
@@ -978,10 +983,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | unresolved | Initial entry: The artifact cannot be located, so the ticket's rule applies: record unresolved rather than guess. |
-| 2026-10-31 | still-applicable | Resolved as a provenance answer: test_a_lone_quote_walk_is_not_booked_as_reward asserts the numbers and passes on the current tree. The 2026-09-23 entry searched paper/evidence only. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | unresolved | unknown | no | Initial entry: The artifact cannot be located, so the ticket's rule applies: record unresolved rather than guess. |
+| 2026-10-31 | still-applicable | unknown | no | Resolved as a provenance answer: test_a_lone_quote_walk_is_not_booked_as_reward asserts the numbers and passes on the current tree. The 2026-09-23 entry searched paper/evidence only. |
 
 ### `SA-seeded-shuffle`
 
@@ -1018,10 +1023,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | unresolved | Initial entry: The supporting measurement has no artifact in the evidence scope, so no disposition can be chosen without guessing. |
-| 2026-10-31 | still-applicable | Resolved as a provenance answer: two named tests assert the measurement and pass on the current tree. The 2026-09-23 entry searched paper/evidence only. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | unresolved | unknown | no | Initial entry: The supporting measurement has no artifact in the evidence scope, so no disposition can be chosen without guessing. |
+| 2026-10-31 | still-applicable | unknown | no | Resolved as a provenance answer: two named tests assert the measurement and pass on the current tree. The 2026-09-23 entry searched paper/evidence only. |
 
 ### `SA-nonempirical-tables`
 
@@ -1060,10 +1065,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | still-applicable | Initial entry: No cell reports a measurement, so no artifact can go stale under these tables. |
-| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | still-applicable | unknown | no | Initial entry: No cell reports a measurement, so no artifact can go stale under these tables. |
+| 2026-10-31 | still-applicable | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 7769ef5: no evidence producer steps a vector environment, so SharpeArena #118 reaches no artifact here. The artifact digests were opened against the sharpearena tree and match. The row of record now lives in that repository. |
 
 ## SharpeBench
 
@@ -1100,10 +1105,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | still-applicable | Initial entry: The table reports no measurement, so no artifact can go stale under it; the mechanisms it names are the current tree's, exercised by the test list in paper/sections/A-commands.tex. |
-| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | still-applicable | unknown | no | Initial entry: The table reports no measurement, so no artifact can go stale under it; the mechanisms it names are the current tree's, exercised by the test list in paper/sections/A-commands.tex. |
+| 2026-10-31 | still-applicable | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-tab-leakage`
 
@@ -1138,10 +1143,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | still-applicable | Initial entry: No measurement is reported, and the controls named are properties of the current tree rather than of the frozen snapshot. |
-| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | still-applicable | unknown | no | Initial entry: No measurement is reported, and the controls named are properties of the current tree rather than of the frozen snapshot. |
+| 2026-10-31 | still-applicable | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-tab-attacks`
 
@@ -1178,11 +1183,11 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | still-applicable | Initial entry: The documented comparison is the commit-time test itself, which re-checks the claim against the current kernel on every commit. |
-| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
-| 2026-10-31 | still-applicable | Rechecked at the gap-closure integration: crates/sharpebench-arena/src/audit.rs moved, and the recorded digest is rebound to the integrated tree. The claim still holds there, so the disposition is unchanged. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | still-applicable | unknown | no | Initial entry: The documented comparison is the commit-time test itself, which re-checks the claim against the current kernel on every commit. |
+| 2026-10-31 | still-applicable | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| 2026-10-31 | still-applicable | model: claude-opus-5-5 | no | Rechecked at the gap-closure integration: crates/sharpebench-arena/src/audit.rs moved, and the recorded digest is rebound to the integrated tree. The claim still holds there, so the disposition is unchanged. |
 
 ### `SB-tab-data`
 
@@ -1226,10 +1231,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | needs-rescore | Initial entry: The recorded inputs are sufficient: the battery is a deterministic function of the committed CSVs and the command exists on the current tree, so a current-method verdict is a recomputation rather than a new experiment. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
-| 2026-10-31 | needs-rescore | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | needs-rescore | unknown | no | Initial entry: The recorded inputs are sufficient: the battery is a deterministic function of the committed CSVs and the command exists on the current tree, so a current-method verdict is a recomputation rather than a new experiment. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
+| 2026-10-31 | needs-rescore | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-tab-datasheet`
 
@@ -1272,10 +1277,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | still-applicable | Initial entry: The comparison is recorded rather than inferred: all nine byte and row counts were recomputed from the committed CSVs and agree with the table exactly. |
-| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | still-applicable | unknown | no | Initial entry: The comparison is recorded rather than inferred: all nine byte and row counts were recomputed from the committed CSVs and agree with the table exactly. |
+| 2026-10-31 | still-applicable | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-tab-related`
 
@@ -1310,10 +1315,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | still-applicable | Initial entry: The documented comparison is the per-cell provenance sheet with its dated checks; nothing in this repository can move these cells. |
-| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | still-applicable | unknown | no | Initial entry: The documented comparison is the per-cell provenance sheet with its dated checks; nothing in this repository can move these cells. |
+| 2026-10-31 | still-applicable | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-fig-demotion`
 
@@ -1325,7 +1330,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Artifacts.**
 - `paper/figures/sharpebench-luck-demotion.pdf`, sha256 `1e025ac30099de23ae8455f20ae5441b557e924870d0e1475c7508512908ec0d`, digest source: paper/evidence/provenance.json
-- `crates/sharpebench-core/golden/example_submissions.scores.json`, sha256 `00cc54e484c5193e424d46c649d05378a5f5eb3bafc8d5a42a880dac8f7e54f6`, digest source: computed for this register; the file is outside the provenance manifest scope, the golden score record the panel is read from
+- `crates/sharpebench-core/golden/example_submissions.scores.json`, sha256 `28fae98151c032eeb33c3d4a0e0d892c94f415bc39b034c0d98d80306b07dabf`, digest source: computed for this register; the file is outside the provenance manifest scope, the golden score record the panel is read from
 - `suites/example_submissions.json`, sha256 `909775dd86084682cfee7b723b64ce67529fe9b1111a5054f1ef6c8437c4ba96`, digest source: computed for this register; the file is outside the provenance manifest scope, the field the golden record scores
 
 **Producer command.** sharpebench score suites/example_submissions.json; the figure is drawn by python paper/src/make-figures.py (paper/sections/A-commands.tex)
@@ -1340,6 +1345,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 **Relevant later changes.**
 - The golden fields changed in the Pareto flag of hold and later in calibration counts, Brier scores and confidence-weighted return; no gate reads those fields (paper/sections/E-repairs.tex:19).
 - paper/sections/E-repairs.tex:17 records that the two committed golden fields hold four and three agents and take the configured path, so the dispersion-vote repair does not move them, and that sharpebench score --json on the example submissions is byte-identical.
+- The 2026-10-31 fix-round integration (fix/row-disclosures) added runs_passed, window_bars, window_pass_floors, implausible_windows and pass_k_floors_plausible to every row of crates/sharpebench-core/golden/example_submissions.scores.json; no existing field or value changed.
 
 **Present applicability.** Applicable to the current kernel: the golden record is the current tree's and the repairs that touched it are recorded as leaving the gate outcomes the panel plots unchanged.
 
@@ -1351,10 +1357,11 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | still-applicable | Initial entry: The documented comparison is paper/sections/E-repairs.tex:17 together with the golden_scores test, which pins the record the panel reads to the current kernel. |
-| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | still-applicable | unknown | no | Initial entry: The documented comparison is paper/sections/E-repairs.tex:17 together with the golden_scores test, which pins the record the panel reads to the current kernel. |
+| 2026-10-31 | still-applicable | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| 2026-11-01 | still-applicable | model: claude-opus-5-5 | no | Rechecked at the fix-round integration: crates/sharpebench-core/golden/example_submissions.scores.json gained five additive fields and the recorded digest is rebound. Every existing field and value is unchanged, so the claim and its disposition stand. |
 
 ### `SB-fig-deflation`
 
@@ -1390,10 +1397,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | still-applicable | Initial entry: The producer agrees with the current kernel under a passing pinned test, and the panel's inputs are stated constants rather than frozen measurements. |
-| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | still-applicable | unknown | no | Initial entry: The producer agrees with the current kernel under a passing pinned test, and the panel's inputs are stated constants rather than frozen measurements. |
+| 2026-10-31 | still-applicable | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-tab-units`
 
@@ -1430,10 +1437,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | historical-only | Initial entry: The frozen note is the located artifact: it carries the table verbatim and a producing commit, so the claim is a valid record of the v0.2.1 kernel, which the caption binds it to. The upstream sweep it reduces is gone, which the missing-provenance field records rather than the disposition hiding. |
-| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | historical-only | unknown | no | Initial entry: The frozen note is the located artifact: it carries the table verbatim and a producing commit, so the claim is a valid record of the v0.2.1 kernel, which the caption binds it to. The upstream sweep it reduces is gone, which the missing-provenance field records rather than the disposition hiding. |
+| 2026-10-31 | historical-only | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-sec-units-prefloor`
 
@@ -1469,10 +1476,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | unresolved | Initial entry: The artifact behind the quoted pair could not be located: the named file does not contain it at any cell checked, and the file that does contain it is a superseded note that disclaims the attribution. Recorded as unresolved rather than resolved by picking one of the two. |
-| 2026-10-31 | historical-only | Corrected a mistake in the 2026-09-23 entry, which reported that no buy-and-hold record carried 0.984 and compared against the configured-prior default cell. The measured-dispersion cell carries it: 0.98419 at us-indices-1w.jsonl:321 and 0.0 at us-indices-1d.jsonl:321. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | unresolved | unknown | no | Initial entry: The artifact behind the quoted pair could not be located: the named file does not contain it at any cell checked, and the file that does contain it is a superseded note that disclaims the attribution. Recorded as unresolved rather than resolved by picking one of the two. |
+| 2026-10-31 | historical-only | unknown | no | Corrected a mistake in the 2026-09-23 entry, which reported that no buy-and-hold record carried 0.984 and compared against the configured-prior default cell. The measured-dispersion cell carries it: 0.98419 at us-indices-1w.jsonl:321 and 0.0 at us-indices-1d.jsonl:321. |
 
 ### `SB-sec-units-worked-example`
 
@@ -1506,11 +1513,11 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | still-applicable | Initial entry: The documented comparison is the commit-time regression test against the published example. |
-| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
-| 2026-10-31 | still-applicable | Rechecked at the gap-closure integration: crates/sharpebench-stats/src/deflated_sharpe.rs moved, and the recorded digest is rebound to the integrated tree. The claim still holds there, so the disposition is unchanged. The digest was rebound again after unit tests for the observed-risk rule were added to the same file; the worked-example test is unchanged. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | still-applicable | unknown | no | Initial entry: The documented comparison is the commit-time regression test against the published example. |
+| 2026-10-31 | still-applicable | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| 2026-10-31 | still-applicable | model: claude-opus-5-5 | no | Rechecked at the gap-closure integration: crates/sharpebench-stats/src/deflated_sharpe.rs moved, and the recorded digest is rebound to the integrated tree. The claim still holds there, so the disposition is unchanged. The digest was rebound again after unit tests for the observed-risk rule were added to the same file; the worked-example test is unchanged. |
 
 ### `SB-tab-eligibility`
 
@@ -1556,10 +1563,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | historical-only | Initial entry: The artifact validly records the frozen kernel's run and the manuscript binds the table to that snapshot. The separate question of what the current engine would compute is carried by SB-sec-passk. |
-| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | historical-only | unknown | no | Initial entry: The artifact validly records the frozen kernel's run and the manuscript binds the table to that snapshot. The separate question of what the current engine would compute is carried by SB-sec-passk. |
+| 2026-10-31 | historical-only | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-sec-passk`
 
@@ -1605,10 +1612,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | needs-new-experiment | Initial entry: A rescore is not defensible: generation changed (simulator and entrant repairs) and the inputs a repaired dispersion measurement needs are absent from the committed records. Re-running the field would be a new empirical run rather than a correction, which paper/sections/E-repairs.tex:7 states in those terms. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
-| 2026-10-31 | needs-new-experiment | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | needs-new-experiment | unknown | no | Initial entry: A rescore is not defensible: generation changed (simulator and entrant repairs) and the inputs a repaired dispersion measurement needs are absent from the committed records. Re-running the field would be a new empirical run rather than a correction, which paper/sections/E-repairs.tex:7 states in those terms. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
+| 2026-10-31 | needs-new-experiment | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-sec-ablation`
 
@@ -1651,10 +1658,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | historical-only | Initial entry: The artifact validly records the v0.9.0 ablation. The drawdown figures are read from the same frozen records and the manuscript scopes them to that run; the current-engine question is carried by SB-sec-passk rather than duplicated here. |
-| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | historical-only | unknown | no | Initial entry: The artifact validly records the v0.9.0 ablation. The drawdown figures are read from the same frozen records and the manuscript scopes them to that run; the current-engine question is carried by SB-sec-passk rather than duplicated here. |
+| 2026-10-31 | historical-only | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-sec-riskmanaged`
 
@@ -1690,10 +1697,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | historical-only | Initial entry: The artifact validly records the v0.9.0 run and the manuscript binds it to that snapshot; the appendix establishes only that the dispersion-vote repair does not touch these panels, not that the statistics are unchanged. |
-| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | historical-only | unknown | no | Initial entry: The artifact validly records the v0.9.0 run and the manuscript binds it to that snapshot; the appendix establishes only that the dispersion-vote repair does not touch these panels, not that the statistics are unchanged. |
+| 2026-10-31 | historical-only | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-fig-drawdowns`
 
@@ -1729,10 +1736,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | historical-only | Initial entry: Figure-to-record agreement is checked on the current tree, but the records are v0.9.0 and the simulator repair can move drawdown paths, so the figure inherits its records' historical scope. |
-| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | historical-only | unknown | no | Initial entry: Figure-to-record agreement is checked on the current tree, but the records are v0.9.0 and the simulator repair can move drawdown paths, so the figure inherits its records' historical scope. |
+| 2026-10-31 | historical-only | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-fig-luckdeflation`
 
@@ -1771,10 +1778,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | historical-only | Initial entry: The figure validly reduces the frozen records; the manuscript binds those records to v0.9.0 and the repairs that would move them are recorded rather than applied. |
-| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | historical-only | unknown | no | Initial entry: The figure validly reduces the frozen records; the manuscript binds those records to v0.9.0 and the repairs that would move them are recorded rather than applied. |
+| 2026-10-31 | historical-only | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-tab-external`
 
@@ -1813,10 +1820,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | historical-only | Initial entry: The artifact validly records the frozen run; the current-engine question is carried by SB-sec-external. |
-| 2026-10-31 | historical-only | Rechecked against #172: the stressed cells this row reports ran without the delay the current engine applies, which adds a difference to the row and does not change its disposition. #118 and #171 do not touch it. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | historical-only | unknown | no | Initial entry: The artifact validly records the frozen run; the current-engine question is carried by SB-sec-external. |
+| 2026-10-31 | historical-only | unknown | no | Rechecked against #172: the stressed cells this row reports ran without the delay the current engine applies, which adds a difference to the row and does not change its disposition. #118 and #171 do not touch it. |
 
 ### `SB-tab-costsens`
 
@@ -1853,10 +1860,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | needs-new-experiment | Initial entry: This table's headline quantity is exactly the one the dispersion-vote repair changes, and The committed records serialize each agent's deflated and probabilistic Sharpe but not its pooled Sharpe, and the probabilistic Sharpe cannot be inverted without that track's skewness and kurtosis, so the frozen artifacts lack the inputs a repaired dispersion measurement would need (paper/sections/E-repairs.tex:17). A rescore from the committed records is therefore not sufficient. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
-| 2026-10-31 | needs-new-experiment | Rechecked against #172: the stressed cells this row reports ran without the delay the current engine applies, which adds a difference to the row and does not change its disposition. #118 and #171 do not touch it. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | needs-new-experiment | unknown | no | Initial entry: This table's headline quantity is exactly the one the dispersion-vote repair changes, and The committed records serialize each agent's deflated and probabilistic Sharpe but not its pooled Sharpe, and the probabilistic Sharpe cannot be inverted without that track's skewness and kurtosis, so the frozen artifacts lack the inputs a repaired dispersion measurement would need (paper/sections/E-repairs.tex:17). A rescore from the committed records is therefore not sufficient. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
+| 2026-10-31 | needs-new-experiment | unknown | no | Rechecked against #172: the stressed cells this row reports ran without the delay the current engine applies, which adds a difference to the row and does not change its disposition. #118 and #171 do not touch it. |
 
 ### `SB-sec-external`
 
@@ -1894,10 +1901,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | needs-new-experiment | Initial entry: Generation and measurement both changed and the committed records lack the pooled Sharpes a repaired measurement needs, so no defensible rescore exists. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
-| 2026-10-31 | needs-new-experiment | Rechecked against #172: the stressed cells this row reports ran without the delay the current engine applies, which adds a difference to the row and does not change its disposition. #118 and #171 do not touch it. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | needs-new-experiment | unknown | no | Initial entry: Generation and measurement both changed and the committed records lack the pooled Sharpes a repaired measurement needs, so no defensible rescore exists. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
+| 2026-10-31 | needs-new-experiment | unknown | no | Rechecked against #172: the stressed cells this row reports ran without the delay the current engine applies, which adds a difference to the row and does not change its disposition. #118 and #171 do not touch it. |
 
 ### `SB-tab-relative`
 
@@ -1935,10 +1942,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | historical-only | Initial entry: The artifact validly records the frozen run under both verdicts, and the manuscript binds it to that snapshot. |
-| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | historical-only | unknown | no | Initial entry: The artifact validly records the frozen run under both verdicts, and the manuscript binds it to that snapshot. |
+| 2026-10-31 | historical-only | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-tab-mandate`
 
@@ -1976,10 +1983,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | historical-only | Initial entry: The artifact validly records the frozen run, and the one cross-table inference it supports is already bound to the frozen kernel in the manuscript. |
-| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | historical-only | unknown | no | Initial entry: The artifact validly records the frozen run, and the one cross-table inference it supports is already bound to the frozen kernel in the manuscript. |
+| 2026-10-31 | historical-only | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-tab-seedleg`
 
@@ -2015,10 +2022,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | historical-only | Initial entry: The artifact validly records the frozen run and the manuscript bounds the claim with three stated caveats. |
-| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | historical-only | unknown | no | Initial entry: The artifact validly records the frozen run and the manuscript bounds the claim with three stated caveats. |
+| 2026-10-31 | historical-only | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-sec-perturb`
 
@@ -2053,10 +2060,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | historical-only | Initial entry: The reported spread comes from the frozen artifact; the current-tree test covers the separate synthetic claim, not these two numbers. |
-| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | historical-only | unknown | no | Initial entry: The reported spread comes from the frozen artifact; the current-tree test covers the separate synthetic claim, not these two numbers. |
+| 2026-10-31 | historical-only | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-sec-witness`
 
@@ -2092,10 +2099,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | still-applicable | Initial entry: The documented comparison is paper/sections/E-repairs.tex:7: this is the one field rerun under the repaired producer and the current kernel, and the manuscript states the resulting shift. |
-| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | still-applicable | unknown | no | Initial entry: The documented comparison is paper/sections/E-repairs.tex:7: this is the one field rerun under the repaired producer and the current kernel, and the manuscript states the resulting shift. |
+| 2026-10-31 | still-applicable | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-sec-falsify`
 
@@ -2137,10 +2144,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | historical-only | Initial entry: The artifact validly records the frozen run under the corrected floor construction; neither effect of the later repairs on this comparison is established, so the claim stays bound to the snapshot. |
-| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | historical-only | unknown | no | Initial entry: The artifact validly records the frozen run under the corrected floor construction; neither effect of the later repairs on this comparison is established, so the claim stays bound to the snapshot. |
+| 2026-10-31 | historical-only | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-sec-luck1000`
 
@@ -2177,10 +2184,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | historical-only | Initial entry: The artifact validly records the frozen run, and the repair that does touch it has an unestablished magnitude, so the claim stays bound to the snapshot. |
-| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | historical-only | unknown | no | Initial entry: The artifact validly records the frozen run, and the repair that does touch it has an unestablished magnitude, so the claim stays bound to the snapshot. |
+| 2026-10-31 | historical-only | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-sec-sybil`
 
@@ -2215,10 +2222,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | still-applicable | Initial entry: The documented comparison is the commit-time test that rebuilds every committed field and asserts the outcome; it executes against the current kernel. |
-| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | still-applicable | unknown | no | Initial entry: The documented comparison is the commit-time test that rebuilds every committed field and asserts the outcome; it executes against the current kernel. |
+| 2026-10-31 | still-applicable | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-sec-power`
 
@@ -2256,10 +2263,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | needs-rescore | Initial entry: The producer is deterministic and reads only bars, so a current-engine version of this table is a recomputation rather than a new experiment; it is blocked only on repaired bars, which SB-sec-passk and SB-sec-external own. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
-| 2026-10-31 | needs-rescore | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | needs-rescore | unknown | no | Initial entry: The producer is deterministic and reads only bars, so a current-engine version of this table is a recomputation rather than a new experiment; it is blocked only on repaired bars, which SB-sec-passk and SB-sec-external own. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
+| 2026-10-31 | needs-rescore | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-sec-forecast-report`
 
@@ -2298,11 +2305,11 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | still-applicable | Initial entry: The documented comparison is the independent Python recomputation, which runs in CI against the committed report. |
-| 2026-10-31 | still-applicable | Rechecked against #171: the fixtures are unchanged and the numerical results reproduce through the schema normalization the example records, so the row stays applicable as a statement about those two reports. It is no longer a statement about the current report schema, which is v5. |
-| 2026-10-31 | still-applicable | Rechecked after the size constants moved: both fixture digests are unchanged and every field except the two size fields still reproduces. The manuscript's statement that the tutorial comparison carries 0.138 stays true of the frozen report. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | still-applicable | unknown | no | Initial entry: The documented comparison is the independent Python recomputation, which runs in CI against the committed report. |
+| 2026-10-31 | still-applicable | unknown | no | Rechecked against #171: the fixtures are unchanged and the numerical results reproduce through the schema normalization the example records, so the row stays applicable as a statement about those two reports. It is no longer a statement about the current report schema, which is v5. |
+| 2026-10-31 | still-applicable | unknown | no | Rechecked after the size constants moved: both fixture digests are unchanged and every field except the two size fields still reproduces. The manuscript's statement that the tutorial comparison carries 0.138 stays true of the frozen report. |
 
 ### `SB-sec-forecast-strata`
 
@@ -2336,9 +2343,9 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-10-31 | historical-only | Initial entry, found while rechecking against #171: the analyzer now stratifies and emits v5, so the sentence describes the code as it stood before that change. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-10-31 | historical-only | unknown | no | Initial entry, found while rechecking against #171: the analyzer now stratifies and emits v5, so the sentence describes the code as it stood before that change. |
 
 ### `SB-sec-forecast-size`
 
@@ -2375,11 +2382,11 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | unresolved | Initial entry: The artifact cannot be located, so no disposition can be chosen without guessing. Recorded as unresolved rather than assumed current, per the ticket's rule. |
-| 2026-10-31 | needs-rescore | The seeded producer forecast_size_study was committed and run at the stated configuration. Five of seven rates agree with the constants; the two four-block rates are 0.007 and 0.011 above them in the 60,000-replication run, so the row moves to needs-rescore pending an owner decision on the constants. |
-| 2026-10-31 | needs-rescore | The owner approved adopting the study's values, so the constants moved to the 60,000-replication rates and a test ties them to that artifact. The disposition holds because the manuscript still prints the replaced values. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | unresolved | unknown | no | Initial entry: The artifact cannot be located, so no disposition can be chosen without guessing. Recorded as unresolved rather than assumed current, per the ticket's rule. |
+| 2026-10-31 | needs-rescore | unknown | no | The seeded producer forecast_size_study was committed and run at the stated configuration. Five of seven rates agree with the constants; the two four-block rates are 0.007 and 0.011 above them in the 60,000-replication run, so the row moves to needs-rescore pending an owner decision on the constants. |
+| 2026-10-31 | needs-rescore | unknown | no | The owner approved adopting the study's values, so the constants moved to the 60,000-replication rates and a test ties them to that artifact. The disposition holds because the manuscript still prints the replaced values. |
 
 ### `SB-sec-compute`
 
@@ -2414,10 +2421,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | unresolved | Initial entry: No artifact could be located for any of the quoted measurements, and the ticket requires unresolved rather than a guess. |
-| 2026-10-31 | historical-only | Resolved as a provenance answer: the origin commits are identified and the history holds no timing record, so the numbers are uncommitted observations bound to those commits. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | unresolved | unknown | no | Initial entry: No artifact could be located for any of the quoted measurements, and the ticket requires unresolved rather than a guess. |
+| 2026-10-31 | historical-only | unknown | no | Resolved as a provenance answer: the origin commits are identified and the history holds no timing record, so the numbers are uncommitted observations bound to those commits. |
 
 ### `SB-claims-i`
 
@@ -2464,10 +2471,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | needs-new-experiment | Initial entry: Same reasoning as SB-sec-passk: generation changed and the committed records lack the inputs a repaired measurement needs. This is a headline claim, so it is queued rather than left implicit. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
-| 2026-10-31 | needs-new-experiment | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | needs-new-experiment | unknown | no | Initial entry: Same reasoning as SB-sec-passk: generation changed and the committed records lack the inputs a repaired measurement needs. This is a headline claim, so it is queued rather than left implicit. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
+| 2026-10-31 | needs-new-experiment | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-claims-ii`
 
@@ -2510,10 +2517,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | historical-only | Initial entry: The artifacts validly record the frozen run; whether the simulator repair moves the comparison is not established, so the claim stays bound to the snapshot rather than being asserted of the current engine. |
-| 2026-10-31 | historical-only | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | historical-only | unknown | no | Initial entry: The artifacts validly record the frozen run; whether the simulator repair moves the comparison is not established, so the claim stays bound to the snapshot rather than being asserted of the current engine. |
+| 2026-10-31 | historical-only | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-claims-iii`
 
@@ -2550,10 +2557,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | needs-new-experiment | Initial entry: Inherits SB-sec-external: no defensible rescore exists from the committed records. Queued as a headline claim. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
-| 2026-10-31 | needs-new-experiment | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | needs-new-experiment | unknown | no | Initial entry: Inherits SB-sec-external: no defensible rescore exists from the committed records. Queued as a headline claim. P00-E maps evidence and authorizes no rerun. The follow-up names the ticket that would own one. |
+| 2026-10-31 | needs-new-experiment | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-claims-iv`
 
@@ -2588,11 +2595,11 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | still-applicable | Initial entry: The documented comparison is the commit-time test, which runs against the current tree rather than against the frozen snapshot. |
-| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
-| 2026-10-31 | still-applicable | Rechecked at the gap-closure integration: crates/sharpebench-arena/src/audit.rs moved, and the recorded digest is rebound to the integrated tree. The claim still holds there, so the disposition is unchanged. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | still-applicable | unknown | no | Initial entry: The documented comparison is the commit-time test, which runs against the current tree rather than against the frozen snapshot. |
+| 2026-10-31 | still-applicable | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| 2026-10-31 | still-applicable | model: claude-opus-5-5 | no | Rechecked at the gap-closure integration: crates/sharpebench-arena/src/audit.rs moved, and the recorded digest is rebound to the integrated tree. The claim still holds there, so the disposition is unchanged. |
 
 ### `SB-claims-v`
 
@@ -2601,8 +2608,8 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 **Source.** `paper/sections/05-experiments.tex:266`
 
 **Artifacts.**
-- `crates/sharpebench-core/golden/example_submissions.scores.json`, sha256 `00cc54e484c5193e424d46c649d05378a5f5eb3bafc8d5a42a880dac8f7e54f6`, digest source: computed for this register; the file is outside the provenance manifest scope
-- `crates/sharpebench-core/golden/synthetic_field.scores.json`, sha256 `678a9783017cb1c783daaf6a14a82bf86bf089c9469a4f41ab1567b0fe613e8c`, digest source: computed for this register; the file is outside the provenance manifest scope
+- `crates/sharpebench-core/golden/example_submissions.scores.json`, sha256 `28fae98151c032eeb33c3d4a0e0d892c94f415bc39b034c0d98d80306b07dabf`, digest source: computed for this register; the file is outside the provenance manifest scope
+- `crates/sharpebench-core/golden/synthetic_field.scores.json`, sha256 `c9b899e58c9d0f59d338f2d331afd49b56c9dcdbd33d310c105eb8fd047b206d`, digest source: computed for this register; the file is outside the provenance manifest scope
 - `crates/sharpebench-core/golden/synthetic_field.input.json`, sha256 `b5d298d72a68fb5922fbcbd252a7922fe1033f133d38203f2c15a4ec01cd8b61`, digest source: computed for this register; the file is outside the provenance manifest scope
 
 **Producer command.** cargo test -p sharpebench-core --test golden_scores; cargo test -p sharpebench-sim --test golden_input; cargo test -p sharpebench-wasm --test native_parity (paper/sections/A-commands.tex)
@@ -2616,6 +2623,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Relevant later changes.**
 - The golden fields changed in the Pareto flag of hold and in calibration counts, Brier scores and confidence-weighted return; no gate reads those fields (paper/sections/E-repairs.tex:19).
+- The 2026-10-31 fix-round integration (fix/row-disclosures) added runs_passed, window_bars, window_pass_floors, implausible_windows and pass_k_floors_plausible to every row of crates/sharpebench-core/golden/example_submissions.scores.json, crates/sharpebench-core/golden/synthetic_field.scores.json; no existing field or value changed.
 
 **Present applicability.** Re-established on every CI run across the three targets.
 
@@ -2627,10 +2635,11 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | still-applicable | Initial entry: The documented comparison is the golden test on three CI targets, which executes against the current kernel. |
-| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | still-applicable | unknown | no | Initial entry: The documented comparison is the golden test on three CI targets, which executes against the current kernel. |
+| 2026-10-31 | still-applicable | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| 2026-11-01 | still-applicable | model: claude-opus-5-5 | no | Rechecked at the fix-round integration: crates/sharpebench-core/golden/example_submissions.scores.json, crates/sharpebench-core/golden/synthetic_field.scores.json gained five additive fields and the recorded digest is rebound. Every existing field and value is unchanged, so the claim and its disposition stand. |
 
 ### `SB-claims-vi`
 
@@ -2663,10 +2672,10 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | still-applicable | Initial entry: The witness is the one field rerun under the repaired producer and the current kernel, and the claim is stated with its sampling caveat. |
-| 2026-10-31 | still-applicable | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | still-applicable | unknown | no | Initial entry: The witness is the one field rerun under the repaired producer and the current kernel, and the claim is stated with its sampling caveat. |
+| 2026-10-31 | still-applicable | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 
 ### `SB-forecast-pilot`
 
@@ -2717,7 +2726,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Status history.**
 
-| Date | Disposition | Rationale |
-|---|---|---|
-| 2026-09-23 | historical-only | Initial entry: The field validly records the pilot under the superseded envelope and the manuscript already excludes its scores from every claim, which is exactly what historical-only means. |
-| 2026-10-31 | historical-only | Rechecked against #171: the archived pilot report stays at schema v1 and #171 did not touch it. #118 and #172 do not reach it. |
+| Date | Disposition | Recorded by | Independent | Rationale |
+|---|---|---|---|---|
+| 2026-09-23 | historical-only | unknown | no | Initial entry: The field validly records the pilot under the superseded envelope and the manuscript already excludes its scores from every claim, which is exactly what historical-only means. |
+| 2026-10-31 | historical-only | unknown | no | Rechecked against #171: the archived pilot report stays at schema v1 and #171 did not touch it. #118 and #172 do not reach it. |

@@ -89,7 +89,12 @@ byte-identical.
 Edit the JSONL row, then run `python scripts/make-evidence-register.py` to
 rewrite this file and `python scripts/check-evidence-register.py` to validate
 both. A disposition that changes gets a new `status_history` entry with its own
-rationale; repeating the previous entry's text fails the check. An artifact's
+rationale; repeating the previous entry's text fails the check. Every entry
+names its recorder in `recorded_by` (`human` or `model` with an `id`, or
+`unknown` when the history does not say) and states in `independent` whether
+the recorder was someone other than the author of the change under review. An
+unknown recorder is never independent, and the checker prints how many entries
+have one. An artifact's
 `sha256` is over the file's bytes, and the checker prints the digest it computed
 when a recorded one does not match.
 
@@ -127,6 +132,13 @@ def artifact_line(artifact: dict) -> str:
     if note:
         parts.append(note)
     return ", ".join(parts)
+
+
+def recorder_label(recorder) -> str:
+    """`kind: id`, or `unknown`; anything unreadable reads as unknown."""
+    if not isinstance(recorder, dict) or recorder.get("kind") not in ("human", "model"):
+        return "unknown"
+    return f"{recorder['kind']}: {recorder.get('id', '')}"
 
 
 def render(rows: list[dict]) -> str:
@@ -235,12 +247,17 @@ def render(rows: list[dict]) -> str:
             )
             out.append(f"**Owner.** {row.get('owner', '')}\n\n")
             out.append(f"**Follow-up.** {row.get('follow_up') or 'none'}\n\n")
-            out.append("**Status history.**\n\n| Date | Disposition | Rationale |\n|---|---|---|\n")
+            out.append(
+                "**Status history.**\n\n| Date | Disposition | Recorded by | Independent "
+                "| Rationale |\n|---|---|---|---|---|\n"
+            )
             for entry in row.get("status_history", []):
                 out.append(
-                    "| {date} | {disposition} | {rationale} |\n".format(
+                    "| {date} | {disposition} | {recorder} | {independent} | {rationale} |\n".format(
                         date=escape(entry.get("date", "")),
                         disposition=escape(entry.get("disposition", "")),
+                        recorder=escape(recorder_label(entry.get("recorded_by"))),
+                        independent="yes" if entry.get("independent") is True else "no",
                         rationale=escape(entry.get("rationale", "")),
                     )
                 )

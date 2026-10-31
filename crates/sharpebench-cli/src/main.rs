@@ -637,6 +637,8 @@ fn help() {
     );
     println!("                       --allow-unbound-trajectory: explicit legacy or cross-version regrade; never the default");
     println!("                       --short-borrow-bps <bps>: for capture (reference or external entrant) and verify-trajectory; the rate is bound, so a different one refuses");
+    println!("                       --masked: for run, capture, verify-trajectory, decision-stability and timing-luck; opaque symbols and dates, levels rebased by a power of two, every return unchanged; the masked data is bound, so verify with --masked too");
+    println!("                       --fill-delay-bars <n>: fill every decision n bars later (bound in the cost model); a dataset whose <name>.marks.json declares legs marked at different times needs n >= 1");
     println!("                       --reexecute [--cmd \"<prog>\"|--http <addr>|--image <ref>]: also re-run every captured run with a fresh agent and refuse the first divergent decision");
     println!("                       --timing-null [--null-draws N] [--null-seed S]: also place each run's Sharpe among seeded replays of its own holding periods at random bars (rank-neutral)");
     println!("                       --lagged-replay <k,k,...>: also report Sharpe and mean return with every decision executed k bars late (rank-neutral)");
@@ -1100,7 +1102,13 @@ fn run_stress(json: bool) -> ExitCode {
     }
     let mut scenarios: Vec<serde_json::Value> = Vec::new();
     for (name, data) in Dataset::stress_suite(20_260_621) {
-        let masked = data.masked();
+        let masked = match data.masked() {
+            Ok(masked) => masked,
+            Err(error) => {
+                eprintln!("error: {error}");
+                return ExitCode::FAILURE;
+            }
+        };
         let windows = [Window {
             start: 20,
             end: masked.len(),
@@ -1339,6 +1347,7 @@ fn run_board_json(
                 }
                 if let Some(isolation) = external.cell_isolation {
                     row["cell_isolation"] = cell_isolation::disclosure(isolation);
+                    row["evidence_mode"] = cell_isolation::run_evidence_mode(isolation);
                 }
             }
         }
@@ -1559,6 +1568,21 @@ fn load_retry_backoff(args: &[String], max_retries: u32) -> Result<BackoffSchedu
 /// another. A negative or non-finite rate is refused before anything runs.
 pub(crate) fn cost_model_from_args(args: &[String]) -> Result<sharpebench_sim::CostModel, String> {
     let mut costs = sharpebench_sim::CostModel::default();
+    if args.iter().any(|arg| arg == "--fill-delay-bars") {
+        let raw = flag_value(args, "--fill-delay-bars")
+            .filter(|raw| !raw.starts_with("--"))
+            .ok_or("--fill-delay-bars requires a whole number of bars, such as 1")?;
+        let bars = raw
+            .parse::<usize>()
+            .ok()
+            .filter(|bars| *bars >= 1)
+            .ok_or_else(|| {
+                format!(
+                    "--fill-delay-bars must be a whole number of bars of at least 1, got `{raw}`"
+                )
+            })?;
+        costs.fixed_delay = Some(sharpebench_sim::FixedDecisionDelay::Fifo { bars });
+    }
     if !args.iter().any(|arg| arg == "--short-borrow-bps") {
         return Ok(costs);
     }
@@ -1852,7 +1876,7 @@ fn print_suite_evidence(board: &[CompositeScore], evidence: &sharpebench_core::S
 
 fn run_demo(args: &[String], json: bool) -> ExitCode {
     use sharpebench_sim::{
-        Agent, BuyAndHold, CostModel, Dataset, ExternalAgent, HttpAgent, Momentum, Window,
+        Agent, BuyAndHold, CostModel, ExternalAgent, HttpAgent, Momentum, Window,
     };
 
     let rate_card = match load_rate_card(args) {
@@ -1946,33 +1970,34 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
         sharpebench_harness::ResumePolicy::UnfinishedOnly
     };
 
+    let loaded = match load_trading_dataset(flag_value(args, "--data"), args) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
     let (data, windows) = match flag_value(args, "--data") {
-        Some(path) => match Dataset::from_csv_file(path) {
-            Ok(d) => {
-                let n = d.len();
-                if n < 40 {
-                    eprintln!("error: dataset too short ({n} rows); need at least 40");
-                    return ExitCode::FAILURE;
-                }
-                // A warmup, then split the rest into an in-sample + out-of-sample window.
-                let warm = (n / 10).clamp(10, 30);
-                let mid = (warm + n) / 2;
-                let w = vec![
-                    Window {
-                        start: warm,
-                        end: mid,
-                    },
-                    Window { start: mid, end: n },
-                ];
-                (d, w)
-            }
-            Err(e) => {
-                eprintln!("error: {e}");
+        Some(_) => {
+            let n = loaded.len();
+            if n < 40 {
+                eprintln!("error: dataset too short ({n} rows); need at least 40");
                 return ExitCode::FAILURE;
             }
-        },
+            // A warmup, then split the rest into an in-sample + out-of-sample window.
+            let warm = (n / 10).clamp(10, 30);
+            let mid = (warm + n) / 2;
+            let w = vec![
+                Window {
+                    start: warm,
+                    end: mid,
+                },
+                Window { start: mid, end: n },
+            ];
+            (loaded, w)
+        }
         None => (
-            Dataset::synthetic(8, 180, 20_260_621),
+            loaded,
             vec![
                 Window {
                     start: 20,
@@ -2596,16 +2621,50 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// Load a frozen CSV for a trading command. A mark-time sheet beside it
+/// (`<name>.marks.json` next to `<name>.csv`) is attached, so the declared
+/// marks enter the dataset identity. `--masked` replaces the dataset with its
+/// masked view: opaque symbols and dates and a power-of-two rebased level,
+/// with every return and backtest outcome unchanged. The masked dataset has
+/// its own digest, so a trajectory captured masked verifies only masked.
+pub(crate) fn load_trading_dataset(
+    path: Option<&str>,
+    args: &[String],
+) -> Result<sharpebench_sim::Dataset, String> {
+    use sharpebench_sim::{Dataset, MarkSheet};
+    let mut data = match path {
+        Some(path) => {
+            let data = Dataset::from_csv_file(path)?;
+            let sidecar = format!("{}.marks.json", path.strip_suffix(".csv").unwrap_or(path));
+            match std::fs::read_to_string(&sidecar) {
+                Ok(text) => data.with_marks(MarkSheet::from_json(&text)?)?,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => data,
+                Err(error) => return Err(format!("cannot read {sidecar}: {error}")),
+            }
+        }
+        None => Dataset::synthetic(8, 180, 20_260_621),
+    };
+    if args.iter().any(|arg| arg == "--masked") {
+        data = data.masked().map_err(|e| e.to_string())?;
+    }
+    // A malformed cost flag is the caller's to refuse, with its own usage exit
+    // code; every caller validates the cost model on the same arguments.
+    if let Ok(costs) = cost_model_from_args(args) {
+        data.check_mark_timing(&costs).map_err(|e| e.to_string())?;
+    }
+    Ok(data)
+}
+
 /// Resolve the dataset + windows for the trajectory subcommands. Identical logic
 /// to `run_demo`'s resolver, so a `capture` and a `verify-trajectory` over the same
 /// `--data` (or both synthetic) replay against the byte-identical frozen dataset.
 fn resolve_dataset(
     args: &[String],
 ) -> Result<(sharpebench_sim::Dataset, Vec<sharpebench_sim::Window>), String> {
-    use sharpebench_sim::{Dataset, Window};
+    use sharpebench_sim::Window;
+    let d = load_trading_dataset(flag_value(args, "--data"), args)?;
     match flag_value(args, "--data") {
-        Some(path) => {
-            let d = Dataset::from_csv_file(path)?;
+        Some(_) => {
             let n = d.len();
             if n < 40 {
                 return Err(format!("dataset too short ({n} rows); need at least 40"));
@@ -2622,7 +2681,7 @@ fn resolve_dataset(
             Ok((d, w))
         }
         None => Ok((
-            Dataset::synthetic(8, 180, 20_260_621),
+            d,
             vec![
                 Window {
                     start: 20,
@@ -3501,10 +3560,10 @@ fn print_board(board: &[CompositeScore]) {
     let certified = board.iter().any(|s| s.certification.is_some());
     let certified_header = if certified { " certified" } else { "" };
     println!(
-        "{:<4} {:<18} {:>9} {:>8} {:>7} {:>6} {:>9} {:>10}{mandate_header}{certified_header}",
+        "{:<4} {:<18} {:>9} {:>8} {:>11} {:>6} {:>9} {:>10}{mandate_header}{certified_header}",
         "#", "agent", "DSR", "PSR", "pass^k", "proc", "boot_p", "raw_ret"
     );
-    println!("{}", "-".repeat(80));
+    println!("{}", "-".repeat(84));
     for (i, s) in board.iter().enumerate() {
         let pos = if s.rank_eligible {
             format!("{}", i + 1)
@@ -3531,12 +3590,12 @@ fn print_board(board: &[CompositeScore]) {
             String::new()
         };
         println!(
-            "{:<4} {:<18} {:>9.4} {:>8.4} {:>7} {:>6} {:>9.4} {:>10.5}{mandate}{certification}",
+            "{:<4} {:<18} {:>9.4} {:>8.4} {:>11} {:>6} {:>9.4} {:>10.5}{mandate}{certification}",
             pos,
             truncate(&s.agent_id, 18),
             s.deflated_sharpe,
             s.psr,
-            yn(s.passed_k),
+            pass_k_cell(s),
             yn(s.process_ok),
             s.bootstrap_p,
             s.raw_mean_return,
@@ -3547,6 +3606,9 @@ fn print_board(board: &[CompositeScore]) {
         board.iter().filter(|s| s.rank_eligible).count(),
         board.len()
     );
+    for line in pass_floor_notes(board) {
+        println!("{line}");
+    }
     if declared {
         println!(
             "Declared mandates are reported beside the board verdict, never ranked against it: \
@@ -3554,6 +3616,51 @@ fn print_board(board: &[CompositeScore]) {
              is eligibility under this board's verdict, and # counts the latter only."
         );
     }
+}
+
+/// The pass^k cell: the verdict, then how many of the k runs passed.
+fn pass_k_cell(s: &CompositeScore) -> String {
+    match s.runs_passed {
+        Some(passed) => format!("{} {passed}/{}", yn(s.passed_k), s.runs_scored),
+        None => yn(s.passed_k).to_string(),
+    }
+}
+
+/// One line per window whose pass^k floor is out of practical reach, so an
+/// unpassable window reads apart from a field that failed. Windows are the
+/// field's shared cells, so the first row that reports floors speaks for all.
+fn pass_floor_notes(board: &[CompositeScore]) -> Vec<String> {
+    let Some(row) = board.iter().find(|s| !s.window_bars.is_empty()) else {
+        return Vec::new();
+    };
+    let bound = sharpebench_core::pass_floor::PASS_FLOOR_PLAUSIBLE_MAX_ANNUAL_SHARPE;
+    let mut notes: Vec<String> = row
+        .implausible_windows
+        .iter()
+        .map(|&w| {
+            let bars = row.window_bars.get(w).copied().unwrap_or(0);
+            match row.window_pass_floors.get(w).copied().flatten() {
+                Some(floor) => format!(
+                    "pass^k floor: window {w} ({bars} bars) needs an annualized Sharpe of \
+                     {floor:.2} per run to clear the per-run bar, above the plausibility \
+                     bound of {bound:.2}"
+                ),
+                None => format!(
+                    "pass^k floor: window {w} ({bars} bars) has no Sharpe ratio with which a \
+                     run clears the per-run bar"
+                ),
+            }
+        })
+        .collect();
+    if row.pass_k_floors_plausible == Some(false) {
+        notes.push(
+            "Under this board's pass mode pass^k needs a window listed above, so its NO is \
+             expected of almost any track: it says the window is out of practical reach, not \
+             only that the field failed."
+                .to_string(),
+        );
+    }
+    notes
 }
 
 fn yn(b: bool) -> &'static str {
@@ -3577,6 +3684,43 @@ fn truncate(s: &str, n: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The board prints how many of the k runs passed beside the verdict, and
+    /// a note for each window whose floor is out of practical reach, so an
+    /// unpassable window reads apart from a field that failed.
+    #[test]
+    fn the_board_prints_pass_counts_and_flags_unpassable_windows() {
+        let run = |n: usize, drift: f64| sharpebench_core::Run {
+            returns: (0..n)
+                .map(|i| drift + if i % 2 == 0 { 1.0 } else { -1.0 })
+                .collect(),
+            ..sharpebench_core::Run::default()
+        };
+        let sub = AgentSubmission {
+            agent_id: "mixed".into(),
+            runs: vec![run(250, 0.5), run(250, 0.0), run(78, 0.5)],
+            ..AgentSubmission::default()
+        };
+        let score = sharpebench_core::score_agent(&sub, &ScoreConfig::default());
+        assert_eq!(pass_k_cell(&score), "NO 2/3");
+        let notes = pass_floor_notes(std::slice::from_ref(&score));
+        assert_eq!(notes.len(), 2, "{notes:?}");
+        assert!(
+            notes[0].starts_with("pass^k floor: window 2 (78 bars)"),
+            "{notes:?}"
+        );
+        assert!(notes[0].contains("2.32"), "{notes:?}");
+        assert!(notes[1].contains("out of practical reach"), "{notes:?}");
+
+        let long = AgentSubmission {
+            agent_id: "long".into(),
+            runs: vec![run(250, 0.5), run(250, 0.5)],
+            ..AgentSubmission::default()
+        };
+        let score = sharpebench_core::score_agent(&long, &ScoreConfig::default());
+        assert_eq!(pass_k_cell(&score), "yes 2/2");
+        assert!(pass_floor_notes(&[score]).is_empty());
+    }
 
     #[test]
     fn attempt_metadata_preserves_failed_work_without_changing_the_board() {
@@ -3978,6 +4122,57 @@ mod tests {
         assert_eq!(status.expected_cells, 16);
         assert_eq!(status.completed_cells, 8);
         assert_eq!(status.runtime_failed_cells, 8);
+    }
+
+    /// A live entrant that always overruns its decision budget used to exhaust
+    /// every cell as a retried transport fault, which made the sweep it was in
+    /// noncertifying. Driven here through a real silent subprocess: the
+    /// overrun is charged to the entrant and the sweep stays certifiable.
+    #[test]
+    fn an_always_slow_entrant_leaves_the_sweep_certifiable() {
+        let data = sharpebench_sim::Dataset::synthetic(3, 60, 5);
+        let windows = [sharpebench_sim::Window { start: 20, end: 60 }];
+        let seeds = [0u64, 1];
+        let res = sharpebench_harness::run_external_agent(
+            "always-slow",
+            &data,
+            &windows,
+            &seeds,
+            sharpebench_sim::CostModel::default(),
+            // The same retry bound the external sweep uses.
+            2,
+            || {
+                #[cfg(windows)]
+                let spawned = sharpebench_sim::ExternalAgent::spawn(
+                    "powershell",
+                    &[
+                        "-NoProfile",
+                        "-Command",
+                        "$null = [Console]::In.ReadLine(); Start-Sleep -Seconds 60",
+                    ],
+                );
+                #[cfg(not(windows))]
+                let spawned =
+                    sharpebench_sim::ExternalAgent::spawn("sh", &["-c", "read line; sleep 60"]);
+                Some(
+                    spawned
+                        .expect("the platform shell spawns")
+                        .with_decide_timeout(std::time::Duration::from_secs(2)),
+                )
+            },
+        );
+        assert!(res
+            .failures
+            .records
+            .iter()
+            .all(|r| r.kind == sharpebench_harness::FailureKind::DecisionBudgetExceeded));
+        let status = external_sweep_completeness(&res.failures, 2, res.submission.runs.len());
+        assert_eq!(status.runtime_failed_cells, 0);
+        assert_eq!(status.agent_failed_cells, 2);
+        assert!(
+            status.complete,
+            "one slow entrant must not deny certification to the sweep"
+        );
     }
 
     #[test]

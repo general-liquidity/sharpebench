@@ -21,6 +21,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Test the scope check
+        run: python3 -m unittest scripts/test_check_lean_scope.py
       - name: Check Lean module scope declarations
         run: python3 scripts/check-lean-scope.py
       - name: Verify selected forecast invariants
@@ -38,6 +40,48 @@ jobs:
           nanoda: false
           axiom-audit: true
           axiom-audit-root: SharpeBenchFormal
+      # Build, leanchecker and the axiom audit check that whatever is stated is proved. This
+      # checks what is stated: a weakened statement still proves, and changes this manifest.
+      - name: Pin theorem statements
+        working-directory: formal
+        run: |
+          lake env lean --run scripts/Statements.lean SharpeBenchFormal > "$RUNNER_TEMP/statements.txt"
+          diff -u statements.txt "$RUNNER_TEMP/statements.txt"
+      # A gate that has never been seen to fail proves nothing: plant each defect in a scratch
+      # copy and require the gate meant for it to refuse it.
+      - name: Negative controls for the formal gate
+        run: >-
+          python3 formal/scripts/negative_controls.py
+          --package formal --library SharpeBenchFormal
+          --file SharpeBenchFormal/Forecast.lean
+          --weaken "holmStep prior candidate cap ≤ cap := by" "holmStep prior candidate cap ≤ cap + 1 := by"
+          --cases cases/forecast.json
+          --case-mutation '"pair_support": [2]' '"pair_support": [2, 3]'
+
+  formal-samuelson:
+    name: Lean proof of the Samuelson bound (Mathlib, axiom audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Prove the bound sign_is_forced_by_moments relies on
+        uses: leanprover/lean-action@50fcf42d2e460296f1a34b402e990d1b24f8b596 # v1
+        with:
+          lake-package-directory: formal/samuelson
+          use-mathlib-cache: true
+          build: true
+          test: false
+          lint: false
+          # leanchecker would re-check all of Mathlib as well as this module.
+          leanchecker: false
+          nanoda: false
+          axiom-audit: true
+          axiom-audit-root: SharpeBenchSamuelson
+      - name: Pin theorem statements
+        working-directory: formal/samuelson
+        run: |
+          lake env lean --run ../scripts/Statements.lean SharpeBenchSamuelson > "$RUNNER_TEMP/statements.txt"
+          diff -u statements.txt "$RUNNER_TEMP/statements.txt"
 
   release-rehearsal:
     name: isolated release rehearsal
@@ -461,6 +505,13 @@ jobs:
         run: python -m unittest scripts/test_check_evidence_register.py
       - name: Every claim maps to an artifact and carries a disposition
         run: python scripts/check-evidence-register.py
+      # The evidence register binds the paper's own claims; this binds what it
+      # credits to others, in refs.bib and in the code's credit lines. It reads
+      # files only and fetches nothing.
+      - name: The citation register's own rules hold
+        run: python -m unittest scripts/test_check_citation_register.py
+      - name: Every bibliography key and code credit is in the citation register
+        run: python scripts/check-citation-register.py
       - name: Every recorded source and artifact matches the committed scope
         run: python paper/src/check-provenance.py
 
