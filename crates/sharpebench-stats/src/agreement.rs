@@ -1,11 +1,32 @@
-//! Does the automated gate agree with the human who triaged the gold set?
+//! Does an automated gate agree with a human who triaged the same items?
 //!
 //! SharpeBench decides things: eligible or not, disqualified or not, promoted to
-//! the board or held back. Those decisions are made by deterministic gates. The
-//! gold set was triaged by a person. Nothing in the kernel could previously say
-//! whether the two agree beyond raw hit-rate, and raw hit-rate is not an answer:
-//! two decision rules that both approve 95% of entries agree 90% of the time by
-//! arithmetic alone, having learned nothing about each other.
+//! the board or held back. Deterministic gates make those decisions. This module
+//! measures how well a gate's decisions match a human's decisions on the same
+//! items, and raw hit rate is not that measurement: two decision rules that both
+//! approve 95% of entries agree 90% of the time by arithmetic alone, having
+//! learned nothing about each other.
+//!
+//! # What exists and what does not
+//!
+//! The repository ships the agreement machinery in this module and nothing
+//! else. There is no human-triaged gold set in the repository, no committed
+//! human verdicts, and no published agreement figure, so no kappa, rho or
+//! per-class rate has been computed over real benchmark decisions. The tests
+//! below run on hand-built inputs with known answers.
+//!
+//! A gold set that this module could score would need, per item:
+//!
+//! - a stable item identifier tied to the evidence the gate read, so the gate
+//!   verdict can be recomputed from committed bytes;
+//! - the human's pass or fail verdict, recorded before the human saw the gate's
+//!   output, and optionally a graded severity for the rank leg;
+//! - the gate threshold in force when the gate verdict was taken.
+//!
+//! It would also need enough items in each human class for the per-class
+//! intervals ([`ClassRate::wilson_95`]) to be narrow enough to act on. At 20
+//! human fails, a gate that catches all 20 still has a 95% lower bound near
+//! 0.84 on its fail rate.
 //!
 //! This module answers it two ways, both pure and deterministic:
 //!
@@ -196,6 +217,73 @@ pub struct GateAgreement {
     pub gate_lenient: usize,
     /// Items the gate failed and the human passed.
     pub gate_strict: usize,
+    /// True positive rate, with "positive" meaning the human passed the item:
+    /// of the items the human passed, the share the gate also passed. `None`
+    /// when the human passed no item, because the rate has no denominator.
+    pub tpr: Option<ClassRate>,
+    /// True negative rate: of the items the human failed, the share the gate
+    /// also failed. `1 - tnr` is the rate at which the gate lets through what
+    /// the human would have stopped. `None` when the human failed no item.
+    pub tnr: Option<ClassRate>,
+}
+
+/// The share of one human class that the gate placed in the same class, with
+/// a 95% Wilson score interval.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ClassRate {
+    /// Items in the class on which the gate agreed with the human.
+    pub hits: usize,
+    /// Items the human placed in the class. Always at least 1.
+    pub total: usize,
+    /// `hits / total`.
+    pub rate: f64,
+    /// 95% Wilson score interval for `rate`.
+    pub wilson_95: ProportionInterval,
+}
+
+/// A two-sided interval for a proportion, inside `[0, 1]`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ProportionInterval {
+    pub lower: f64,
+    pub upper: f64,
+}
+
+/// The 0.975 quantile of the standard normal, for a two-sided 95% interval.
+/// The same constant `sharpebench-study` uses for its 95% Wilson interval.
+const Z_95: f64 = 1.959_963_984_540_054;
+
+/// 95% Wilson score interval for `hits` successes in `total` trials.
+///
+/// Wilson rather than Wald because the classes here are often small and the
+/// rates often near 0 or 1, where the Wald interval collapses to zero width:
+/// 20 hits out of 20 would read as certainty. Wilson keeps a lower bound below
+/// 1 there (about 0.839). Bounds are clamped into `[0, 1]`.
+///
+/// `None` when `total` is 0 or `hits > total`.
+pub fn wilson_interval_95(hits: usize, total: usize) -> Option<ProportionInterval> {
+    if total == 0 || hits > total {
+        return None;
+    }
+    let n = total as f64;
+    let x = hits as f64;
+    let z2 = Z_95 * Z_95;
+    let denominator = n + z2;
+    let center = (x + z2 / 2.0) / denominator;
+    let spread = Z_95 / denominator * (x * (n - x) / n + z2 / 4.0).sqrt();
+    Some(ProportionInterval {
+        lower: (center - spread).max(0.0),
+        upper: (center + spread).min(1.0),
+    })
+}
+
+fn class_rate(hits: usize, total: usize) -> Option<ClassRate> {
+    let wilson_95 = wilson_interval_95(hits, total)?;
+    Some(ClassRate {
+        hits,
+        total,
+        rate: hits as f64 / total as f64,
+        wilson_95,
+    })
 }
 
 /// Why kappa was withheld: one rater's marginal is degenerate.
@@ -318,6 +406,9 @@ pub fn gate_vs_human_with_fields(
         .filter(|(g, h)| !**g && **h)
         .count();
 
+    let human_passes = human_verdict.iter().filter(|v| **v).count();
+    let human_fails = n - human_passes;
+
     let constant = |v: &[bool]| v.iter().all(|x| *x) || v.iter().all(|x| !*x);
     let kappa_unavailable = match (constant(&gate_verdict), constant(human_verdict)) {
         (true, true) => Some(KappaUnavailable::BothConstant),
@@ -365,6 +456,8 @@ pub fn gate_vs_human_with_fields(
         rho: human_severity.and_then(|hs| spearman_rho(gate_severity, hs)),
         gate_lenient,
         gate_strict,
+        tpr: class_rate(human_passes - gate_strict, human_passes),
+        tnr: class_rate(human_fails - gate_lenient, human_fails),
     })
 }
 
@@ -633,6 +726,101 @@ mod tests {
         assert_eq!(best.field, "half");
         assert!(!best.inverted);
         assert!((best.agreement - 0.5).abs() < 1e-12);
+    }
+
+    fn close(actual: f64, expected: f64, what: &str) {
+        assert!(
+            (actual - expected).abs() < 1e-4,
+            "{what}: expected {expected}, got {actual}"
+        );
+    }
+
+    /// The 2x2 table of `kappa_matches_a_hand_computed_table`, read per class.
+    /// The human passed 30 items and the gate passed 20 of them; the human
+    /// failed 20 and the gate failed 15 of them. 15 of 20 at 95% is the
+    /// published Wilson case (0.5313, 0.8881) that `sharpebench-study` also pins.
+    #[test]
+    fn per_class_rates_match_a_hand_computed_table() {
+        let mut gate = Vec::new();
+        let mut human = Vec::new();
+        for (g, h, count) in [
+            (0.9, true, 20),
+            (0.9, false, 5),
+            (0.1, true, 10),
+            (0.1, false, 15),
+        ] {
+            for _ in 0..count {
+                gate.push(g);
+                human.push(h);
+            }
+        }
+        let r = gate_vs_human(&gate, 0.5, &human, None).unwrap();
+
+        let tpr = r.tpr.unwrap();
+        assert_eq!((tpr.hits, tpr.total), (20, 30));
+        assert!((tpr.rate - 20.0 / 30.0).abs() < 1e-12);
+        close(tpr.wilson_95.lower, 0.4878, "tpr lower");
+        close(tpr.wilson_95.upper, 0.8077, "tpr upper");
+
+        let tnr = r.tnr.unwrap();
+        assert_eq!((tnr.hits, tnr.total), (15, 20));
+        assert!((tnr.rate - 0.75).abs() < 1e-12);
+        close(tnr.wilson_95.lower, 0.5313, "tnr lower");
+        close(tnr.wilson_95.upper, 0.8881, "tnr upper");
+    }
+
+    /// A gate that passes everything agrees with a human who passes 18 of 20 on
+    /// 90% of items. The per-class split shows where that 90% comes from: it
+    /// passes every human pass and stops none of the two human fails.
+    #[test]
+    fn per_class_rates_expose_a_gate_that_stops_nothing() {
+        let mut human = [true; 20];
+        human[0] = false;
+        human[1] = false;
+        let r = gate_vs_human(&[1.0; 20], 0.5, &human, None).unwrap();
+        assert!((r.observed_agreement - 0.9).abs() < 1e-12);
+        let tpr = r.tpr.unwrap();
+        assert_eq!((tpr.hits, tpr.total, tpr.rate), (18, 18, 1.0));
+        close(
+            tpr.wilson_95.lower,
+            0.8241,
+            "a perfect rate on 18 items is not certain",
+        );
+        let tnr = r.tnr.unwrap();
+        assert_eq!((tnr.hits, tnr.total, tnr.rate), (0, 2, 0.0));
+        close(
+            tnr.wilson_95.upper,
+            0.6576,
+            "two items leave the fail rate wide open",
+        );
+    }
+
+    /// A rate over an empty human class has no denominator. It is withheld,
+    /// never reported as 0 or 1.
+    #[test]
+    fn a_rate_over_an_empty_human_class_is_withheld() {
+        let r = gate_vs_human(&[0.9, 0.1, 0.9], 0.5, &[true; 3], None).unwrap();
+        assert_eq!(r.tnr, None, "the human failed nothing");
+        assert_eq!(r.tpr.unwrap().total, 3);
+        let r = gate_vs_human(&[0.9, 0.1, 0.9], 0.5, &[false; 3], None).unwrap();
+        assert_eq!(r.tpr, None, "the human passed nothing");
+        assert_eq!(r.tnr.unwrap().hits, 1);
+    }
+
+    #[test]
+    fn wilson_interval_keeps_width_at_the_boundaries_and_refuses_impossible_counts() {
+        let none = wilson_interval_95(0, 20).unwrap();
+        assert!(none.lower.abs() < 1e-12, "lower bound at zero hits is 0");
+        close(
+            none.upper,
+            0.1611,
+            "zero hits still leave a positive upper bound",
+        );
+        let all = wilson_interval_95(20, 20).unwrap();
+        assert_eq!(all.upper, 1.0);
+        close(all.lower, 0.8389, "twenty of twenty is not certainty");
+        assert_eq!(wilson_interval_95(0, 0), None);
+        assert_eq!(wilson_interval_95(3, 2), None);
     }
 
     #[test]
