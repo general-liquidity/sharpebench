@@ -5,12 +5,16 @@
 //! boundary error rather than reporting a number derived from an unmatched task
 //! population, a nonfinite input, or an oracle that is not a ceiling.
 
-use sharpebench_memory::{ablation_report, poisoning_report, Arm, ArmCost, ArmScores};
+use sharpebench_memory::{
+    ablation_report, poisoning_report, Arm, ArmCost, ArmScores, ControlExposure,
+    ControlTaskExposure,
+};
 
 const EPS: f64 = 1e-9;
 
 fn baseline(scores: Vec<f64>) -> ArmScores {
-    ArmScores::new(Arm::Baseline, scores)
+    let clean = ControlExposure::new(vec![ControlTaskExposure::CLEAN; scores.len()]);
+    ArmScores::new(Arm::Baseline, scores).with_control_exposure(clean)
 }
 fn retrieval(scores: Vec<f64>) -> ArmScores {
     ArmScores::new(Arm::Retrieval, scores)
@@ -125,4 +129,63 @@ fn poisoning_refuses_nonfinite_scores_and_invalid_alpha() {
         );
     }
     assert!(poisoning_report(&clean, &dirty, 0.05).is_ok());
+}
+
+#[test]
+fn a_baseline_without_exposure_evidence_is_refused() {
+    let b = ArmScores::new(Arm::Baseline, vec![0.1, 0.2, 0.3]);
+    let r = retrieval(vec![0.5, 0.6, 0.7]);
+    let o = oracle(vec![0.9, 0.9, 0.9]);
+    let error = ablation_report(&b, &r, &o, 0.05)
+        .expect_err("a control with no exposure evidence is not a certified control");
+    assert!(error.contains("exposure evidence"), "{error}");
+}
+
+#[test]
+fn a_baseline_that_touched_memory_is_refused() {
+    let r = retrieval(vec![0.5, 0.6, 0.7]);
+    let o = oracle(vec![0.9, 0.9, 0.9]);
+    for (task, exposure) in [
+        (
+            1,
+            ControlTaskExposure {
+                retrievals: 1,
+                memory_reads: 0,
+            },
+        ),
+        (
+            2,
+            ControlTaskExposure {
+                retrievals: 0,
+                memory_reads: 3,
+            },
+        ),
+    ] {
+        let mut tasks = vec![ControlTaskExposure::CLEAN; 3];
+        tasks[task] = exposure;
+        let b = ArmScores::new(Arm::Baseline, vec![0.1, 0.2, 0.3])
+            .with_control_exposure(ControlExposure::new(tasks));
+        let error = ablation_report(&b, &r, &o, 0.05)
+            .expect_err("a contaminated control must not anchor a lift");
+        assert!(error.contains(&format!("task {task}")), "{error}");
+    }
+}
+
+#[test]
+fn control_exposure_must_cover_every_scored_task() {
+    let r = retrieval(vec![0.5, 0.6, 0.7]);
+    let o = oracle(vec![0.9, 0.9, 0.9]);
+    for covered in [2, 4] {
+        let b = ArmScores::new(Arm::Baseline, vec![0.1, 0.2, 0.3]).with_control_exposure(
+            ControlExposure::new(vec![ControlTaskExposure::CLEAN; covered]),
+        );
+        let error = ablation_report(&b, &r, &o, 0.05)
+            .expect_err("evidence for a different task count proves nothing about these tasks");
+        assert!(
+            error.contains(&format!("covers {covered} tasks")),
+            "{error}"
+        );
+    }
+    let b = baseline(vec![0.1, 0.2, 0.3]);
+    assert!(ablation_report(&b, &r, &o, 0.05).is_ok());
 }

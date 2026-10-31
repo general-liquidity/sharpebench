@@ -37,6 +37,15 @@ captured. Dividing by a negative gap instead returns a sign-flipped ratio, which
 reports a retrieval arm that also lost ground as having captured a favorable
 positive share of the ceiling.
 
+The baseline arm must also carry control exposure evidence
+(`ArmScores::with_control_exposure`): one host-observed record per scored task
+counting the retrievals the memory layer served and the memory reads the host
+saw. "No memory" is otherwise a configuration claim, and a control that retrieved
+or read a store makes the lift a comparison between two treated arms. The report
+is refused when the evidence is missing, covers a different number of tasks, or
+shows any retrieval or read. A host that cannot count memory use cannot certify a
+control arm, so missing evidence is never read as zero exposure.
+
 #### Migration from the unmatched-oracle report
 
 An oracle arm of a different length used to be accepted, and `fraction_of_ceiling`
