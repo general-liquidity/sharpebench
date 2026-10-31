@@ -685,6 +685,29 @@ mod tests {
         }
     }
 
+    /// A confidence at either end of `[0, 1]` hashes as a stated value, apart
+    /// from an unstated one, and `-0` hashes as `0` because the comparison reads
+    /// them as equal.
+    #[test]
+    fn the_content_identity_holds_confidence_at_its_boundary_values() {
+        let key = |confidence: Option<f64>| {
+            let mut stated = order("AAA", Action::Buy, 0.5, 0.0);
+            stated.confidence = confidence;
+            decision_content_sha256(
+                0,
+                &[ObservedDecision {
+                    observation_sha256: "o".to_string(),
+                    decision: &decision(vec![stated]),
+                }],
+            )
+        };
+        let (zero, one, unstated) = (key(Some(0.0)), key(Some(1.0)), key(None));
+        assert_ne!(zero, unstated);
+        assert_ne!(one, unstated);
+        assert_ne!(zero, one);
+        assert_eq!(key(Some(-0.0)), zero);
+    }
+
     fn order(symbol: &str, action: Action, target_weight: f64, confidence: f64) -> Order {
         Order {
             symbol: symbol.to_string(),
