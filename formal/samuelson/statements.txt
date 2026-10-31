@@ -1,0 +1,16 @@
+def SharpeBenchSamuelson.SignForced : {n : ℕ} → (Fin n → ℝ) → Prop
+  value: fun {n} x => 2 ≤ n ∧ |SharpeBenchSamuelson.mean x| * √↑n > SharpeBenchSamuelson.stdDev x * (↑n - 1)
+def SharpeBenchSamuelson.SignForcedByTStat : {n : ℕ} → (Fin n → ℝ) → Prop
+  value: fun {n} x => 2 ≤ n ∧ ↑n * SharpeBenchSamuelson.mean x ^ 2 > SharpeBenchSamuelson.sumSq x / (↑n - 1)
+def SharpeBenchSamuelson.mean : {n : ℕ} → (Fin n → ℝ) → ℝ
+  value: fun {n} x => (∑ i, x i) / ↑n
+theorem SharpeBenchSamuelson.pos_mul_mean_of_signForced : ∀ {n : ℕ} {x : Fin n → ℝ}, SharpeBenchSamuelson.SignForced x → ∀ (j : Fin n), 0 < x j * SharpeBenchSamuelson.mean x
+  axioms: [Classical.choice, Quot.sound, propext]
+theorem SharpeBenchSamuelson.samuelson_sq : ∀ {n : ℕ}, 0 < n → ∀ (x : Fin n → ℝ) (j : Fin n), ↑n * (x j - SharpeBenchSamuelson.mean x) ^ 2 ≤ (↑n - 1) * SharpeBenchSamuelson.sumSq x
+  axioms: [Classical.choice, Quot.sound, propext]
+def SharpeBenchSamuelson.stdDev : {n : ℕ} → (Fin n → ℝ) → ℝ
+  value: fun {n} x => √(SharpeBenchSamuelson.sumSq x / (↑n - 1))
+def SharpeBenchSamuelson.sumSq : {n : ℕ} → (Fin n → ℝ) → ℝ
+  value: fun {n} x => ∑ i, (x i - SharpeBenchSamuelson.mean x) ^ 2
+theorem SharpeBenchSamuelson.sum_sub_mean : ∀ {n : ℕ}, 0 < n → ∀ (x : Fin n → ℝ), ∑ i, (x i - SharpeBenchSamuelson.mean x) = 0
+  axioms: [Classical.choice, Quot.sound, propext]
