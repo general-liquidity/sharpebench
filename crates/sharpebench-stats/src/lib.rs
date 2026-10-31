@@ -57,9 +57,11 @@ pub mod agreement;
 pub mod deflated_sharpe;
 pub mod dissent;
 pub mod fdr;
+pub mod moment_credit;
 pub mod opt_in_diagnostics;
 pub mod paired_randomization;
 pub mod selection;
+pub mod serial_correlation;
 pub mod significance;
 pub mod stats;
 pub mod stylized_facts;
@@ -82,6 +84,10 @@ pub use dissent::{
     DEFAULT_MAX_LEVEL_DISSENT, DEFAULT_MAX_RANK_DISSENT,
 };
 pub use fdr::{benjamini_hochberg, fdr_verdict, FdrVerdict};
+pub use moment_credit::{
+    certify_without_moment_credit, deflated_sharpe_without_moment_credit,
+    NOT_CERTIFIED_WITHOUT_MOMENT_CREDIT,
+};
 pub use opt_in_diagnostics::{
     first_order_autocorrelation, manipulation_proof_performance,
     probabilistic_sharpe_ratio_autocorrelated, sharpe_standard_error_autocorrelated,
@@ -90,6 +96,10 @@ pub use opt_in_diagnostics::{
 pub use selection::{
     percentile_selection, selection_robustness, CandidateUtility, PercentileSelection,
     SelectionRobustness, Utility, DEFAULT_SELECTION_ALPHA, MIN_RECOMMENDED_SELECTION_ALPHA,
+};
+pub use serial_correlation::{
+    certify_under_serial_correlation, serially_corrected_deflated_sharpe,
+    within_window_autocorrelations, SerialCorrection, NOT_CERTIFIED_UNDER_SERIAL_CORRELATION,
 };
 pub use stylized_facts::{
     stylized_facts, validate_dataset, validate_dataset_with, RealismFailure, RealismThresholds,

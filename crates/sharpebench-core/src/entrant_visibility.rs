@@ -392,6 +392,7 @@ pub const COMPOSITE_SCORE_VISIBILITY: VisibilityAllowlist = VisibilityAllowlist 
         ("bootstrap_error", V),
         ("deflation_error", V),
         ("selection_error", V),
+        ("standard_error_refusal", V),
         ("raw_mean_return", V),
         ("rank_eligible", V),
         ("composite", V),
