@@ -353,7 +353,8 @@ impl Dataset {
     /// A contamination-masked copy: symbols renamed to opaque ids, dates
     /// replaced with plain indices, and every series rebased so its first
     /// nonzero close lies in `[64, 128)`. See [`Dataset::masked_view`], which
-    /// also returns the map back to the source symbols.
+    /// also returns the map back to the source symbols. (After KTD-Fin's data-side
+    /// masking.)
     pub fn masked(&self) -> Result<Dataset, MaskError> {
         self.masked_view().map(|view| view.dataset)
     }
