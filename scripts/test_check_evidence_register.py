@@ -218,7 +218,9 @@ class MissingArtifact(unittest.TestCase):
 
 class MissingLabelSource(unittest.TestCase):
     """A label source that disappears fails coverage instead of leaving it with
-    nothing to check. Each case deletes one file from a copy of the paper."""
+    nothing to check. The cases delete one file from a copy of this product's
+    paper, or from a small tree whose section inputs a nested fragment, so the
+    same test runs unchanged in both products."""
 
     def coverage_without(self, relative: str | None) -> list[str]:
         import shutil
@@ -234,16 +236,17 @@ class MissingLabelSource(unittest.TestCase):
                 for line in CHECK.REGISTER_JSONL.read_text(encoding="utf-8").splitlines()
                 if line.strip()
             ]
-            original = CHECK.LABEL_SOURCES
-            CHECK.LABEL_SOURCES = [paper / "main.tex"] + sorted(
-                (paper / "sections").glob("*.tex")
-            )
-            try:
-                problems: list[str] = []
-                CHECK.check_coverage(rows, problems)
-            finally:
-                CHECK.LABEL_SOURCES = original
-            return problems
+            return self.coverage(paper, rows)
+
+    def coverage(self, paper: pathlib.Path, rows: list[dict]) -> list[str]:
+        original = CHECK.LABEL_SOURCES
+        CHECK.LABEL_SOURCES = [paper / "main.tex"] + sorted((paper / "sections").glob("*.tex"))
+        try:
+            problems: list[str] = []
+            CHECK.check_coverage(rows, problems)
+        finally:
+            CHECK.LABEL_SOURCES = original
+        return problems
 
     def test_the_full_copy_has_no_coverage_problem(self):
         self.assertEqual(self.coverage_without(None), [])
@@ -252,19 +255,49 @@ class MissingLabelSource(unittest.TestCase):
         problems = self.coverage_without("main.tex")
         self.assertTrue(any("main.tex is not on disk" in p for p in problems), problems)
 
-    def test_a_deleted_nested_fragment_fails(self):
-        # Named only by an \input inside a section, not by main.tex.
-        problems = self.coverage_without("sections/power-fragment.tex")
-        self.assertTrue(any("power-fragment.tex is not on disk" in p for p in problems), problems)
-
     def test_a_deleted_input_section_fails(self):
         # The glob no longer lists the deleted file, so only the \input in
         # main.tex can say that it is missing.
-        problems = self.coverage_without("sections/05-experiments.tex")
-        self.assertTrue(
-            any("05-experiments.tex is not on disk" in p for p in problems), problems
-        )
+        main = (ROOT / "paper" / "main.tex").read_text(encoding="utf-8")
+        name = CHECK.INPUT_PATTERN.findall(main)[0]
+        relative = name if name.endswith(".tex") else name + ".tex"
+        problems = self.coverage_without(relative)
+        missing = pathlib.PurePosixPath(relative).name
+        self.assertTrue(any(f"{missing} is not on disk" in p for p in problems), problems)
 
+    def nested_tree(self, directory: str, with_fragment: bool) -> pathlib.Path:
+        """main.tex inputs one section, and that section inputs a fragment that
+        sits outside the sections glob, so only the nested input names it."""
+        paper = pathlib.Path(directory) / "paper"
+        (paper / "sections").mkdir(parents=True)
+        (paper / "main.tex").write_text(r"\input{sections/01-body}" "\n", encoding="utf-8")
+        # TeX resolves the nested path from main.tex's directory, not the section's.
+        # The commented-out \input names a file that never exists and is ignored.
+        (paper / "sections" / "01-body.tex").write_text(
+            r"\label{tab:body}" "\n" r"% \input{fragments/commented-out}" "\n"
+            r"\input{fragments/nested}" "\n",
+            encoding="utf-8",
+        )
+        if with_fragment:
+            (paper / "fragments").mkdir()
+            (paper / "fragments" / "nested.tex").write_text(
+                r"\label{fig:nested}" "\n", encoding="utf-8"
+            )
+        return paper
+
+    def test_a_nested_fragment_label_needs_a_row(self):
+        with tempfile.TemporaryDirectory() as directory:
+            paper = self.nested_tree(directory, with_fragment=True)
+            problems = self.coverage(paper, [good_row(labels=["tab:body"])])
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("fig:nested has no register row", problems[0])
+
+    def test_a_deleted_nested_fragment_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            paper = self.nested_tree(directory, with_fragment=False)
+            problems = self.coverage(paper, [good_row(labels=["tab:body"])])
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("nested.tex is not on disk", problems[0])
 
 class MissingDisposition(unittest.TestCase):
     def test_an_absent_disposition_fails(self):
