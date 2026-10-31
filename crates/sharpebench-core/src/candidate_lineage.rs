@@ -2128,6 +2128,30 @@ pub fn verify_journal_chain(journal: &[JournalRecord]) -> Result<usize, Candidat
 mod tests {
     use super::*;
 
+    /// `journal_chains_verified` is omitted at zero, so a census of a journal
+    /// older than the chain keeps its bytes, and written at any other count.
+    #[test]
+    fn a_census_writes_the_chain_count_only_when_it_is_not_zero() {
+        let report = |journal_chains_verified| TestSplitCensusReport {
+            schema_version: 1,
+            evidence_class: "e".to_string(),
+            scope: "s".to_string(),
+            records: 2,
+            completed_records: 2,
+            failed_records: 0,
+            unidentified_records: 0,
+            declared_censuses_verified: 0,
+            journal_chains_verified,
+            splits: Vec::new(),
+            journal: Vec::new(),
+        };
+        let written = |count| serde_json::to_value(report(count)).unwrap();
+        assert!(written(0).get("journal_chains_verified").is_none());
+        assert_eq!(written(2)["journal_chains_verified"], 2);
+        let back: TestSplitCensusReport = serde_json::from_value(written(0)).unwrap();
+        assert_eq!(back.journal_chains_verified, 0);
+    }
+
     fn candidate(id: &str, threshold: f64) -> Value {
         serde_json::json!({
             "id": id,
