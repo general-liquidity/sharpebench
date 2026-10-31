@@ -547,6 +547,8 @@ mod tests {
                 input_tokens: 10,
                 output_tokens: 5,
                 usd_nanos: "20".into(),
+                cache_read_input_tokens: None,
+                cache_write_input_tokens: None,
             },
             FinishClass::Length,
         );

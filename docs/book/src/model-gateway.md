@@ -423,6 +423,19 @@ other, and still requires the same routes, budget and sweep. A journal moves to
 v2 on the save that records its first class, which is the settlement of the
 first parsed answer. Loading a journal never rewrites it.
 
+Provider usage can also carry `cache_read_input_tokens` and
+`cache_write_input_tokens`, the prompt-cache reads and writes the provider
+reported. Each is optional, and an absent count means the provider did not
+report it, never zero. A priced settlement records both as reported, and they
+are not priced: rate card v1 prices `input_tokens` as the provider reported
+them and does not model cache discounts, and providers differ on whether
+`input_tokens` already includes cached tokens, which is why the counts are kept
+apart. A journal in which any settlement holds a cache count is written as
+`sharpebench.gateway-journal.v3`, on the same rollback rule as v2: an older
+binary would drop the count, so it refuses the document instead. The
+host-observed usage on the row sums each count over the priced calls, and
+publishes the sum only when every priced call reported that count.
+
 After a sweep records a class, only a binary that reads v2 can resume its
 journal. To run an older binary, start it on a fresh journal and checkpoint
 pair.

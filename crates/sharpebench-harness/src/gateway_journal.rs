@@ -33,6 +33,15 @@ pub const JOURNAL_SCHEMA_VERSION: &str = "sharpebench.gateway-journal.v1";
 /// records, so no caller can write a class under v1.
 pub const JOURNAL_SCHEMA_VERSION_V2: &str = "sharpebench.gateway-journal.v2";
 
+/// The version of a journal in which any priced settlement carries a
+/// provider-reported cache count.
+///
+/// The same rollback rule as [`JOURNAL_SCHEMA_VERSION_V2`]: a binary built
+/// before the cache counts existed would drop them on its next save, so a
+/// journal holding one is written under a version such a binary refuses. A
+/// journal with no cache count keeps the version it had.
+pub const JOURNAL_SCHEMA_VERSION_V3: &str = "sharpebench.gateway-journal.v3";
+
 /// Schema of the document a [`JournalLock`] writes. A lock is not a journal:
 /// it lives at a different path, carries a different schema version and is
 /// refused by [`GatewayJournal::load_bound`] like any other foreign document.
@@ -85,6 +94,16 @@ pub enum Settlement {
         input_tokens: u64,
         output_tokens: u64,
         usd_nanos: String,
+        /// Input tokens the provider reported serving from its prompt cache.
+        /// Absent means the provider did not report the count, never zero.
+        /// Recorded, not priced: rate card v1 prices `input_tokens` as the
+        /// provider reported them and does not model cache discounts.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cache_read_input_tokens: Option<u64>,
+        /// Input tokens the provider reported writing into its prompt cache.
+        /// Absent means unreported, never zero. Recorded, not priced.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cache_write_input_tokens: Option<u64>,
     },
     /// The call is charged at its full reservation because its true cost is not
     /// knowable. Never a refund and never a zero.
@@ -218,7 +237,9 @@ impl JournalIdentity {
 }
 
 fn is_readable_version(version: &str) -> bool {
-    version == JOURNAL_SCHEMA_VERSION || version == JOURNAL_SCHEMA_VERSION_V2
+    version == JOURNAL_SCHEMA_VERSION
+        || version == JOURNAL_SCHEMA_VERSION_V2
+        || version == JOURNAL_SCHEMA_VERSION_V3
 }
 
 /// Derived spend state. Every field is a fold over the records; none of it is
@@ -1234,6 +1255,22 @@ impl GatewayJournal {
     /// The schema version these records need on disk. See
     /// [`JOURNAL_SCHEMA_VERSION_V2`].
     pub fn required_schema_version(&self) -> &'static str {
+        let holds_a_cache_count = self.records.iter().any(|record| {
+            matches!(
+                record,
+                JournalRecord::Settled {
+                    settlement: Settlement::Priced {
+                        cache_read_input_tokens,
+                        cache_write_input_tokens,
+                        ..
+                    },
+                    ..
+                } if cache_read_input_tokens.is_some() || cache_write_input_tokens.is_some()
+            )
+        });
+        if holds_a_cache_count {
+            return JOURNAL_SCHEMA_VERSION_V3;
+        }
         let holds_a_class = self.records.iter().any(|record| {
             matches!(
                 record,
@@ -1258,6 +1295,44 @@ impl GatewayJournal {
             finish_reason: Some(finish),
             settlement,
         });
+    }
+
+    /// Provider-reported prompt-cache reads and writes summed over every priced
+    /// settlement, as `(read, write)`. Each total is present only when every
+    /// priced call reported that count: a sum over the calls that happened to
+    /// report it would read as the whole sweep's figure. Absent means
+    /// unreported, never zero, and a journal with no priced call has neither.
+    pub fn cache_token_totals(&self) -> (Option<u64>, Option<u64>) {
+        let mut read = Some(0_u64);
+        let mut write = Some(0_u64);
+        let mut priced = false;
+        // inv: each total is the saturating sum over the priced settlements
+        // visited so far, or None once one of them did not report that count.
+        for record in &self.records {
+            if let JournalRecord::Settled {
+                settlement:
+                    Settlement::Priced {
+                        cache_read_input_tokens,
+                        cache_write_input_tokens,
+                        ..
+                    },
+                ..
+            } = record
+            {
+                priced = true;
+                read = read
+                    .zip(*cache_read_input_tokens)
+                    .map(|(a, b)| a.saturating_add(b));
+                write = write
+                    .zip(*cache_write_input_tokens)
+                    .map(|(a, b)| a.saturating_add(b));
+            }
+        }
+        if priced {
+            (read, write)
+        } else {
+            (None, None)
+        }
     }
 
     /// Fold the settlements into counts by stop reason. Like [`Self::spend`],
@@ -1621,6 +1696,8 @@ mod tests {
                 input_tokens: 10,
                 output_tokens: 10,
                 usd_nanos: "50".into(),
+                cache_read_input_tokens: None,
+                cache_write_input_tokens: None,
             },
         );
         journal.save(&path).expect("save");
@@ -2285,6 +2362,8 @@ mod tests {
                 input_tokens: 10,
                 output_tokens: 10,
                 usd_nanos: "20".into(),
+                cache_read_input_tokens: None,
+                cache_write_input_tokens: None,
             },
         );
         let unknown = journal.reserve("alias", &card, 500);
@@ -2340,6 +2419,8 @@ mod tests {
                 input_tokens: 10,
                 output_tokens: 10,
                 usd_nanos: "20".into(),
+                cache_read_input_tokens: None,
+                cache_write_input_tokens: None,
             },
         );
         match journal.monetary_summary(Some(&card)) {

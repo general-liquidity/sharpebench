@@ -90,6 +90,8 @@ impl ProviderTransport for ScriptedProvider {
                     .map(|(input_tokens, output_tokens)| ProviderUsage {
                         input_tokens,
                         output_tokens,
+                        cache_read_input_tokens: None,
+                        cache_write_input_tokens: None,
                     }),
             })
             .expect("a provider body serializes"),

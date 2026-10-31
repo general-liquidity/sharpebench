@@ -562,6 +562,16 @@ pub struct ProviderBody {
 pub struct ProviderUsage {
     pub input_tokens: u64,
     pub output_tokens: u64,
+    /// Input tokens served from the provider's prompt cache, when the provider
+    /// reports the count. Absent means unreported, never zero. Whether
+    /// `input_tokens` already includes them differs by provider, which is why
+    /// the count is kept apart instead of folded in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_read_input_tokens: Option<u64>,
+    /// Input tokens written into the provider's prompt cache, when reported.
+    /// Absent means unreported, never zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_write_input_tokens: Option<u64>,
 }
 
 /// What the host hands a transport.
@@ -1214,6 +1224,8 @@ impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
                     input_tokens: usage.input_tokens,
                     output_tokens: usage.output_tokens,
                     usd_nanos: usd_nanos.to_string(),
+                    cache_read_input_tokens: usage.cache_read_input_tokens,
+                    cache_write_input_tokens: usage.cache_write_input_tokens,
                 },
                 None => Settlement::Unknown {
                     reason: UnknownCostReason::AmbiguousAfterCommit,
@@ -1381,6 +1393,8 @@ mod tests {
             usage: usage.map(|(input_tokens, output_tokens)| ProviderUsage {
                 input_tokens,
                 output_tokens,
+                cache_read_input_tokens: None,
+                cache_write_input_tokens: None,
             }),
         })
         .expect("a provider body serializes")
@@ -1948,6 +1962,80 @@ mod tests {
         assert_eq!(gateway.dispatches(), 1);
         // Ten input plus five output tokens at one nanodollar each.
         assert_eq!(gateway.journal().spend().priced_usd_nanos, 15);
+    }
+
+    /// Cache counts the provider reports reach the settlement as reported, an
+    /// unreported count stays absent rather than becoming zero, and a sweep
+    /// total exists only when every priced call reported it. A journal that
+    /// holds a count is written under v3, which a binary that would drop the
+    /// count refuses.
+    #[test]
+    fn reported_cache_counts_are_recorded_and_unreported_ones_stay_absent() {
+        let routes = table("2026-01-01");
+        let permits = CallPermits::new(4);
+        let cached = br#"{"text":"ok","finish_reason":"stop","usage":{"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":7,"cache_write_input_tokens":0}}"#;
+        let script = vec![
+            ProviderOutcome::Answered {
+                status: 200,
+                body: cached.to_vec(),
+            },
+            ProviderOutcome::Answered {
+                status: 200,
+                body: body("ok", Some((10, 5))),
+            },
+        ];
+        let mut gateway = ModelGateway::new(
+            &routes,
+            &permits,
+            FakeProvider::new(script),
+            budget(u128::MAX, 32),
+            GatewayLimits::default(),
+        );
+        assert!(parse(&gateway.serve_line(&request("hello", 16))).ok);
+        let settled: Vec<Settlement> = gateway
+            .journal()
+            .records()
+            .iter()
+            .filter_map(|record| match record {
+                JournalRecord::Settled { settlement, .. } => Some(settlement.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(matches!(
+            settled[0],
+            Settlement::Priced {
+                cache_read_input_tokens: Some(7),
+                cache_write_input_tokens: Some(0),
+                ..
+            }
+        ));
+        // A reported zero is a measurement and is kept as one.
+        assert_eq!(gateway.journal().cache_token_totals(), (Some(7), Some(0)));
+        assert_eq!(
+            gateway.journal().required_schema_version(),
+            crate::gateway_journal::JOURNAL_SCHEMA_VERSION_V3
+        );
+        // Pricing is unchanged: ten input plus five output at one nanodollar.
+        assert_eq!(gateway.journal().spend().priced_usd_nanos, 15);
+
+        assert!(parse(&gateway.serve_line(&request("again", 16))).ok);
+        let last = gateway.journal().records().last().cloned();
+        assert!(matches!(
+            last,
+            Some(JournalRecord::Settled {
+                settlement: Settlement::Priced {
+                    cache_read_input_tokens: None,
+                    cache_write_input_tokens: None,
+                    ..
+                },
+                ..
+            })
+        ));
+        assert_eq!(
+            gateway.journal().cache_token_totals(),
+            (None, None),
+            "one priced call did not report, so no sweep total exists"
+        );
     }
 
     /// Every dispatch, retries included, is reserved and settled exactly once.
