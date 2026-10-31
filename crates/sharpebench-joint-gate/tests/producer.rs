@@ -384,7 +384,9 @@ fn per_seed_paths_can_only_be_stricter_than_each_seed() {
         block: b.id.clone(),
         dgp: "iid".to_string(),
         history_bars: 120,
-        effect_annual: 200.0,
+        // A planted edge of 200 annual Sharpe leaves the focal track with no
+        // losing bar, which the scorer now refuses as showing no observed risk.
+        effect_annual: 20.0,
         rule: "small".to_string(),
         block_prob: 0.1,
         seed_path: SeedPath::PerSeed,
