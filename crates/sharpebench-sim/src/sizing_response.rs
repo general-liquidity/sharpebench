@@ -665,6 +665,7 @@ mod tests {
             dates: (0..bars).map(|t| format!("t{t:03}")).collect(),
             closes: series,
             dividends: BTreeMap::new(),
+            marks: None,
         }
     }
 

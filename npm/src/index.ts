@@ -48,10 +48,48 @@ function parse<T>(json: string): T {
   return value as T;
 }
 
+/**
+ * A lone UTF-16 surrogate: a high surrogate not followed by a low one, or a low
+ * surrogate not preceded by a high one. Such a string has no UTF-8 encoding.
+ */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/** The refusal for text that cannot cross into the kernel as UTF-8. */
+export class InvalidUtf8Error extends Error {
+  constructor(where: string) {
+    super(
+      `InvalidUtf8: ${where} contains a lone UTF-16 surrogate, which has no UTF-8 ` +
+        `encoding. Refusing it rather than letting it reach the kernel as U+FFFD.`,
+    );
+    this.name = "InvalidUtf8Error";
+  }
+}
+
+function checkText(text: string, where: string): void {
+  if (LONE_SURROGATE.test(text)) throw new InvalidUtf8Error(where);
+}
+
+/**
+ * Serialize a kernel argument, refusing any key or string value the kernel could only
+ * receive as replacement characters. Without this the refusal would depend on which
+ * path the text took and on the wasm-bindgen glue in `pkg/`: `JSON.stringify` escapes
+ * a lone surrogate as `\ud800`, which serde_json rejects with an unrelated parse
+ * message, while a string handed to the glue directly is encoded by `TextEncoder`,
+ * which substitutes U+FFFD and succeeds. Each export returns a Rust `String`, valid
+ * UTF-8 by construction, so the other direction cannot carry an invalid sequence.
+ */
+function toJson(value: unknown, what: string): string {
+  return JSON.stringify(value, function (key: string, v: unknown) {
+    checkText(key, `${what} key`);
+    if (typeof v === "string") checkText(v, key === "" ? what : `${what}.${key}`);
+    return v;
+  });
+}
+
 /** Empty/absent config → `""`, which the kernel reads as "use defaults". */
-function optJson(value: object | undefined): string {
+function optJson(value: object | undefined, what: string): string {
   if (!value || Object.keys(value).length === 0) return "";
-  return JSON.stringify(value);
+  return toJson(value, what);
 }
 
 /**
@@ -63,7 +101,7 @@ export function score(
   submissions: AgentSubmission[],
   config?: ScoreConfig,
 ): CompositeScore[] {
-  return parse(kernel.score(JSON.stringify(submissions), optJson(config)));
+  return parse(kernel.score(toJson(submissions, "submissions"), optJson(config, "config")));
 }
 
 /**
@@ -74,7 +112,7 @@ export function scoreAgent(
   submission: AgentSubmission,
   config?: ScoreConfig,
 ): CompositeScore {
-  return parse(kernel.score_agent(JSON.stringify(submission), optJson(config)));
+  return parse(kernel.score_agent(toJson(submission, "submission"), optJson(config, "config")));
 }
 
 /** Fire the known gaming attacks at the scorer and report whether each is demoted. */
@@ -87,7 +125,7 @@ export function auditBriefing(
   briefing: Briefing,
   policy?: BriefingPolicy,
 ): BriefingAudit {
-  return parse(kernel.audit_briefing(JSON.stringify(briefing), optJson(policy)));
+  return parse(kernel.audit_briefing(toJson(briefing, "briefing"), optJson(policy, "policy")));
 }
 
 /** Score a target-allocation trajectory: weight validity + L1 turnover. */
@@ -96,18 +134,19 @@ export function scoreAllocation(
   policy?: AllocationPolicy,
 ): AllocationReport {
   return parse(
-    kernel.score_allocation(JSON.stringify(trajectory), optJson(policy)),
+    kernel.score_allocation(toJson(trajectory, "trajectory"), optJson(policy, "policy")),
   );
 }
 
 /** Price and local Greeks for one long European option. Throws for invalid inputs
  * or undefined Greeks at a payoff kink. Does not infer payoff-loss boundedness. */
 export function greeks(params: GreeksParams): GreeksResult {
-  return parse(kernel.greeks(JSON.stringify(params)));
+  return parse(kernel.greeks(toJson(params, "params")));
 }
 
 /** Derive a deterministic do-not-train contamination tripwire from seed material. */
 export function canary(seed: string): Canary {
+  checkText(seed, "seed");
   return parse(kernel.canary(seed));
 }
 
@@ -146,7 +185,7 @@ function honestyConfigJson(opts: HonestyOpts): string {
     }
     cfg[key] = value;
   }
-  return JSON.stringify(cfg);
+  return toJson(cfg, "opts");
 }
 
 /** Map the kernel's snake_case HonestyVerdict JSON → the camelCase {@link HonestyVerdict}. */
@@ -181,7 +220,7 @@ export function isMySharpeReal(
   opts: HonestyOpts,
 ): HonestyVerdict {
   const raw = parse<Record<string, unknown>>(
-    kernel.is_my_sharpe_real(JSON.stringify(returns), honestyConfigJson(opts)),
+    kernel.is_my_sharpe_real(toJson(returns, "returns"), honestyConfigJson(opts)),
   );
   return toHonestyVerdict(raw);
 }
@@ -201,7 +240,7 @@ export function isMySharpeRealFull(
 ): FullVerdict {
   const raw = parse<Record<string, unknown>>(
     kernel.is_my_sharpe_real_full(
-      JSON.stringify(field),
+      toJson(field, "field"),
       winnerIdx,
       honestyConfigJson(opts),
     ),
@@ -248,7 +287,7 @@ export function percentileSelection(
   if (opts?.nBoot !== undefined) params.n_boot = opts.nBoot;
   if (opts?.blockProb !== undefined) params.block_prob = opts.blockProb;
   return parse(
-    kernel.percentile_selection(JSON.stringify(candidates), optJson(params)),
+    kernel.percentile_selection(toJson(candidates, "candidates"), optJson(params, "opts")),
   );
 }
 
@@ -266,12 +305,12 @@ export function percentileSelection(
 export function decomposeUncertainty(input: UncertaintyInput): UncertaintySplit {
   return parse(
     kernel.decompose_uncertainty(
-      JSON.stringify({
+      toJson({
         outcomes: input.outcomes,
         signals: input.signals,
         case_returns: input.caseReturns,
         reference_returns: input.referenceReturns,
-      }),
+      }, "input"),
     ),
   );
 }
@@ -293,7 +332,7 @@ export function crowdingHalfLife(
     delta_max: params.deltaMax,
   };
   if (params.curvature !== undefined) cfg.curvature = params.curvature;
-  return parse(kernel.crowding_half_life(JSON.stringify(cfg)));
+  return parse(kernel.crowding_half_life(toJson(cfg, "params")));
 }
 
 /**
@@ -309,8 +348,8 @@ export function classifyDisqualification(
 ): DisqualificationReport[] {
   return parse(
     kernel.classify_disqualification(
-      JSON.stringify(submissions),
-      optJson(config),
+      toJson(submissions, "submissions"),
+      optJson(config, "config"),
     ),
   );
 }
@@ -332,10 +371,10 @@ export function regimeCompare(
   if (opts?.tieTol !== undefined) options.tie_tol = opts.tieTol;
   return parse(
     kernel.regime_compare(
-      JSON.stringify(returnsA),
-      JSON.stringify(returnsB),
-      JSON.stringify(regimes),
-      optJson(options),
+      toJson(returnsA, "returnsA"),
+      toJson(returnsB, "returnsB"),
+      toJson(regimes, "regimes"),
+      optJson(options, "opts"),
     ),
   );
 }

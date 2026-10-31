@@ -306,6 +306,77 @@ pub enum ActivationEvidence {
     },
 }
 
+/// What the host saw a control (no-memory) arm do with memory on one task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ControlTaskExposure {
+    /// Retrievals the memory layer served to the agent on this task.
+    pub retrievals: u64,
+    /// Memory reads the host observed on this task, outside the retrieval path
+    /// (a store opened, a memory file read).
+    pub memory_reads: u64,
+}
+
+impl ControlTaskExposure {
+    /// A task on which the host saw no retrieval and no memory read.
+    pub const CLEAN: Self = Self {
+        retrievals: 0,
+        memory_reads: 0,
+    };
+
+    /// Whether the host saw no memory use at all on this task.
+    pub fn is_clean(&self) -> bool {
+        self.retrievals == 0 && self.memory_reads == 0
+    }
+}
+
+/// Exposure evidence for the control arm of an ablation: one host-observed
+/// record per task, in the arm's task order.
+///
+/// A baseline that is called "no memory" is a configuration claim. A lift over
+/// it measures the memory layer only when the baseline really ran without
+/// memory: a control arm that retrieved, or read a memory store the treatment
+/// also reads, is a contaminated control, and the lift then understates or
+/// misattributes the treatment. [`crate::ablation_report`] therefore refuses a
+/// baseline with no exposure evidence, with evidence for a different number of
+/// tasks, or with any task that shows a retrieval or a memory read. The counts
+/// are what the host that ran the arm observed; the crate cannot observe them
+/// itself, and a host that cannot count memory use cannot certify a control arm.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ControlExposure {
+    /// One record per scored task, aligned with the arm's scores.
+    pub tasks: Vec<ControlTaskExposure>,
+}
+
+impl ControlExposure {
+    /// Exposure evidence from per-task host observations.
+    pub fn new(tasks: Vec<ControlTaskExposure>) -> Self {
+        Self { tasks }
+    }
+
+    /// Check that this evidence covers exactly `task_count` tasks and shows no
+    /// memory use on any of them. The error names the first offending task.
+    pub fn verify_clean(&self, task_count: usize) -> Result<(), String> {
+        if self.tasks.len() != task_count {
+            return Err(format!(
+                "control exposure evidence covers {} tasks but the arm scores {task_count}",
+                self.tasks.len()
+            ));
+        }
+        // inv: every task before `index` was clean.
+        for (index, task) in self.tasks.iter().enumerate() {
+            if !task.is_clean() {
+                return Err(format!(
+                    "control arm task {index} was exposed to memory: {} retrievals, {} memory reads",
+                    task.retrievals, task.memory_reads
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// The declared compute budget a treatment ran under. Compared for equality only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

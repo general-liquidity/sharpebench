@@ -71,7 +71,8 @@ pub mod validation;
 pub use validation::StatisticalError;
 
 pub use agreement::{
-    binarize, cohens_kappa, cohens_kappa_binary, gate_vs_human, spearman_rho, GateAgreement,
+    binarize, cohens_kappa, cohens_kappa_binary, gate_vs_human, gate_vs_human_with_fields,
+    spearman_rho, FieldBaseline, GateAgreement, KappaUnavailable,
 };
 pub use deflated_sharpe::{
     deflated_sharpe_ratio, expected_max_sharpe, is_constant_track, observed_sharpe_ratio,
@@ -94,8 +95,9 @@ pub use opt_in_diagnostics::{
     sharpe_variance_factor, StandardErrorAt, DEFAULT_MPPM_RISK_AVERSION,
 };
 pub use selection::{
-    percentile_selection, selection_robustness, CandidateUtility, PercentileSelection,
-    SelectionRobustness, Utility, DEFAULT_SELECTION_ALPHA, MIN_RECOMMENDED_SELECTION_ALPHA,
+    percentile_selection, selection_robustness, stationary_bootstrap_path, CandidateUtility,
+    PercentileSelection, SelectionRobustness, Utility, DEFAULT_SELECTION_ALPHA,
+    MIN_RECOMMENDED_SELECTION_ALPHA,
 };
 pub use serial_correlation::{
     certify_under_serial_correlation, serially_corrected_deflated_sharpe,

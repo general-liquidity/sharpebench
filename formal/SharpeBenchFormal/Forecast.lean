@@ -16,9 +16,14 @@ pair receives inference, the separation between forecast reporting and trading r
 the Holm adjustment, and the finite-bootstrap plus-one correction. The theorems are proved about
 this model.
 
-The model is not mechanically linked to the Rust implementation. No Rust, Python or TOML file
-references a declaration in this module, and there is no extraction or refinement proof relating
-the two. Separate executable Rust tests cover the same rules independently of this model: the unit
+The model is linked to the Rust implementation by one mechanism only: the shared case table
+`formal/cases/forecast.json`, which `formal/SharpeBenchFormal/Cases.lean` evaluates against
+`pairSupport`, `commonSupport` and `admittedDecision` while the library builds, and which
+`crates/sharpebench-core/tests/formal_cases.rs` evaluates against the differenced contract count
+and the unequal-support refusal of the production report. The Holm step, the bootstrap counts and
+the rank projection have no case in that table. There is no extraction or refinement proof
+relating model and code, and agreement on a finite table is not one. Separate executable Rust
+tests cover the same rules independently of this model: the unit
 tests in `crates/sharpebench-core/src/forecast.rs` and the integration tests in
 `crates/sharpebench-core/tests/forecast_settlement_and_support.rs` and
 `crates/sharpebench-core/tests/forecast_partial_support.rs` exercise pair support, the Holm
@@ -36,6 +41,8 @@ adjustment, the bootstrap p-value and rank isolation on the implementation.
   contained in each agent's in-scope support, it is that support.
 - `commonSupport_eq_of_admitted`: the no-plan specialisation of the previous result, which is the
   rule the v2 report declares. It is a direct application, not a separate proof.
+- `inferenceAdmitted_iff_admittedDecision`: the gate is decided by `admittedDecision`, the
+  boolean the shared conformance cases in `formal/cases/forecast.json` record.
 - `rankProjection_attachForecast`: the model's rank projection of an entry paired with a report is
   that entry; this holds by definition for any pair and is not a result about the Rust rank path.
 - `holmStep_monotone`: one modelled Holm step never lowers a prior adjusted value within the cap.
@@ -86,12 +93,12 @@ that forms each Holm candidate, the withheld comparisons that stay in the family
 adjusted value, the division that turns the plus-one counts into a p-value, and the Rust rank
 functions themselves.
 
-Check: the CI scope check (scripts/check-lean-scope.py) proves only that every repository path
-named in backticks in this block exists. It does not prove that the rules described here still
-correspond to the code at that path.
+Check: the CI scope check (scripts/check-lean-scope.py) proves that every repository path named in
+backticks in this block exists and that every production symbol named in backticks occurs in a file
+the block names. It does not prove that the rules described here still correspond to that code.
 -/
 
-public section
+@[expose] public section
 
 namespace SharpeBenchFormal
 
@@ -133,6 +140,22 @@ def pairSupport (plan : Option (List Contract)) (left right : List Contract) : L
 significance flag: neither agent resolved a digest in scope that the other did not. -/
 def inferenceAdmitted (plan : Option (List Contract)) (left right : List Contract) : Prop :=
   ∀ contract, contract ∈ inScope plan left ↔ contract ∈ inScope plan right
+
+/-- A decision procedure for `inferenceAdmitted`: every digest in scope for either agent is in
+scope for the other. It is what the shared conformance cases evaluate. -/
+def admittedDecision (plan : Option (List Contract)) (left right : List Contract) : Bool :=
+  (inScope plan left).all (· ∈ inScope plan right) && (inScope plan right).all (· ∈ inScope plan left)
+
+/-- The decision procedure decides the gate: it returns `true` exactly when inference is admitted.
+
+Without this, a case table that records `admittedDecision` would say nothing about the hypothesis
+the support theorems take. -/
+theorem inferenceAdmitted_iff_admittedDecision {plan : Option (List Contract)}
+    {left right : List Contract} :
+    inferenceAdmitted plan left right ↔ admittedDecision plan left right = true := by
+  simp only [inferenceAdmitted, admittedDecision, Bool.and_eq_true, List.all_eq_true,
+    decide_eq_true_eq]
+  grind
 
 /-- A digest in scope for an agent was resolved by that agent. -/
 theorem mem_inScope {plan : Option (List Contract)} {resolved : List Contract} {contract : Contract}

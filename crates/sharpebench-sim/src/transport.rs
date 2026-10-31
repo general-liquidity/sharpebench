@@ -24,8 +24,19 @@ pub enum DecideError {
     /// Connection reset, stdout closed, write failed, malformed framing - a runtime
     /// transport error (retryable).
     Transport,
-    /// The endpoint did not answer within the wall-clock budget (retryable).
+    /// The wall-clock budget ran out with no evidence the entrant is to blame:
+    /// the observation was never accepted (a stalled write), or the endpoint is
+    /// remote and a slow answer cannot be told from a slow network. A runtime
+    /// fault (retryable).
     Timeout,
+    /// The entrant overran its per-decision time budget: the observation was
+    /// delivered (the write completed), the entrant was still running when the
+    /// budget ran out, and no answer had arrived. The harness's side of the
+    /// exchange held, so the stall is the entrant's own, the way breaching the
+    /// published memory budget is. **Not** retryable: the same entrant against
+    /// the same budget reproduces it, and a retry would let a slow entrant turn
+    /// its own overrun into a harness fault that denies the sweep certification.
+    BudgetOverrun,
     /// The agent answered, but the bytes were not a parseable [`Decision`]. The
     /// agent's own protocol violation - **not** retryable.
     Protocol,
@@ -130,6 +141,9 @@ pub struct TransportHealth {
     pub transport_faults: u32,
     /// Agent protocol faults (unparseable or oversized output) - the agent's own fault.
     pub protocol_faults: u32,
+    /// Decisions on which a live entrant that had accepted the observation
+    /// overran its per-decision time budget - the agent's own fault.
+    pub budget_overruns: u32,
     /// Whether the per-endpoint circuit breaker has tripped.
     pub tripped: bool,
     /// The most recent decision-level fault, if any.
@@ -142,6 +156,7 @@ impl TransportHealth {
     pub fn record(&mut self, err: DecideError, tripped: bool) {
         match err {
             DecideError::Protocol | DecideError::Oversized => self.protocol_faults += 1,
+            DecideError::BudgetOverrun => self.budget_overruns += 1,
             DecideError::Transport | DecideError::Timeout | DecideError::Exited(_) => {
                 self.transport_faults += 1
             }
@@ -153,7 +168,10 @@ impl TransportHealth {
     /// Did any decision in the run fail at the transport / agent layer? I.e. was at
     /// least one hold a masked fault rather than a deliberate hold?
     pub fn degraded(&self) -> bool {
-        self.transport_faults > 0 || self.protocol_faults > 0 || self.tripped
+        self.transport_faults > 0
+            || self.protocol_faults > 0
+            || self.budget_overruns > 0
+            || self.tripped
     }
 }
 
@@ -250,6 +268,28 @@ mod tests {
         assert_eq!(health.transport_faults, 1);
         assert_eq!(health.protocol_faults, 0);
         assert_eq!(health.last_error, Some(DecideError::Exited(Some(137))));
+    }
+
+    /// A budget overrun by a live entrant is its own fault: never retried, and
+    /// kept apart from the transport faults the harness answers for.
+    #[test]
+    fn a_budget_overrun_is_final_and_kept_apart_from_transport_faults() {
+        let mut calls = 0u32;
+        let out = decide_with_retry(5, || {
+            calls += 1;
+            Err(DecideError::BudgetOverrun)
+        });
+        assert_eq!(out.unwrap_err(), DecideError::BudgetOverrun);
+        assert_eq!(
+            calls, 1,
+            "an overrun is the entrant's, so it is never retried"
+        );
+        let mut health = TransportHealth::default();
+        health.record(DecideError::BudgetOverrun, false);
+        assert_eq!(health.budget_overruns, 1);
+        assert_eq!(health.transport_faults, 0);
+        assert_eq!(health.protocol_faults, 0);
+        assert!(health.degraded());
     }
 
     #[test]

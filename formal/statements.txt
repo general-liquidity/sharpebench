@@ -1,0 +1,64 @@
+inductive SharpeBenchFormal.ForecastReport : Type
+def SharpeBenchFormal.ForecastReport.meanLossNumerator : SharpeBenchFormal.ForecastReport → Int
+constructor SharpeBenchFormal.ForecastReport.mk : Nat → Int → SharpeBenchFormal.ForecastReport
+def SharpeBenchFormal.ForecastReport.resolvedClaims : SharpeBenchFormal.ForecastReport → Nat
+inductive SharpeBenchFormal.TradingEntry : Type
+def SharpeBenchFormal.TradingEntry.eligible : SharpeBenchFormal.TradingEntry → Bool
+def SharpeBenchFormal.TradingEntry.entrant : SharpeBenchFormal.TradingEntry → String
+constructor SharpeBenchFormal.TradingEntry.mk : String → Bool → Int → SharpeBenchFormal.TradingEntry
+def SharpeBenchFormal.TradingEntry.rankKey : SharpeBenchFormal.TradingEntry → Int
+def SharpeBenchFormal.admittedDecision : {Contract : Type} → [inst : BEq Contract] → [LawfulBEq Contract] → Option (List Contract) → List Contract → List Contract → Bool
+  value: fun {Contract} [BEq Contract] [LawfulBEq Contract] plan left right => ((SharpeBenchFormal.inScope plan left).all fun x => Decidable.decide (x ∈ SharpeBenchFormal.inScope plan right)) && (SharpeBenchFormal.inScope plan right).all fun x => Decidable.decide (x ∈ SharpeBenchFormal.inScope plan left)
+def SharpeBenchFormal.attachForecast : SharpeBenchFormal.TradingEntry → SharpeBenchFormal.ForecastReport → SharpeBenchFormal.TradingEntry × SharpeBenchFormal.ForecastReport
+  value: fun entry report => (entry, report)
+def SharpeBenchFormal.commonSupport : {Contract : Type} → [inst : BEq Contract] → [LawfulBEq Contract] → List Contract → List Contract → List Contract
+  value: fun {Contract} [BEq Contract] [LawfulBEq Contract] left right => List.filter (fun x => Decidable.decide (x ∈ right)) left
+theorem SharpeBenchFormal.commonSupport_eq_of_admitted : ∀ {Contract : Type} [inst : BEq Contract] [inst_1 : LawfulBEq Contract] {left right : List Contract}, SharpeBenchFormal.inferenceAdmitted Option.none left right → SharpeBenchFormal.commonSupport left right = left
+  axioms: [Quot.sound, propext]
+def SharpeBenchFormal.correctedBootstrapCounts : Nat → Nat → Nat × Nat
+  value: fun extreme samples => (extreme + 1, samples + 1)
+theorem SharpeBenchFormal.correctedBootstrapCounts_le : ∀ {extreme samples : Nat}, extreme ≤ samples → (SharpeBenchFormal.correctedBootstrapCounts extreme samples).fst ≤ (SharpeBenchFormal.correctedBootstrapCounts extreme samples).snd
+  axioms: [Classical.choice, Quot.sound, propext]
+theorem SharpeBenchFormal.correctedBootstrapCounts_pos : ∀ (extreme samples : Nat), 0 < (SharpeBenchFormal.correctedBootstrapCounts extreme samples).fst ∧ 0 < (SharpeBenchFormal.correctedBootstrapCounts extreme samples).snd
+  axioms: [Classical.choice, Quot.sound, propext]
+def SharpeBenchFormal.holmStep : Nat → Nat → Nat → Nat
+  value: fun prior candidate cap => cap.min (prior.max candidate)
+theorem SharpeBenchFormal.holmStep_le : ∀ (prior candidate cap : Nat), SharpeBenchFormal.holmStep prior candidate cap ≤ cap
+  axioms: [Classical.choice, Quot.sound, propext]
+theorem SharpeBenchFormal.holmStep_monotone : ∀ {prior candidate cap : Nat}, prior ≤ cap → prior ≤ SharpeBenchFormal.holmStep prior candidate cap
+  axioms: [Classical.choice, Quot.sound, propext]
+def SharpeBenchFormal.inScope : {Contract : Type} → [inst : BEq Contract] → [LawfulBEq Contract] → Option (List Contract) → List Contract → List Contract
+  value: fun {Contract} [BEq Contract] [LawfulBEq Contract] plan resolved =>
+  match plan with
+  | Option.none => resolved
+  | Option.some plan => List.filter (fun x => Decidable.decide (x ∈ resolved)) plan
+def SharpeBenchFormal.inferenceAdmitted : {Contract : Type} → [inst : BEq Contract] → [LawfulBEq Contract] → Option (List Contract) → List Contract → List Contract → Prop
+  value: fun {Contract} [BEq Contract] [LawfulBEq Contract] plan left right => ∀ (contract : Contract), contract ∈ SharpeBenchFormal.inScope plan left ↔ contract ∈ SharpeBenchFormal.inScope plan right
+theorem SharpeBenchFormal.inferenceAdmitted_iff_admittedDecision : ∀ {Contract : Type} [inst : BEq Contract] [inst_1 : LawfulBEq Contract] {plan : Option (List Contract)} {left right : List Contract}, SharpeBenchFormal.inferenceAdmitted plan left right ↔ SharpeBenchFormal.admittedDecision plan left right = Bool.true
+  axioms: [Classical.choice, Quot.sound, propext]
+def SharpeBenchFormal.instDecidableEqForecastReport : DecidableEq SharpeBenchFormal.ForecastReport
+def SharpeBenchFormal.instDecidableEqForecastReport.decEq : (x x_1 : SharpeBenchFormal.ForecastReport) → Decidable (x = x_1)
+def SharpeBenchFormal.instDecidableEqTradingEntry : DecidableEq SharpeBenchFormal.TradingEntry
+def SharpeBenchFormal.instDecidableEqTradingEntry.decEq : (x x_1 : SharpeBenchFormal.TradingEntry) → Decidable (x = x_1)
+def SharpeBenchFormal.instReprForecastReport : Repr SharpeBenchFormal.ForecastReport
+def SharpeBenchFormal.instReprForecastReport.repr : SharpeBenchFormal.ForecastReport → Nat → Std.Format
+def SharpeBenchFormal.instReprTradingEntry : Repr SharpeBenchFormal.TradingEntry
+def SharpeBenchFormal.instReprTradingEntry.repr : SharpeBenchFormal.TradingEntry → Nat → Std.Format
+theorem SharpeBenchFormal.mem_commonSupport : ∀ {Contract : Type} [inst : BEq Contract] [inst_1 : LawfulBEq Contract] {left right : List Contract} {contract : Contract}, contract ∈ SharpeBenchFormal.commonSupport left right → contract ∈ left ∧ contract ∈ right
+  axioms: [propext]
+theorem SharpeBenchFormal.mem_commonSupport_iff : ∀ {Contract : Type} [inst : BEq Contract] [inst_1 : LawfulBEq Contract] {left right : List Contract} {contract : Contract}, contract ∈ SharpeBenchFormal.commonSupport left right ↔ contract ∈ left ∧ contract ∈ right
+  axioms: [propext]
+theorem SharpeBenchFormal.mem_inScope : ∀ {Contract : Type} [inst : BEq Contract] [inst_1 : LawfulBEq Contract] {plan : Option (List Contract)} {resolved : List Contract} {contract : Contract}, contract ∈ SharpeBenchFormal.inScope plan resolved → contract ∈ resolved
+  axioms: [propext]
+theorem SharpeBenchFormal.mem_pairSupport_comm : ∀ {Contract : Type} [inst : BEq Contract] [inst_1 : LawfulBEq Contract] {plan : Option (List Contract)} {left right : List Contract} {contract : Contract}, contract ∈ SharpeBenchFormal.pairSupport plan left right ↔ contract ∈ SharpeBenchFormal.pairSupport plan right left
+  axioms: [Classical.choice, Quot.sound, propext]
+theorem SharpeBenchFormal.mem_pairSupport_iff : ∀ {Contract : Type} [inst : BEq Contract] [inst_1 : LawfulBEq Contract] {plan : Option (List Contract)} {left right : List Contract} {contract : Contract}, contract ∈ SharpeBenchFormal.pairSupport plan left right ↔ contract ∈ SharpeBenchFormal.inScope plan left ∧ contract ∈ SharpeBenchFormal.inScope plan right
+  axioms: [Classical.choice, Quot.sound, propext]
+def SharpeBenchFormal.pairSupport : {Contract : Type} → [inst : BEq Contract] → [LawfulBEq Contract] → Option (List Contract) → List Contract → List Contract → List Contract
+  value: fun {Contract} [BEq Contract] [LawfulBEq Contract] plan left right => List.filter (fun x => Decidable.decide (x ∈ right)) (SharpeBenchFormal.inScope plan left)
+theorem SharpeBenchFormal.pairSupport_eq_of_admitted : ∀ {Contract : Type} [inst : BEq Contract] [inst_1 : LawfulBEq Contract] {plan : Option (List Contract)} {left right : List Contract}, SharpeBenchFormal.inferenceAdmitted plan left right → SharpeBenchFormal.pairSupport plan left right = SharpeBenchFormal.inScope plan left
+  axioms: [Quot.sound, propext]
+def SharpeBenchFormal.rankProjection : SharpeBenchFormal.TradingEntry × SharpeBenchFormal.ForecastReport → SharpeBenchFormal.TradingEntry
+  value: fun value => value.fst
+theorem SharpeBenchFormal.rankProjection_attachForecast : ∀ (entry : SharpeBenchFormal.TradingEntry) (report : SharpeBenchFormal.ForecastReport), SharpeBenchFormal.rankProjection (SharpeBenchFormal.attachForecast entry report) = entry
+  axioms: []
