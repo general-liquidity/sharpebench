@@ -273,6 +273,7 @@ pub const COMPOSITE_SCORE_INVENTORY: EvidenceInventory = EvidenceInventory {
         ("bootstrap_error", COVERED_SCORE),
         ("deflation_error", COVERED_SCORE),
         ("selection_error", COVERED_SCORE),
+        ("exposure_path_error", COVERED_SCORE),
         ("raw_mean_return", COVERED_SCORE),
         ("rank_eligible", COVERED_SCORE),
         ("composite", COVERED_SCORE),

@@ -407,6 +407,52 @@ The shipped datasets: `us-indices-1d`, `fx-majors-1d`, `commodities-1d`,
 
 > Bailey & López de Prado, *The Deflated Sharpe Ratio* (2014), is the reference.
 
+## Leverage timing: the risk an exposure history implies
+
+A return series records what a strategy earned, not what it risked. A strategy
+that sizes from its own profit can turn a fair coin into evidence: it trades
+until its running t-statistic is high and then goes flat, so the bars that could
+have taken the gain back are never drawn. The Sharpe ratio reads the dispersion
+of the bars that were traded and shrinks with the exposure the strategy stopped
+carrying. On two windows of 60 bars, a zero-edge coin that stops once its
+t-statistic reaches 2 cleared every other gate on 94 of 4,000 seeds, against 16
+for a coin of the same size traded to the end.
+
+Since the change after 0.28.0, a track must also clear the risk its exposure
+history implies (`exposure_path_error`, typed requirement
+`EXPOSURE_PATH_UNPROVEN`). In each window the exposure rate is the running mean
+square `V_t / t` of the returns so far. The window is charged its length times the
+largest rate it showed after its first quarter, so stopping or de-risking leaves
+the charge where the history put it and raising exposure raises it. The
+statistic is the pooled profit over the square root of the pooled charge, and it
+must reach `Phi^-1(1 - alpha / 2)`, 1.96 at the default alpha.
+
+The factor of two is Lévy's reflection principle: under no edge with
+conditionally symmetric bar outcomes, a walk stopped at any time before the end
+of its window reaches a level with at most twice the probability that the
+unstopped walk ends there. Halving alpha restores the gate's size whatever the
+stopping rule. The statistic is a ratio, so rescaling a track does not move it.
+The stopped coin above now clears on 31 of 4,000 seeds and the unstopped one still
+on 16: the factor of two the bound allows remains, since the other gates are not
+halved, so this is a mitigation of optional stopping and not a closure.
+
+Sizing from the market is not sizing from the strategy's own profit.
+Volatility targeting with a fixed rule and a fixed Kelly fraction keep a charge
+near their realized variance, so the statistic is near their ordinary
+t-statistic and the gate costs them the factor of two in the tail. In a seeded
+study of 1,500 tracks each, with an edge of 0.15 of volatility a bar on a
+GARCH market, the gate kept 245 of 251 eligible volatility-targeted tracks and
+237 of 246 fixed-fraction ones. A strategy whose exposure falls sharply late in
+a window for a market reason (a calm after a crash, under a fixed fraction) pays
+for its earlier exposure, and a strategy that closes out before the window ends
+is charged as if it had stayed in.
+
+What it does not close: martingale doubling and pyramiding raise exposure after
+losses or gains. On the grader-search seed their remaining admissions arrive at
+the iid null's rate, on held-out seeds and in a uniform draw, so they are the
+gates' size under a search over thousands of seeds and not a leverage-specific
+excess. A conditionally skewed bar (a sold tail) is outside the symmetric case.
+
 ## Opt-in diagnostics the gate does not use
 
 Three estimators from the literature audit, a tail-risk diagnostic and a

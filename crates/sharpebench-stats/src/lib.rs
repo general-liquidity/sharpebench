@@ -56,6 +56,7 @@
 pub mod agreement;
 pub mod deflated_sharpe;
 pub mod dissent;
+pub mod exposure_path;
 pub mod fdr;
 pub mod opt_in_diagnostics;
 pub mod paired_randomization;
@@ -80,6 +81,9 @@ pub use deflated_sharpe::{
 pub use dissent::{
     dissent, dissent_across, kendall_tau_b, DissentReport, DissentThresholds, DissentVerdict,
     DEFAULT_MAX_LEVEL_DISSENT, DEFAULT_MAX_RANK_DISSENT,
+};
+pub use exposure_path::{
+    exposure_path_evidence, forgone_risk_z, EXPOSURE_BURN_IN_FRACTION, EXPOSURE_PATH_UNPROVEN,
 };
 pub use fdr::{benjamini_hochberg, fdr_verdict, FdrVerdict};
 pub use opt_in_diagnostics::{

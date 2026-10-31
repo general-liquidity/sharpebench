@@ -392,6 +392,7 @@ pub const COMPOSITE_SCORE_VISIBILITY: VisibilityAllowlist = VisibilityAllowlist 
         ("bootstrap_error", V),
         ("deflation_error", V),
         ("selection_error", V),
+        ("exposure_path_error", V),
         ("raw_mean_return", V),
         ("rank_eligible", V),
         ("composite", V),
@@ -540,6 +541,7 @@ mod tests {
         score.bootstrap_error = Some("bootstrap unavailable".to_string());
         score.deflation_error = Some("deflation unavailable".to_string());
         score.selection_error = Some("selection unavailable".to_string());
+        score.exposure_path_error = Some("exposure path unproven".to_string());
         score.dsr_ci_low = Some(0.1);
         score.dsr_ci_high = Some(0.9);
         score.dsr_se = Some(0.2);

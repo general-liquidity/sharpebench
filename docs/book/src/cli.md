@@ -880,11 +880,13 @@ disqualification/quality signal that fired for each agent, instead of the
 single rank-eligible verdict. Pass the same field and [host controls](#score) as
 `score`: explanations come from the ranked field, including its benchmark and
 field-dependent deflation, rather than separately scoring each submission.
-The taxonomy has eleven reasons in three groups. Five mirror the scorer's hard
+The taxonomy has twelve reasons in three groups. Five mirror the scorer's hard
 eligibility gates (`FailedPassK`, `DsrBelowBar`, `ProcessViolation`,
 `BootstrapInsignificant`, `MandateBreached`). Two name the unavailability of a
 statistic the scorer really does gate on, so they are hard as well:
-`DeflationUnavailable` and `BootstrapUnavailable`. The remaining four are
+`DeflationUnavailable` and `BootstrapUnavailable`. `ExposurePathUnproven` is the
+hard exposure-path gate: a profit that does not clear the risk the track's
+exposure history implies. The remaining four are
 advisory and never gate: `SelectionUnavailable`, `HighSelectionGap`,
 `IsRediscovery` and `OosDecay`.
 
