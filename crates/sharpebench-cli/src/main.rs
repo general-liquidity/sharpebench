@@ -27,6 +27,7 @@ mod decision_stability_cmd;
 mod external_capture;
 mod forecast_cmd;
 mod gateway_cli;
+mod grader_search_cmd;
 mod import_cmd;
 mod lineage_cmd;
 mod regrade_cmd;
@@ -59,6 +60,9 @@ fn main() -> ExitCode {
         Some("commit") => run_commit(&args),
         Some("stress") => run_stress(json),
         Some("audit") => run_audit(json),
+        Some("grader-search") => {
+            ExitCode::from(grader_search_cmd::run(&args, json).clamp(0, 255) as u8)
+        }
         Some("realism") => run_realism(&args, json),
         Some("sign") => run_sign(&args, json),
         Some("verify") => run_verify(&args, json),
@@ -613,6 +617,9 @@ fn help() {
     );
     println!("  sharpebench stress                    run the adversarial stress suite (masked)");
     println!("  sharpebench audit                     self-audit: prove the scorer resists gaming");
+    println!(
+        "  sharpebench grader-search [--seed N] [--budget N] [--out <report.json>]  seeded search for no-skill submissions that clear the gates; rank-neutral"
+    );
     println!("  sharpebench realism [--data <csv>]    prove a dataset behaves like a market (Cont's stylized facts)");
     println!(
         "  sharpebench sign <subs.json> <key> <out.json> [--ed25519 <secret>]  score + sign a board to a file"
@@ -1833,8 +1840,9 @@ fn print_suite_evidence(board: &[CompositeScore], evidence: &sharpebench_core::S
     }
     let binding = &evidence.control_binding;
     println!(
-        "control binding: run_provenance {} over {}",
+        "control binding: run_provenance {} ({}) over {}",
         binding.sha256,
+        binding.preimage_encoding.label(),
         binding.covered_fields.join(", ")
     );
     for unbound in &binding.unbound_fields {

@@ -1,6 +1,6 @@
 # Validation status and frozen evidence
 
-Reviewed 2026-10-10. Implementation, software verification, exploratory
+Reviewed 2026-10-31. Implementation, software verification, exploratory
 calibration and confirmatory validation are different evidence classes.
 
 The benchmark implements its scoring gates and has regression, golden,
@@ -11,7 +11,7 @@ eligible system is deployable profitably.
 ## Joint-gate calibration
 
 The [development evidence README](../../../paper/evidence/development/README.md)
-documents P12-A's exploratory calculation. It models pooled DSR against fixed
+documents the exploratory joint-gate calculation. It models pooled DSR against fixed
 committed bars, per-window reliability, and a bootstrap leg on supported
 geometries. It does not execute a live agent or simulate the whole field's
 calibration path. The hourly crypto geometry omits the bootstrap leg and does
@@ -47,8 +47,18 @@ producer does not retrospectively validate its previous artifact.
 | Establish realism, agent skill or deployable profitability | Requires suitable task/market/agent evidence, not synthetic regression controls alone |
 | Propagate a repair to SharpeArena | Requires a Bench release and Arena's exact dependency-pin update; sibling source changes do not propagate automatically |
 
-These are remaining measurement and delivery decisions, not permission to run
-experiments, rewrite frozen results, publish packages or change gate thresholds.
+The confirmatory protocol is now written and sealed, unapproved, at
+[docs/studies/joint-gate](../../studies/joint-gate/PROTOCOL.md), with its producer
+in `crates/sharpebench-joint-gate`. It fixes the estimand, candidate rules, null
+grid, controls, multiplicity, precision, stopping and stated outcomes, including a
+no-feasible-geometry result. Sealing is not running: no frozen draw has been read,
+no rate in this book comes from it, and the producer refuses a frozen run until the
+owner approves the budget and the protocol binds the merged engine.
+
+These are remaining measurement and delivery decisions. A declared,
+protocol-frozen experiment may run once the owner approves it, and its result is
+published beside the frozen evidence. Frozen results are not rewritten, and
+publishing packages or changing gate thresholds stays an owner decision.
 The [study protocol validator](../../../crates/sharpebench-study/src/validate.rs)
 can check a declared protocol contract; it does not supply missing empirical
 validation or authorize the campaign.

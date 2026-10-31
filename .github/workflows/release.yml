@@ -223,9 +223,12 @@ jobs:
           # wasm + the CLI, so it MUST come before wasm. arena depends on core/attest/
           # leaderboard/sim and is a dep of the CLI, so it comes after those and before
           # sharpebench. publish=false members are omitted.
-          for c in sharpebench-stats sharpebench-memory sharpebench-edge sharpebench-protocol \
-                   sharpebench-core sharpebench-attest sharpebench-sim sharpebench-leaderboard \
-                   sharpebench-wasm sharpebench-harness sharpebench-arena sharpebench; do
+          # scripts/publish-order.txt is the one inventory; scripts/test_release.py holds it
+          # to the workspace graph. mapfile, not $(cat ...): a failed substitution in a
+          # `for` list is an empty loop, a green run that published nothing.
+          mapfile -t CRATES < scripts/publish-order.txt
+          test "${#CRATES[@]}" -gt 0
+          for c in "${CRATES[@]}"; do
             if curl -s -A "$UA" "https://crates.io/api/v1/crates/$c/$V" | grep -q "\"num\":\"$V\""; then
               echo "✓ $c@$V already on crates.io — skipping"
             else
@@ -249,7 +252,11 @@ jobs:
         with:
           ref: ${{ needs.validate_tag.outputs.validated_commit }}
 
-      # The npm package ships the compiled WASM kernel (npm/pkg), so build it first.
+      # The npm package ships the compiled WASM kernel. This job used to overwrite npm/pkg
+      # with a fresh build and publish that after only `npm install` and `tsc`, so no gate
+      # ever ran the binary users receive. The COMMITTED bundle is now the published one,
+      # which the release driver rebuilds for the version it cuts. The steps below check it
+      # is what the tagged source builds, then run the suite against it before publish.
       - name: Install Rust (pinned) + wasm target
         uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # 2026-08-27
         with:
@@ -259,8 +266,6 @@ jobs:
         uses: taiki-e/install-action@37f7c5781271959fb65b6b35224e28652ff2b63d # v2
         with:
           tool: wasm-pack@0.15.0
-      - name: Build the WASM kernel
-        run: wasm-pack build crates/sharpebench-wasm --target nodejs --out-dir ../../npm/pkg --out-name sharpebench
 
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
@@ -291,11 +296,26 @@ jobs:
           exit $fail
         working-directory: npm
 
+      # The committed bundle is the one about to be published, so it has to answer like the
+      # one this tag's source builds. Behavioral equivalence over every export rather than
+      # byte equality; scripts/check-wasm-bundle.mjs records why, and builds in a temp
+      # directory so npm/pkg stays exactly as tagged.
+      - name: The committed wasm bundle answers like this tag's build
+        run: node scripts/check-wasm-bundle.mjs
+
+      # The gate the published artifact actually passes. Every step reads the committed
+      # npm/pkg, and smoke-install runs against the packed and installed tarball.
+      - name: Build and test the package that is about to publish
+        working-directory: npm
+        run: |
+          npm ci
+          npm run build
+          npm test
+          npm run smoke-install
+
       - name: Publish @general-liquidity/sharpebench (skip if version exists)
         working-directory: npm
         run: |
-          npm install
-          npm run build
           V=$(node -p "require('./package.json').version")
           if npm view "@general-liquidity/sharpebench@$V" version >/dev/null 2>&1; then
             echo "@general-liquidity/sharpebench@$V already published — skipping"
@@ -332,6 +352,9 @@ jobs:
           fi
           npm install --package-lock=false
           npm run build
+          # Against the dependency a user resolves: the registry tarball, not the sibling
+          # checkout npm.yml tests with.
+          npm test
           V=$(node -p "require('./package.json').version")
           if npm view "@general-liquidity/sharpebench-mcp@$V" version >/dev/null 2>&1; then
             echo "@general-liquidity/sharpebench-mcp@$V already published — skipping"
@@ -435,6 +458,11 @@ jobs:
             fi
           done
           exit $fail
+      # For scripts/publish-order.txt. Runs after the result check, so a failed
+      # validate_tag reports itself rather than an empty ref here.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.validate_tag.outputs.validated_commit }}
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24.18.0
@@ -451,9 +479,9 @@ jobs:
           fail=0
 
           if [ "$PUBLISH_CRATES" = "true" ]; then
-            for c in sharpebench-stats sharpebench-memory sharpebench-edge sharpebench-protocol sharpebench-core \
-                     sharpebench-attest sharpebench-sim sharpebench-leaderboard sharpebench-wasm \
-                     sharpebench-harness sharpebench-arena sharpebench; do
+            mapfile -t CRATES < scripts/publish-order.txt
+            test "${#CRATES[@]}" -gt 0
+            for c in "${CRATES[@]}"; do
               # The crates.io index can lag a publish by minutes (v0.20.0 failed
               # here on sharpebench-wasm and passed on a rerun), so poll.
               ok=0

@@ -2103,42 +2103,34 @@ fn pairwise_median_scale(sorted: &[f64]) -> f64 {
 /// scales from their own field's median. `sorted` is the vote sample in
 /// ascending Sharpe order; it stays sorted.
 ///
-/// **What this excludes, and why the shape matters.** The defect this closes is
-/// a track that never moved carrying a Sharpe ratio large enough to be the
-/// whole field's dispersion: 0.001 repeated with a 1e-12 perturbation in each
-/// window has a per-period Sharpe near 2.6e10, which took the hourly crypto
-/// bar from 0.244 to 5.1e10 and zeroed every honest deflated Sharpe. Twice
-/// before, the answer was a predicate on the track's *values*: refuse a track
-/// whose observations all equal the first
-/// ([`crate::deflated_sharpe::is_constant_track`]), then refuse one whose every
-/// window is constant. Exact value equality is a knife edge on a continuum. One
-/// unit in the last place puts a track on the legal side of it while changing
-/// nothing about what the track is, which is what the 1e-12 perturbation buys:
-/// the track is no longer constant by any bit comparison and is still a track
-/// that never moved.
+/// **What this excludes, and what it does not decide.** A vote can be far from
+/// the field because the track is unusually strong, so distance alone says
+/// nothing about whether the track deserves a score. The fence therefore answers
+/// one question only: may this vote set the bar of the *other* entrants. A vote
+/// under the fence is within a bounded multiple of the field's own robust spread,
+/// so the influence it can have on anybody else's bar is the influence an honest
+/// outlier already has and the disclosure already names. That bound is on
+/// influence and not on harm: a vote just inside the reach still moves the bar.
 ///
-/// A distance has no knife edge to step off. A vote can only reach the fence by
-/// actually moving toward the field, and a vote that gets under it is, by
-/// construction, within a bounded multiple of the field's own robust spread, so
-/// the influence it can have on anybody else's bar is the influence an honest
-/// outlier already has and the disclosure already names. The fence therefore
-/// converts an unbounded attack into a bounded one rather than relying on
-/// recognizing any particular degenerate shape.
-///
-/// What it does not do is decide that an admitted vote is honest, and it reads
-/// a scale the field itself sets, so it inherits that scale's breakdown point:
-/// distant votes that are a large enough minority of the pairs stop being
+/// It reads a scale the field itself sets, so it inherits that scale's breakdown
+/// point: distant votes that are a large enough minority of the pairs stop being
 /// distant. The clone collapse folds a flood of near-identical copies into one
 /// vote before this runs, which is the shape that minority most easily takes.
 ///
-/// **Exclusion is not a discount.** A fenced entrant is still scored and still
-/// ranked, and it keeps the bar this field measured *with its own vote in it*,
-/// which is the bar it had before the fence existed. Removing a vote can only
-/// lower the dispersion it dominated, so the fence can lower an admitted
-/// entrant's bar and can never lower a fenced one's: no entrant is better off
-/// for having been fenced than it was without the fence. Without that clause
-/// the fence would be an exploit of its own, handing the same near-constant
-/// track a clean bar and first place instead of the zeroed board.
+/// **Exclusion is not a discount, and it is not a refusal.** A fenced entrant is
+/// still scored and still ranked, and it keeps the bar this field measured *with
+/// its own vote in it*, which is the bar it had before the fence existed. Removing
+/// a vote can only lower the dispersion it dominated, so no entrant is better off
+/// for having been fenced than it was without the fence.
+///
+/// That clause is not a deterrent and this function does not stop a track being
+/// admitted. The bar a lone distant vote measures is about `2 / sqrt(votes)` of
+/// its own Sharpe, so one vote clears the bar its own presence raised, and low
+/// kurtosis keeps the PSR denominator small: a no-skill track that alternated
+/// 1e-8 around 0.001 was first on a board of honest entrants while fenced.
+/// What keeps such a track off the board is the refusal in
+/// [`observed_sharpe_ratio_of_windows`], which runs before any vote is cast. A
+/// strong honest track far from the field stays admissible on purpose.
 ///
 /// Returns the field indices it removed, ascending. `sorted` is the vote sample
 /// in ascending Sharpe order and stays sorted.
@@ -3322,14 +3314,17 @@ mod tests {
     fn a_track_with_a_sharpe_ratio_reports_its_figures_unchanged() {
         let cfg = exercised_config();
         let dispersed = |i: usize| 0.002 + 0.0005 * (i as f64 * 0.7).sin();
-        let tracks: [(&str, AgentSubmission); 4] = [
+        let tracks: [(&str, AgentSubmission); 3] = [
             ("dispersed", exercised(dispersed)),
             ("low volatility", exercised(move |i| dispersed(i) * 1e-9)),
             (
-                "tiny dispersion",
-                exercised(|i| 0.001 + 1e-12 * ((i % 5) as f64 - 2.0)),
+                "sparse",
+                exercised(|i| match i {
+                    17 => 2e-9,
+                    59 => 1e-9,
+                    _ => 0.0,
+                }),
             ),
-            ("sparse", exercised(|i| if i == 59 { 1e-9 } else { 0.0 })),
         ];
         for (label, sub) in tracks {
             let score = score_agent(&sub, &cfg);
@@ -3869,8 +3864,8 @@ mod tests {
             ..ScoreConfig::default()
         };
         // Two identical strong agents: same track ⇒ identical DSR CIs ⇒ tied.
-        let strong_a = agent("strong_a", (0..3).map(|_| run(0.01, 0.001, 60)).collect());
-        let strong_b = agent("strong_b", (0..3).map(|_| run(0.01, 0.001, 60)).collect());
+        let strong_a = agent("strong_a", (0..3).map(|_| run(0.004, 0.006, 60)).collect());
+        let strong_b = agent("strong_b", (0..3).map(|_| run(0.004, 0.006, 60)).collect());
         // A much weaker but still-eligible agent: its DSR CI sits well below.
         let weak = agent("weak", (0..3).map(|_| run(0.001, 0.02, 60)).collect());
 
@@ -3946,7 +3941,7 @@ mod tests {
         // Cells 0–1 are easy (steady edge), cells 2–4 are hard (noisy, no edge).
         // The veteran completed all five; the entrant only the two easy ones, with
         // returns identical to the veteran's on those cells.
-        let easy = || run(0.004, 0.0005, 60);
+        let easy = || run(0.004, 0.006, 60);
         let hard = || run(0.0, 0.004, 60);
         let veteran = agent("veteran", vec![easy(), easy(), hard(), hard(), hard()]);
         let entrant = agent("entrant", vec![easy(), easy()]);
@@ -5140,8 +5135,8 @@ mod tests {
             n_boot: 600,
             ..ScoreConfig::default()
         };
-        let clean = agent("clean", (0..3).map(|_| run(0.01, 0.001, 60)).collect());
-        let mut warned_runs: Vec<Run> = (0..3).map(|_| run(0.01, 0.001, 60)).collect();
+        let clean = agent("clean", (0..3).map(|_| run(0.004, 0.006, 60)).collect());
+        let mut warned_runs: Vec<Run> = (0..3).map(|_| run(0.004, 0.006, 60)).collect();
         warned_runs[0]
             .trace
             .events
@@ -5177,7 +5172,7 @@ mod tests {
             n_boot: 600,
             ..ScoreConfig::default()
         };
-        let mut strong_runs: Vec<Run> = (0..3).map(|_| run(0.01, 0.001, 60)).collect();
+        let mut strong_runs: Vec<Run> = (0..3).map(|_| run(0.004, 0.006, 60)).collect();
         strong_runs[0]
             .trace
             .events

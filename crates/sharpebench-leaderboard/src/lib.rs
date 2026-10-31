@@ -19,7 +19,14 @@ use sharpebench_core::{CompositeScore, ScoreConfig};
 /// The transaction-cost profile a board was scored under — a self-contained mirror
 /// of the simulator's cost model, inlined so a published entry is re-derivable
 /// without reaching into the sim crate.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+///
+/// No other field of [`RunSpec`] names the execution model, so this mirror is
+/// the only record of it on a self-describing board. Each optional field keeps the simulator's serialized name and
+/// is omitted when it holds the simulator's default, so a board signed before
+/// the field existed reserializes to the bytes it signed and keeps its meaning:
+/// no turnover factor, no execution noise, no short borrow, immediate execution.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct CostProfile {
     pub fee_bps: f64,
     pub slippage_bps: f64,
@@ -28,6 +35,41 @@ pub struct CostProfile {
     /// `None` encodes an unlimited (`f64::INFINITY`) liquidity cap so the profile
     /// JSON stays finite and portable.
     pub max_participation: Option<f64>,
+    /// Proportional turnover cost, when the board opted into it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trf_cost: Option<f64>,
+    /// Seed-driven execution noise, when the board opted into it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub noise: Option<ExecutionNoiseProfile>,
+    /// Per-step short borrow cost (bps). Zero is omitted.
+    #[serde(default, skip_serializing_if = "is_zero_bps")]
+    pub short_borrow_bps: f64,
+    /// Fixed decision-to-eligibility delay. Absent means immediate execution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fixed_delay: Option<FixedDelayProfile>,
+}
+
+fn is_zero_bps(bps: &f64) -> bool {
+    *bps == 0.0
+}
+
+/// Mirror of the simulator's `ExecutionNoise`.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ExecutionNoiseProfile {
+    pub delay_prob: f64,
+    pub min_fill_frac: f64,
+    pub carry_floor: f64,
+    pub queue_participation_ref: f64,
+}
+
+/// Mirror of the simulator's `FixedDecisionDelay`. An unknown timing version is
+/// refused when the board is read, never interpreted as immediate execution.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "schema_version", deny_unknown_fields)]
+pub enum FixedDelayProfile {
+    #[serde(rename = "sharpebench.fixed-decision-delay.v1")]
+    Fifo { bars: usize },
 }
 
 /// The benchmark-condition specification a leaderboard was produced from. It is
@@ -268,12 +310,6 @@ pub fn verify_self_describing(b: &SelfDescribingBoard, key: &[u8]) -> bool {
     first.payload == spec_payload(&b.spec) && scores_match_links(&b.scores, score_links)
 }
 
-/// Persist a self-describing board to a JSON file.
-pub fn save_self_describing(b: &SelfDescribingBoard, path: &str) -> std::io::Result<()> {
-    let json = serde_json::to_string_pretty(b).map_err(std::io::Error::other)?;
-    std::fs::write(path, json)
-}
-
 /// Persist a published board to a JSON file.
 pub fn save(board: &PublishedBoard, path: &str) -> std::io::Result<()> {
     let json = serde_json::to_string_pretty(board).map_err(std::io::Error::other)?;
@@ -372,7 +408,7 @@ mod tests {
             agent_id: id.to_string(),
             runs: (0..3)
                 .map(|_| Run {
-                    returns: (0..60).map(|i| 0.01 + 0.001 * (i as f64).sin()).collect(),
+                    returns: (0..60).map(|i| 0.004 + 0.006 * (i as f64).sin()).collect(),
                     trace: Default::default(),
                     confidences: Vec::new(),
                     outcomes: Vec::new(),
@@ -425,6 +461,7 @@ mod tests {
                 impact_bps: 50.0,
                 financing_bps: 5.0,
                 max_participation: None,
+                ..CostProfile::default()
             },
             score_config: ScoreConfig::default(),
             seeds: vec![0, 1, 2, 3],
@@ -469,5 +506,17 @@ mod tests {
         assert_eq!(back.scores.len(), 2);
         assert!(verify_board(&back.chain, b"key"));
         assert!(!verify_board(&back.chain, b"wrong"));
+    }
+
+    #[test]
+    fn a_saved_board_loads_back_and_still_verifies() {
+        let board = rank(&[sub("a", 0.002), sub("b", 0.0)], &ScoreConfig::default());
+        let path = std::env::temp_dir().join(format!("sb-board-{}.json", std::process::id()));
+        let path = path.to_str().expect("a UTF-8 temp path");
+        save(&publish(&board, b"key"), path).expect("the board is written");
+        let loaded = load(path).expect("the board is read back");
+        std::fs::remove_file(path).expect("the board file is removed");
+        assert!(verify_published(&loaded, b"key"));
+        assert_eq!(loaded.scores.len(), board.len());
     }
 }

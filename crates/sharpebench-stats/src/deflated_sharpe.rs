@@ -174,6 +174,11 @@ pub const NO_WINDOW_VARIES: &str =
 /// The pooled question is asked first, so a track the concatenation already
 /// refuses keeps the error it has always carried and only a track that reaches
 /// [`observed_sharpe_ratio`] as a series that varies can meet the new one.
+///
+/// A track that varies in some window can still have no window that resolves its
+/// dispersion, which is [`NO_RESOLVED_MOTION`]: see
+/// [`window_resolves_its_dispersion`]. Only a track whose *every* window is like
+/// that is refused, so one window that moves keeps the track its Sharpe ratio.
 pub fn observed_sharpe_ratio_of_windows(windows: &[&[f64]]) -> Result<f64, StatisticalError> {
     let pooled: Vec<f64> = windows.iter().flat_map(|w| w.iter().copied()).collect();
     let sharpe = observed_sharpe_ratio(&pooled)?;
@@ -186,7 +191,84 @@ pub fn observed_sharpe_ratio_of_windows(windows: &[&[f64]]) -> Result<f64, Stati
             requirement: NO_WINDOW_VARIES,
         });
     }
+    if !windows
+        .iter()
+        .any(|window| window_resolves_its_dispersion(window))
+    {
+        return Err(StatisticalError::InvalidParameter {
+            name: "returns",
+            requirement: NO_RESOLVED_MOTION,
+        });
+    }
     Ok(sharpe)
+}
+
+/// The requirement [`observed_sharpe_ratio_of_windows`] refuses a track on when
+/// no window of it shows observed risk.
+///
+/// This is a scoring change introduced after release 0.28.0 (grader-search
+/// finding of 2026-10-30, owner decision of 2026-10-31): a track with no observed
+/// loss in any window, which 0.28.0 deflated and could rank first, now has no
+/// Sharpe ratio. A positive-drift track that never loses a bar is refused with
+/// it; returns alone cannot tell such a track from one that never moved.
+pub const NO_RESOLVED_MOTION: &str =
+    "must show observed risk: in every window the moments prove that no bar is a loss, or would \
+     once its single most distant bar is set aside, so the dispersion measures a perturbation \
+     around a level and not risk";
+
+/// Whether the moments of `window` alone prove that no observation of it can
+/// reach zero.
+///
+/// This is Samuelson's inequality (1968): in any sample of `n`, every observation
+/// lies within `s * (n - 1) / sqrt(n)` of the mean, `s` the sample standard
+/// deviation. So `|mean| / s > (n - 1) / sqrt(n)` is a statement about the
+/// sample and not about any distribution: every bar is on one side of zero, by
+/// more than the dispersion can account for. The threshold is a theorem, carries
+/// no tuned constant, and reads a ratio, so rescaling a track does not move it.
+pub fn sign_is_forced_by_moments(window: &[f64]) -> bool {
+    let n = window.len() as f64;
+    let (center, scale) = (mean(window), std_dev(window));
+    window.len() >= 2 && center.abs() * n.sqrt() > scale * (n - 1.0)
+}
+
+/// Whether `window` carries a measurement of risk: its dispersion is more than a
+/// perturbation around a level, and it survives losing any one observation.
+///
+/// Exact equality was not enough, because `0.001 + 1e-8` on even bars and
+/// `0.001 - 1e-8` on odd ones is not constant by any bit comparison and its
+/// Sharpe of 1e5 is a level over a perturbation: [`sign_is_forced_by_moments`]
+/// refuses it. Nor is that alone enough. A flat window with one large spike
+/// passes Samuelson's bound, since the spike is exactly what the bound allows,
+/// and every statistic of that window is a function of one draw. So the question
+/// is asked again without the observation furthest from the median. A window with
+/// a single trade in it fails, in a flat window or at zero, whereas a discrete
+/// return distribution with many bars away from its mode (the worked example of
+/// Bailey and Lopez de Prado) does not, which a median test would get wrong.
+///
+/// A real track reads well below the bound however strong it is: a Sharpe of 5 a
+/// bar over 120 bars is half of it.
+pub fn window_resolves_its_dispersion(window: &[f64]) -> bool {
+    if observed_sharpe_ratio(window).is_err() || sign_is_forced_by_moments(window) {
+        return false;
+    }
+    if window.len() < 3 {
+        return true;
+    }
+    let mut sorted = window.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    let middle = sorted[sorted.len() / 2];
+    let furthest = window
+        .iter()
+        .enumerate()
+        .max_by(|a, b| (a.1 - middle).abs().total_cmp(&(b.1 - middle).abs()))
+        .map_or(0, |(index, _)| index);
+    let rest: Vec<f64> = window
+        .iter()
+        .enumerate()
+        .filter(|&(index, _)| index != furthest)
+        .map(|(_, &x)| x)
+        .collect();
+    !is_constant_track(&rest) && !sign_is_forced_by_moments(&rest)
 }
 
 /// Checked counterpart for Result-returning deflation. Validate before a
@@ -337,6 +419,46 @@ pub(crate) fn deflated_sharpe_ratio_of(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Samuelson's bound on its own: a level with a small wobble is forced to
+    /// one side of zero, a window with a losing bar is not, and one bar carries
+    /// no dispersion to compare with.
+    #[test]
+    fn sign_is_forced_only_when_the_mean_exceeds_samuelsons_bound() {
+        assert!(sign_is_forced_by_moments(&[1.0, 1.001, 0.999]));
+        assert!(sign_is_forced_by_moments(&[-1.0, -1.001, -0.999]));
+        // Mean 1, standard deviation 0.7, three bars: |mean| sqrt(3) = 1.73
+        // clears 0.7 * 2 = 1.4, and would not clear 0.7 * 3 = 2.1.
+        assert!(sign_is_forced_by_moments(&[0.3, 1.0, 1.7]));
+        assert!(!sign_is_forced_by_moments(&[0.02, -0.01, 0.015]));
+        // A flat window has no dispersion and no mean: zero against zero is
+        // not strictly greater.
+        assert!(!sign_is_forced_by_moments(&[0.0, 0.0]));
+        assert!(!sign_is_forced_by_moments(&[0.01]));
+        assert!(!sign_is_forced_by_moments(&[]));
+    }
+
+    /// A window resolves its dispersion when it has losing and winning bars,
+    /// and not when a level, a single spike or a single outlier carries all of
+    /// it.
+    #[test]
+    fn a_window_resolves_its_dispersion_only_without_one_dominant_bar() {
+        assert!(window_resolves_its_dispersion(&[
+            0.02, -0.01, 0.015, -0.005
+        ]));
+        assert!(window_resolves_its_dispersion(&[0.01, -0.02]));
+        // Forced to one side by its moments, at two bars and at three.
+        assert!(!window_resolves_its_dispersion(&[1.0, 1.001]));
+        assert!(!window_resolves_its_dispersion(&[1.0, 1.001, 0.999]));
+        // A single spike in a flat window: without it the rest is constant.
+        assert!(!window_resolves_its_dispersion(&[0.0, 0.0, 1.0]));
+        // The bar set aside is the one furthest from the median, not from the
+        // smallest bar and not by ratio or sum.
+        assert!(!window_resolves_its_dispersion(&[1.0, 1.0, 1.0, -5.0]));
+        assert!(!window_resolves_its_dispersion(&[2.0, 2.0, 2.0, -1.0]));
+        assert!(!window_resolves_its_dispersion(&[-1.0, 2.0, 2.0, 2.0]));
+        assert!(!window_resolves_its_dispersion(&[0.5, 0.01, 0.01, 0.01]));
+    }
 
     /// A long, steady, low-vol track clears PSR vs 0 easily.
     #[test]
@@ -524,7 +646,7 @@ mod tests {
 
         // One window that varies is enough, and the answer is the pooled one.
         let moving: Vec<f64> = (0..30)
-            .map(|i| 0.002 + 0.0005 * f64::from(i).sin())
+            .map(|i| 0.002 + 0.004 * f64::from(i).sin())
             .collect();
         let mixed: Vec<f64> = flat_a.iter().chain(&moving).copied().collect();
         assert_eq!(

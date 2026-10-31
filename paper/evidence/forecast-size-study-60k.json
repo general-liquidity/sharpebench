@@ -1,0 +1,269 @@
+{
+  "schema": "sharpebench.forecast-size-study.v1",
+  "purpose": "seeded producer for the rejection rates MEASURED_SIZE and FAMILYWISE_SIZE_RULE state; the constants are not edited by this run",
+  "master_seed": 5903410038175475066,
+  "replications": 60000,
+  "contracts_per_block": 5,
+  "bootstrap_samples": 2000,
+  "bootstrap_seed": 264899179192358,
+  "nominal": 0.05,
+  "rejection_rule": "familywise_significant of a one-pair analyze_forecast_quality report, which with a family of one is raw_p_value <= familywise_alpha",
+  "lognormal_law": "exp(Z) - exp(1/2) with Z standard normal; the original study's parameters were not recorded, so this law is this producer's choice",
+  "float_note": "draws use sqrt and ln only; the JSON is byte-stable on one platform and the counts are integers",
+  "size": [
+    {
+      "law": "normal",
+      "blocks": 4,
+      "contracts": 20,
+      "stated": 0.188,
+      "measured": {
+        "hits": 11719,
+        "rate": 0.19531666666666667,
+        "wilson_lower": 0.19216405751484145,
+        "wilson_upper": 0.1985082876034009
+      },
+      "measured_fresh_seed": {
+        "hits": 11815,
+        "rate": 0.19691666666666666,
+        "wilson_lower": 0.19375415799212095,
+        "wilson_upper": 0.20011798226143387
+      },
+      "difference_from_stated": 0.007316666666666666,
+      "stated_inside_wilson_95": false,
+      "percentile_interval_coverage": {
+        "hits": 48085,
+        "rate": 0.8014166666666667,
+        "wilson_lower": 0.7982053390377358,
+        "wilson_upper": 0.804589400776092
+      }
+    },
+    {
+      "law": "normal",
+      "blocks": 5,
+      "contracts": 25,
+      "stated": 0.162,
+      "measured": {
+        "hits": 9849,
+        "rate": 0.16415,
+        "wilson_lower": 0.16120766218675764,
+        "wilson_upper": 0.16713534019154225
+      },
+      "measured_fresh_seed": {
+        "hits": 9777,
+        "rate": 0.16295,
+        "wilson_lower": 0.16001647227950241,
+        "wilson_upper": 0.1659266837473131
+      },
+      "difference_from_stated": 0.0021499999999999853,
+      "stated_inside_wilson_95": true,
+      "percentile_interval_coverage": {
+        "hits": 50042,
+        "rate": 0.8340333333333333,
+        "wilson_lower": 0.8310349959207337,
+        "wilson_upper": 0.8369889009744136
+      }
+    },
+    {
+      "law": "normal",
+      "blocks": 6,
+      "contracts": 30,
+      "stated": 0.138,
+      "measured": {
+        "hits": 8412,
+        "rate": 0.1402,
+        "wilson_lower": 0.13744494505746124,
+        "wilson_upper": 0.14300112388912894
+      },
+      "measured_fresh_seed": {
+        "hits": 8465,
+        "rate": 0.14108333333333334,
+        "wilson_lower": 0.13832091676220865,
+        "wilson_upper": 0.14389170574866866
+      },
+      "difference_from_stated": 0.0021999999999999797,
+      "stated_inside_wilson_95": true,
+      "percentile_interval_coverage": {
+        "hits": 51482,
+        "rate": 0.8580333333333333,
+        "wilson_lower": 0.8552177493865311,
+        "wilson_upper": 0.8608030745383045
+      }
+    },
+    {
+      "law": "normal",
+      "blocks": 10,
+      "contracts": 50,
+      "stated": 0.096,
+      "measured": {
+        "hits": 5798,
+        "rate": 0.09663333333333333,
+        "wilson_lower": 0.09429497997632197,
+        "wilson_upper": 0.09902333393165355
+      },
+      "measured_fresh_seed": {
+        "hits": 5943,
+        "rate": 0.09905,
+        "wilson_lower": 0.09668532058623057,
+        "wilson_upper": 0.10146601722403996
+      },
+      "difference_from_stated": 0.000633333333333333,
+      "stated_inside_wilson_95": true,
+      "percentile_interval_coverage": {
+        "hits": 54142,
+        "rate": 0.9023666666666667,
+        "wilson_lower": 0.8999658464984835,
+        "wilson_upper": 0.9047159676339706
+      }
+    },
+    {
+      "law": "normal",
+      "blocks": 20,
+      "contracts": 100,
+      "stated": 0.072,
+      "measured": {
+        "hits": 4270,
+        "rate": 0.07116666666666667,
+        "wilson_lower": 0.06913678837077879,
+        "wilson_upper": 0.07325145296680531
+      },
+      "measured_fresh_seed": {
+        "hits": 4326,
+        "rate": 0.0721,
+        "wilson_lower": 0.07005765885402077,
+        "wilson_upper": 0.07419712964582897
+      },
+      "difference_from_stated": -0.0008333333333333248,
+      "stated_inside_wilson_95": true,
+      "percentile_interval_coverage": {
+        "hits": 55671,
+        "rate": 0.92785,
+        "wilson_lower": 0.9257522119604987,
+        "wilson_upper": 0.9298930059416729
+      }
+    },
+    {
+      "law": "normal",
+      "blocks": 40,
+      "contracts": 200,
+      "stated": 0.06,
+      "measured": {
+        "hits": 3599,
+        "rate": 0.05998333333333333,
+        "wilson_lower": 0.05811134680601799,
+        "wilson_upper": 0.06191165978370441
+      },
+      "measured_fresh_seed": {
+        "hits": 3691,
+        "rate": 0.061516666666666664,
+        "wilson_lower": 0.05962202514031978,
+        "wilson_upper": 0.06346745178741046
+      },
+      "difference_from_stated": -0.00001666666666666483,
+      "stated_inside_wilson_95": true,
+      "percentile_interval_coverage": {
+        "hits": 56347,
+        "rate": 0.9391166666666667,
+        "wilson_lower": 0.9371751161838606,
+        "wilson_upper": 0.9410019924628037
+      }
+    },
+    {
+      "law": "lognormal",
+      "blocks": 4,
+      "contracts": 20,
+      "stated": 0.237,
+      "measured": {
+        "hits": 14898,
+        "rate": 0.2483,
+        "wilson_lower": 0.24485931656445034,
+        "wilson_upper": 0.25177291121169404
+      },
+      "measured_fresh_seed": {
+        "hits": 14959,
+        "rate": 0.24931666666666666,
+        "wilson_lower": 0.2458711920490007,
+        "wilson_upper": 0.2527942388860402
+      },
+      "difference_from_stated": 0.011300000000000004,
+      "stated_inside_wilson_95": false,
+      "percentile_interval_coverage": {
+        "hits": 45240,
+        "rate": 0.754,
+        "wilson_lower": 0.7505377281353809,
+        "wilson_upper": 0.7574297495954865
+      }
+    }
+  ],
+  "comparators": [
+    {
+      "name": "shipped test at a half-sigma effect",
+      "code_path": "shipped analyzer",
+      "law": "normal",
+      "effect": 0.5,
+      "blocks": 4,
+      "stated": 0.745,
+      "measured": {
+        "hits": 43444,
+        "rate": 0.7240666666666666,
+        "wilson_lower": 0.7204758614938456,
+        "wilson_upper": 0.727628782247216
+      }
+    },
+    {
+      "name": "studentised block bootstrap, size",
+      "code_path": "reconstructed here; no shipped code path",
+      "law": "normal",
+      "effect": 0.0,
+      "blocks": 4,
+      "stated": 0.013,
+      "measured": {
+        "hits": 1099,
+        "rate": 0.018316666666666665,
+        "wilson_lower": 0.01727414069233365,
+        "wilson_upper": 0.019420867581957733
+      }
+    },
+    {
+      "name": "studentised block bootstrap at a half-sigma effect",
+      "code_path": "reconstructed here; no shipped code path",
+      "law": "normal",
+      "effect": 0.5,
+      "blocks": 4,
+      "stated": 0.121,
+      "measured": {
+        "hits": 8199,
+        "rate": 0.13665,
+        "wilson_lower": 0.1339249095571024,
+        "wilson_upper": 0.13942161393301306
+      }
+    },
+    {
+      "name": "Student-t on block means, size",
+      "code_path": "reconstructed here; no shipped code path",
+      "law": "normal",
+      "effect": 0.0,
+      "blocks": 4,
+      "stated": 0.05,
+      "measured": {
+        "hits": 2956,
+        "rate": 0.04926666666666667,
+        "wilson_lower": 0.04756361477363918,
+        "wilson_upper": 0.051027430649354354
+      }
+    },
+    {
+      "name": "Student-t on block means, size",
+      "code_path": "reconstructed here; no shipped code path",
+      "law": "lognormal",
+      "effect": 0.0,
+      "blocks": 4,
+      "stated": 0.094,
+      "measured": {
+        "hits": 5558,
+        "rate": 0.09263333333333333,
+        "wilson_lower": 0.09033955683574771,
+        "wilson_upper": 0.09497926923394642
+      }
+    }
+  ]
+}

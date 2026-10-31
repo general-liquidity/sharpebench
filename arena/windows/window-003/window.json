@@ -3,7 +3,7 @@
   "id": "window-003",
   "commit_deadline": 20711,
   "data_reveal_epoch": 20720,
-  "status": "committed",
+  "status": "expired-empty",
   "score_config": {
     "n_trials": 50,
     "trials_sr_std": 0.5,
@@ -38,5 +38,6 @@
   "commitments": [],
   "refusals": [],
   "dataset_hash": null,
-  "scores": []
+  "scores": [],
+  "expired_at_epoch": 20756
 }

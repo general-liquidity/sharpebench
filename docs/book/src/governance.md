@@ -39,7 +39,10 @@ tampering without pretending to remove the host from the trust boundary.
    case first shows the oracle's returns are rank-eligible when ranked directly,
    so it credits intake, not the statistics. The suite is a regression suite
    over named attacks, not a proof that no entrant can find another way to game
-   the scorer.
+   the scorer. `sharpebench grader-search` looks for the attacks nobody named
+   and reports what it finds with the exact series; see
+   [`grader-search`](cli.md#grader-search). It is rank-neutral and it is not a
+   proof either.
 
 The principle is **verify what the artifacts establish and name what they do
 not**. Scores and signed history are independently checkable. The operator still

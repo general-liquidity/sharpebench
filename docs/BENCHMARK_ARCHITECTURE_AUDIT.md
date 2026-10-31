@@ -55,8 +55,8 @@ the page was read, and the row should be checked against its source before it is
 quoted.
 
 The source-tree ledger records 12 adopted rows, 53 already stronger,
-22 future and 11 rejected. The literature ledger records 63 already covered,
-1 candidate, 20 future and 23 not transferable.
+22 future and 11 rejected. The literature ledger records 64 already covered,
+no candidates, 20 future and 23 not transferable.
 
 ## What changed because of the audit
 
@@ -338,7 +338,7 @@ disagree, because the paper and the code do not always describe the same mechani
 | 11 | AstaBench | science | arXiv 2510.21652 | paper | Price logged token usage with a frozen cost map and report score-cost Pareto frontiers | Future | See source-tree row: SharpeArena already carries rank-neutral token accounting, but pricing it on a cost frontier needs the populated frontier-model field and touches the known gap that inference cost never enters rank. |
 | 12 | Auditing AI Investment Recommendations | trading | trading-papers corpus | paper | Frozen, replayable audit of model advice as executable actions | Already covered | Strict replay recomputes performance from recorded decisions against frozen inputs. |
 | 13 | Automated LLM Speedrunning Benchmark | science | arXiv 2506.22419 | paper | Crossed model, scaffold, hint and seed factorial at an equal search budget | Future | Its 4 models by 5 scaffolds by 6 hint regimes by 3 seeds design, with a flat best-of-M control at a fixed 20-node budget, is a template for the known gap of separating model and scaffold effects once a frontier-model field exists. |
-| 14 | AutomationBench | agents | arXiv 2604.18934 | paper | Run optimization against the grader to surface reward hacks before release | **Candidate** | See source-tree row: SharpeBench's self-audit is a regression suite over ten named attacks and says it is not a proof that no entrant can game the scorer (`docs/book/src/governance.md:22`); both scoring fail-opens closed in 2026-09 were found by review, not by the suite, so a search without model calls for submissions that pass the gates without skill would test attacks nobody has named. |
+| 14 | AutomationBench | agents | arXiv 2604.18934 | paper | Run optimization against the grader to surface reward hacks before release | Already covered | See source-tree row: SharpeBench's self-audit is a regression suite over ten named attacks and says it is not a proof that no entrant can game the scorer (`docs/book/src/governance.md:22`); both scoring fail-opens closed in 2026-09 were found by review, not by the suite. `sharpebench grader-search` is the seeded search without model calls for submissions that pass the gates without skill. It is rank-neutral. |
 | 15 | BacktestBench | trading | arXiv 2605.17937v2, KDD 2026 | paper | Two independent implementations of the metric engine must agree before use | Already covered | SharpeBench computes every statistic in one deterministic kernel checked against cross-platform goldens, and the paper's finding that the best model computes Sharpe correctly in 31.7% of cases shows why entrants never report their own metrics; its ticker, parameter and strategy selection tasks label the in-sample best of a small sampled candidate set as correct, at zero cost, with strategies drawn from a combinatorial space of about 205,000 buy and sell rules. |
 | 16 | Backtrader-Bench | trading | arXiv 2608.11232v1, IJCAI 2026 FinLLM Workshop | paper | Questions generated at runtime under a seed so answers never appear online, each re-derived by an independent backtest re-run | Already covered | See source-tree row for its question-mining filter. SharpeArena's sealed seeds, committed before submissions close, are stronger: Backtrader-Bench regenerates from a public seed over public AAPL 2020 to 2024 prices and releases its 160-question pool, so its items are enumerable. Its re-run checker matches strict replay, and its no-tools accuracy drops tool-attempt questions from the denominator. |
 | 17 | BikeBench | other | arXiv 2508.00830 | paper | Report every score under a standardized evaluator-call budget bracket | Already covered | See source-tree row: selection-deflated budget curves and the attempt ledger already charge search effort against the evidence, whereas BikeBench's 0 to 1B evaluation brackets are only a leaderboard filter. |
@@ -435,11 +435,11 @@ disagree, because the paper and the code do not always describe the same mechani
 
 ## Candidates
 
-One mechanism from the literature ledger is not built, and it would close a
-named gap. Three further candidates were built in the 16 September 2026 round
-and their literature rows now read Already covered: a mark the scored agent
-cannot set (CoffeeBench) and a seat-removal externality (EconEvals) in
-SharpeArena PR #83, and lagged replay (LiveTradeBench) in SharpeBench PR #151.
+Every mechanism the literature ledger named as a candidate is now built. Three
+were built in the 16 September 2026 round and their literature rows read Already
+covered: a mark the scored agent cannot set (CoffeeBench) and a seat-removal
+externality (EconEvals) in SharpeArena PR #83, and lagged replay
+(LiveTradeBench) in SharpeBench PR #151.
 
 **Search against the grader** (AutomationBench, arXiv 2604.18934). The self-audit
 is a regression suite over named attacks and states that it is not a proof
@@ -450,7 +450,9 @@ setting the field's deflation bar, were found by review rather than by that
 suite, and the unbound arena intake fixed in the 16 September 2026 round was
 found by reading a paper. A search over synthetic submissions for ones that
 clear the gates without skill needs no model calls and targets exactly that
-class of defect. This candidate stays open.
+class of defect. `sharpebench grader-search` is that search. It is rank-neutral,
+its oracle is the generator rather than the scorer, and its findings carry the
+exact return series. See [`grader-search`](book/src/cli.md#grader-search).
 
 ## Ideas deliberately not built
 

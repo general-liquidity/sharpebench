@@ -431,6 +431,25 @@ def rebuild_committed_bundle(root: Path, target: str) -> None:
     git(root, "commit", "--amend", "--no-edit")
 
 
+def push_release(tree: Path, tag: str) -> None:
+    """Publish the release commits and their tag together, or neither.
+
+    The daily arena clock pushes to main on its own schedule, so main can move
+    between the fetch and this push. That loses the race rather than damaging the
+    candidate: the non-force update is refused, and `--atomic` keeps the tag off
+    origin with it, so a rerun cuts a fresh tag from the new base.
+    """
+    run(
+        tree,
+        "git",
+        "push",
+        "--atomic",
+        "origin",
+        "HEAD:refs/heads/main",
+        f"refs/tags/{tag}",
+    )
+
+
 def cut_release(root: Path, bump: str, current: str, target: str, branch: str) -> str:
     prepare_changelog(root, current, target)
     run(
@@ -499,15 +518,7 @@ def release(
         if verified != head:
             raise ReleaseError(f"release tag resolved to {verified}, expected {head}")
         if push:
-            run(
-                tree,
-                "git",
-                "push",
-                "--atomic",
-                "origin",
-                "HEAD:refs/heads/main",
-                f"refs/tags/{tag}",
-            )
+            push_release(tree, tag)
             tag_pushed = True
         return head, target
     finally:

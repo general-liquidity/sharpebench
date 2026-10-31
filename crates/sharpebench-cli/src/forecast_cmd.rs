@@ -215,16 +215,32 @@ fn write_report(out: &mut String, report: &ForecastQualityReport) -> std::fmt::R
         legacy_digests
     )?;
     for agent in &report.agents {
+        let resolved = match &agent.planned {
+            Some(planned) => format!(
+                "{}/{} planned claims resolved ({}), {}/{} in the whole document",
+                planned.n_resolved,
+                planned.n_claims,
+                planned
+                    .resolution_rate
+                    .map_or("unavailable".to_string(), |rate| format!(
+                        "{:.1}%",
+                        100.0 * rate
+                    )),
+                agent.n_resolved,
+                agent.n_claims,
+            ),
+            None => format!(
+                "{}/{} resolved ({:.1}%)",
+                agent.n_resolved,
+                agent.n_claims,
+                100.0 * agent.resolution_rate
+            ),
+        };
         writeln!(
             out,
             "
-{}: {}/{} resolved ({:.1}%), {} blind, {} consensus-exposed",
-            agent.agent_id,
-            agent.n_resolved,
-            agent.n_claims,
-            100.0 * agent.resolution_rate,
-            agent.blind_resolved,
-            agent.consensus_exposed_resolved
+{}: {resolved}, {} blind, {} consensus-exposed",
+            agent.agent_id, agent.blind_resolved, agent.consensus_exposed_resolved
         )?;
         if let Some(gap) = support
             .unresolved_by_agent
@@ -406,7 +422,7 @@ mod tests {
     }
 
     #[test]
-    fn a_declared_plan_writes_a_v5_report_and_prints_its_support() {
+    fn a_declared_plan_writes_a_v6_report_and_prints_its_support() {
         let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../examples/forecast-quality/fixtures");
         let committed: serde_json::Value = serde_json::from_str(
@@ -456,7 +472,7 @@ mod tests {
                 .expect("--output contains JSON");
         fs::remove_file(&output).expect("remove temporary report");
         fs::remove_file(&plan).expect("remove temporary plan");
-        assert_eq!(report["schema_version"], "sharpebench.forecast-quality.v5");
+        assert_eq!(report["schema_version"], "sharpebench.forecast-quality.v6");
         assert_eq!(report["common_support"]["n_contracts"], 13);
         assert_eq!(
             report["common_support"]["unresolved_by_agent"]["agent-alpha"]["not_claimed"],
