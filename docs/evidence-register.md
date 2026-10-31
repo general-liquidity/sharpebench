@@ -1187,7 +1187,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 |---|---|---|---|---|
 | 2026-09-23 | still-applicable | unknown | no | Initial entry: The documented comparison is the commit-time test itself, which re-checks the claim against the current kernel on every commit. |
 | 2026-10-31 | still-applicable | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
-| 2026-10-31 | still-applicable | unknown | no | Rechecked at the gap-closure integration: crates/sharpebench-arena/src/audit.rs moved, and the recorded digest is rebound to the integrated tree. The claim still holds there, so the disposition is unchanged. |
+| 2026-10-31 | still-applicable | model: claude-opus-5-5 | no | Rechecked at the gap-closure integration: crates/sharpebench-arena/src/audit.rs moved, and the recorded digest is rebound to the integrated tree. The claim still holds there, so the disposition is unchanged. |
 
 ### `SB-tab-data`
 
@@ -1515,7 +1515,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 |---|---|---|---|---|
 | 2026-09-23 | still-applicable | unknown | no | Initial entry: The documented comparison is the commit-time regression test against the published example. |
 | 2026-10-31 | still-applicable | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
-| 2026-10-31 | still-applicable | unknown | no | Rechecked at the gap-closure integration: crates/sharpebench-stats/src/deflated_sharpe.rs moved, and the recorded digest is rebound to the integrated tree. The claim still holds there, so the disposition is unchanged. The digest was rebound again after unit tests for the observed-risk rule were added to the same file; the worked-example test is unchanged. |
+| 2026-10-31 | still-applicable | model: claude-opus-5-5 | no | Rechecked at the gap-closure integration: crates/sharpebench-stats/src/deflated_sharpe.rs moved, and the recorded digest is rebound to the integrated tree. The claim still holds there, so the disposition is unchanged. The digest was rebound again after unit tests for the observed-risk rule were added to the same file; the worked-example test is unchanged. |
 
 ### `SB-tab-eligibility`
 
@@ -2597,7 +2597,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 |---|---|---|---|---|
 | 2026-09-23 | still-applicable | unknown | no | Initial entry: The documented comparison is the commit-time test, which runs against the current tree rather than against the frozen snapshot. |
 | 2026-10-31 | still-applicable | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
-| 2026-10-31 | still-applicable | unknown | no | Rechecked at the gap-closure integration: crates/sharpebench-arena/src/audit.rs moved, and the recorded digest is rebound to the integrated tree. The claim still holds there, so the disposition is unchanged. |
+| 2026-10-31 | still-applicable | model: claude-opus-5-5 | no | Rechecked at the gap-closure integration: crates/sharpebench-arena/src/audit.rs moved, and the recorded digest is rebound to the integrated tree. The claim still holds there, so the disposition is unchanged. |
 
 ### `SB-claims-v`
 
