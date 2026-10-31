@@ -810,7 +810,13 @@ mod tests {
         };
         let plain = run_backtest(&base, &mut BuyAndHold, w, 0, no_costs);
         let div = run_backtest(&paying, &mut BuyAndHold, w, 0, no_costs);
-        let masked = run_backtest(&paying.masked(), &mut BuyAndHold, w, 0, no_costs);
+        let masked = run_backtest(
+            &paying.masked().expect("exact rebase"),
+            &mut BuyAndHold,
+            w,
+            0,
+            no_costs,
+        );
         assert_eq!(
             div.returns, masked.returns,
             "identifier masking must preserve the entire total-return replay"

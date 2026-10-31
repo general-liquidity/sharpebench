@@ -55,6 +55,7 @@ fn dataset(n: usize, closes: &[fn(usize) -> f64]) -> Dataset {
             .map(|(i, close)| (format!("S{i}"), (0..n).map(close).collect()))
             .collect(),
         dividends: BTreeMap::new(),
+        marks: None,
     }
 }
 

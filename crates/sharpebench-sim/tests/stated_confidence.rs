@@ -208,6 +208,7 @@ fn alternating(n: usize) -> Dataset {
         dates: (0..n).map(|t| format!("2026-01-{t:03}")).collect(),
         closes: BTreeMap::from([("A".to_string(), closes)]),
         dividends: BTreeMap::new(),
+        marks: None,
     }
 }
 

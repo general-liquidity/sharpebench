@@ -40,6 +40,7 @@ fn iid_panel(symbols: usize, bars: usize, seed: u64, drift: f64, width: f64) -> 
         dates: (0..bars).map(|bar| format!("b{bar:05}")).collect(),
         closes,
         dividends: BTreeMap::new(),
+        marks: None,
     }
 }
 
@@ -1131,6 +1132,7 @@ fn a_book_at_zero_nav_with_a_position_is_invested() {
         dates: (0..30).map(|bar| format!("b{bar:02}")).collect(),
         closes: BTreeMap::from([("S0".to_string(), closes)]),
         dividends: BTreeMap::new(),
+        marks: None,
     };
     // Twice levered at 100, held through the halving (NAV -1 + 0.02 * 50 = 0),
     // then closed.
