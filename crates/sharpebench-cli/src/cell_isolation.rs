@@ -14,6 +14,13 @@
 //! invocation material behind `invocation_sha256`, so a checkpoint written under
 //! one class cannot be resumed under another. No digest changes to carry it.
 //!
+//! The row also says whether the runner leaves the entrant a network
+//! (`network_reachable`): only the `--image` container runs with `--network
+//! none`. On the historical windows `sharpebench run` scores, a reachable
+//! network lets an entrant fetch the prices it is scored on, so such a row is
+//! published noncertifying in its `evidence_mode` (see
+//! `sharpebench_harness::evidence_mode`).
+//!
 //! This discloses; it does not detect. An entrant under a runner that allows
 //! carryover may carry nothing, and nothing here looks for it.
 
@@ -21,7 +28,8 @@ use sharpebench_arena::SandboxedAgent;
 use sharpebench_sim::external::CellIsolation;
 use sharpebench_sim::{ExternalAgent, HttpAgent};
 
-pub const CELL_ISOLATION_VERSION: &str = "sharpebench.cell-isolation.v1";
+/// v2 adds `network_reachable`; a v1 reader would not know the field.
+pub const CELL_ISOLATION_VERSION: &str = "sharpebench.cell-isolation.v2";
 
 /// The isolation class of the runner behind `agent_id`, or `None` for an id
 /// no external transport produced.
@@ -40,9 +48,24 @@ pub fn disclosure(isolation: CellIsolation) -> serde_json::Value {
         "schema_version": CELL_ISOLATION_VERSION,
         "class": isolation,
         "runner_discards_state_between_cells": isolation.runner_discards_state(),
+        "network_reachable": isolation.network_reachable(),
         "detects_state_carryover": false,
         "rank_neutral": true,
     })
+}
+
+/// The `evidence_mode` object for an entrant `sharpebench run` scored. Every
+/// window this command scores is historical. This command attaches no model
+/// gateway, so a container entrant has no route to a model at all, and a host
+/// process or endpoint has one the host cannot observe.
+pub fn run_evidence_mode(isolation: CellIsolation) -> serde_json::Value {
+    use sharpebench_harness::evidence_mode::{disclosure, ModelCalls, WindowTiming};
+    let calls = if isolation.network_reachable() {
+        ModelCalls::Unobserved
+    } else {
+        ModelCalls::Unreachable
+    };
+    disclosure(WindowTiming::Historical, Some(isolation), calls)
 }
 
 /// The human-output line, printed beside the attempt accounting.
@@ -52,6 +75,21 @@ pub fn print(agent_id: &str) {
         eprintln!(
             "cell isolation for {agent_id}: {} (disclosed from the runner, not a check on the entrant)",
             class.as_str().unwrap_or_default()
+        );
+        let mode = run_evidence_mode(isolation);
+        eprintln!(
+            "evidence mode for {agent_id}: {}, network {}; {}",
+            mode["mode"].as_str().unwrap_or_default(),
+            if isolation.network_reachable() {
+                "reachable"
+            } else {
+                "none"
+            },
+            if mode["certifying"] == true {
+                "the row may certify"
+            } else {
+                "noncertifying: a historical window with a network-reachable entrant"
+            }
         );
     }
 }
@@ -114,6 +152,41 @@ mod tests {
         }
     }
 
+    /// `sharpebench run` scores historical windows, so the open-network
+    /// runners publish a noncertifying row and the `--network none` container
+    /// may certify. Model use is unobservable for the open runners here, and
+    /// unreachable for the container, which this command gives no gateway.
+    #[test]
+    fn only_the_networkless_container_certifies_a_run_board() {
+        let pinned = format!("registry.invalid/agent@sha256:{}", "a".repeat(64));
+        for (flags, reachable, mode) in [
+            (vec!["--image", pinned.as_str()], false, "backtest"),
+            (
+                vec!["--cmd", "python agent.py"],
+                true,
+                "backtest_unobserved",
+            ),
+            (
+                vec!["--http", "127.0.0.1:8080"],
+                true,
+                "backtest_unobserved",
+            ),
+        ] {
+            let label = crate::external_entrant_label(&args(&flags)).expect("a transport flag");
+            let isolation = of_entrant(&label).expect("an external runner tag");
+            assert_eq!(
+                disclosure(isolation)["network_reachable"],
+                reachable,
+                "{label}"
+            );
+            let evidence = run_evidence_mode(isolation);
+            assert_eq!(evidence["window"], "historical", "{label}");
+            assert_eq!(evidence["mode"], mode, "{label}");
+            assert_eq!(evidence["certifying"], !reachable, "{label}");
+            assert_eq!(evidence["rank_neutral"], true, "{label}");
+        }
+    }
+
     /// An id no external transport produced carries no class, so a reference
     /// row, or an entrant id with no runner tag, is never labelled.
     #[test]
@@ -161,6 +234,13 @@ mod tests {
             .remove("cell_isolation")
             .expect("the entrant row carries the class");
         assert_eq!(disclosed["class"], "operator_endpoint");
+        assert_eq!(disclosed["network_reachable"], true);
+        let mode = entrant
+            .as_object_mut()
+            .expect("a row")
+            .remove("evidence_mode")
+            .expect("the entrant row carries its evidence mode");
+        assert_eq!(mode["certifying"], false);
         assert_eq!(with, without);
         assert!(without
             .as_array()

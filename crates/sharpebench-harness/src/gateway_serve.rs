@@ -746,6 +746,16 @@ pub struct HostObservedUsage {
 }
 
 impl HostObservedUsage {
+    /// The model calls this sweep's gateway saw reach, or possibly reach, a
+    /// provider: priced calls plus calls charged at their reservation. A
+    /// released call returned nothing from a model and is not counted. This is
+    /// the observation [`crate::evidence_mode`] applies the advisory rule from.
+    pub fn model_calls(&self) -> crate::evidence_mode::ModelCalls {
+        crate::evidence_mode::ModelCalls::Observed(
+            self.priced_calls.saturating_add(self.unknown_calls),
+        )
+    }
+
     fn of<T: ProviderTransport>(gateway: &ModelGateway<'_, T>, sweep_sha256: String) -> Self {
         let journal = gateway.journal();
         let state = journal.spend();

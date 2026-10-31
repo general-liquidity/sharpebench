@@ -1332,6 +1332,7 @@ fn run_board_json(
                 }
                 if let Some(isolation) = external.cell_isolation {
                     row["cell_isolation"] = cell_isolation::disclosure(isolation);
+                    row["evidence_mode"] = cell_isolation::run_evidence_mode(isolation);
                 }
             }
         }
