@@ -617,6 +617,24 @@ mod tests {
         );
     }
 
+    /// On a tie the earliest field and the plain polarity are kept, so the
+    /// reported baseline does not depend on which of two equal raters is
+    /// listed last.
+    #[test]
+    fn the_single_field_baseline_keeps_the_earliest_on_a_tie() {
+        let gate = [0.9, 0.1, 0.9, 0.1];
+        let human = [true, false, true, false];
+        let half: &[bool] = &[true, true, false, false];
+        let same: &[bool] = &[true, false, false, true];
+        let r =
+            gate_vs_human_with_fields(&gate, 0.5, &human, None, &[("half", half), ("same", same)])
+                .unwrap();
+        let best = r.best_single_field.unwrap();
+        assert_eq!(best.field, "half");
+        assert!(!best.inverted);
+        assert!((best.agreement - 0.5).abs() < 1e-12);
+    }
+
     #[test]
     fn gate_agreement_rejects_mismatched_or_empty_inputs() {
         assert!(gate_vs_human(&[], 0.5, &[], None).is_none());

@@ -352,6 +352,23 @@ fn percentile_selection_checked(
 mod tests {
     use super::*;
 
+    /// The path has the requested length, stays inside `0..n`, repeats under
+    /// its seed, moves with the seed, and refuses an empty source.
+    #[test]
+    fn a_stationary_bootstrap_path_has_its_length_and_range() {
+        let path = stationary_bootstrap_path(7, 5, 40, 0.2).unwrap();
+        assert_eq!(path.len(), 40);
+        assert!(path.iter().all(|&i| i < 5));
+        assert!(path.iter().any(|&i| i > 1), "the walk reaches past index 1");
+        assert_eq!(stationary_bootstrap_path(7, 5, 40, 0.2).unwrap(), path);
+        assert_ne!(stationary_bootstrap_path(8, 5, 40, 0.2).unwrap(), path);
+        assert!(stationary_bootstrap_path(7, 0, 40, 0.2).is_err());
+        assert_eq!(
+            stationary_bootstrap_path(7, 1, 3, 0.2).unwrap(),
+            vec![0, 0, 0]
+        );
+    }
+
     #[test]
     fn unavailable_candidates_never_win_percentile_selection() {
         for utility in [Utility::MeanReturn, Utility::Sharpe] {
