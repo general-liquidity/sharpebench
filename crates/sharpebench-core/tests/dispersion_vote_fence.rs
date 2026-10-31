@@ -259,8 +259,8 @@ fn field_with_probe(extra_honest: usize, sharpe: f64) -> Vec<AgentSubmission> {
     field
 }
 
-/// A probe half a percent inside the fence votes, and the field measures the
-/// dispersion of all seven votes. A probe half a percent outside it does not,
+/// A probe half a percent inside the fence votes (clipped by the influence
+/// bound, so it still moves the honest bar). A probe half a percent outside it does not,
 /// and the six honest rows measure the dispersion of six.
 ///
 /// The two probes straddle one boundary, so any change to the distance the
@@ -290,15 +290,30 @@ fn the_fence_stands_where_the_field_and_the_constant_put_it() {
         let outside = boundary * 1.005;
         let honest_count = HONEST.len() + extra;
 
+        // Inside the fence the probe votes, and the influence bound clips it:
+        // the probe keeps the dispersion its vote measured as cast, and the
+        // honest rows measure one that still carries the probe's vote, clipped,
+        // so it sits strictly between the honest field's and the unbounded one.
         let field = field_with_probe(extra, inside);
         let all_votes = std_dev(&votes_of(&field));
+        let mut honest_only = votes_of(&field);
+        honest_only.retain(|v| *v < inside / 2.0);
+        let honest_dispersion = std_dev(&honest_only);
         for r in &rank(&field, &cfg()) {
-            assert_eq!(
-                r.trials_sr_std.to_bits(),
-                all_votes.to_bits(),
-                "{extra}/{}: a vote inside the fence votes",
-                r.agent_id
-            );
+            if r.agent_id == "probe" {
+                assert_eq!(
+                    r.trials_sr_std.to_bits(),
+                    all_votes.to_bits(),
+                    "{extra}: the clipped probe keeps the bar its vote measured"
+                );
+            } else {
+                assert!(
+                    r.trials_sr_std > honest_dispersion && r.trials_sr_std < all_votes,
+                    "{extra}/{}: a vote inside the fence votes, bounded: {} not in ({honest_dispersion}, {all_votes})",
+                    r.agent_id,
+                    r.trials_sr_std
+                );
+            }
         }
 
         let field = field_with_probe(extra, outside);
@@ -440,11 +455,19 @@ fn a_field_with_no_robust_scale_fences_nobody() {
         min_measured_trials_sr_std: 0.0,
         ..cfg()
     };
+    // The five streams are permutations of one another and correlate beyond
+    // sampling noise, so the independence weighting counts them for less than
+    // five votes and the measured dispersion is at least the plain one of all
+    // six. A fenced vote would be measured against a different sample from the
+    // rest, so one dispersion on every row is what shows nobody was fenced.
     let all_six = std_dev(&votes);
-    for r in &rank(&field, &cfg) {
+    let board = rank(&field, &cfg);
+    let measured = board[0].trials_sr_std;
+    assert!(measured >= all_six, "{measured} below the plain {all_six}");
+    for r in &board {
         assert_eq!(
             r.trials_sr_std.to_bits(),
-            all_six.to_bits(),
+            measured.to_bits(),
             "{}: a field with no scale fences nobody",
             r.agent_id
         );

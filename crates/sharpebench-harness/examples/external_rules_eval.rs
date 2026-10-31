@@ -50,7 +50,7 @@ use std::io::{BufWriter, Write};
 use serde::Serialize;
 use sharpebench_core::composite::{rank, ScoreConfig, TrialsSrStdSource};
 use sharpebench_core::AgentSubmission;
-use sharpebench_harness::{luck_floor, run_agent};
+use sharpebench_harness::{luck_floor, luck_floor_controls, run_agent};
 use sharpebench_protocol::{Action, Decision, MarketObservation, Order};
 use sharpebench_sim::agent::RiskManaged;
 use sharpebench_sim::{
@@ -502,6 +502,7 @@ fn main() {
 
             let cfg = ScoreConfig {
                 execution_seeds_per_window: EXEC_SEEDS.len(),
+                dispersion_controls: luck_floor_controls(LUCK_FLOOR_AGENTS),
                 ..ScoreConfig::for_periods_per_year(*ppy)
             };
             let votes = dispersion_votes(&subs, EXEC_SEEDS.len());
