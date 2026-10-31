@@ -32,6 +32,7 @@ and links the commits it was built from.
 - memory: `ablation_report` refuses a baseline arm without `ControlExposure` evidence showing zero retrievals and memory reads on every task.
 - stats: `GateAgreement` withholds kappa on a constant rater (`kappa_unavailable`) and reports always-majority and single-field baselines.
 - register: status entries record `recorded_by` and `independent`. Every earlier entry is migrated as unknown and not independent, apart from the integration rechecks, which record the model that wrote them. Empty artifacts and the empty-input digest are refused unless declared, and a missing manuscript label source now fails coverage.
+- scripts: the citation register accepts a bibliography entry named only by a code credit, and the three evidence-register scripts are byte-identical with SharpeArena's.
 
 ### Corrected
 
@@ -143,6 +144,7 @@ and links the commits it was built from.
 - Lean model: shared conformance cases in `formal/cases/forecast.json` are checked by Lean and by the production tests for pair support and the inference gate.
 - Lean model: Samuelson's inequality and the soundness of the near-constant refusal are proved over the reals in `formal/samuelson`, in a separate CI job. f64 rounding is out of scope.
 - scripts: `check-lean-scope.py` checks that named production symbols, main results and non-vacuity entries exist, and has its own tests.
+- paper: `refs.bib` entries for KTD-Fin, ALE-Bench and The Probability of Backtest Overfitting (2017), so every code credit resolves to a verified source.
 
 ### Fixed
 
@@ -155,6 +157,9 @@ and links the commits it was built from.
 - arena: the arena clock no longer rewrites state when no transition is due.
 - py: the `moments` docstring states that `sortino` is also `None` for non-finite input.
 - core: a near-constant track can no longer set the whole field's deflation bar. This is the third variant of a class the kernel has closed twice, and the first fix that is not a predicate on a track's values. The first refused a track whose observations all equal the first, the second refused one whose every window is constant, and both are exact value equality, which is a knife edge on a continuum: 0.001 repeated with a 1e-12 perturbation in each window is constant under no bit comparison and is still a track that never moved. Its pooled per-period Sharpe is near 2.6e10, it qualified as a vote, and on a seven-agent hourly crypto field the measured dispersion went from 0.107 to 2.2e10, the deflation bar from 0.244 to 5.1e10, and every honest deflated Sharpe to zero. The fix is a membership rule on the vote rather than a cap on the dispersion or another shape a predicate has to recognize: a vote further than `DISPERSION_VOTE_FENCE_Z`, 10.75, robust scales from its own field's median does not enter the dispersion. The distance is measured against the median of the field's pairwise absolute differences rather than its median absolute deviation, because the MAD of a field that is a tight cluster of luck-floor agents plus two agents that traded is the spread inside the cluster, which puts the honest hourly carrier at a robust distance of 162 and would fence a legitimate entrant; the pairwise median puts that same vote at 5.2, and the largest honest distance on the three panels the engine measures is 5.199, 4.541 and 2.698 against the fence's 10.75. The constant is the one the rejected dispersion cap was measured with, the 99th percentile of the largest robust z in an honest normal field of seven, and its reuse under the new scale is shown conservative by a fixed-seed calibration rather than assumed. Exclusion is not a discount: a fenced entrant is still scored and still ranked, against the bar this field measures with its own vote in it, which is the bar it had before the fence existed, so no entrant is better off for having been fenced and the near-constant track keeps the deflated Sharpe of 0.83 and the ineligibility it always carried instead of inheriting a clean bar and first place. A clone cluster votes once, so fencing that vote fences every stream it spoke for, and a flood of near-identical copies cannot leave one of its own on the measured bar. Nothing is fenced on a field with no distant vote, where the dispersion is the same sample summed in the same order: the three measured panels, their measured dispersions, every committed golden and the whole configured path are byte-identical. What the fence does not do is decide that a vote inside it is honest. An entrant that places itself at the fence has the influence an honest outlier already has, which the row's `trials_sr_std_most_influential_vote` names; the fence bounds the attack, it does not identify the attacker. One counterfactual moves with it. The benchmark self-audit reports the sybil case twice, once with the clone collapse on, which is the shipped default, and once with it off to show what the collapse prevents. In the arm with it off, two hundred near-identical puppets are the field, so the honest votes are the distant minority and the fence removes them: that arm now reads an undefended dispersion of 0.0318 rather than 0.0559 and an undefended real-agent deflated Sharpe of 0.9916 rather than 0.9522. The defended arm, which is what any shipped board computes, is unchanged at 0.3018 and the case is still defended. The fence reads a scale the field itself sets, so a field that is mostly one entrant is a field it cannot help, and the clone collapse is the control for that shape.
+- npm: every wrapper entry point refuses a lone UTF-16 surrogate in any key or string with a named `InvalidUtf8Error`, instead of a serde parse error or a silent U+FFFD substitution. `canary` already substituted under the committed glue.
+- docs: the pass^k credit names tau-bench (Yao et al., 2024), which introduced the metric, not tau2-bench.
+- docs: the attribution and selection credit lines claimed mechanisms their sources do not contain, KTD-Fin's Barra-style factor model and an ALE-Bench median-of-candidates rule. They now say what was taken.
 
 ### Documentation
 
@@ -162,6 +167,8 @@ and links the commits it was built from.
 - docs: the vote-fence documentation no longer claims the fence keeps a fenced track off the board, and known `grader-search` admissions on the fixed seed are documented, including near-constant tracks that clear the bar measured with their own vote.
 - docs: the false-pass sweep gains a dated note with the completed mutation counts.
 - operations: `window-003` expired with no entrant at epoch 20756.
+- docs: the pass-floor plausibility bound of 2.0 annualized Sharpe is stated as a declared choice, not a measurement.
+- paper: the paper says `GateAgreement` withholds kappa for a constant rater.
 
 ## [0.28.0] - 2026-09-18
 
