@@ -207,6 +207,56 @@ class MissingArtifact(unittest.TestCase):
             self.assertTrue(any("cannot be marked in_repo" in p for p in problems), problems)
 
 
+class MissingLabelSource(unittest.TestCase):
+    """A label source that disappears fails coverage instead of leaving it with
+    nothing to check. Each case deletes one file from a copy of the paper."""
+
+    def coverage_without(self, relative: str | None) -> list[str]:
+        import shutil
+
+        with tempfile.TemporaryDirectory() as directory:
+            paper = pathlib.Path(directory) / "paper"
+            shutil.copytree(ROOT / "paper" / "sections", paper / "sections")
+            shutil.copy(ROOT / "paper" / "main.tex", paper / "main.tex")
+            if relative is not None:
+                (paper / relative).unlink()
+            rows = [
+                json.loads(line)
+                for line in CHECK.REGISTER_JSONL.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            original = CHECK.LABEL_SOURCES
+            CHECK.LABEL_SOURCES = [paper / "main.tex"] + sorted(
+                (paper / "sections").glob("*.tex")
+            )
+            try:
+                problems: list[str] = []
+                CHECK.check_coverage(rows, problems)
+            finally:
+                CHECK.LABEL_SOURCES = original
+            return problems
+
+    def test_the_full_copy_has_no_coverage_problem(self):
+        self.assertEqual(self.coverage_without(None), [])
+
+    def test_a_deleted_main_file_fails(self):
+        problems = self.coverage_without("main.tex")
+        self.assertTrue(any("main.tex is not on disk" in p for p in problems), problems)
+
+    def test_a_deleted_nested_fragment_fails(self):
+        # Named only by an \input inside a section, not by main.tex.
+        problems = self.coverage_without("sections/power-fragment.tex")
+        self.assertTrue(any("power-fragment.tex is not on disk" in p for p in problems), problems)
+
+    def test_a_deleted_input_section_fails(self):
+        # The glob no longer lists the deleted file, so only the \input in
+        # main.tex can say that it is missing.
+        problems = self.coverage_without("sections/05-experiments.tex")
+        self.assertTrue(
+            any("05-experiments.tex is not on disk" in p for p in problems), problems
+        )
+
+
 class MissingDisposition(unittest.TestCase):
     def test_an_absent_disposition_fails(self):
         with TemporaryRoot() as root:

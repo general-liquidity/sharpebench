@@ -75,6 +75,8 @@ LABEL_SOURCES = [ROOT / "paper" / "main.tex"] + sorted(
     (ROOT / "paper" / "sections").glob("*.tex")
 )
 LABEL_PATTERN = re.compile(r"\\label\{((?:tab|fig):[^}]+)\}")
+# An uncommented \input or \include, whose target is also a label source.
+INPUT_PATTERN = re.compile(r"^[^%\n]*\\(?:input|include)\{([^}]+)\}", re.MULTILINE)
 
 REQUIRED_TEXT_FIELDS = (
     "claim_id",
@@ -126,12 +128,37 @@ def sha256_of(path: pathlib.Path) -> str:
     return digest.hexdigest()
 
 
-def manuscript_labels() -> set[str]:
+def manuscript_labels(problems: list[str] | None = None) -> set[str]:
+    """Every table and figure label in the manuscript.
+
+    The sources are ``LABEL_SOURCES`` plus every file an ``\\input`` in a source
+    names, followed transitively. TeX resolves an ``\\input`` path from the
+    directory of the main document, the first source, not from the file that
+    contains it. A source that is not on disk is a reported problem, never
+    skipped: a deleted ``main.tex`` or section would otherwise leave the
+    coverage check passing with nothing to check.
+    """
     found: set[str] = set()
-    for source in LABEL_SOURCES:
-        if not source.exists():
+    queue = list(LABEL_SOURCES)
+    base = queue[0].parent if queue else ROOT
+    seen: set[pathlib.Path] = set()
+    while queue:
+        source = queue.pop(0)
+        key = source.resolve()
+        if key in seen:
             continue
-        found.update(LABEL_PATTERN.findall(source.read_text(encoding="utf-8")))
+        seen.add(key)
+        if not source.is_file():
+            if problems is not None:
+                problems.append(f"manuscript label source {source} is not on disk")
+            continue
+        text = source.read_text(encoding="utf-8")
+        found.update(LABEL_PATTERN.findall(text))
+        for name in INPUT_PATTERN.findall(text):
+            target = base / name
+            if target.suffix != ".tex":
+                target = target.with_name(target.name + ".tex")
+            queue.append(target)
     return found
 
 
@@ -383,7 +410,7 @@ def check_coverage(rows: list[dict], problems: list[str]) -> None:
         labels = row.get("labels")
         if isinstance(labels, list):
             covered.update(label for label in labels if isinstance(label, str))
-    for label in sorted(manuscript_labels() - covered):
+    for label in sorted(manuscript_labels(problems) - covered):
         problems.append(
             f"docs/evidence-register.jsonl: manuscript label {label} has no register row"
         )
