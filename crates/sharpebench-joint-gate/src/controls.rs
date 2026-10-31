@@ -16,7 +16,9 @@ use serde::{Deserialize, Serialize};
 use sharpebench_core::composite::{rank, Run, ScoreConfig};
 use sharpebench_core::process::{ProcessEvent, Trace};
 use sharpebench_core::AgentSubmission;
-use sharpebench_harness::{luck_floor, run_agent, run_agent_capture, verify_trajectory_reexecuted};
+use sharpebench_harness::{
+    luck_floor, run_agent, run_agent_capture, verify_trajectory_reexecuted, ReexecutionError,
+};
 use sharpebench_protocol::{Action, Decision, MarketObservation, Order};
 use sharpebench_sim::{Agent, BuyAndHold, CostModel, CostProfile, Dataset, Momentum, Window};
 
@@ -274,16 +276,27 @@ fn reexecution_control(
         }];
     }
     let board = rank(std::slice::from_ref(&submission), &cfg);
-    let verdict =
-        verify_trajectory_reexecuted(&data, &trajectory, costs, &cfg, Some(RUNNER), || {
+    let reexecute = |trajectory: &sharpebench_protocol::AgentTrajectory| {
+        verify_trajectory_reexecuted(&data, trajectory, costs, &cfg, Some(RUNNER), || {
             Box::new(Momentum::default()) as Box<dyn Agent>
-        });
+        })
+    };
+    // Only a divergence is a detection. Any other refusal means the capture never
+    // reached the comparison, and the honest twin must clear the same path, or a
+    // verifier refusing everything would read as a perfect detection rate.
+    let verdict = reexecute(&trajectory);
+    let (_, mut honest) = run_agent_capture(FOCAL, &data, &windows, &seeds, costs, || {
+        Box::new(Momentum::default()) as Box<dyn Agent>
+    });
+    if let Some(contract) = &mut honest.contract {
+        contract.runner_artifact_sha256 = Some(RUNNER.to_string());
+    }
     ControlRow {
         kind: block.kind,
         rep,
-        detected: verdict.is_err(),
+        detected: matches!(verdict, Err(ReexecutionError::Diverged(_))),
         statistics_admitted: focal_eligible(&board),
-        twin_ok: true,
+        twin_ok: reexecute(&honest).is_ok(),
         measure: board[0].deflated_sharpe,
     }
 }

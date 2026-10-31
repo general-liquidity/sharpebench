@@ -254,6 +254,8 @@ refusal is the violation's doing.
 | cost_losing_random | Luck-floor allocators through `run_backtest`, Typical costs, zero-premium tape | No allocator eligible | Whether any is eligible at zero cost |
 | passive_beta | Buy-and-hold through `run_backtest`, Typical costs, market Sharpe 0.87 tape | Ineligible | |
 
+For the first two, detection means a typed divergence, and the honest twin must clear the same verifier in that replicate, so a verifier that refused everything would fail the control rather than pass it.
+
 Re-execution is the defence for the first two, not the statistics. A control that
 the scorer would admit is reported that way, because that is the finding: the
 statistics do not see look-ahead, and the certifying path has to.

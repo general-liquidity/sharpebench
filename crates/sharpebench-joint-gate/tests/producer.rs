@@ -521,8 +521,8 @@ fn every_planted_violation_is_refused_by_its_own_mechanism() {
     for kind in [ControlKind::LookAheadOracle, ControlKind::Fabrication] {
         let row = run_control(&c, &control(kind), 7, 0);
         assert!(
-            row.detected,
-            "{kind:?}: re-execution must refuse it: {row:?}"
+            row.detected && row.twin_ok,
+            "{kind:?}: re-execution must diverge on it and clear its honest twin: {row:?}"
         );
     }
 }
