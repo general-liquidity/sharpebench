@@ -1833,8 +1833,9 @@ fn print_suite_evidence(board: &[CompositeScore], evidence: &sharpebench_core::S
     }
     let binding = &evidence.control_binding;
     println!(
-        "control binding: run_provenance {} over {}",
+        "control binding: run_provenance {} ({}) over {}",
         binding.sha256,
+        binding.preimage_encoding.label(),
         binding.covered_fields.join(", ")
     );
     for unbound in &binding.unbound_fields {
