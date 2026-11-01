@@ -123,6 +123,71 @@ fn powf_bits_are_pinned() {
     }
 }
 
+/// The domain `powf` documents: the C99 Annex F special cases, and the edges
+/// where a finite result stops being finite. Each row is `(x, y, expected)`,
+/// compared by bits so the sign of a zero or an infinity counts.
+#[test]
+fn powf_boundary_special_cases_and_range_edges() {
+    let inf = f64::INFINITY;
+    let cases: &[(f64, f64, f64)] = &[
+        // y = 0 or x = 1 is 1, even for NaN.
+        (f64::NAN, 0.0, 1.0),
+        (f64::NAN, -0.0, 1.0),
+        (1.0, f64::NAN, 1.0),
+        (-3.5, 0.0, 1.0),
+        // |x| = 1 with infinite y is 1.
+        (-1.0, inf, 1.0),
+        (-1.0, -inf, 1.0),
+        // Infinite y otherwise: 0 or +inf by |x| against 1 and the sign of y.
+        (0.5, inf, 0.0),
+        (0.5, -inf, inf),
+        (2.0, inf, inf),
+        (2.0, -inf, 0.0),
+        // Zero base: an odd integer exponent keeps the zero's sign.
+        (-0.0, 3.0, -0.0),
+        (-0.0, 2.0, 0.0),
+        (-0.0, -3.0, -inf),
+        (-0.0, -2.0, inf),
+        (0.0, -0.5, inf),
+        // Infinite base.
+        (-inf, 3.0, -inf),
+        (-inf, -3.0, -0.0),
+        (-inf, 2.0, inf),
+        (inf, -0.5, 0.0),
+        // A negative finite base with a non-integer exponent is NaN.
+        (-2.0, 0.5, f64::NAN),
+        // Exact powers of two at both ends of the finite range.
+        (2.0, 1023.0, f64::from_bits(0x7fe0_0000_0000_0000)),
+        (2.0, 1024.0, inf),
+        (-2.0, 1025.0, -inf),
+        (2.0, -1022.0, f64::MIN_POSITIVE),
+        (2.0, -1074.0, f64::from_bits(1)),
+        (2.0, -1080.0, 0.0),
+        (-2.0, -1081.0, -0.0),
+        // An exponent near f64::MAX decides overflow and underflow before the
+        // exact product, whose split would itself overflow.
+        (2.0, f64::MAX, inf),
+        (2.0, -f64::MAX, 0.0),
+        (0.5, f64::MAX, 0.0),
+        (-0.5, -f64::MAX, inf),
+        // Odd-integer detection stops at 2^53, where every double is even.
+        (-1.5, 9_007_199_254_740_992.0, inf),
+    ];
+    for &(x, y, expected) in cases {
+        let got = powf(x, y);
+        let same = if expected.is_nan() {
+            got.is_nan()
+        } else {
+            got.to_bits() == expected.to_bits()
+        };
+        assert!(
+            same,
+            "powf({x:e}, {y:e}) = {got:e} (0x{:016x}), expected {expected:e}",
+            got.to_bits()
+        );
+    }
+}
+
 #[test]
 fn powi_bits_are_pinned() {
     for &(x, n, expected) in POWI_PINS {
