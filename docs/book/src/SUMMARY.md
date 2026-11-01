@@ -14,6 +14,7 @@
   - [Candidate lineage diagnostics](candidate-lineage.md)
   - [Replay diagnostics](replay-diagnostics.md)
   - [Timing-luck floor](timing-luck.md)
+  - [How to read a row](reading-a-row.md)
 - [Prospective forecast quality](forecast-quality.md)
 - [The simulator](simulator.md)
 - [Options pricing and payoff risk](options-risk.md)

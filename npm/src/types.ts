@@ -343,12 +343,17 @@ export interface CrowdingDecayPrior {
 // --- Disqualification-reason taxonomy ---------------------------------------
 
 /**
- * A reason an agent was (or should be) demoted. The first five mirror the hard
- * eligibility gates in the scorer; two more name the unavailability of a
- * statistic the scorer does gate on. The last four are advisory quality flags
- * that never gate. `selection_unavailable` is advisory because the scorer
- * reports the selection axis and never consults it in `rank_eligible`, so an
- * agent carrying it alone is still ranked.
+ * A reason an agent was (or should be) demoted, in the kernel's stable order.
+ * The first ten are hard reasons, each of which removes the agent from the
+ * rank: five original gates, the unavailability of the deflation family or the
+ * bootstrap, the deflation family's refusal of the track's shape
+ * (`degenerate_track`), the refused standard-error certification and the
+ * unproven exposure path. The last four are advisory quality flags that never
+ * gate. `selection_unavailable` is advisory because the scorer reports the
+ * selection axis and never consults it in `rank_eligible`. `is_rediscovery` and
+ * `oos_decay` need evidence this package does not take (a known-strategy
+ * library and an out-of-sample split), so {@link classifyDisqualification}
+ * never returns them; `sharpebench disqualify --known/--oos-windows` does.
  */
 export type FailReason =
   | "failed_pass_k"
@@ -357,7 +362,10 @@ export type FailReason =
   | "bootstrap_insignificant"
   | "mandate_breached"
   | "deflation_unavailable"
+  | "degenerate_track"
   | "bootstrap_unavailable"
+  | "standard_error_uncertified"
+  | "exposure_path_unproven"
   | "selection_unavailable"
   | "high_selection_gap"
   | "is_rediscovery"
@@ -369,6 +377,59 @@ export interface DisqualificationReport {
   rank_eligible: boolean;
   /** Reasons in stable order; empty means no signal fired. */
   reasons: FailReason[];
+  [k: string]: unknown;
+}
+
+// --- Headline verdict --------------------------------------------------------
+
+/**
+ * The one-word reading of a row. The first matching rule wins, in this order:
+ * `refused` (no scored row), `unavailable` (a statistic a gate needs could not
+ * be computed), `degenerate_track` (the track has no Sharpe ratio),
+ * `disqualified` (a process violation or a breached mandate),
+ * `skill_supported` (rank-eligible), `cannot_tell` (pass^k is the only hard
+ * reason and its floors are out of practical reach), `no_evidence_of_skill`.
+ */
+export type HeadlineVerdict =
+  | "refused"
+  | "unavailable"
+  | "degenerate_track"
+  | "disqualified"
+  | "skill_supported"
+  | "cannot_tell"
+  | "no_evidence_of_skill";
+
+/**
+ * The harness evidence mode behind a row. A field of submissions carries none,
+ * so the package always reports `unknown`.
+ */
+export type HeadlineEvidence =
+  | { status: "unknown" }
+  | { status: "certifying"; mode: string }
+  | { status: "noncertifying"; mode: string; reasons: string[] };
+
+/** Facts reported beside the verdict. None of them changes it. */
+export interface HeadlineQualifiers {
+  evidence: HeadlineEvidence;
+  tied: boolean;
+  tie_group: number;
+  stress: "not_run" | "clean" | "marked" | "unavailable";
+  advisory: FailReason[];
+  declared_mandate?: string;
+  rank_mode?: string;
+  [k: string]: unknown;
+}
+
+/** The headline of one row (schema `sharpebench.headline.v1`). */
+export interface Headline {
+  schema: string;
+  agent_id: string;
+  verdict: HeadlineVerdict;
+  /** Hard reasons in stable order; empty exactly for refused and skill_supported. */
+  hard_reasons: FailReason[];
+  /** The refusal or unavailability text that decided the verdict, when one did. */
+  cause?: string;
+  qualifiers: HeadlineQualifiers;
   [k: string]: unknown;
 }
 

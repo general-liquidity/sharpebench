@@ -92,9 +92,10 @@ fn main() -> ExitCode {
         Some("timing-luck") => {
             ExitCode::from(timing_luck_cmd::run(&args, json).clamp(0, 255) as u8)
         }
-        Some(sub @ ("select" | "disqualify" | "rediscover" | "uncertainty" | "decay-prior")) => {
-            ExitCode::from(analysis_cmd::run(sub, &args, json).clamp(0, 255) as u8)
-        }
+        Some(
+            sub @ ("select" | "disqualify" | "headline" | "rediscover" | "uncertainty"
+            | "decay-prior"),
+        ) => ExitCode::from(analysis_cmd::run(sub, &args, json).clamp(0, 255) as u8),
         Some("self-update" | "update") => run_self_update(),
         Some("--help") | Some("-h") | None => {
             help();
@@ -617,6 +618,10 @@ fn help() {
         "                         does not use: autocorrelated-psr,null-se-psr,mppm,expected-shortfall (comma-separated)"
     );
     println!(
+        "                       --headline: add a headline verdict column (JSON: a `headlines` list beside"
+    );
+    println!("                         the sealed board); never changes a score or the rank");
+    println!(
         "  sharpebench commit <agent> <window> <digest> <salt> [--fault-plan <plan.json>]  forward-attestation pre-registration"
     );
     println!("  sharpebench stress                    run the adversarial stress suite (masked)");
@@ -697,6 +702,9 @@ fn help() {
     );
     println!(
         "  sharpebench disqualify <subs.json>                          classify each agent's hard gates and advisory flags"
+    );
+    println!(
+        "  sharpebench headline <subs.json>                            one verdict per row, with its hard reasons and qualifiers beside it"
     );
     println!(
         "  sharpebench rediscover <submitted.csv> <known.csv...>       flag a submission cosine-near a known strategy"
@@ -3397,18 +3405,37 @@ fn run_score(path: &str, args: &[String], json: bool) -> ExitCode {
         Some(mode) => sharpebench_core::rank_certified(&subs, &declarations, &cfg, mode),
         None => sharpebench_core::rank_declared(&subs, &declarations, &cfg),
     };
-    match diagnostics {
-        None => emit_board(&board, json),
-        Some(requested) => {
-            let report = sharpebench_core::sharpe_diagnostics(&subs, &board, &cfg, &requested);
+    // `--headline` is opt-in. Absent, the output is byte for byte what it was;
+    // present, the verdicts are computed from the finished board and reported
+    // beside it, never written into a row, so the sealed board is unchanged.
+    let headlines = args.iter().any(|a| a == "--headline").then(|| {
+        sharpebench_core::board_headlines(
+            &board,
+            &sharpebench_core::DisqualThresholds::from_score_config(&cfg),
+        )
+    });
+    match (diagnostics, headlines) {
+        (None, None) => emit_board(&board, json),
+        (requested, headlines) => {
+            let report = requested
+                .as_ref()
+                .map(|r| sharpebench_core::sharpe_diagnostics(&subs, &board, &cfg, r));
             if json {
-                emit_json(&serde_json::json!({
+                let mut out = serde_json::json!({
                     "board": sharpebench_core::seal_board(&board),
-                    "sharpe_diagnostics": report,
-                }));
+                });
+                if let Some(report) = &report {
+                    out["sharpe_diagnostics"] = serde_json::json!(report);
+                }
+                if let Some(headlines) = &headlines {
+                    out["headlines"] = serde_json::json!(headlines);
+                }
+                emit_json(&out);
             } else {
-                print_board(&board);
-                print_sharpe_diagnostics(&report, &requested);
+                print_board_with(&board, headlines.as_deref());
+                if let (Some(report), Some(requested)) = (&report, &requested) {
+                    print_sharpe_diagnostics(report, requested);
+                }
             }
         }
     }
@@ -3566,6 +3593,13 @@ fn emit_board(board: &[CompositeScore], json: bool) {
 }
 
 fn print_board(board: &[CompositeScore]) {
+    print_board_with(board, None);
+}
+
+/// The board table, with the headline verdict as a last column when
+/// `headlines` is given (one per row, in board order).
+fn print_board_with(board: &[CompositeScore], headlines: Option<&[sharpebench_core::Headline]>) {
+    let headline_header = if headlines.is_some() { " headline" } else { "" };
     // The mandate column appears only when some row declared one, so a board
     // with no declarations prints exactly as before.
     let declared = board.iter().any(|s| s.verdict_applied.is_some());
@@ -3574,7 +3608,7 @@ fn print_board(board: &[CompositeScore]) {
     let certified = board.iter().any(|s| s.certification.is_some());
     let certified_header = if certified { " certified" } else { "" };
     println!(
-        "{:<4} {:<18} {:>9} {:>8} {:>11} {:>6} {:>9} {:>10}{mandate_header}{certified_header}",
+        "{:<4} {:<18} {:>9} {:>8} {:>11} {:>6} {:>9} {:>10}{mandate_header}{certified_header}{headline_header}",
         "#", "agent", "DSR", "PSR", "pass^k", "proc", "boot_p", "raw_ret"
     );
     println!("{}", "-".repeat(84));
@@ -3603,8 +3637,11 @@ fn print_board(board: &[CompositeScore]) {
         } else {
             String::new()
         };
+        let verdict = headlines
+            .and_then(|h| h.get(i))
+            .map_or_else(String::new, |h| format!(" {}", h.verdict.as_str()));
         println!(
-            "{:<4} {:<18} {:>9.4} {:>8.4} {:>11} {:>6} {:>9.4} {:>10.5}{mandate}{certification}",
+            "{:<4} {:<18} {:>9.4} {:>8.4} {:>11} {:>6} {:>9.4} {:>10.5}{mandate}{certification}{verdict}",
             pos,
             truncate(&s.agent_id, 18),
             s.deflated_sharpe,

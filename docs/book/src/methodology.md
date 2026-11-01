@@ -7,15 +7,29 @@ Seeds remain separate for pass^k, but pooled statistics first average aligned
 seed returns inside each window and then concatenate windows. Replicating an
 execution seed therefore cannot multiply the apparent sample size.
 
-An agent is **rank-eligible only if every gate holds**:
+An agent is **rank-eligible only if all nine conditions hold**:
 
 ```text
-eligible = DSR ≥ dsr_bar          (survives multiple-testing deflation)
-         ∧ pass^k                  (clears the per-run bar on EVERY run)
-         ∧ process_ok              (zero block-severity trace violations)
-         ∧ bootstrap_p < alpha     (edge beats the stationary-bootstrap null)
-         ∧ mandate_ok              (respected its drawdown mandate)
+eligible = DSR ≥ dsr_bar                   (survives multiple-testing deflation)
+         ∧ pass^k                           (clears the per-run bar on EVERY run)
+         ∧ process_ok                       (zero block-severity trace violations)
+         ∧ bootstrap_p < alpha              (edge beats the stationary-bootstrap null)
+         ∧ mandate_ok                       (respected its drawdown mandate)
+         ∧ deflation_error is absent        (the deflation family was computed)
+         ∧ bootstrap_error is absent        (the bootstrap was computed)
+         ∧ standard_error_refusal is absent (the admitted DSR's standard error is certified)
+         ∧ exposure_path_error is absent    (the profit clears the risk its exposure history implies)
 ```
+
+The first five are the hard gates. The next two hold when the statistics the
+gates read could be computed: a track the deflation family refuses for its
+shape, such as a constant track or one that never lost a bar, has no Sharpe
+ratio and fails here. The last two can only remove a row the first seven
+admitted; see
+[certifying the standard error](methodology-deflated-sharpe.md#certifying-the-standard-error-before-admission)
+and [leverage timing](methodology-deflated-sharpe.md#leverage-timing-the-risk-an-exposure-history-implies).
+[How to read a row](reading-a-row.md) names the reason each failed condition
+produces and gives the one-word headline verdict a row reads as.
 
 Eligible agents sort by the **rank key** (Deflated Sharpe by default, or Alpha).
 Ineligible agents sort last, by raw return, for display only; raw return never

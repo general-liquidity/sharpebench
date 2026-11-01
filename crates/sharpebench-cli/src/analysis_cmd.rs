@@ -19,7 +19,8 @@ use sharpebench_core::selection::{
     MIN_RECOMMENDED_SELECTION_ALPHA,
 };
 use sharpebench_core::{
-    classify_disqualification, classify_rediscovery, DisqualThresholds, FailReason,
+    board_headlines, classify_disqualification, classify_rediscovery, AgentSubmission,
+    CompositeScore, DisqualThresholds, FailReason, Headline, OosDecayReport, RediscoveryVerdict,
     DEFAULT_REDISCOVERY_THRESHOLD,
 };
 
@@ -31,6 +32,7 @@ pub fn run(subcommand: &str, args: &[String], json: bool) -> i32 {
     match subcommand {
         "select" => run_select(args, json),
         "disqualify" => run_disqualify(args, json),
+        "headline" => run_headline(args, json),
         "rediscover" => run_rediscover(args, json),
         "uncertainty" => run_uncertainty(args, json),
         "decay-prior" => run_decay_prior(args, json),
@@ -260,12 +262,129 @@ fn run_select(args: &[String], json: bool) -> i32 {
 
 // --- disqualify --------------------------------------------------------------
 
+/// The out-of-band evidence `disqualify` screens each agent against when the
+/// caller supplies it: a library of known strategy streams (`--known`) and a
+/// window count for the out-of-sample decay split (`--oos-windows`). Both are
+/// opt-in, so without them the output is what it was.
+struct AdvisoryEvidence {
+    known: Vec<Vec<f64>>,
+    rediscovery_threshold: f64,
+    oos_windows: Option<usize>,
+}
+
+impl AdvisoryEvidence {
+    /// The evidence the flags ask for, or the exit code and message: 2 for a
+    /// malformed flag, 1 for a library file that cannot be read.
+    fn from_args(args: &[String]) -> Result<Self, (i32, String)> {
+        let paths = flag_values(args, "--known");
+        if args.iter().filter(|a| *a == "--known").count() != paths.len()
+            || paths.iter().any(|p| p.starts_with("--"))
+        {
+            return Err((2, "--known requires a CSV path".to_string()));
+        }
+        let mut known = Vec::with_capacity(paths.len());
+        for path in paths {
+            let stream = read_file(path)
+                .and_then(|t| read_returns_column(&t, None))
+                .map_err(|e| (1, format!("{path}: {e}")))?;
+            known.push(stream);
+        }
+        let rediscovery_threshold = parse_f64_flag_or(
+            args,
+            "--rediscovery-threshold",
+            DEFAULT_REDISCOVERY_THRESHOLD,
+        )
+        .map_err(|e| (2, e))?;
+        let oos_windows = if args.iter().any(|a| a == "--oos-windows") {
+            let raw = flag_value(args, "--oos-windows").unwrap_or("");
+            match raw.parse::<usize>() {
+                Ok(n) if n >= 2 => Some(n),
+                _ => {
+                    return Err((
+                        2,
+                        format!("--oos-windows must be an integer of at least 2, got `{raw}`"),
+                    ))
+                }
+            }
+        } else {
+            None
+        };
+        Ok(Self {
+            known,
+            rediscovery_threshold,
+            oos_windows,
+        })
+    }
+
+    /// The decay report of a submission split window-major into the declared
+    /// number of windows, when a split was asked for and the submission has a
+    /// run for every window.
+    fn oos(&self, sub: &AgentSubmission) -> Option<OosDecayReport> {
+        let windows = self.oos_windows?;
+        (sub.runs.len() >= windows).then(|| sharpebench_harness::oos_decay_of(sub, windows))
+    }
+
+    /// The rediscovery screen of a submission's pooled stream (its runs in
+    /// submission order) against the known library, when one was supplied.
+    fn rediscovery(&self, sub: &AgentSubmission) -> Option<RediscoveryVerdict> {
+        if self.known.is_empty() {
+            return None;
+        }
+        let pooled: Vec<f64> = sub
+            .runs
+            .iter()
+            .flat_map(|r| r.returns.iter().copied())
+            .collect();
+        Some(classify_rediscovery(
+            &pooled,
+            &self.known,
+            self.rediscovery_threshold,
+            false,
+        ))
+    }
+}
+
+/// One classified board row.
+struct Classified {
+    agent_id: String,
+    rank_eligible: bool,
+    reasons: Vec<FailReason>,
+}
+
+/// Classify every row of a board, with the out-of-band evidence for the
+/// submission of the same agent.
+fn classify_board(
+    board: &[CompositeScore],
+    subs: &[AgentSubmission],
+    thresholds: &DisqualThresholds,
+    evidence: &AdvisoryEvidence,
+) -> Vec<Classified> {
+    board
+        .iter()
+        .map(|score| {
+            let sub = subs.iter().find(|s| s.agent_id == score.agent_id);
+            let oos = sub.and_then(|s| evidence.oos(s));
+            let rediscovery = sub.and_then(|s| evidence.rediscovery(s));
+            Classified {
+                agent_id: score.agent_id.clone(),
+                rank_eligible: score.rank_eligible,
+                reasons: classify_disqualification(
+                    score,
+                    thresholds,
+                    oos.as_ref(),
+                    rediscovery.as_ref(),
+                ),
+            }
+        })
+        .collect()
+}
+
 /// `disqualify <subs.json>`: score a field of submissions and name every
 /// disqualification/quality signal that fired for each agent. Pure legibility
 /// over the composite score: nothing here changes eligibility semantics.
 fn run_disqualify(args: &[String], json: bool) -> i32 {
     let Some(path) = args.get(2).filter(|p| !p.starts_with('-')) else {
-        eprintln!("usage: sharpebench disqualify <submissions.json> [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode MODE] [--benchmark-agent ID] [--json]");
+        eprintln!("usage: sharpebench disqualify <submissions.json> [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode MODE] [--benchmark-agent ID] [--known <known.csv>]... [--rediscovery-threshold T] [--oos-windows N] [--json]");
         return 2;
     };
     let data = match read_file(path) {
@@ -289,24 +408,25 @@ fn run_disqualify(args: &[String], json: bool) -> i32 {
             return 2;
         }
     };
+    let evidence = match AdvisoryEvidence::from_args(args) {
+        Ok(evidence) => evidence,
+        Err((code, error)) => {
+            eprintln!("error: {error}");
+            return code;
+        }
+    };
     let thresholds = DisqualThresholds::from_score_config(&cfg);
     let board = sharpebench_core::rank_declared(&subs, &declarations, &cfg);
-    let classified: Vec<(String, bool, Vec<FailReason>)> = board
-        .iter()
-        .map(|score| {
-            let reasons = classify_disqualification(score, &thresholds, None, None);
-            (score.agent_id.clone(), score.rank_eligible, reasons)
-        })
-        .collect();
+    let classified = classify_board(&board, &subs, &thresholds, &evidence);
 
     if json {
         let out: Vec<serde_json::Value> = classified
             .iter()
-            .map(|(id, eligible, reasons)| {
+            .map(|row| {
                 serde_json::json!({
-                    "agent_id": id,
-                    "rank_eligible": eligible,
-                    "reasons": reasons,
+                    "agent_id": row.agent_id,
+                    "rank_eligible": row.rank_eligible,
+                    "reasons": row.reasons,
                 })
             })
             .collect();
@@ -316,7 +436,12 @@ fn run_disqualify(args: &[String], json: bool) -> i32 {
     println!(
         "Disqualification reasons (hard gates mirror the scorer; advisory flags never gate)\n"
     );
-    for (id, eligible, reasons) in &classified {
+    for Classified {
+        agent_id: id,
+        rank_eligible: eligible,
+        reasons,
+    } in &classified
+    {
         if reasons.is_empty() {
             println!("{id}: clear (no signal fired), rank-eligible={eligible}");
             continue;
@@ -334,6 +459,85 @@ fn run_disqualify(args: &[String], json: bool) -> i32 {
         println!("{id}: {} , rank-eligible={eligible}", listed.join(", "));
     }
     0
+}
+
+// --- headline ----------------------------------------------------------------
+
+/// The headline of every row of a scored field, in board order. A field read
+/// from a submissions file carries no evidence mode and no stress replay, so
+/// those qualifiers read `unknown` and `not_run`.
+fn field_headlines(
+    data: &str,
+    cfg: &sharpebench_core::ScoreConfig,
+) -> Result<Vec<Headline>, String> {
+    let (subs, declarations) = sharpebench_core::parse_declared_field(data)?;
+    let board = sharpebench_core::rank_declared(&subs, &declarations, cfg);
+    Ok(board_headlines(
+        &board,
+        &DisqualThresholds::from_score_config(cfg),
+    ))
+}
+
+/// `headline <subs.json>`: score a field and print one verdict per row, with
+/// the hard reasons and the qualifiers beside it. Reads the same scoring
+/// controls as `score` and `disqualify`, and never changes a score or a rank.
+fn run_headline(args: &[String], json: bool) -> i32 {
+    let Some(path) = args.get(2).filter(|p| !p.starts_with('-')) else {
+        eprintln!("usage: sharpebench headline <submissions.json> [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode MODE] [--benchmark-agent ID] [--json]");
+        return 2;
+    };
+    let cfg = match crate::score_config_from_args(args) {
+        Ok(cfg) => cfg,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return 2;
+        }
+    };
+    let headlines = match read_file(path).and_then(|data| field_headlines(&data, &cfg)) {
+        Ok(h) => h,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return 1;
+        }
+    };
+    if json {
+        emit_json(&headlines);
+        return 0;
+    }
+    println!("Headline verdicts (first matching rule wins; qualifiers never change a verdict)\n");
+    for h in &headlines {
+        println!("{}", headline_line(h));
+    }
+    0
+}
+
+/// One human line per headline: the agent, the verdict, the hard reasons and
+/// the qualifiers that are set.
+pub(crate) fn headline_line(h: &Headline) -> String {
+    let mut line = format!("{}: {}", h.agent_id, h.verdict.as_str());
+    if !h.hard_reasons.is_empty() {
+        let reasons: Vec<String> = h.hard_reasons.iter().map(|r| format!("{r:?}")).collect();
+        line.push_str(&format!(" [{}]", reasons.join(", ")));
+    }
+    if h.qualifiers.tied {
+        line.push_str(&format!(", tied in band {}", h.qualifiers.tie_group));
+    }
+    if !h.qualifiers.advisory.is_empty() {
+        let advisory: Vec<String> = h
+            .qualifiers
+            .advisory
+            .iter()
+            .map(|r| format!("{r:?}"))
+            .collect();
+        line.push_str(&format!(", advisory: {}", advisory.join(", ")));
+    }
+    if let Some(label) = &h.qualifiers.declared_mandate {
+        line.push_str(&format!(", declared mandate: {label}"));
+    }
+    if let Some(label) = &h.qualifiers.rank_mode {
+        line.push_str(&format!(", rank mode: {label}"));
+    }
+    line
 }
 
 // --- rediscover --------------------------------------------------------------

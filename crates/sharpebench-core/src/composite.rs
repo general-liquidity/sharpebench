@@ -3703,7 +3703,7 @@ mod tests {
             assert!(!score.rank_eligible);
             assert_eq!(
                 crate::disqualification::classify_disqualification(&score, &thresholds, None, None),
-                vec![crate::disqualification::FailReason::DeflationUnavailable]
+                vec![crate::disqualification::FailReason::DegenerateTrack]
             );
         }
     }

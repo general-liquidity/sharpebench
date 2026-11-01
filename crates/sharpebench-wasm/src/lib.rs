@@ -347,8 +347,11 @@ dataset, and nothing should rank on it"
 /// field of submissions, taking the same JSON array `score_json` takes. Pure
 /// legibility over the composite score: nothing here changes eligibility
 /// semantics. Output: `[{agent_id, rank_eligible, reasons}]` with reasons in
-/// stable enum order; the advisory reasons (high_selection_gap, is_rediscovery,
-/// oos_decay) never gate.
+/// stable enum order; the advisory reasons (selection_unavailable,
+/// high_selection_gap, is_rediscovery, oos_decay) never gate. This surface takes
+/// no known-strategy library and no out-of-sample split, so it never emits
+/// is_rediscovery or oos_decay; `sharpebench disqualify --known/--oos-windows`
+/// does.
 pub fn classify_disqualification_json(
     submissions_json: &str,
     config_json: &str,
@@ -371,6 +374,22 @@ pub fn classify_disqualification_json(
         })
         .collect();
     serde_json::to_string(&out).map_err(|e| e.to_string())
+}
+
+/// The headline verdict of every row of a field of submissions, taking the
+/// same JSON array `score_json` takes. Output: one
+/// `sharpebench.headline.v1` record per row, in board order, each with the
+/// verdict, the hard reasons, the cause and the qualifiers. A field carries no
+/// evidence mode and no stress replay, so those qualifiers read `unknown` and
+/// `not_run`. Never changes a score or a rank.
+pub fn headline_json(submissions_json: &str, config_json: &str) -> Result<String, String> {
+    use sharpebench_core::{board_headlines, DisqualThresholds};
+
+    let (subs, declarations) = parse_declared_field(submissions_json)?;
+    let cfg: ScoreConfig = parse_or_default(config_json)?;
+    let board = rank_declared(&subs, &declarations, &cfg);
+    let headlines = board_headlines(&board, &DisqualThresholds::from_score_config(&cfg));
+    serde_json::to_string(&headlines).map_err(|e| e.to_string())
 }
 
 #[derive(Default, serde::Deserialize)]
@@ -504,6 +523,11 @@ mod wasm {
             submissions_json,
             config_json,
         ))
+    }
+
+    #[wasm_bindgen]
+    pub fn headline(submissions_json: &str, config_json: &str) -> String {
+        wrap(super::headline_json(submissions_json, config_json))
     }
 
     #[wasm_bindgen]
@@ -857,6 +881,46 @@ mod tests {
             "{noise_reasons:?}"
         );
         assert!(classify_disqualification_json("not json", "").is_err());
+    }
+
+    #[test]
+    fn headline_json_reads_one_verdict_per_row_under_the_given_config() {
+        let steady: Vec<f64> = (0..60)
+            .map(|i| 0.002 + 0.004 * (i as f64 * 0.7).sin())
+            .collect();
+        let subs = serde_json::json!([
+            { "agent_id": "steady", "runs": (0..5).map(|_| serde_json::json!({"returns": steady})).collect::<Vec<_>>() },
+            { "agent_id": "flat", "runs": [{"returns": vec![0.0; 60]}] },
+        ]);
+        let v: serde_json::Value =
+            serde_json::from_str(&headline_json(&subs.to_string(), "").unwrap()).unwrap();
+        let verdicts: Vec<(&str, &str)> = v
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|h| {
+                (
+                    h["agent_id"].as_str().unwrap(),
+                    h["verdict"].as_str().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            verdicts,
+            [("steady", "skill_supported"), ("flat", "degenerate_track")]
+        );
+        // The config is honored: an interval level the estimator refuses makes
+        // the steady row unavailable, not unskilled.
+        let broken = serde_json::to_string(&ScoreConfig {
+            dsr_ci_level: 1.5,
+            ..ScoreConfig::default()
+        })
+        .unwrap();
+        let v: serde_json::Value =
+            serde_json::from_str(&headline_json(&subs.to_string(), &broken).unwrap()).unwrap();
+        assert_eq!(v[0]["verdict"], "unavailable");
+        assert!(headline_json("not json", "").is_err());
+        assert!(headline_json(&subs.to_string(), "not json").is_err());
     }
 
     #[test]

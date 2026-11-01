@@ -51,6 +51,7 @@ pub mod entrants;
 pub mod evidence_coverage;
 pub mod forecast;
 pub mod greeks;
+pub mod headline;
 pub mod oos;
 pub mod pass_floor;
 pub mod pass_k;
@@ -103,7 +104,10 @@ pub use decision_stability::{
     ObservedDecision, ReplicateRun, StabilityCounts, StabilityRate, StabilityUnavailable,
     WindowStability,
 };
-pub use disqualification::{classify_disqualification, rollup, DisqualThresholds, FailReason};
+pub use disqualification::{
+    classify_disqualification, is_degenerate_track_refusal, rollup, DisqualThresholds, FailReason,
+    CONSTANT_SERIES, DEGENERATE_TRACK_REQUIREMENTS,
+};
 pub use econrationality::{
     assess_rationality, elicit_revealed_selection, DominanceChoice, EconRationalityReport,
 };
@@ -135,6 +139,10 @@ pub use forecast::{
 pub use greeks::{
     bs_greeks, bs_price, classify_greeks_risk, classify_payoff_tail, portfolio_greeks, Greeks,
     GreeksPolicy, GreeksRisk, Leg, OptionsError, PayoffTailRisk,
+};
+pub use headline::{
+    board_headlines, headline, Evidence as HeadlineEvidence, Headline, HeadlineContext,
+    HeadlineRow, Qualifiers as HeadlineQualifiers, StressMark, Verdict as HeadlineVerdict,
 };
 pub use oos::{oos_decay, OosDecayReport};
 pub use pass_k::{pass_k, PassMode};

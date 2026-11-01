@@ -70,13 +70,20 @@ candidate is unsupported. Its `alpha_warning` reports where `alpha` sits and
 nothing else: a refusal that had nothing to do with alpha, such as too few
 observations or a rejected block probability, leaves the flag false.
 
-`classifyDisqualification` returns eleven reasons in three groups: five mirror
-the scorer's hard eligibility gates, two name the unavailability of a statistic
-the scorer gates on (`deflation_unavailable`, `bootstrap_unavailable`), and four
-are advisory and never gate (`selection_unavailable`, `high_selection_gap`,
-`is_rediscovery`, `oos_decay`). `selection_unavailable` is advisory because the
-scorer reports `selection_gap` and never consults it in `rank_eligible`, so a
-submission carrying only advisory reasons is still rank-eligible. Read
+`classifyDisqualification` names fourteen reasons. Ten are hard and each
+removes the agent from the rank: five mirror the scorer's hard eligibility
+gates, two name a statistic the scorer gates on that could not be computed
+(`deflation_unavailable`, `bootstrap_unavailable`), `degenerate_track` names a
+track with no Sharpe ratio, and `standard_error_uncertified` and
+`exposure_path_unproven` refuse an admitted Sharpe ratio. Four are advisory and
+never gate (`selection_unavailable`, `high_selection_gap`, `is_rediscovery`,
+`oos_decay`); this package never returns the last two, because it takes no
+known-strategy library and no out-of-sample split. `selection_unavailable` is
+advisory because the scorer reports `selection_gap` and never consults it in
+`rank_eligible`, so a submission carrying only advisory reasons is still
+rank-eligible. `headline(submissions, config)` returns one
+[headline verdict](https://github.com/general-liquidity/sharpebench/blob/main/docs/book/src/reading-a-row.md)
+per row. Read
 `rank_eligible`, not the presence of a reason. See the [error and migration guide](https://github.com/general-liquidity/sharpebench/blob/main/docs/book/src/wasm.md#statistical-unavailability-and-migration).
 
 ## Why luck-robust?

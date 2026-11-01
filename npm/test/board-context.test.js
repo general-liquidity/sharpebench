@@ -54,3 +54,26 @@ test("both board endpoints refuse invalid declarations and ambiguous identities"
     assert.throws(() => sb.classifyDisqualification(input));
   }
 });
+
+test("headline reads one verdict per board row through actual wasm", () => {
+  const config = {
+    n_trials: 2, trials_sr_std: 0.5, dsr_bar: 0.95, per_run_psr_bar: 0.9,
+    alpha: 0.05, bootstrap_seed: 7, n_boot: 99, block_prob: 0.1,
+    pass_mode: "relative_to_benchmark", benchmark_agent_id: "candidate",
+  };
+  const board = sb.score(field(), config);
+  const headlines = sb.headline(field(), config);
+  assert.deepEqual(headlines.map((h) => h.agent_id), board.map((s) => s.agent_id));
+  for (const [row, h] of board.map((s, i) => [s, headlines[i]])) {
+    assert.equal(h.schema, "sharpebench.headline.v1");
+    assert.equal(h.verdict === "skill_supported", row.rank_eligible);
+    assert.equal(h.hard_reasons.length === 0, row.rank_eligible);
+    assert.deepEqual(h.qualifiers.evidence, { status: "unknown" });
+    assert.equal(h.qualifiers.stress, "not_run");
+  }
+  const flat = sb.headline([{ agent_id: "flat", runs: [{ returns: Array(60).fill(0) }] }]);
+  assert.equal(flat[0].verdict, "degenerate_track");
+  assert.ok(flat[0].hard_reasons.includes("degenerate_track"));
+  assert.ok(!flat[0].hard_reasons.includes("deflation_unavailable"));
+  assert.throws(() => sb.headline([{ agent_id: "a", runs: [] }, { agent_id: "a", runs: [] }]));
+});

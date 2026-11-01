@@ -22,9 +22,10 @@ use crate::rediscovery::RediscoveryVerdict;
 
 /// A single reason an agent was (or should be) demoted. The first five mirror the
 /// original eligibility gates in [`crate::composite::score_agent`]; two more name
-/// the unavailability of a statistic the scorer does gate on, one the standard
-/// error certification of an admitted deflated Sharpe, and one the exposure-path
-/// gate added after 0.28.0. The last four are
+/// the unavailability of a statistic the scorer does gate on, one the deflation
+/// family's refusal of a track's shape, one the standard error certification of
+/// an admitted deflated Sharpe, and one the exposure-path gate added after
+/// 0.28.0. The last four are
 /// advisory quality flags the scorer reports but does not gate on, surfaced here so
 /// they are legible alongside the hard failures. `SelectionUnavailable` is advisory
 /// because the whole selection axis is: the scorer reports `selection_gap` and never
@@ -46,8 +47,17 @@ pub enum FailReason {
     BootstrapInsignificant,
     /// The agent breached its trading mandate (e.g. the drawdown cap).
     MandateBreached,
-    /// Deflation or its confidence interval could not be computed.
+    /// Deflation or its confidence interval could not be computed for a
+    /// numerical or configuration reason. A track the deflation family refuses
+    /// for its shape is [`FailReason::DegenerateTrack`] instead.
     DeflationUnavailable,
+    /// The deflation family refused the track for its shape: the pooled series
+    /// is constant, no window varies, no window resolves its dispersion, or no
+    /// bar of any window is a loss. `deflation_error` then equals one of the
+    /// [`DEGENERATE_TRACK_REQUIREMENTS`] behind the `returns ` parameter name.
+    /// The track has no Sharpe ratio, which is a fact about the track and not a
+    /// failure of the computation.
+    DegenerateTrack,
     /// The bootstrap significance test could not be computed.
     BootstrapUnavailable,
     /// The deflated Sharpe cleared its bar only with a standard error the
@@ -89,6 +99,33 @@ impl FailReason {
                 | Self::OosDecay
         )
     }
+}
+
+/// The requirement `sharpebench_stats::observed_sharpe_ratio` refuses a
+/// constant series on. `sharpebench-stats` states it inline rather than as an
+/// exported constant, so it is restated here and pinned against the function's
+/// own error by a test.
+pub const CONSTANT_SERIES: &str = "must not be constant: a constant series has no Sharpe ratio";
+
+/// The requirements the deflation family refuses a track's shape on, in the
+/// order the scorer checks them. A refused row's `deflation_error` is the
+/// parameter name `returns`, a space, and one of these. The last three are
+/// exported by `sharpebench-stats`.
+pub const DEGENERATE_TRACK_REQUIREMENTS: [&str; 4] = [
+    CONSTANT_SERIES,
+    sharpebench_stats::NO_WINDOW_VARIES,
+    sharpebench_stats::NO_RESOLVED_MOTION,
+    sharpebench_stats::NO_OBSERVED_LOSS,
+];
+
+/// Whether a `deflation_error` is the deflation family's refusal of the
+/// track's shape (one of [`DEGENERATE_TRACK_REQUIREMENTS`]) rather than a
+/// numerical or configuration failure. Matches the whole string, so a message
+/// that merely contains a requirement is not taken for it.
+pub fn is_degenerate_track_refusal(deflation_error: &str) -> bool {
+    deflation_error
+        .strip_prefix("returns ")
+        .is_some_and(|requirement| DEGENERATE_TRACK_REQUIREMENTS.contains(&requirement))
 }
 
 /// Thresholds for the disqualification classifier. The eligibility-gate bars mirror
@@ -159,8 +196,12 @@ pub fn classify_disqualification(
     if !score.mandate_ok {
         reasons.push(FailReason::MandateBreached);
     }
-    if score.deflation_error.is_some() {
-        reasons.push(FailReason::DeflationUnavailable);
+    if let Some(error) = score.deflation_error.as_deref() {
+        reasons.push(if is_degenerate_track_refusal(error) {
+            FailReason::DegenerateTrack
+        } else {
+            FailReason::DeflationUnavailable
+        });
     }
     if score.bootstrap_error.is_some() {
         reasons.push(FailReason::BootstrapUnavailable);
@@ -249,6 +290,40 @@ mod tests {
 
     fn thresholds() -> DisqualThresholds {
         DisqualThresholds::from_score_config(&ScoreConfig::default())
+    }
+
+    /// Each shape requirement is the one the stats crate refuses with, so the
+    /// match reads the error the scorer really writes.
+    #[test]
+    fn the_shape_requirements_are_the_ones_the_stats_crate_refuses_with() {
+        use sharpebench_stats::{observed_sharpe_ratio, observed_sharpe_ratio_of_windows};
+        let refusal = |result: Result<f64, sharpebench_stats::StatisticalError>| {
+            result.unwrap_err().to_string()
+        };
+        let constant: &[f64] = &[0.001; 8];
+        let gains: Vec<f64> = (0..30)
+            .map(|i| 0.01 * (i as f64 * 0.7).sin().abs() + 0.001)
+            .collect();
+        let produced = [
+            refusal(observed_sharpe_ratio(constant)),
+            refusal(observed_sharpe_ratio_of_windows(&[
+                &[0.001; 8],
+                &[0.002; 8],
+            ])),
+            refusal(observed_sharpe_ratio_of_windows(&[&[5.0, 5.0, 5.0, 5.001]])),
+            refusal(observed_sharpe_ratio_of_windows(&[&gains])),
+        ];
+        for (error, requirement) in produced.iter().zip(DEGENERATE_TRACK_REQUIREMENTS) {
+            assert_eq!(error, &format!("returns {requirement}"));
+            assert!(is_degenerate_track_refusal(error), "{error}");
+        }
+        for other in [
+            refusal(observed_sharpe_ratio(&[1.0])),
+            format!("returns {CONSTANT_SERIES}."),
+            CONSTANT_SERIES.to_string(),
+        ] {
+            assert!(!is_degenerate_track_refusal(&other), "{other}");
+        }
     }
 
     #[test]

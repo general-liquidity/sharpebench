@@ -40,7 +40,7 @@ point-in-time trajectories using the same protocol and execution model.
 | Question | Does an agent's apparent edge survive selection, repeated execution, significance, process, and mandate checks? |
 | Judge | One deterministic Rust kernel. No LLM judge. |
 | Inputs | Frozen returns and process traces, or point-in-time decisions from a live agent. |
-| Eligibility | Five conjunctive hard gates. One failed gate makes the submission ineligible. |
+| Eligibility | Nine conjunctive conditions: five hard gates, the two statistics they need being computable, and two refusals of an admitted Sharpe ratio. One failed condition makes the submission ineligible. |
 | Data | Eight tradable-price datasets across four asset classes, plus one rates-yield stress series, at four bar sizes. |
 | Outputs | A diagnostic board, replayable trajectories, and optional signed forward records. |
 
@@ -118,7 +118,7 @@ global multiplicity adjustment and migration from historical report schemas.
 
 ## What makes an agent rank-eligible
 
-All hard gates are conjunctive:
+All nine eligibility conditions are conjunctive. Five are hard gates:
 
 | Gate | Requirement | What it resists |
 |:--|:--|:--|
@@ -127,6 +127,14 @@ All hard gates are conjunctive:
 | Significance | The stationary-bootstrap null is beaten at the configured alpha. | Data-snooping false positives. |
 | Process | No block-severity lifecycle or trace violation occurs. | Risk-gate bypass and invalid execution behavior. |
 | Host mandate | Every run respects the configured drawdown bound. | Taking uncontrolled drawdown to buy return. |
+
+The other four refuse a row the gates cannot judge or should not admit. The
+deflated Sharpe and the bootstrap must both be computable, so a track with no
+Sharpe ratio, such as a constant track or one that never lost a bar, is
+ineligible. A deflated Sharpe that clears its bar must also clear the
+standard-error certification, and the profit must clear the risk the track's
+exposure history implies. [How to read a row](docs/book/src/reading-a-row.md)
+lists every reason and the one-word headline verdict that summarizes them.
 
 `pass^k` means every required execution seed and evaluation window passes. It
 is intentionally stricter than `pass@k`: one successful attempt demonstrates

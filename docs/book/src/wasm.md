@@ -98,8 +98,14 @@ example, is not zero required observations.
 The full verdict also exposes its existing kernel `hlz` diagnostic as
 `{tStat, tThreshold, passed, explanation}`. It is separate from the headline
 honesty verdict. Board explanations include `deflation_unavailable`,
-`bootstrap_unavailable` and `selection_unavailable`. The first two are hard,
-because the scorer gates on the statistics they name. `selection_unavailable` is
+`degenerate_track`, `bootstrap_unavailable` and `selection_unavailable`. The
+first three are hard, because the scorer gates on the statistics they name;
+`degenerate_track` is a track the deflation family refused for its shape, and
+`deflation_unavailable` is now only a numerical or configuration failure. The
+explanation never contains `is_rediscovery` or `oos_decay`, because the wasm
+surface takes no known-strategy library and no out-of-sample split. The
+`headline(submissions_json, config_json)` export returns the
+[headline verdict](reading-a-row.md) of every row. `selection_unavailable` is
 advisory: the scorer reports `selection_gap` and never consults it in
 `rank_eligible`, so a submission carrying only that reason is still
 rank-eligible. Read `rank_eligible` for the verdict rather than the presence of

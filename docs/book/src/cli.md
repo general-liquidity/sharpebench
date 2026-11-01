@@ -389,7 +389,7 @@ Ranks a JSON field of pre-computed submissions (see
 bootstrap p, and raw return, with a footer naming how many of the submitted agents
 are eligible.
 
-`score` and [`disqualify`](#disqualify) share these host scoring controls:
+`score`, [`disqualify`](#disqualify) and [`headline`](#headline) share these host scoring controls:
 
 | Flag | Meaning |
 |---|---|
@@ -424,6 +424,15 @@ The human table gains a separate block after the unchanged board; `--json`
 prints `{"board": ..., "sharpe_diagnostics": [...]}`, where `board` is the
 board-only output. An unknown identifier or a missing value exits 2 before any
 output. Without the flag the output is byte-identical to a build without it.
+
+`--headline` adds the [headline verdict](reading-a-row.md) of each row. The
+human table gains a last `headline` column; `--json` prints
+`{"board": ..., "headlines": [...]}`, where `board` is the board-only output and
+`headlines` has one record per row in board order. With `--diagnostics` as
+well, the JSON object carries all three members. The verdict is computed from
+the finished board and never written into a row, so scores, rank, ordinal and
+the sealed board are unchanged. Without the flag the output is byte-identical to
+a build without it.
 
 These identity checks do not verify temporal alignment of legacy JSON `runs`.
 The caller still supplies consistent window, seed and period order across the
@@ -879,7 +888,7 @@ leaves it false rather than blaming an argument that was not the problem.
 ## `disqualify`
 
 ```bash
-sharpebench disqualify <submissions.json> [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode MODE] [--benchmark-agent ID] [--json]
+sharpebench disqualify <submissions.json> [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode MODE] [--benchmark-agent ID] [--known <known.csv>]... [--rediscovery-threshold T] [--oos-windows N] [--json]
 ```
 
 Scores a JSON field of submissions (same format as `score`) and names every
@@ -887,15 +896,31 @@ disqualification/quality signal that fired for each agent, instead of the
 single rank-eligible verdict. Pass the same field and [host controls](#score) as
 `score`: explanations come from the ranked field, including its benchmark and
 field-dependent deflation, rather than separately scoring each submission.
-The taxonomy has twelve reasons in three groups. Five mirror the scorer's hard
-eligibility gates (`FailedPassK`, `DsrBelowBar`, `ProcessViolation`,
-`BootstrapInsignificant`, `MandateBreached`). Two name the unavailability of a
-statistic the scorer really does gate on, so they are hard as well:
-`DeflationUnavailable` and `BootstrapUnavailable`. `ExposurePathUnproven` is the
-hard exposure-path gate: a profit that does not clear the risk the track's
-exposure history implies. The remaining four are
-advisory and never gate: `SelectionUnavailable`, `HighSelectionGap`,
-`IsRediscovery` and `OosDecay`.
+The taxonomy has fourteen reasons. Ten are hard, and each removes the agent
+from the rank. Five mirror the scorer's hard eligibility gates (`FailedPassK`,
+`DsrBelowBar`, `ProcessViolation`, `BootstrapInsignificant`,
+`MandateBreached`). `DeflationUnavailable` and `BootstrapUnavailable` name a
+statistic the scorer gates on that could not be computed for a numerical or
+configuration reason. `DegenerateTrack` names a track the deflation family
+refused for its shape, so it has no Sharpe ratio: the pooled series is
+constant, no window varies, no window resolves its dispersion, or no bar is a
+loss. `StandardErrorUncertified` names a deflated Sharpe that cleared its bar
+only with a standard error the certification refused, and
+`ExposurePathUnproven` names a profit that does not clear the risk the track's
+exposure history implies. The remaining four are advisory and never gate:
+`SelectionUnavailable`, `HighSelectionGap`, `IsRediscovery` and `OosDecay`.
+
+`IsRediscovery` and `OosDecay` need evidence a submissions file does not carry,
+so they are emitted only when it is supplied. `--known <known.csv>`, repeatable,
+screens each agent's pooled stream (its runs concatenated in submission order)
+against a library of known strategy streams, as [`rediscover`](#rediscover)
+does, at `--rediscovery-threshold` (default 0.97). The pairing is by index, so
+the known streams must be aligned to the same bars. `--oos-windows N`, N at
+least 2, splits each agent's runs window-major into N windows and reports
+`OosDecay` when less than half of the first window's Sharpe proxy is retained
+in the later windows; an agent with fewer runs than windows gets no split. A
+malformed flag exits 2 and an unreadable library file exits 1. Without these
+flags the output is what it was.
 
 `SelectionUnavailable` is advisory because the whole selection axis is. The
 scorer reports `selection_gap` and never consults it in `rank_eligible`, so the
@@ -910,6 +935,20 @@ explain the host score only, including its drawdown mandate; they do not explain
 the separate declared-mandate verdict. To inspect that verdict, use the
 `declared_*` fields returned by `score`. Explanation generation changes neither
 eligibility nor rank.
+
+## `headline`
+
+```bash
+sharpebench headline <submissions.json> [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode MODE] [--benchmark-agent ID] [--json]
+```
+
+Scores a JSON field of submissions (same format and host controls as `score`)
+and prints one [headline verdict](reading-a-row.md) per row, with its hard
+reasons and qualifiers beside it. `--json` prints the same records
+`score --headline --json` puts under `headlines`. A submissions file carries no
+evidence mode and no stress replay, so those qualifiers read `unknown` and
+`not_run`. Nothing here changes a score or the rank. A missing path exits 2 and
+an unreadable or malformed field exits 1.
 
 ## `rediscover`
 

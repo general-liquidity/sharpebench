@@ -4,7 +4,11 @@ const assert = require("node:assert/strict");
 
 module.exports = function assertKernelRepairContract(sb, version) {
   const returns = Array.from({ length: 60 }, (_, i) => 0.002 + 0.0005 * ((i % 3) - 1));
-  const field = [{ agent_id: "strong", runs: [{ returns }] }];
+  // Every third bar of this track is a loss, so it has a Sharpe ratio and the
+  // only refusal is the interval level below. `returns` never loses a bar, so
+  // the deflation family refuses its shape first (`degenerate_track`).
+  const losing = Array.from({ length: 60 }, (_, i) => 0.002 + 0.003 * ((i % 3) - 1));
+  const field = [{ agent_id: "strong", runs: [{ returns: losing }] }];
   const config = {
     n_trials: 2, trials_sr_std: 0.5, dsr_bar: 0.95, per_run_psr_bar: 0.9,
     alpha: 0.05, bootstrap_seed: 7, n_boot: 99, block_prob: 0.1,
@@ -13,6 +17,7 @@ module.exports = function assertKernelRepairContract(sb, version) {
   const [diagnostic] = sb.classifyDisqualification(field, config);
   assert.equal(diagnostic.rank_eligible, false);
   assert.ok(diagnostic.reasons.includes("deflation_unavailable"));
+  assert.ok(!diagnostic.reasons.includes("degenerate_track"));
 
   const selection = sb.percentileSelection([[], [-0.02, -0.01, -0.03]], { nBoot: 10 });
   assert.equal(selection.selected, null);

@@ -289,6 +289,17 @@ function battery() {
     '{"n_trials":2,"trials_sr_std":0.5,"dsr_bar":0.95,"per_run_psr_bar":0.9,"alpha":0.05,"bootstrap_seed":7,"n_boot":99,"block_prob":0.1,"dsr_ci_level":1.5}',
   ]);
 
+  push("headline(field)", "headline", [FIELD, ""]);
+  push("headline(bad ci level)", "headline", [
+    FIELD,
+    '{"n_trials":2,"trials_sr_std":0.5,"dsr_bar":0.95,"per_run_psr_bar":0.9,"alpha":0.05,"bootstrap_seed":7,"n_boot":99,"block_prob":0.1,"dsr_ci_level":1.5}',
+  ]);
+  push("headline(flat track)", "headline", [
+    JSON.stringify([{ agent_id: "flat", runs: [{ returns: Array(60).fill(0) }] }]),
+    "",
+  ]);
+  push("headline(malformed)", "headline", ["not json", ""]);
+
   const regimes = JSON.stringify(["calm", "calm", "stress", "stress"]);
   push("regime_compare(reversal)", "regime_compare", [
     "[0.02,0.03,-0.01,-0.02]",
