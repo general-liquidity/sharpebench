@@ -29,7 +29,7 @@ use std::io::{BufWriter, Write};
 use serde::Serialize;
 use sharpebench_core::composite::{rank, ScoreConfig};
 use sharpebench_harness::perturb::perturbed_field;
-use sharpebench_harness::{luck_floor, run_agent, TeamMember};
+use sharpebench_harness::{luck_floor, luck_floor_controls, run_agent, TeamMember};
 use sharpebench_sim::agent::RiskManaged;
 use sharpebench_sim::{walk_forward, Agent, BuyAndHold, CostModel, Dataset, Window};
 
@@ -190,9 +190,11 @@ fn main() {
 
         let mut cfg = ScoreConfig::for_periods_per_year(*ppy);
         cfg.execution_seeds_per_window = EXEC_SEEDS.len();
+        cfg.dispersion_controls = luck_floor_controls(LUCK_FLOOR_AGENTS);
         let mut cfg_nc = ScoreConfig::reliability_never_catastrophic(NEVER_CATASTROPHIC_RUN_DD);
         cfg_nc.periods_per_year = *ppy;
         cfg_nc.execution_seeds_per_window = EXEC_SEEDS.len();
+        cfg_nc.dispersion_controls = luck_floor_controls(LUCK_FLOOR_AGENTS);
         let scored = rank(&subs, &cfg);
         let scored_nc = rank(&subs, &cfg_nc);
 

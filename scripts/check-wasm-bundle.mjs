@@ -114,7 +114,8 @@ const GOLDENS = [
   },
 ];
 
-const RETURNS = Array.from({ length: 60 }, (_, i) => 0.002 + 0.0005 * ((i % 3) - 1));
+// A losing bar in every third period: a track that never lost is refused.
+const RETURNS = Array.from({ length: 60 }, (_, i) => 0.002 + 0.004 * ((i % 3) - 1));
 const WAVE = Array.from({ length: 120 }, (_, i) => 0.02 + 0.1 * Math.sin(i * 0.9));
 const FIELD = JSON.stringify([
   { agent_id: "strong", runs: [{ returns: RETURNS }] },

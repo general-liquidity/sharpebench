@@ -65,6 +65,8 @@ pub mod rolling;
 pub mod run_identity;
 pub mod selfaudit;
 pub mod sharpe_diagnostics;
+pub mod standard_error;
+pub mod stress_replay;
 pub mod suite_controls;
 pub mod suite_evidence;
 pub mod trial_census;
@@ -91,9 +93,10 @@ pub use comparison_sets::{
 };
 pub use composite::{
     parse_declared_field, per_period_sr_std, per_run_passes, per_run_psr_benchmark, rank,
-    rank_declared, score_agent, score_agent_declared, split_declarations, AgentSubmission,
-    CompositeScore, DeclaredMandate, DeclaredSubmission, DispersionLeverage, Mandate,
-    MandateDeclarations, MandateVerdict, Run, ScoreConfig, TrialsSrStdSource,
+    rank_declared, score_agent, score_agent_declared, split_declarations, AbstentionReason,
+    AgentSubmission, ClippedVote, CompositeScore, DeclaredMandate, DeclaredSubmission,
+    DispersionAbstention, DispersionLeverage, Mandate, MandateDeclarations, MandateVerdict, Run,
+    ScoreConfig, TrialsSrStdSource,
 };
 pub use correlation::{crowdedness, Crowdedness};
 pub use decision_stability::{

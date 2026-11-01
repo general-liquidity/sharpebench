@@ -153,6 +153,24 @@ fn only_a_vote_inside_the_fence_demotes() {
     }
 }
 
+/// One vote inside the fence is clipped by the influence bound, so where it
+/// sits no longer sets the honest bar: before the bound the eight positions
+/// measured 0.77 to 1.48 per period, now every one measures the same bar. The
+/// honest entrants are still demoted on this six-agent fixture; the bound
+/// limits a vote to an honest field's 99th-percentile distance, and keeping all
+/// six eligible would need a reach that clips most honest fields.
+#[test]
+fn the_griefer_position_does_not_set_the_bar() {
+    let demotions = array(&doc()["demotions"]);
+    let first = demotions[0]["bar_after"].as_f64().expect("a bar");
+    for d in demotions {
+        let bar = d["bar_after"].as_f64().expect("a bar");
+        assert!((bar - first).abs() < 1e-12, "{d}");
+        assert!(bar < 0.7, "{d}");
+        assert_eq!(d["griefer_clipped"], true, "{d}");
+    }
+}
+
 /// Puppets the collapse folds do not lift a target: the copy control flips none.
 #[test]
 fn copies_are_folded_by_the_collapse() {
@@ -160,6 +178,18 @@ fn copies_are_folded_by_the_collapse() {
         if finding["move"] == "clone_threshold" {
             assert_eq!(finding["replication"]["control_admitted"], 0, "{finding}");
         }
+    }
+}
+
+/// Puppets just below the collapse cosine lift no target either. Before the
+/// independence weighting, 32 of them at a pairwise cosine of 0.97 to 0.99 took
+/// a refused zero-edge target's bar from 0.277 to about 0.12 and admitted it;
+/// now the flood weighs about one vote and no grid point admits anybody.
+#[test]
+fn puppets_below_the_collapse_lift_no_target() {
+    assert_eq!(row("clone_threshold")["admitted_on_screen"], 0);
+    for finding in array(&doc()["findings"]) {
+        assert_ne!(finding["move"], "clone_threshold", "{finding}");
     }
 }
 
@@ -220,15 +250,22 @@ const PINS: [(&str, u64, u64); 8] = [
     ("constant_track", 200, 0),
     ("near_constant", 118, 0),
     ("single_observation", 120, 0),
-    ("autocorrelated", 120, 9),
-    ("tail_seller", 120, 37),
+    // Was 9 before the standard-error certification: the Newey-West correction
+    // refuses three of the serially correlated zero-edge points on this budget.
+    ("autocorrelated", 120, 6),
+    // Was 37 before the observed-loss refusal: a crash-free seller that never
+    // lost a bar is refused, and one that loses on ordinary bars is not.
+    ("tail_seller", 120, 26),
     ("leverage_timing", 120, 1),
     ("window_boundary", 120, 0),
-    ("clone_threshold", 3384, 38),
+    // Was 38 before the independence weighting of the dispersion votes: puppets
+    // below the collapse cosine no longer cast a full vote each, so none lifts
+    // a target the honest field refuses.
+    ("clone_threshold", 3384, 0),
 ];
-const STRUCTURAL: u64 = 2;
+const STRUCTURAL: u64 = 1;
 const DEMOTIONS: usize = 8;
-const DIGEST: &str = "718f2633a03ae454";
+const DIGEST: &str = "035ecf8c9720261c";
 
 #[test]
 fn a_bad_invocation_is_refused() {

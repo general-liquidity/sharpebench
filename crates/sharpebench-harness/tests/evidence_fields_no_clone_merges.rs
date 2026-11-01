@@ -611,8 +611,8 @@ fn fenced_dispersion(sorted: &[f64], c: f64, floor: f64) -> (f64, f64) {
     (std_dev(&clipped), dev[dev.len() - 1] / raw_scale)
 }
 
-/// On the three panels the current engine measures, the disclosure names the
-/// honest reference vote that carries the dispersion, and the bar is untouched.
+/// The three panels that measured with the luck floor voting, and what they do
+/// now that the producers declare it as controls.
 ///
 /// The five luck-floor agents sit in a tight cluster and buy-and-hold sits far
 /// from it, so one honest vote multiplies the measured dispersion: 4.89 on
@@ -620,15 +620,16 @@ fn fenced_dispersion(sorted: &[f64], c: f64, floor: f64) -> (f64, f64) {
 /// engine. A cap on the vote was measured against exactly these fields and not
 /// shipped, because containing one hostile entrant would have lowered the hourly
 /// crypto bar by 74.5% and the daily FX bar by 17.4%. The disclosure reports the
-/// row instead, and the measured dispersion is still the plain standard
-/// deviation of the sorted votes, bit for bit.
+/// row instead. The owner's decision of 2026-10-31 removed the cluster from the
+/// sample: the luck floor is declared as controls and casts no vote, which
+/// leaves two entrant votes, so these panels now take the configured prior.
 ///
 /// The same loop recomputes the rejected cap on these votes, so the chapter's
 /// binding-table rows for the three sweep panels, and the robust distance it
 /// quotes for hourly buy-and-hold, are reproduced by a test rather than
 /// carried as numbers from a study.
 #[test]
-fn the_measured_panels_disclose_the_vote_that_sets_their_bar() {
+fn the_luck_floor_set_these_panels_bars_and_now_casts_no_vote() {
     use sharpebench_core::composite::window_tracks;
     use sharpebench_core::deflated_sharpe::observed_sharpe_ratio_of_windows;
     use sharpebench_core::stats::std_dev;
@@ -695,29 +696,38 @@ fn the_measured_panels_disclose_the_vote_that_sets_their_bar() {
             );
         }
 
+        // With the luck floor voting, buy-and-hold carries the dispersion
+        // (the leverage the chapter quotes), and its vote is the one the
+        // influence bound clips on this shape.
+        let without_bh = std_dev(&votes[..votes.len() - 1]);
+        let got = measured / without_bh;
+        assert!(
+            (got - leverage).abs() < 0.005,
+            "{name}: leverage {got}, measured {leverage}"
+        );
         for row in &board {
             assert_eq!(
                 row.trials_sr_std_source,
                 TrialsSrStdSource::Measured,
                 "{name}"
             );
+        }
+
+        // The producers declare the luck floor as controls (owner decision of
+        // 2026-10-31). Two entrant votes are then left, below the five-vote
+        // minimum, so every row of these panels takes the configured prior.
+        let declared = ScoreConfig {
+            dispersion_controls: sharpebench_harness::luck_floor_controls(LUCK_FLOOR_AGENTS),
+            ..cfg.clone()
+        };
+        for row in rank(&sweep, &declared) {
             assert_eq!(
-                row.trials_sr_std.to_bits(),
-                measured.to_bits(),
-                "{name}: the disclosure must not move the measured dispersion"
+                row.trials_sr_std_source,
+                TrialsSrStdSource::Configured,
+                "{name}: {}",
+                row.agent_id
             );
-            let vote = row
-                .trials_sr_std_most_influential_vote
-                .as_ref()
-                .unwrap_or_else(|| panic!("{name}: a measured row carries the disclosure"));
-            assert_eq!(vote.agent_id, "buy-and-hold", "{name}: {vote:?}");
-            assert_eq!(vote.agents_in_vote, 1, "{name}");
-            assert_eq!(vote.votes, 7, "{name}");
-            let got = vote.leverage.expect("the other votes are not all equal");
-            assert!(
-                (got - leverage).abs() < 0.005,
-                "{name}: leverage {got}, measured {leverage}"
-            );
+            assert!(row.trials_sr_std_most_influential_vote.is_none());
         }
     }
 }

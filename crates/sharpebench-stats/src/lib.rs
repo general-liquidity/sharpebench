@@ -57,10 +57,14 @@ pub mod agreement;
 pub mod deflated_sharpe;
 pub mod det_math;
 pub mod dissent;
+pub mod exposure_path;
 pub mod fdr;
+pub mod moment_credit;
+pub mod observed_loss;
 pub mod opt_in_diagnostics;
 pub mod paired_randomization;
 pub mod selection;
+pub mod serial_correlation;
 pub mod significance;
 pub mod stats;
 pub mod stylized_facts;
@@ -71,7 +75,8 @@ pub use validation::StatisticalError;
 
 pub use agreement::{
     binarize, cohens_kappa, cohens_kappa_binary, gate_vs_human, gate_vs_human_with_fields,
-    spearman_rho, FieldBaseline, GateAgreement, KappaUnavailable,
+    spearman_rho, wilson_interval_95, ClassRate, FieldBaseline, GateAgreement, KappaUnavailable,
+    ProportionInterval,
 };
 pub use deflated_sharpe::{
     deflated_sharpe_ratio, expected_max_sharpe, is_constant_track, observed_sharpe_ratio,
@@ -83,7 +88,15 @@ pub use dissent::{
     dissent, dissent_across, kendall_tau_b, DissentReport, DissentThresholds, DissentVerdict,
     DEFAULT_MAX_LEVEL_DISSENT, DEFAULT_MAX_RANK_DISSENT,
 };
+pub use exposure_path::{
+    exposure_path_evidence, forgone_risk_z, EXPOSURE_BURN_IN_FRACTION, EXPOSURE_PATH_UNPROVEN,
+};
 pub use fdr::{benjamini_hochberg, fdr_verdict, FdrVerdict};
+pub use moment_credit::{
+    certify_without_moment_credit, deflated_sharpe_without_moment_credit,
+    NOT_CERTIFIED_WITHOUT_MOMENT_CREDIT,
+};
+pub use observed_loss::{shows_an_observed_loss, NO_OBSERVED_LOSS};
 pub use opt_in_diagnostics::{
     first_order_autocorrelation, manipulation_proof_performance,
     probabilistic_sharpe_ratio_autocorrelated, sharpe_standard_error_autocorrelated,
@@ -93,6 +106,10 @@ pub use selection::{
     percentile_selection, selection_robustness, stationary_bootstrap_path, CandidateUtility,
     PercentileSelection, SelectionRobustness, Utility, DEFAULT_SELECTION_ALPHA,
     MIN_RECOMMENDED_SELECTION_ALPHA,
+};
+pub use serial_correlation::{
+    certify_under_serial_correlation, serially_corrected_deflated_sharpe,
+    within_window_autocorrelations, SerialCorrection, NOT_CERTIFIED_UNDER_SERIAL_CORRELATION,
 };
 pub use stylized_facts::{
     stylized_facts, validate_dataset, validate_dataset_with, RealismFailure, RealismThresholds,

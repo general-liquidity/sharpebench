@@ -39,6 +39,25 @@ stays refused. The cluster casts one dispersion vote, but all 207 visible
 submissions still count toward the observable trial floor and remain on the
 board.
 
+## Known limit: one vote inside an honest field's spread
+
+The measured dispersion is defended in four layers: only entrants vote (host
+controls such as the luck floor are scored but cast no vote), near-copies below
+the clone threshold are weighted by how independent they are, a vote beyond
+10.75 robust scales is fenced, and every admitted vote is clipped to the 99th
+percentile of the largest robust distance in an honest field, 4.12 robust scales
+at seven votes. One dissimilar vote placed inside that reach is not stopped by
+any of them, because by its value it cannot be told apart from an honest
+outlier. On the grader search's fixed-seed fixture (`sharpebench grader-search
+--seed 20261030`, move `dispersion_grief`) such a vote moves the honest bar from
+0.21 to 0.61 per period and removes all six honest admissions. Keeping all six
+admitted would need a reach of at most 1.35 robust scales, which clips 72% of
+honest seven-vote fields. The clip does guarantee that a vote anywhere past the
+reach measures the same bar, where the same fixture measured 0.77 to 1.48 before
+the clip, and it lowers no honest bar on any committed producer. See
+[the deflation chapter](methodology-deflated-sharpe.md) for the rule and its
+calibration.
+
 `sharpebench audit` fires a battery of known attacks at the live scorer and checks
 each is demoted:
 
@@ -101,11 +120,20 @@ length-prefixes every name and value so no value can imitate a field boundary.
 ## Agreement and dissent, without a judge
 
 The audit above exercises ten fixtures and shows that the current scorer
-demotes those known attacks. A different question
-it could not previously ask is whether the automated gate agrees with the
-**human** who triaged the gold set in the first place. Two deterministic
-modules in `sharpebench-stats` answer it, with no model in either, which is
-why they belong in a judge-free kernel:
+demotes those known attacks. A different question is whether the automated
+gate agrees with a **human** who triaged the same items. Two deterministic
+modules in `sharpebench-stats` can measure that, with no model in either,
+which is why they belong in a judge-free kernel.
+
+No human triage exists in the repository yet. There is no gold set, no
+committed human verdicts and no agreement figure, so the modules below have
+only been run on hand-built test inputs with known answers. A gold set they
+could score would need, per item, an identifier tied to the evidence the gate
+read, the human's pass or fail verdict recorded before the human saw the
+gate's output (optionally with a graded severity), and the gate threshold in
+force. It would also need enough items in each human class for the per-class
+intervals to be narrow: with 20 human fails, a gate that catches all 20 still
+has a 95% lower bound of about 0.84 on its true negative rate.
 
 - `agreement`: Cohen's kappa with the standard chance correction, and
   Spearman rho with tie handling. `gate_vs_human` rolls the pair up and
@@ -115,7 +143,11 @@ why they belong in a judge-free kernel:
   otherwise score a kappa of 0 that reads as a measurement. Beside kappa the
   rollup reports the raw agreement of a rater that always gives the human's
   majority verdict, and `gate_vs_human_with_fields` adds the best agreement a
-  rater reading one supplied field alone reaches.
+  rater reading one supplied field alone reaches. The rollup also splits
+  agreement by human class: `tpr` is the share of human passes the gate
+  passed and `tnr` the share of human fails the gate failed, each with its
+  counts and a 95% Wilson interval, and each withheld when the human class is
+  empty.
 - `dissent`: Kendall tau-b, tie-corrected in the denominator, splitting a
   disagreement into whether the **ranking** differs or the **levels** differ.
   A single agreement number collapses those two, which are different defects

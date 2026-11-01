@@ -39,7 +39,7 @@
 use std::collections::BTreeSet;
 
 use serde::Serialize;
-use sharpebench_core::composite::DISPERSION_VOTE_FENCE_Z;
+use sharpebench_core::composite::{AbstentionReason, DISPERSION_VOTE_FENCE_Z};
 use sharpebench_core::deflated_sharpe::observed_sharpe_ratio;
 use sharpebench_core::rediscovery::CLONE_COLLAPSE_COSINE;
 use sharpebench_core::stats::{mean, std_dev};
@@ -815,6 +815,9 @@ pub struct Demotion {
     pub honest_eligible_after: usize,
     pub griefer_eligible: bool,
     pub griefer_fenced: bool,
+    /// The kernel clipped the griefer's vote with the influence bound: it
+    /// voted, at the bound's reach rather than where it sat.
+    pub griefer_clipped: bool,
     pub reproducer: Vec<AgentSubmission>,
 }
 
@@ -1456,8 +1459,22 @@ fn search_grief(spec: &SearchSpec) -> (MoveReport, Vec<Demotion>) {
             honest_eligible_before: before,
             honest_eligible_after: eligible(&board),
             griefer_eligible: griefer_row.rank_eligible,
-            griefer_fenced: griefer_row.trials_sr_std.to_bits()
-                != honest_row.trials_sr_std.to_bits(),
+            // Read off the honest row's disclosure, which names the votes the
+            // fence excluded and the ones the bound clipped. Both leave the
+            // griefer on a different dispersion from the honest rows, so the
+            // two numbers alone cannot tell them apart.
+            griefer_fenced: honest_row
+                .trials_sr_std_most_influential_vote
+                .as_ref()
+                .is_some_and(|v| {
+                    v.abstained
+                        .iter()
+                        .any(|a| a.agent_id == "griefer" && a.reason == AbstentionReason::Fenced)
+                }),
+            griefer_clipped: honest_row
+                .trials_sr_std_most_influential_vote
+                .as_ref()
+                .is_some_and(|v| v.clipped.iter().any(|c| c.agent_id == "griefer")),
             reproducer: field,
         }
     })
@@ -1485,7 +1502,7 @@ fn run_controls(spec: &SearchSpec) -> Control {
     let skilled: Vec<Vec<f64>> = (0..5)
         .map(|w| {
             let mut rng = Rng::new(0x5B11_1ED0 + w);
-            (0..60).map(|_| 0.002 + 0.0005 * rng.gauss()).collect()
+            (0..60).map(|_| 0.002 + 0.004 * rng.gauss()).collect()
         })
         .collect();
     let n_boot = ScoreConfig::default().n_boot;
@@ -1657,7 +1674,7 @@ fn print_report(report: &GraderSearchReport) {
     }
     for d in &report.demotions {
         println!(
-            "[demotion] {} vote {:.3} at {:.3} of the fence: bar {:.4} -> {:.4}, honest eligible {} -> {}, griefer eligible={} fenced={}",
+            "[demotion] {} vote {:.3} at {:.3} of the fence: bar {:.4} -> {:.4}, honest eligible {} -> {}, griefer eligible={} fenced={} clipped={}",
             d.direction,
             d.griefer_vote,
             d.fence_fraction,
@@ -1666,7 +1683,8 @@ fn print_report(report: &GraderSearchReport) {
             d.honest_eligible_before,
             d.honest_eligible_after,
             d.griefer_eligible,
-            d.griefer_fenced
+            d.griefer_fenced,
+            d.griefer_clipped
         );
     }
     println!(

@@ -81,7 +81,7 @@ fn run_with(returns: Vec<f64>, trace: Trace) -> Run {
 fn skilled_run(n: usize) -> Run {
     run_with(
         (0..n)
-            .map(|i| 0.002 + 0.0005 * (i as f64 * 0.7).sin())
+            .map(|i| 0.002 + 0.004 * (i as f64 * 0.7).sin())
             .collect(),
         Trace::default(),
     )

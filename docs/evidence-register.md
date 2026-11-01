@@ -1157,7 +1157,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 **Labels.** `tab:attacks`
 
 **Artifacts.**
-- `crates/sharpebench-core/src/selfaudit.rs`, sha256 `579718f85fe269b33174681aad905a3803da9ff5a6a67278cb31afea2af13a16`, digest source: paper/evidence/provenance.json, carries the battery and the commit-time assertions that every case is defended and no known gap remains
+- `crates/sharpebench-core/src/selfaudit.rs`, sha256 `30fe452f24b34d286086d6e1d1afde7b9134c76568539f0d97a553744c066cbc`, digest source: paper/evidence/provenance.json, carries the battery and the commit-time assertions that every case is defended and no known gap remains
 - `crates/sharpebench-arena/src/audit.rs`, sha256 `5dba8da8bce47be67aaace6b7b297668026f3a038b0b136f75a9f04f4d15cb14`, digest source: paper/evidence/provenance.json, the tenth case, against the forward arena's intake
 
 **Producer command.** sharpebench audit (paper/sections/A-commands.tex); the claim is enforced by the commit-time tests in the two files above.
@@ -1172,6 +1172,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 **Relevant later changes.**
 - The ninth case was a measured known gap until ranking gained the clone collapse of sec:sybil; its test now asserts that the exploit reproduces when the defense is switched off (paper/sections/04-integrity.tex:42).
 - The 2026-10-31 integration (feat/arena-completeness, fix/verify-board-stability, fix/header-execution-identity) changed crates/sharpebench-arena/src/audit.rs for the signed head and the bound execution identity; `sharpebench audit` on the integrated tree still reports all ten attacks defended, and the forward-arena case is still refused under both intakes.
+- The 2026-11-01 scorer-round integration: fix/tail-seller rewrote the self-audit skilled fixture to carry losing bars; `sharpebench audit` on the merged scorer still reports all ten attacks defended.
 
 **Present applicability.** Applicable to the current tree: the assertions run on every commit, so the claim is re-established rather than inherited.
 
@@ -1188,6 +1189,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | 2026-09-23 | still-applicable | unknown | no | Initial entry: The documented comparison is the commit-time test itself, which re-checks the claim against the current kernel on every commit. |
 | 2026-10-31 | still-applicable | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 | 2026-10-31 | still-applicable | model: claude-opus-5-5 | no | Rechecked at the gap-closure integration: crates/sharpebench-arena/src/audit.rs moved, and the recorded digest is rebound to the integrated tree. The claim still holds there, so the disposition is unchanged. |
+| 2026-11-01 | still-applicable | model: claude-opus-5-5 | no | Rechecked at the scorer-round integration: crates/sharpebench-core/src/selfaudit.rs moved and the recorded digests are rebound. The claim still holds on the merged scorer, so the disposition is unchanged. |
 
 ### `SB-tab-data`
 
@@ -1329,9 +1331,9 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 **Labels.** `fig:demotion`
 
 **Artifacts.**
-- `paper/figures/sharpebench-luck-demotion.pdf`, sha256 `1e025ac30099de23ae8455f20ae5441b557e924870d0e1475c7508512908ec0d`, digest source: paper/evidence/provenance.json
-- `crates/sharpebench-core/golden/example_submissions.scores.json`, sha256 `28fae98151c032eeb33c3d4a0e0d892c94f415bc39b034c0d98d80306b07dabf`, digest source: computed for this register; the file is outside the provenance manifest scope, the golden score record the panel is read from
-- `suites/example_submissions.json`, sha256 `909775dd86084682cfee7b723b64ce67529fe9b1111a5054f1ef6c8437c4ba96`, digest source: computed for this register; the file is outside the provenance manifest scope, the field the golden record scores
+- `paper/figures/sharpebench-luck-demotion.pdf`, sha256 `beaa2054f85384b12334267e10b7981a22967b6983f65bd75b0b1bfbcc262e86`, digest source: paper/evidence/provenance.json
+- `crates/sharpebench-core/golden/example_submissions.scores.json`, sha256 `6f74bb23887122be95b306cc6b1628d0c8d8da39eb26a96776e4c032cbfb1dcd`, digest source: computed for this register; the file is outside the provenance manifest scope, the golden score record the panel is read from
+- `suites/example_submissions.json`, sha256 `2de7950cd4f536d87a2e0f5e7328a4c5cc0de0c6c9c8a684fdb31fcb1af0a815`, digest source: computed for this register; the file is outside the provenance manifest scope, the field the golden record scores
 
 **Producer command.** sharpebench score suites/example_submissions.json; the figure is drawn by python paper/src/make-figures.py (paper/sections/A-commands.tex)
 
@@ -1346,6 +1348,9 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 - The golden fields changed in the Pareto flag of hold and later in calibration counts, Brier scores and confidence-weighted return; no gate reads those fields (paper/sections/E-repairs.tex:19).
 - paper/sections/E-repairs.tex:17 records that the two committed golden fields hold four and three agents and take the configured path, so the dispersion-vote repair does not move them, and that sharpebench score --json on the example submissions is byte-identical.
 - The 2026-10-31 fix-round integration (fix/row-disclosures) added runs_passed, window_bars, window_pass_floors, implausible_windows and pass_k_floors_plausible to every row of crates/sharpebench-core/golden/example_submissions.scores.json; no existing field or value changed.
+- The 2026-11-01 scorer-round integration: fix/tail-seller regenerated the demotion figure from the rewritten example agents (owner-approved); every agent's verdict, deflated Sharpe, PSR, pass^k, eligibility and rank are unchanged.
+- The 2026-11-01 scorer-round integration: fix/tail-seller rewrote skilled-momentum and ungated-bot to carry losing bars (owner-approved), which moves their return, drawdown, beta and alpha fields; every agent's verdict, deflated Sharpe, PSR, pass^k, eligibility and rank are unchanged, and the file was regenerated once at the merged tip with no further change.
+- The 2026-11-01 scorer-round integration: fix/tail-seller rewrote the example submissions so the never-losing agents carry losing bars (owner-approved).
 
 **Present applicability.** Applicable to the current kernel: the golden record is the current tree's and the repairs that touched it are recorded as leaving the gate outcomes the panel plots unchanged.
 
@@ -1362,6 +1367,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | 2026-09-23 | still-applicable | unknown | no | Initial entry: The documented comparison is paper/sections/E-repairs.tex:17 together with the golden_scores test, which pins the record the panel reads to the current kernel. |
 | 2026-10-31 | still-applicable | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 | 2026-11-01 | still-applicable | model: claude-opus-5-5 | no | Rechecked at the fix-round integration: crates/sharpebench-core/golden/example_submissions.scores.json gained five additive fields and the recorded digest is rebound. Every existing field and value is unchanged, so the claim and its disposition stand. |
+| 2026-11-01 | still-applicable | model: claude-opus-5-5 | no | Rechecked at the scorer-round integration: paper/figures/sharpebench-luck-demotion.pdf, crates/sharpebench-core/golden/example_submissions.scores.json, suites/example_submissions.json moved and the recorded digests are rebound. The claim still holds on the merged scorer, so the disposition is unchanged. |
 
 ### `SB-fig-deflation`
 
@@ -1488,7 +1494,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 **Source.** `paper/sections/05-experiments.tex:36`
 
 **Artifacts.**
-- `crates/sharpebench-stats/src/deflated_sharpe.rs`, sha256 `bc4f817b1f1b04761ea7eec766570fabfec811e0871828805c84ac15380d115c`, digest source: paper/evidence/provenance.json, carries the worked-example regression test
+- `crates/sharpebench-stats/src/deflated_sharpe.rs`, sha256 `e7fcb65afd77df911734f5bcdb2a3688deb23aa6e68398e96f24b2d956c0ec6e`, digest source: paper/evidence/provenance.json, carries the worked-example regression test
 
 **Producer command.** cargo test -p sharpebench-stats worked_example (paper/sections/A-commands.tex)
 
@@ -1502,6 +1508,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 **Relevant later changes.**
 - The standardized-moment repair changed the estimator convention; the test runs on the current tree and reproduces the printed values through the kernel's own entry points.
 - The 2026-10-31 integration (fix/near-constant-admission) added the observed-risk refusal to crates/sharpebench-stats/src/deflated_sharpe.rs; the worked-example regression test still passes on the integrated tree, because the example track has losing bars.
+- The 2026-11-01 scorer-round integration: the scorer stages changed crates/sharpebench-stats/src/deflated_sharpe.rs; the worked-example regression test still passes on the merged scorer.
 
 **Present applicability.** Applicable to the current tree, since the test executes against it.
 
@@ -1518,6 +1525,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | 2026-09-23 | still-applicable | unknown | no | Initial entry: The documented comparison is the commit-time regression test against the published example. |
 | 2026-10-31 | still-applicable | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 | 2026-10-31 | still-applicable | model: claude-opus-5-5 | no | Rechecked at the gap-closure integration: crates/sharpebench-stats/src/deflated_sharpe.rs moved, and the recorded digest is rebound to the integrated tree. The claim still holds there, so the disposition is unchanged. The digest was rebound again after unit tests for the observed-risk rule were added to the same file; the worked-example test is unchanged. |
+| 2026-11-01 | still-applicable | model: claude-opus-5-5 | no | Rechecked at the scorer-round integration: crates/sharpebench-stats/src/deflated_sharpe.rs moved and the recorded digests are rebound. The claim still holds on the merged scorer, so the disposition is unchanged. |
 
 ### `SB-tab-eligibility`
 
@@ -2196,7 +2204,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 **Source.** `paper/sections/sybil-defense-fragment.tex:4`
 
 **Artifacts.**
-- `crates/sharpebench-harness/tests/evidence_fields_no_clone_merges.rs`, sha256 `3d00305fb3ab5bdddf77c08466ca838cea120e40f0238b606051911ce2bfc8c8`, digest source: paper/evidence/provenance.json, rebuilds every committed evidence field twice and asserts the merge counts and the stamped dispersion source
+- `crates/sharpebench-harness/tests/evidence_fields_no_clone_merges.rs`, sha256 `f54f0f84c9a25d68e877338fe93ed67ddaa3de49eb4bf683140a7dbb877ba9ab`, digest source: paper/evidence/provenance.json, rebuilds every committed evidence field twice and asserts the merge counts and the stamped dispersion source
 - `crates/sharpebench-core/src/rediscovery.rs`, sha256 `a14b70c1d1f317eee9cfec132c35a1a884875e7225497d74d66d1bcdc4db67f3`, digest source: paper/evidence/provenance.json, carries CLONE_COLLAPSE_COSINE = 0.995
 
 **Producer command.** cargo test -p sharpebench-harness --test evidence_fields_no_clone_merges (paper/sections/A-commands.tex)
@@ -2211,6 +2219,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 **Relevant later changes.**
 - A track with no Sharpe ratio no longer votes on another agent's deflation bar. hold voted wherever a record stamps measured or floored: 64 of the 576 default-sweep panels, all 27 panels of the externally specified sweep and four of the nine power-curve panels. How far the repaired measurement would move each bar is not established and is not estimated (paper/sections/E-repairs.tex:15, :17). The dispersion sample is now qualified before clone collapse, which changes which streams the similarity is taken over on panels containing a constant track.
 - A vote further than 10.75 robust scales from its own field's median no longer enters the measured dispersion. Nothing is fenced on any committed field, so the merge counts and the stamped dispersion source this row rests on are unchanged, and the same test now also pins the margin by which each measured panel sits inside the fence. The self-audit's sybil counterfactual, the arm computed with the clone collapse off, does move: two hundred near-identical puppets are the field there, so the honest votes are the distant minority and the fence removes them.
+- The 2026-11-01 scorer-round integration: fix/griefing-clones updated the clone-merge regression for entrant-only dispersion votes; the test runs in CI's slow harness job on the merged tree.
 
 **Present applicability.** The merge behaviour is re-established on every commit by the named test. The quoted similarity values are the test's printed output, which the register cannot pin to a stored artifact.
 
@@ -2226,6 +2235,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 |---|---|---|---|---|
 | 2026-09-23 | still-applicable | unknown | no | Initial entry: The documented comparison is the commit-time test that rebuilds every committed field and asserts the outcome; it executes against the current kernel. |
 | 2026-10-31 | still-applicable | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| 2026-11-01 | still-applicable | model: claude-opus-5-5 | no | Rechecked at the scorer-round integration: crates/sharpebench-harness/tests/evidence_fields_no_clone_merges.rs moved and the recorded digests are rebound. The claim still holds on the merged scorer, so the disposition is unchanged. |
 
 ### `SB-sec-power`
 
@@ -2569,7 +2579,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 **Source.** `paper/sections/05-experiments.tex:266`
 
 **Artifacts.**
-- `crates/sharpebench-core/src/selfaudit.rs`, sha256 `579718f85fe269b33174681aad905a3803da9ff5a6a67278cb31afea2af13a16`, digest source: paper/evidence/provenance.json
+- `crates/sharpebench-core/src/selfaudit.rs`, sha256 `30fe452f24b34d286086d6e1d1afde7b9134c76568539f0d97a553744c066cbc`, digest source: paper/evidence/provenance.json
 - `crates/sharpebench-arena/src/audit.rs`, sha256 `5dba8da8bce47be67aaace6b7b297668026f3a038b0b136f75a9f04f4d15cb14`, digest source: paper/evidence/provenance.json
 
 **Producer command.** sharpebench audit; enforced by the commit-time tests in the two files above.
@@ -2584,6 +2594,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 **Relevant later changes.**
 - The ninth case moved from a recorded known gap to a defended case when ranking gained clone collapse (paper/sections/04-integrity.tex:42).
 - The 2026-10-31 integration (feat/arena-completeness, fix/verify-board-stability, fix/header-execution-identity) changed crates/sharpebench-arena/src/audit.rs for the signed head and the bound execution identity; `sharpebench audit` on the integrated tree still reports all ten attacks defended, and the forward-arena case is still refused under both intakes.
+- The 2026-11-01 scorer-round integration: fix/tail-seller rewrote the self-audit skilled fixture to carry losing bars; `sharpebench audit` on the merged scorer still reports all ten attacks defended.
 
 **Present applicability.** Re-established on every commit against the current kernel.
 
@@ -2600,6 +2611,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | 2026-09-23 | still-applicable | unknown | no | Initial entry: The documented comparison is the commit-time test, which runs against the current tree rather than against the frozen snapshot. |
 | 2026-10-31 | still-applicable | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 | 2026-10-31 | still-applicable | model: claude-opus-5-5 | no | Rechecked at the gap-closure integration: crates/sharpebench-arena/src/audit.rs moved, and the recorded digest is rebound to the integrated tree. The claim still holds there, so the disposition is unchanged. |
+| 2026-11-01 | still-applicable | model: claude-opus-5-5 | no | Rechecked at the scorer-round integration: crates/sharpebench-core/src/selfaudit.rs moved and the recorded digests are rebound. The claim still holds on the merged scorer, so the disposition is unchanged. |
 
 ### `SB-claims-v`
 
@@ -2608,7 +2620,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 **Source.** `paper/sections/05-experiments.tex:266`
 
 **Artifacts.**
-- `crates/sharpebench-core/golden/example_submissions.scores.json`, sha256 `28fae98151c032eeb33c3d4a0e0d892c94f415bc39b034c0d98d80306b07dabf`, digest source: computed for this register; the file is outside the provenance manifest scope
+- `crates/sharpebench-core/golden/example_submissions.scores.json`, sha256 `6f74bb23887122be95b306cc6b1628d0c8d8da39eb26a96776e4c032cbfb1dcd`, digest source: computed for this register; the file is outside the provenance manifest scope
 - `crates/sharpebench-core/golden/synthetic_field.scores.json`, sha256 `c9b899e58c9d0f59d338f2d331afd49b56c9dcdbd33d310c105eb8fd047b206d`, digest source: computed for this register; the file is outside the provenance manifest scope
 - `crates/sharpebench-core/golden/synthetic_field.input.json`, sha256 `b5d298d72a68fb5922fbcbd252a7922fe1033f133d38203f2c15a4ec01cd8b61`, digest source: computed for this register; the file is outside the provenance manifest scope
 
@@ -2624,6 +2636,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 **Relevant later changes.**
 - The golden fields changed in the Pareto flag of hold and in calibration counts, Brier scores and confidence-weighted return; no gate reads those fields (paper/sections/E-repairs.tex:19).
 - The 2026-10-31 fix-round integration (fix/row-disclosures) added runs_passed, window_bars, window_pass_floors, implausible_windows and pass_k_floors_plausible to every row of crates/sharpebench-core/golden/example_submissions.scores.json, crates/sharpebench-core/golden/synthetic_field.scores.json; no existing field or value changed.
+- The 2026-11-01 scorer-round integration: fix/tail-seller rewrote skilled-momentum and ungated-bot to carry losing bars (owner-approved), which moves their return, drawdown, beta and alpha fields; every agent's verdict, deflated Sharpe, PSR, pass^k, eligibility and rank are unchanged, and the file was regenerated once at the merged tip with no further change.
 
 **Present applicability.** Re-established on every CI run across the three targets.
 
@@ -2640,6 +2653,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | 2026-09-23 | still-applicable | unknown | no | Initial entry: The documented comparison is the golden test on three CI targets, which executes against the current kernel. |
 | 2026-10-31 | still-applicable | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 | 2026-11-01 | still-applicable | model: claude-opus-5-5 | no | Rechecked at the fix-round integration: crates/sharpebench-core/golden/example_submissions.scores.json, crates/sharpebench-core/golden/synthetic_field.scores.json gained five additive fields and the recorded digest is rebound. Every existing field and value is unchanged, so the claim and its disposition stand. |
+| 2026-11-01 | still-applicable | model: claude-opus-5-5 | no | Rechecked at the scorer-round integration: crates/sharpebench-core/golden/example_submissions.scores.json moved and the recorded digests are rebound. The claim still holds on the merged scorer, so the disposition is unchanged. |
 
 ### `SB-claims-vi`
 

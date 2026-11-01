@@ -33,6 +33,48 @@ available as an opt-in diagnostic (see
 [below](#opt-in-diagnostics-the-gate-does-not-use)); the gate keeps the 2014
 variance.
 
+### Certifying the standard error before admission
+
+The reported DSR keeps the 2014 variance, so no published number moves. A DSR
+that clears `dsr_bar` must also clear it twice more before the track is
+admitted, and a track that fails either is refused with the reason in
+`standard_error_refusal` (fail reason `standard_error_uncertified`). Both are
+scoring changes after release 0.28.0, from `grader-search` findings of
+2026-10-30.
+
+- **Serial correlation.** The bracket is multiplied by the Newey-West
+  long-run variance ratio `1 + 2 * sum (1 - k / (L + 1)) rho_k`, the correction
+  Lo (2002) gives for non-i.i.d. returns, floored at one so serial correlation
+  never buys precision. The autocorrelations are measured inside windows only,
+  each window centred on its own mean, so neither the join between two windows
+  nor a level difference between regimes is read as persistence, and the
+  bandwidth `L` follows
+  Andrews (1991), growing with the lag-one persistence it sees. The estimate is
+  model-free: an AR(1) bracket would read a periodic track, whose
+  autocorrelations change sign, as several times less precise when its mean is
+  more precise. Zero-edge AR(1) and smoothed tracks were admitted on up to 24
+  of 64 held-out seeds against 0 to 2 for an i.i.d. null. The rule is a
+  mitigation, not a closure: on the fixed search seed it takes the admitted
+  autocorrelated points from 499 to 361. When the correlation time is
+  comparable to the window, centring a thirty to 120 bar window absorbs the
+  persistence, and the window's returns cannot reveal it.
+- **Moment credit.** The DSR is recomputed with the bracket floored at the
+  Gaussian `1 + SR^2 / 2`, so a sample skewness or kurtosis can widen the
+  standard error but not narrow it. Three zero-mean draws of one sign in a flat
+  window make a large positive skewness, and the bracket credited it. The
+  search placed the draws at the end of each window; the bars' order does not
+  enter the DSR, and the same draws scattered through one window were admitted
+  more often, because only the block bootstrap had protected the edge. The
+  floor reads moments only, so it holds wherever the bars and the window
+  boundaries sit. It costs a genuine positively skewed track the precision the
+  skewness credited. It too is a mitigation: the search's admitted
+  `window_boundary` points fell from 18 to 3, each at the i.i.d. control's
+  held-out rate, and a sparse track whose Gaussian-bracket DSR still clears the
+  bar is admitted.
+
+Neither can admit a track. The opt-in `autocorrelated-psr` diagnostic below is
+unchanged: it still reports the AR(1) bracket on the pooled lag-one estimate.
+
 The **Deflated Sharpe Ratio (DSR)** goes further: it is the PSR evaluated against
 a benchmark Sharpe that accounts for **how many strategies were tried**. Search
 1000 configurations and the best one will look good by chance; the DSR subtracts
@@ -129,11 +171,41 @@ track below the bound has skill: a steady drift with a real dispersion is, on
 returns alone, what skill looks like.
 
 This is a scoring change after release 0.28.0, decided by the owner on
-2026-10-31. Its cost is stated rather than hidden: a genuine positive-drift
-track that never loses a bar in any window, such as a carry with a small wiggle,
-is refused too. On returns alone it cannot be told from a track that never moved,
-and a benchmark that admits the one admits the other. No frozen panel, golden or
-committed field contains such a track, so no published number moves.
+2026-10-31. The Samuelson refusal alone does not refuse every track that never
+lost: it fires only when the moments prove the sign, so a carry with a small
+wiggle below the bound keeps its Sharpe under it. The observed-loss refusal
+below is what refuses such a track.
+
+Samuelson's bound only proves a sign above a per-bar Sharpe of `(n - 1) / sqrt(n)`,
+5.3 at thirty bars, so it does not on its own refuse every track that never lost.
+A seller of tail insurance that drew no crash shows it: a premium of 2e-4 with
+noise of a quarter of it has a per-bar Sharpe of 4, never loses a bar, and was
+admitted alone and in fields (`grader-search`, 2026-10-30). The PSR's skewness
+and kurtosis terms cannot price it, because they are sample moments and the crash
+is not in the sample. So the kernel also asks the question directly: a track with
+no bar below zero in any window is refused with `must show an observed loss`. The
+test is a sign, it reads no constant, and rescaling does not move it.
+
+Its cost is stated rather than hidden: a genuine positive-drift track that never
+loses a bar in any window, such as a carry with a small wiggle, is refused too.
+On returns alone it cannot be told from a seller whose crash has not yet come,
+and a benchmark that admits the one admits the other. The shipped demonstration
+field was such a track: `skilled-momentum` and `ungated-bot` drifted at 0.002 a
+bar with a wiggle of 0.0005 and never lost. Both were rewritten with a wiggle of
+0.004, which loses on 90 of 300 bars, and the golden board was regenerated; the
+demonstration keeps its verdicts. No frozen evidence panel contains such a track,
+so no frozen number moves.
+
+What no rule on the sample can do is refuse a tail seller that missed its crash
+and loses on ordinary bars. Conditional on no crash, its sample is a sample of its
+premium distribution, so any rule refuses it exactly as often as it refuses an
+honest track of that distribution (and no test of a mean has power above its size
+over every distribution with a finite mean, Bahadur and Savage 1956). A seller
+with a per-bar Sharpe near 1 loses on about one bar in six and stays admissible,
+as an honest Gaussian track of that Sharpe must. Extreme-value estimates of the
+loss tail do not help: they extrapolate from the losses in the sample, and the
+crash is not among them. A token loss posted on a fabricated series also passes:
+returns alone cannot tell it from a loss that was taken.
 
 An excluded agent is still scored, still
 ranked and still refused on its own terms. The exclusion runs before the clone
@@ -150,6 +222,22 @@ agents keep their vote) are collapsed to one vote per cluster, for the estimate
 and for the field count the floor is checked against, so a flood of
 near-duplicate submissions cannot shrink the dispersion and lower the bar
 (`dedup_clones_for_measured_sr_std`, default on; see the integrity chapter).
+
+The same switch weights the remaining votes by how independent they are. Each
+vote weighs `1 / sum_j s_ij` over the votes measured, itself included, where
+`s_ij` is the share of variance the two pooled streams have in common beyond
+sampling noise: the squared centred correlation in excess of `9 / n` for `n`
+common bars, rescaled to `[0, 1]`. A stream independent of the rest weighs 1;
+`m` streams with pairwise share `s` weigh `m / (1 + (m - 1) s)` together, so 32
+puppets correlated at 0.97 over 120 bars, below the collapse threshold, weigh
+about 1.07 votes instead of 32. The weighted dispersion is the
+reliability-weighted standard deviation, which equals the plain sample standard
+deviation when every weight is equal, and the measured value is the larger of
+the plain and the weighted dispersion. Measurement therefore never lowers a bar
+the plain dispersion would set: a field whose streams are independent, or
+equally correlated, measures exactly what it measured before. There is no
+cosine below which a near-copy keeps a full vote, because the weight falls
+continuously as streams become alike.
 
 The resulting votes also pass a membership fence before measuring the admitted
 field. A vote is retained when its distance from the field median is at most
@@ -170,7 +258,58 @@ never moved is kept off the board by the refusal above, which runs before any vo
 is cast, not by this fence. The rule bounds an individual distant vote relative to
 the field's own spread, not against an absolute ceiling. Near-boundary votes retain influence;
 coalitions can change the median and scale. Small fields still use their prior.
-No admitted vote is winsorized or numerically replaced.
+
+### Who votes, and how far one vote can reach
+
+Only entrants vote (owner decision of 2026-10-31). A host lists its own control
+tracks, such as the luck floor, in `ScoreConfig::dispersion_controls`. A control
+is scored, ranked and reported against the bar the entrants measure, but it is
+left out of the dispersion sample before anything else is read: the clone
+partition, the fence's centre and scale, and the field count all see entrants
+only. Every measured row names the agents that cast no vote in
+`trials_sr_std_most_influential_vote.abstained`, each with its reason
+(`control`, `no_sharpe_ratio` or `fenced`). The committed producers declare
+their five luck-floor agents as controls. The 1000-agent luck-floor producer
+does not, because there the luck floor is the field under study.
+
+The admitted votes then pass an influence bound. Each vote is clipped to
+`centre +/- z_n * scale`, where the centre is the independence-weighted median
+of the votes, the scale the weighted median of their pairwise distances (pair
+weight `w_i * w_j`) times `PAIRWISE_MEDIAN_TO_SIGMA`, floored at the dispersion
+floor, and `z_n` the 99th percentile of the largest such robust distance in an
+honest field of `n` independent normal votes: 5.28 at five votes, 4.12 at seven,
+3.95 at ten and about 3.82 from fifteen to thirty, each the larger of two
+simulations of one million fields, and `norm_ppf(1 - 0.01 / n) + 0.4` past thirty.
+So the bound binds on 1% of honest normal fields at every size, and more often
+under fat tails (5.50 is the 99th percentile at seven votes under Student `t`
+with five degrees of freedom). A vote anywhere past the reach enters at the
+reach, so there is no position that keeps more influence than an honest vote at
+the field's own 99th percentile. The bound is a cap: it applies only when it
+lowers the dispersion. A clipped entrant, like a fenced one, keeps the
+dispersion its vote measured as cast, so being clipped is never a discount, and
+every measured row records the clipped votes (`clipped`) and the dispersion
+before the clip (`dispersion_before_clip`). Turning the clone defences off
+(`dedup_clones_for_measured_sr_std: false`) turns the bound off with them.
+
+On the grader search's fixed seed, one vote at 0.5 to 0.995 of the fence beside
+six honest entrants used to take their bar from 0.21 to between 0.77 and 1.48
+per period depending on where it sat. With the bound every one of those
+positions measures 0.61, and the six honest entrants are still not admitted. A
+vote placed inside the reach is not clipped and still raises the bar, because by
+its value it cannot be told apart from an honest outlier. A tighter bound does
+not repair that without clipping honest fields: on the same fixture all six
+honest entrants stay admitted only while the reach is at most 1.35 robust
+scales, which clips 72% of honest seven-vote fields, and the strongest one stays
+admitted only while it is at most 3.22, which clips about 3%. The bound
+therefore guarantees that where a vote sits past the reach does not change the
+bar; it does not stop a single dissimilar vote from inside the reach.
+Entrants-only voting, the independence weighting and the vote fence narrow
+that case and do not close it.
+
+On every committed producer the bound binds on no field: with the luck floor out
+of the sample, every committed field measures the same numbers with and without
+the bound. What moves the committed numbers is dropping the controls, recorded in
+the change log of this release.
 
 ### Which vote sets the measured bar
 
@@ -206,13 +345,13 @@ Three limits on reading it:
 - **Upward only.** The disclosure names the vote that raises the dispersion.
   Votes that lower it, by crowding the middle, are not reported.
 
-It is a disclosure and nothing more. It clips no vote, refuses no agent and
-moves no bar by itself. The separate membership fence controls which votes enter
-the admitted sample. On the three measured reference panels no vote is fenced,
-so the measured dispersion remains bit-identical; a test on those panels
-(`the_measured_panels_disclose_the_vote_that_sets_their_bar` in
-`sharpebench-harness/tests/evidence_fields_no_clone_merges.rs`) pins that. On
-the current engine those panels name the same agent:
+The leverage itself is a disclosure: it clips no vote, refuses no agent and
+moves no bar. With the luck floor voting, the three reference panels that used
+to measure named the same agent, which is why a bound on one vote could not ship
+while the luck floor was in the sample. With it declared as controls, two
+entrant votes are left and these panels take the configured prior; the harness
+test `the_luck_floor_set_these_panels_bars_and_now_casts_no_vote` in
+`sharpebench-harness/tests/evidence_fields_no_clone_merges.rs` pins both facts:
 
 | Panel | Votes | Vote that sets the bar | Leverage |
 |---|---|---|---|
@@ -406,6 +545,52 @@ The shipped datasets: `us-indices-1d`, `fx-majors-1d`, `commodities-1d`,
 `crypto-majors-1h` 8760; `us-indices-1w` and `crypto-majors-1w` 52.
 
 > Bailey & López de Prado, *The Deflated Sharpe Ratio* (2014), is the reference.
+
+## Leverage timing: the risk an exposure history implies
+
+A return series records what a strategy earned, not what it risked. A strategy
+that sizes from its own profit can turn a fair coin into evidence: it trades
+until its running t-statistic is high and then goes flat, so the bars that could
+have taken the gain back are never drawn. The Sharpe ratio reads the dispersion
+of the bars that were traded and shrinks with the exposure the strategy stopped
+carrying. On two windows of 60 bars, a zero-edge coin that stops once its
+t-statistic reaches 2 cleared every other gate on 94 of 4,000 seeds, against 16
+for a coin of the same size traded to the end.
+
+Since the change after 0.28.0, a track must also clear the risk its exposure
+history implies (`exposure_path_error`, typed requirement
+`EXPOSURE_PATH_UNPROVEN`). In each window the exposure rate is the running mean
+square `V_t / t` of the returns so far. The window is charged its length times the
+largest rate it showed after its first quarter, so stopping or de-risking leaves
+the charge where the history put it and raising exposure raises it. The
+statistic is the pooled profit over the square root of the pooled charge, and it
+must reach `Phi^-1(1 - alpha / 2)`, 1.96 at the default alpha.
+
+The factor of two is Lévy's reflection principle: under no edge with
+conditionally symmetric bar outcomes, a walk stopped at any time before the end
+of its window reaches a level with at most twice the probability that the
+unstopped walk ends there. Halving alpha restores the gate's size whatever the
+stopping rule. The statistic is a ratio, so rescaling a track does not move it.
+The stopped coin above now clears on 31 of 4,000 seeds and the unstopped one still
+on 16: the factor of two the bound allows remains, since the other gates are not
+halved, so this is a mitigation of optional stopping and not a closure.
+
+Sizing from the market is not sizing from the strategy's own profit.
+Volatility targeting with a fixed rule and a fixed Kelly fraction keep a charge
+near their realized variance, so the statistic is near their ordinary
+t-statistic and the gate costs them the factor of two in the tail. In a seeded
+study of 1,500 tracks each, with an edge of 0.15 of volatility a bar on a
+GARCH market, the gate kept 245 of 251 eligible volatility-targeted tracks and
+237 of 246 fixed-fraction ones. A strategy whose exposure falls sharply late in
+a window for a market reason (a calm after a crash, under a fixed fraction) pays
+for its earlier exposure, and a strategy that closes out before the window ends
+is charged as if it had stayed in.
+
+What it does not close: martingale doubling and pyramiding raise exposure after
+losses or gains. On the grader-search seed their remaining admissions arrive at
+the iid null's rate, on held-out seeds and in a uniform draw, so they are the
+gates' size under a search over thousands of seeds and not a leverage-specific
+excess. A conditionally skewed bar (a sold tail) is outside the symmetric case.
 
 ## Opt-in diagnostics the gate does not use
 

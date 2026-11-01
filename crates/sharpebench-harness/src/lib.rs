@@ -19,6 +19,7 @@ pub mod gateway_journal;
 pub mod perturb;
 #[cfg(test)]
 mod scratch;
+pub mod stress_replay;
 pub mod timing_luck;
 
 pub use checkpoint::{
@@ -575,17 +576,23 @@ pub fn luck_floor(
 ) -> Vec<AgentSubmission> {
     (0..n_agents)
         .map(|k| {
-            let base = 0xF100_0000_0000_0000 ^ (k as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
             run_seeded_agent(
                 &luck_floor_agent_id(k),
                 data,
                 windows,
                 seeds,
                 costs,
-                move |seed| Box::new(RandomAgent::new(base ^ seed)) as Box<dyn Agent>,
+                move |seed| luck_floor_agent(k, seed),
             )
         })
         .collect()
+}
+
+/// The `k`-th luck-floor monkey for execution `seed`, the agent [`luck_floor`]
+/// runs in that cell. Exposed so a stress replay drives the same agent.
+pub fn luck_floor_agent(k: usize, seed: u64) -> Box<dyn Agent> {
+    let base = 0xF100_0000_0000_0000 ^ (k as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    Box::new(RandomAgent::new(base ^ seed))
 }
 
 /// The agent id of the `k`-th luck-floor monkey. A producer that declares its
@@ -594,6 +601,14 @@ pub fn luck_floor(
 /// drifts from the field it is supposed to be a declaration of.
 pub fn luck_floor_agent_id(k: usize) -> String {
     format!("luck-floor-{k:02}")
+}
+
+/// The ids of a [`luck_floor`] of `n_agents`, declared as dispersion controls
+/// (`ScoreConfig::dispersion_controls`): the host runs the luck floor to show
+/// what no skill looks like, so it is scored beside the entrants but does not
+/// vote on the deflation bar they are measured against.
+pub fn luck_floor_controls(n_agents: usize) -> Vec<String> {
+    (0..n_agents).map(luck_floor_agent_id).collect()
 }
 
 /// The published identity of one evaluation window: its `start-end` index pair
@@ -1679,7 +1694,7 @@ mod tests {
             runs: (0..seeds.len())
                 .map(|_| Run {
                     returns: (0..100)
-                        .map(|i| 0.002 + 0.0005 * (i as f64 * 0.7).sin())
+                        .map(|i| 0.002 + 0.004 * (i as f64 * 0.7).sin())
                         .collect(),
                     ..Run::default()
                 })

@@ -3,8 +3,10 @@
 //! The 2026-09-10 literature audit (`docs/audits/2026-09-09/LITERATURE-AUDIT.md`)
 //! deferred three estimators because switching the gate to any of them would
 //! move published values. They live here as separate functions so a caller can
-//! ask for them; nothing in `sharpebench-core`'s scoring, eligibility or rank
-//! predicate calls this module.
+//! ask for them; nothing in `sharpebench-core`'s scoring or rank predicate calls
+//! this module. The one exception is eligibility: the admission test's
+//! serial-correlation term ([`crate::serial_correlation`]) reads
+//! [`sharpe_variance_factor`], and can only refuse a track the gate admitted.
 //!
 //! - [`probabilistic_sharpe_ratio_autocorrelated`]: the PSR with the
 //!   generalized Sharpe variance of López de Prado, Lipton and Zoonekynd,
