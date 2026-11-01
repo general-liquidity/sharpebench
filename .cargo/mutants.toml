@@ -24,6 +24,52 @@ exclude_re = [
     # `fmt` with `Ok(())` changes nothing a test should pin; a missed mutant
     # here would only push tests to freeze wording.
     "<impl (std::)?(fmt::)?(Display|Debug) for ",
+
+    # Equivalent mutants in det_math.rs (SharpeBench PR #178). Each condition
+    # below is a guard whose boundary value gives the same result on either
+    # branch; the reason follows each entry. Anchored by file:line:col so a
+    # later edit that moves the line stops the exclusion from matching and the
+    # mutant comes back as missed (fail closed) instead of hiding another one.
+    # scale 313:17: k = -1022 takes the other branch, which computes y * 2^0 * 2^-1022: the same single rounding.
+    '^crates/sharpebench-stats/src/det_math\.rs:313:17: replace < with <= in scale$',
+    # exp_dd 328:13: at hi = 709.8, e^709.8 > f64::MAX, so the series path also returns +inf.
+    '^crates/sharpebench-stats/src/det_math\.rs:328:13: replace > with >= in exp_dd$',
+    # exp_dd 331:13: at hi = -746, e^-746 is below half the smallest subnormal, so the series path also returns 0.
+    '^crates/sharpebench-stats/src/det_math\.rs:331:13: replace < with <= in exp_dd$',
+    # exp_m1 351:30: at |x| = 2^-54 the series returns the correctly rounded e^x - 1, which is x itself.
+    '^crates/sharpebench-stats/src/det_math\.rs:351:30: replace < with <= in exp_m1$',
+    # exp_m1 356:10: at x = 700, e^x - 1 and e^x round to the same double, which the other path returns.
+    '^crates/sharpebench-stats/src/det_math\.rs:356:10: replace > with >= in exp_m1$',
+    # exp_m1 360:10: at x = -40, e^x - 1 = -1 + 4.2e-18 rounds to -1, which the series path returns.
+    '^crates/sharpebench-stats/src/det_math\.rs:360:10: replace < with <= in exp_m1$',
+    # ln_dd 385:11: at hi = f64::MIN_POSITIVE the 2^54 rescale is exact and e absorbs it: same m, same result.
+    '^crates/sharpebench-stats/src/det_math\.rs:385:11: replace < with <= in ln_dd$',
+    # ln_dd 396:63: the masked mantissa has a zero exponent field, so OR and XOR with the 1.0 exponent bits agree.
+    '^crates/sharpebench-stats/src/det_math\.rs:396:63: replace \| with \^ in ln_dd$',
+    # ln_dd 402:10: at m = SQRT_2 both reductions (m, e) and (m / 2, e + 1) are exact and give ln m to ~2^-100; the rounded result is the same.
+    '^crates/sharpebench-stats/src/det_math\.rs:402:10: replace > with >= in ln_dd$',
+    # ln_1p 457:38: at |x| = 2^-54 the series returns the correctly rounded ln(1 + x), which is x itself.
+    '^crates/sharpebench-stats/src/det_math\.rs:457:38: replace < with <= in ln_1p$',
+    # powf 483:23: |x| = 1 returned one line above, so ax < 1 and ax <= 1 agree here.
+    '^crates/sharpebench-stats/src/det_math\.rs:483:23: replace < with <= in powf$',
+    # powf 483:36: y is infinite in this branch, never 0.
+    '^crates/sharpebench-stats/src/det_math\.rs:483:36: replace < with <= in powf$',
+    # powf 491:34: at |y| = 2^53 the parity test (y / 2).trunc() != y / 2 already says even.
+    '^crates/sharpebench-stats/src/det_math\.rs:491:34: replace < with <= in powf$',
+    # powf 493:25: y = 0 returned at the top, so y < 0 and y <= 0 agree here.
+    '^crates/sharpebench-stats/src/det_math\.rs:493:25: replace < with <= in powf$',
+    # powf 501:30: y = 0 returned at the top.
+    '^crates/sharpebench-stats/src/det_math\.rs:501:30: replace < with <= in powf$',
+    # powf 502:21: x is infinite in this branch, never 0.
+    '^crates/sharpebench-stats/src/det_math\.rs:502:21: replace < with <= in powf$',
+    # powf 508:21: x = 0 returned above, so x > 0 and x >= 0 agree here.
+    '^crates/sharpebench-stats/src/det_math\.rs:508:21: replace > with >= in powf$',
+    # powf 521:10: at t = 750 the exp path overflows to the same signed infinity.
+    '^crates/sharpebench-stats/src/det_math\.rs:521:10: replace > with >= in powf$',
+    # powf 524:10: at t = -760 the exp path underflows to the same signed zero.
+    '^crates/sharpebench-stats/src/det_math\.rs:524:10: replace < with <= in powf$',
+    # powi 553:10: at n = 0 the loop leaves acc = 1, and 1 / 1 = 1.
+    '^crates/sharpebench-stats/src/det_math\.rs:553:10: replace < with <= in powi$',
 ]
 
 # Timeouts. The default is 1.5x the baseline test time with a 20 second floor,
