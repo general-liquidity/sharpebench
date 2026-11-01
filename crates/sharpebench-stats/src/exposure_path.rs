@@ -120,6 +120,29 @@ pub fn exposure_path_evidence(windows: &[&[f64]], alpha: f64) -> Result<f64, Sta
 mod tests {
     use super::*;
 
+    /// The documented edges: no exposure and a non-finite result have no
+    /// statistic, and the bound saturates at alpha 2 (admit all) and 0 (admit
+    /// none).
+    #[test]
+    fn forgone_risk_and_the_alpha_bound_hold_at_their_boundary_values() {
+        let flat: &[f64] = &[0.0; 8];
+        assert_eq!(forgone_risk_z(&[flat]), None, "no exposure, no statistic");
+        assert_eq!(forgone_risk_z(&[]), None, "no window, no statistic");
+        let huge: &[f64] = &[f64::MAX, f64::MAX, f64::MAX, f64::MAX];
+        assert_eq!(
+            forgone_risk_z(&[huge]),
+            None,
+            "an overflowing charge is not finite"
+        );
+        let track: &[f64] = &[0.02, -0.01, 0.03, 0.01, -0.02, 0.04, 0.01, 0.02];
+        let z = forgone_risk_z(&[track]).unwrap();
+        assert!(z.is_finite());
+        let scaled: Vec<f64> = track.iter().map(|x| x * 3.0).collect();
+        assert!((forgone_risk_z(&[&scaled]).unwrap() - z).abs() < 1e-12);
+        assert!(exposure_path_evidence(&[track], 2.0).is_ok());
+        assert!(exposure_path_evidence(&[track], 0.0).is_err());
+    }
+
     fn pm(n: usize, s: f64) -> Vec<f64> {
         (0..n).map(|i| if i % 3 == 2 { -s } else { s }).collect()
     }

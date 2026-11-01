@@ -190,6 +190,19 @@ pub fn assess(scenarios: &[ScenarioRuns]) -> StressReplay {
 mod tests {
     use super::*;
 
+    /// The documented edges: no run, an empty run and a non-finite return
+    /// have no loss, and a return at or below -100% is a total loss of 1.
+    #[test]
+    fn stress_loss_holds_at_its_boundary_values() {
+        assert_eq!(stress_loss(&[]), None);
+        assert_eq!(stress_loss(&[vec![0.01], Vec::new()]), None);
+        assert_eq!(stress_loss(&[vec![0.01, f64::NAN]]), None);
+        assert_eq!(stress_loss(&[vec![0.01, f64::INFINITY]]), None);
+        assert_eq!(stress_loss(&[vec![0.01, -1.0]]), Some(1.0));
+        assert_eq!(stress_loss(&[vec![0.01, -2.5]]), Some(1.0));
+        assert_eq!(stress_loss(&[vec![0.01, 0.02]]), Some(0.0));
+    }
+
     fn runs(name: &str, agent: Vec<Vec<f64>>, benchmark: Vec<Vec<f64>>) -> ScenarioRuns {
         ScenarioRuns {
             scenario: name.to_string(),
