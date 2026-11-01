@@ -185,6 +185,7 @@ The six scorer stages that answer the `grader-search` admissions. Stages 1, 2 an
 - stats: `det_math::powi` runs a fixed 32 passes, one per bit of the exponent, so no change to its body can make it loop forever. Its bits are unchanged.
 - tests: the double-double primitives are checked against exact rationals and the `exp` reduction against high-precision values. New pins cover `exp` near overflow and `ln` and `ln_1p` at `f64::MAX`, and new boundary and value tests cover the decay IC floor, the binary log score's non-event branch, normal CRPS off the mean and PIT calibration.
 - ci: `.cargo/mutants.toml` records 20 equivalent `det_math` mutants, each anchored to its file, line and column with the reason it cannot change a result.
+- tests: the scorer round reached main without a pull request and so skipped the PR-diff mutation gate. Its diff now passes that gate, with 368 mutants and 0 missed. 59 survivors are killed by tests that pin the Newey-West bandwidth to Andrews (1991), the serial-correlation and moment-credit certification bounds, the influence reach and the leverage branch, and 15 equivalent mutants are recorded in `.cargo/mutants.toml` with their reasons. A new test also requires the self-audit's clean skilled fixture to be finite, to show a loss and to be eligible.
 
 ### Documentation
 

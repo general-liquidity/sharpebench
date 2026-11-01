@@ -283,4 +283,169 @@ mod tests {
             assert!((forward[k] - as_one[k]).abs() > 1e-3, "lag {}", k + 1);
         }
     }
+
+    /// An AR(1) window `x_t = drift + phi * (x_{t-1} - drift) + e_t`, with
+    /// uniform innovations on `[-scale, scale]` from a fixed xorshift64 stream.
+    fn ar1(len: usize, phi: f64, drift: f64, scale: f64, seed: u64) -> Vec<f64> {
+        let mut state = seed;
+        let mut level = 0.0;
+        // inv: `out` holds the first `t` bars and `level` is bar t - 1 minus drift.
+        // term: t rises by one to len.
+        (0..len)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                let unit = (state >> 11) as f64 / (1u64 << 53) as f64;
+                level = phi * level + scale * (2.0 * unit - 1.0);
+                drift + level
+            })
+            .collect()
+    }
+
+    /// Two AR(1) windows at phi = 0.6 with a positive drift: the independent
+    /// deflated Sharpe is 0.969, the corrected one 0.893, so a 0.95 bar
+    /// separates them.
+    fn persistent_track() -> (Vec<f64>, Vec<f64>) {
+        (
+            ar1(120, 0.6, 0.0008, 0.004, 1),
+            ar1(120, 0.6, 0.0008, 0.004, 1001),
+        )
+    }
+
+    /// Andrews (1991) eq. 6.4 and table 1 for the Bartlett kernel, worked by
+    /// hand: alpha = 4 rho^2 / ((1 - rho)^2 (1 + rho)^2).
+    ///
+    /// - rho 0.5, T 100: alpha = 1 / 0.5625 = 16/9, (alpha T)^(1/3) = 5.623,
+    ///   times 1.1447 is 6.437, so 6 bars.
+    /// - rho 0.9, T 600: alpha = 3.24 / 0.0361 = 89.75, (alpha T)^(1/3) = 37.76,
+    ///   times 1.1447 is 43.23, so 43 bars.
+    /// - rho -0.5 is rho 0.5: alpha reads rho squared.
+    /// - rho 0: no persistence, no lags.
+    /// - the cap is one less than the shortest window, and saturates at zero.
+    /// - rho 1: alpha is infinite and the bandwidth is the cap.
+    #[test]
+    fn the_bandwidth_is_the_andrews_ar1_plug_in_at_hand_computed_values() {
+        let cases: [(f64, usize, usize, usize); 9] = [
+            (0.5, 100, 1000, 6),
+            (0.9, 600, 1000, 43),
+            (-0.5, 100, 1000, 6),
+            (0.0, 500, 1000, 0),
+            (0.5, 100, 5, 4),
+            (0.5, 100, 7, 6),
+            (0.5, 100, 0, 0),
+            (1.0, 100, 30, 29),
+            (-1.0, 100, 30, 29),
+        ];
+        for (rho, observations, shortest, expected) in cases {
+            assert_eq!(
+                andrews_bartlett_bandwidth(rho, observations, shortest),
+                expected,
+                "rho {rho}, T {observations}, shortest window {shortest}"
+            );
+        }
+    }
+
+    /// rho_k is the sum of within-window lag-k cross products over the sum of
+    /// within-window squares, each window centred on its own mean, and a window
+    /// too short for lag k adds nothing at that lag. Worked by hand:
+    /// `[1, -1, 1, -1]` (mean 0) has squares 4 and cross products -3, 2, -1 at
+    /// lags 1 to 3; `[2, 4, 6]` (mean 4, centred `[-2, 0, 2]`) has squares 8 and
+    /// cross products 0, -4 at lags 1 and 2. Pooled: -3/12, -2/12, -1/12.
+    #[test]
+    fn autocorrelations_pool_cross_products_over_squares_by_window() {
+        let rhos = within_window_autocorrelations(&[&[1.0, -1.0, 1.0, -1.0], &[2.0, 4.0, 6.0]], 3)
+            .unwrap();
+        assert_eq!(rhos, vec![-3.0 / 12.0, -2.0 / 12.0, -1.0 / 12.0]);
+    }
+
+    /// On a persistent track the bandwidth is the plug-in at the measured
+    /// lag-one autocorrelation, the ratio is the Bartlett-weighted sum through
+    /// it, and the deflated Sharpe is the kernel's with its bracket multiplied
+    /// by that ratio (Lo 2002, eq. 4 with the Newey-West long-run variance).
+    #[test]
+    fn a_persistent_track_has_its_bracket_widened_by_the_long_run_ratio() {
+        let (a, b) = persistent_track();
+        let windows = [a.as_slice(), b.as_slice()];
+        let corrected = serially_corrected_deflated_sharpe(&windows, 1, 0.0, 0.0).unwrap();
+
+        let rho_1 = within_window_autocorrelations(&windows, 1).unwrap()[0];
+        assert_eq!(corrected.lag_one_autocorrelation, rho_1);
+        assert_eq!(
+            corrected.bandwidth,
+            andrews_bartlett_bandwidth(rho_1, 240, 120)
+        );
+        assert_eq!(corrected.bandwidth, 9);
+
+        let lags = corrected.bandwidth;
+        let rhos = within_window_autocorrelations(&windows, lags).unwrap();
+        let weighted: f64 = (1..=lags)
+            .map(|k| (1.0 - k as f64 / (lags + 1) as f64) * rhos[k - 1])
+            .sum();
+        assert_eq!(corrected.long_run_variance_ratio, 1.0 + 2.0 * weighted);
+        assert!(corrected.long_run_variance_ratio > 2.0, "{corrected:?}");
+        assert_eq!(corrected.applied_ratio, corrected.long_run_variance_ratio);
+
+        let pooled = windows.concat();
+        let sr = observed_sharpe_ratio(&pooled).unwrap();
+        let bracket = 1.0 - skewness(&pooled) * sr + ((kurtosis(&pooled) - 1.0) / 4.0) * sr * sr;
+        let z =
+            sr * (pooled.len() as f64 - 1.0).sqrt() / (bracket * corrected.applied_ratio).sqrt();
+        assert_eq!(corrected.deflated_sharpe.to_bits(), norm_cdf(z).to_bits());
+        let kernel = deflated_sharpe_ratio_against_null(&pooled, 1, 0.0, 0.0).unwrap();
+        assert!(corrected.deflated_sharpe < kernel, "{corrected:?} {kernel}");
+    }
+
+    const REFUSED: Result<(), StatisticalError> = Err(StatisticalError::InvalidParameter {
+        name: "returns",
+        requirement: NOT_CERTIFIED_UNDER_SERIAL_CORRELATION,
+    });
+
+    /// The rule refuses exactly the tracks whose independent deflated Sharpe is
+    /// at or above the bar and whose corrected one is below it, and both
+    /// comparisons are inclusive of the bar as the kernel's gate is.
+    #[test]
+    fn certification_refuses_only_between_the_corrected_and_independent_values() {
+        let (a, b) = persistent_track();
+        let windows = [a.as_slice(), b.as_slice()];
+        let pooled = windows.concat();
+        let independent = deflated_sharpe_ratio_against_null(&pooled, 1, 0.0, 0.0).unwrap();
+        let corrected = serially_corrected_deflated_sharpe(&windows, 1, 0.0, 0.0)
+            .unwrap()
+            .deflated_sharpe;
+        assert!(
+            corrected < 0.95 && 0.95 <= independent,
+            "{corrected} {independent}"
+        );
+
+        let certify = |bar: f64| certify_under_serial_correlation(&windows, 1, 0.0, 0.0, bar);
+        // Cleared only under independence: refused.
+        assert_eq!(certify(0.95), REFUSED);
+        // A bar exactly at the independent value is cleared by it, so the
+        // correction is asked, and refuses.
+        assert_eq!(certify(independent), REFUSED);
+        // A bar the independent value does not reach is that gate's refusal,
+        // not this one's.
+        assert_eq!(certify(0.99), Ok(()));
+        // A bar exactly at the corrected value is cleared by it.
+        assert_eq!(certify(corrected), Ok(()));
+        assert_eq!(certify(0.5), Ok(()));
+    }
+
+    /// Two bars are the fewest that have a lag: `[1, -1]` centred is itself,
+    /// squares 2, lag-one cross product -1, so rho_1 = -0.5. One bar is refused.
+    #[test]
+    fn two_bars_are_the_boundary_of_a_measurable_autocorrelation() {
+        assert_eq!(
+            within_window_autocorrelations(&[&[1.0, -1.0]], 1),
+            Ok(vec![-0.5])
+        );
+        assert_eq!(
+            within_window_autocorrelations(&[&[1.0]], 1),
+            Err(StatisticalError::InsufficientObservations {
+                required: 2,
+                actual: 1
+            })
+        );
+    }
 }
