@@ -270,7 +270,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
@@ -293,6 +293,22 @@ jobs:
         run: |
           cargo run -q -p sharpebench -- score suites/example_submissions.json --json > scored.json
           diff scored.json crates/sharpebench-core/golden/example_submissions.scores.json && echo "matches golden ✓"
+      # Every step above runs a debug build. An optimised build can fold a
+      # transcendental call with a constant argument inside the compiler, which
+      # need not round like the runtime libm: `erf(FRAC_1_SQRT_2)` once came out
+      # 1 ulp lower under `--release` on windows-gnu with every debug gate green.
+      # Released binaries and the wasm bundle are optimised builds, so the bit
+      # pins and the golden diff run again under the release profile.
+      - name: Bit pins and golden scores under the release profile
+        shell: bash
+        run: |
+          cargo test --release --locked -p sharpebench-stats --test special_function_bits
+          cargo test --release --locked -p sharpebench-core --test golden_scores
+      - name: Release-built CLI output → byte-identical to the committed golden fixture
+        shell: bash
+        run: |
+          cargo run -q --release -p sharpebench -- score suites/example_submissions.json --json > scored-release.json
+          diff scored-release.json crates/sharpebench-core/golden/example_submissions.scores.json && echo "release matches golden ✓"
 
   sandbox:
     # The container boundary is the only security claim in this repository that
