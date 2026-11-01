@@ -25,9 +25,9 @@ exclude_re = [
     # here would only push tests to freeze wording.
     "<impl (std::)?(fmt::)?(Display|Debug) for ",
     # Equivalent: at ratio == cap both branches return the same value.
-    "^crates/sharpebench-stats/src/forward_eprocess\.rs:260:21: replace > with >= in BettorState::bet$",
+    '^crates/sharpebench-stats/src/forward_eprocess.rs:260:21: replace > with >= in BettorState::bet$',
     # Equivalent: at wealth == max_wealth the assignment stores the same value.
-    "^crates/sharpebench-stats/src/forward_eprocess\.rs:292:32: replace > with >= in BettorState::step$",
+    '^crates/sharpebench-stats/src/forward_eprocess.rs:292:32: replace > with >= in BettorState::step$',
 ]
 
 # Timeouts. The default is 1.5x the baseline test time with a 20 second floor,
