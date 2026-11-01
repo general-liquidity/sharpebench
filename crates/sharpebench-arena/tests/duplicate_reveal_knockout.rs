@@ -86,6 +86,7 @@ fn capture(entrant: &str, data: &Dataset) -> AgentTrajectory {
 
 fn reveal(agent_id: &str, artifact: &str, capture: AgentTrajectory) -> RevealedEntry {
     RevealedEntry {
+        live_log: None,
         agent_id: Some(agent_id.to_string()),
         submission: None,
         capture: Some(capture),

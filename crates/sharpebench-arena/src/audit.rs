@@ -142,6 +142,7 @@ fn dataset_csv(data: &Dataset) -> String {
 
 fn entry(agent_id: &str, capture: Option<AgentTrajectory>, artifact: &str) -> RevealedEntry {
     RevealedEntry {
+        live_log: None,
         agent_id: Some(agent_id.to_string()),
         submission: None,
         capture,
@@ -232,6 +233,7 @@ fn run_case() -> Result<AuditCase, String> {
 
     let entries = vec![
         RevealedEntry {
+            live_log: None,
             agent_id: None,
             submission: Some(supplied),
             ..entry(RETURNS_AGENT, None, &image)
@@ -271,6 +273,7 @@ fn run_case() -> Result<AuditCase, String> {
         returns_provenance: BTreeMap::new(),
         expired_at_epoch: None,
         execution: None,
+        live_capture: std::collections::BTreeMap::new(),
     };
 
     let replayed = admit_entries(

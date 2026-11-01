@@ -176,6 +176,7 @@ fn score(dir: &Path, data: &Dataset) -> Arena {
     let (mut arena, dataset) = committed(dir, data);
     let (reference, digest) = image("committed");
     let entry = RevealedEntry {
+        live_log: None,
         agent_id: Some(ENTRANT.to_string()),
         submission: None,
         capture: Some(capture(&format!("sandbox:{reference}"), data)),

@@ -133,6 +133,7 @@ fn oracle(data: &Dataset) -> impl Fn() -> Box<dyn Agent> + '_ {
 
 fn reveal(agent_id: &str, artifact: &str, capture: AgentTrajectory) -> RevealedEntry {
     RevealedEntry {
+        live_log: None,
         agent_id: Some(agent_id.to_string()),
         submission: None,
         capture: Some(capture),
@@ -422,6 +423,7 @@ fn a_forged_entry_is_refused_alone() {
     let (mut arena, dataset) = committed(&dir, &data, &[("alpha", &digest)], None);
     let honest = reveal("alpha", &digest, capture(&entrant, &data, momentum));
     let wrong_salt = RevealedEntry {
+        live_log: None,
         salt: "not-alpha-salt".to_string(),
         ..reveal("alpha", &digest, capture(&entrant, &data, oracle(&data)))
     };
@@ -536,6 +538,7 @@ fn an_unnamed_entry_is_recorded_and_the_rest_are_scored() {
     let entrant = format!("sandbox:{reference}");
     let (mut arena, dataset) = committed(&dir, &data, &[("alpha", &digest)], None);
     let unnamed = RevealedEntry {
+        live_log: None,
         agent_id: None,
         ..reveal("alpha", &digest, capture(&entrant, &data, momentum))
     };
@@ -608,6 +611,7 @@ fn a_board_that_ranked_nothing_does_not_certify() {
     // Supplied returns are refused under the default intake, so the field is
     // empty and every entry is on the refusals list.
     let entry = RevealedEntry {
+        live_log: None,
         agent_id: Some("alpha".to_string()),
         submission: Some(sharpebench_core::AgentSubmission {
             agent_id: "alpha".to_string(),

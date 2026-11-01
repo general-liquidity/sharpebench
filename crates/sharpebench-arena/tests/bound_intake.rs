@@ -141,6 +141,7 @@ fn momentum() -> Box<dyn Agent> {
 
 fn reveal(agent_id: &str, artifact: &str, capture: AgentTrajectory) -> RevealedEntry {
     RevealedEntry {
+        live_log: None,
         agent_id: Some(agent_id.to_string()),
         submission: None,
         capture: Some(capture),
@@ -877,6 +878,7 @@ fn a_faulted_window_refuses_captures_and_ranks_supplied_returns_only_as_noncerti
     );
     returns.agent_id = "supplied".to_string();
     let supplied = RevealedEntry {
+        live_log: None,
         agent_id: None,
         submission: Some(returns),
         capture: None,
@@ -927,10 +929,12 @@ fn entries_that_cannot_be_ranked_are_refused_and_recorded() {
     let mut both = reveal("both", &digest, capture(&entrant, &data, momentum));
     both.submission = Some(returns("both"));
     let neither = RevealedEntry {
+        live_log: None,
         capture: None,
         ..reveal("neither", &digest, capture(&entrant, &data, momentum))
     };
     let renamed = RevealedEntry {
+        live_log: None,
         agent_id: Some("renamed".to_string()),
         submission: Some(returns("someone-else")),
         capture: None,
@@ -940,6 +944,7 @@ fn entries_that_cannot_be_ranked_are_refused_and_recorded() {
     };
     let twice = reveal("twice", &digest, capture(&entrant, &data, momentum));
     let supplied = RevealedEntry {
+        live_log: None,
         agent_id: None,
         submission: Some(returns("supplied")),
         capture: None,

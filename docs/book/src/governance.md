@@ -24,7 +24,9 @@ tampering without pretending to remove the host from the trust boundary.
    re-executes the committed artifact by default (a pinned image or a reference
    agent) and refuses a capture whose decisions it does not repeat. The signed
    header marks a board `certifying` only when every ranked row was
-   re-executed. A board with a row ranked from replay alone
+   re-executed, or, for a model-backed entrant, live-captured from a sealed
+   log of what the host ran during the window
+   ([live forward capture](arena.md#live-forward-capture)). A board with a row ranked from replay alone
    (`arena score --replay-only`) or from supplied returns
    (`--allow-supplied-returns`) is signed noncertifying. A certifying row still
    rests on the operator's custody of the data. See

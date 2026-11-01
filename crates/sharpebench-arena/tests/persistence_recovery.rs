@@ -226,6 +226,7 @@ fn an_interrupted_publish_recovers_board_window_and_state_together() {
     let dataset = fixture.0.join("dataset.csv");
     std::fs::write(&dataset, b"sym,close\nA,1\nA,1.01\n").unwrap();
     let entry = RevealedEntry {
+        live_log: None,
         agent_id: None,
         submission: Some(AgentSubmission {
             agent_id: "alpha".to_string(),

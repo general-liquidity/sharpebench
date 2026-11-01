@@ -136,6 +136,10 @@ writes. It is accepted only when all of the following hold:
   `sharpebench_harness::verify_trajectory_strict` must accept it (cost model,
   engine, one aligned decision per bar).
 
+An entry may instead reveal `live_log`, the sealed log of a
+[live forward capture](#live-forward-capture), in place of a capture; an entry
+that carries a live log together with a capture or returns is refused.
+
 The ranked submission is the capture's replay under the entry's `agent_id`.
 Anything else is refused and recorded against that agent: a capture naming
 another artifact, dataset, matrix or runner; an entry carrying both a capture
@@ -197,16 +201,86 @@ dataset> --reexecute --image <repository@sha256:...>`.
 **Scope.** The arena can re-execute only what it can run again: the reference
 agents, and images that decide deterministically without network access. The
 sandbox runs an image with `--network none`, and re-execution requires every
-score-bearing decision to repeat. A model-backed entrant therefore has no
-certifying route today. A `cmd:` or `http:` capture is refused, an image
-capture cannot reach a model from inside the sandbox, and supplied returns are
-noncertifying, so its forward rows can only be `replayed` or `supplied`, on a
-noncertifying board.
+score-bearing decision to repeat. A model-backed entrant does not repeat, and
+an image capture cannot reach a model from inside the sandbox, so
+re-execution cannot certify it. A `cmd:` or `http:` capture is refused and
+supplied returns are noncertifying. Its certifying route is
+[live forward capture](#live-forward-capture), which certifies on a sealed log
+of what the host ran during the window instead of on a second run.
+
+### Live forward capture
+
+During the window, the host runs the committed image (digest-pinned, under the
+same sandbox and [model gateway](model-gateway.md)) as each bar arrives, and
+`LiveRecorder` appends to an append-only per-entrant log, one JSON line per
+entry, flushed to disk before the next:
+
+- for every bar of every run of the execution matrix, the SHA-256 of the
+  observation the entrant was given and the decision it returned
+  (`LiveLoggedAgent` wraps the entrant), and
+- every model call the gateway dispatched for that bar: the request digest
+  (provider, model, revision, messages, tools and output bound; never the
+  credential or destination), the response body digest, the outcome and status,
+  provider-reported token usage, and when it started and finished
+  (`LoggingTransport` wraps the provider transport).
+
+Every entry carries the digest of the one before it, starting from the digest
+of the log header, so the log is one hash chain. The header names the window,
+the agent, the committed image, the scorer artifact the host ran and the
+execution matrix. The matrix depends on the revealed dataset's length, so a
+live window fixes its bar count before it opens. When the host restarts it
+reopens the file, checks the chain, refuses a file whose last line was cut
+short, and appends a restart entry; a bar that was open is shown to the fresh
+entrant instance again before it is decided. A write that fails is latched, and
+a log with a lost write cannot be sealed.
+
+At window close the host seals the chain's root with the arena's signing key,
+and the entrant reveals the sealed log as the entry's `live_log`, in place of a
+capture or returns. Intake admits it only when:
+
+1. the seal verifies and signs this log's header, entry count and root;
+2. the header names this window, this agent, the committed image digest, the
+   window's frozen scorer and the execution matrix of the revealed data;
+3. the chain is unbroken, so no entry was altered, dropped, inserted or moved;
+4. every bar of every run is complete and in order: an observation, any model
+   calls, then one decision, with no bar missing;
+5. the host clock is consistent within two minutes: no observation is stamped
+   before its bar's UTC day began, no decision after the next bar's day began,
+   no model call finished before it started, and no run's clock goes back;
+6. replaying the logged decisions over the revealed data gives, at every bar,
+   an observation with the logged digest.
+
+A log that fails is refused and recorded with the rule it broke (for example
+`live log has no complete record of run 1 step 4`). One that passes is ranked
+on its logged decisions, replayed under the window's scorer exactly as a capture
+is, with provenance `live-captured`. The window records each admitted log's
+root (`live_capture`: image, header digest, entry, bar, model call and restart
+counts, root digest, and the seal), and the signed header carries the roots.
+Publishing refuses a root sealed under any key but the arena's, and
+verification checks every root's seal under the board's key and requires one
+root per `live-captured` row. A window that records a root is written under
+schema 8, which a binary built before live capture refuses rather than loading
+it and writing it back without the roots. Every other window keeps its schema
+and bytes.
+
+What a `live-captured` row certifies: the committed image is what ran, it was
+told exactly the point-in-time observations the revealed data produces, its
+decisions were recorded bar by bar under the host clock before the next bar,
+and these are the model calls it made. What it does not certify: that a
+provider served the model snapshot the route names (the host knows what it
+asked for, not what answered), that the host clock is true time, or that the
+host did not hold the data early. The timestamps and the seal are the
+operator's statement, under the same custody re-execution already rests on.
+Running a live window needs a host that stays up for the whole window and a
+live data feed; neither ships here. The recorder, the wrappers and the intake
+rules are built and tested with a fake provider behind the real gateway, a
+fake image digest and a fake clock.
 
 ### Certifying boards
 
 A board certifies its rows only when it ranked at least one row, supplied
-returns were not accepted, and every ranked row is `re-executed`. The arena
+returns were not accepted, and every ranked row is `re-executed` or
+`live-captured`. The arena
 computes this from the rows when it scores; no option sets it. The window
 records it as `certifying`, the signed header carries it, and `arena score
 --json` reports it. A `replayed` or `supplied` row makes the board
@@ -228,8 +302,8 @@ re-executed.
 
 ### Provenance on the board
 
-Each ranked row's `returns_provenance`, one of `supplied`, `replayed` or
-`re-executed`, is recorded in the window file and published on the row's
+Each ranked row's `returns_provenance`, one of `supplied`, `replayed`,
+`re-executed` or `live-captured`, is recorded in the window file and published on the row's
 signed link beside the kernel's fields. It is rank-neutral: it changes no
 score and no ordering. `board.md` lists it per agent, and `arena score --json`
 returns it as a map from agent id. A row without it has the bytes of the plain
@@ -574,8 +648,10 @@ Honestly, quite a lot; deliberately so:
   `replayed` row proves its returns follow from its recorded decisions, not
   that the committed artifact made them without seeing the revealed data, so
   its board is noncertifying. Re-execution covers the reference agents and
-  deterministic images without network access; a model-backed entrant has no
-  certifying route (see [returns intake](#what-replay-proves-and-what-re-execution-adds)).
+  deterministic images without network access. A model-backed entrant
+  certifies only through [live forward capture](#live-forward-capture), which
+  needs an always-on host and a live data feed that this crate does not
+  provide, and which does not show which model snapshot a provider served.
 
 A complete forward league is therefore: a cron job that advances the epoch, a
 repository that collects commitments before each deadline, one `score` and one

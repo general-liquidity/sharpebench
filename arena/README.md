@@ -81,6 +81,14 @@ against this directory is fine); the operator registers it with
 At the reveal epoch, reveals that do not match their registered commitment are
 refused and the refusal is part of the permanent signed record.
 
+A deterministic image or reference agent certifies by re-execution. A
+model-backed entrant certifies only through a live forward capture: the host
+runs its committed image through the model gateway while the window runs and
+reveals the sealed log of every observation, model call and decision (see
+[live forward capture](../docs/book/src/arena.md#live-forward-capture)). No
+host here runs a window live yet, so such an entrant has no certifying row in
+this arena until one does.
+
 The dates above are operator declarations derived from the stated epoch scheme.
 The crate does not read wall time or observe when data becomes available. A
 forward interpretation trusts the operator's epoch advancement, custody of the

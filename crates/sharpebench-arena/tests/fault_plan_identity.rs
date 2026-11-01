@@ -61,6 +61,7 @@ fn supplied() -> IntakeOptions<'static> {
 
 fn entry(agent_id: &str, artifact: &str, plan: Option<String>) -> RevealedEntry {
     RevealedEntry {
+        live_log: None,
         agent_id: None,
         submission: Some(AgentSubmission {
             agent_id: agent_id.to_string(),
