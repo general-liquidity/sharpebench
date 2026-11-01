@@ -454,7 +454,11 @@ fn trailing_volatility(data: &Dataset, t: usize, lookback: usize) -> Result<f64,
         let returns: Vec<f64> = closes.windows(2).map(|w| w[1] / w[0] - 1.0).collect();
         let n = returns.len() as f64;
         let mean = returns.iter().sum::<f64>() / n;
-        let variance = returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / (n - 1.0);
+        let variance = returns
+            .iter()
+            .map(|r| sharpebench_stats::det_math::powi(r - mean, 2))
+            .sum::<f64>()
+            / (n - 1.0);
         total += variance.sqrt();
     }
     let volatility = total / symbols.len() as f64;

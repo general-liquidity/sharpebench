@@ -871,16 +871,23 @@ inside the compiler, which need not round the same way. That happened: on
 `x86_64-pc-windows-gnu`, `erf(1/sqrt 2)` returned one ulp less under
 `cargo test --release` than under `cargo test`, because the compiler's folded
 `exp(-0.5000000000000001)` is 0.61 ulp from the true value where the runtime
-library's is 0.39 ulp. `erf` and `norm_ppf` now call
-`sharpebench_stats::det_math::{exp, ln}`, which use only operations IEEE-754
-defines exactly, evaluate in double-double arithmetic and round once, so they
-return the correctly rounded value (outside rare hard-to-round arguments and
-subnormal outputs) identically in every build profile and on every target. The
-approximation formulas are unchanged, and so are the 93 pinned bits and both
-golden fixtures. A call costs about half a microsecond instead of a few
-nanoseconds; these functions run once per score or forecast point, not inside
-resampling loops. The CI reproducibility job now also runs the bit pins, the
-golden test and the CLI golden diff under the release profile.
+library's is 0.39 ulp. `erf`, `norm_ppf` and every other scoring-path call of
+`exp`, `ln`, `ln_1p`, `exp_m1` and `powf` in the kernel crates now go through
+`sharpebench_stats::det_math`, which uses only operations IEEE-754 defines
+exactly, evaluates in double-double arithmetic and rounds once. Those functions
+return the correctly rounded value (outside rare hard-to-round arguments,
+exact midpoints of `powf` and subnormal outputs) identically in every build
+profile and on every target. Integer powers have the same problem in a
+different form: `f64::powi` with a constant argument is folded by repeated
+multiplication, while the runtime routine linked on `x86_64-pc-windows-gnu`
+returns other bits for about a quarter of cubes. The moment estimators and the
+other kernel call sites now use `det_math::powi`, which is that repeated
+multiplication written out, the same loop `compiler-builtins` runs on the
+other targets and in the WebAssembly build. The approximation formulas are
+unchanged, and so are the 93 pinned bits and both golden fixtures. A call to
+the transcendental functions costs about half a microsecond instead of a few
+nanoseconds. The CI reproducibility job now also runs the bit pins, the golden
+test and the CLI golden diff under the release profile.
 
 The moment estimators (`mean`, `variance`, `std_dev`,
 `skewness`, `kurtosis`) stay hand-rolled in either case: the standardized

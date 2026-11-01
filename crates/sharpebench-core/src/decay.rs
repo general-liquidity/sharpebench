@@ -32,7 +32,7 @@ pub fn edge_half_life(ic_series: &[f64]) -> Option<f64> {
         .filter_map(|(t, &ic)| {
             let a = ic.abs();
             if a > 1e-9 {
-                Some((t as f64, a.ln()))
+                Some((t as f64, sharpebench_stats::det_math::ln(a)))
             } else {
                 None
             }
@@ -161,7 +161,7 @@ pub fn crowding_half_life(adoption: f64, params: CrowdingParams) -> CrowdingDeca
     } else {
         1.0
     };
-    let delta = params.delta_max.max(0.0) * phi.powf(curvature);
+    let delta = params.delta_max.max(0.0) * sharpebench_stats::det_math::powf(phi, curvature);
     let hazard = params.theta + delta;
     CrowdingDecayPrior {
         adoption: phi,
