@@ -229,6 +229,17 @@ pub fn compare_decay_to_prior(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn an_ic_at_exactly_the_floor_is_dropped_boundary() {
+        // `|ic| > 1e-9` is strict: a point at the floor is not fitted, so it
+        // leaves the halving series' half-life of exactly one window alone.
+        let halving = [0.2, 0.1, 0.05];
+        let with_floor = [0.2, 0.1, 0.05, 1e-9];
+        assert_eq!(edge_half_life(&halving), edge_half_life(&with_floor));
+        assert_eq!(edge_half_life(&[1e-9, -1e-9, 1e-9]), None);
+    }
+
     use super::*;
 
     /// Per-period rates for a series whose half-life sits near 7 periods, chosen

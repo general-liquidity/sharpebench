@@ -2914,6 +2914,17 @@ mod tests {
     }
 
     #[test]
+    fn pit_calibration_reports_the_population_moments_and_bin_counts() {
+        // PITs 0.1, 0.4, 0.7: mean 0.4, population variance (0.09 + 0 + 0.09) / 3.
+        let report = distribution_calibration(&[0.1, 0.4, 0.7], 2).unwrap();
+        assert_eq!(report.n, 3);
+        assert!((report.pit_mean - 0.4).abs() < 1e-15);
+        assert!((report.pit_variance - 0.06).abs() < 1e-15);
+        assert_eq!(report.bin_counts, vec![2, 1]);
+        assert!(distribution_calibration(&[], 2).is_none());
+    }
+
+    #[test]
     fn normal_crps_and_interval_score_match_closed_form_values() {
         let mut normal =
             serde_json::from_str::<ForecastEvidence>(&fixture("n", &[0.5], &[1.0])).unwrap();
@@ -2934,6 +2945,17 @@ mod tests {
         let expected =
             2.0 * ((2.0 / std::f64::consts::PI).sqrt() - 1.0 / std::f64::consts::PI.sqrt());
         assert!((score - expected).abs() < 1e-7);
+        // Off the mean, z = (1 - 0) / 2 = 0.5, so the standardisation and the
+        // density both show: 2 (0.5 (2 Phi(0.5) - 1) + 2 phi(0.5) - 1 / sqrt(pi)),
+        // with Phi and phi taken to 16 digits. The tolerance covers norm_cdf's
+        // documented 1.5e-7 error.
+        let score = score_prediction(&normal.contracts[0], &[0.0, 2.0], &Value::from(1.0))
+            .unwrap()
+            .0;
+        let (cdf, pdf) = (0.691_462_461_274_013_1, 0.352_065_326_764_299_5);
+        let expected =
+            2.0 * (0.5 * (2.0 * cdf - 1.0) + 2.0 * pdf - 1.0 / std::f64::consts::PI.sqrt());
+        assert!((score - expected).abs() < 1e-6, "{score} vs {expected}");
     }
 
     #[test]
@@ -2949,6 +2971,11 @@ mod tests {
             .unwrap()
             .0;
         assert!((score - -0.8_f64.ln()).abs() < 1e-12);
+        // The non-event branch scores the complement: -ln(1 - p).
+        let score = score_prediction(&binary_log, &[0.8], &Value::from(0.0))
+            .unwrap()
+            .0;
+        assert!((score - -0.2_f64.ln()).abs() < 1e-12);
 
         let mut categorical = base.clone();
         categorical.kind = "categorical".to_string();
