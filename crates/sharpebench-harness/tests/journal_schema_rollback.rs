@@ -80,6 +80,7 @@ fn budget() -> GatewayBudget {
     GatewayBudget {
         max_usd_nanos: 1_000_000_000_000,
         max_calls: 100,
+        per_cell: None,
     }
 }
 
@@ -268,7 +269,7 @@ fn a_journal_under_an_unknown_schema_version_is_refused() {
     let path = dir.join("journal.json");
     serve(&path, &[Answer::Length]);
     for version in [
-        "sharpebench.gateway-journal.v4",
+        "sharpebench.gateway-journal.v5",
         "sharpebench.gateway-journal.v0",
         "",
     ] {
@@ -324,7 +325,7 @@ fn a_v2_journal_keeps_its_route_budget_and_sweep_binding() {
         )
         .for_sweep(sweep.clone()),
         JournalIdentity {
-            schema_version: "sharpebench.gateway-journal.v4".into(),
+            schema_version: "sharpebench.gateway-journal.v5".into(),
             ..mine.clone()
         },
     ] {

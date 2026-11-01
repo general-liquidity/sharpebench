@@ -41,6 +41,7 @@ fn budget(max_usd_nanos: u128, max_calls: u32) -> GatewayBudget {
     GatewayBudget {
         max_usd_nanos,
         max_calls,
+        per_cell: None,
     }
 }
 
@@ -496,22 +497,61 @@ fn a_gateway_sweep_publishes_host_observed_usage_beside_the_rank() {
         row["host_observed_usage"]["monetary_cost"]["usage_source"],
         "host_observed"
     );
+    assert_eq!(
+        row["input_tokens"],
+        serde_json::Value::Null,
+        "not a row column"
+    );
+    assert_eq!(row["host_observed_usage"]["input_tokens"], 10 * 12);
+    assert_eq!(row["host_observed_usage"]["output_tokens"], 5 * 12);
+    // The cost columns read the host's figure, never the entrant's.
+    let host_usd = 180.0 / 1e9;
+    let entrant = plain
+        .as_array()
+        .and_then(|rows| {
+            rows.iter()
+                .find(|row| row["agent_id"] == "gateway:scripted")
+        })
+        .expect("the entrant is ranked");
+    assert_eq!(row["entrant_reported_cost"], entrant["cost"]);
+    assert_eq!(row["cost_source"], "host_observed_usd");
+    assert_eq!(row["cost"].as_f64(), Some(host_usd));
+    let raw = row["raw_mean_return"].as_f64().expect("a mean return");
+    assert_eq!(row["return_per_cost"].as_f64(), Some(raw / host_usd));
     let mut stripped = published.clone();
-    for row in stripped.as_array_mut().expect("an array") {
-        row.as_object_mut()
-            .expect("a row")
-            .remove("host_observed_usage");
+    let mut expected = plain.clone();
+    for board in [&mut stripped, &mut expected] {
+        for row in board.as_array_mut().expect("an array") {
+            let row = row.as_object_mut().expect("a row");
+            for key in [
+                "host_observed_usage",
+                "cost",
+                "return_per_cost",
+                "dsr_per_cost",
+                "cost_source",
+                "entrant_reported_cost",
+            ] {
+                row.remove(key);
+            }
+        }
     }
     assert_eq!(
-        stripped, plain,
+        stripped, expected,
         "the usage sits beside the rank, never in it"
+    );
+    // The baseline has no host usage, so its row is exactly what it was.
+    assert_eq!(
+        rows.iter().find(|row| row["agent_id"] == "buy-and-hold"),
+        plain
+            .as_array()
+            .and_then(|rows| rows.iter().find(|row| row["agent_id"] == "buy-and-hold"))
     );
 }
 
-/// Every decision of a sweep is recorded with its gateway request count, by
-/// cell and attempt, on its own record beside the rank. A resumed sweep runs
-/// no cell, so its record says every cell is unrecorded rather than showing
-/// cells that made no requests.
+/// Every decision of a sweep is recorded with its gateway request count,
+/// calls, tokens and money, by cell and attempt, on its own record beside the
+/// rank. A resumed sweep runs no cell and still publishes the same record,
+/// read back from the journal the first run filed it in.
 #[test]
 fn a_gateway_sweep_records_requests_per_decision_beside_the_rank() {
     let fixture = Fixture::new("per-decision");
@@ -537,6 +577,11 @@ fn a_gateway_sweep_records_requests_per_decision_beside_the_rank() {
                 decision,
                 requests: 1,
                 served: 1,
+                calls: 1,
+                priced_calls: 1,
+                input_tokens: Some(10),
+                output_tokens: Some(5),
+                usd_nanos: Some("15".to_string()),
             });
         }
     }
@@ -571,8 +616,8 @@ fn a_gateway_sweep_records_requests_per_decision_beside_the_rank() {
         budget(1_000_000, 100),
         &Log::default(),
     ));
-    assert!(resumed.decision_requests.decisions.is_empty());
-    assert_eq!(resumed.decision_requests.cells_unrecorded, cells);
+    assert_eq!(resumed.decision_requests, first.decision_requests);
+    assert_eq!(resumed.decision_requests.cells_unrecorded, 0);
     assert_eq!(returns(&resumed), returns(&first));
 }
 
@@ -901,6 +946,11 @@ fn requests_past_the_per_decision_ceiling_are_refused_by_type() {
             decision: 0,
             requests: 3,
             served: 2,
+            calls: 2,
+            priced_calls: 2,
+            input_tokens: Some(20),
+            output_tokens: Some(10),
+            usd_nanos: Some("30".to_string()),
         }],
         "the per-decision record keeps the refused request beside the served ones"
     );
@@ -1116,4 +1166,268 @@ fn scripted_process(dir: &Path) -> EntrantLaunch {
             })
             .collect(),
     )
+}
+
+fn with_cell_ceiling(sweep: GatewayBudget, max_usd_nanos: u128, max_calls: u32) -> GatewayBudget {
+    GatewayBudget {
+        per_cell: Some(crate::gateway_journal::CellBudget {
+            max_usd_nanos,
+            max_calls,
+        }),
+        ..sweep
+    }
+}
+
+/// Calls the per-decision record charges to each seed's cell, in seed order.
+fn calls_per_cell(outcome: &GatewaySweepOutcome) -> Vec<u32> {
+    SEEDS
+        .iter()
+        .map(|seed| {
+            outcome
+                .decision_requests
+                .decisions
+                .iter()
+                .filter(|decision| decision.seed == Some(*seed))
+                .map(|decision| decision.calls)
+                .sum()
+        })
+        .collect()
+}
+
+fn refusals(log: &Log) -> Vec<GatewayErrorKind> {
+    log.lock()
+        .expect("log lock")
+        .iter()
+        .filter_map(|answer| answer.error.as_ref().map(|error| error.kind))
+        .collect()
+}
+
+/// The sweep-wide token totals are a fold over the journal, the budget the
+/// sweep ran under is on the record, and the journal that holds the cell
+/// stamps and decision logs is written under the version an older binary
+/// refuses.
+#[test]
+fn host_observed_usage_carries_token_totals_and_its_ceilings() {
+    let fixture = Fixture::new("tokens");
+    let ceilings = with_cell_ceiling(budget(1_000_000, 100), 500_000, 50);
+    let outcome = outcome(fixture.run(
+        ScriptedProvider::answering("0.25"),
+        ceilings,
+        &Log::default(),
+    ));
+    let calls = (WINDOWS.len() * SEEDS.len() * STEPS) as u64;
+    let usage = &outcome.host_observed;
+    assert_eq!(usage.schema_version, HOST_USAGE_VERSION);
+    assert_eq!(usage.input_tokens, Some(10 * calls));
+    assert_eq!(usage.output_tokens, Some(5 * calls));
+    assert_eq!(usage.budget, ceilings);
+    let wire = serde_json::to_value(usage).expect("usage serializes");
+    assert_eq!(wire["budget"]["per_cell"]["max_calls"], 50);
+
+    let on_disk: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(fixture.journal()).expect("journal"))
+            .expect("the journal is JSON");
+    assert_eq!(
+        on_disk["identity"]["schema_version"],
+        crate::gateway_journal::JOURNAL_SCHEMA_VERSION_V4
+    );
+    assert_eq!(
+        on_disk["decision_logs"].as_array().map(Vec::len),
+        Some(SEEDS.len())
+    );
+    assert_eq!(
+        on_disk["records"][0]["cell"],
+        serde_json::json!({ "window_index": 0, "seed": SEEDS[0] })
+    );
+}
+
+/// A provider that reports no usage leaves every call charged at its
+/// reservation. No token or money figure is published for the sweep or for
+/// any decision: absent, never zero.
+#[test]
+fn unreported_usage_publishes_no_token_or_money_figure() {
+    let fixture = Fixture::new("unreported");
+    let provider = ScriptedProvider {
+        usage: None,
+        ..ScriptedProvider::answering("0.25")
+    };
+    let outcome = outcome(fixture.run(provider, budget(1_000_000, 100), &Log::default()));
+    assert_eq!(outcome.host_observed.input_tokens, None);
+    assert_eq!(outcome.host_observed.output_tokens, None);
+    assert!(!outcome.decision_requests.decisions.is_empty());
+    for decision in &outcome.decision_requests.decisions {
+        assert_eq!((decision.calls, decision.priced_calls), (1, 0));
+        assert_eq!(decision.input_tokens, None);
+        assert_eq!(decision.output_tokens, None);
+        assert_eq!(decision.usd_nanos, None);
+    }
+}
+
+/// One sweep-wide call ceiling lets the first cell take every call and
+/// starves the second. The same ceiling with a per-cell share gives both
+/// cells the same calls, and a refused decision is an agent-side hold of the
+/// existing call-limit kind, not a host failure.
+#[test]
+fn a_per_cell_call_ceiling_keeps_early_cells_from_starving_later_ones() {
+    let fixture = Fixture::new("cell-calls-sweep-only");
+    let log = Log::default();
+    let starved = outcome(fixture.run(
+        ScriptedProvider::answering("0.25"),
+        budget(1_000_000, STEPS as u32),
+        &log,
+    ));
+    assert_eq!(calls_per_cell(&starved), [STEPS as u32, 0]);
+
+    let fixture = Fixture::new("cell-calls-shared");
+    let log = Log::default();
+    let shared = outcome(fixture.run(
+        ScriptedProvider::answering("0.25"),
+        with_cell_ceiling(budget(1_000_000, STEPS as u32), 1_000_000, 3),
+        &log,
+    ));
+    assert_eq!(calls_per_cell(&shared), [3, 3]);
+    assert_eq!(
+        refusals(&log),
+        vec![GatewayErrorKind::CallLimitExhausted; 2 * (STEPS - 3)]
+    );
+    assert!(shared.result.failures.is_empty());
+    assert_eq!(shared.result.submission.runs.len(), SEEDS.len());
+}
+
+/// The money ceiling per cell. Each call reserves 32 and settles at 15, so
+/// under 60 per cell two calls fit (60, then 45 left) and the third (30 left)
+/// is refused, in each cell. The sweep-wide 120 alone would have let the
+/// first cell take all six.
+#[test]
+fn a_per_cell_money_ceiling_refuses_with_the_existing_budget_kind() {
+    let fixture = Fixture::new("cell-money-sweep-only");
+    let starved = outcome(fixture.run(
+        ScriptedProvider::answering("0.25"),
+        budget(120, 100),
+        &Log::default(),
+    ));
+    assert_eq!(calls_per_cell(&starved), [6, 0]);
+
+    let fixture = Fixture::new("cell-money-shared");
+    let log = Log::default();
+    let shared = outcome(fixture.run(
+        ScriptedProvider::answering("0.25"),
+        with_cell_ceiling(budget(120, 100), 60, 100),
+        &log,
+    ));
+    assert_eq!(calls_per_cell(&shared), [2, 2]);
+    assert_eq!(
+        refusals(&log),
+        vec![GatewayErrorKind::BudgetExhausted; 2 * (STEPS - 2)]
+    );
+    for seed in SEEDS {
+        let spent = shared
+            .decision_requests
+            .decisions
+            .iter()
+            .filter(|d| d.seed == Some(seed));
+        let nanos: u128 = spent
+            .filter_map(|d| d.usd_nanos.as_deref())
+            .map(|nanos| nanos.parse::<u128>().expect("an integer"))
+            .sum();
+        assert_eq!(nanos, 30, "two calls at 15 each in seed {seed}");
+    }
+}
+
+/// A process that dies after a cell made its calls leaves the calls in the
+/// journal stamped with the cell. The resumed cell draws on the same ceiling,
+/// so it cannot spend the ceiling a second time.
+#[test]
+fn a_resumed_cell_keeps_drawing_on_its_own_ceiling() {
+    let fixture = Fixture::new("cell-resume");
+    let ceilings = with_cell_ceiling(budget(1_000_000, 100), 1_000_000, 4);
+    let checkpoint = fixture.checkpoint();
+    let journal = fixture.journal();
+    let crashed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut cells = 0;
+        run_gateway_sweep(
+            fixture.sweep(&checkpoint, &journal),
+            fixture.host(ScriptedProvider::answering("0.25"), ceilings),
+            |window, seed, gateway| {
+                let observed = gateway_backtest(
+                    &fixture.data,
+                    in_thread(model_entrant(Log::default(), 1)),
+                    gateway,
+                    WINDOWS[window],
+                    seed,
+                    CostModel::default(),
+                    None,
+                );
+                cells += 1;
+                assert!(cells < 2, "the process dies after the second cell's calls");
+                observed
+            },
+        )
+    }));
+    assert!(crashed.is_err());
+
+    let resumed_provider = ScriptedProvider::answering("0.25");
+    let resumed = outcome(fixture.run(resumed_provider.clone(), ceilings, &Log::default()));
+    assert_eq!(
+        resumed_provider.calls(),
+        0,
+        "the cell spent its ceiling already"
+    );
+    assert_eq!(resumed.host_observed.calls_started, 8);
+    // Both cells have a log now: the first from the dead process, the second
+    // from this one, which the dead process never filed.
+    assert_eq!(resumed.decision_requests.cells_unrecorded, 0);
+    assert_eq!(calls_per_cell(&resumed), [4, 0]);
+}
+
+/// A cell attempted twice gets a second attempt number, carried across
+/// processes by the journal's logs, so two attempts never share a number.
+#[test]
+fn attempt_numbers_continue_from_the_journal() {
+    let fixture = Fixture::new("attempts");
+    let checkpoint = fixture.checkpoint();
+    let journal = fixture.journal();
+    let run = |fail: bool| {
+        run_gateway_sweep(
+            GatewaySweep {
+                max_retries: 0,
+                policy: ResumePolicy::RetryRuntimeFailures,
+                ..fixture.sweep(&checkpoint, &journal)
+            },
+            fixture.host(ScriptedProvider::answering("0.25"), budget(1_000_000, 100)),
+            |window, seed, gateway| {
+                let mut observed = gateway_backtest(
+                    &fixture.data,
+                    in_thread(model_entrant(Log::default(), 1)),
+                    gateway,
+                    WINDOWS[window],
+                    seed,
+                    CostModel::default(),
+                    None,
+                );
+                if fail && seed == SEEDS[1] {
+                    observed.result = Err(crate::failure::FailureKind::SpawnError);
+                }
+                observed
+            },
+        )
+    };
+    let first = outcome(run(true));
+    assert!(!first.result.failures.is_empty());
+    let second = outcome(run(false));
+    let attempts: Vec<(Option<u64>, Option<u32>)> = second
+        .decision_requests
+        .decisions
+        .iter()
+        .filter(|d| d.decision == 0)
+        .map(|d| (d.seed, d.attempt))
+        .collect();
+    assert_eq!(
+        attempts,
+        [
+            (Some(SEEDS[0]), Some(0)),
+            (Some(SEEDS[1]), Some(0)),
+            (Some(SEEDS[1]), Some(1)),
+        ]
+    );
 }

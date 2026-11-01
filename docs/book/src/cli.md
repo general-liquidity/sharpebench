@@ -202,10 +202,13 @@ declaration; this mechanism does not verify which model an entrant called.
 Version 1 excludes caching, batch discounts, tool fees and taxes. Explicitly
 zero rates can price a nonzero reported count as zero.
 
-The old `cost`, `return_per_cost` and `dsr_per_cost` columns are unchanged.
-Their legacy entrant-selected scalar can mean USD or tokens; the accounting
-record labels it `entrant_selected_usd_or_tokens_not_rate_card_priced`. Do not
-interpret those columns as the new USD quote. Token pricing does not change
+The old `cost`, `return_per_cost` and `dsr_per_cost` columns are unchanged on
+a row without host-observed gateway usage. Their legacy entrant-selected scalar
+can mean USD or tokens; the accounting record labels it
+`entrant_selected_usd_or_tokens_not_rate_card_priced`. Do not interpret those
+columns as the new USD quote. On a row with host-observed usage the three
+columns are the host-observed USD figure or are withheld, never the entrant's,
+as [the model gateway](model-gateway.md#what-leaves-the-host) describes. Token pricing does not change
 decisions, returns, scores, eligibility or ordering.
 
 See [The arena](arena.md#sandboxed-entrants) for the boundary and acceptance
