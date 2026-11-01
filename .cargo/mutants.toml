@@ -53,12 +53,26 @@ exclude_re = [
     # denominator is positive and never NaN: the guard cannot fire in either
     # form, and `||` and `&&` agree.
     'composite\.rs:2475:29: replace \|\| with && in weighted_dispersion$',
+    # On weighted == plain the two values are the same non-negative number
+    # (both standard deviations are +0 or positive), so returning either is
+    # returning the same bits: `>` and `>=` agree.
+    'composite\.rs:2417:36: replace > with >= in field_dispersion$',
+    # Two votes always carry equal weights, so the centre is their midpoint and
+    # each sits half a gap from it, inside a reach of 5.28 robust scales of
+    # 1.048 gaps (or more, with the floor): two votes are never clipped.
+    'composite\.rs:2587:20: replace < with <= in clip_distant_votes$',
+    # A Vec capacity hint: changing it changes no value.
+    'composite\.rs:2603:28: replace \* with (\+|/) in clip_distant_votes$',
     'composite\.rs:2450:19: replace < with (<=|==) in weighted_dispersion$',
     'composite\.rs:2450:23: replace \|\| with && in weighted_dispersion$',
     # A self-audit fixture, not scoring code: flipping the phase of the skilled
     # run's sinusoid keeps its drift, its amplitude and its losing bars, so
     # every audit case returns the same verdict.
     'selfaudit\.rs:84:28: replace \+ with - in skilled_run$',
+    # The same fixture's sinusoid frequency, `i * 0.7` read as `i / 0.7` or
+    # `i + 0.7`: still a clean drifting track with losing bars, eligible on its
+    # own, so every case verdict is the same.
+    'selfaudit\.rs:84:48: replace \* with (\+|/) in skilled_run$',
 ]
 
 # Timeouts. The default is 1.5x the baseline test time with a 20 second floor,
