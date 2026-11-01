@@ -1158,7 +1158,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Artifacts.**
 - `crates/sharpebench-core/src/selfaudit.rs`, sha256 `30fe452f24b34d286086d6e1d1afde7b9134c76568539f0d97a553744c066cbc`, digest source: paper/evidence/provenance.json, carries the battery and the commit-time assertions that every case is defended and no known gap remains
-- `crates/sharpebench-arena/src/audit.rs`, sha256 `5dba8da8bce47be67aaace6b7b297668026f3a038b0b136f75a9f04f4d15cb14`, digest source: paper/evidence/provenance.json, the tenth case, against the forward arena's intake
+- `crates/sharpebench-arena/src/audit.rs`, sha256 `122ea3522a2e316fa7434875aae80e8b7357f9a0d145fc2ddaccba3612e14422`, digest source: paper/evidence/provenance.json, the tenth case, against the forward arena's intake
 
 **Producer command.** sharpebench audit (paper/sections/A-commands.tex); the claim is enforced by the commit-time tests in the two files above.
 
@@ -1190,6 +1190,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | 2026-10-31 | still-applicable | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 | 2026-10-31 | still-applicable | model: claude-opus-5-5 | no | Rechecked at the gap-closure integration: crates/sharpebench-arena/src/audit.rs moved, and the recorded digest is rebound to the integrated tree. The claim still holds there, so the disposition is unchanged. |
 | 2026-11-01 | still-applicable | model: claude-opus-5-5 | no | Rechecked at the scorer-round integration: crates/sharpebench-core/src/selfaudit.rs moved and the recorded digests are rebound. The claim still holds on the merged scorer, so the disposition is unchanged. |
+| 2026-11-02 | still-applicable | model: claude-opus-5-5 | no | Rechecked on feat/forward-eprocess: crates/sharpebench-arena/src/audit.rs moved by one line (the window record it builds gains `forward: None`), and the recorded digest is rebound. The tenth case and its assertions are unchanged, so the disposition is unchanged. |
 
 ### `SB-tab-data`
 
@@ -2580,7 +2581,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Artifacts.**
 - `crates/sharpebench-core/src/selfaudit.rs`, sha256 `30fe452f24b34d286086d6e1d1afde7b9134c76568539f0d97a553744c066cbc`, digest source: paper/evidence/provenance.json
-- `crates/sharpebench-arena/src/audit.rs`, sha256 `5dba8da8bce47be67aaace6b7b297668026f3a038b0b136f75a9f04f4d15cb14`, digest source: paper/evidence/provenance.json
+- `crates/sharpebench-arena/src/audit.rs`, sha256 `122ea3522a2e316fa7434875aae80e8b7357f9a0d145fc2ddaccba3612e14422`, digest source: paper/evidence/provenance.json
 
 **Producer command.** sharpebench audit; enforced by the commit-time tests in the two files above.
 
@@ -2612,6 +2613,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | 2026-10-31 | still-applicable | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 | 2026-10-31 | still-applicable | model: claude-opus-5-5 | no | Rechecked at the gap-closure integration: crates/sharpebench-arena/src/audit.rs moved, and the recorded digest is rebound to the integrated tree. The claim still holds there, so the disposition is unchanged. |
 | 2026-11-01 | still-applicable | model: claude-opus-5-5 | no | Rechecked at the scorer-round integration: crates/sharpebench-core/src/selfaudit.rs moved and the recorded digests are rebound. The claim still holds on the merged scorer, so the disposition is unchanged. |
+| 2026-11-02 | still-applicable | model: claude-opus-5-5 | no | Rechecked on feat/forward-eprocess: crates/sharpebench-arena/src/audit.rs moved by one line (the window record it builds gains `forward: None`), and the recorded digest is rebound. The tenth case and its assertions are unchanged, so the disposition is unchanged. |
 
 ### `SB-claims-v`
 
