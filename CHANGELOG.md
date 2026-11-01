@@ -179,6 +179,7 @@ The six scorer stages that answer the `grader-search` admissions. Stages 1, 2 an
 - stats: `erf` and `norm_ppf` returned different bits under `--release`, because an optimised build folds `exp` of a constant argument inside the compiler. They now use a deterministic, correctly rounded `exp` and `ln` (`sharpebench_stats::det_math`). Pins and goldens are unchanged.
 - npm: the WASM build disagreed with native by 1 ulp on one measured-field `dsr_se`, from the compiler-builtins libm. The rebuilt bundle matches native: row 3's `dsr_se` moves from 0.08493733130527846 to 0.08493733130527845.
 - ci: the reproducibility job also runs the bit pins, the golden test and the CLI golden diff under the release profile.
+- tests: the scorer round reached main without a pull request and so skipped the PR-diff mutation gate. Its diff now passes that gate, with 368 mutants and 0 missed. 59 survivors are killed by tests that pin the Newey-West bandwidth to Andrews (1991), the serial-correlation and moment-credit certification bounds, the influence reach and the leverage branch, and 15 equivalent mutants are recorded in `.cargo/mutants.toml` with their reasons. A new test also requires the self-audit's clean skilled fixture to be finite, to show a loss and to be eligible.
 
 ### Documentation
 
