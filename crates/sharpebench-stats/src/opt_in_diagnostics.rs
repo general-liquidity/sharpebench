@@ -7,6 +7,11 @@
 //! this module. The one exception is eligibility: the admission test's
 //! serial-correlation term ([`crate::serial_correlation`]) reads
 //! [`sharpe_variance_factor`], and can only refuse a track the gate admitted.
+//! A score configuration that opts into the null standard error
+//! (`ScoreConfig::psr_standard_error`, see
+//! [`crate::null_standard_error::checked_probabilistic_sharpe_ratio_at`]) also
+//! reads [`sharpe_variance_factor`], at zero autocorrelation and the
+//! benchmark Sharpe; the default configuration does not.
 //!
 //! - [`probabilistic_sharpe_ratio_autocorrelated`]: the PSR with the
 //!   generalized Sharpe variance of López de Prado, Lipton and Zoonekynd,

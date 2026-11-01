@@ -15,7 +15,9 @@
 //! bar, so neither can admit a track, and a track whose correction changes
 //! nothing keeps its verdict bit for bit.
 
-use sharpebench_stats::{certify_under_serial_correlation, certify_without_moment_credit};
+use sharpebench_stats::{
+    certify_under_serial_correlation_at, certify_without_moment_credit_at, StandardErrorAt,
+};
 
 /// The refusal, if any, of a track whose deflated Sharpe clears `dsr_bar`:
 /// serial correlation is asked first, then moment credit. `None` when the
@@ -28,17 +30,46 @@ pub fn standard_error_refusal(
     trials_sr_std: f64,
     dsr_bar: f64,
 ) -> Option<String> {
+    standard_error_refusal_at(
+        windows,
+        n_trials,
+        null_mean_sharpe,
+        trials_sr_std,
+        dsr_bar,
+        StandardErrorAt::Observed,
+    )
+}
+
+/// [`standard_error_refusal`] for a deflated Sharpe whose standard error is
+/// evaluated where `at` says (`ScoreConfig::psr_standard_error`). Both terms
+/// are asked under the same evaluation as the deflated Sharpe they guard.
+pub fn standard_error_refusal_at(
+    windows: &[&[f64]],
+    n_trials: u32,
+    null_mean_sharpe: f64,
+    trials_sr_std: f64,
+    dsr_bar: f64,
+    at: StandardErrorAt,
+) -> Option<String> {
     let pooled: Vec<f64> = windows.iter().flat_map(|w| w.iter().copied()).collect();
-    certify_under_serial_correlation(windows, n_trials, null_mean_sharpe, trials_sr_std, dsr_bar)
-        .and_then(|()| {
-            certify_without_moment_credit(
-                &pooled,
-                n_trials,
-                null_mean_sharpe,
-                trials_sr_std,
-                dsr_bar,
-            )
-        })
-        .err()
-        .map(|error| error.to_string())
+    certify_under_serial_correlation_at(
+        windows,
+        n_trials,
+        null_mean_sharpe,
+        trials_sr_std,
+        dsr_bar,
+        at,
+    )
+    .and_then(|()| {
+        certify_without_moment_credit_at(
+            &pooled,
+            n_trials,
+            null_mean_sharpe,
+            trials_sr_std,
+            dsr_bar,
+            at,
+        )
+    })
+    .err()
+    .map(|error| error.to_string())
 }

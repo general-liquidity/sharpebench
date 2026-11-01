@@ -456,6 +456,7 @@ pub const COMPOSITE_SCORE_INVENTORY: EvidenceInventory = EvidenceInventory {
         ("declared_passed_k", COVERED_SCORE),
         ("declared_mandate_eligible", COVERED_FIELD),
         ("declared_mandate_ordinal", COVERED_FIELD),
+        ("psr_standard_error", COVERED_SCORE),
         (
             "certification",
             Coverage::Excluded {

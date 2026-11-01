@@ -425,6 +425,22 @@ prints `{"board": ..., "sharpe_diagnostics": [...]}`, where `board` is the
 board-only output. An unknown identifier or a missing value exits 2 before any
 output. Without the flag the output is byte-identical to a build without it.
 
+`--psr-standard-error observed|benchmark` (also accepted by `disqualify`)
+selects where every PSR and deflated Sharpe on the board evaluates its standard
+error, described under
+[the deflated Sharpe](methodology-deflated-sharpe.md). `observed`, the plug-in,
+is the default and leaves the output byte-identical; `benchmark` is the opt-in
+null-SE methodology and every row records it. Any other value exits 2.
+
+`--pareto` adds `front` and `elig_front` columns to the human board and a
+`pareto` key to the `--json` output, beside `board`. Each cell is `yes` or `no`
+with the bootstrap membership frequency, `refused` for a row that takes no part
+and `-` on the eligible front for an ineligible row. `sharpebench pareto
+<field.json>` takes the same flags and prints the full report alone (`--json`:
+`{"pareto": ...}`): the six axes, both fronts and the dominating agents. Both
+are described under [the multi-objective report](methodology.md). Neither
+changes the board order or any row.
+
 These identity checks do not verify temporal alignment of legacy JSON `runs`.
 The caller still supplies consistent window, seed and period order across the
 field; use [captured trajectory contracts](evidence-contracts.md#captured-trajectories)

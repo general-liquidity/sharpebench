@@ -11,12 +11,22 @@
 //! only where `1 - g3 (s + b) / 2 + k s b > 0`, with `k = (g4 - 1) / 4`. Outside
 //! that region a higher Sharpe can lower the PSR. That is pinned as its own test
 //! below, so the restriction is visible rather than hidden in a generator.
+//!
+//! The opt-in null-SE PSR (`StandardErrorAt::Benchmark`, López de Prado,
+//! Lipton and Zoonekynd 2026, eqs. 4 and 5) has no such region: its
+//! denominator does not depend on the observed Sharpe. The last tests below
+//! state its monotonicity without the restriction, and show the pinned
+//! counterexample monotone under it.
 
 use sharpebench_stats::deflated_sharpe::{
     checked_probabilistic_sharpe_ratio, deflated_sharpe_ratio_against_null,
     probabilistic_sharpe_ratio, sharpe_ratio,
 };
-use sharpebench_stats::stats::{kurtosis, skewness};
+use sharpebench_stats::null_standard_error::{
+    checked_probabilistic_sharpe_ratio_at, deflated_sharpe_ratio_against_null_at,
+};
+use sharpebench_stats::stats::{kurtosis, norm_cdf, skewness};
+use sharpebench_stats::{probabilistic_sharpe_ratio_autocorrelated, StandardErrorAt};
 
 const SEED: u64 = 0x5EED_D5A0_2026_1101;
 const CASES: usize = 300;
@@ -286,4 +296,129 @@ fn psr_is_sign_symmetric_and_dsr_is_where_nothing_is_deflated() {
             );
         }
     });
+}
+
+fn null_se_psr(xs: &[f64], b: f64) -> f64 {
+    checked_probabilistic_sharpe_ratio_at(xs, b, StandardErrorAt::Benchmark).expect("a valid track")
+}
+
+/// The null-SE PSR is non-decreasing in the observed Sharpe with the moments
+/// held fixed, for every benchmark and every shape the generator draws: no
+/// monotone region is needed, because the bracket is evaluated at `b` and does
+/// not move with the shift. The 1e-12 allowance covers the last-bit drift of
+/// the recomputed moments, as in the plug-in property above.
+#[test]
+fn null_se_psr_is_non_decreasing_in_the_observed_sharpe_everywhere() {
+    let mut outside_plug_in_region = 0usize;
+    each_case(6, |case, rng, xs| {
+        let b = rng.range(-0.2, 0.2);
+        let (g3, g4) = (skewness(xs), kurtosis(xs));
+        let mut shifts: Vec<f64> = (0..8).map(|_| rng.range(-0.05, 0.05)).collect();
+        shifts.sort_by(f64::total_cmp);
+        for pair in shifts.windows(2) {
+            let lo: Vec<f64> = xs.iter().map(|x| x + pair[0]).collect();
+            let hi: Vec<f64> = xs.iter().map(|x| x + pair[1]).collect();
+            let (s_lo, s_hi) = (sharpe_ratio(&lo), sharpe_ratio(&hi));
+            if !psr_increasing_at(s_lo, b, g3, g4) {
+                outside_plug_in_region += 1;
+            }
+            let (p_lo, p_hi) = (null_se_psr(&lo, b), null_se_psr(&hi, b));
+            assert!(
+                s_hi >= s_lo && p_hi >= p_lo - 1e-12,
+                "case {case}: Sharpe {s_lo} -> {s_hi} moved null-SE PSR {p_lo} -> {p_hi} (b {b})"
+            );
+        }
+    });
+    assert!(
+        outside_plug_in_region > 0,
+        "the generator never left the plug-in monotone region, so the property says nothing \
+         the plug-in one does not"
+    );
+}
+
+/// The pinned plug-in counterexample above, under the null-SE PSR: the same
+/// two tracks and the same Sharpe ratios, and the PSR no longer falls. At a
+/// zero benchmark the bracket is exactly one, so the statistic is
+/// `Phi(SR sqrt(n - 1))`, bit for bit, and takes no credit from the skewness
+/// of 1.5 the plug-in bracket rewards. Both Sharpe ratios saturate the normal
+/// CDF there, so the pair is also read against a benchmark just below the
+/// lower Sharpe, where the null-SE PSR is strictly inside (0, 1) and rises.
+#[test]
+fn the_plug_in_counterexample_is_monotone_under_the_null_standard_error() {
+    let base = [0.0, 0.0, 0.0, 0.0, 0.01];
+    let lower: Vec<f64> = base.iter().map(|x| x + 0.02).collect();
+    let higher: Vec<f64> = base.iter().map(|x| x + 0.1).collect();
+    let (s_lo, s_hi) = (sharpe_ratio(&lower), sharpe_ratio(&higher));
+    assert!(s_hi > s_lo);
+    let (p_lo, p_hi) = (null_se_psr(&lower, 0.0), null_se_psr(&higher, 0.0));
+    assert!(
+        p_hi >= p_lo,
+        "expected the null-SE PSR not to fall, got {p_lo} -> {p_hi}"
+    );
+    for (s, p) in [(s_lo, p_lo), (s_hi, p_hi)] {
+        assert_eq!(p.to_bits(), norm_cdf(s * 2.0).to_bits(), "n - 1 = 4");
+    }
+    // The plug-in PSR on the same pair still falls: the opt-in leaves it alone.
+    assert!(probabilistic_sharpe_ratio(&higher, 0.0) < probabilistic_sharpe_ratio(&lower, 0.0));
+
+    let b = s_lo - 0.5;
+    let (q_lo, q_hi) = (null_se_psr(&lower, b), null_se_psr(&higher, b));
+    assert!(q_lo > 0.5 && q_lo < 0.99, "{q_lo}");
+    assert!(
+        q_hi > q_lo,
+        "expected the null-SE PSR to rise, got {q_lo} -> {q_hi}"
+    );
+}
+
+/// The checked null-SE PSR is the `null-se-psr` diagnostic's statistic at zero
+/// autocorrelation, bit for bit, and the observed evaluation is the kernel's,
+/// bit for bit, so the default board cannot move. The DSR under each
+/// evaluation is that evaluation's PSR at the deflation benchmark.
+#[test]
+fn both_evaluations_reproduce_the_functions_they_name() {
+    each_case(7, |case, rng, xs| {
+        let b = rng.range(-0.2, 0.2);
+        let diagnostic =
+            probabilistic_sharpe_ratio_autocorrelated(xs, b, 0.0, StandardErrorAt::Benchmark)
+                .unwrap();
+        assert_eq!(
+            null_se_psr(xs, b).to_bits(),
+            diagnostic.to_bits(),
+            "case {case}"
+        );
+        let observed = checked_probabilistic_sharpe_ratio_at(xs, b, StandardErrorAt::Observed);
+        assert_eq!(
+            observed.map(f64::to_bits),
+            checked_probabilistic_sharpe_ratio(xs, b).map(f64::to_bits),
+            "case {case}"
+        );
+        let (n, sr_std) = (2 + rng.below(500) as u32, rng.range(0.0, 0.3));
+        for at in [StandardErrorAt::Observed, StandardErrorAt::Benchmark] {
+            let bar = sharpebench_stats::expected_max_sharpe(sr_std, n).unwrap() + b;
+            assert_eq!(
+                deflated_sharpe_ratio_against_null_at(xs, n, b, sr_std, at)
+                    .unwrap()
+                    .to_bits(),
+                checked_probabilistic_sharpe_ratio_at(xs, bar, at)
+                    .unwrap()
+                    .to_bits(),
+                "case {case}: {at:?}"
+            );
+        }
+    });
+}
+
+/// The checked boundary holds under the null standard error too: a constant
+/// track is refused, a non-finite return or benchmark is refused, and fewer
+/// than two returns keep the 0.0 convention.
+#[test]
+fn the_null_standard_error_keeps_the_checked_boundary() {
+    let at = StandardErrorAt::Benchmark;
+    assert!(checked_probabilistic_sharpe_ratio_at(&[0.01; 30], 0.0, at).is_err());
+    assert!(checked_probabilistic_sharpe_ratio_at(&[0.01, f64::NAN], 0.0, at).is_err());
+    assert!(checked_probabilistic_sharpe_ratio_at(&[0.01, 0.02], f64::INFINITY, at).is_err());
+    assert_eq!(
+        checked_probabilistic_sharpe_ratio_at(&[0.01], 0.0, at),
+        Ok(0.0)
+    );
 }
