@@ -55,6 +55,7 @@
 
 pub mod agreement;
 pub mod deflated_sharpe;
+pub mod det_math;
 pub mod dissent;
 pub mod exposure_path;
 pub mod fdr;
