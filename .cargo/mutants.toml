@@ -87,7 +87,7 @@ exclude_re = [
     # w[k..] adds no product: the filter only keeps shorter windows from
     # slicing out of range, and `>` and `>=` sum the same terms.
     'serial_correlation\.rs:104:33: replace > with >= in within_window_autocorrelations$',
-    'serial_correlation\.rs:124:30: replace && with \|\| in andrews_bartlett_bandwidth$',
+    'serial_correlation\.rs:127:30: replace && with \|\| in andrews_bartlett_bandwidth$',
     # Fewer than two kept votes, or no share matrix, always gives equal weights
     # (two votes share s symmetrically, so both overlaps are 1 + s bit for bit;
     # no matrix weighs every vote 1), and the equal-weight test right below
