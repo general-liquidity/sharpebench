@@ -59,6 +59,7 @@ use sharpebench_sim::{
     TransportDiagnostics, Window,
 };
 
+use crate::forward_evidence::{record_window, Admitted, ForwardRecord};
 use crate::{
     describe_fault_plan, registry_for, validate_sha256, ExecutionIdentity, Refusal, RevealedEntry,
     WindowState,
@@ -401,6 +402,10 @@ pub struct Admission {
     /// the replay contract each one was checked against, under the window's
     /// scorer artifact.
     pub execution: Option<ExecutionIdentity>,
+    /// What the window contributes to the forward evidence ledger: every
+    /// re-executed row's pooled track. `None` when no row was re-executed.
+    /// See [`crate::forward_evidence`].
+    pub forward: Option<ForwardRecord>,
 }
 
 /// Whether a board certifies its rows: it has rows, supplied returns were not
@@ -538,21 +543,47 @@ pub fn admit_entries(
         execution: replay
             .as_ref()
             .map(|r| ExecutionIdentity::of(r, &window.scorer_artifact_sha256)),
+        forward: None,
     };
     // A window holds one commitment per agent and the registry opens each one
     // once, so an agent reaches this loop with at most one admitted entry. The
     // field needs no second pass to decide which copy of a commitment to rank:
     // there is never more than one, and a copy that arrived too late is already
     // a refusal.
-    for (agent_id, outcome) in outcomes {
+    // `outcomes` holds one entry per revealed entry, in order.
+    let mut admitted_entries = Vec::new();
+    for ((agent_id, outcome), entry) in outcomes.into_iter().zip(entries) {
         match outcome {
             Ok((submission, provenance)) => {
-                admission.returns_provenance.insert(agent_id, provenance);
+                admission
+                    .returns_provenance
+                    .insert(agent_id.clone(), provenance);
+                admitted_entries.push((agent_id, entry, provenance));
                 admission.field.push(submission);
             }
             Err(reason) => admission.refusals.push(Refusal { agent_id, reason }),
         }
     }
+    let admitted: Vec<Admitted<'_>> = admitted_entries
+        .iter()
+        .zip(&admission.field)
+        .map(|((agent_id, entry, provenance), submission)| Admitted {
+            agent_id,
+            artifact_digest: &entry.artifact_digest,
+            mandate: entry
+                .capture
+                .as_ref()
+                .and_then(|capture| capture.declared_mandate.as_ref()),
+            submission,
+            provenance: *provenance,
+        })
+        .collect();
+    let forward = record_window(
+        replay.as_ref(),
+        window.score_config.execution_seeds_per_window,
+        &admitted,
+    );
+    admission.forward = forward;
     admission.certifying = board_certifies(&admission.returns_provenance, allow_supplied_returns);
     Ok(admission)
 }
