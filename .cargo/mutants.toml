@@ -24,6 +24,29 @@ exclude_re = [
     # `fmt` with `Ok(())` changes nothing a test should pin; a missed mutant
     # here would only push tests to freeze wording.
     "<impl (std::)?(fmt::)?(Display|Debug) for ",
+    # Equivalent mutants, each anchored to its file and line so it is the only
+    # mutant the pattern drops; if the code moves, the mutant reappears and the
+    # gate asks again. Found running the gate over the scorer round
+    # (d5123f8..1e7224c), which reached main without it.
+    #
+    # charge is a sum of squares, so charge == 0 means every bar is zero (or
+    # squares underflow to zero) and z = profit / 0 is NaN or infinite: the
+    # finiteness test already returns None, so `>` and `>=` agree.
+    'exposure_path\.rs:89:13: replace > with >= in forgone_risk_z$',
+    # alpha >= 0 and observations >= 0, so the bandwidth is never a negative
+    # finite number; +inf saturates to usize::MAX and min(cap) is the cap, and
+    # NaN fails both forms, so `&&` and `||` agree on every reachable value.
+    'serial_correlation\.rs:124:30: replace && with \|\| in andrews_bartlett_bandwidth$',
+    # Fewer than two kept votes, or no share matrix, always gives equal weights
+    # (two votes share s symmetrically, so both overlaps are 1 + s bit for bit;
+    # no matrix weighs every vote 1), and the equal-weight test right below
+    # returns None, so the early return only skips work.
+    'composite\.rs:2450:19: replace < with (<=|==) in weighted_dispersion$',
+    'composite\.rs:2450:23: replace \|\| with && in weighted_dispersion$',
+    # A self-audit fixture, not scoring code: flipping the phase of the skilled
+    # run's sinusoid keeps its drift, its amplitude and its losing bars, so
+    # every audit case returns the same verdict.
+    'selfaudit\.rs:84:28: replace \+ with - in skilled_run$',
 ]
 
 # Timeouts. The default is 1.5x the baseline test time with a 20 second floor,
