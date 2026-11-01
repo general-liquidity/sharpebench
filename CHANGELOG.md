@@ -179,6 +179,9 @@ The six scorer stages that answer the `grader-search` admissions. Stages 1, 2 an
 - stats: `erf` and `norm_ppf` returned different bits under `--release`, because an optimised build folds `exp` of a constant argument inside the compiler. They now use a deterministic, correctly rounded `exp` and `ln` (`sharpebench_stats::det_math`). Pins and goldens are unchanged.
 - npm: the WASM build disagreed with native by 1 ulp on one measured-field `dsr_se`, from the compiler-builtins libm. The rebuilt bundle matches native: row 3's `dsr_se` moves from 0.08493733130527846 to 0.08493733130527845.
 - ci: the reproducibility job also runs the bit pins, the golden test and the CLI golden diff under the release profile.
+- stats: `det_math` adds deterministic `exp_m1`, `ln_1p` and `powf`, which are correctly rounded, and a `powi` that follows the compiler-builtins binary-exponentiation loop LLVM also uses to fold constants. On x86_64-pc-windows-gnu the runtime `powi` differed from that loop on about a quarter of cubes, so the same call gave different bits in a folded release build and at run time.
+- kernel: every non-test call of `exp`, `ln`, `ln_1p`, `exp_m1`, `powf` and `powi` in the stats, core, edge, sim and joint-gate crates now goes through `det_math`. That includes the private `erf` and `norm_pdf` behind the Black-Scholes greeks. These results no longer depend on the build profile or the platform libm. On x86_64-pc-windows-gnu, 80 of 20,000 random Black-Scholes inputs had moved gamma by 1 to 2 ulp. New `det_math_bits` and `rerouted_math_bits` tests pin the values. The goldens and the 93 special-function pins are unchanged.
+- ci: the reproducibility job also runs `det_math_bits` and `rerouted_math_bits` under the release profile.
 
 ### Documentation
 
