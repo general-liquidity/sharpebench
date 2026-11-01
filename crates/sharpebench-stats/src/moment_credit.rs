@@ -161,4 +161,55 @@ mod tests {
             })
         );
     }
+
+    fn three_positive_draws() -> Vec<f64> {
+        let mut returns = vec![0.0; 30];
+        returns[27..].copy_from_slice(&[0.0006, 0.0006, 0.0011]);
+        returns
+    }
+
+    /// Lo (2002): the variance factor of the Sharpe estimator under i.i.d.
+    /// Normal returns is `1 + SR^2 / 2`. At SR 0.5 that is 1.125, at SR 3 it is
+    /// 5.5, and at SR 0 it is 1.
+    #[test]
+    fn the_gaussian_bracket_is_lo_2002_at_hand_computed_values() {
+        assert_eq!(gaussian_bracket(0.0), 1.0);
+        assert_eq!(gaussian_bracket(0.5), 1.125);
+        assert_eq!(gaussian_bracket(3.0), 5.5);
+        assert_eq!(gaussian_bracket(-3.0), 5.5);
+    }
+
+    /// Where the floor binds, the deflated Sharpe is the PSR with the Gaussian
+    /// bracket in place of the kernel's, bit for bit.
+    #[test]
+    fn a_floored_track_is_scored_with_the_gaussian_bracket() {
+        let returns = three_positive_draws();
+        let sr = observed_sharpe_ratio(&returns).unwrap();
+        let kernel_bracket =
+            1.0 - skewness(&returns) * sr + ((kurtosis(&returns) - 1.0) / 4.0) * sr * sr;
+        assert!(kernel_bracket < gaussian_bracket(sr), "{kernel_bracket}");
+        let z = sr * (returns.len() as f64 - 1.0).sqrt() / (1.0 + sr * sr / 2.0).sqrt();
+        let floored = deflated_sharpe_without_moment_credit(&returns, 1, 0.0, 0.0).unwrap();
+        assert_eq!(floored.to_bits(), norm_cdf(z).to_bits());
+    }
+
+    /// The rule refuses exactly the tracks whose kernel deflated Sharpe is at
+    /// or above the bar and whose floored one is below it, both comparisons
+    /// inclusive of the bar as the kernel's gate is.
+    #[test]
+    fn certification_refuses_only_between_the_floored_and_kernel_values() {
+        let returns = three_positive_draws();
+        let kernel = deflated_sharpe_ratio_against_null(&returns, 50, 0.0, 0.03).unwrap();
+        let floored = deflated_sharpe_without_moment_credit(&returns, 50, 0.0, 0.03).unwrap();
+        assert!(floored < kernel, "{floored} {kernel}");
+        let refused = Err(StatisticalError::InvalidParameter {
+            name: "returns",
+            requirement: NOT_CERTIFIED_WITHOUT_MOMENT_CREDIT,
+        });
+        let certify = |bar: f64| certify_without_moment_credit(&returns, 50, 0.0, 0.03, bar);
+        assert_eq!(certify(kernel), refused);
+        assert_eq!(certify(floored), Ok(()));
+        // A bar above the kernel value is the kernel gate's refusal, not this one.
+        assert_eq!(certify((kernel + 1.0) / 2.0), Ok(()));
+    }
 }
