@@ -2467,7 +2467,7 @@ fn weighted_dispersion(
     let spread: f64 = kept
         .iter()
         .zip(&weights)
-        .map(|(v, w)| w * (v.sharpe - centre).powi(2))
+        .map(|(v, w)| w * crate::det_math::powi(v.sharpe - centre, 2))
         .sum();
     // Two positive weights make `v1^2 > v2`, so the denominator is positive
     // for two or more votes; a degenerate one leaves the plain branch to answer.
