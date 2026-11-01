@@ -941,11 +941,11 @@ fn score_prediction(
             let event = realized == 1.0;
             let probability = prediction[0];
             let loss = if contract.scoring_rule == "binary_brier" {
-                (probability - realized).powi(2)
+                sharpebench_stats::det_math::powi(probability - realized, 2)
             } else if event {
-                -probability.ln()
+                -sharpebench_stats::det_math::ln(probability)
             } else {
-                -(1.0 - probability).ln()
+                -sharpebench_stats::det_math::ln(1.0 - probability)
             };
             Ok((loss, Some((probability, event)), None, None))
         }
@@ -964,11 +964,11 @@ fn score_prediction(
                     .enumerate()
                     .map(|(at, probability)| {
                         let target = if at == index { 1.0 } else { 0.0 };
-                        (probability - target).powi(2)
+                        sharpebench_stats::det_math::powi(probability - target, 2)
                     })
                     .sum()
             } else {
-                -prediction[index].ln()
+                -sharpebench_stats::det_math::ln(prediction[index])
             };
             let (chosen, confidence) = prediction
                 .iter()
@@ -983,7 +983,8 @@ fn score_prediction(
             let mean = prediction[0];
             let sigma = prediction[1];
             let z = (realized - mean) / sigma;
-            let phi = (-0.5 * z * z).exp() / (2.0 * std::f64::consts::PI).sqrt();
+            let phi = sharpebench_stats::det_math::exp(-0.5 * z * z)
+                / (2.0 * std::f64::consts::PI).sqrt();
             let cdf = norm_cdf(z);
             let crps =
                 sigma * (z * (2.0 * cdf - 1.0) + 2.0 * phi - 1.0 / std::f64::consts::PI.sqrt());
@@ -1427,7 +1428,7 @@ fn degenerate_resample_mass(blocks: usize) -> f64 {
         return 1.0;
     }
     let blocks = blocks as f64;
-    blocks.powf(1.0 - blocks)
+    sharpebench_stats::det_math::powf(blocks, 1.0 - blocks)
 }
 
 /// The independent-block requirement this protocol enforces before it reports
@@ -1874,18 +1875,24 @@ fn binary_calibration(values: &[(f64, bool)], bins: usize) -> Option<BinaryCalib
     let base_rate = values.iter().filter(|(_, event)| *event).count() as f64 / n;
     let brier = values
         .iter()
-        .map(|(probability, event)| (probability - if *event { 1.0 } else { 0.0 }).powi(2))
+        .map(|(probability, event)| {
+            sharpebench_stats::det_math::powi(probability - if *event { 1.0 } else { 0.0 }, 2)
+        })
         .sum::<f64>()
         / n;
     let reliability = bins
         .iter()
         .filter_map(|bin| Some((bin.n as f64 / n, bin.mean_forecast?, bin.event_rate?)))
-        .map(|(weight, forecast, observed)| weight * (forecast - observed).powi(2))
+        .map(|(weight, forecast, observed)| {
+            weight * sharpebench_stats::det_math::powi(forecast - observed, 2)
+        })
         .sum();
     let resolution = bins
         .iter()
         .filter_map(|bin| Some((bin.n as f64 / n, bin.event_rate?)))
-        .map(|(weight, observed)| weight * (observed - base_rate).powi(2))
+        .map(|(weight, observed)| {
+            weight * sharpebench_stats::det_math::powi(observed - base_rate, 2)
+        })
         .sum();
     let uncertainty = base_rate * (1.0 - base_rate);
     Some(BinaryCalibration {
@@ -1921,7 +1928,7 @@ fn distribution_calibration(values: &[f64], bins: usize) -> Option<DistributionC
     let average = mean(values);
     let variance = values
         .iter()
-        .map(|value| (value - average).powi(2))
+        .map(|value| sharpebench_stats::det_math::powi(value - average, 2))
         .sum::<f64>()
         / values.len() as f64;
     let mut bin_counts = vec![0; bins];

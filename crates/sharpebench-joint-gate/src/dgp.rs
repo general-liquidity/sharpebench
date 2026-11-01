@@ -62,7 +62,7 @@ impl Stream {
             let v = 2.0 * self.unit() - 1.0;
             let s = u * u + v * v;
             if s > 0.0 && s < 1.0 {
-                let scale = (-2.0 * s.ln() / s).sqrt();
+                let scale = (-2.0 * sharpebench_core::det_math::ln(s) / s).sqrt();
                 self.spare = Some(v * scale);
                 return u * scale;
             }

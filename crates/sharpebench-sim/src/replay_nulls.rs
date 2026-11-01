@@ -599,7 +599,7 @@ impl TimingPercentile {
         let variance = (second_moment - percentile * percentile).max(0.0);
         // Every draw scored the same, so the scores have no spread to plug in.
         let degenerate = variance == 0.0;
-        let saturated = 0.05_f64.powf(1.0 / draws);
+        let saturated = sharpebench_stats::det_math::powf(0.05, 1.0 / draws);
         Self {
             draws: reference.len(),
             below,

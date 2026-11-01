@@ -327,7 +327,7 @@ pub fn manipulation_proof_performance(
     }
     let n = returns.len() as f64;
     let dt = 1.0 / periods_per_year;
-    let log_gross: Vec<f64> = returns.iter().map(|x| x.ln_1p()).collect();
+    let log_gross: Vec<f64> = returns.iter().map(|&x| crate::det_math::ln_1p(x)).collect();
     if risk_aversion == 1.0 {
         let mean_log = log_gross.iter().sum::<f64>() / n;
         return finite_computation(mean_log / dt, "manipulation-proof performance");
@@ -337,8 +337,12 @@ pub fn manipulation_proof_performance(
     // s = max_t k l_t, so no term overflows and none underflows to a zero sum.
     let scaled: Vec<f64> = log_gross.iter().map(|l| k * l).collect();
     let shift = scaled.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    let excess = scaled.iter().map(|y| (y - shift).exp_m1()).sum::<f64>() / n;
-    let log_mean = finite_computation(shift + excess.ln_1p(), "MPPM log mean")?;
+    let excess = scaled
+        .iter()
+        .map(|y| crate::det_math::exp_m1(y - shift))
+        .sum::<f64>()
+        / n;
+    let log_mean = finite_computation(shift + crate::det_math::ln_1p(excess), "MPPM log mean")?;
     // `+ 0.0` turns the -0.0 a flat track gives under rho > 1 into 0.0.
     finite_computation(log_mean / (k * dt) + 0.0, "manipulation-proof performance")
 }
