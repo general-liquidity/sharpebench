@@ -212,4 +212,20 @@ mod tests {
         // A bar above the kernel value is the kernel gate's refusal, not this one.
         assert_eq!(certify((kernel + 1.0) / 2.0), Ok(()));
     }
+
+    /// Two returns are the fewest the floored deflated Sharpe reads; one is
+    /// refused by count, not scored.
+    #[test]
+    fn two_returns_are_the_boundary_of_a_floored_deflated_sharpe() {
+        let two = deflated_sharpe_without_moment_credit(&[0.01, 0.03], 1, 0.0, 0.0).unwrap();
+        let kernel = deflated_sharpe_ratio_against_null(&[0.01, 0.03], 1, 0.0, 0.0).unwrap();
+        assert!(two.is_finite() && two <= kernel, "{two} {kernel}");
+        assert_eq!(
+            deflated_sharpe_without_moment_credit(&[0.01], 1, 0.0, 0.0),
+            Err(StatisticalError::InsufficientObservations {
+                required: 2,
+                actual: 1
+            })
+        );
+    }
 }

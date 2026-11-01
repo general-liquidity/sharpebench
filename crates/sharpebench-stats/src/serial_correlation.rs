@@ -428,4 +428,21 @@ mod tests {
         assert_eq!(certify(corrected), Ok(()));
         assert_eq!(certify(0.5), Ok(()));
     }
+
+    /// Two bars are the fewest that have a lag: `[1, -1]` centred is itself,
+    /// squares 2, lag-one cross product -1, so rho_1 = -0.5. One bar is refused.
+    #[test]
+    fn two_bars_are_the_boundary_of_a_measurable_autocorrelation() {
+        assert_eq!(
+            within_window_autocorrelations(&[&[1.0, -1.0]], 1),
+            Ok(vec![-0.5])
+        );
+        assert_eq!(
+            within_window_autocorrelations(&[&[1.0]], 1),
+            Err(StatisticalError::InsufficientObservations {
+                required: 2,
+                actual: 1
+            })
+        );
+    }
 }
