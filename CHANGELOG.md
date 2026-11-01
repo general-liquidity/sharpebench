@@ -182,6 +182,9 @@ The six scorer stages that answer the `grader-search` admissions. Stages 1, 2 an
 - stats: `det_math` adds deterministic `exp_m1`, `ln_1p` and `powf`, which are correctly rounded, and a `powi` that follows the compiler-builtins binary-exponentiation loop LLVM also uses to fold constants. On x86_64-pc-windows-gnu the runtime `powi` differed from that loop on about a quarter of cubes, so the same call gave different bits in a folded release build and at run time.
 - kernel: every non-test call of `exp`, `ln`, `ln_1p`, `exp_m1`, `powf` and `powi` in the stats, core, edge, sim and joint-gate crates now goes through `det_math`. That includes the private `erf` and `norm_pdf` behind the Black-Scholes greeks. These results no longer depend on the build profile or the platform libm. On x86_64-pc-windows-gnu, 80 of 20,000 random Black-Scholes inputs had moved gamma by 1 to 2 ulp. New `det_math_bits` and `rerouted_math_bits` tests pin the values. The goldens and the 93 special-function pins are unchanged.
 - ci: the reproducibility job also runs `det_math_bits` and `rerouted_math_bits` under the release profile.
+- stats: `det_math::powi` runs a fixed 32 passes, one per bit of the exponent, so no change to its body can make it loop forever. Its bits are unchanged.
+- tests: the double-double primitives are checked against exact rationals and the `exp` reduction against high-precision values. New pins cover `exp` near overflow and `ln` and `ln_1p` at `f64::MAX`, and new boundary and value tests cover the decay IC floor, the binary log score's non-event branch, normal CRPS off the mean and PIT calibration.
+- ci: `.cargo/mutants.toml` records 20 equivalent `det_math` mutants, each anchored to its file, line and column with the reason it cannot change a result.
 
 ### Documentation
 
