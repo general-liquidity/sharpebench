@@ -121,6 +121,9 @@ pub fn kurtosis(xs: &[f64]) -> f64 {
 }
 
 /// Error function (Abramowitz & Stegun 7.1.26, max abs error ~1.5e-7).
+///
+/// `exp` comes from [`crate::det_math`], not `f64::exp`, so debug and release
+/// builds and every platform return the same bits (see that module).
 pub fn erf(x: f64) -> f64 {
     let sign = if x < 0.0 { -1.0 } else { 1.0 };
     let x = x.abs();
@@ -129,7 +132,7 @@ pub fn erf(x: f64) -> f64 {
         - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t
             + 0.254829592)
             * t
-            * (-x * x).exp();
+            * crate::det_math::exp(-x * x);
     sign * y
 }
 
@@ -180,7 +183,7 @@ pub fn norm_ppf(p: f64) -> f64 {
     const P_HIGH: f64 = 1.0 - P_LOW;
 
     if p < P_LOW {
-        let q = (-2.0 * p.ln()).sqrt();
+        let q = (-2.0 * crate::det_math::ln(p)).sqrt();
         (((((C[0] * q + C[1]) * q + C[2]) * q + C[3]) * q + C[4]) * q + C[5])
             / ((((D[0] * q + D[1]) * q + D[2]) * q + D[3]) * q + 1.0)
     } else if p <= P_HIGH {
@@ -189,7 +192,7 @@ pub fn norm_ppf(p: f64) -> f64 {
         (((((A[0] * r + A[1]) * r + A[2]) * r + A[3]) * r + A[4]) * r + A[5]) * q
             / (((((B[0] * r + B[1]) * r + B[2]) * r + B[3]) * r + B[4]) * r + 1.0)
     } else {
-        let q = (-2.0 * (1.0 - p).ln()).sqrt();
+        let q = (-2.0 * crate::det_math::ln(1.0 - p)).sqrt();
         -(((((C[0] * q + C[1]) * q + C[2]) * q + C[3]) * q + C[4]) * q + C[5])
             / ((((D[0] * q + D[1]) * q + D[2]) * q + D[3]) * q + 1.0)
     }

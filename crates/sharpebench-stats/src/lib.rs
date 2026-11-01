@@ -55,6 +55,7 @@
 
 pub mod agreement;
 pub mod deflated_sharpe;
+pub mod det_math;
 pub mod dissent;
 pub mod fdr;
 pub mod opt_in_diagnostics;

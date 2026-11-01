@@ -679,6 +679,24 @@ and demonstrates it in the three-platform job. If the paper's numerical evidence
 is ever regenerated wholesale, the reproducibility baseline is re-established
 from scratch and the question should be reopened then.
 
+The exponential and logarithm inside these bodies no longer come from the
+platform. `f64::exp` and `f64::ln` call the platform library at run time, but an
+optimised build may evaluate a call whose argument is a compile-time constant
+inside the compiler, which need not round the same way. That happened: on
+`x86_64-pc-windows-gnu`, `erf(1/sqrt 2)` returned one ulp less under
+`cargo test --release` than under `cargo test`, because the compiler's folded
+`exp(-0.5000000000000001)` is 0.61 ulp from the true value where the runtime
+library's is 0.39 ulp. `erf` and `norm_ppf` now call
+`sharpebench_stats::det_math::{exp, ln}`, which use only operations IEEE-754
+defines exactly, evaluate in double-double arithmetic and round once, so they
+return the correctly rounded value (outside rare hard-to-round arguments and
+subnormal outputs) identically in every build profile and on every target. The
+approximation formulas are unchanged, and so are the 93 pinned bits and both
+golden fixtures. A call costs about half a microsecond instead of a few
+nanoseconds; these functions run once per score or forecast point, not inside
+resampling loops. The CI reproducibility job now also runs the bit pins, the
+golden test and the CLI golden diff under the release profile.
+
 The moment estimators (`mean`, `variance`, `std_dev`,
 `skewness`, `kurtosis`) stay hand-rolled in either case: the standardized
 moments use the population normalisation fixed by the 2026-09-07 audit (R03),
