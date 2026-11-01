@@ -6552,10 +6552,60 @@ mod tests {
                 .collect(),
         };
         for share in [0.0, 0.3] {
+            assert_eq!(weighted_dispersion(&votes, &alike(share), None), None);
             assert_eq!(
                 field_dispersion(&votes, &alike(share), None).to_bits(),
                 plain_dispersion(&votes, None).to_bits()
             );
         }
+    }
+
+    /// The shared variance of two streams, at hand-worked values. Over 36 bars
+    /// tau = 9 / 36 = 0.25. `a` alternates and `c` has period four, so both are
+    /// centred and orthogonal with equal norms, and `b = 0.8 a + 0.6 c` has a
+    /// centred correlation of 0.8 with `a`: share (0.64 - 0.25) / 0.75 = 0.52.
+    /// A shifted, scaled copy shares everything, and a pair of nine bars
+    /// (tau = 1) can resolve nothing.
+    #[test]
+    fn shared_variance_is_the_squared_correlation_in_excess_of_noise() {
+        let a: Vec<f64> = (0..36)
+            .map(|t| if t % 2 == 0 { 1.0 } else { -1.0 })
+            .collect();
+        let c: Vec<f64> = (0..36)
+            .map(|t| if t % 4 < 2 { 1.0 } else { -1.0 })
+            .collect();
+        let b: Vec<f64> = a.iter().zip(&c).map(|(x, y)| 0.8 * x + 0.6 * y).collect();
+        let copy: Vec<f64> = a.iter().map(|x| 2.0 * x + 3.0).collect();
+        let shared = SharedVariance::of(&[&a, &b, &copy]);
+        assert_eq!(shared.rows[0][0], 1.0);
+        assert!(
+            (shared.rows[0][1] - 0.52).abs() < 1e-12,
+            "{}",
+            shared.rows[0][1]
+        );
+        assert_eq!(shared.rows[1][0], shared.rows[0][1]);
+        assert_eq!(shared.rows[0][2], 1.0);
+        let short = SharedVariance::of(&[&a[..9], &copy[..9]]);
+        assert_eq!(short.rows[0][1], 0.0);
+    }
+
+    /// A field whose median pairwise distance is zero states no scale, so the
+    /// influence bound clips nobody even though one vote stands apart: four
+    /// equal votes and one at 2 make six zero gaps out of ten.
+    #[test]
+    fn a_field_with_no_robust_scale_clips_no_vote() {
+        let mut votes: Vec<Vote> = [1.0, 1.0, 1.0, 1.0, 2.0]
+            .iter()
+            .enumerate()
+            .map(|(i, &sharpe)| Vote {
+                index: i,
+                members: vec![i],
+                sharpe,
+                stream: i,
+            })
+            .collect();
+        let clips = clip_distant_votes(&mut votes, &SharedVariance::default(), 0.0);
+        assert!(clips.is_empty());
+        assert_eq!(votes[4].sharpe, 2.0);
     }
 }
