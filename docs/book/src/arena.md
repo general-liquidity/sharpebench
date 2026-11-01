@@ -352,6 +352,17 @@ it on save. As with every signed field, the key holder can sign any identity;
 the verifier checks that it is consistent and that the window file agrees, and
 cannot re-derive the rows without the captures.
 
+### Forward evidence
+
+Every board also carries the forward evidence ledger in its signed header: an
+anytime-valid e-process per re-executed artifact, carried from each board's
+`posterior` to the next board's `prior`, with e-BH decisions over every
+artifact ever committed. It is rank-neutral. A window that re-executed a row
+records its contribution as `forward` and is written as schema 9. `arena verify` recomputes each ledger from the signed
+observations and reports a board that does not follow, or one without a ledger
+after the ledger began, as `forward_evidence_error`. See
+[Forward evidence ledger](forward-evidence.md).
+
 ### Completeness: the signed head
 
 The cross-window chain exposes a changed or missing interior board, because a
@@ -403,7 +414,9 @@ requires the header to record the same identity, field by field:
 edited under its old digest is caught), `score_config_sha256`,
 `scorer_artifact_sha256`, `sealed_eval_salt_sha256`, `fault_plan_sha256`,
 `dataset_hash`, `replay_dataset_sha256`, `supplied_returns_accepted`,
-`certifying` and `execution` (compared whole). An optional field present on one side and absent on the other is
+`certifying`, `execution` (compared whole), `forward_record` (the window's
+forward evidence contribution, compared whole) and, on a header that carries
+the forward evidence ledger, `forward_commitments`. An optional field present on one side and absent on the other is
 a disagreement like two different values, so a window file that drops or
 invents a fault plan fails, and so does one that changes, adds or drops a
 certification mark. Refusals and scores are outcomes rather than
