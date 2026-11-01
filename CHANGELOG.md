@@ -176,6 +176,9 @@ The six scorer stages that answer the `grader-search` admissions. Stages 1, 2 an
 - npm: every wrapper entry point refuses a lone UTF-16 surrogate in any key or string with a named `InvalidUtf8Error`, instead of a serde parse error or a silent U+FFFD substitution. `canary` already substituted under the committed glue.
 - docs: the pass^k credit names tau-bench (Yao et al., 2024), which introduced the metric, not tau2-bench.
 - docs: the attribution and selection credit lines claimed mechanisms their sources do not contain, KTD-Fin's Barra-style factor model and an ALE-Bench median-of-candidates rule. They now say what was taken.
+- stats: `erf` and `norm_ppf` returned different bits under `--release`, because an optimised build folds `exp` of a constant argument inside the compiler. They now use a deterministic, correctly rounded `exp` and `ln` (`sharpebench_stats::det_math`). Pins and goldens are unchanged.
+- npm: the WASM build disagreed with native by 1 ulp on one measured-field `dsr_se`, from the compiler-builtins libm. The rebuilt bundle matches native: row 3's `dsr_se` moves from 0.08493733130527846 to 0.08493733130527845.
+- ci: the reproducibility job also runs the bit pins, the golden test and the CLI golden diff under the release profile.
 
 ### Documentation
 
