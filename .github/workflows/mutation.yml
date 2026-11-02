@@ -6,7 +6,8 @@ name: Mutation
 # only in the four pure crates. That population is split across eight parallel
 # shards, each shard running the same command with its own `--shard i/8`, each
 # using every core the runner reports, under a 20 minute per-shard budget. The
-# shards partition the population exactly: `--shard` is 0 based, every mutant
+# shards partition the population exactly: `--shard` is 0 based, mutant i of the
+# sorted list goes to shard i % 8 (`--sharding round-robin`), every mutant
 # lands in exactly one shard, and an out of range index is a hard error rather
 # than a silent drop, so nothing the diff introduces escapes the gate. A missed
 # mutant in any shard fails that shard and so fails the check. Paired-boundary:
@@ -74,6 +75,15 @@ jobs:
       # it is surfaced as a warning rather than a failure because it is runner
       # dependent, and the report artifact names it.
       #
+      # `--sharding round-robin` deals mutant i to shard i % 8. The default,
+      # `slice`, hands each shard a consecutive run of the list, and the list is
+      # sorted by package, so every sharpebench-core mutant (a ~25 s core rebuild
+      # plus a ~20 s core suite each) landed in shards 0-2 while shards 3-7 got
+      # the quick stats mutants: on PR #178 shard 1 hit the 20 minute limit while
+      # shards 3-7 finished in 4-7. Dealing round-robin gives every shard the
+      # same share of each package. It changes which shard runs a mutant, never
+      # whether it runs.
+      #
       # `--jobs` is the core count the runner itself reports, echoed here so the
       # log records it. cargo-mutants builds a whole tree per job, so going past
       # the real core count makes the run slower rather than faster.
@@ -91,6 +101,7 @@ jobs:
             --timeout-multiplier 3 \
             --jobs "$cores" \
             --shard "${{ matrix.shard }}/$MUTANT_SHARDS" \
+            --sharding round-robin \
             --output "$RUNNER_TEMP/mutants"
           code=$?
           set -e
