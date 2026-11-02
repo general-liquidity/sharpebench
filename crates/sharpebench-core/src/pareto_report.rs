@@ -281,14 +281,15 @@ pub fn pareto_report(
             let slices: Vec<&[f64]> = t.iter().map(Vec::as_slice).collect();
             observed_sharpe_ratio_of_windows(&slices).map(|_| ())
         });
-        let refused = match (&sharpe, axes.comparable()) {
-            (None, _) => Some("no submission for this row in the field".to_string()),
-            (_, Err(ParetoAxis::ExpectedShortfall)) if shortfall_error.is_some() => {
-                shortfall_error.map(|e| format!("expected_shortfall unavailable: {e}"))
-            }
-            (_, Err(axis)) => Some(format!("{} is not a finite number", axis.name())),
-            (Some(Err(e)), Ok(_)) => Some(format!("no Sharpe ratio: {e}")),
-            (Some(Ok(())), Ok(_)) => None,
+        // The first reason that applies: no submission, an expected
+        // shortfall the tail cannot estimate, an axis that is not finite, no
+        // Sharpe ratio.
+        let refused = match (&sharpe, shortfall_error, axes.comparable()) {
+            (None, _, _) => Some("no submission for this row in the field".to_string()),
+            (_, Some(e), _) => Some(format!("expected_shortfall unavailable: {e}")),
+            (_, None, Err(axis)) => Some(format!("{} is not a finite number", axis.name())),
+            (Some(Err(e)), None, Ok(_)) => Some(format!("no Sharpe ratio: {e}")),
+            (Some(Ok(())), None, Ok(_)) => None,
         };
         pooled.push(track);
         rows.push(ParetoRow {
@@ -572,6 +573,30 @@ mod tests {
         let b = row(&report, "bad");
         assert_eq!(b.dominated_by, vec!["flat".to_string()]);
         assert_eq!((b.on_front, b.front_frequency), (false, Some(0.0)));
+    }
+
+    /// Returns large enough that the tail sum overflows: the shortfall refuses
+    /// the row with its own reason, ahead of the other axes that overflow too.
+    #[test]
+    fn an_overflowing_shortfall_refuses_the_row_with_its_reason() {
+        let huge: Vec<f64> = (0..400)
+            .map(|t| if t % 2 == 0 { f64::MAX } else { f64::MAX / 2.0 })
+            .collect();
+        let subs = vec![sub("good", good()), sub("huge", huge)];
+        let cfg = ScoreConfig {
+            shared_run_set: false,
+            ..ScoreConfig::default()
+        };
+        let board = rank(&subs, &cfg);
+        let report = pareto_report(&subs, &board, &cfg, boot(4));
+        let huge = row(&report, "huge");
+        assert_eq!(
+            huge.refused.as_deref(),
+            Some("expected_shortfall unavailable: expected shortfall is not finite")
+        );
+        assert_eq!(huge.axes.expected_shortfall, None);
+        assert!(!huge.on_front);
+        assert!(row(&report, "good").on_front);
     }
 
     #[test]

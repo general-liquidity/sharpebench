@@ -158,6 +158,27 @@ mod tests {
         assert!(null_se_psr(&flat, 0.0, Track::Observed).is_err());
         assert_eq!(null_se_psr(&flat, 0.0, Track::Resample), Ok(norm_cdf(0.0)));
         assert!(null_se_psr(&flat, 0.1, Track::Resample).unwrap() < norm_cdf(0.0));
+        // A resample that varies has the observed track's Sharpe, bit for bit.
+        let varied = [0.01, -0.02, 0.03, 0.005, -0.004, 0.02];
+        for (null, sr_std) in [(0.0, 0.0), (0.002, 0.03)] {
+            assert_eq!(
+                deflated_sharpe_ratio_at_of(&varied, 20, null, sr_std, Track::Resample, at)
+                    .map(f64::to_bits),
+                deflated_sharpe_ratio_at_of(&varied, 20, null, sr_std, Track::Observed, at)
+                    .map(f64::to_bits)
+            );
+        }
+        // Two returns are enough for a statistic; one keeps the 0.0 convention.
+        let two = [0.01, 0.03];
+        let sr = 0.02 / (0.0002f64).sqrt();
+        assert_eq!(
+            checked_probabilistic_sharpe_ratio_at(&two, 0.0, at).map(f64::to_bits),
+            Ok(norm_cdf(sr).to_bits())
+        );
+        assert_eq!(
+            checked_probabilistic_sharpe_ratio_at(&[0.01], 0.0, at),
+            Ok(0.0)
+        );
         assert_eq!(
             deflated_sharpe_ratio_at_of(&flat, 1, 0.0, 0.0, Track::Resample, at),
             Ok(norm_cdf(0.0))
