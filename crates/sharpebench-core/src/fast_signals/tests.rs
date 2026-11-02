@@ -109,6 +109,23 @@ fn the_percentile_bootstrap_is_pinned_and_brackets_the_mean() {
     assert_eq!(percentile_bootstrap(&[], 0.95), None);
 }
 
+/// With values whose resampled means are all distinct, the interval is the
+/// order statistics at ranks 50 and 1950 of the 2000 sorted means (0-based,
+/// `q * 1999` rounded). Pinned so a shifted rank shows.
+#[test]
+fn the_bootstrap_bounds_are_the_pinned_order_statistics() {
+    let values = [0.31, -1.2, 2.7, 0.05, 1.9, -0.4, 3.3, 0.8, -2.1, 1.17];
+    let (low, high) = percentile_bootstrap(&values, 0.95).unwrap();
+    assert_eq!(
+        (low.to_bits(), high.to_bits()),
+        (DISTINCT_LOW, DISTINCT_HIGH),
+        "{low} {high}"
+    );
+}
+
+const DISTINCT_LOW: u64 = 13_821_799_457_979_184_972;
+const DISTINCT_HIGH: u64 = 4_610_042_204_563_397_674;
+
 /// Bits of the 95% interval of the mean of 0..10 (about 2.7 and 6.3).
 const PINNED_LOW: u64 = 4_613_262_278_296_967_578;
 const PINNED_HIGH: u64 = 4_618_779_187_840_496_435;

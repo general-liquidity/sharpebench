@@ -124,6 +124,10 @@ exclude_re = [
     'forward_eprocess\.rs:260:21: replace > with >= in BettorState::bet$',
     # Equivalent: at wealth == max_wealth the assignment stores the same value.
     'forward_eprocess\.rs:292:32: replace > with >= in BettorState::step$',
+    # Equivalent: f(mid) equals the target only at the crossing itself, where
+    # either half holds it, and the 100 halvings leave both brackets within f64
+    # spacing of the root, so the Clopper-Pearson bound is the same.
+    '^crates/sharpebench-core/src/fast_signals\.rs:531:19: replace > with >= in bisect_decreasing$',
 ]
 
 # Timeouts. The default is 1.5x the baseline test time with a 20 second floor,
