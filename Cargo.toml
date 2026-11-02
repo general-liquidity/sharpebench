@@ -39,6 +39,19 @@ all = { level = "deny", priority = -1 }
 todo = "deny"
 dbg_macro = "deny"
 
+# `sharpebench-stats` is built optimised in dev and test builds too. Its
+# `det_math` routines (exp, ln, powf and the integer-power loop the moment
+# estimators call about a million times per scored agent) are double-double
+# and loop code that runs tens of times slower unoptimised, which pushed the
+# debug test suite and the mutation shards past their CI time limits. The
+# override cannot change a result: det_math uses only IEEE operations that
+# every optimisation level evaluates identically, and the release and debug
+# runs of `det_math_bits`, `special_function_bits` and `rerouted_math_bits`
+# pin the same bits. Overflow checks and debug assertions stay on: they are
+# separate profile settings and this changes only the optimisation level.
+[profile.dev.package.sharpebench-stats]
+opt-level = 3
+
 [profile.release]
 lto = true
 codegen-units = 1
