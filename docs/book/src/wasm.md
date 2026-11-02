@@ -102,7 +102,12 @@ honesty verdict. Board explanations include `deflation_unavailable`,
 `exposure_path_unavailable` and `selection_unavailable`. All but the last are
 hard, because the scorer gates on the statistics they name. `deflation_refused`
 is a verdict on the track's shape rather than a failure to compute, and is read
-from the row's `deflation_refusal`. `selection_unavailable` is
+from the row's `deflation_refusal`. The explanation never contains
+`is_rediscovery` or `oos_decay`, because the wasm surface takes no
+known-strategy library and no out-of-sample split. The
+`headline(submissions_json, config_json)` export returns the
+[headline verdict](reading-a-row.md) of every row; a refused track reads
+`degenerate_track`. `selection_unavailable` is
 advisory: the scorer reports `selection_gap` and never consults it in
 `rank_eligible`, so a submission carrying only that reason is still
 rank-eligible. Read `rank_eligible` for the verdict rather than the presence of

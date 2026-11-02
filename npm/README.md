@@ -77,12 +77,17 @@ scorer gates on (`deflation_unavailable`, `dsr_interval_unavailable`,
 `bootstrap_unavailable`, `exposure_path_unavailable`), and
 `standard_error_uncertified` and `exposure_path_unproven` name the two later
 gates. Four are advisory and never gate (`selection_unavailable`,
-`high_selection_gap`, `is_rediscovery`, `oos_decay`). One cause names one
+`high_selection_gap`, `is_rediscovery`, `oos_decay`); this package never
+returns the last two, because it takes no known-strategy library and no
+out-of-sample split. One cause names one
 reason: a deflated Sharpe that was refused or not computed is not also
 `dsr_below_bar`, and a bootstrap that was not computed is not also
 `bootstrap_insignificant`. `selection_unavailable` is advisory because the
 scorer reports `selection_gap` and never consults it in `rank_eligible`, so a
-submission carrying only advisory reasons is still rank-eligible. Read
+submission carrying only advisory reasons is still rank-eligible.
+`headline(submissions, config)` returns one
+[headline verdict](https://github.com/general-liquidity/sharpebench/blob/main/docs/book/src/reading-a-row.md)
+per row. Read
 `rank_eligible`, not the presence of a reason. See the [error and migration guide](https://github.com/general-liquidity/sharpebench/blob/main/docs/book/src/wasm.md#statistical-unavailability-and-migration).
 
 ## Why luck-robust?

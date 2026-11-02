@@ -24,10 +24,27 @@ test("registers the kernel tools", async () => {
     "canary",
     "is_my_sharpe_real",
     "regime_compare",
+    "classify_disqualification",
+    "headline",
   ]) {
     assert.ok(names.includes(expected), `missing tool: ${expected}`);
   }
   await client.close();
+});
+
+test("headline tool reads a verdict per row", async () => {
+  const client = await connectedClient();
+  try {
+    const res = await client.callTool({
+      name: "headline",
+      arguments: { submissions: [{ agent_id: "flat", runs: [{ returns: Array(60).fill(0) }] }] },
+    });
+    assert.notEqual(res.isError, true, res.content[0].text);
+    const parsed = JSON.parse(res.content[0].text);
+    assert.equal(parsed[0].verdict, "degenerate_track");
+  } finally {
+    await client.close();
+  }
 });
 
 test("is_my_sharpe_real tool renders a verdict", async () => {

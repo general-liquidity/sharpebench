@@ -25,6 +25,7 @@ import type {
   FullVerdict,
   GreeksParams,
   GreeksResult,
+  Headline,
   HonestyOpts,
   HonestyVerdict,
   PercentileSelectionOpts,
@@ -338,9 +339,10 @@ export function crowdingHalfLife(
 /**
  * Name every disqualification/quality signal that fired for each agent in a
  * field of submissions (the same input {@link score} takes). Pure legibility
- * over the composite score: the first five reasons mirror the scorer's hard
- * eligibility gates, the advisory ones (high_selection_gap, is_rediscovery,
- * oos_decay) never gate, and nothing here changes eligibility semantics.
+ * over the composite score: the ten hard reasons each remove the agent from
+ * the rank, the advisory ones (selection_unavailable, high_selection_gap)
+ * never gate, and nothing here changes eligibility semantics. This surface
+ * never returns is_rediscovery or oos_decay; see {@link FailReason}.
  */
 export function classifyDisqualification(
   submissions: AgentSubmission[],
@@ -351,6 +353,17 @@ export function classifyDisqualification(
       toJson(submissions, "submissions"),
       optJson(config, "config"),
     ),
+  );
+}
+
+/**
+ * The headline verdict of every row of a scored field (the same input
+ * {@link score} takes), in board order: one word per row, with its hard
+ * reasons and its qualifiers beside it. Never changes a score or a rank.
+ */
+export function headline(submissions: AgentSubmission[], config?: ScoreConfig): Headline[] {
+  return parse(
+    kernel.headline(toJson(submissions, "submissions"), optJson(config, "config")),
   );
 }
 
