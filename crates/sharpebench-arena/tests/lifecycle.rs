@@ -89,6 +89,7 @@ fn entry(
     );
     capture.contract.as_mut().unwrap().runner_artifact_sha256 = Some(scorer.to_string());
     RevealedEntry {
+        live_log: None,
         agent_id: Some(agent_id.to_string()),
         submission: None,
         capture: Some(capture),

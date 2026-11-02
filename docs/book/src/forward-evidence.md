@@ -154,6 +154,9 @@ A scored window that re-executed a row records its contribution in
 never re-executes, so it never records one). No binary that predates the field loads
 that schema, so a rollback cannot publish such a window without its ledger. A
 window with no re-executed row keeps the schema and the bytes it always had.
+Schema 9 implies support for schema 8's live capture roots, so a window with
+both a live-captured row and a re-executed row is written under schema 9 and
+keeps both records.
 
 `arena verify` checks, for every board that carries the ledger, that `prior`
 is the previous board's `posterior` (or genesis when no earlier board carries

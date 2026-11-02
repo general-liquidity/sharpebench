@@ -55,6 +55,7 @@ fn capture_entry(
     );
     capture.contract.as_mut().unwrap().runner_artifact_sha256 = Some(scorer.to_string());
     RevealedEntry {
+        live_log: None,
         agent_id: Some("alpha".to_string()),
         submission: None,
         capture: Some(capture),
@@ -310,6 +311,7 @@ fn supplied_returns_are_ranked_only_under_the_explicit_flag() {
     let dataset_path = root.join("dataset.csv");
     write_dataset(&dataset_path);
     let entries = vec![RevealedEntry {
+        live_log: None,
         agent_id: None,
         submission: Some(AgentSubmission {
             agent_id: "alpha".to_string(),

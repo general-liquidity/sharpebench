@@ -60,6 +60,7 @@ use sharpebench_sim::{
 };
 
 use crate::forward_evidence::{record_window, Admitted, ForwardRecord};
+use crate::live_capture::{certify_live_log, LiveCaptureRoot};
 use crate::{
     describe_fault_plan, registry_for, validate_sha256, ExecutionIdentity, Refusal, RevealedEntry,
     WindowState,
@@ -81,6 +82,10 @@ pub enum ReturnsProvenance {
     /// Replayed, and the committed entrant, run again on the revealed data,
     /// repeated every score-bearing decision the capture records.
     ReExecuted,
+    /// Derived by strict replay of the decisions the host logged bar by bar
+    /// while the committed image ran during the window, from a sealed live log
+    /// ([`crate::live_capture`]). Certifies on custody, not on repetition.
+    LiveCaptured,
 }
 
 impl ReturnsProvenance {
@@ -89,6 +94,7 @@ impl ReturnsProvenance {
             Self::Supplied => "supplied",
             Self::Replayed => "replayed",
             Self::ReExecuted => "re-executed",
+            Self::LiveCaptured => "live-captured",
         }
     }
 }
@@ -406,12 +412,14 @@ pub struct Admission {
     /// re-executed row's pooled track. `None` when no row was re-executed.
     /// See [`crate::forward_evidence`].
     pub forward: Option<ForwardRecord>,
+    /// The root of each admitted live log, by agent id.
+    pub live_capture: BTreeMap<String, LiveCaptureRoot>,
 }
 
 /// Whether a board certifies its rows: it has rows, supplied returns were not
-/// accepted, and every ranked row was re-executed. A replayed row can hold
-/// hindsight decisions, and a supplied row holds whatever the entrant sent, so
-/// either one makes the board noncertifying.
+/// accepted, and every ranked row was re-executed or live-captured. A replayed
+/// row can hold hindsight decisions, and a supplied row holds whatever the
+/// entrant sent, so either one makes the board noncertifying.
 ///
 /// A field with no rows does not meet the rule. `certifying` is a claim about
 /// rows, and a board that ranked none has nothing to claim it of; reading the
@@ -423,9 +431,12 @@ pub fn board_certifies(
 ) -> bool {
     !supplied_returns_accepted
         && !returns_provenance.is_empty()
-        && returns_provenance
-            .values()
-            .all(|provenance| *provenance == ReturnsProvenance::ReExecuted)
+        && returns_provenance.values().all(|provenance| {
+            matches!(
+                provenance,
+                ReturnsProvenance::ReExecuted | ReturnsProvenance::LiveCaptured
+            )
+        })
 }
 
 /// Refusal reason for supplied returns under the default intake.
@@ -461,7 +472,7 @@ pub(crate) fn check_entries(window: &WindowState, entries: &[RevealedEntry]) -> 
     Ok(())
 }
 
-type Admissible = (AgentSubmission, ReturnsProvenance);
+type Admissible = (AgentSubmission, ReturnsProvenance, Option<LiveCaptureRoot>);
 
 /// Admit revealed entries into a window's field without touching the disk.
 /// Each entry's commitment is revealed through the attest registry at
@@ -484,7 +495,10 @@ pub fn admit_entries(
     options: IntakeOptions<'_>,
 ) -> Result<Admission, String> {
     check_entries(window, entries)?;
-    let replay = if entries.iter().any(|entry| entry.capture.is_some()) {
+    let replay = if entries
+        .iter()
+        .any(|entry| entry.capture.is_some() || entry.live_log.is_some())
+    {
         Some(ReplayWindow::parse(dataset_bytes, &window.score_config)?)
     } else {
         None
@@ -544,6 +558,7 @@ pub fn admit_entries(
             .as_ref()
             .map(|r| ExecutionIdentity::of(r, &window.scorer_artifact_sha256)),
         forward: None,
+        live_capture: BTreeMap::new(),
     };
     // A window holds one commitment per agent and the registry opens each one
     // once, so an agent reaches this loop with at most one admitted entry. The
@@ -554,7 +569,10 @@ pub fn admit_entries(
     let mut admitted_entries = Vec::new();
     for ((agent_id, outcome), entry) in outcomes.into_iter().zip(entries) {
         match outcome {
-            Ok((submission, provenance)) => {
+            Ok((submission, provenance, root)) => {
+                if let Some(root) = root {
+                    admission.live_capture.insert(agent_id.clone(), root);
+                }
                 admission
                     .returns_provenance
                     .insert(agent_id.clone(), provenance);
@@ -616,6 +634,7 @@ fn admit_one(
         window.fault_plan_sha256.as_deref(),
     )?;
     let admitted = match (&entry.capture, &entry.submission) {
+        _ if entry.live_log.is_some() => admit_live_log(window, replay, entry, agent_id),
         (Some(_), Some(_)) => Err(
             "the entry carries both supplied returns and a capture; the arena ranks only returns it derives from the capture"
                 .to_string(),
@@ -627,9 +646,10 @@ fn admit_one(
             capture,
             agent_id,
             launcher,
-        ),
+        )
+        .map(|(submission, provenance)| (submission, provenance, None)),
         (None, Some(submission)) if allow_supplied_returns => {
-            Ok((submission.clone(), ReturnsProvenance::Supplied))
+            Ok((submission.clone(), ReturnsProvenance::Supplied, None))
         }
         (None, Some(_)) => Err(SUPPLIED_RETURNS_REFUSAL.to_string()),
         (None, None) => Err("the entry carries neither a capture nor returns".to_string()),
@@ -640,6 +660,40 @@ fn admit_one(
     // open for the one that is not.
     registry.open(verified);
     Ok(admitted)
+}
+
+/// Admit an entry that reveals a sealed live log, or return why it is refused.
+fn admit_live_log(
+    window: &WindowState,
+    replay: Option<&ReplayWindow>,
+    entry: &RevealedEntry,
+    agent_id: &str,
+) -> Result<Admissible, String> {
+    let log = entry.live_log.as_ref().expect("the caller checked");
+    if entry.capture.is_some() || entry.submission.is_some() {
+        return Err("the entry carries a live log and also a capture or returns; the arena ranks only returns it derives from one record".to_string());
+    }
+    if window.fault_plan_sha256.is_some() {
+        return Err("a live log records no fault plan, so it cannot stand for this window's faulted experiment".to_string());
+    }
+    let replay = replay.expect("a replay window exists whenever an entry carries a live log");
+    let certified = certify_live_log(
+        &window.id,
+        &window.scorer_artifact_sha256,
+        &window.score_config,
+        replay,
+        agent_id,
+        &entry.artifact_digest,
+        log,
+    )
+    .map_err(|refusal| refusal.to_string())?;
+    let mut submission = replay_submission(&replay.data, &certified.trajectory, replay.costs);
+    submission.agent_id = agent_id.to_string();
+    Ok((
+        submission,
+        ReturnsProvenance::LiveCaptured,
+        Some(certified.root),
+    ))
 }
 
 fn admit_capture(

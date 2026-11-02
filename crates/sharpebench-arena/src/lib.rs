@@ -36,6 +36,7 @@ pub mod audit;
 pub mod execution;
 pub mod forward_evidence;
 pub mod intake;
+pub mod live_capture;
 mod persistence;
 pub mod sandbox;
 mod verify_certification;
@@ -51,6 +52,10 @@ pub use intake::{
     reference_entrant_digest, unnamed_entry, Admission, CapturedEntrant, DockerLauncher,
     EntrantLauncher, IntakeOptions, LaunchedEntrant, ReplayWindow, ReturnsProvenance,
     SUPPLIED_RETURNS_REFUSAL, UNNAMED_ENTRY_REFUSAL,
+};
+pub use live_capture::{
+    certify_live_log, seal_live_log, LiveCaptureRoot, LiveLogHeader, LiveLogRefusal, LiveRecorder,
+    SealedLiveLog, LIVE_CAPTURE_WINDOW_SCHEMA_VERSION,
 };
 pub use sandbox::{
     check_sandbox_readiness, classify_container_exit, docker_available, probe_egress,
@@ -155,7 +160,12 @@ pub const EXECUTED_FAULTED_WINDOW_SCHEMA_VERSION: u32 = 7;
 /// it refuses the window instead. A window with no re-executed row records
 /// nothing and keeps the version it had. A faulted window refuses every
 /// capture, so it never re-executes a row and needs no faulted variant.
-/// Version 8 is reserved for the live capture record on another branch.
+///
+/// Version 8 ([`LIVE_CAPTURE_WINDOW_SCHEMA_VERSION`]) records live capture
+/// roots. Every binary that knows this version also knows that field, so this
+/// version implies support for it: a window that records both a forward
+/// contribution (a re-executed row) and a live capture root (a live-captured
+/// row) carries this version and keeps both.
 pub const FORWARD_WINDOW_SCHEMA_VERSION: u32 = 9;
 
 /// The schema a window must carry given whether it names a fault plan,
@@ -337,11 +347,22 @@ pub struct WindowState {
     /// publish. Omitted otherwise. See [`FORWARD_WINDOW_SCHEMA_VERSION`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub forward: Option<ForwardRecord>,
+    /// The root of each admitted live log, by agent id: one per
+    /// `live-captured` row. Omitted when empty, so a window without one keeps
+    /// its bytes. See [`live_capture`] and
+    /// [`LIVE_CAPTURE_WINDOW_SCHEMA_VERSION`].
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub live_capture: BTreeMap<String, LiveCaptureRoot>,
 }
 
 impl WindowState {
     /// The schema version this record must carry.
     fn expected_schema(&self) -> u32 {
+        // Version 9 implies 8's field, so a live capture root alone asks for
+        // 8 and a forward contribution asks for 9 with or without one.
+        if self.forward.is_none() && !self.live_capture.is_empty() {
+            return LIVE_CAPTURE_WINDOW_SCHEMA_VERSION;
+        }
         expected_window_schema(
             self.fault_plan_sha256.as_deref(),
             self.records_score_meaning(),
@@ -447,6 +468,7 @@ impl WindowState {
             expired_at_epoch: _,
             execution: _,
             forward: _,
+            live_capture: _,
         } = self;
         replay_dataset_sha256.is_some()
             || *supplied_returns_accepted
@@ -482,6 +504,11 @@ pub struct RevealedEntry {
     /// equal the window's `fault_plan_sha256`, absent for an unfaulted window.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fault_plan_sha256: Option<String>,
+    /// The sealed live log the host recorded for this entrant during the
+    /// window ([`live_capture`]). Carried instead of a capture or returns, and
+    /// omitted when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live_log: Option<SealedLiveLog>,
 }
 
 impl RevealedEntry {
@@ -563,6 +590,10 @@ pub struct WindowHeader {
     /// Omitted on every header signed before the field existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub forward_evidence: Option<ForwardEvidence>,
+    /// The window's `live_capture` roots. Omitted when empty, so a header for
+    /// a window without a live-captured row signs the same bytes as before.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub live_capture: BTreeMap<String, LiveCaptureRoot>,
 }
 
 /// The signed terminal anchor (`head.json`), rewritten by every publish in the
@@ -726,6 +757,8 @@ pub enum IdentityField {
     /// compared with the window's. Checked only when the header carries
     /// forward evidence.
     ForwardCommitments,
+    /// The live capture roots, compared whole.
+    LiveCapture,
 }
 
 impl IdentityField {
@@ -747,6 +780,7 @@ impl IdentityField {
             Self::Execution => "execution",
             Self::ForwardRecord => "forward_record",
             Self::ForwardCommitments => "forward_commitments",
+            Self::LiveCapture => "live_capture",
         }
     }
 }
@@ -787,6 +821,17 @@ fn json_text<T: Serialize>(value: Option<&T>, label: &str) -> Result<Option<Stri
     value
         .map(|v| serde_json::to_string(v).map_err(|e| format!("serialize {label}: {e}")))
         .transpose()
+}
+
+/// Live capture roots as the mismatch report shows them: absent when empty,
+/// else their canonical JSON.
+fn live_capture_text(roots: &BTreeMap<String, LiveCaptureRoot>) -> Result<Option<String>, String> {
+    if roots.is_empty() {
+        return Ok(None);
+    }
+    serde_json::to_string(roots)
+        .map(Some)
+        .map_err(|e| format!("serialize live capture: {e}"))
 }
 
 /// Every identity field on which `header` and `window` disagree.
@@ -870,6 +915,11 @@ fn identity_mismatches(
             IdentityField::ForwardRecord,
             json_text(forward.and_then(|f| f.record.as_ref()), "forward record")?,
             json_text(window.forward.as_ref(), "forward record")?,
+        ),
+        (
+            IdentityField::LiveCapture,
+            live_capture_text(&header.live_capture)?,
+            live_capture_text(&window.live_capture)?,
         ),
     ];
     if let Some(forward) = forward {
@@ -1205,6 +1255,7 @@ impl Arena {
             w.check_expiry()?;
             w.check_execution()?;
             w.check_forward()?;
+            live_capture::check_window_roots(&w)?;
             windows.insert(id.clone(), w);
         }
         Ok(Self {
@@ -1451,6 +1502,7 @@ impl Arena {
                 expired_at_epoch: None,
                 execution: None,
                 forward: None,
+                live_capture: BTreeMap::new(),
             },
         );
         self.state.window_order.push(id.to_string());
@@ -1671,6 +1723,7 @@ impl Arena {
         w.returns_provenance = admission.returns_provenance;
         w.execution = admission.execution;
         w.forward = admission.forward;
+        w.live_capture = admission.live_capture;
         w.status = WindowStatus::Scoring;
         self.save()?;
         Ok(scores)
@@ -1754,7 +1807,12 @@ impl Arena {
                 &w.commitments,
                 w.forward.as_ref(),
             )?),
+            live_capture: w.live_capture.clone(),
         };
+        let arena_key = key.verifying_key().to_hex();
+        for (agent_id, root) in &w.live_capture {
+            live_capture::check_root(&w.id, agent_id, root, Some(&arena_key))?;
+        }
         let rows: Vec<BoardRow> = w
             .scores
             .iter()
@@ -1855,6 +1913,16 @@ fn render_markdown(header: &WindowHeader, scores: &[CompositeScore], rows: &[Boa
             "Replayed under execution SHA-256 `{}`: cost model `{}` with {delay}, engine {}.\n\n",
             execution.execution_sha256, execution.cost_model_sha256, execution.engine_version
         ));
+    }
+    if !header.live_capture.is_empty() {
+        out.push_str("Live capture roots. A `live-captured` row ranks decisions the host logged bar by bar while the committed image ran, sealed under the arena key; it does not show which model snapshot a provider served.\n\n");
+        for (agent_id, root) in &header.live_capture {
+            out.push_str(&format!(
+                "- `{agent_id}`: image `{}`, root `{}`, {} bars, {} model calls, {} restarts\n",
+                root.image, root.root_sha256, root.bars, root.model_calls, root.restarts
+            ));
+        }
+        out.push('\n');
     }
     out.push_str("```\n");
     out.push_str(&sharpebench_leaderboard::render(scores));
@@ -2137,10 +2205,10 @@ pub fn verify_arena_expecting(
             Ok(header) => identity_mismatches(header, &window)?,
             Err(()) => Vec::new(),
         };
-        let certification_error = header
-            .as_ref()
-            .ok()
-            .and_then(|header| verify_certification::certification_error(header, &board));
+        let certification_error = header.as_ref().ok().and_then(|header| {
+            verify_certification::certification_error(header, &board)
+                .or_else(|| live_capture::board_error(header, &board))
+        });
         let (execution, execution_error) = match &header {
             Ok(header) => execution_status(header),
             Err(()) => (ExecutionStatus::NotReplayed, None),

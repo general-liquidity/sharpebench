@@ -64,6 +64,7 @@ fn published(dir: &Path, plan: Option<String>) {
             .unwrap();
         arena.advance(deadline + 10).unwrap();
         let entry = RevealedEntry {
+            live_log: None,
             agent_id: None,
             submission: Some(AgentSubmission {
                 agent_id: "alpha".to_string(),

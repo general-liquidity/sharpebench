@@ -622,6 +622,7 @@ fn run_window(
                 artifact_digest: artifact,
                 salt,
                 fault_plan_sha256: None,
+                live_log: None,
             });
         }
     }
@@ -993,6 +994,7 @@ fn boards_signed_before_the_ledger_still_verify_and_the_ledger_starts_after_them
                 artifact_digest: artifact,
                 salt: "salt".to_string(),
                 fault_plan_sha256: None,
+                live_log: None,
             }],
         )
         .unwrap();

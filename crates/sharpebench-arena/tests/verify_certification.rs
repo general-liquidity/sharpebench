@@ -46,6 +46,7 @@ impl Fixture {
             .unwrap();
         arena.advance(20).unwrap();
         let entry = RevealedEntry {
+            live_log: None,
             agent_id: None,
             submission: Some(AgentSubmission {
                 agent_id: "alpha".to_string(),
