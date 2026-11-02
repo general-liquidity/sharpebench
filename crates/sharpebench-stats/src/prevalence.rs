@@ -209,8 +209,11 @@ mod tests {
         assert_eq!(rogan_gladen(0.3, 1.0, 0.0).unwrap().estimate, 0.3);
         // An apparent share equal to the false-eligibility rate is all false
         // positives, one equal to the power is all skilled.
-        assert_eq!(rogan_gladen(0.125, 0.875, 0.125).unwrap().estimate, 0.0);
-        assert_eq!(rogan_gladen(0.875, 0.875, 0.125).unwrap().estimate, 1.0);
+        // Neither end is a clamp: the raw value is already 0 or 1.
+        let at_zero = rogan_gladen(0.125, 0.875, 0.125).unwrap();
+        assert_eq!((at_zero.estimate, at_zero.clamp), (0.0, Clamp::None));
+        let at_one = rogan_gladen(0.875, 0.875, 0.125).unwrap();
+        assert_eq!((at_one.estimate, at_one.clamp), (1.0, Clamp::None));
     }
 
     #[test]
