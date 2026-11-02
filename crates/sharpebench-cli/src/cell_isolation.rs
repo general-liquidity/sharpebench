@@ -68,6 +68,19 @@ pub fn run_evidence_mode(isolation: CellIsolation) -> serde_json::Value {
     disclosure(WindowTiming::Historical, Some(isolation), calls)
 }
 
+/// The `evaluation_tier` object for an entrant `sharpebench run` scored. Every
+/// window this command scores is historical, so the row never certifies
+/// skill, whatever its isolation class or evidence mode.
+pub fn run_evaluation_tier() -> serde_json::Value {
+    let tier = sharpebench_core::EvaluationTier::HistoricalAdvisory;
+    serde_json::json!({
+        "schema_version": sharpebench_core::EVALUATION_TIER_VERSION,
+        "tier": tier,
+        "certifies_skill": tier.certifies_skill(),
+        "rank_neutral": true,
+    })
+}
+
 /// The human-output line, printed beside the attempt accounting.
 pub fn print(agent_id: &str) {
     if let Some(isolation) = of_entrant(agent_id) {
@@ -241,6 +254,15 @@ mod tests {
             .remove("evidence_mode")
             .expect("the entrant row carries its evidence mode");
         assert_eq!(mode["certifying"], false);
+        let tier = entrant
+            .as_object_mut()
+            .expect("a row")
+            .remove("evaluation_tier")
+            .expect("the entrant row carries its evaluation tier");
+        assert_eq!(tier["tier"], "historical-advisory");
+        assert_eq!(tier["certifies_skill"], false);
+        assert_eq!(tier["schema_version"], "sharpebench.evaluation-tier.v1");
+        assert_eq!(tier["rank_neutral"], true);
         assert_eq!(with, without);
         assert!(without
             .as_array()

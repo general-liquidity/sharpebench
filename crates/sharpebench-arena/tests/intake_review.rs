@@ -286,7 +286,11 @@ fn a_board_that_ranks_a_replayed_hindsight_capture_is_signed_noncertifying() {
     assert_eq!(header_json(&dir)["certifying"], false);
     let md = board_md(&dir);
     assert!(
-        md.starts_with("# Arena window `w1`\n\n**Noncertifying board.**"),
+        md.starts_with(&format!(
+            "# Arena window `w1`\n\nEvaluation tier: `{}` ({}).\n\n**Noncertifying board.**",
+            sharpebench_core::EvaluationTier::HistoricalAdvisory.as_str(),
+            sharpebench_core::EvaluationTier::HistoricalAdvisory.meaning()
+        )),
         "{md}"
     );
     assert!(

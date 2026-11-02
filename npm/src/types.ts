@@ -416,6 +416,8 @@ export type HeadlineEvidence =
 
 /** Facts reported beside the verdict. None of them changes it. */
 export interface HeadlineQualifiers {
+  /** Evaluation tier, listed first. `historical-advisory` never certifies skill. */
+  tier: "historical-advisory" | "forward-certifying";
   evidence: HeadlineEvidence;
   tied: boolean;
   tie_group: number;

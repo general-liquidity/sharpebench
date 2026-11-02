@@ -29,14 +29,15 @@
 //! that a track was lucky, so the last rule says only that the evidence for skill
 //! is absent.
 //!
-//! Qualifiers ([`Qualifiers`]) never change the verdict: the evidence mode, the
-//! tie band, the stress mark, the advisory reasons and the labeled second
-//! verdicts are reported beside it.
+//! Qualifiers ([`Qualifiers`]) never change the verdict: the evaluation tier
+//! (listed first), the evidence mode, the tie band, the stress mark, the
+//! advisory reasons and the labeled second verdicts are reported beside it.
 
 use serde::{Deserialize, Serialize};
 
 use crate::composite::CompositeScore;
 use crate::disqualification::{classify_disqualification, DisqualThresholds, FailReason};
+use crate::evaluation_tier::EvaluationTier;
 use crate::stress_replay::StressReplay;
 
 /// Schema of the headline record.
@@ -147,6 +148,12 @@ pub enum HeadlineRow<'a> {
 /// The facts reported beside the verdict. None of them changes it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Qualifiers {
+    /// The evaluation tier the evidence puts the row in, listed first: a
+    /// `historical-advisory` row never certifies skill whatever its verdict.
+    /// Derived from `evidence` alone ([`EvaluationTier::of_evidence`]). A
+    /// record written before the field existed reads `historical-advisory`.
+    #[serde(default)]
+    pub tier: EvaluationTier,
     pub evidence: Evidence,
     /// Whether the row shares its deflated-Sharpe tie band with another
     /// eligible row (`dsr_tied`).
@@ -233,6 +240,7 @@ pub fn headline(
                 hard_reasons: Vec::new(),
                 cause: Some(reason.to_string()),
                 qualifiers: Qualifiers {
+                    tier: EvaluationTier::of_evidence(&context.evidence),
                     evidence: context.evidence.clone(),
                     tied: false,
                     tie_group: 0,
@@ -257,6 +265,7 @@ pub fn headline(
         hard_reasons: hard,
         cause,
         qualifiers: Qualifiers {
+            tier: EvaluationTier::of_evidence(&context.evidence),
             evidence: context.evidence.clone(),
             tied: score.dsr_tied,
             tie_group: score.tie_group,
@@ -671,8 +680,44 @@ mod tests {
             Some("submission arrived after the window closed")
         );
         assert_eq!(h.qualifiers.evidence, context.evidence);
+        assert_eq!(h.qualifiers.tier, EvaluationTier::HistoricalAdvisory);
         assert_eq!(h.qualifiers.stress, StressMark::Unavailable);
         assert!(!h.qualifiers.tied && h.qualifiers.tie_group == 0);
+        let forward = HeadlineContext {
+            evidence: Evidence::Certifying {
+                mode: "forward".into(),
+            },
+            stress: StressMark::NotRun,
+        };
+        let refused = headline(
+            HeadlineRow::Refused {
+                agent_id: "late",
+                reason: "late",
+            },
+            &thresholds(),
+            &forward,
+        );
+        assert_eq!(refused.qualifiers.tier, EvaluationTier::ForwardCertifying);
+    }
+
+    /// The tier is the first qualifier in the JSON record, and a record
+    /// written before the field existed reads back as historical-advisory.
+    #[test]
+    fn the_tier_is_the_first_qualifier_and_defaults_to_historical_advisory() {
+        let h = headline(
+            HeadlineRow::Scored(&eligible()),
+            &thresholds(),
+            &HeadlineContext::default(),
+        );
+        let json = serde_json::to_value(&h).unwrap();
+        assert_eq!(json["qualifiers"]["tier"], "historical-advisory");
+        let text = serde_json::to_string(&h).unwrap();
+        assert!(text.contains(r#""qualifiers":{"tier":"historical-advisory","evidence""#));
+        let mut legacy = json.clone();
+        legacy["qualifiers"].as_object_mut().unwrap().remove("tier");
+        let back: Headline = serde_json::from_value(legacy).unwrap();
+        assert_eq!(back.qualifiers.tier, EvaluationTier::HistoricalAdvisory);
+        assert_eq!(back, h);
     }
 
     /// Qualifiers are reported beside the verdict and never move it: the same
@@ -708,6 +753,10 @@ mod tests {
                 let h = headline(HeadlineRow::Scored(&score), &thresholds(), context);
                 assert_eq!(h.verdict, base);
                 assert_eq!(h.qualifiers.evidence, context.evidence);
+                assert_eq!(
+                    h.qualifiers.tier,
+                    EvaluationTier::of_evidence(&context.evidence)
+                );
                 assert_eq!(h.qualifiers.stress, context.stress);
                 assert_eq!(h.qualifiers.tied, score.dsr_tied);
                 assert_eq!(h.qualifiers.tie_group, score.tie_group);

@@ -212,6 +212,19 @@ fn cli_drives_the_full_lifecycle_and_verify_walks_the_chain() {
         std::fs::read_to_string(arena_dir.join("windows").join(window).join("board.md")).unwrap()
     };
     assert!(!md("w1").contains("Noncertifying"), "{}", md("w1"));
+    // The tier is the first line after the title: the certifying board is
+    // forward-certifying, the noncertifying one historical-advisory.
+    let tier_line = |window: &str| md(window).lines().nth(2).unwrap_or_default().to_string();
+    assert!(
+        tier_line("w1").starts_with("Evaluation tier: `forward-certifying`"),
+        "{}",
+        md("w1")
+    );
+    assert!(
+        tier_line("w2").starts_with("Evaluation tier: `historical-advisory`"),
+        "{}",
+        md("w2")
+    );
     assert!(
         md("w2").contains("**Noncertifying board.**"),
         "{}",
