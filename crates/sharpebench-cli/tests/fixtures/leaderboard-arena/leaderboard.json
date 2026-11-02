@@ -48,6 +48,7 @@
           "failed_pass_k"
         ],
         "qualifiers": {
+          "tier": "forward-certifying",
           "evidence": {
             "status": "certifying",
             "mode": "forward"
@@ -58,7 +59,8 @@
           "advisory": []
         }
       },
-      "tier": null,
+      "tier": "forward-certifying",
+      "tie_band": null,
       "rank_eligible": false,
       "dsr": 0.9658735278449151,
       "dsr_interval": [
@@ -97,6 +99,7 @@
           "bootstrap_insignificant"
         ],
         "qualifiers": {
+          "tier": "forward-certifying",
           "evidence": {
             "status": "certifying",
             "mode": "forward"
@@ -107,7 +110,8 @@
           "advisory": []
         }
       },
-      "tier": null,
+      "tier": "forward-certifying",
+      "tie_band": null,
       "rank_eligible": false,
       "dsr": 0.6486033842056311,
       "dsr_interval": [
@@ -143,6 +147,7 @@
         "hard_reasons": [],
         "cause": "reveal does not match commitment",
         "qualifiers": {
+          "tier": "historical-advisory",
           "evidence": {
             "status": "unknown"
           },
@@ -152,7 +157,8 @@
           "advisory": []
         }
       },
-      "tier": null,
+      "tier": "historical-advisory",
+      "tie_band": null,
       "rank_eligible": false,
       "dsr": null,
       "dsr_interval": null,
@@ -175,6 +181,7 @@
         "verdict": "skill_supported",
         "hard_reasons": [],
         "qualifiers": {
+          "tier": "historical-advisory",
           "evidence": {
             "status": "noncertifying",
             "mode": "forward",
@@ -189,7 +196,8 @@
           "advisory": []
         }
       },
-      "tier": 1,
+      "tier": "historical-advisory",
+      "tie_band": 1,
       "rank_eligible": true,
       "dsr": 1.0,
       "dsr_interval": [
@@ -228,6 +236,7 @@
         ],
         "cause": "returns must not be constant: a constant series has no Sharpe ratio",
         "qualifiers": {
+          "tier": "historical-advisory",
           "evidence": {
             "status": "noncertifying",
             "mode": "forward",
@@ -242,7 +251,8 @@
           "advisory": []
         }
       },
-      "tier": null,
+      "tier": "historical-advisory",
+      "tie_band": null,
       "rank_eligible": false,
       "dsr": null,
       "dsr_interval": null,

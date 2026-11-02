@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::composite::CompositeScore;
 use crate::disqualification::DisqualThresholds;
+use crate::evaluation_tier::EvaluationTier;
 use crate::headline::{headline, Evidence, Headline, HeadlineContext, HeadlineRow, StressMark};
 
 /// Schema of the export record.
@@ -125,10 +126,14 @@ pub struct RecordLink {
 pub struct ExportRow {
     pub board_id: String,
     pub headline: Headline,
-    /// The row's tier: its tie band (`tie_group`) when it is rank-eligible.
-    /// Rows that share a tier are statistically indistinguishable on the
-    /// deflated Sharpe. `None` for a row that cannot be ranked.
-    pub tier: Option<usize>,
+    /// The row's evaluation tier, the headline's first qualifier:
+    /// `forward-certifying` only for a row whose signed board header
+    /// certifies it, and `historical-advisory` for every other row.
+    pub tier: EvaluationTier,
+    /// The row's tie band (`tie_group`) when it is rank-eligible. Rows that
+    /// share a band are statistically indistinguishable on the deflated
+    /// Sharpe. `None` for a row that cannot be ranked.
+    pub tie_band: Option<usize>,
     pub rank_eligible: bool,
     /// The deflated Sharpe. `None` when the deflation family refused the track
     /// or could not compute it, whose stored value is a floor, not a figure.
@@ -181,8 +186,9 @@ pub fn scored_row(
     let total = (score.cost > 0.0).then_some(score.cost);
     ExportRow {
         board_id: board.board_id.clone(),
+        tier: headline.qualifiers.tier,
         headline,
-        tier: score.rank_eligible.then_some(score.tie_group),
+        tie_band: score.rank_eligible.then_some(score.tie_group),
         rank_eligible: score.rank_eligible,
         dsr: (!refused_shape).then_some(score.deflated_sharpe),
         dsr_interval,
@@ -224,14 +230,16 @@ pub fn refused_row(
         evidence,
         stress: StressMark::NotRun,
     };
+    let headline = headline(
+        HeadlineRow::Refused { agent_id, reason },
+        thresholds,
+        &context,
+    );
     ExportRow {
         board_id: board.board_id.clone(),
-        headline: headline(
-            HeadlineRow::Refused { agent_id, reason },
-            thresholds,
-            &context,
-        ),
-        tier: None,
+        tier: headline.qualifiers.tier,
+        headline,
+        tie_band: None,
         rank_eligible: false,
         dsr: None,
         dsr_interval: None,
@@ -358,7 +366,8 @@ fn link_cell(record: &RecordLink) -> String {
 fn row_line(row: &ExportRow) -> String {
     let dash = || "-".to_string();
     let scored = row.pass_k.is_some();
-    let tier = row.tier.map_or_else(dash, |t| t.to_string());
+    let tier = row.tier.as_str();
+    let tie_band = row.tie_band.map_or_else(dash, |t| t.to_string());
     let dsr = match row.dsr {
         Some(dsr) => format!("{dsr:.4}"),
         None if scored => "unavailable".to_string(),
@@ -388,7 +397,7 @@ fn row_line(row: &ExportRow) -> String {
         )
     });
     format!(
-        "| {} | {} | {} | {} | {tier} | {dsr} | {interval} | {pass_k} | {eligible} | {} | {cost} | {} | {} |",
+        "| {} | {} | {} | {} | {tier} | {tie_band} | {dsr} | {interval} | {pass_k} | {eligible} | {} | {cost} | {} | {} |",
         cell(&row.board_id),
         link_cell(&row.record),
         cell(&row.headline.agent_id),
@@ -433,12 +442,13 @@ pub fn render_markdown(export: &LeaderboardExport) -> String {
         out.push_str(&format!("- Head: `{}`\n", cell(head)));
     }
     out.push_str("\n## Boards\n\n");
-    out.push_str("| board | record | final signature sha256 | certifying | supplied returns | rows | refusals |\n");
-    out.push_str("|---|---|---|---|---|---|---|\n");
+    out.push_str("| board | tier | record | final signature sha256 | certifying | supplied returns | rows | refusals |\n");
+    out.push_str("|---|---|---|---|---|---|---|---|\n");
     for b in &export.boards {
         out.push_str(&format!(
-            "| {} | `{}` | `{}` | {} | {} | {} | {} |\n",
+            "| {} | {} | `{}` | `{}` | {} | {} | {} | {} |\n",
             cell(&b.board_id),
+            EvaluationTier::of_signed_forward_board(b.certifying).as_str(),
             cell(&b.board_path),
             cell(&b.final_signature_sha256),
             optional_flag(b.certifying),
@@ -448,8 +458,8 @@ pub fn render_markdown(export: &LeaderboardExport) -> String {
         ));
     }
     out.push_str("\n## Rows\n\n");
-    out.push_str("| board | record | agent | verdict | tier | DSR | DSR interval | pass^k | eligible | evidence | cost | qualifiers | reasons |\n");
-    out.push_str("|---|---|---|---|---|---|---|---|---|---|---|---|---|\n");
+    out.push_str("| board | record | agent | verdict | tier | tie band | DSR | DSR interval | pass^k | eligible | evidence | cost | qualifiers | reasons |\n");
+    out.push_str("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n");
     for row in &export.rows {
         out.push_str(&row_line(row));
         out.push('\n');
@@ -545,7 +555,9 @@ mod tests {
         assert_eq!(row.headline.verdict, Verdict::SkillSupported);
         assert_eq!(row.headline.qualifiers.evidence, certifying());
         assert_eq!(row.headline.qualifiers.stress, StressMark::NotRun);
-        assert_eq!(row.tier, Some(s.tie_group));
+        assert_eq!(row.tier, EvaluationTier::ForwardCertifying);
+        assert_eq!(row.tier, row.headline.qualifiers.tier);
+        assert_eq!(row.tie_band, Some(s.tie_group));
         assert!(s.tie_group > 0);
         assert!(row.rank_eligible);
         assert_eq!(row.dsr, Some(s.deflated_sharpe));
@@ -580,7 +592,7 @@ mod tests {
     }
 
     #[test]
-    fn an_ineligible_row_has_no_tier_and_unreported_cost_is_absent() {
+    fn an_ineligible_row_has_no_tie_band_and_unreported_cost_is_absent() {
         let scores = field();
         let s = &scores[1];
         let row = scored_row(
@@ -594,7 +606,8 @@ mod tests {
         );
         assert_eq!(row.returns_provenance, None);
         assert!(!row.rank_eligible);
-        assert_eq!(row.tier, None);
+        assert_eq!(row.tie_band, None);
+        assert_eq!(row.tier, EvaluationTier::HistoricalAdvisory);
         assert_ne!(row.headline.verdict, Verdict::SkillSupported);
         assert!(!row.headline.hard_reasons.is_empty());
         let cost = row.cost.unwrap();
@@ -645,7 +658,8 @@ mod tests {
             row.headline.cause.as_deref(),
             Some("commitment after the deadline")
         );
-        assert_eq!(row.tier, None);
+        assert_eq!(row.tie_band, None);
+        assert_eq!(row.tier, EvaluationTier::HistoricalAdvisory);
         assert!(!row.rank_eligible);
         assert_eq!((row.dsr, row.dsr_interval), (None, None));
         assert_eq!((row.pass_k, row.cost), (None, None));
@@ -729,11 +743,11 @@ mod tests {
         assert!(md.contains("- Completeness: anchored. rollback is undetectable\n"));
         assert!(md.contains(&format!("- Head: `1:{}`\n", "ab".repeat(32))));
         assert!(md.contains(&format!(
-            "| w1 | `windows/w1/board.json` | `{}` | yes | no | 2 | 1 |\n",
+            "| w1 | forward-certifying | `windows/w1/board.json` | `{}` | yes | no | 2 | 1 |\n",
             "ab".repeat(32)
         )));
         let skilled = format!(
-            "| w1 | `windows/w1/board.json#1` | skilled | skill_supported | {} | {:.4} | [{:.4}, {:.4}] | passed {}/{} | yes | certifying (forward, re-executed) | {:.4} entrant_reported | - | - |",
+            "| w1 | `windows/w1/board.json#1` | skilled | skill_supported | forward-certifying | {} | {:.4} | [{:.4}, {:.4}] | passed {}/{} | yes | certifying (forward, re-executed) | {:.4} entrant_reported | - | - |",
             s.tie_group,
             s.deflated_sharpe,
             s.dsr_ci_low.unwrap(),
@@ -747,14 +761,17 @@ mod tests {
             .iter()
             .find(|l| l.contains("| noisy |"))
             .expect("the noisy row");
-        assert!(noisy.contains(" | - | "), "no tier: {noisy}");
+        assert!(
+            noisy.contains(" | forward-certifying | - | "),
+            "no tie band: {noisy}"
+        );
         assert!(noisy.contains("| unreported |"), "{noisy}");
         assert!(noisy.contains(" | no | "), "{noisy}");
         assert!(noisy.contains("failed ") || noisy.contains("passed "));
         let refused = lines.last().unwrap();
         assert_eq!(
             *refused,
-            "| w1 | `windows/w1/board.json#0` | a\\|b c | refused | - | - | - | - | - | noncertifying (unrecorded) | - | - | cause: bad \\\\ reveal |"
+            "| w1 | `windows/w1/board.json#0` | a\\|b c | refused | historical-advisory | - | - | - | - | - | noncertifying (unrecorded) | - | - | cause: bad \\\\ reveal |"
         );
         // Every row line has the header's column count once escapes are
         // discounted.
@@ -809,8 +826,11 @@ mod tests {
         assert!(line.contains(
             "| unavailable | unavailable | failed ?/4 | yes | unknown | unreported | tied; stress marked; advisory: high_selection_gap, oos_decay; mandate: m; rank mode: r | dsr_below_bar, failed_pass_k, cause: why |"
         ), "{line}");
+        assert!(md.contains("| w1 | historical-advisory | `windows/w1/board.json` |"));
         e.boards[0].certifying = Some(false);
-        assert!(render_markdown(&e).contains("| no | yes | 2 | 1 |"));
+        let md = render_markdown(&e);
+        assert!(md.contains("| no | yes | 2 | 1 |"));
+        assert!(md.contains("| w1 | historical-advisory | `windows/w1/board.json` |"));
     }
 
     #[test]

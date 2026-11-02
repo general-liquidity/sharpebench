@@ -17,6 +17,7 @@ use sharpebench_arena::{
     RevealedEntry, SigningKey, BOARD_FILE, HEAD_FILE, STATE_FILE, WINDOWS_DIR, WINDOW_FILE,
 };
 use sharpebench_attest::{content_digest, make_commitment, PublicChain};
+use sharpebench_core::evaluation_tier::EvaluationTier;
 use sharpebench_core::headline::{Evidence, Verdict};
 use sharpebench_core::leaderboard_export::{render_markdown, to_canonical_json, SourceKind};
 use sharpebench_core::{AgentSubmission, Run, ScoreConfig};
@@ -252,6 +253,23 @@ fn the_export_reads_every_signed_row_and_refusal_in_chain_order() {
         export.rows[2].record.link_signature,
         board_header_signature(&dir.0, "w1")
     );
+    // The evaluation tier is forward-certifying only for a scored row of the
+    // certifying board; the refusal and both rows of the noncertifying board
+    // are historical-advisory.
+    let tiers: Vec<EvaluationTier> = export.rows.iter().map(|r| r.tier).collect();
+    assert_eq!(
+        tiers,
+        [
+            EvaluationTier::ForwardCertifying,
+            EvaluationTier::ForwardCertifying,
+            EvaluationTier::HistoricalAdvisory,
+            EvaluationTier::HistoricalAdvisory,
+            EvaluationTier::HistoricalAdvisory,
+        ]
+    );
+    for row in &export.rows {
+        assert_eq!(row.tier, row.headline.qualifiers.tier);
+    }
     assert_eq!(rows[4].1, "flat");
     assert_eq!(rows[4].2, Verdict::DegenerateTrack);
     assert_eq!(export.rows[4].dsr, None);
