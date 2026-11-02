@@ -12,6 +12,7 @@ sharpebench stress                    run the adversarial stress suite (contamin
 sharpebench audit                     self-audit: prove the scorer resists gaming
 sharpebench sign <subs.json> <key> <out.json>         score + sign a board to a file
 sharpebench verify <board.json> <key> verify a signed board's chain
+sharpebench leaderboard export <arena-dir|board.json> --out <dir>   verify signed boards, then write leaderboard.json and leaderboard.md
 sharpebench capture <agent> <out.json>                capture an agent's raw-decision trajectory
 sharpebench verify-trajectory <traj.json>             replay a trajectory → recompute its score
 sharpebench rescore <bundle.json>                     recompute a declared submission bundle from its frozen files
@@ -519,6 +520,22 @@ The [forward-attestation](attestation.md) surface: pre-register a strategy diges
 sign a published board, and verify a board's chain. HMAC verification requires a
 shared secret whose holders can also forge. Public verification uses the
 Ed25519 chain and a verifying key obtained through an independent channel.
+
+## `leaderboard export`
+
+```bash
+sharpebench leaderboard export <arena-dir | board.json> [--out <dir>] [--pubkey <hex>] [--expect-head <count>:<sha256>] [--key <secret>] [--public] [--json]
+```
+
+Verifies an arena directory (as `arena verify` does) or a board file from
+`sign` (under `--key`, `--pubkey` or `--public`), then writes a canonical JSON
+record and a Markdown table derived only from the signed links:
+`leaderboard.json` and `leaderboard.md` under `--out`, or the table (the record
+under `--json`) on standard output. An input that does not verify exits 1 and
+writes nothing; a usage error exits 2. Each row carries the headline verdict,
+tier, qualifiers, the deflated Sharpe with its interval, the pass^k count,
+eligibility, the evidence mode, the cost columns and the signed link it came
+from. See [Leaderboard export](leaderboard-export.md).
 
 ## `capture` / `verify-trajectory`
 

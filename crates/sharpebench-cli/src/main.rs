@@ -30,6 +30,7 @@ mod forecast_cmd;
 mod gateway_cli;
 mod grader_search_cmd;
 mod import_cmd;
+mod leaderboard_cmd;
 mod lineage_cmd;
 mod regrade_cmd;
 mod replay_diagnostics_cmd;
@@ -92,6 +93,9 @@ fn main() -> ExitCode {
         Some("regime") => run_regime(&args, json),
         Some("lineage") => ExitCode::from(lineage_cmd::run(&args, json).clamp(0, 255) as u8),
         Some("arena") => ExitCode::from(arena_cmd::run(&args, json).clamp(0, 255) as u8),
+        Some("leaderboard") => {
+            ExitCode::from(leaderboard_cmd::run(&args, json).clamp(0, 255) as u8)
+        }
         Some("forecast-quality") => {
             ExitCode::from(forecast_cmd::run(&args, json).clamp(0, 255) as u8)
         }
@@ -757,6 +761,9 @@ fn help() {
     );
     println!(
         "  sharpebench arena <init|open|commit|advance|score|publish|verify> ...  drive a forward-attested scoring window (see docs/book/src/arena.md)"
+    );
+    println!(
+        "  sharpebench leaderboard export <arena-dir|board.json> [--out <dir>] [--pubkey <hex>] [--expect-head <count>:<sha256>] [--key <secret>] [--public]  verify signed boards, then write leaderboard.json and leaderboard.md (see docs/book/src/leaderboard-export.md)"
     );
     println!(
         "  sharpebench forecast-quality <evidence.json>... [--contracts <plan.json>]  score prospective forecasts on exact common support, or on a declared contract plan (reported only)"

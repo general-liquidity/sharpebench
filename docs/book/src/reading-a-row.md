@@ -128,7 +128,9 @@ Qualifiers are listed beside the verdict and never change it.
 A field read from a submissions file carries no evidence mode and no stress
 replay, so `score --headline`, `headline`, wasm, npm and MCP report `unknown`
 and `not_run`. A library caller that holds those records passes them in
-`HeadlineContext`.
+`HeadlineContext`. The [leaderboard export](leaderboard-export.md) passes the
+`forward` mode for an arena row, certifying when the signed board header
+certifies and otherwise noncertifying with the board's flag as the reason.
 
 ### Three meanings of "certifying"
 
