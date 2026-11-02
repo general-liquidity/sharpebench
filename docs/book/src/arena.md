@@ -651,7 +651,10 @@ Honestly, quite a lot; deliberately so:
 
 - **No hosting or HTTP intake.** There is no server. Entrants deliver
   commitment files and reveal files out of band (a PR, an upload, an email);
-  the operator feeds them to the CLI.
+  the operator feeds them to the CLI. Readers get the published boards as
+  files: `sharpebench leaderboard export <arena-dir>` verifies the arena and
+  writes a JSON record and a Markdown table of every row (see
+  [Leaderboard export](leaderboard-export.md)).
 - **No wall-clock scheduler.** The arena never advances itself. Drive it with
   cron, CI, or by hand; the `advance` call is the entire integration surface.
 - **No proof of freshness from the documents alone.** A rollback to an earlier

@@ -1,0 +1,270 @@
+{
+  "schema": "sharpebench.leaderboard-export.v1",
+  "source": {
+    "kind": "arena",
+    "scheme": "ed25519",
+    "verifying_key": "324d7175f1c14e922259bde9312ea9574b3ef78a96f23d784f515b195a48e51a",
+    "key_pinned": true,
+    "completeness": "anchored",
+    "completeness_limit": "signed head covers every published window; a rollback to an earlier head together with its windows is undetectable from the documents alone, so pin a head seen out of band with --expect-head",
+    "head": "2:bbb31f35be1fcdbe8d91a0b282af2cd3faeca5ce9bfd9a06339e7c041effafee"
+  },
+  "boards": [
+    {
+      "board_id": "w1",
+      "board_path": "windows/w1/board.json",
+      "window_path": "windows/w1/window.json",
+      "final_signature_sha256": "268d9e0e62499b59633a321c1b203a8c4bec9672d2e0c4a1bba4c8eb2a0a9f05",
+      "dataset_hash": "6db1ff11159304c3f6473105065898475319f30b876d1f2f6f67ae61821518e7",
+      "score_config_sha256": "8c59e511ea2a9e572d8fb7901fd2951da1221ca9323bfe8e2fdbfa9395a89f07",
+      "scorer_artifact_sha256": "7bfc530c44de03b1be946e692e878b0f5ad2b83284248a60448da9c00056e3da",
+      "certifying": true,
+      "supplied_returns_accepted": false,
+      "rows": 2,
+      "refusals": 1
+    },
+    {
+      "board_id": "w2",
+      "board_path": "windows/w2/board.json",
+      "window_path": "windows/w2/window.json",
+      "final_signature_sha256": "bbb31f35be1fcdbe8d91a0b282af2cd3faeca5ce9bfd9a06339e7c041effafee",
+      "dataset_hash": "6db1ff11159304c3f6473105065898475319f30b876d1f2f6f67ae61821518e7",
+      "score_config_sha256": "8c59e511ea2a9e572d8fb7901fd2951da1221ca9323bfe8e2fdbfa9395a89f07",
+      "scorer_artifact_sha256": "7bfc530c44de03b1be946e692e878b0f5ad2b83284248a60448da9c00056e3da",
+      "certifying": false,
+      "supplied_returns_accepted": true,
+      "rows": 2,
+      "refusals": 0
+    }
+  ],
+  "rows": [
+    {
+      "board_id": "w1",
+      "headline": {
+        "schema": "sharpebench.headline.v1",
+        "agent_id": "beta",
+        "verdict": "cannot_tell",
+        "hard_reasons": [
+          "failed_pass_k"
+        ],
+        "qualifiers": {
+          "evidence": {
+            "status": "certifying",
+            "mode": "forward"
+          },
+          "tied": false,
+          "tie_group": 0,
+          "stress": "not_run",
+          "advisory": []
+        }
+      },
+      "tier": null,
+      "rank_eligible": false,
+      "dsr": 0.9658735278449151,
+      "dsr_interval": [
+        0.5589811331392853,
+        0.9992891733120199
+      ],
+      "dsr_interval_error": null,
+      "pass_k": {
+        "passed": false,
+        "runs_passed": 1,
+        "runs_scored": 2
+      },
+      "cost": {
+        "source": "entrant_reported",
+        "total": null,
+        "return_per_cost": null,
+        "dsr_per_cost": null
+      },
+      "returns_provenance": "re-executed",
+      "record": {
+        "board_path": "windows/w1/board.json",
+        "window_path": "windows/w1/window.json",
+        "link": 1,
+        "link_signature": "e2fee65d7e0faf02834abb1e04d9b4140f68f3b2fe6e33ea3e9bee419a394e30b402f01e9bc5ba8f2fd86dad01a74620b4c581949f7513cceb0265a6ad26660e"
+      }
+    },
+    {
+      "board_id": "w1",
+      "headline": {
+        "schema": "sharpebench.headline.v1",
+        "agent_id": "alpha",
+        "verdict": "no_evidence_of_skill",
+        "hard_reasons": [
+          "failed_pass_k",
+          "dsr_below_bar",
+          "bootstrap_insignificant"
+        ],
+        "qualifiers": {
+          "evidence": {
+            "status": "certifying",
+            "mode": "forward"
+          },
+          "tied": false,
+          "tie_group": 0,
+          "stress": "not_run",
+          "advisory": []
+        }
+      },
+      "tier": null,
+      "rank_eligible": false,
+      "dsr": 0.6486033842056311,
+      "dsr_interval": [
+        0.09388851156044026,
+        0.9732720512179843
+      ],
+      "dsr_interval_error": null,
+      "pass_k": {
+        "passed": false,
+        "runs_passed": 1,
+        "runs_scored": 2
+      },
+      "cost": {
+        "source": "entrant_reported",
+        "total": null,
+        "return_per_cost": null,
+        "dsr_per_cost": null
+      },
+      "returns_provenance": "re-executed",
+      "record": {
+        "board_path": "windows/w1/board.json",
+        "window_path": "windows/w1/window.json",
+        "link": 2,
+        "link_signature": "679201a426ce402627f690c204c987b323bb70dd3c87ce175f478348a36f42f25aa77ef4d7eb5894787636f4fc53c7780b830fbee3d9a6790f56649b5663920d"
+      }
+    },
+    {
+      "board_id": "w1",
+      "headline": {
+        "schema": "sharpebench.headline.v1",
+        "agent_id": "gamma",
+        "verdict": "refused",
+        "hard_reasons": [],
+        "cause": "reveal does not match commitment",
+        "qualifiers": {
+          "evidence": {
+            "status": "unknown"
+          },
+          "tied": false,
+          "tie_group": 0,
+          "stress": "not_run",
+          "advisory": []
+        }
+      },
+      "tier": null,
+      "rank_eligible": false,
+      "dsr": null,
+      "dsr_interval": null,
+      "dsr_interval_error": null,
+      "pass_k": null,
+      "cost": null,
+      "returns_provenance": null,
+      "record": {
+        "board_path": "windows/w1/board.json",
+        "window_path": "windows/w1/window.json",
+        "link": 0,
+        "link_signature": "d918704e059ffbe053852433f2a6214e44ef6d7158b5e546924ddfe330c75b64e49fce77ed99645d63efbf15e45fda60696aeaf7608a33c1a4ac0ba2583a4f04"
+      }
+    },
+    {
+      "board_id": "w2",
+      "headline": {
+        "schema": "sharpebench.headline.v1",
+        "agent_id": "delta",
+        "verdict": "skill_supported",
+        "hard_reasons": [],
+        "qualifiers": {
+          "evidence": {
+            "status": "noncertifying",
+            "mode": "forward",
+            "reasons": [
+              "the board does not certify its rows",
+              "the board ranked returns supplied by an entrant after the reveal"
+            ]
+          },
+          "tied": false,
+          "tie_group": 1,
+          "stress": "not_run",
+          "advisory": []
+        }
+      },
+      "tier": 1,
+      "rank_eligible": true,
+      "dsr": 1.0,
+      "dsr_interval": [
+        0.9999999999999993,
+        1.0
+      ],
+      "dsr_interval_error": null,
+      "pass_k": {
+        "passed": true,
+        "runs_passed": 3,
+        "runs_scored": 3
+      },
+      "cost": {
+        "source": "entrant_reported",
+        "total": 0.75,
+        "return_per_cost": 0.002877857704038442,
+        "dsr_per_cost": 1.3333333333333333
+      },
+      "returns_provenance": "supplied",
+      "record": {
+        "board_path": "windows/w2/board.json",
+        "window_path": "windows/w2/window.json",
+        "link": 1,
+        "link_signature": "671e82c36c8508578c5d1b84f10c124b0e8f9d0c35faf7742b6f25043503f934b3c9ad043dd9f6673c913dce171b66c4b1cc3bc3e2e25753c5eb94bd341d0701"
+      }
+    },
+    {
+      "board_id": "w2",
+      "headline": {
+        "schema": "sharpebench.headline.v1",
+        "agent_id": "flat",
+        "verdict": "degenerate_track",
+        "hard_reasons": [
+          "failed_pass_k",
+          "deflation_refused"
+        ],
+        "cause": "returns must not be constant: a constant series has no Sharpe ratio",
+        "qualifiers": {
+          "evidence": {
+            "status": "noncertifying",
+            "mode": "forward",
+            "reasons": [
+              "the board does not certify its rows",
+              "the board ranked returns supplied by an entrant after the reveal"
+            ]
+          },
+          "tied": false,
+          "tie_group": 0,
+          "stress": "not_run",
+          "advisory": []
+        }
+      },
+      "tier": null,
+      "rank_eligible": false,
+      "dsr": null,
+      "dsr_interval": null,
+      "dsr_interval_error": null,
+      "pass_k": {
+        "passed": false,
+        "runs_passed": 0,
+        "runs_scored": 3
+      },
+      "cost": {
+        "source": "entrant_reported",
+        "total": null,
+        "return_per_cost": null,
+        "dsr_per_cost": null
+      },
+      "returns_provenance": "supplied",
+      "record": {
+        "board_path": "windows/w2/board.json",
+        "window_path": "windows/w2/window.json",
+        "link": 2,
+        "link_signature": "3aa32ae41f67acf88f342b6a10f1b3ecfd0a851e98cf65802123d7c0f2a96e3dc85143ff7d3b0becd39fa23c8e6d796547b5008d93bcc46270d4fdcedad9af0b"
+      }
+    }
+  ]
+}

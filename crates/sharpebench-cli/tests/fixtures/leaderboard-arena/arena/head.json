@@ -1,0 +1,16 @@
+{
+  "scheme": "ed25519",
+  "verifying_key": "324d7175f1c14e922259bde9312ea9574b3ef78a96f23d784f515b195a48e51a",
+  "chain": [
+    {
+      "payload": "{\"kind\":\"sharpebench-arena-head\",\"published_count\":2,\"head_window_id\":\"w2\",\"head_digest\":\"bbb31f35be1fcdbe8d91a0b282af2cd3faeca5ce9bfd9a06339e7c041effafee\"}",
+      "prev_signature": "genesis",
+      "signature": "595c2f46fc88785aa2b2a6ae5214a95de296922bc792f0b66e9776cfee34639e009a8887c8c6e151db352cf473f15f13c9a8d4b37529281c316719d5a432310a"
+    }
+  ],
+  "receipt": {
+    "records": 1,
+    "terminal_signature": "595c2f46fc88785aa2b2a6ae5214a95de296922bc792f0b66e9776cfee34639e009a8887c8c6e151db352cf473f15f13c9a8d4b37529281c316719d5a432310a",
+    "signature": "308d8957ed1fd217798d5365dddfa1b9df6540b7d09d992f37deef482bf1fb4c877873190d3db1ed449618b9ac3831e7f6707b5d24e95926efbe8f41348def0b"
+  }
+}

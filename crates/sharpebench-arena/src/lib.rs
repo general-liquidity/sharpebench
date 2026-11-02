@@ -36,6 +36,7 @@ pub mod audit;
 pub mod execution;
 pub mod forward_evidence;
 pub mod intake;
+pub mod leaderboard_export;
 pub mod live_capture;
 mod persistence;
 pub mod sandbox;

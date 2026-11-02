@@ -1,0 +1,12 @@
+{
+  "current_epoch": 20,
+  "window_order": [
+    "w1",
+    "w2"
+  ],
+  "published_order": [
+    "w1",
+    "w2"
+  ],
+  "superseded": []
+}
