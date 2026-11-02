@@ -7,6 +7,7 @@ export const classify_disqualification: (a: number, b: number, c: number, d: num
 export const crowding_half_life: (a: number, b: number) => [number, number];
 export const decompose_uncertainty: (a: number, b: number) => [number, number];
 export const greeks: (a: number, b: number) => [number, number];
+export const headline: (a: number, b: number, c: number, d: number) => [number, number];
 export const is_my_sharpe_real: (a: number, b: number, c: number, d: number) => [number, number];
 export const is_my_sharpe_real_full: (a: number, b: number, c: number, d: number, e: number) => [number, number];
 export const percentile_selection: (a: number, b: number, c: number, d: number) => [number, number];
