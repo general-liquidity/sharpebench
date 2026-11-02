@@ -25,12 +25,14 @@ use std::path::PathBuf;
 use serde::Deserialize;
 use sharpebench_harness::accounting::RateCard;
 use sharpebench_harness::gateway::{GatewayLimits, ModelRoute, RouteTable, Secret};
-use sharpebench_harness::gateway_journal::{GatewayBudget, GatewayJournal, JournalLock};
+use sharpebench_harness::gateway_journal::{
+    CellCeilings, GatewayBudget, GatewayJournal, JournalLock,
+};
 
 const ROUTES_SCHEMA_VERSION: &str = "sharpebench.gateway-routes.v1";
 const MAX_ROUTES_BYTES: u64 = 256 * 1024;
 
-const USAGE: &str = "usage: sharpebench gateway --routes <routes.json> --budget-usd-nanos <n> --max-calls <n> [--journal <journal.json>] [--json]";
+const USAGE: &str = "usage: sharpebench gateway --routes <routes.json> --budget-usd-nanos <n> --max-calls <n> --cells <n> [--no-cell-ceilings] [--journal <journal.json>] [--json]";
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -118,7 +120,7 @@ fn load_routes(
     Ok((RouteTable::new(routes)?, bindings))
 }
 
-fn parse_budget(args: &[String]) -> Result<GatewayBudget, String> {
+fn parse_budget(args: &[String]) -> Result<SweepBudget, String> {
     let money = flag(args, "--budget-usd-nanos").ok_or(
         "--budget-usd-nanos <n> is required; a paid gateway run needs an explicit ceiling",
     )?;
@@ -133,11 +135,49 @@ fn parse_budget(args: &[String]) -> Result<GatewayBudget, String> {
     if max_usd_nanos == 0 || max_calls == 0 {
         return Err("a gateway budget of zero would refuse every call".into());
     }
-    Ok(GatewayBudget {
+    let cells = flag(args, "--cells").ok_or(
+        "--cells <n> is required: the number of (window, seed) cells the sweep runs, which sets each cell's share of the ceiling",
+    )?;
+    let cells: usize = cells
+        .parse()
+        .ok()
+        .filter(|&cells| cells > 0)
+        .ok_or_else(|| format!("--cells must be a positive integer, got `{cells}`"))?;
+    let ceilings = if args.iter().any(|arg| arg == "--no-cell-ceilings") {
+        CellCeilings::SweepOnly
+    } else {
+        CellCeilings::EqualShares
+    };
+    let budget = GatewayBudget {
         max_usd_nanos,
         max_calls,
         per_cell: None,
+    }
+    .for_published_sweep(cells, ceilings)?;
+    Ok(SweepBudget {
+        budget,
+        cells,
+        ceilings,
     })
+}
+
+/// The budget a sweep over `cells` cells runs under, and how its cell
+/// ceilings were chosen.
+struct SweepBudget {
+    budget: GatewayBudget,
+    cells: usize,
+    ceilings: CellCeilings,
+}
+
+impl SweepBudget {
+    /// Why the budget does or does not carry a per-cell ceiling.
+    fn cell_ceilings(&self) -> &'static str {
+        match (self.budget.per_cell, self.ceilings) {
+            (Some(_), _) => "equal_shares",
+            (None, CellCeilings::SweepOnly) => "opted_out",
+            (None, CellCeilings::EqualShares) => "single_cell",
+        }
+    }
 }
 
 fn limits_json(limits: &GatewayLimits) -> serde_json::Value {
@@ -165,7 +205,8 @@ fn report(
     lookup: &dyn Fn(&str) -> Option<String>,
 ) -> Result<serde_json::Value, String> {
     let path = flag(args, "--routes").ok_or(USAGE)?;
-    let budget = parse_budget(args)?;
+    let sweep_budget = parse_budget(args)?;
+    let budget = sweep_budget.budget;
     let (routes, bindings) = load_routes(path, lookup)?;
     let limits = GatewayLimits::default();
     let journal_path = flag(args, "--journal").map(PathBuf::from);
@@ -216,6 +257,12 @@ fn report(
         "budget": {
             "max_usd_nanos": budget.max_usd_nanos.to_string(),
             "max_calls": budget.max_calls,
+            "cells": sweep_budget.cells,
+            "cell_ceilings": sweep_budget.cell_ceilings(),
+            "per_cell": budget.per_cell.map(|cell| serde_json::json!({
+                "max_usd_nanos": cell.max_usd_nanos.to_string(),
+                "max_calls": cell.max_calls,
+            })),
         },
         "limits": limits_json(&limits),
         "journal": journal_path.as_ref().map(|path| path.display().to_string()),
@@ -312,6 +359,8 @@ mod tests {
             "1000000",
             "--max-calls",
             "50",
+            "--cells",
+            "1",
         ]))
         .expect("a complete configuration reports");
         assert_eq!(value["aliases"][0], "fake.v1");
@@ -334,6 +383,75 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    /// A sweep over more than one cell gets an equal per-cell share of the
+    /// ceiling unless the operator opts out, and the report says which applied.
+    /// A journal a per-cell sweep wrote is read under the default budget.
+    #[test]
+    fn per_cell_ceilings_are_on_by_default_for_a_multi_cell_sweep() {
+        let dir = temp_dir("percell");
+        let routes = write(
+            &dir,
+            "routes.json",
+            &manifest("fake.v1", "2026-01-01", KEY_VAR),
+        );
+        let journal = dir.join("journal.json");
+        let (table, _) = load_routes(&routes, &present).expect("routes");
+        let shared = GatewayBudget {
+            max_usd_nanos: 1000,
+            max_calls: 7,
+            per_cell: None,
+        }
+        .with_equal_cell_shares(3)
+        .expect("a share");
+        GatewayJournal::new(JournalIdentity::new(table.identity_digest(), shared))
+            .save(&journal)
+            .expect("save");
+        let journal = journal.display().to_string();
+        let report_with = |extra: &[&str]| {
+            let mut pairs = vec![
+                "--routes",
+                &routes,
+                "--budget-usd-nanos",
+                "1000",
+                "--max-calls",
+                "7",
+            ];
+            pairs.extend_from_slice(extra);
+            present_report(&args(&pairs))
+        };
+
+        let default = report_with(&["--cells", "3", "--journal", &journal])
+            .expect("the per-cell journal reads under the default budget");
+        assert_eq!(default["budget"]["cell_ceilings"], "equal_shares");
+        assert_eq!(default["budget"]["cells"], 3);
+        assert_eq!(
+            default["budget"]["per_cell"],
+            serde_json::json!({"max_usd_nanos": "333", "max_calls": 2})
+        );
+
+        let opted_out =
+            report_with(&["--cells", "3", "--no-cell-ceilings"]).expect("an opt-out reports");
+        assert_eq!(opted_out["budget"]["cell_ceilings"], "opted_out");
+        assert!(opted_out["budget"]["per_cell"].is_null());
+        let error = report_with(&["--cells", "3", "--no-cell-ceilings", "--journal", &journal])
+            .expect_err("the opt-out budget is not the one the journal is bound to");
+        assert!(error.contains("cannot resume"), "{error}");
+
+        let single = report_with(&["--cells", "1"]).expect("one cell reports");
+        assert_eq!(single["budget"]["cell_ceilings"], "single_cell");
+        assert!(single["budget"]["per_cell"].is_null());
+
+        for (extra, needle) in [
+            (&[][..], "--cells <n> is required"),
+            (&["--cells", "0"][..], "positive integer"),
+            (&["--cells", "8"][..], "zero share"),
+        ] {
+            let error = report_with(extra).expect_err("refused");
+            assert!(error.contains(needle), "{extra:?}: {error}");
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     /// A credential the host has not set is a refusal before anything runs, not
     /// an empty key discovered at the wire.
     #[test]
@@ -351,6 +469,8 @@ mod tests {
             "1000",
             "--max-calls",
             "5",
+            "--cells",
+            "1",
         ]))
         .expect_err("an unset credential refuses");
         assert!(error.contains("is not set"), "{error}");
@@ -380,6 +500,8 @@ mod tests {
             "0",
             "--max-calls",
             "5",
+            "--cells",
+            "1",
         ]))
         .expect_err("a zero ceiling refuses");
         assert!(zero.contains("zero"), "{zero}");
@@ -417,6 +539,8 @@ mod tests {
                     "1000",
                     "--max-calls",
                     "5",
+                    "--cells",
+                    "1",
                 ]))
                 .is_err(),
                 "{name} must be refused"
@@ -459,6 +583,8 @@ mod tests {
             "1000",
             "--max-calls",
             "5",
+            "--cells",
+            "1",
             "--journal",
             &journal,
         ]))
@@ -470,6 +596,8 @@ mod tests {
             "1000",
             "--max-calls",
             "5",
+            "--cells",
+            "1",
             "--journal",
             &journal,
         ]))
@@ -510,6 +638,8 @@ mod tests {
             "1000",
             "--max-calls",
             "5",
+            "--cells",
+            "1",
             "--journal",
             &journal,
         ]))
@@ -565,6 +695,8 @@ mod tests {
             "1000",
             "--max-calls",
             "5",
+            "--cells",
+            "1",
             "--journal",
             &journal,
         ]))
@@ -605,6 +737,8 @@ mod tests {
             "1000",
             "--max-calls",
             "5",
+            "--cells",
+            "1",
             "--journal",
             &journal,
         ]);

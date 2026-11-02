@@ -250,6 +250,11 @@ capture or returns. Intake admits it only when:
 6. replaying the logged decisions over the revealed data gives, at every bar,
    an observation with the logged digest.
 
+The two-minute tolerance (`MAX_CLOCK_SKEW_MS`) and the UTC bar day in rule 5
+are declared conventions, confirmed by the owner. The tolerance absorbs host
+clock jitter around bar boundaries; it is not a claim that the host clock is
+true time.
+
 A log that fails is refused and recorded with the rule it broke (for example
 `live log has no complete record of run 1 step 4`). One that passes is ranked
 on its logged decisions, replayed under the window's scorer exactly as a capture

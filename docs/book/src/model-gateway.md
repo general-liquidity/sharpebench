@@ -242,6 +242,22 @@ rows; whether rows ran under equal ceilings is what `budget_parity` (below)
 states. A budget with no `per_cell` serializes exactly as before the field
 existed, so its invocation digest and journal binding are unchanged.
 
+A published LLM sweep runs under per-cell ceilings by default.
+`GatewayBudget::for_published_sweep(cells, CellCeilings::default())` applies
+`with_equal_cell_shares` when the sweep has more than one (window, seed) cell,
+keeps the sweep ceiling alone for a single cell, and refuses a ceiling too
+small to give every cell a nonzero share. `CellCeilings::SweepOnly` is the
+explicit opt-out. The library types keep `per_cell` optional, and
+`run_gateway_sweep` runs the budget it is handed; an operator binary that produces a published board builds
+that budget with `for_published_sweep`, and `sharpebench gateway --cells <n>`
+reports the same budget, default on and opted out with `--no-cell-ceilings`.
+For pass^k this means each cell's attempt starts with its own share, so a
+pass^k pool across windows and seeds is not decided by which cells ran first.
+It does not make retries independent: retries of one cell still share that
+cell's ceiling. Whether per-cell ceilings applied is on every row, as
+`host_observed_usage.budget.per_cell`, and on the board, as `budget_parity`'s
+`per_cell_ceilings`.
+
 **A binary that runs the sweep.** The CLI does not run gateway sweeps, because
 serving needs an adapter and none ships. The operator's binary calls
 `run_gateway_sweep(sweep, host, attempt)`, where `attempt` starts one entrant per
@@ -271,14 +287,15 @@ environment minus every variable whose value carries a credential.
 
 ```bash
 sharpebench gateway --routes routes.json \
-  --budget-usd-nanos <n> --max-calls <n> \
-  [--journal journal.json] [--json]
+  --budget-usd-nanos <n> --max-calls <n> --cells <n> \
+  [--no-cell-ceilings] [--journal journal.json] [--json]
 ```
 
 This command never calls a provider. It resolves the route manifest, binds
 credentials from the environment by name, and prints the route-table identity,
 the aliases, which variable backs each alias (its value is always
-`<redacted>`), the budget, the `limits` the gateway enforces (the
+`<redacted>`), the budget (with `cells`, `per_cell` and `cell_ceilings`:
+`equal_shares`, `single_cell` or `opted_out`), the `limits` the gateway enforces (the
 `GatewayLimits` defaults: the request, message, tool, output, response, retry,
 concurrency and timeout bounds, and `max_requests_per_decision`), and, given a
 journal, what it has already committed: calls started, priced, unknown,
@@ -609,7 +626,8 @@ Nothing in a row says whether two rows can be compared at equal budget, and
 `host_observed_usage.budget` and returns a `sharpebench.budget-parity.v1`
 disclosure: `equal_ceilings`, true only when every row carries host-observed
 usage and all of them declare the same sweep and per-cell ceilings;
-`ceiling_groups`, one group of agent ids per distinct set of ceilings; and
+`per_cell_ceilings`, true only when every row carries host-observed usage and
+every one of their budgets has a per-cell ceiling; `ceiling_groups`, one group of agent ids per distinct set of ceilings; and
 `unbudgeted_agent_ids` for rows with no host budget, which no parity claim can
 cover. Agent ids are sorted, so the disclosure does not follow rank order.
 `attach_budget_parity` puts the same value on every row under `budget_parity`
@@ -751,14 +769,14 @@ the gate checks that claim too.
 | Where | Tests | Covers |
 |---|---|---|
 | `crates/sharpebench-harness/src/gateway.rs` | 52 | forbidden fields by name, exact alias resolution, two routes each reserved and priced under the alias named, a reservation no route explains refused at reopen, the host supplying destination, credential, revision and every bound, the envelope bounds, oversized, truncated, unparseable and unknown-field provider bodies, the shared permit pool, the reservation reaching disk before dispatch, hard money and call refusals starting no request, retries reconciled exactly once, absent usage as unknown rather than zero, framing overhead in the reservation, overspend stopping the sweep, one owner among racing gateways and a second gateway refused the journal the first owns, a settlement that cannot be persisted stopping the gateway, an unconfirmed durability published as unwritable rather than as lost ownership, a journal holding a settlement that never landed refused at reopen rather than resumed, a late answer refused and charged, resume without repricing, credential rotation excluded from identity, provider-reported cache counts recorded and unreported ones left absent, a per-cell ceiling admitting its last nanodollar and refusing past it with the budget kind, a per-cell call ceiling refusing with the call-limit kind, a cell past its ceiling refusing even a free call while other cells spend, a cell exactly at its ceiling still admitting a free call, a gateway stopped on its journal writing no decision log, redaction and rank neutrality |
-| `crates/sharpebench-harness/src/gateway_journal.rs` | 42 | the fold, partial and unavailable totals, the `host_observed` label, an unsettled reservation charged rather than refunded, a released reservation still consuming a call, a sweep-bound journal resuming only under its sweep, and the ownership family: one holder per journal document, a second name for that document refused, a document written before it carried an identity owned on the identity derived from its bytes, a legacy document's identity resolved from a single read of it, a stale lock refused rather than broken, a takeover recording who it displaced, and the version check refusing the displaced holder's next write; usage over a range of reservations measured only when complete, an unreadable priced amount unmeasured, spend per cell, equal cell shares rounding down and refusing a zero share, a budget and reservation without cells keeping their bytes, a cell stamp or decision log requiring v4, and a decision log past the last reservation refused on load |
+| `crates/sharpebench-harness/src/gateway_journal.rs` | 43 | the fold, partial and unavailable totals, the `host_observed` label, an unsettled reservation charged rather than refunded, a released reservation still consuming a call, a sweep-bound journal resuming only under its sweep, and the ownership family: one holder per journal document, a second name for that document refused, a document written before it carried an identity owned on the identity derived from its bytes, a legacy document's identity resolved from a single read of it, a stale lock refused rather than broken, a takeover recording who it displaced, and the version check refusing the displaced holder's next write; usage over a range of reservations measured only when complete, an unreadable priced amount unmeasured, spend per cell, equal cell shares rounding down and refusing a zero share, a published sweep's budget sharing its ceiling over two or more cells unless opted out, a budget and reservation without cells keeping their bytes, a cell stamp or decision log requiring v4, and a decision log past the last reservation refused on load |
 | `crates/sharpebench-harness/src/gateway_serve_tests.rs` | 22 | the serving loop on real OS pipes and one real child process: a call through the entrant's own pipe, a scored sweep with usage on the entrant's row, resume making no new calls, an interrupted sweep rerunning only unfinished cells, typed budget refusals, overlapping windows refused before a journal is written, the checkpoint and journal pair, gateway lines never read as decisions, the per-decision ceiling, host serving time excluded from the entrant clock, no credential in any launch, host material withheld, gateway requests, calls, tokens and money recorded per decision beside the rank and published again on resume, cost columns read from the host and never the entrant, a live entrant that overruns its decision budget charged with the overrun, sweep token totals and ceilings on the usage record with a v4 journal, unreported usage publishing no token or money figure, per-cell call and money ceilings keeping early cells from starving later ones, a resumed cell drawing on its own ceiling, attempt numbers continuing from the journal, and the presentation suite run against a gateway entrant with every model call brokered and counted by the host |
-| `crates/sharpebench-harness/src/cost_fairness.rs` | 12 | host-observed USD replacing every entrant-reported cost column, a refused deflation keeping `dsr_per_cost` null, an unmeasured host cost withholding the columns with its reason, a second attach never filing the host figure as the entrant's, budget parity true under one set of ceilings and false with grouped differing ceilings or an unbudgeted row, parity attached to every row moving nothing else, and the opt-in cost axis: USD and token frontiers, dominance on one axis at equality on the other, any row off the axis withholding the frontier, and a missing token count withholding only the token frontier |
+| `crates/sharpebench-harness/src/cost_fairness.rs` | 13 | host-observed USD replacing every entrant-reported cost column, a refused deflation keeping `dsr_per_cost` null, an unmeasured host cost withholding the columns with its reason, a second attach never filing the host figure as the entrant's, budget parity true under one set of ceilings and false with grouped differing ceilings or an unbudgeted row, per-cell ceilings disclosed only when every row ran under one, parity attached to every row moving nothing else, and the opt-in cost axis: USD and token frontiers, dominance on one axis at equality on the other, any row off the axis withholding the frontier, and a missing token count withholding only the token frontier |
 | `crates/sharpebench-harness/tests/gateway_error_vocabulary.rs` | 2 | the detail sentence of every error kind held equal to this chapter, and the kind list held complete |
 | `crates/sharpebench-harness/tests/journal_ownership_review.rs` | 3 | the two journal-ownership findings of the [accounting review](https://github.com/general-liquidity/sharpebench/blob/main/docs/audits/2026-09-09/ACCOUNTING-REVIEW.md), through the public surface only: a holder releases the lock it holds and no other, and one journal document admits one gateway under either of two names, a document written before it carried an identity included |
 | `crates/sharpebench-harness/tests/finish_reason_accounting.rs` | 6 | stop-reason accounting: a length-stopped answer counted as `length`, the exact class vocabulary, refused and released calls in no class, the counts surviving the journal file, a journal written before the field reporting its answers as `unrecorded`, an unknown class refused at load, and a truncated sweep publishing its counts in `host_observed_usage` |
 | `crates/sharpebench-harness/tests/journal_schema_rollback.rs` | 7 | rollback safety for the class: the published version strings, a journal with no class staying v1 and passing an older binary's admission checks, the first recorded class writing v2, which those checks refuse and this binary resumes, a v1 journal that already holds classes written as v2 on its next save and not on load, unknown versions (v5 among them) refused by both loaders, a v2 journal keeping its route, budget and sweep binding, and a journal holding a cache count written as v3 |
-| `crates/sharpebench-cli/src/gateway_cli.rs` | 8 | the operator report, including `limits.max_requests_per_decision`, `journal_lock_held` and `finish_reasons`, a sweep-bound journal reported with its sweep, and the refusals: a malformed manifest, a missing credential, a missing or zero budget, and a journal bound to another route table |
+| `crates/sharpebench-cli/src/gateway_cli.rs` | 9 | the operator report, including `limits.max_requests_per_decision`, `journal_lock_held` and `finish_reasons`, a sweep-bound journal reported with its sweep, per-cell ceilings on by default for a multi-cell sweep with the opt-out, a single cell and a refused zero share, and the refusals: a malformed manifest, a missing credential, a missing or zero budget, and a journal bound to another route table |
 
 The arena's sandbox is not one of those files. Most of its tests are the
 sandbox's own and two concern the gateway, so a count of the file would be a

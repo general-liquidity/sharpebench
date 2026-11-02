@@ -92,7 +92,7 @@ wrong bar rather than nothing, and its Sharpe falls under the shifted calendar.
 ## `contamination-probe`
 
 ```bash
-sharpebench contamination-probe <entrant> [--data <csv>] [--window-bars N] [--windows N] [--twin-seed N] [--frictionless] [--short-borrow-bps <bps>] [--declared-training-cutoff YYYY-MM-DD] [--json]
+sharpebench contamination-probe <entrant> [--data <csv>] [--window-bars N] [--windows N] [--twin-seed N] [--with-costs [--short-borrow-bps <bps>] [--fill-delay-bars N]] [--declared-training-cutoff YYYY-MM-DD] [--json]
 ```
 
 The shape-level probe for the part the mask cannot hide. Each of up to
@@ -104,11 +104,16 @@ each, and the edge is real Sharpe minus twin Sharpe; a whole-window sign-flip
 test with a minimum-edge floor decides `memorization`. Every twin is built before
 any arm runs. The document is `sharpebench.contamination-probe.v1`.
 
-Costs are `run`'s cost model unless `--frictionless` is given. The probe
-measures recall, and a recalling agent that switches its book every bar pays
-away under the default impact charge what it remembers; the planted `--cmd`
-memorizer is convicted with `--frictionless` and was not convicted under the
-default costs when the fixture was built. The document records which was used.
+Both arms run frictionless by default. The probe asks whether an agent recalls
+the path, not whether recall pays after costs, and a recalling agent that
+switches its book every bar pays away under the default impact charge what it
+remembers: the planted `--cmd` memorizer is convicted frictionless and was not
+convicted under `run`'s costs when the fixture was built. `--with-costs` opts
+both arms into `run`'s cost model, and only with it do `--short-borrow-bps` and
+`--fill-delay-bars` apply; given without it, either is a usage error rather
+than a flag silently ignored. `--frictionless` is still accepted and changes
+nothing, and combined with `--with-costs` it is a usage error. The document
+records the mode as `context.frictionless`.
 
 Its stated limit stands: block resampling copies stretches of the real path into
 the twin, which biases the edge toward zero, never toward a false conviction.

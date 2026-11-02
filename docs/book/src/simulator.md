@@ -76,6 +76,12 @@ A book whose NAV is at or below `1e-12` is ruined, and ruin is absorbing:
 - Every later bar books a return of exactly 0, and the book stays at the ruined
   NAV.
 
+Ruin is not capped at -100 percent, and the owner has confirmed this
+convention. When a negative mark carries NAV through zero, the ruin bar's return
+is the real loss against the previous NAV, which can exceed the capital: a long
+futures position held through a negative settlement owes more than the book
+held. Capping the return at -100 percent would hide that loss beyond capital.
+
 Every return of a run is therefore finite. Before this rule the engine sized the
 next targets against the negative NAV, which turned every long into a short and,
 through the participation term of the impact model, compounded the commodities

@@ -234,6 +234,41 @@ impl GatewayBudget {
     }
 }
 
+/// Whether a published sweep's budget carries a ceiling for each cell.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CellCeilings {
+    /// Divide the sweep ceiling evenly over the cells, with
+    /// [`GatewayBudget::with_equal_cell_shares`], when the sweep has more than
+    /// one (window, seed) cell. The default for a published sweep: under one
+    /// shared ceiling an entrant that overspends early meets
+    /// `budget_exhausted` in later cells, and pass^k across them then measures
+    /// budget order as much as the strategy.
+    #[default]
+    EqualShares,
+    /// The sweep ceiling only. An explicit opt-out.
+    SweepOnly,
+}
+
+impl GatewayBudget {
+    /// The budget a published sweep over `cells` (window, seed) cells runs
+    /// under. With [`CellCeilings::EqualShares`] and more than one cell, each
+    /// cell gets an equal share of the sweep ceiling; a single cell, or
+    /// [`CellCeilings::SweepOnly`], keeps the sweep ceiling alone. A share that
+    /// would round to zero is refused rather than silently dropped, because a
+    /// zero share refuses every call.
+    pub fn for_published_sweep(self, cells: usize, ceilings: CellCeilings) -> Result<Self, String> {
+        if ceilings == CellCeilings::SweepOnly || cells <= 1 {
+            return Ok(self);
+        }
+        self.with_equal_cell_shares(cells).ok_or_else(|| {
+            format!(
+                "a sweep ceiling of {} calls and {} USD nanodollars gives at least one of {cells} cells a zero share; raise the ceiling or opt out of per-cell ceilings",
+                self.max_calls, self.max_usd_nanos
+            )
+        })
+    }
+}
+
 /// The sweep cell a reservation was made for. Written on reservations a sweep
 /// makes and absent on every other, so a journal no sweep owns keeps the bytes
 /// it had before the field existed.
@@ -2052,6 +2087,33 @@ mod tests {
         assert_eq!(budget(100, 2).with_equal_cell_shares(3), None);
         assert_eq!(budget(2, 7).with_equal_cell_shares(3), None);
         assert_eq!(budget(100, 7).with_equal_cell_shares(usize::MAX), None);
+    }
+
+    #[test]
+    fn a_published_sweep_shares_its_ceiling_over_two_or_more_cells_unless_opted_out() {
+        let shared = budget(100, 7)
+            .for_published_sweep(3, CellCeilings::default())
+            .expect("a share");
+        assert_eq!(shared, budget(100, 7).with_equal_cell_shares(3).unwrap());
+        for (cells, ceilings) in [
+            (1, CellCeilings::EqualShares),
+            (0, CellCeilings::EqualShares),
+            (3, CellCeilings::SweepOnly),
+        ] {
+            assert_eq!(
+                budget(100, 7).for_published_sweep(cells, ceilings),
+                Ok(budget(100, 7)),
+                "{cells} cells, {ceilings:?}"
+            );
+        }
+        let refused = budget(100, 2)
+            .for_published_sweep(3, CellCeilings::EqualShares)
+            .expect_err("a zero call share");
+        assert!(refused.contains("zero share"), "{refused}");
+        assert_eq!(
+            budget(100, 2).for_published_sweep(3, CellCeilings::SweepOnly),
+            Ok(budget(100, 2))
+        );
     }
 
     /// A budget with no cell ceiling, and a reservation with no cell, are

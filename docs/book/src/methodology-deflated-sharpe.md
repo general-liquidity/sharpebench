@@ -30,7 +30,8 @@ carries `"psr_standard_error": "benchmark"`. The default, `observed`, is omitted
 from a serialized configuration and from every row, so a default board, its
 digests and the joint-gate engine fingerprint are byte-identical to a build
 without the field. The default does not change: the joint-gate protocol freezes
-the plug-in estimand. Why the opt-in exists: the plug-in PSR is not monotone in
+the plug-in estimand, and the default stays `observed` until a named-rule run in
+the joint-gate study measures the change. Why the opt-in exists: the plug-in PSR is not monotone in
 the observed Sharpe. With the moments fixed, its slope at a zero benchmark has
 the sign of `1 - g3 SR / 2`, so on a short, smooth, positively skewed track
 (`g3 SR > 2`) a higher Sharpe lowers it, and a pinned five-bar track shows it.
