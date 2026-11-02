@@ -1157,7 +1157,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 **Labels.** `tab:attacks`
 
 **Artifacts.**
-- `crates/sharpebench-core/src/selfaudit.rs`, sha256 `30fe452f24b34d286086d6e1d1afde7b9134c76568539f0d97a553744c066cbc`, digest source: paper/evidence/provenance.json, carries the battery and the commit-time assertions that every case is defended and no known gap remains
+- `crates/sharpebench-core/src/selfaudit.rs`, sha256 `187b68cfd75021a37647dd00a55fe8d944b41b009b7f30001d21f3d9934cb305`, digest source: paper/evidence/provenance.json, carries the battery and the commit-time assertions that every case is defended and no known gap remains
 - `crates/sharpebench-arena/src/audit.rs`, sha256 `5dba8da8bce47be67aaace6b7b297668026f3a038b0b136f75a9f04f4d15cb14`, digest source: paper/evidence/provenance.json, the tenth case, against the forward arena's intake
 
 **Producer command.** sharpebench audit (paper/sections/A-commands.tex); the claim is enforced by the commit-time tests in the two files above.
@@ -2579,7 +2579,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 **Source.** `paper/sections/05-experiments.tex:266`
 
 **Artifacts.**
-- `crates/sharpebench-core/src/selfaudit.rs`, sha256 `30fe452f24b34d286086d6e1d1afde7b9134c76568539f0d97a553744c066cbc`, digest source: paper/evidence/provenance.json
+- `crates/sharpebench-core/src/selfaudit.rs`, sha256 `187b68cfd75021a37647dd00a55fe8d944b41b009b7f30001d21f3d9934cb305`, digest source: paper/evidence/provenance.json
 - `crates/sharpebench-arena/src/audit.rs`, sha256 `5dba8da8bce47be67aaace6b7b297668026f3a038b0b136f75a9f04f4d15cb14`, digest source: paper/evidence/provenance.json
 
 **Producer command.** sharpebench audit; enforced by the commit-time tests in the two files above.

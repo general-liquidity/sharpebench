@@ -17,7 +17,10 @@
 //! floor).
 
 use sharpebench_core::significance::bootstrap_pvalue;
-use sharpebench_core::{rank, AgentSubmission, CompositeScore, PassMode, Run, ScoreConfig};
+use sharpebench_core::{
+    rank, rank_declared, AgentSubmission, CompositeScore, DeclaredMandate, MandateDeclarations,
+    PassMode, Run, ScoreConfig,
+};
 use sharpebench_stats::{
     certify_without_moment_credit, deflated_sharpe_ratio, per_period_from_annualized,
     serially_corrected_deflated_sharpe,
@@ -314,4 +317,25 @@ fn a_real_edge_keeps_its_eligibility() {
         assert_eq!(row.standard_error_refusal, None, "{label}: {row:?}");
         assert!(row.rank_eligible, "{label}: {row:?}");
     }
+}
+
+/// The refusal is reported only where it decided a verdict. The found AR(1)
+/// track still fails the serial-correlation certification, but at an alpha no
+/// bootstrap p-value reaches, both its host verdict and its declared one are
+/// already refused by the bootstrap gate, so neither names the certification.
+#[test]
+fn a_row_refused_on_another_gate_names_no_standard_error_refusal() {
+    let cfg = ScoreConfig {
+        pass_mode: PassMode::All,
+        alpha: 1e-9,
+        ..ScoreConfig::default()
+    };
+    let mut declarations = MandateDeclarations::new();
+    declarations.insert("candidate".into(), DeclaredMandate::AbsoluteReturn);
+    let row = rank_declared(&[agent("candidate", ar1_admission())], &declarations, &cfg).remove(0);
+    assert!(row.deflated_sharpe >= cfg.dsr_bar, "{row:?}");
+    assert!(row.bootstrap_p >= cfg.alpha, "{row:?}");
+    assert_eq!(row.declared_mandate_eligible, Some(false), "{row:?}");
+    assert!(!row.rank_eligible, "{row:?}");
+    assert_eq!(row.standard_error_refusal, None, "{row:?}");
 }
