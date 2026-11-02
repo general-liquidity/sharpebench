@@ -24,6 +24,55 @@ exclude_re = [
     # `fmt` with `Ok(())` changes nothing a test should pin; a missed mutant
     # here would only push tests to freeze wording.
     "<impl (std::)?(fmt::)?(Display|Debug) for ",
+    # Equivalent mutants, each anchored to its file and line so it is the only
+    # mutant the pattern drops; if the code moves, the mutant reappears and the
+    # gate asks again. Found running the gate over the scorer round
+    # (d5123f8..1e7224c), which reached main without it.
+    #
+    # charge is a sum of squares, so charge == 0 means every bar is zero (or
+    # squares underflow to zero) and z = profit / 0 is NaN or infinite: the
+    # finiteness test already returns None, so `>` and `>=` agree.
+    'exposure_path\.rs:89:13: replace > with >= in forgone_risk_z$',
+    # alpha >= 0 and observations >= 0, so the bandwidth is never a negative
+    # finite number; +inf saturates to usize::MAX and min(cap) is the cap, and
+    # NaN fails both forms, so `&&` and `||` agree on every reachable value.
+    # A window of exactly k bars has an empty lag-k tail, so zipping it with
+    # w[k..] adds no product: the filter only keeps shorter windows from
+    # slicing out of range, and `>` and `>=` sum the same terms.
+    'serial_correlation\.rs:104:33: replace > with >= in within_window_autocorrelations$',
+    'serial_correlation\.rs:124:30: replace && with \|\| in andrews_bartlett_bandwidth$',
+    # Fewer than two kept votes, or no share matrix, always gives equal weights
+    # (two votes share s symmetrically, so both overlaps are 1 + s bit for bit;
+    # no matrix weighs every vote 1), and the equal-weight test right below
+    # returns None, so the early return only skips work.
+    # cosine_similarity is clamped to [-1, 1], so at tau == 1 the share
+    # (r^2 - 1) / 0 is -inf or NaN and max(0.0) makes it 0, the value the
+    # `tau < 1` branch gives: `<` and `<=` agree.
+    'composite\.rs:2363:36: replace < with <= in SharedVariance::of$',
+    # Weights here are positive and not all equal, so v1^2 > v2 and the
+    # denominator is positive and never NaN: the guard cannot fire in either
+    # form, and `||` and `&&` agree.
+    'composite\.rs:2475:29: replace \|\| with && in weighted_dispersion$',
+    # On weighted == plain the two values are the same non-negative number
+    # (both standard deviations are +0 or positive), so returning either is
+    # returning the same bits: `>` and `>=` agree.
+    'composite\.rs:2417:36: replace > with >= in field_dispersion$',
+    # Two votes always carry equal weights, so the centre is their midpoint and
+    # each sits half a gap from it, inside a reach of 5.28 robust scales of
+    # 1.048 gaps (or more, with the floor): two votes are never clipped.
+    'composite\.rs:2587:20: replace < with <= in clip_distant_votes$',
+    # A Vec capacity hint: changing it changes no value.
+    'composite\.rs:2603:28: replace \* with (\+|/) in clip_distant_votes$',
+    'composite\.rs:2450:19: replace < with (<=|==) in weighted_dispersion$',
+    'composite\.rs:2450:23: replace \|\| with && in weighted_dispersion$',
+    # A self-audit fixture, not scoring code: flipping the phase of the skilled
+    # run's sinusoid keeps its drift, its amplitude and its losing bars, so
+    # every audit case returns the same verdict.
+    'selfaudit\.rs:84:28: replace \+ with - in skilled_run$',
+    # The same fixture's sinusoid frequency, `i * 0.7` read as `i / 0.7` or
+    # `i + 0.7`: still a clean drifting track with losing bars, eligible on its
+    # own, so every case verdict is the same.
+    'selfaudit\.rs:84:48: replace \* with (\+|/) in skilled_run$',
 ]
 
 # Timeouts. The default is 1.5x the baseline test time with a 20 second floor,
