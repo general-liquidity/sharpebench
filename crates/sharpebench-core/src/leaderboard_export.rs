@@ -164,6 +164,9 @@ pub struct LeaderboardExport {
 ///
 /// `thresholds` must be [`DisqualThresholds::from_score_config`] of the
 /// configuration the board was scored under, as for [`headline`].
+/// `stalled_holds` is the count the row's signed live capture root records;
+/// zero or `None` adds no qualifier.
+#[allow(clippy::too_many_arguments)]
 pub fn scored_row(
     board: &BoardRecord,
     link: usize,
@@ -172,10 +175,12 @@ pub fn scored_row(
     thresholds: &DisqualThresholds,
     evidence: Evidence,
     returns_provenance: Option<&str>,
+    stalled_holds: Option<u64>,
 ) -> ExportRow {
     let context = HeadlineContext {
         evidence,
         stress: StressMark::NotRun,
+        stalled_holds: stalled_holds.filter(|&holds| holds > 0),
     };
     let headline = headline(HeadlineRow::Scored(score), thresholds, &context);
     let refused_shape = score.deflation_error.is_some() || score.deflation_refusal.is_some();
@@ -229,6 +234,7 @@ pub fn refused_row(
     let context = HeadlineContext {
         evidence,
         stress: StressMark::NotRun,
+        stalled_holds: None,
     };
     let headline = headline(
         HeadlineRow::Refused { agent_id, reason },
@@ -339,6 +345,9 @@ fn qualifiers_cell(row: &ExportRow) -> String {
     }
     if let Some(label) = &q.rank_mode {
         parts.push(format!("rank mode: {}", cell(label)));
+    }
+    if let Some(holds) = q.stalled_holds {
+        parts.push(format!("stalled_holds {holds}"));
     }
     if parts.is_empty() {
         "-".to_string()
@@ -548,7 +557,9 @@ mod tests {
             &thresholds(),
             certifying(),
             Some("re-executed"),
+            Some(3),
         );
+        assert_eq!(row.headline.qualifiers.stalled_holds, Some(3));
         assert_eq!(row.returns_provenance.as_deref(), Some("re-executed"));
         assert_eq!(row.board_id, "w1");
         assert_eq!(row.headline.agent_id, "skilled");
@@ -603,7 +614,10 @@ mod tests {
             &thresholds(),
             Evidence::Unknown,
             None,
+            Some(0),
         );
+        // A zero count is no qualifier.
+        assert_eq!(row.headline.qualifiers.stalled_holds, None);
         assert_eq!(row.returns_provenance, None);
         assert!(!row.rank_eligible);
         assert_eq!(row.tie_band, None);
@@ -629,7 +643,16 @@ mod tests {
         let mut half = base.clone();
         half.dsr_ci_high = None;
         let row = |s: &CompositeScore| {
-            scored_row(&board(), 1, "s", s, &thresholds(), Evidence::Unknown, None)
+            scored_row(
+                &board(),
+                1,
+                "s",
+                s,
+                &thresholds(),
+                Evidence::Unknown,
+                None,
+                None,
+            )
         };
         assert_eq!(row(&refused).dsr, None);
         assert_eq!(row(&failed).dsr, None);
@@ -688,6 +711,7 @@ mod tests {
                     &thresholds(),
                     certifying(),
                     Some("re-executed"),
+                    None,
                 )
             })
             .collect();
@@ -813,6 +837,7 @@ mod tests {
         q.advisory = vec![FailReason::HighSelectionGap, FailReason::OosDecay];
         q.declared_mandate = Some("m".into());
         q.rank_mode = Some("r".into());
+        q.stalled_holds = Some(2);
         q.evidence = Evidence::Unknown;
         row.returns_provenance = None;
         let md = render_markdown(&e);
@@ -824,7 +849,7 @@ mod tests {
         assert!(md.contains("| unrecorded | yes | 2 | 1 |"), "{md}");
         let line = md.lines().find(|l| l.contains("| skilled |")).unwrap();
         assert!(line.contains(
-            "| unavailable | unavailable | failed ?/4 | yes | unknown | unreported | tied; stress marked; advisory: high_selection_gap, oos_decay; mandate: m; rank mode: r | dsr_below_bar, failed_pass_k, cause: why |"
+            "| unavailable | unavailable | failed ?/4 | yes | unknown | unreported | tied; stress marked; advisory: high_selection_gap, oos_decay; mandate: m; rank mode: r; stalled_holds 2 | dsr_below_bar, failed_pass_k, cause: why |"
         ), "{line}");
         assert!(md.contains("| w1 | historical-advisory | `windows/w1/board.json` |"));
         e.boards[0].certifying = Some(false);

@@ -1,8 +1,13 @@
 //! The live window runner end to end: a window opened, run bar by bar from a
 //! replay feed, sealed, scored, published and verified. Each entrant is a
 //! model-backed process on real OS pipes behind the real gateway entrant and
-//! model gateway, with a fake provider and a simulated clock: no model call,
-//! no network, no container, no market data.
+//! model gateway, with a fake provider and a deterministic clock: no model
+//! call, no network, no container, no market data.
+//!
+//! Most tests run under [`StandInHostClock`], which moves like the rehearsal
+//! clock but does not report itself simulated, so the certifying path is
+//! exercised. The rehearsal clock itself is tested on its own: a board run
+//! under it is `live-rehearsal` and never certifies.
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -102,7 +107,28 @@ fn key() -> SigningKey {
     SigningKey::derive(b"live-window-arena-key")
 }
 
+/// A deterministic stand-in for the host's wall clock: the rehearsal clock's
+/// readings, without its rehearsal mark. An operator's real host runs
+/// `SystemClock`; these tests replay bars from years ago, so they need a clock
+/// that moves with the bars.
+struct StandInHostClock(SimulatedClock);
+
+impl HostClock for StandInHostClock {
+    fn now_unix_ms(&self) -> u64 {
+        self.0.now_unix_ms()
+    }
+
+    fn bar_arrived(&self, date: &str) {
+        self.0.bar_arrived(date);
+    }
+}
+
 fn simulated() -> Arc<dyn HostClock> {
+    Arc::new(StandInHostClock(SimulatedClock::new(ARRIVAL_MS)))
+}
+
+/// The rehearsal clock `--simulated-clock` uses.
+fn rehearsal() -> Arc<dyn HostClock> {
     Arc::new(SimulatedClock::new(ARRIVAL_MS))
 }
 
@@ -604,18 +630,61 @@ fn a_stalled_entrant_holds_from_the_stall_and_its_calls_are_charged() {
     // Run 0 asked the model four times, the fourth before it stalled; every
     // later bar of the run holds without a call.
     assert_eq!(report.entrants[0].model_calls, Some(4 + 3 * 15));
+    // The holds from the stall on (steps 3 to 14 of run 0) are the host's,
+    // sealed into the root and surfaced on the signed board's row.
+    assert_eq!(report.entrants[0].stalled_holds, Some(12));
+    let arena = Arena::load(&dir).unwrap();
+    let window = arena.window(WINDOW).unwrap();
+    assert_eq!(window.live_capture["llm-a"].stalled_holds, 12);
+    let board_md =
+        std::fs::read_to_string(dir.join("windows").join(WINDOW).join("board.md")).unwrap();
+    assert!(
+        board_md.contains("- `llm-a`: live-captured, stalled_holds 12\n"),
+        "{board_md}"
+    );
+    assert!(board_md.contains(", 12 stalled holds\n"), "{board_md}");
+    let export = sharpebench_arena::leaderboard_export::export_arena(
+        &dir,
+        Some(&key().verifying_key()),
+        None,
+    )
+    .unwrap();
+    assert_eq!(export.rows[0].headline.qualifiers.stalled_holds, Some(12));
+    assert!(
+        sharpebench_core::leaderboard_export::render_markdown(&export).contains("stalled_holds 12")
+    );
     let entries = revealed(&dir);
     let run0: Vec<&Decision> = live_events(&entries[0])
         .iter()
         .filter(|e| e.run == 0)
         .filter_map(|e| match &e.event {
-            LiveEvent::Decision { decision } => Some(decision),
+            LiveEvent::Decision { decision, .. } => Some(decision),
             _ => None,
         })
         .collect();
     assert_eq!(run0.len(), 15);
     assert!(run0[3..].iter().all(|d| d.orders.is_empty()));
     assert!(run0[..3].iter().all(|d| d.orders.len() == 1));
+    let held: Vec<bool> = live_events(&entries[0])
+        .iter()
+        .filter(|e| e.run == 0)
+        .filter_map(|e| match &e.event {
+            LiveEvent::Decision { host_hold, .. } => Some(*host_hold),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(held, [[false; 3].as_slice(), &[true; 12]].concat());
+    // No other run stalled, so no other decision is a host hold.
+    assert!(live_events(&entries[0])
+        .iter()
+        .filter(|e| e.run != 0)
+        .all(|e| !matches!(
+            e.event,
+            LiveEvent::Decision {
+                host_hold: true,
+                ..
+            }
+        )));
     // The stalled call was dispatched and answered, so it is charged.
     let journals = host.journals.lock().unwrap();
     let (_, stalled) = journals.iter().find(|(run, _)| *run == 0).unwrap();
@@ -878,7 +947,7 @@ fn the_clock_checks_allow_exactly_the_two_minute_tolerance() {
         &entrants(&["llm-a"]),
         &mut replay_feed(),
         &mut GatewayHost::default(),
-        Arc::new(SimulatedClock::new(86_400_000 - 60_000)),
+        Arc::new(StandInHostClock(SimulatedClock::new(86_400_000 - 60_000))),
     )
     .unwrap();
     assert!(report.certifying, "{:?}", report.refusals);
@@ -943,4 +1012,190 @@ fn a_host_stopped_on_the_last_bar_resumes_without_the_feed_and_an_overlong_journ
         error.contains("holds 41 bars, the window runs 40"),
         "{error}"
     );
+}
+
+/// Re-sign a published board after editing its signed payloads, as a key
+/// holder could, with the window record and head rewritten to match, so a
+/// verifier fails it on what the edit means and not on a broken signature.
+fn resign_board(
+    dir: &Path,
+    edit: impl FnOnce(&mut Vec<serde_json::Value>, &mut serde_json::Value),
+) {
+    use sharpebench_arena::{head_digest, ArenaHead, ARENA_HEAD_KIND, HEAD_FILE};
+    use sharpebench_attest::{publish_public_chain, PublicChain};
+    let base = dir.join("windows").join(WINDOW);
+    let board: PublicChain =
+        serde_json::from_slice(&std::fs::read(base.join("board.json")).unwrap()).unwrap();
+    let mut payloads: Vec<serde_json::Value> = board
+        .chain
+        .iter()
+        .map(|link| serde_json::from_str(&link.payload).unwrap())
+        .collect();
+    let mut window: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(base.join("window.json")).unwrap()).unwrap();
+    edit(&mut payloads, &mut window);
+    std::fs::write(
+        base.join("window.json"),
+        serde_json::to_vec(&window).unwrap(),
+    )
+    .unwrap();
+    let strings: Vec<String> = payloads
+        .iter()
+        .map(|value| serde_json::to_string(value).unwrap())
+        .collect();
+    let board = publish_public_chain(&strings, &key());
+    std::fs::write(base.join("board.json"), serde_json::to_vec(&board).unwrap()).unwrap();
+    let head = ArenaHead {
+        kind: ARENA_HEAD_KIND.to_string(),
+        published_count: 1,
+        head_window_id: WINDOW.to_string(),
+        head_digest: head_digest(&board.chain.last().unwrap().signature),
+    };
+    let document = publish_public_chain(&[serde_json::to_string(&head).unwrap()], &key());
+    std::fs::write(dir.join(HEAD_FILE), serde_json::to_vec(&document).unwrap()).unwrap();
+}
+
+#[test]
+fn a_board_run_under_the_simulated_clock_is_a_rehearsal_and_never_certifies() {
+    let dir = temp_dir("rehearsal");
+    let field = entrants(&["llm-a", "llm-b"]);
+    let mut host = GatewayHost::default();
+    let report = run(
+        &dir,
+        &spec(),
+        &field,
+        &mut replay_feed(),
+        &mut host,
+        rehearsal(),
+    )
+    .unwrap();
+    assert!(report.simulated_clock);
+    assert!(!report.certifying);
+    assert_eq!(report.scored, 2);
+    for entrant in &report.entrants {
+        assert_eq!(
+            report.returns_provenance.get(&entrant.agent_id),
+            Some(&ReturnsProvenance::LiveRehearsal)
+        );
+    }
+    // Every log header carries the mark, and every root records it.
+    for entry in revealed(&dir) {
+        assert!(entry.live_log.as_ref().unwrap().header.simulated_clock);
+    }
+    let arena = Arena::load(&dir).unwrap();
+    let window = arena.window(WINDOW).unwrap();
+    assert_eq!(window.certifying, Some(false));
+    assert!(window
+        .live_capture
+        .values()
+        .all(|root| root.simulated_clock));
+    // The board verifies as what it is: a noncertifying rehearsal.
+    assert!(verify_arena(&dir, Some(&key().verifying_key())).unwrap().ok);
+    let board_md =
+        std::fs::read_to_string(dir.join("windows").join(WINDOW).join("board.md")).unwrap();
+    assert!(
+        board_md.contains("Evaluation tier: `historical-advisory`"),
+        "{board_md}"
+    );
+    assert!(board_md.contains("**Noncertifying board.**"), "{board_md}");
+    assert!(
+        board_md.contains("A row marked `live-rehearsal`"),
+        "{board_md}"
+    );
+    assert!(board_md.contains(", simulated clock\n"), "{board_md}");
+    let export = sharpebench_arena::leaderboard_export::export_arena(
+        &dir,
+        Some(&key().verifying_key()),
+        None,
+    )
+    .unwrap();
+    for row in &export.rows {
+        assert_eq!(
+            row.tier,
+            sharpebench_core::EvaluationTier::HistoricalAdvisory
+        );
+        assert_eq!(row.returns_provenance.as_deref(), Some("live-rehearsal"));
+    }
+
+    // Publishing the rehearsal as a certifying board is refused: a re-signed
+    // header that claims certification fails verification on what its rows
+    // derive.
+    let claim = temp_dir("rehearsal-claim");
+    copy_tree(&dir, &claim);
+    resign_board(&claim, |payloads, window| {
+        payloads[0]["certifying"] = serde_json::json!(true);
+        window["certifying"] = serde_json::json!(true);
+    });
+    let verdict = verify_arena(&claim, Some(&key().verifying_key())).unwrap();
+    assert!(!verdict.ok);
+    assert!(
+        verdict.windows[0]
+            .detail
+            .contains("signed rows derive false"),
+        "{verdict:?}"
+    );
+    // Relabelling the rows as live-captured custody is refused too: each
+    // root records the simulated clock its log was run under.
+    let relabel = temp_dir("rehearsal-relabel");
+    copy_tree(&dir, &relabel);
+    resign_board(&relabel, |payloads, window| {
+        payloads[0]["certifying"] = serde_json::json!(true);
+        window["certifying"] = serde_json::json!(true);
+        for row in payloads.iter_mut().skip(1) {
+            row["returns_provenance"] = serde_json::json!("live-captured");
+        }
+        for (_, provenance) in window["returns_provenance"].as_object_mut().unwrap() {
+            *provenance = serde_json::json!("live-captured");
+        }
+    });
+    let verdict = verify_arena(&relabel, Some(&key().verifying_key())).unwrap();
+    assert!(!verdict.ok);
+    assert!(
+        verdict.windows[0]
+            .detail
+            .contains("records simulated_clock true"),
+        "{verdict:?}"
+    );
+
+    // A window opened under the rehearsal clock cannot be resumed under a
+    // host clock: the logs' headers would change.
+    let mixed = temp_dir("rehearsal-mixed");
+    let mut stop = GatewayHost {
+        crash: Some(Arc::new(AtomicUsize::new(7))),
+        ..GatewayHost::default()
+    };
+    let crashed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        run(
+            &mixed,
+            &spec(),
+            &field,
+            &mut replay_feed(),
+            &mut stop,
+            rehearsal(),
+        )
+    }));
+    assert!(crashed.is_err());
+    let error = run(
+        &mixed,
+        &spec(),
+        &field,
+        &mut replay_feed(),
+        &mut GatewayHost::default(),
+        simulated(),
+    )
+    .unwrap_err();
+    assert!(error.contains("has another header"), "{error}");
+}
+
+fn copy_tree(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), target).unwrap();
+        }
+    }
 }

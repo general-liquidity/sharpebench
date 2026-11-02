@@ -114,6 +114,11 @@ pub struct LiveLogHeader {
     /// it opens.
     pub windows: Vec<LiveWindow>,
     pub seeds: Vec<u64>,
+    /// The host ran this log under a simulated clock, to rehearse the timing
+    /// rules. Its timestamps are not the host's, so the row it supports is
+    /// marked `live-rehearsal` and never certifies. Omitted when false.
+    #[serde(default, skip_serializing_if = "crate::is_false")]
+    pub simulated_clock: bool,
 }
 
 /// What the gateway's provider did with one model call.
@@ -161,8 +166,15 @@ pub enum LiveEvent {
     },
     /// A model call dispatched while the entrant decided this bar.
     ModelCall(ModelCallRecord),
-    /// The entrant's decision for this bar.
-    Decision { decision: Decision },
+    /// The entrant's decision for this bar. `host_hold` marks a hold the host
+    /// applied because the entrant's instance had stalled, faulted or failed
+    /// to launch, rather than one the entrant returned; it carries no orders.
+    /// Omitted when false.
+    Decision {
+        decision: Decision,
+        #[serde(default, skip_serializing_if = "crate::is_false")]
+        host_hold: bool,
+    },
     /// The host resumed the log after a restart. A bar that was open when the
     /// host stopped is observed again before it is decided; the entrant
     /// restarts as a fresh instance.
@@ -227,9 +239,22 @@ pub struct LiveCaptureRoot {
     /// Times the host resumed the log. Each one restarted the entrant as a
     /// fresh instance mid-window.
     pub restarts: u64,
+    /// Bars the host held for the entrant after its instance stalled, faulted
+    /// or failed to launch (decisions logged with `host_hold`). Omitted when
+    /// zero.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub stalled_holds: u64,
+    /// The log's header records a simulated clock, so its row is
+    /// `live-rehearsal`. Omitted when false.
+    #[serde(default, skip_serializing_if = "crate::is_false")]
+    pub simulated_clock: bool,
     pub root_sha256: String,
     pub closed_at_unix_ms: u64,
     pub seal: PublicChain,
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 /// Why a live log does not certify.
@@ -502,18 +527,18 @@ struct RunState {
 
 /// Read a header and its entries into one decision and one observation digest
 /// per bar of every run, checking order and clocks (rules 4 and 5 of the module
-/// docs). Returns the runs and the model call and restart counts.
+/// docs). Returns the runs and the model call, restart and host hold counts.
 fn read_bars(
     replay: &ReplayWindow,
     entries: &[LiveEntry],
-) -> Result<(Vec<RunState>, u64, u64), LiveLogRefusal> {
+) -> Result<(Vec<RunState>, u64, u64, u64), LiveLogRefusal> {
     let lengths: Vec<(usize, usize)> = replay
         .windows
         .iter()
         .flat_map(|w| replay.seeds.iter().map(move |_| (w.start, w.end - w.start)))
         .collect();
     let mut runs: Vec<RunState> = lengths.iter().map(|_| RunState::default()).collect();
-    let (mut model_calls, mut restarts) = (0, 0);
+    let (mut model_calls, mut restarts, mut host_holds) = (0, 0, 0);
     let dates = &replay.data.dates;
     // inv: each run's state describes exactly its entries among entries[..i].
     for entry in entries {
@@ -613,9 +638,15 @@ fn read_bars(
                 }
                 model_calls += 1;
             }
-            LiveEvent::Decision { decision } => {
+            LiveEvent::Decision {
+                decision,
+                host_hold,
+            } => {
                 if !open_here {
                     return Err(out_of_order("a decision for no open bar".to_string()));
+                }
+                if *host_hold && !decision.orders.is_empty() {
+                    return Err(out_of_order("a host hold that carries orders".to_string()));
                 }
                 let t = start + entry.step;
                 let deadline = match dates.get(t + 1) {
@@ -638,6 +669,7 @@ fn read_bars(
                 run.decisions.push(decision.clone());
                 run.next_step += 1;
                 run.reopenable = false;
+                host_holds += u64::from(*host_hold);
             }
             LiveEvent::Restart => unreachable!("handled above"),
         }
@@ -650,7 +682,7 @@ fn read_bars(
             });
         }
     }
-    Ok((runs, model_calls, restarts))
+    Ok((runs, model_calls, restarts, host_holds))
 }
 
 /// Plays a run's logged decisions back and records the first bar whose
@@ -763,7 +795,7 @@ pub fn certify_live_log(
         });
     }
 
-    let (runs, model_calls, restarts) = read_bars(replay, &log.entries)?;
+    let (runs, model_calls, restarts, stalled_holds) = read_bars(replay, &log.entries)?;
     let windows = &replay.windows;
     let mut contract = sharpebench_harness::trajectory_contract(
         &replay.data,
@@ -840,6 +872,8 @@ pub fn certify_live_log(
             bars,
             model_calls,
             restarts,
+            stalled_holds,
+            simulated_clock: header.simulated_clock,
             root_sha256,
             closed_at_unix_ms: seal.closed_at_unix_ms,
             seal: log.seal.clone(),
@@ -874,7 +908,7 @@ fn check_rows_match_roots(
 ) -> Result<(), String> {
     let live: Vec<&String> = provenance
         .iter()
-        .filter(|(_, p)| **p == crate::ReturnsProvenance::LiveCaptured)
+        .filter(|(_, p)| p.is_live_log())
         .map(|(agent, _)| agent)
         .collect();
     let rooted: Vec<&String> = roots.keys().collect();
@@ -882,6 +916,18 @@ fn check_rows_match_roots(
         return Err(format!(
             "live-captured rows {live:?} do not match live capture roots {rooted:?}"
         ));
+    }
+    // A root sealed under a simulated clock stands only behind a rehearsal
+    // row, so a rehearsal cannot be relabelled as certifying custody.
+    for (agent, root) in roots {
+        let rehearsal = provenance.get(agent) == Some(&crate::ReturnsProvenance::LiveRehearsal);
+        if rehearsal != root.simulated_clock {
+            return Err(format!(
+                "the row of `{agent}` is {}, but its live capture root records simulated_clock {}",
+                provenance[agent].as_str(),
+                root.simulated_clock
+            ));
+        }
     }
     Ok(())
 }
@@ -1085,6 +1131,18 @@ impl LiveRecorder {
     pub fn record_decision(&mut self, run: usize, step: usize, decision: &Decision) {
         let event = LiveEvent::Decision {
             decision: decision.clone(),
+            host_hold: false,
+        };
+        self.append(run, step, event, None);
+    }
+
+    /// Record a hold the host applied for the entrant because its instance
+    /// stalled, faulted or failed to launch. `decision` must carry no orders,
+    /// or certification refuses the log.
+    pub fn record_host_hold(&mut self, run: usize, step: usize, decision: &Decision) {
+        let event = LiveEvent::Decision {
+            decision: decision.clone(),
+            host_hold: true,
         };
         self.append(run, step, event, None);
     }
@@ -1264,6 +1322,7 @@ mod tests {
             runner_artifact_sha256: "1".repeat(64),
             windows: vec![LiveWindow { start: 0, end: 1 }],
             seeds: vec![0],
+            simulated_clock: false,
         }
     }
 
@@ -1547,6 +1606,8 @@ mod tests {
             bars: 0,
             model_calls: 0,
             restarts: 0,
+            stalled_holds: 0,
+            simulated_clock: false,
             root_sha256: header_sha256(&header()),
             closed_at_unix_ms: 5,
             seal: sealed.seal.clone(),

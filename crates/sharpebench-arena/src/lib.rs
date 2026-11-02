@@ -1900,6 +1900,12 @@ fn render_markdown(header: &WindowHeader, scores: &[CompositeScore], rows: &[Boa
         {
             out.push_str("- A row marked `replayed` ranks recorded decisions that were not re-executed, so nothing shows the committed artifact made them without the revealed data.\n");
         }
+        if rows
+            .iter()
+            .any(|row| row.returns_provenance == Some(ReturnsProvenance::LiveRehearsal))
+        {
+            out.push_str("- A row marked `live-rehearsal` ranks decisions logged under a simulated clock. The run rehearsed the timing rules, and its timestamps are not the host's.\n");
+        }
         if header.certifying.is_none() {
             out.push_str("- The signed header does not state that the board certifies its rows.\n");
         }
@@ -1932,8 +1938,15 @@ fn render_markdown(header: &WindowHeader, scores: &[CompositeScore], rows: &[Boa
     if !header.live_capture.is_empty() {
         out.push_str("Live capture roots. A `live-captured` row ranks decisions the host logged bar by bar while the committed image ran, sealed under the arena key; it does not show which model snapshot a provider served.\n\n");
         for (agent_id, root) in &header.live_capture {
+            let mut extra = String::new();
+            if root.stalled_holds > 0 {
+                extra.push_str(&format!(", {} stalled holds", root.stalled_holds));
+            }
+            if root.simulated_clock {
+                extra.push_str(", simulated clock");
+            }
             out.push_str(&format!(
-                "- `{agent_id}`: image `{}`, root `{}`, {} bars, {} model calls, {} restarts\n",
+                "- `{agent_id}`: image `{}`, root `{}`, {} bars, {} model calls, {} restarts{extra}\n",
                 root.image, root.root_sha256, root.bars, root.model_calls, root.restarts
             ));
         }
@@ -1946,8 +1959,17 @@ fn render_markdown(header: &WindowHeader, scores: &[CompositeScore], rows: &[Boa
         out.push_str("\n## Returns provenance\n\n");
         for row in rows {
             if let Some(provenance) = row.returns_provenance {
+                let holds = header
+                    .live_capture
+                    .get(&row.score.agent_id)
+                    .map_or(0, |root| root.stalled_holds);
+                let qualifier = if holds > 0 {
+                    format!(", stalled_holds {holds}")
+                } else {
+                    String::new()
+                };
                 out.push_str(&format!(
-                    "- `{}`: {}\n",
+                    "- `{}`: {}{qualifier}\n",
                     row.score.agent_id,
                     provenance.as_str()
                 ));

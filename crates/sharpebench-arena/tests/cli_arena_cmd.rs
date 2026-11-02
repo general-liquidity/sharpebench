@@ -633,11 +633,14 @@ fn live_window_runs_a_replay_rehearsal_to_a_verified_board() {
     assert!(rehearsal.join("windows/live-cli/board.json").exists());
     let window = sharpebench_arena::Arena::load(&rehearsal).unwrap();
     let state = window.window("live-cli").unwrap();
+    // A simulated clock rehearses the timing rules: the row is marked
+    // `live-rehearsal` and the board never certifies.
     assert_eq!(
         state.returns_provenance.get("mom"),
-        Some(&ReturnsProvenance::LiveCaptured)
+        Some(&ReturnsProvenance::LiveRehearsal)
     );
-    assert_eq!(state.certifying, Some(true));
+    assert_eq!(state.certifying, Some(false));
+    assert!(state.live_capture["mom"].simulated_clock);
     let rehearsal_s = rehearsal.to_str().unwrap();
     assert_eq!(arena_cmd::run(&argv(&["verify", rehearsal_s]), true), 0);
     // A second invocation finds the window published and only verifies it.

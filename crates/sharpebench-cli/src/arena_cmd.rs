@@ -659,13 +659,19 @@ pub fn cmd_live_window(args: &[String], json: bool, host: &mut dyn LiveHost) -> 
                     report.board,
                     report.verifying_key
                 );
-                if simulated {
-                    println!("  SIMULATED CLOCK: a rehearsal; the log timestamps are bar times, not the host's");
+                if report.simulated_clock {
+                    println!("  SIMULATED CLOCK: a rehearsal; the log timestamps are bar times, not the host's, so every row is live-rehearsal and the board never certifies");
                 }
                 if !report.certifying {
-                    println!("  NONCERTIFYING: not every ranked row was live-captured");
+                    println!("  NONCERTIFYING: not every ranked row was live-captured under the host clock");
                 }
                 for entrant in &report.entrants {
+                    if let Some(holds) = entrant.stalled_holds.filter(|&n| n > 0) {
+                        println!(
+                            "  `{}` stalled_holds {holds}: bars the host held after its instance stalled, faulted or failed to launch",
+                            entrant.agent_id
+                        );
+                    }
                     for fault in &entrant.faults {
                         println!("  `{}` {fault}", entrant.agent_id);
                     }

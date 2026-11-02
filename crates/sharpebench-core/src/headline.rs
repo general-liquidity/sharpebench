@@ -135,6 +135,11 @@ impl StressMark {
 pub struct HeadlineContext {
     pub evidence: Evidence,
     pub stress: StressMark,
+    /// Bars the host held for a live-logged entrant after its instance
+    /// stalled, faulted or failed to launch, when the caller holds the signed
+    /// live capture root and the count is above zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stalled_holds: Option<u64>,
 }
 
 /// The row a headline reads: a score, or the refusal that stands in place of
@@ -171,6 +176,12 @@ pub struct Qualifiers {
     /// was applied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rank_mode: Option<String>,
+    /// Bars the host held for the entrant after its instance stalled,
+    /// faulted or failed to launch during a live window, as the signed live
+    /// capture root counts them. Present only when a caller supplied a count
+    /// above zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stalled_holds: Option<u64>,
 }
 
 /// The headline of one row.
@@ -248,6 +259,7 @@ pub fn headline(
                     advisory: Vec::new(),
                     declared_mandate: None,
                     rank_mode: None,
+                    stalled_holds: context.stalled_holds,
                 },
             };
         }
@@ -273,6 +285,7 @@ pub fn headline(
             advisory,
             declared_mandate: score.mandate_verdict_label(),
             rank_mode: score.certification.as_ref().map(|c| c.describe()),
+            stalled_holds: context.stalled_holds,
         },
     }
 }
@@ -663,6 +676,7 @@ mod tests {
                 reasons: vec!["supplied returns".into()],
             },
             stress: StressMark::Unavailable,
+            stalled_holds: None,
         };
         let h = headline(
             HeadlineRow::Refused {
@@ -688,6 +702,7 @@ mod tests {
                 mode: "forward".into(),
             },
             stress: StressMark::NotRun,
+            stalled_holds: None,
         };
         let refused = headline(
             HeadlineRow::Refused {
@@ -732,6 +747,7 @@ mod tests {
                     mode: "forward".into(),
                 },
                 stress: StressMark::Clean,
+                stalled_holds: None,
             },
             HeadlineContext {
                 evidence: Evidence::Noncertifying {
@@ -739,6 +755,7 @@ mod tests {
                     reasons: vec!["network reachable".into()],
                 },
                 stress: StressMark::Marked,
+                stalled_holds: None,
             },
         ];
         let mut tied = eligible();

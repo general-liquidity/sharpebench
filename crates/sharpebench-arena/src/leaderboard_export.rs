@@ -131,6 +131,10 @@ fn arena_board(
             &thresholds,
             row_evidence(&header),
             row.returns_provenance.map(ReturnsProvenance::as_str),
+            header
+                .live_capture
+                .get(&row.score.agent_id)
+                .map(|root| root.stalled_holds),
         ));
     }
     for refusal in &header.refusals {
@@ -326,6 +330,7 @@ pub fn export_signed_board(
                         &score,
                         &thresholds,
                         Evidence::Unknown,
+                        None,
                         None,
                     )
                 })

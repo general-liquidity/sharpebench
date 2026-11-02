@@ -239,6 +239,7 @@ fn header(replay: &ReplayWindow, tag: &str) -> LiveLogHeader {
             })
             .collect(),
         seeds: replay.seeds.clone(),
+        simulated_clock: false,
     }
 }
 
@@ -627,7 +628,7 @@ fn a_broken_or_altered_live_log_is_refused_with_its_reason() {
             "tampered last decision",
             {
                 let mut tampered = log.clone();
-                if let LiveEvent::Decision { decision } = &mut tampered.entries[last].event {
+                if let LiveEvent::Decision { decision, .. } = &mut tampered.entries[last].event {
                     decision.reasoning = "rewritten".to_string();
                 }
                 tampered
@@ -1031,4 +1032,78 @@ fn a_faulted_window_refuses_a_live_log() {
         "{}",
         window.refusals[0].reason
     );
+}
+
+#[test]
+fn host_holds_are_counted_into_the_root_and_a_host_hold_with_orders_is_refused() {
+    let dir = temp_dir("host-holds");
+    let data = market(5);
+    let log = live_log(&dir, &data);
+    let committed = image_digest("a");
+    let root = |log: &SealedLiveLog| {
+        certify_live_log(
+            WINDOW,
+            &scorer(),
+            &config(),
+            &replay_of(&data),
+            AGENT,
+            &committed,
+            log,
+        )
+        .map(|certified| certified.root)
+    };
+    let plain = root(&log).unwrap();
+    assert_eq!((plain.stalled_holds, plain.simulated_clock), (0, false));
+
+    // The last decision of two runs, emptied and marked as host holds, are
+    // counted. A run's last decision feeds no later observation of that run.
+    let last_of_run = |run: usize| {
+        log.entries
+            .iter()
+            .rposition(|e| e.run == run && matches!(e.event, LiveEvent::Decision { .. }))
+            .unwrap()
+    };
+    let ends = [last_of_run(0), last_of_run(1)];
+    let held = resealed(&log, |entries| {
+        for &i in &ends {
+            if let LiveEvent::Decision {
+                decision,
+                host_hold,
+            } = &mut entries[i].event
+            {
+                decision.orders.clear();
+                *host_hold = true;
+            }
+        }
+    });
+    assert_eq!(root(&held).unwrap().stalled_holds, 2);
+
+    // A decision with orders cannot be passed off as a host hold.
+    let trading = log
+        .entries
+        .iter()
+        .position(|e| matches!(&e.event, LiveEvent::Decision { decision, .. } if !decision.orders.is_empty()))
+        .expect("the fixture trades on some bar");
+    let forged = resealed(&log, |entries| {
+        if let LiveEvent::Decision { host_hold, .. } = &mut entries[trading].event {
+            *host_hold = true;
+        }
+    });
+    let refusal = root(&forged).unwrap_err();
+    assert!(
+        matches!(&refusal, LiveLogRefusal::OutOfOrder { detail, .. } if detail.contains("host hold that carries orders")),
+        "{refusal:?}"
+    );
+
+    // A header that records a simulated clock carries the mark into the root.
+    let mut rehearsal_header = log.header.clone();
+    rehearsal_header.simulated_clock = true;
+    let mut entries = log.entries.clone();
+    let mut prev = header_sha256(&rehearsal_header);
+    for entry in &mut entries {
+        entry.prev_sha256 = prev;
+        prev = entry_sha256(entry);
+    }
+    let rehearsal = seal_live_log(rehearsal_header, entries, &key(), 1).unwrap();
+    assert!(root(&rehearsal).unwrap().simulated_clock);
 }

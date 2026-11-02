@@ -425,6 +425,8 @@ export interface HeadlineQualifiers {
   advisory: FailReason[];
   declared_mandate?: string;
   rank_mode?: string;
+  /** Bars the host held after a live-logged entrant stalled, when a caller supplied a count above zero. */
+  stalled_holds?: number;
   [k: string]: unknown;
 }
 

@@ -38,9 +38,15 @@
 //! A stalled entrant is handled by the launched transport's own budget: the
 //! sandbox and gateway entrants give each decision 30 s net of host serving
 //! time, then terminate the instance, and the run holds for every later bar.
-//! The hold is the decision applied, so it is what the log records, and the
-//! model calls the instance made before it stalled were dispatched and are
-//! charged in the gateway journal by its settlement rules.
+//! The hold is the decision applied, so it is what the log records, marked
+//! `host_hold`, and the model calls the instance made before it stalled were
+//! dispatched and are charged in the gateway journal by its settlement rules.
+//! The count of such holds is sealed into the entrant's live capture root as
+//! `stalled_holds`, so it is published on the signed board beside the row.
+//!
+//! A run under a [`HostClock`] that reports itself simulated
+//! ([`SimulatedClock`], `--simulated-clock`) writes `simulated_clock` into every
+//! log header. Its rows are `live-rehearsal` and its board never certifies.
 
 use std::collections::BTreeMap;
 use std::io::Write as _;
@@ -160,6 +166,12 @@ impl LiveFeed for ReplayFeed {
 /// The host's clock as the runner reads it.
 pub trait HostClock: Send + Sync {
     fn now_unix_ms(&self) -> u64;
+    /// Whether this clock is a rehearsal clock rather than the host's. A
+    /// window run under one is marked in every log header, and its rows and
+    /// board never certify.
+    fn simulated(&self) -> bool {
+        false
+    }
     /// Called when the runner starts on the bar dated `date`, on arrival and
     /// again when it resumes that bar. A wall clock ignores it.
     fn bar_arrived(&self, _date: &str) {}
@@ -174,7 +186,8 @@ impl HostClock for SystemClock {
 /// A rehearsal clock: it moves to `arrival_offset_ms` past the start of each
 /// bar's UTC day when the bar arrives (never backwards), and advances one
 /// millisecond per reading. A board run under it rehearses the timing rules;
-/// its timestamps are not the host's.
+/// its timestamps are not the host's, so its rows are `live-rehearsal` and the
+/// board never certifies.
 pub struct SimulatedClock {
     now: AtomicU64,
     arrival_offset_ms: u64,
@@ -192,6 +205,10 @@ impl SimulatedClock {
 impl HostClock for SimulatedClock {
     fn now_unix_ms(&self) -> u64 {
         self.now.fetch_add(1, Ordering::SeqCst)
+    }
+
+    fn simulated(&self) -> bool {
+        true
     }
 
     fn bar_arrived(&self, date: &str) {
@@ -284,6 +301,10 @@ pub struct LiveEntrantReport {
     pub model_calls: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub restarts: Option<u64>,
+    /// Bars the host held after this entrant's instance stalled, faulted or
+    /// failed to launch, from the window's recorded root.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stalled_holds: Option<u64>,
 }
 
 /// The outcome of [`run_live_window`]: a published board that verified.
@@ -296,6 +317,8 @@ pub struct LiveWindowReport {
     pub refusals: Vec<Refusal>,
     pub returns_provenance: BTreeMap<String, ReturnsProvenance>,
     pub certifying: bool,
+    /// The window ran under a simulated clock: a rehearsal, never certifying.
+    pub simulated_clock: bool,
     pub board: String,
     pub verifying_key: String,
 }
@@ -575,7 +598,7 @@ fn read_progress(
 ) -> Vec<Vec<Decision>> {
     let mut decisions = vec![Vec::new(); windows.len()];
     for entry in entries {
-        if let LiveEvent::Decision { decision } = &entry.event {
+        if let LiveEvent::Decision { decision, .. } = &entry.event {
             if let Some(runs) = decisions.get_mut(entry.run) {
                 runs.push(decision.clone());
                 let bar = windows[entry.run].0.start + entry.step;
@@ -725,6 +748,7 @@ pub fn run_live_window(run: LiveWindowRun<'_>) -> Result<LiveWindowReport, Strin
                 runner_artifact_sha256: spec.scorer_artifact_sha256.clone(),
                 windows: header_windows.clone(),
                 seeds: seeds.clone(),
+                simulated_clock: clock.simulated(),
             };
             let log = live_dir.join(log_name(&entrant.agent_id));
             let recorder_clock = Box::new(RecorderClock(Arc::clone(&clock)));
@@ -839,7 +863,16 @@ pub fn run_live_window(run: LiveWindowRun<'_>) -> Result<LiveWindowReport, Strin
                             Some(instance) => instance.decide(observation),
                             None => HoldAgent.decide(observation),
                         };
-                        lock(&recorder).record_decision(r, step, &decision);
+                        // A faulted transport answers with holds that are not
+                        // the entrant's (`LaunchedEntrant::fault`), and a run
+                        // with no instance is held by the host.
+                        let host_hold = decision.orders.is_empty()
+                            && instance.as_ref().is_none_or(|i| i.fault().is_some());
+                        if host_hold {
+                            lock(&recorder).record_host_hold(r, step, &decision);
+                        } else {
+                            lock(&recorder).record_decision(r, step, &decision);
+                        }
                         decided = Some(decision.clone());
                         decision
                     };
@@ -951,6 +984,7 @@ pub fn run_live_window(run: LiveWindowRun<'_>) -> Result<LiveWindowReport, Strin
                 bars: root.map(|r| r.bars),
                 model_calls: root.map(|r| r.model_calls),
                 restarts: root.map(|r| r.restarts),
+                stalled_holds: root.map(|r| r.stalled_holds),
             }
         })
         .collect();
@@ -962,6 +996,10 @@ pub fn run_live_window(run: LiveWindowRun<'_>) -> Result<LiveWindowReport, Strin
         refusals: window.refusals.clone(),
         returns_provenance: window.returns_provenance.clone(),
         certifying: window.certifying == Some(true),
+        simulated_clock: window
+            .live_capture
+            .values()
+            .any(|root| root.simulated_clock),
         board: arena_dir
             .join(WINDOWS_DIR)
             .join(id)
@@ -1098,6 +1136,7 @@ mod tests {
                 at,
                 LiveEvent::Decision {
                     decision: hold.clone(),
+                    host_hold: false,
                 },
             )
         };

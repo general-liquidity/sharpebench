@@ -1383,6 +1383,7 @@ mod tests {
                 advisory: Vec::new(),
                 declared_mandate: None,
                 rank_mode: None,
+                stalled_holds: None,
             },
         };
         let pass = verdict_gate(&base());
