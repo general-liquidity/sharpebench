@@ -25,7 +25,8 @@ use sharpebench_protocol::{Decision, MarketObservation};
 
 use crate::agent::Agent;
 use crate::transport::{
-    decide_with_retry, CircuitBreaker, DecideError, TransportDiagnostics, TransportHealth,
+    decide_with_retry, with_retry, CircuitBreaker, DecideError, LineExchange, TransportDiagnostics,
+    TransportHealth,
 };
 
 /// How much state an external entrant can carry from one (window, seed) cell of a
@@ -538,15 +539,14 @@ impl ExternalAgent {
     fn drain_after_exit(
         &mut self,
         status: std::process::ExitStatus,
-        obs: &MarketObservation,
         request_deadline: Instant,
-    ) -> Result<Decision, DecideError> {
+    ) -> Result<String, DecideError> {
         let deadline = (Instant::now() + EXIT_DRAIN_GRACE).min(request_deadline);
         loop {
             match self.lines.recv_timeout(
                 DEAD_CHILD_POLL.min(deadline.saturating_duration_since(Instant::now())),
             ) {
-                Ok(Ok(Wire::Line(resp))) => return parse_decision(&resp, obs),
+                Ok(Ok(Wire::Line(resp))) => return Ok(resp),
                 Ok(Ok(Wire::Oversized)) => return Err(oversized_fault()),
                 Ok(Ok(Wire::OutputBudgetExceeded)) => return Err(output_budget_fault()),
                 Ok(Err(_)) => return Err(DecideError::Transport),
@@ -564,14 +564,10 @@ impl ExternalAgent {
     /// child that has exited is reported as the exit, and a child whose state
     /// cannot be read is a plain [`DecideError::Timeout`]: without evidence the
     /// entrant was alive, the overrun is not charged to it.
-    fn read_budget_spent(
-        &mut self,
-        obs: &MarketObservation,
-        deadline: Instant,
-    ) -> Result<Decision, DecideError> {
+    fn read_budget_spent(&mut self, deadline: Instant) -> Result<String, DecideError> {
         match self.child.try_wait() {
             Ok(None) => Err(DecideError::BudgetOverrun),
-            Ok(Some(status)) => self.drain_after_exit(status, obs, deadline),
+            Ok(Some(status)) => self.drain_after_exit(status, deadline),
             Err(_) => Err(DecideError::Timeout),
         }
     }
@@ -586,13 +582,21 @@ impl ExternalAgent {
     /// exit it is, immediately, instead of spending the full budget to call a
     /// startup crash a timeout.
     fn decide_once(&mut self, obs: &MarketObservation) -> Result<Decision, DecideError> {
+        let line = serde_json::to_string(obs).map_err(|_| DecideError::Transport)?;
+        let response = self.exchange_once(line)?;
+        parse_decision(&response, obs)
+    }
+
+    /// One request line out and one response line back over the stdio pipe,
+    /// under the per-decision budget and with the typed faults
+    /// [`ExternalAgent::decide_once`] documents. The response is not parsed.
+    fn exchange_once(&mut self, line: String) -> Result<String, DecideError> {
         if let Some(stall) = self.stalled {
             return Err(stall);
         }
         let deadline = Instant::now()
             .checked_add(self.timeout)
             .ok_or(DecideError::Transport)?;
-        let line = serde_json::to_string(obs).map_err(|_| DecideError::Transport)?;
         if Instant::now() >= deadline {
             return Err(DecideError::Timeout);
         }
@@ -612,11 +616,11 @@ impl ExternalAgent {
         // entrant's to spend.
         loop {
             if Instant::now() >= deadline {
-                return self.read_budget_spent(obs, deadline);
+                return self.read_budget_spent(deadline);
             }
             let slice = DEAD_CHILD_POLL.min(deadline.saturating_duration_since(Instant::now()));
             match self.lines.recv_timeout(slice) {
-                Ok(Ok(Wire::Line(resp))) => return parse_decision(&resp, obs),
+                Ok(Ok(Wire::Line(resp))) => return Ok(resp),
                 Ok(Ok(Wire::Oversized)) => return Err(oversized_fault()),
                 Ok(Ok(Wire::OutputBudgetExceeded)) => return Err(output_budget_fault()),
                 Ok(Err(_)) => return Err(DecideError::Transport),
@@ -640,10 +644,10 @@ impl ExternalAgent {
                 }
                 Err(RecvTimeoutError::Timeout) => {
                     if let Ok(Some(status)) = self.child.try_wait() {
-                        return self.drain_after_exit(status, obs, deadline);
+                        return self.drain_after_exit(status, deadline);
                     }
                     if Instant::now() >= deadline {
-                        return self.read_budget_spent(obs, deadline);
+                        return self.read_budget_spent(deadline);
                     }
                 }
             }
@@ -704,20 +708,37 @@ impl Agent for ExternalAgent {
                 d
             }
             Err(e) => {
-                if matches!(e, DecideError::Timeout | DecideError::BudgetOverrun) {
-                    // Never match a late response to a later observation. The
-                    // harness may retry only by constructing a fresh process,
-                    // and every later decision repeats this one's verdict.
-                    self.stalled = Some(e);
-                    #[cfg(unix)]
-                    signal_group(self.child.id(), "KILL");
-                    let _ = self.child.kill();
-                }
+                self.stall_on(e);
                 let tripped = self.breaker.record_fault();
                 self.health.record(e, tripped);
                 error_hold("external agent transport fault → hold")
             }
         }
+    }
+}
+
+impl ExternalAgent {
+    /// After a timeout or an overrun, never match a late response to a later
+    /// request. The harness may retry only by constructing a fresh process,
+    /// and every later request repeats this one's verdict.
+    fn stall_on(&mut self, error: DecideError) {
+        if matches!(error, DecideError::Timeout | DecideError::BudgetOverrun) {
+            self.stalled = Some(error);
+            #[cfg(unix)]
+            signal_group(self.child.id(), "KILL");
+            let _ = self.child.kill();
+        }
+    }
+}
+
+impl LineExchange for ExternalAgent {
+    /// The request travels the pipe a decision travels, under the same budget.
+    fn exchange(&mut self, request: &str) -> Result<String, DecideError> {
+        let response = self.exchange_once(request.to_string());
+        if let Err(error) = response {
+            self.stall_on(error);
+        }
+        response.map(|line| line.trim_end_matches(['\n', '\r']).to_string())
     }
 }
 
@@ -840,6 +861,13 @@ impl HttpAgent {
     /// transport fault; a non-JSON body is the agent's protocol fault.
     fn decide_once(&self, obs: &MarketObservation) -> Result<Decision, DecideError> {
         let body = serde_json::to_string(obs).map_err(|_| DecideError::Transport)?;
+        let json = self.post("/decide", &body)?;
+        parse_decision(&json, obs)
+    }
+
+    /// One `POST` of `body` to `path` over a fresh connection, under the
+    /// per-decision budget, returning the response body unparsed.
+    fn post(&self, path: &str, body: &str) -> Result<String, DecideError> {
         // One absolute instant covers connect, write and every read, so no
         // sequence of individually prompt operations can outlast the budget.
         let deadline = Instant::now()
@@ -852,7 +880,7 @@ impl HttpAgent {
         // `Connection: close` lets us read the whole response to EOF - no need to
         // parse Content-Length / chunked encoding for a one-shot request.
         let req = format!(
-            "POST /decide HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\n\
+            "POST {path} HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\n\
              Content-Length: {}\r\nConnection: close\r\n\r\n{}",
             self.host,
             body.len(),
@@ -863,11 +891,9 @@ impl HttpAgent {
             .map_err(|e| classify_io(&e))?;
         stream.flush().map_err(|e| classify_io(&e))?;
         let raw = read_to_deadline(&mut stream, deadline)?;
-        let json = raw
-            .split_once("\r\n\r\n")
-            .map(|(_, b)| b)
-            .ok_or(DecideError::Transport)?;
-        parse_decision(json, obs)
+        raw.split_once("\r\n\r\n")
+            .map(|(_, b)| b.to_string())
+            .ok_or(DecideError::Transport)
     }
 
     /// Connect within the remaining budget. A plain `TcpStream::connect` blocks
@@ -929,6 +955,13 @@ impl Agent for HttpAgent {
                 error_hold("http agent transport fault → hold")
             }
         }
+    }
+}
+
+impl LineExchange for HttpAgent {
+    /// `POST /identify`, with the retry budget a decision has.
+    fn exchange(&mut self, request: &str) -> Result<String, DecideError> {
+        with_retry(self.retries, || self.post("/identify", request))
     }
 }
 
@@ -1489,7 +1522,6 @@ mod tests {
             agent
         };
         let status = finished_status("7");
-        let obs = one_symbol_observation();
 
         // A line that arrives during the drain window is the agent's answer.
         let (tx, rx) = mpsc::channel();
@@ -1498,7 +1530,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(100));
             let _ = tx.send(Ok(Wire::Line(r#"{"orders":[]}"#.to_string())));
         });
-        let drained = agent.drain_after_exit(status, &obs, Instant::now() + EXIT_DRAIN_GRACE);
+        let drained = agent.drain_after_exit(status, Instant::now() + EXIT_DRAIN_GRACE);
         sender.join().expect("sender thread must finish");
         assert!(
             drained.is_ok(),
@@ -1511,7 +1543,7 @@ mod tests {
         let mut agent = make_agent(rx);
         assert_eq!(
             agent
-                .drain_after_exit(status, &obs, Instant::now() + EXIT_DRAIN_GRACE)
+                .drain_after_exit(status, Instant::now() + EXIT_DRAIN_GRACE)
                 .unwrap_err(),
             DecideError::Exited(Some(7)),
             "an exit with nothing pending must carry its status"
@@ -1631,5 +1663,78 @@ Content-Type: application/json
             elapsed < Duration::from_secs(2),
             "the trickle extended the 200ms budget to {elapsed:?}"
         );
+    }
+
+    /// A closed question rides the stdio pipe a decision rides, and the line
+    /// that comes back is handed over unparsed: here the decision a
+    /// decision-only agent writes, which the question's parser then refuses.
+    #[test]
+    fn a_question_line_travels_the_stdio_pipe_and_returns_unparsed() {
+        #[cfg(windows)]
+        let mut agent = spawn_windows_fixture("--decision-only");
+        #[cfg(not(windows))]
+        let mut agent = ExternalAgent::spawn("sh", &["-c", "read line; echo '{\"orders\":[]}'"])
+            .expect("spawning the platform shell must work");
+        assert_eq!(
+            agent.exchange(r#"{"question_id":0}"#).as_deref(),
+            Ok(r#"{"orders":[]}"#)
+        );
+        assert!(!agent.health().degraded(), "a question is not a decision");
+    }
+
+    /// A question that stalls the pipe stalls it for good, as a decision does:
+    /// the next request repeats the verdict rather than reading a late line.
+    #[test]
+    fn a_question_that_overruns_its_budget_stalls_the_pipe() {
+        let mut agent = spawn_silent_agent().with_decide_timeout(Duration::from_millis(300));
+        assert_eq!(agent.exchange("{}"), Err(DecideError::BudgetOverrun));
+        assert_eq!(agent.exchange("{}"), Err(DecideError::BudgetOverrun));
+        assert_eq!(agent.stalled, Some(DecideError::BudgetOverrun));
+    }
+
+    /// Over HTTP a question is a `POST /identify`, and the body comes back
+    /// unparsed.
+    #[test]
+    fn a_question_is_posted_to_identify_over_http() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("loopback listener");
+        let port = listener
+            .local_addr()
+            .expect("the bound listener has an address")
+            .port();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().expect("one connection");
+            let mut reader = BufReader::new(socket.try_clone().expect("a second handle"));
+            let mut request_line = String::new();
+            reader.read_line(&mut request_line).expect("a request line");
+            let mut length = 0usize;
+            loop {
+                let mut header = String::new();
+                reader.read_line(&mut header).expect("a header");
+                if header.trim().is_empty() {
+                    break;
+                }
+                if let Some(value) = header.strip_prefix("Content-Length: ") {
+                    length = value.trim().parse().expect("a length");
+                }
+            }
+            let mut body = vec![0u8; length];
+            reader.read_exact(&mut body).expect("the body");
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n{\"answer\":1}")
+                .expect("the response");
+            // A graceful close: the client reads to EOF, so the server ends
+            // its side first and waits for the client to hang up, rather than
+            // racing the client's read with a reset.
+            let _ = socket.shutdown(std::net::Shutdown::Write);
+            let _ = reader.read_to_end(&mut Vec::new());
+            (request_line, String::from_utf8(body).expect("utf-8"))
+        });
+        let mut agent = HttpAgent::with_resilience(format!("127.0.0.1:{port}"), 0, 1)
+            .with_decide_timeout(Duration::from_secs(5));
+        let answer = agent.exchange(r#"{"q":1}"#);
+        let (request_line, body) = server.join().expect("the server finishes");
+        assert_eq!(answer.as_deref(), Ok(r#"{"answer":1}"#));
+        assert_eq!(request_line.trim_end(), "POST /identify HTTP/1.1");
+        assert_eq!(body, r#"{"q":1}"#);
     }
 }

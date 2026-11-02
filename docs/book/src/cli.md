@@ -23,6 +23,7 @@ sharpebench audit-briefing <briefing.json>            audit a shared briefing fo
 sharpebench canary <seed>                             derive a do-not-train contamination tripwire
 sharpebench contamination-probe <entrant>             real-minus-twin shape probe for path recall (rank-neutral)
 sharpebench presentation-stability <entrant>          decisions under partial blinding, reordering and a date shift (rank-neutral)
+sharpebench identifiability-probe <entrant>           closed ticker and year questions on masked series and their twins (rank-neutral)
 sharpebench sandbox-check <image@sha256:digest>       run the live Docker-boundary acceptance checks
 sharpebench gateway --routes <routes.json> ...        report the host-observed model gateway configuration
 sharpebench score-allocation <alloc.json>             score a weight-vector trajectory (turnover)
@@ -418,6 +419,20 @@ reordered symbols, and under a calendar shifted by `--date-shift-days`
 `--declared-training-cutoff`, refuse `--masked`, carry `rank_input: false`, and
 report a failed arm as a typed `unavailable` object (exit 1). See
 [Contamination probes](contamination-probes.md).
+
+```bash
+sharpebench identifiability-probe (--cmd "<prog>" | --http <addr> | --image <repository@sha256:...>) [--data <csv>] [--window-bars N] [--windows N] [--twin-seed N] [--top-k N] [--year-tolerance N] [--json]
+```
+
+`identifiability-probe` asks an external entrant, over its own transport, to
+name the ticker and year of each masked series of the same windows and of their
+twins, one fresh entrant per question, and scores the answers against the
+truth, a uniform guesser and a whole-window sign-flip test
+(`sharpebench.identifiability-probe.v1`). The question is a stdin line for
+`--cmd` and `--image` and `POST /identify` for `--http`. A declined or failed
+question refuses the document (exit 1); `--agent` and the cost flags are usage
+errors (exit 2). The wire format is in
+[Contamination probes](contamination-probes.md#identifiability-probe).
 
 `run --declared-training-cutoff YYYY-MM-DD`, with an external entrant only,
 publishes the operator's declared cutoff on the entrant's row as

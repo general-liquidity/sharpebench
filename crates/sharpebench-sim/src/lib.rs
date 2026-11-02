@@ -41,8 +41,9 @@ pub use external::{
     AGENT_ENV_PASSTHROUGH, AGENT_ENV_SECRET,
 };
 pub use identifiability::{
-    identifiability_probe, ArmRates, ChanceRates, IdentifiabilityConfig, IdentifiabilityReport,
-    IdentifiabilityUnavailable, IdentityAnswer, IdentityQuestion, IDENTITY_QUESTION_SCHEMA,
+    ask_identity, identifiability_probe, identity_reply_from_wire, ArmRates, AskError, ChanceRates,
+    IdentifiabilityConfig, IdentifiabilityReport, IdentifiabilityUnavailable, IdentityAnswer,
+    IdentityQuestion, IdentityReply, IDENTITY_ANSWER_SCHEMA, IDENTITY_QUESTION_SCHEMA,
 };
 pub use marks::{MarkSheet, MarkTiming, MarkTimingError, SymbolMark, MARK_SHEET_SCHEMA};
 pub use presentation::{
@@ -60,6 +61,7 @@ pub use trajectory::{
     RegradeDisposition, RegradeReceipt, RegradeRefusal, RegradeRequest,
 };
 pub use transport::{
-    decide_with_retry, CircuitBreaker, DecideError, TransportDiagnostics, TransportHealth,
+    decide_with_retry, CircuitBreaker, DecideError, LineExchange, TransportDiagnostics,
+    TransportHealth,
 };
 pub use windows::{tag_regime, walk_forward, Regime};

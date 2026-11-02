@@ -28,7 +28,9 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 
 use sharpebench_sim::external::CellIsolation;
-use sharpebench_sim::{Agent, ExternalAgent, TransportDiagnostics, TransportHealth};
+use sharpebench_sim::{
+    Agent, DecideError, ExternalAgent, LineExchange, TransportDiagnostics, TransportHealth,
+};
 
 /// How a sandboxed agent run is configured.
 #[derive(Clone, Debug, Default)]
@@ -1125,6 +1127,17 @@ impl Agent for SandboxedAgent {
     }
 }
 
+impl LineExchange for SandboxedAgent {
+    /// A closed question rides the container's stdio pipe, under the budget a
+    /// decision has.
+    fn exchange(&mut self, request: &str) -> Result<String, DecideError> {
+        self.agent
+            .as_mut()
+            .expect("agent is present until finish consumes the value")
+            .exchange(request)
+    }
+}
+
 impl TransportDiagnostics for SandboxedAgent {
     fn health(&self) -> &TransportHealth {
         self.agent
@@ -1551,6 +1564,29 @@ mod tests {
             oom_killed,
             exit_code,
         }
+    }
+
+    /// A closed question rides the launched transport: the line the agent
+    /// writes back is what the exchange returns. No container is involved, so
+    /// none is inspected or removed.
+    #[test]
+    fn a_sandboxed_agent_carries_a_question_on_its_transport() {
+        #[cfg(windows)]
+        let spawned = ExternalAgent::spawn(
+            "powershell",
+            &[
+                "-NoProfile",
+                "-Command",
+                "$null = [Console]::In.ReadLine(); [Console]::Out.WriteLine('pong')",
+            ],
+        );
+        #[cfg(not(windows))]
+        let spawned = ExternalAgent::spawn("sh", &["-c", "read line; echo pong"]);
+        let mut agent = SandboxedAgent {
+            agent: Some(spawned.expect("spawning the platform shell must work")),
+            container: None,
+        };
+        assert_eq!(agent.exchange("ping").as_deref(), Ok("pong"));
     }
 
     fn named_agent() -> SandboxedAgent {

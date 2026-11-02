@@ -52,8 +52,8 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use sharpebench_protocol::{Decision, MarketObservation};
 use sharpebench_sim::{
-    Agent, CircuitBreaker, CostModel, Dataset, DecideError, TransportDiagnostics, TransportHealth,
-    Window,
+    Agent, CircuitBreaker, CostModel, Dataset, DecideError, LineExchange, TransportDiagnostics,
+    TransportHealth, Window,
 };
 
 use super::{
@@ -584,13 +584,21 @@ impl<'g, 'r, T: ProviderTransport> GatewayEntrant<'g, 'r, T> {
     }
 
     fn decide_once(&mut self, observation: &MarketObservation) -> Result<Decision, DecideError> {
+        let line = serde_json::to_string(observation).map_err(|_| DecideError::Transport)?;
+        let answer = self.exchange_once(line)?;
+        parse_decision(&answer, observation)
+    }
+
+    /// Send one request line and serve every gateway request the entrant makes
+    /// before it writes its one answer line, which is returned unparsed. The
+    /// budget and the typed faults are a decision's.
+    fn exchange_once(&mut self, line: String) -> Result<String, DecideError> {
         if let Some(stall) = self.stalled {
             return Err(stall);
         }
         let mut deadline = Instant::now()
             .checked_add(self.timeout)
             .ok_or(DecideError::Transport)?;
-        let line = serde_json::to_string(observation).map_err(|_| DecideError::Transport)?;
         self.send(line, deadline)?;
         let mut requests = 0u32;
         loop {
@@ -600,7 +608,7 @@ impl<'g, 'r, T: ProviderTransport> GatewayEntrant<'g, 'r, T> {
             };
             let line = line.trim_end_matches(['\n', '\r']);
             if !is_gateway_request(line) {
-                return parse_decision(line, observation);
+                return Ok(line.to_string());
             }
             // Nobody is left to read the answer, so nothing is spent on it.
             if let Some(code) = exited {
@@ -672,17 +680,37 @@ impl<T: ProviderTransport> GatewayEntrant<'_, '_, T> {
                 decision
             }
             Err(error) => {
-                if matches!(error, DecideError::Timeout | DecideError::BudgetOverrun) {
-                    // A late line must never answer a later observation, and
-                    // every later decision repeats this one's verdict.
-                    self.stalled = Some(error);
-                    self.process.terminate();
-                }
+                self.stall_on(error);
                 let tripped = self.breaker.record_fault();
                 self.health.record(error, tripped);
                 error_hold("gateway entrant transport fault -> hold")
             }
         }
+    }
+}
+
+impl<T: ProviderTransport> GatewayEntrant<'_, '_, T> {
+    /// After a timeout or an overrun, a late line must never answer a later
+    /// request, and every later request repeats this one's verdict.
+    fn stall_on(&mut self, error: DecideError) {
+        if matches!(error, DecideError::Timeout | DecideError::BudgetOverrun) {
+            self.stalled = Some(error);
+            self.process.terminate();
+        }
+    }
+}
+
+impl<T: ProviderTransport> LineExchange for GatewayEntrant<'_, '_, T> {
+    /// A closed question travels the decision pipe, and the model calls the
+    /// entrant makes to answer it are brokered, charged and journaled like a
+    /// decision's. They are not entered in the per-decision record, which
+    /// lines up with the run's decisions.
+    fn exchange(&mut self, request: &str) -> Result<String, DecideError> {
+        let answer = self.exchange_once(request.to_string());
+        if let Err(error) = answer {
+            self.stall_on(error);
+        }
+        answer
     }
 }
 

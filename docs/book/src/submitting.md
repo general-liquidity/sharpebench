@@ -61,7 +61,10 @@ The external protocol is a request/response loop: the harness writes a
 point-in-time `MarketObservation` (only data at or before the decision date) and
 reads back a `Decision` (target weights + an optional confidence per order). The
 agent never sees a future bar: look-ahead is impossible by construction, not by
-convention.
+convention. Answering anything else is optional: an agent that wants to be
+measured by `identifiability-probe` also answers its closed identity questions
+on the same transport (`POST /identify` over HTTP); see
+[Contamination probes](contamination-probes.md#identifiability-probe).
 
 ## Confidence and calibration
 
