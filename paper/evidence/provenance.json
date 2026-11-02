@@ -179,7 +179,7 @@
       "sha256": "beaa2054f85384b12334267e10b7981a22967b6983f65bd75b0b1bfbcc262e86"
     }
   ],
-  "generated_at_head": "d2e861ee23f0eb4c4c3b95a603e4b210bd4aa479",
+  "generated_at_head": "3e5dfcd3d7e46da96e5928427abd3a953d3863d4",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -679,7 +679,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/selfaudit.rs",
-      "sha256": "187b68cfd75021a37647dd00a55fe8d944b41b009b7f30001d21f3d9934cb305"
+      "sha256": "96c2e2d67dfae121db51bea9ba31c5d81d0808619d77735cfc80a6953e0b16e7"
     },
     {
       "path": "crates/sharpebench-core/src/sharpe_diagnostics.rs",
@@ -767,7 +767,7 @@
     },
     {
       "path": "crates/sharpebench-core/tests/near_constant_admission.rs",
-      "sha256": "5a1cb5943f882e68316985b9e0b825030a8ea18c8e6ea7dea20faecaf2b5608e"
+      "sha256": "b6a7e8adfad1eb7b68b16e5589b045e38e4524e6dbd8925459b069924c3d34a5"
     },
     {
       "path": "crates/sharpebench-core/tests/pareto_refused_tracks.rs",
@@ -1783,5 +1783,5 @@
     "data/*.csv",
     "arena/windows/**/*.json"
   ],
-  "source_snapshot_sha256": "ce9faafb8a4af63269b1c766a1975e4bfac0131f2cdcd90f3c9568bb18ad6aab"
+  "source_snapshot_sha256": "3a669b4541a50c65733375e9c80b43b4f11a04ca73a88060344bc05da02e5a21"
 }
