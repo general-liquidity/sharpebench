@@ -120,9 +120,10 @@ pub fn within_window_autocorrelations(
 fn andrews_bartlett_bandwidth(rho_1: f64, observations: usize, shortest_window: usize) -> usize {
     let alpha = 4.0 * rho_1 * rho_1
         / (crate::det_math::powi(1.0 - rho_1, 2) * crate::det_math::powi(1.0 + rho_1, 2));
-    // `cbrt` stays the platform routine: the result is floored to a whole lag, so
-    // a last-place difference can matter only within one ulp of an integer.
-    let bandwidth = 1.1447 * (alpha * observations as f64).cbrt();
+    // The deterministic, correctly rounded cube root: the platform `cbrt` differs
+    // between platforms in the last place, and the bandwidth is floored to a
+    // whole lag, so such a difference would move it next to an integer.
+    let bandwidth = 1.1447 * crate::det_math::cbrt(alpha * observations as f64);
     let cap = shortest_window.saturating_sub(1);
     if bandwidth.is_finite() && bandwidth >= 0.0 {
         (bandwidth.floor() as usize).min(cap)

@@ -908,7 +908,12 @@ multiplication, while the runtime routine linked on `x86_64-pc-windows-gnu`
 returns other bits for about a quarter of cubes. The moment estimators and the
 other kernel call sites now use `det_math::powi`, which is that repeated
 multiplication written out, the same loop `compiler-builtins` runs on the
-other targets and in the WebAssembly build. The approximation formulas are
+other targets and in the WebAssembly build. The cube root in the Newey-West
+bandwidth of the serial-correlation correction now uses `det_math::cbrt`, a
+correctly rounded cube root built the same way, because the platform `cbrt`
+differs between targets in the last place (on `x86_64-pc-windows-gnu` it
+returns the other neighbour for about three arguments in ten) and the
+bandwidth is floored to a whole lag. The approximation formulas are
 unchanged, and so are the 93 pinned bits and both golden fixtures. A call to
 the transcendental functions costs about half a microsecond instead of a few
 nanoseconds. The CI reproducibility job now also runs the bit pins, the golden
