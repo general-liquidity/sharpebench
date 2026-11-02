@@ -7,7 +7,10 @@
 //! load skipped one, both reaching the ordinary final filename and a zero exit.
 //! The checks now live in `examples/support/declared_support.rs`, which the
 //! three producers call before they open an output and again before they
-//! publish it. This is the same file the examples compile, included by path, so
+//! publish it. `luck_floor_1000`, `mandate_eval`, `relative_mandate_eval` and
+//! `seed_leg_eval`, which skipped a dataset that failed to load and still
+//! exited zero, stage through `<out>.partial` the same way and refuse when a
+//! declared dataset fails to load or contributes no record. This is the same file the examples compile, included by path, so
 //! a producer cannot drift from what is asserted here without the shared module
 //! changing under it.
 //!
