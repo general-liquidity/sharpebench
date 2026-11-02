@@ -212,6 +212,19 @@ fn cli_drives_the_full_lifecycle_and_verify_walks_the_chain() {
         std::fs::read_to_string(arena_dir.join("windows").join(window).join("board.md")).unwrap()
     };
     assert!(!md("w1").contains("Noncertifying"), "{}", md("w1"));
+    // The tier is the first line after the title: the certifying board is
+    // forward-certifying, the noncertifying one historical-advisory.
+    let tier_line = |window: &str| md(window).lines().nth(2).unwrap_or_default().to_string();
+    assert!(
+        tier_line("w1").starts_with("Evaluation tier: `forward-certifying`"),
+        "{}",
+        md("w1")
+    );
+    assert!(
+        tier_line("w2").starts_with("Evaluation tier: `historical-advisory`"),
+        "{}",
+        md("w2")
+    );
     assert!(
         md("w2").contains("**Noncertifying board.**"),
         "{}",
@@ -485,4 +498,153 @@ fn open_records_the_digest_of_a_validated_fault_plan() {
         );
     }
     let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Momentum in process, standing in for a launched image under the CLI's
+/// `live-window` arm: what the subcommand does around the host is the subject.
+struct InProcessHost {
+    launches: usize,
+}
+
+struct InProcessEntrant(Momentum);
+
+impl sharpebench_sim::Agent for InProcessEntrant {
+    fn decide(
+        &mut self,
+        observation: &sharpebench_protocol::MarketObservation,
+    ) -> sharpebench_protocol::Decision {
+        self.0.decide(observation)
+    }
+}
+
+impl sharpebench_arena::LaunchedEntrant for InProcessEntrant {
+    fn fault(&self) -> Option<String> {
+        None
+    }
+    fn finish(self: Box<Self>) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+impl sharpebench_arena::LiveHost for InProcessHost {
+    fn admit(&mut self, _image: &str) -> Result<(), String> {
+        Ok(())
+    }
+    fn launch(
+        &mut self,
+        _image: &str,
+        _run: usize,
+        _recorder: &sharpebench_arena::live_capture::SharedRecorder,
+    ) -> Result<Box<dyn sharpebench_arena::LaunchedEntrant>, String> {
+        self.launches += 1;
+        Ok(Box::new(InProcessEntrant(Momentum { lookback: 5 })))
+    }
+}
+
+#[test]
+fn live_window_runs_a_replay_rehearsal_to_a_verified_board() {
+    let dir = temp_dir("live-window");
+    let arena = dir.join("arena");
+    let dataset = dir.join("dataset.csv");
+    write_dataset(&dataset);
+    let spec = dir.join("spec.json");
+    std::fs::write(
+        &spec,
+        serde_json::json!({
+            "schema": sharpebench_arena::LIVE_WINDOW_SPEC_SCHEMA,
+            "window_id": "live-cli",
+            "commit_deadline": 1,
+            "data_reveal_epoch": 2,
+            "bars": 60,
+            "scorer_artifact_sha256": content_digest(b"live-cli-scorer"),
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let manifest = dir.join("entrants.json");
+    std::fs::write(
+        &manifest,
+        serde_json::json!({
+            "schema": sharpebench_arena::LIVE_ENTRANTS_SCHEMA,
+            "entrants": [{
+                "agent_id": "mom",
+                "image": format!("test/mom@sha256:{}", content_digest(b"live-cli-image")),
+                "salt": "s",
+            }],
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let (arena_s, spec_s, manifest_s) = (
+        arena.to_str().unwrap(),
+        spec.to_str().unwrap(),
+        manifest.to_str().unwrap(),
+    );
+    let feed = format!("replay:{}", dataset.to_str().unwrap());
+    let args = |extra: &[&str]| {
+        let mut parts = vec![
+            "live-window",
+            arena_s,
+            "--window",
+            spec_s,
+            "--entrants",
+            manifest_s,
+            "--data-feed",
+            feed.as_str(),
+            "--key",
+            "live-cli-key",
+        ];
+        parts.extend_from_slice(extra);
+        argv(&parts)
+    };
+    let mut host = InProcessHost { launches: 0 };
+    // Usage errors write nothing.
+    for broken in [
+        argv(&["live-window", arena_s, "--window", spec_s]),
+        argv(&["live-window", "--window", spec_s]),
+        {
+            let mut a = args(&[]);
+            let at = a.iter().position(|x| x.starts_with("replay:")).unwrap();
+            a[at] = "polygon:aapl".to_string();
+            a
+        },
+    ] {
+        assert_eq!(arena_cmd::cmd_live_window(&broken, false, &mut host), 2);
+    }
+    assert!(!arena.exists());
+    // Under the wall clock the replayed bars are years old, so the first bar
+    // after the first decided one shows the decisions were late, and the run
+    // stops with nothing published.
+    assert_eq!(arena_cmd::cmd_live_window(&args(&[]), true, &mut host), 1);
+    assert!(!arena.join("windows/live-cli/board.json").exists());
+
+    let rehearsal = temp_dir("live-window-sim").join("arena");
+    let sim_args: Vec<String> = args(&["--simulated-clock"])
+        .into_iter()
+        .map(|a| {
+            if a == arena_s {
+                rehearsal.to_str().unwrap().to_string()
+            } else {
+                a
+            }
+        })
+        .collect();
+    assert_eq!(arena_cmd::cmd_live_window(&sim_args, true, &mut host), 0);
+    assert!(rehearsal.join("windows/live-cli/board.json").exists());
+    let window = sharpebench_arena::Arena::load(&rehearsal).unwrap();
+    let state = window.window("live-cli").unwrap();
+    // A simulated clock rehearses the timing rules: the row is marked
+    // `live-rehearsal` and the board never certifies.
+    assert_eq!(
+        state.returns_provenance.get("mom"),
+        Some(&ReturnsProvenance::LiveRehearsal)
+    );
+    assert_eq!(state.certifying, Some(false));
+    assert!(state.live_capture["mom"].simulated_clock);
+    let rehearsal_s = rehearsal.to_str().unwrap();
+    assert_eq!(arena_cmd::run(&argv(&["verify", rehearsal_s]), true), 0);
+    // A second invocation finds the window published and only verifies it.
+    let before = host.launches;
+    assert_eq!(arena_cmd::cmd_live_window(&sim_args, false, &mut host), 0);
+    assert_eq!(host.launches, before);
 }

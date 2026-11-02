@@ -16,9 +16,10 @@
 use std::path::Path;
 
 use sharpebench_arena::{
-    verify_arena_expecting, Arena, CompletenessStatus, DockerLauncher, EntrantLauncher,
-    ExecutionStatus, ExpectedHead, IntakeOptions, RevealedEntry, SigningKey, VerifyingKey,
-    LEGACY_EXECUTION_LIMIT,
+    run_live_window, verify_arena_expecting, Arena, CompletenessStatus, DockerLauncher,
+    EntrantLauncher, ExecutionStatus, ExpectedHead, HostClock, IntakeOptions, LiveEntrants,
+    LiveHost, LiveWindowRun, LiveWindowSpec, ReplayFeed, RevealedEntry, SigningKey, SimulatedClock,
+    VerifyingKey, LEGACY_EXECUTION_LIMIT,
 };
 
 /// Entry point (see the module docs for the argv contract).
@@ -36,6 +37,7 @@ pub fn run(args: &[String], json: bool) -> i32 {
         Some("score") => cmd_score(args, json),
         Some("publish") => cmd_publish(args, json),
         Some("verify") => cmd_verify(args, json),
+        Some("live-window") => cmd_live_window(args, json, &mut DockerLauncher),
         _ => {
             usage();
             2
@@ -564,6 +566,121 @@ fn cmd_verify(args: &[String], json: bool) -> i32 {
                 }
             }
             i32::from(!report.ok)
+        }
+        Err(e) => fail(&e, json),
+    }
+}
+
+const LIVE_WINDOW_USAGE: &str = "arena live-window <dir> --window <spec.json> --entrants <manifest.json> --data-feed replay:<dataset.csv> --key <key> [--simulated-clock]";
+
+/// When a bar arrives under `--simulated-clock`: 21:00 UTC on its day.
+const SIMULATED_ARRIVAL_MS: u64 = 21 * 3_600_000;
+
+fn read_json_file<T: serde::de::DeserializeOwned>(path: &str, what: &str) -> Result<T, String> {
+    std::fs::read_to_string(path)
+        .map_err(|e| format!("cannot read {path}: {e}"))
+        .and_then(|t| {
+            serde_json::from_str(&t).map_err(|e| format!("invalid {what} in {path}: {e}"))
+        })
+}
+
+/// `arena live-window`: run a forward window end to end under live capture,
+/// starting each entrant's runs with `host`. The production CLI passes the
+/// Docker sandbox host; no model gateway is attached because no provider
+/// adapter ships, so a model-backed entrant needs an operator binary that
+/// calls `sharpebench_arena::run_live_window` with its own host.
+pub fn cmd_live_window(args: &[String], json: bool, host: &mut dyn LiveHost) -> i32 {
+    let dir = args.get(3).filter(|dir| !dir.starts_with("--"));
+    let (Some(dir), Some(spec), Some(manifest), Some(feed), Some(key_spec)) = (
+        dir,
+        flag_value(args, "--window"),
+        flag_value(args, "--entrants"),
+        flag_value(args, "--data-feed"),
+        flag_value(args, "--key"),
+    ) else {
+        eprintln!("usage: sharpebench {LIVE_WINDOW_USAGE}");
+        return 2;
+    };
+    let Some(replay) = feed.strip_prefix("replay:") else {
+        eprintln!(
+            "error: --data-feed `{feed}` names no adapter this binary has; it ships only `replay:<dataset.csv>`,              and a live market-data adapter is an operator binary implementing `LiveFeed`"
+        );
+        return 2;
+    };
+    let simulated = args.iter().any(|arg| arg == "--simulated-clock");
+    let spec: LiveWindowSpec = match read_json_file(spec, "live window spec") {
+        Ok(spec) => spec,
+        Err(e) => return fail(&e, json),
+    };
+    let entrants: LiveEntrants = match read_json_file(manifest, "live entrants manifest") {
+        Ok(entrants) => entrants,
+        Err(e) => return fail(&e, json),
+    };
+    let mut feed = match std::fs::read_to_string(replay)
+        .map_err(|e| format!("cannot read {replay}: {e}"))
+        .and_then(|text| ReplayFeed::from_csv(&text))
+    {
+        Ok(feed) => feed,
+        Err(e) => return fail(&e, json),
+    };
+    let key = match resolve_key(key_spec) {
+        Ok(secret) => SigningKey::derive(&secret),
+        Err(e) => return fail(&e.to_string(), json),
+    };
+    let clock: std::sync::Arc<dyn HostClock> = if simulated {
+        std::sync::Arc::new(SimulatedClock::new(SIMULATED_ARRIVAL_MS))
+    } else {
+        std::sync::Arc::new(sharpebench_arena::live_capture::SystemClock)
+    };
+    let outcome = run_live_window(LiveWindowRun {
+        arena_dir: Path::new(dir),
+        spec: &spec,
+        entrants: &entrants,
+        feed: &mut feed,
+        host,
+        clock,
+        key: &key,
+    });
+    match outcome {
+        Ok(report) => {
+            if json {
+                let mut out = serde_json::json!({ "ok": true, "report": report });
+                if simulated {
+                    out["clock"] = serde_json::json!("simulated");
+                }
+                emit_json(&out);
+            } else {
+                println!(
+                    "live window `{}`: {} bars, {} entries ranked, {} refused; published {} and verified under {}",
+                    report.window_id,
+                    report.bars,
+                    report.scored,
+                    report.refusals.len(),
+                    report.board,
+                    report.verifying_key
+                );
+                if report.simulated_clock {
+                    println!("  SIMULATED CLOCK: a rehearsal; the log timestamps are bar times, not the host's, so every row is live-rehearsal and the board never certifies");
+                }
+                if !report.certifying {
+                    println!("  NONCERTIFYING: not every ranked row was live-captured under the host clock");
+                }
+                for entrant in &report.entrants {
+                    if let Some(holds) = entrant.stalled_holds.filter(|&n| n > 0) {
+                        println!(
+                            "  `{}` stalled_holds {holds}: bars the host held after its instance stalled, faulted or failed to launch",
+                            entrant.agent_id
+                        );
+                    }
+                    for fault in &entrant.faults {
+                        println!("  `{}` {fault}", entrant.agent_id);
+                    }
+                }
+                for r in &report.refusals {
+                    println!("  refused `{}`: {}", r.agent_id, r.reason);
+                }
+            }
+            0
         }
         Err(e) => fail(&e, json),
     }

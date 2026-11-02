@@ -2,6 +2,7 @@
 //! scripted provider behind the transport seam, a real sweep in between. No
 //! provider, no key and no network anywhere.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -1225,6 +1226,169 @@ fn the_presentation_suite_runs_against_a_gateway_entrant() {
     }
 }
 
+/// A provider that recalls price paths: the model text it returns names the
+/// ticker and year of the exact return path it is shown, found in the public
+/// dataset it holds, and names nothing when the path is not there. A stand-in
+/// for a model that memorized the history; it opens no socket.
+#[derive(Clone)]
+struct RecallingProvider {
+    public: Arc<Dataset>,
+    calls: Arc<Mutex<usize>>,
+}
+
+fn relatives(series: &[f64]) -> Vec<f64> {
+    series.windows(2).map(|w| w[1] / w[0]).collect()
+}
+
+impl ProviderTransport for RecallingProvider {
+    fn call(&mut self, call: ProviderCall<'_>) -> ProviderOutcome {
+        *self.calls.lock().expect("calls lock") += 1;
+        let question: sharpebench_sim::IdentityQuestion =
+            serde_json::from_str(&call.messages[0].content)
+                .expect("the entrant forwards the question");
+        let wanted = relatives(&question.closes);
+        let found = self.public.closes.iter().find_map(|(symbol, series)| {
+            relatives(series)
+                .windows(wanted.len())
+                .position(|w| w == wanted)
+                .map(|offset| {
+                    serde_json::json!({
+                        "tickers": [symbol],
+                        "year": sharpebench_sim::iso_year(
+                            &self.public.dates[offset + question.scored_from]
+                        ),
+                    })
+                })
+        });
+        let text = found.unwrap_or_else(|| serde_json::json!({ "tickers": [] }));
+        ProviderOutcome::Answered {
+            status: 200,
+            body: serde_json::to_vec(&ProviderBody {
+                text: text.to_string(),
+                finish_reason: Some("stop".into()),
+                usage: Some(ProviderUsage {
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    cache_read_input_tokens: None,
+                    cache_write_input_tokens: None,
+                }),
+            })
+            .expect("a provider body serializes"),
+        }
+    }
+}
+
+/// The scripted question-answering entrant: for each closed question it asks
+/// the model once with the question as the message and writes the model's
+/// names back as its typed answer, or declines without asking.
+fn identity_entrant(
+    decline: bool,
+) -> impl FnOnce(&mut dyn BufRead, &mut dyn Write) + Send + 'static {
+    move |input, output| loop {
+        let mut line = String::new();
+        if input.read_line(&mut line).unwrap_or(0) == 0 {
+            return;
+        }
+        let question: sharpebench_sim::IdentityQuestion =
+            serde_json::from_str(&line).expect("the host writes questions");
+        let mut reply = if decline {
+            serde_json::json!({ "declined": true })
+        } else {
+            if writeln!(output, "{}", request_line(line.trim_end())).is_err()
+                || output.flush().is_err()
+            {
+                return;
+            }
+            let mut answer = String::new();
+            if input.read_line(&mut answer).unwrap_or(0) == 0 {
+                return;
+            }
+            let answer: GatewayResponse =
+                serde_json::from_str(&answer).expect("the host writes gateway responses");
+            serde_json::from_str(&answer.text.expect("the model answered"))
+                .expect("the model names tickers")
+        };
+        reply["schema_version"] = sharpebench_sim::IDENTITY_ANSWER_SCHEMA.into();
+        reply["question_id"] = question.question_id.into();
+        if writeln!(output, "{reply}").is_err() || output.flush().is_err() {
+            return;
+        }
+    }
+}
+
+/// The identifiability probe reaches a gateway-attached entrant the way it
+/// reaches any other: one fresh entrant per closed question, every model call
+/// brokered and charged by the host. A model that recalls price paths is
+/// caught on the real windows and not on their twins; an entrant that declines
+/// leaves the probe unavailable, and nothing is spent on it.
+#[test]
+fn the_identifiability_probe_runs_against_a_gateway_entrant() {
+    use sharpebench_sim::{
+        identifiability_probe, IdentifiabilityConfig, IdentifiabilityUnavailable,
+    };
+
+    let public = Dataset::from_csv_file(&format!(
+        "{}/../../data/us-indices-1d.csv",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .expect("the frozen daily index file");
+    let windows: Vec<Window> = sharpebench_sim::walk_forward(public.len(), 20, 40, 150)
+        .into_iter()
+        .take(6)
+        .collect();
+    let routes = table();
+    let permits = CallPermits::new(4);
+    let provider = RecallingProvider {
+        public: Arc::new(public.clone()),
+        calls: Arc::default(),
+    };
+    let mut gateway = ModelGateway::new(
+        &routes,
+        &permits,
+        provider.clone(),
+        budget(1_000_000, 1_000),
+        GatewayLimits::default(),
+    );
+    let report = identifiability_probe(
+        &public,
+        &windows,
+        IdentifiabilityConfig::default(),
+        &mut |question| {
+            let mut entrant = GatewayEntrant::new(in_thread(identity_entrant(false)), &mut gateway);
+            crate::contamination_probe::ask_external(&mut entrant, question)
+        },
+    )
+    .expect("every question was answered");
+    let questions = windows.len() * public.closes.len() * 2;
+    assert_eq!(*provider.calls.lock().expect("calls lock"), questions);
+    assert_eq!(
+        gateway.journal().spend().priced_calls as usize,
+        questions,
+        "every model call the answers needed is brokered and charged"
+    );
+    assert_eq!(report.real.joint, 1.0, "{report:?}");
+    assert_eq!(report.twin.joint, 0.0, "{report:?}");
+    assert!(report.path_identified, "{report:?}");
+
+    let declined = identifiability_probe(
+        &public,
+        &windows,
+        IdentifiabilityConfig::default(),
+        &mut |question| {
+            let mut entrant = GatewayEntrant::new(in_thread(identity_entrant(true)), &mut gateway);
+            crate::contamination_probe::ask_external(&mut entrant, question)
+        },
+    );
+    assert_eq!(
+        declined,
+        Err(IdentifiabilityUnavailable::Answer {
+            question_id: 0,
+            error: crate::contamination_probe::AnswerFailure::Declined,
+        })
+    );
+    assert_eq!(*provider.calls.lock().expect("calls lock"), questions);
+}
+
 fn with_cell_ceiling(sweep: GatewayBudget, max_usd_nanos: u128, max_calls: u32) -> GatewayBudget {
     GatewayBudget {
         per_cell: Some(crate::gateway_journal::CellBudget {
@@ -1487,4 +1651,213 @@ fn attempt_numbers_continue_from_the_journal() {
             (Some(SEEDS[1]), Some(1)),
         ]
     );
+}
+
+/// One scripted provider answer, by call number.
+#[derive(Clone, Copy)]
+enum Step {
+    Priced(u64, u64),
+    Truncated(u64, u64),
+    NoUsage,
+    Status(u16),
+}
+
+/// A provider that answers call `i` with `script[i]`, and every call past the
+/// script with a priced `0.25` at (10, 5) tokens.
+#[derive(Clone)]
+struct SequencedProvider {
+    script: Vec<Step>,
+    next: Arc<Mutex<usize>>,
+}
+
+impl ProviderTransport for SequencedProvider {
+    fn call(&mut self, _call: ProviderCall<'_>) -> ProviderOutcome {
+        let index = {
+            let mut next = self.next.lock().expect("script lock");
+            *next += 1;
+            *next - 1
+        };
+        let step = self
+            .script
+            .get(index)
+            .copied()
+            .unwrap_or(Step::Priced(10, 5));
+        let (usage, finish) = match step {
+            Step::Status(status) => {
+                return ProviderOutcome::Answered {
+                    status,
+                    body: Vec::new(),
+                }
+            }
+            Step::Priced(input, output) => (Some((input, output)), "stop"),
+            Step::Truncated(input, output) => (Some((input, output)), "length"),
+            Step::NoUsage => (None, "stop"),
+        };
+        ProviderOutcome::Answered {
+            status: 200,
+            body: serde_json::to_vec(&ProviderBody {
+                text: "0.25".into(),
+                finish_reason: Some(finish.into()),
+                usage: usage.map(|(input_tokens, output_tokens)| ProviderUsage {
+                    input_tokens,
+                    output_tokens,
+                    cache_read_input_tokens: None,
+                    cache_write_input_tokens: None,
+                }),
+            })
+            .expect("a provider body serializes"),
+        }
+    }
+}
+
+/// Run the fixture's sweep against `provider`, the entrant asking the model
+/// `requests` times per decision under `limits`.
+fn sequenced_sweep(
+    fixture: &Fixture,
+    provider: SequencedProvider,
+    requests: usize,
+    limits: GatewayLimits,
+) -> GatewaySweepOutcome {
+    let checkpoint = fixture.checkpoint();
+    let journal = fixture.journal();
+    outcome(run_gateway_sweep(
+        fixture.sweep(&checkpoint, &journal),
+        GatewayHost {
+            routes: &fixture.routes,
+            permits: &fixture.permits,
+            transport: provider,
+            budget: budget(1_000_000, 100),
+            limits,
+        },
+        |window, seed, gateway| {
+            gateway_backtest(
+                &fixture.data,
+                in_thread(model_entrant(Log::default(), requests)),
+                gateway,
+                WINDOWS[window],
+                seed,
+                CostModel::default(),
+                None,
+            )
+        },
+    ))
+}
+
+/// A rate-limited dispatch retried, an answer without usage and a truncated
+/// answer, read back from the journal file a real sweep wrote: each lands in
+/// its own counter, on the decision that made it, and the counts it shares
+/// with the per-decision record the sweep published agree.
+#[test]
+fn gateway_diagnostics_count_a_sweeps_struggles_from_its_journal() {
+    use crate::gateway_diagnostics::gateway_diagnostics;
+    let fixture = Fixture::new("diagnostics");
+    let provider = SequencedProvider {
+        script: vec![
+            Step::Status(429),
+            Step::Priced(10, 5),
+            Step::NoUsage,
+            Step::Truncated(10, 16),
+        ],
+        next: Arc::default(),
+    };
+    let swept = sequenced_sweep(&fixture, provider, 1, GatewayLimits::default());
+    let journal = GatewayJournal::load_for_inspection(&fixture.journal()).expect("the journal");
+    let d = gateway_diagnostics(&journal);
+    let decisions = (WINDOWS.len() * SEEDS.len() * STEPS) as u64;
+    assert_eq!(
+        d.sweep_sha256.as_deref(),
+        Some(swept.host_observed.sweep_sha256.as_str())
+    );
+    assert_eq!((d.attempts, d.decisions), (2, decisions));
+    assert_eq!(
+        (d.requests, d.served, d.refused_by_limit),
+        (decisions, decisions, 0)
+    );
+    assert_eq!(
+        (d.calls, d.priced_calls, d.faulted_calls),
+        (decisions + 1, decisions - 1, 2)
+    );
+    assert_eq!(d.faults.provider_refused_before_work, 1);
+    assert_eq!(d.faults.usage_absent, 1);
+    assert_eq!(d.truncated_answers, 1);
+    // The 429 was retried on the same decision: one served request, two
+    // calls, so exactly one retry.
+    let first = &d.per_decision[0];
+    assert_eq!((first.seed, first.decision, first.calls), (0, 0, 2));
+    assert_eq!((first.retries_at_least, first.retries_at_most), (1, 1));
+    assert_eq!((d.retries_at_least, d.retries_at_most), (1, 1));
+    assert_eq!(d.per_decision[1].faulted_calls, 1);
+    assert_eq!(d.per_decision[2].truncated_answers, 1);
+    assert_eq!(
+        d.calls_per_decision,
+        BTreeMap::from([(1, decisions - 1), (2, 1)])
+    );
+    assert_eq!(d.requests_per_decision, BTreeMap::from([(1, decisions)]));
+    // Every decision but the one without usage is measured; the truncated
+    // answer's 16 output tokens are the largest.
+    let t = d.tokens_per_decision;
+    assert_eq!(
+        (t.measured_decisions, t.unmeasured_decisions),
+        (decisions - 1, 1)
+    );
+    assert_eq!(
+        (t.input_total, t.output_total),
+        (10 * (decisions - 1), 5 * (decisions - 2) + 16)
+    );
+    assert_eq!((t.input_max, t.output_max), (10, 16));
+    assert_eq!(d.by_alias.len(), 1);
+    assert_eq!(d.by_alias[0].alias, ALIAS);
+    assert_eq!(d.by_alias[0].calls, decisions + 1);
+    assert_eq!(d.unlogged_calls, 0);
+    // The per-decision record the sweep published agrees on every count the
+    // two share.
+    let published: Vec<(u32, u32, u32, u32)> = swept
+        .decision_requests
+        .decisions
+        .iter()
+        .map(|r| (r.requests, r.served, r.calls, r.priced_calls))
+        .collect();
+    let derived: Vec<(u32, u32, u32, u32)> = d
+        .per_decision
+        .iter()
+        .map(|s| (s.requests, s.served, s.calls, s.priced_calls))
+        .collect();
+    assert_eq!(derived, published);
+}
+
+/// Requests past the per-decision limit are counted as refused by limit, on
+/// every decision, and make no call.
+#[test]
+fn gateway_diagnostics_count_requests_refused_by_the_per_decision_limit() {
+    use crate::gateway_diagnostics::gateway_diagnostics;
+    let fixture = Fixture::new("diagnostics-limit");
+    let provider = SequencedProvider {
+        script: Vec::new(),
+        next: Arc::default(),
+    };
+    let limits = GatewayLimits {
+        max_requests_per_decision: 2,
+        ..GatewayLimits::default()
+    };
+    sequenced_sweep(&fixture, provider, 3, limits);
+    let journal = GatewayJournal::load_for_inspection(&fixture.journal()).expect("the journal");
+    let d = gateway_diagnostics(&journal);
+    let decisions = (WINDOWS.len() * SEEDS.len() * STEPS) as u64;
+    assert_eq!(
+        (
+            d.requests,
+            d.served,
+            d.refused_by_limit,
+            d.decisions_refused_by_limit
+        ),
+        (3 * decisions, 2 * decisions, decisions, decisions)
+    );
+    assert_eq!((d.calls, d.faulted_calls), (2 * decisions, 0));
+    assert_eq!((d.retries_at_least, d.retries_at_most), (0, 0));
+    assert_eq!(d.max_requests_in_a_decision, 3);
+    assert_eq!(d.max_calls_in_a_decision, 2);
+    assert_eq!(d.requests_per_decision, BTreeMap::from([(3, decisions)]));
+    let t = d.tokens_per_decision;
+    assert_eq!((t.input_mean, t.output_mean), (Some(20.0), Some(10.0)));
+    assert_eq!(d.by_alias[0].input_tokens, Some(20 * decisions));
 }

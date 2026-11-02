@@ -67,6 +67,7 @@ pub mod null_standard_error;
 pub mod observed_loss;
 pub mod opt_in_diagnostics;
 pub mod paired_randomization;
+pub mod prevalence;
 pub mod selection;
 pub mod serial_correlation;
 pub mod significance;

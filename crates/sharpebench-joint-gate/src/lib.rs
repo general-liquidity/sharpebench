@@ -14,6 +14,8 @@
 //! - [`controls`] runs the integrity legs.
 //! - [`shards`] holds the work plan, resume and the output directory.
 //! - [`report`] states the predeclared reading.
+//! - [`prevalence`] reads an observed eligible share against the measured
+//!   power and false-eligibility rate (Rogan-Gladen), beside the report.
 //! - [`gate`] decides whether a run may call itself frozen.
 //!
 //! Protocol: `docs/studies/joint-gate/PROTOCOL.md`.
@@ -23,5 +25,6 @@ pub mod controls;
 pub mod dgp;
 pub mod fields;
 pub mod gate;
+pub mod prevalence;
 pub mod report;
 pub mod shards;

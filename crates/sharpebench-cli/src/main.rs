@@ -28,13 +28,17 @@ mod decision_stability_cmd;
 mod external_capture;
 mod forecast_cmd;
 mod gateway_cli;
+mod gateway_diagnostics_cmd;
 mod grader_search_cmd;
 mod import_cmd;
+mod leaderboard_cmd;
 mod lineage_cmd;
 mod regrade_cmd;
 mod replay_diagnostics_cmd;
 mod rescore_cmd;
+mod signals_cmd;
 mod stress_replay_cmd;
+mod submit_cmd;
 mod timing_luck_cmd;
 #[cfg(feature = "self-update")]
 mod update;
@@ -55,7 +59,7 @@ fn main() -> ExitCode {
         Some("score") => match args.get(2) {
             Some(path) => run_score(path, &args, json, ScoreOutput::Board),
             None => {
-                eprintln!("usage: sharpebench score <submissions.json> [--require-run-keys] [--rank-mode <id>] [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode <mode>] [--benchmark-agent <id>] [--psr-standard-error observed|benchmark] [--diagnostics <list>] [--pareto] [--headline] [--json]");
+                eprintln!("usage: sharpebench score <submissions.json> [--require-run-keys] [--rank-mode <id>] [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode <mode>] [--benchmark-agent <id>] [--psr-standard-error observed|benchmark] [--diagnostics <list>] [--pareto] [--headline] [--signals] [--json]");
                 ExitCode::from(2)
             }
         },
@@ -81,6 +85,7 @@ fn main() -> ExitCode {
             ExitCode::from(decision_stability_cmd::run(&args, json).clamp(0, 255) as u8)
         }
         Some("rescore") => ExitCode::from(rescore_cmd::run(&args, json).clamp(0, 255) as u8),
+        Some("signals") => ExitCode::from(signals_cmd::run(&args, json).clamp(0, 255) as u8),
         Some("regrade") => ExitCode::from(regrade_cmd::run(&args, json).clamp(0, 255) as u8),
         Some("compare") => ExitCode::from(compare_cmd::run(&args, json).clamp(0, 255) as u8),
         Some("audit-briefing") => run_audit_briefing(&args, json),
@@ -92,18 +97,33 @@ fn main() -> ExitCode {
         Some("regime") => run_regime(&args, json),
         Some("lineage") => ExitCode::from(lineage_cmd::run(&args, json).clamp(0, 255) as u8),
         Some("arena") => ExitCode::from(arena_cmd::run(&args, json).clamp(0, 255) as u8),
+        Some("leaderboard") => {
+            ExitCode::from(leaderboard_cmd::run(&args, json).clamp(0, 255) as u8)
+        }
         Some("forecast-quality") => {
             ExitCode::from(forecast_cmd::run(&args, json).clamp(0, 255) as u8)
         }
         Some("import") => ExitCode::from(import_cmd::run(&args, json).clamp(0, 255) as u8),
         Some("gateway") => ExitCode::from(gateway_cli::run(&args, json).clamp(0, 255) as u8),
+        Some("gateway-diagnostics") => {
+            ExitCode::from(gateway_diagnostics_cmd::run(&args, json).clamp(0, 255) as u8)
+        }
         Some("contamination-probe") => ExitCode::from(
             contamination_cmd::run_shape(&args, json, &external_capture::DockerSandbox)
+                .clamp(0, 255) as u8,
+        ),
+        Some("identifiability-probe") => ExitCode::from(
+            contamination_cmd::run_identify(&args, json, &external_capture::DockerSandbox)
                 .clamp(0, 255) as u8,
         ),
         Some("presentation-stability") => ExitCode::from(
             contamination_cmd::run_presentation(&args, json, &external_capture::DockerSandbox)
                 .clamp(0, 255) as u8,
+        ),
+        Some("init-agent") => ExitCode::from(submit_cmd::run_init(&args, json).clamp(0, 255) as u8),
+        Some("check-agent") => ExitCode::from(
+            submit_cmd::run_check(&args, json, &external_capture::DockerSandbox).clamp(0, 255)
+                as u8,
         ),
         Some("timing-luck") => {
             ExitCode::from(timing_luck_cmd::run(&args, json).clamp(0, 255) as u8)
@@ -637,6 +657,15 @@ fn help() {
     println!("                         beside the score, a row that loses more than the unlevered market there (a mitigation,");
     println!("                         rank-neutral; crashes shaped unlike the stress set are not detected; relaunches --cmd/--http)");
     println!(
+        "  sharpebench init-agent <dir> --kind cmd|http|image  write a minimal agent template (policy, README, spec)"
+    );
+    println!("                       --python <interpreter>: the interpreter the template calls (default python3; python on Windows)");
+    println!(
+        "  sharpebench check-agent <dir|spec.json> | --cmd \"<prog>\" | --http <addr> | --image <ref>"
+    );
+    println!("                       drive the agent through a small synthetic window and report every gate it would fail:");
+    println!("                       launch, transport, protocol, budget, determinism, network and the headline verdict");
+    println!(
         "  sharpebench score <submissions.json>  rank a JSON field of pre-computed submissions"
     );
     println!("                       --pass-mode / --benchmark-agent: as for run");
@@ -652,6 +681,12 @@ fn help() {
     );
     println!(
         "                         adds a certification verdict per row, never changes the host rank"
+    );
+    println!(
+        "                       --signals: also report the rank-neutral fast signals (process, mandate,"
+    );
+    println!(
+        "                         turnover, cost) with intervals; never evidence of skill, never a rank input"
     );
     println!(
         "                       --diagnostics <list>: also report opt-in Sharpe diagnostics the gate"
@@ -742,6 +777,9 @@ fn help() {
         "  sharpebench regime <a.csv> <b.csv> <regimes.csv> [--col NAME]  compare two return series within each regime (labels are an input)"
     );
     println!(
+        "  sharpebench gateway-diagnostics --journal <journal.json>  calls, retries, requests refused by limit, faults, truncated answers and tokens per decision, and the tool-use breakdown, from a gateway sweep's journal (rank-neutral)"
+    );
+    println!(
         "  sharpebench timing-luck --cadence <m> [--data <csv>] [--periods-per-year N]  how far run's reference rows move when they rebalance every m bars and only the schedule phase moves (rank-neutral)"
     );
     println!(
@@ -750,6 +788,9 @@ fn help() {
     println!(
         "  sharpebench presentation-stability <entrant> [--data <csv>] [--date-shift-days N]  decisions under tickers-only, dates-only, levels-only and full blinding, reordered symbols and a shifted calendar, mapped back and compared (rank-neutral)"
     );
+    println!(
+        "  sharpebench identifiability-probe <external entrant> [--data <csv>] [--window-bars N] [--windows N] [--twin-seed N] [--top-k N] [--year-tolerance N]  closed questions over the entrant's own transport: name the ticker and year of a masked series and of its synthetic twin; hit rates against chance and a whole-window sign-flip test (rank-neutral)"
+    );
     println!("                       <entrant>: --agent buy-and-hold|momentum, --cmd \"<prog>\", --http <addr> or --image <repository@sha256:...>; a failed arm is a typed refusal");
     println!("                       --declared-training-cutoff YYYY-MM-DD: also on run with an external entrant; published as a disclosure, never trusted or verified, evidence mode unchanged");
     println!(
@@ -757,6 +798,9 @@ fn help() {
     );
     println!(
         "  sharpebench arena <init|open|commit|advance|score|publish|verify> ...  drive a forward-attested scoring window (see docs/book/src/arena.md)"
+    );
+    println!(
+        "  sharpebench leaderboard export <arena-dir|board.json> [--out <dir>] [--pubkey <hex>] [--expect-head <count>:<sha256>] [--key <secret>] [--public]  verify signed boards, then write leaderboard.json and leaderboard.md (see docs/book/src/leaderboard-export.md)"
     );
     println!(
         "  sharpebench forecast-quality <evidence.json>... [--contracts <plan.json>]  score prospective forecasts on exact common support, or on a declared contract plan (reported only)"
@@ -772,6 +816,9 @@ fn help() {
     );
     println!(
         "  sharpebench headline <subs.json>                            one verdict per row, with its hard reasons and qualifiers beside it"
+    );
+    println!(
+        "  sharpebench signals <subs.json> [evidence flags]            rank-neutral fast signals with intervals; never evidence of skill"
     );
     println!(
         "  sharpebench rediscover <submitted.csv> <known.csv...>       flag a submission cosine-near a known strategy"
@@ -1419,6 +1466,7 @@ fn run_board_json(
                 if let Some(isolation) = external.cell_isolation {
                     row["cell_isolation"] = cell_isolation::disclosure(isolation);
                     row["evidence_mode"] = cell_isolation::run_evidence_mode(isolation);
+                    row["evaluation_tier"] = cell_isolation::run_evaluation_tier();
                 }
             }
         }
@@ -3492,9 +3540,15 @@ fn run_score(path: &str, args: &[String], json: bool, output: ScoreOutput) -> Ex
             &sharpebench_core::DisqualThresholds::from_score_config(&cfg),
         )
     });
-    match (diagnostics, headlines, pareto) {
-        (None, None, None) => emit_board(&board, json),
-        (requested, headlines, pareto) => {
+    // `--signals` is opt-in and reads the submissions, never the board: the
+    // report sits beside it and no score, rank or verdict reads it.
+    let signals = args
+        .iter()
+        .any(|a| a == "--signals")
+        .then(|| sharpebench_core::fast_signals(&subs, &cfg, &std::collections::BTreeMap::new()));
+    match (diagnostics, headlines, pareto, signals) {
+        (None, None, None, None) => emit_board(&board, json),
+        (requested, headlines, pareto, signals) => {
             let report = requested
                 .as_ref()
                 .map(|r| sharpebench_core::sharpe_diagnostics(&subs, &board, &cfg, r));
@@ -3511,6 +3565,9 @@ fn run_score(path: &str, args: &[String], json: bool, output: ScoreOutput) -> Ex
                 if let Some(pareto) = &pareto {
                     out["pareto"] = serde_json::json!(pareto);
                 }
+                if let Some(signals) = &signals {
+                    out["fast_signals"] = serde_json::json!(signals);
+                }
                 emit_json(&out);
             } else {
                 print_board_with(&board, headlines.as_deref(), pareto.as_ref());
@@ -3519,6 +3576,9 @@ fn run_score(path: &str, args: &[String], json: bool, output: ScoreOutput) -> Ex
                 }
                 if let Some(pareto) = &pareto {
                     print_pareto_note(pareto);
+                }
+                if let Some(signals) = &signals {
+                    signals_cmd::print_report(signals);
                 }
             }
         }
@@ -3816,6 +3876,14 @@ fn print_board_with(
     headlines: Option<&[sharpebench_core::Headline]>,
     pareto: Option<&sharpebench_core::ParetoReport>,
 ) {
+    // Every board this command prints is scored on historical windows or on
+    // a submissions file: neither is a signed forward window, so the tier is
+    // always historical-advisory. It is printed first so no verdict below it
+    // reads as certified skill.
+    println!(
+        "{}",
+        sharpebench_core::EvaluationTier::HistoricalAdvisory.board_line()
+    );
     let headline_header = if headlines.is_some() { " headline" } else { "" };
     // The mandate column appears only when some row declared one, so a board
     // with no declarations prints exactly as before.

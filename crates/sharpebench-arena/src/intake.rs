@@ -86,6 +86,12 @@ pub enum ReturnsProvenance {
     /// while the committed image ran during the window, from a sealed live log
     /// ([`crate::live_capture`]). Certifies on custody, not on repetition.
     LiveCaptured,
+    /// Derived as [`ReturnsProvenance::LiveCaptured`] is, from a sealed live
+    /// log whose header records that the host ran it under a simulated clock
+    /// (`simulated_clock`). A rehearsal of the timing rules: its timestamps
+    /// are not the host's, so the row never certifies and its board does not
+    /// either ([`board_certifies`]).
+    LiveRehearsal,
 }
 
 impl ReturnsProvenance {
@@ -95,7 +101,13 @@ impl ReturnsProvenance {
             Self::Replayed => "replayed",
             Self::ReExecuted => "re-executed",
             Self::LiveCaptured => "live-captured",
+            Self::LiveRehearsal => "live-rehearsal",
         }
+    }
+
+    /// Whether the returns come from a sealed live log, rehearsal or not.
+    pub fn is_live_log(self) -> bool {
+        matches!(self, Self::LiveCaptured | Self::LiveRehearsal)
     }
 }
 
@@ -689,11 +701,14 @@ fn admit_live_log(
     .map_err(|refusal| refusal.to_string())?;
     let mut submission = replay_submission(&replay.data, &certified.trajectory, replay.costs);
     submission.agent_id = agent_id.to_string();
-    Ok((
-        submission,
-        ReturnsProvenance::LiveCaptured,
-        Some(certified.root),
-    ))
+    // A log run under a simulated clock rehearses the timing rules, so its row
+    // is marked and never certifies.
+    let provenance = if certified.root.simulated_clock {
+        ReturnsProvenance::LiveRehearsal
+    } else {
+        ReturnsProvenance::LiveCaptured
+    };
+    Ok((submission, provenance, Some(certified.root)))
 }
 
 fn admit_capture(

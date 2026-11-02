@@ -171,7 +171,8 @@ fn headlines_and_diagnostics_are_reported_together() {
     assert_eq!(verdicts(&doc["headlines"]), expected());
     let human = stdout(fx.cli(&["score", "field.json", "--headline", "--diagnostics", "mppm"]));
     assert!(human.contains("Opt-in Sharpe diagnostics"));
-    assert!(human.lines().next().unwrap().ends_with(" headline"));
+    // Line 0 is the evaluation tier; the column header follows it.
+    assert!(human.lines().nth(1).unwrap().ends_with(" headline"));
 }
 
 #[test]
@@ -183,13 +184,16 @@ fn the_human_board_gains_a_last_verdict_column_only_when_asked() {
     let (plain_lines, with_lines): (Vec<&str>, Vec<&str>) =
         (plain.lines().collect(), with.lines().collect());
     assert_eq!(plain_lines.len(), with_lines.len());
-    assert_eq!(with_lines[0], format!("{} headline", plain_lines[0]));
+    // The evaluation tier is the first line of both, unchanged by the flag.
+    assert_eq!(with_lines[0], plain_lines[0]);
+    assert!(with_lines[0].starts_with("evaluation tier: historical-advisory"));
+    assert_eq!(with_lines[1], format!("{} headline", plain_lines[1]));
     for (i, (agent, verdict)) in expected().iter().enumerate() {
-        let row = with_lines[2 + i];
+        let row = with_lines[3 + i];
         assert!(row.contains(agent.as_str()), "{row}");
-        assert_eq!(row, format!("{} {verdict}", plain_lines[2 + i]));
+        assert_eq!(row, format!("{} {verdict}", plain_lines[3 + i]));
     }
-    assert_eq!(&with_lines[2 + 3..], &plain_lines[2 + 3..]);
+    assert_eq!(&with_lines[3 + 3..], &plain_lines[3 + 3..]);
 }
 
 #[test]
@@ -210,17 +214,21 @@ fn the_headline_command_reports_the_same_verdicts() {
     assert_eq!(json[0]["qualifiers"]["stress"], "not_run");
 
     let human = stdout(fx.cli(&["headline", "field.json"]));
-    assert!(human.contains("skilled: skill_supported\n"), "{human}");
+    assert!(
+        human.contains("skilled: skill_supported, tier historical-advisory\n"),
+        "{human}"
+    );
     assert!(
         human.contains("noise: no_evidence_of_skill [FailedPassK, DsrBelowBar"),
         "{human}"
     );
     assert!(
         human.contains(
-            "flat: degenerate_track [FailedPassK, BootstrapInsignificant, DeflationRefused]"
+            "flat: degenerate_track [FailedPassK, BootstrapInsignificant, DeflationRefused], tier historical-advisory"
         ),
         "{human}"
     );
+    assert_eq!(json[0]["qualifiers"]["tier"], "historical-advisory");
 }
 
 #[test]

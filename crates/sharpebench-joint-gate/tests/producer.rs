@@ -13,7 +13,8 @@ use sharpebench_joint_gate::fields::{
     agent_id, draw_field, read_back, score_cell, submissions, Cell, FOCAL,
 };
 use sharpebench_joint_gate::gate::{authorize_frozen, run_identity};
-use sharpebench_joint_gate::report::{build, decide, CellEstimate, Outcome};
+use sharpebench_joint_gate::prevalence::corrected_prevalence;
+use sharpebench_joint_gate::report::{build, decide, CellEstimate, Outcome, Report};
 use sharpebench_joint_gate::shards::{
     cell_table, check_output_dir, engine_fingerprint, load_rows, run_all, RunError, Tier,
 };
@@ -619,4 +620,119 @@ fn a_two_thirds_share_is_two_thirds_of_the_runs() {
         r.score_config(252.0, 8, 0.1).pass_mode,
         sharpebench_core::PassMode::AtLeast(32)
     );
+}
+
+/// A report holding one null cell (index 0) and one power cell (index 1) with
+/// the given focal-eligible counts out of `fields` each.
+fn prevalence_report(null_eligible: u64, power_eligible: u64, fields: u64) -> Report {
+    let cell = |index, block: &str, effect, eligible| CellEstimate {
+        cell: index,
+        fields,
+        focal_eligible: eligible,
+        ..estimate(block, "iid", "small", effect, 0.0, 0.0)
+    };
+    Report {
+        tier: Tier::Frozen,
+        cells: vec![
+            cell(0, "nulls", 0.0, null_eligible),
+            cell(1, "alts", 3.0, power_eligible),
+        ],
+        controls: Vec::new(),
+        rules: Vec::new(),
+        outcome: None,
+        integrity_passed: None,
+    }
+}
+
+#[test]
+fn the_eligible_share_is_corrected_by_the_measured_power_and_false_eligibility() {
+    let c = campaign();
+    // Sensitivity 70/80 = 7/8, false eligibility 10/80 = 1/8, observed 30/80 =
+    // 3/8: (3/8 - 1/8) / (7/8 - 1/8) = 1/3, Youden 3/4.
+    let r = corrected_prevalence(&c, &prevalence_report(10, 70, 80), 1, 0, 30, 80).unwrap();
+    assert_eq!(r.estimate, 1.0 / 3.0);
+    assert_eq!(r.raw, 1.0 / 3.0);
+    assert_eq!(r.youden, 0.75);
+    assert_eq!(r.clamped_to, "none");
+    assert_eq!(
+        (
+            r.apparent.rate,
+            r.sensitivity.rate,
+            r.false_eligibility.rate
+        ),
+        (0.375, 0.875, 0.125)
+    );
+    assert_eq!(
+        (r.rule.as_str(), r.history_bars, r.effect_annual),
+        ("small", 120, 3.0)
+    );
+    assert!(r.interval_informative);
+    assert!(r.interval.lower < 1.0 / 3.0 && 1.0 / 3.0 < r.interval.upper);
+    assert!(0.0 <= r.interval.lower && r.interval.upper <= 1.0);
+    // The interval is the box of the three Wilson intervals the reading reports.
+    let b = sharpebench_stats::prevalence::rogan_gladen_bounds(
+        (r.apparent.interval.lower, r.apparent.interval.upper),
+        (r.sensitivity.interval.lower, r.sensitivity.interval.upper),
+        (
+            r.false_eligibility.interval.lower,
+            r.false_eligibility.interval.upper,
+        ),
+    )
+    .unwrap();
+    assert_eq!((r.interval.lower, r.interval.upper), (b.lower, b.upper));
+    assert_eq!(r.joint_coverage_floor, 0.97);
+    assert!(r.rank_neutral);
+    assert_eq!(r.tier, Tier::Frozen);
+    // Fewer admitted than false eligibility alone predicts: clamped to zero.
+    // (5/80 - 1/8) / (3/4) = -1/12.
+    let r = corrected_prevalence(&c, &prevalence_report(10, 70, 80), 1, 0, 5, 80).unwrap();
+    assert_eq!(
+        (r.raw, r.estimate, r.clamped_to),
+        (-1.0 / 12.0, 0.0, "zero")
+    );
+    // More admitted than the power predicts: clamped to one.
+    let r = corrected_prevalence(&c, &prevalence_report(10, 70, 80), 1, 0, 75, 80).unwrap();
+    assert_eq!((r.estimate, r.clamped_to), (1.0, "one"));
+}
+
+#[test]
+fn a_gate_no_better_than_chance_is_refused_and_a_wide_box_is_uninformative() {
+    let c = campaign();
+    for (null_eligible, power_eligible) in [(40, 40), (40, 20)] {
+        let err = corrected_prevalence(
+            &c,
+            &prevalence_report(null_eligible, power_eligible, 80),
+            1,
+            0,
+            30,
+            80,
+        )
+        .unwrap_err();
+        assert!(err.contains("sensitivity + specificity <= 1"), "{err}");
+    }
+    // Point rates 12/20 and 8/20 separate, but their 99% intervals overlap.
+    let r = corrected_prevalence(&c, &prevalence_report(8, 12, 20), 1, 0, 10, 20).unwrap();
+    assert_eq!(r.estimate, 0.5);
+    assert!(!r.interval_informative);
+    assert_eq!((r.interval.lower, r.interval.upper), (0.0, 1.0));
+}
+
+#[test]
+fn a_prevalence_reading_needs_a_matched_power_and_null_cell() {
+    let c = campaign();
+    let report = prevalence_report(10, 70, 80);
+    let refused = |power, null, eligible, tracks, report: &Report| {
+        corrected_prevalence(&c, report, power, null, eligible, tracks).unwrap_err()
+    };
+    assert!(refused(0, 0, 30, 80, &report).contains("not a primary power cell"));
+    assert!(refused(1, 1, 30, 80, &report).contains("not a primary null cell"));
+    assert!(refused(2, 0, 30, 80, &report).contains("cell 2 is not in the report"));
+    assert!(refused(1, 0, 30, 0, &report).contains("observed eligible count"));
+    assert!(refused(1, 0, 81, 80, &report).contains("observed eligible count"));
+    let mut other_history = report.clone();
+    other_history.cells[0].history_bars = 240;
+    assert!(refused(1, 0, 30, 80, &other_history).contains("different rules or histories"));
+    let mut other_rule = report.clone();
+    other_rule.cells[0].rule = "control".to_string();
+    assert!(refused(1, 0, 30, 80, &other_rule).contains("different rules or histories"));
 }

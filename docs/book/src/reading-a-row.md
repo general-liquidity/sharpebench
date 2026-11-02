@@ -118,17 +118,24 @@ Qualifiers are listed beside the verdict and never change it.
 
 | Qualifier | Source | Values |
 |---|---|---|
+| `tier` | the evidence, listed first ([evaluation tiers](evaluation-tiers.md)) | `historical-advisory`, which never certifies skill, or `forward-certifying` |
 | `evidence` | the harness evidence mode, supplied by the caller | `unknown`, `certifying` with its mode, or `noncertifying` with its mode and reasons |
 | `tied`, `tie_group` | `dsr_tied`, `tie_group` | whether the row shares its deflated-Sharpe tie band, and the band |
 | `stress` | the stress replay record, supplied by the caller | `not_run`, `clean`, `marked`, `unavailable` |
 | `advisory` | the classifier | the advisory reasons |
 | `declared_mandate` | `mandate_verdict_label()` | the declared-mandate verdict, when one was declared |
 | `rank_mode` | `Certification::describe()` | the opt-in rank-mode verdict, when a rank mode was applied |
+| `stalled_holds` | the signed live capture root, supplied by the caller | the bars the host held after a live-logged entrant's instance stalled, faulted or failed to launch, when above zero |
 
 A field read from a submissions file carries no evidence mode and no stress
 replay, so `score --headline`, `headline`, wasm, npm and MCP report `unknown`
-and `not_run`. A library caller that holds those records passes them in
-`HeadlineContext`.
+and `not_run`, and the tier `historical-advisory`. The human board of `score`
+prints the same tier on its first line. See
+[evaluation tiers](evaluation-tiers.md) for the two-tier design. A library
+caller that holds those records passes them in `HeadlineContext`. The
+[leaderboard export](leaderboard-export.md) passes the `forward` mode for an
+arena row, certifying when the signed board header certifies and otherwise
+noncertifying with the board's flag as the reason.
 
 ### Three meanings of "certifying"
 
@@ -157,6 +164,7 @@ same wave with no drift.
 
 ```text
 $ sharpebench score field.json --headline
+evaluation tier: historical-advisory (advisory only: no signed forward window certifies these rows, so no verdict here certifies skill)
 #    agent                    DSR      PSR      pass^k   proc    boot_p    raw_ret headline
 ------------------------------------------------------------------------------------
 1    skilled               1.0000   1.0000     yes 1/1    yes    0.0005    0.00216 skill_supported
@@ -173,7 +181,7 @@ deflated Sharpe of 0.0 is the floor and not an estimate:
 
 ```text
 $ sharpebench headline field.json
-gains-only: degenerate_track [DeflationRefused]
+gains-only: degenerate_track [DeflationRefused], tier historical-advisory
 ```
 
 The verdict is `degenerate_track` and not `no_evidence_of_skill`, because the
@@ -189,7 +197,7 @@ evidence against it does not depend on pass^k, and it reads
 `no_evidence_of_skill`:
 
 ```text
-noise: no_evidence_of_skill [FailedPassK, DsrBelowBar, BootstrapInsignificant]
+noise: no_evidence_of_skill [FailedPassK, DsrBelowBar, BootstrapInsignificant], tier historical-advisory
 ```
 
 Under `--json`, `score --headline` prints `{"board": ..., "headlines": [...]}`,

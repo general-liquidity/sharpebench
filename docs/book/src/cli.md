@@ -5,6 +5,8 @@ The `sharpebench` binary (crate `sharpebench-cli`) is the command-line entry poi
 ```text
 sharpebench run                       run reference agents through the sim and rank them
 sharpebench score <submissions.json>  rank a JSON field of pre-computed submissions
+sharpebench init-agent <dir> --kind cmd|http|image   write a minimal agent template
+sharpebench check-agent <dir>                         check an agent against every submission gate
 sharpebench check <returns.csv> --trials N [--periods-per-year N]   test one return series for backtest honesty
 sharpebench realism [--data <csv>]    run the stylized-facts dataset gate
 sharpebench commit <agent> <window> <digest> <salt> [--fault-plan <plan.json>]   forward-attestation pre-registration
@@ -12,6 +14,7 @@ sharpebench stress                    run the adversarial stress suite (contamin
 sharpebench audit                     self-audit: prove the scorer resists gaming
 sharpebench sign <subs.json> <key> <out.json>         score + sign a board to a file
 sharpebench verify <board.json> <key> verify a signed board's chain
+sharpebench leaderboard export <arena-dir|board.json> --out <dir>   verify signed boards, then write leaderboard.json and leaderboard.md
 sharpebench capture <agent> <out.json>                capture an agent's raw-decision trajectory
 sharpebench verify-trajectory <traj.json>             replay a trajectory → recompute its score
 sharpebench rescore <bundle.json>                     recompute a declared submission bundle from its frozen files
@@ -20,6 +23,7 @@ sharpebench audit-briefing <briefing.json>            audit a shared briefing fo
 sharpebench canary <seed>                             derive a do-not-train contamination tripwire
 sharpebench contamination-probe <entrant>             real-minus-twin shape probe for path recall (rank-neutral)
 sharpebench presentation-stability <entrant>          decisions under partial blinding, reordering and a date shift (rank-neutral)
+sharpebench identifiability-probe <entrant>           closed ticker and year questions on masked series and their twins (rank-neutral)
 sharpebench sandbox-check <image@sha256:digest>       run the live Docker-boundary acceptance checks
 sharpebench gateway --routes <routes.json> ...        report the host-observed model gateway configuration
 sharpebench score-allocation <alloc.json>             score a weight-vector trajectory (turnover)
@@ -325,6 +329,50 @@ census does not move a score, the controls carry no score field, and the binding
 is provenance beside a result; none of them reaches the gate, eligibility or the
 rank.
 
+## `gateway-diagnostics`
+
+```bash
+sharpebench gateway-diagnostics --journal <journal.json> [--json]
+```
+
+Reads a gateway sweep's money journal and reports how the entrant struggled at
+the gateway: calls, retries (bounded, exact for a decision with one served
+request), requests refused by the per-decision limit, faulted calls by cause,
+truncated answers and tokens per decision, with a tool-use breakdown of
+decisions by requests and calls and of calls by route alias
+(`sharpebench.gateway-diagnostics.v1`, `rank_neutral: true`). It never calls a
+provider and takes no lock. It exits 2 without `--journal` and 1 when the
+journal cannot be read or does not validate. See
+[Struggle diagnostics](model-gateway.md#struggle-diagnostics).
+
+## `init-agent` / `check-agent`
+
+`init-agent <dir> --kind cmd|http|image` writes a minimal agent for one
+transport into `<dir>`: the Python policy (`agent.py`, or `server.py` for
+`http`), a `Dockerfile` for `image`, a README, and `sharpebench-agent.json`
+(schema `sharpebench.agent-spec.v1`), which records the `cmd`, `http` address or
+`image` reference. `--python <interpreter>` names the interpreter the template
+calls (default `python3`, or `python` on Windows). It never overwrites a file:
+if any file it would write exists, it writes nothing and exits 1.
+
+`check-agent` takes an agent directory or spec file, or one of `--cmd
+"<prog>"`, `--http <addr>` and `--image <repository@sha256:...>`, and drives
+the entrant through a synthetic check window (4 symbols, windows 20-50 and
+50-80, seeds 0 and 1). It reports seven gates: `launch`, `transport`,
+`protocol`, `budget`, `determinism`, `verdict` (the headline verdict) and
+`network`. Each is `pass`, `fail`, `advisory` or `not_run`. It exits 0 when no
+gate failed, 1 when one did, and 2 on a usage error. `--json` prints the report
+(schema `sharpebench.check-agent.v1`); `--short-borrow-bps` is accepted as for
+`run`.
+
+```bash
+sharpebench init-agent my-agent --kind cmd
+sharpebench check-agent my-agent --json
+```
+
+[Submit your agent](submit-your-agent.md) walks through both commands and
+explains each gate.
+
 ## `timing-luck`
 
 ```bash
@@ -371,6 +419,20 @@ reordered symbols, and under a calendar shifted by `--date-shift-days`
 `--declared-training-cutoff`, refuse `--masked`, carry `rank_input: false`, and
 report a failed arm as a typed `unavailable` object (exit 1). See
 [Contamination probes](contamination-probes.md).
+
+```bash
+sharpebench identifiability-probe (--cmd "<prog>" | --http <addr> | --image <repository@sha256:...>) [--data <csv>] [--window-bars N] [--windows N] [--twin-seed N] [--top-k N] [--year-tolerance N] [--json]
+```
+
+`identifiability-probe` asks an external entrant, over its own transport, to
+name the ticker and year of each masked series of the same windows and of their
+twins, one fresh entrant per question, and scores the answers against the
+truth, a uniform guesser and a whole-window sign-flip test
+(`sharpebench.identifiability-probe.v1`). The question is a stdin line for
+`--cmd` and `--image` and `POST /identify` for `--http`. A declined or failed
+question refuses the document (exit 1); `--agent` and the cost flags are usage
+errors (exit 2). The wire format is in
+[Contamination probes](contamination-probes.md#identifiability-probe).
 
 `run --declared-training-cutoff YYYY-MM-DD`, with an external entrant only,
 publishes the operator's declared cutoff on the entrant's row as
@@ -420,7 +482,10 @@ every platform.
 Ranks a JSON field of pre-computed submissions (see
 [Submitting an agent](submitting.md)). The board shows DSR, PSR, pass^k, process,
 bootstrap p, and raw return, with a footer naming how many of the submitted agents
-are eligible.
+are eligible. The human board's first line is its
+[evaluation tier](evaluation-tiers.md), always `historical-advisory` here
+because a submissions file is not a signed forward window; the human board of
+`run` prints the same line. The `--json` board is unchanged.
 
 `score`, [`disqualify`](#disqualify) and [`headline`](#headline) share these host scoring controls:
 
@@ -466,6 +531,13 @@ well, the JSON object carries all three members. The verdict is computed from
 the finished board and never written into a row, so scores, rank, ordinal and
 the sealed board are unchanged. Without the flag the output is byte-identical to
 a build without it.
+
+`--signals` adds the rank-neutral [fast signals](fast-signals.md) the
+submissions support: process, mandate, turnover and cost measures with their
+intervals. The human output gains a block after the unchanged board; `--json`
+prints `{"board": ..., "fast_signals": {...}}`, where `board` is the board-only
+output. No score, rank or verdict reads the report, and none of its measures is
+evidence of skill.
 
 `--psr-standard-error observed|benchmark` (also accepted by `disqualify`)
 selects where every PSR and deflated Sharpe on the board evaluates its standard
@@ -519,6 +591,22 @@ The [forward-attestation](attestation.md) surface: pre-register a strategy diges
 sign a published board, and verify a board's chain. HMAC verification requires a
 shared secret whose holders can also forge. Public verification uses the
 Ed25519 chain and a verifying key obtained through an independent channel.
+
+## `leaderboard export`
+
+```bash
+sharpebench leaderboard export <arena-dir | board.json> [--out <dir>] [--pubkey <hex>] [--expect-head <count>:<sha256>] [--key <secret>] [--public] [--json]
+```
+
+Verifies an arena directory (as `arena verify` does) or a board file from
+`sign` (under `--key`, `--pubkey` or `--public`), then writes a canonical JSON
+record and a Markdown table derived only from the signed links:
+`leaderboard.json` and `leaderboard.md` under `--out`, or the table (the record
+under `--json`) on standard output. An input that does not verify exits 1 and
+writes nothing; a usage error exits 2. Each row carries the headline verdict,
+the evaluation tier, the tie band, qualifiers, the deflated Sharpe with its interval, the pass^k count,
+eligibility, the evidence mode, the cost columns and the signed link it came
+from. See [Leaderboard export](leaderboard-export.md).
 
 ## `capture` / `verify-trajectory`
 
@@ -1024,8 +1112,35 @@ and prints one [headline verdict](reading-a-row.md) per row, with its hard
 reasons and qualifiers beside it. `--json` prints the same records
 `score --headline --json` puts under `headlines`. A submissions file carries no
 evidence mode and no stress replay, so those qualifiers read `unknown` and
-`not_run`. Nothing here changes a score or the rank. A missing path exits 2 and
-an unreadable or malformed field exits 1.
+`not_run`, and the first qualifier, `tier`, reads `historical-advisory`. The
+human line reports the tier after the hard reasons, for example
+`noise: no_evidence_of_skill [FailedPassK], tier historical-advisory`. Nothing
+here changes a score or the rank. A missing path exits 2 and an unreadable or
+malformed field exits 1.
+
+## `signals`
+
+```bash
+sharpebench signals <submissions.json> [--suite-evidence <path>] [--host-cost <board.json>] [--contamination-probe <agent>=<path>] [--presentation-stability <agent>=<path>] [--decision-stability <path>] [score flags] [--json]
+```
+
+Prints the rank-neutral [fast-signal report](fast-signals.md) for a field
+(same format and host controls as `score`). The submission measures are always
+present. Each evidence flag may repeat and fills the measures that need it:
+
+| Flag | Document | Fills |
+|---|---|---|
+| `--suite-evidence` | `run --json --suite-evidence` output, or its `suite_evidence` object | `agent_fault_cells`, from each agent's census row |
+| `--host-cost` | a JSON board whose rows carry `cost_source: "host_observed_usd"` | `cost_per_run`, replacing the entrant figure |
+| `--contamination-probe <agent>=<path>` | `contamination-probe --json` | `contamination_mean_edge` |
+| `--presentation-stability <agent>=<path>` | `presentation-stability --json` | `presentation_disagreement` |
+| `--decision-stability` | `decision-stability --json`, matched by its `agent_id` | `decision_disagreement` |
+
+`--json` prints `{"fast_signals": {...}}`; the human form prints one block per
+agent with each measure's value, unit count, direction and interval, then the
+statement that no measure is evidence of skill. Evidence for an agent the field
+does not contain is listed under `unmatched_evidence`. A missing path or a flag
+without a value exits 2; an unreadable field or evidence document exits 1.
 
 ## `rediscover`
 

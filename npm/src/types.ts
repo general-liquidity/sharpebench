@@ -416,6 +416,8 @@ export type HeadlineEvidence =
 
 /** Facts reported beside the verdict. None of them changes it. */
 export interface HeadlineQualifiers {
+  /** Evaluation tier, listed first. `historical-advisory` never certifies skill. */
+  tier: "historical-advisory" | "forward-certifying";
   evidence: HeadlineEvidence;
   tied: boolean;
   tie_group: number;
@@ -423,6 +425,8 @@ export interface HeadlineQualifiers {
   advisory: FailReason[];
   declared_mandate?: string;
   rank_mode?: string;
+  /** Bars the host held after a live-logged entrant stalled, when a caller supplied a count above zero. */
+  stalled_holds?: number;
   [k: string]: unknown;
 }
 

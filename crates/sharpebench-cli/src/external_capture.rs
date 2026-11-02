@@ -14,7 +14,7 @@ use std::process::ExitCode;
 use std::rc::Rc;
 
 use sharpebench_harness::FailureKind;
-use sharpebench_sim::{Agent, HoldAgent, TransportDiagnostics};
+use sharpebench_sim::{Agent, DecideError, HoldAgent, LineExchange, TransportDiagnostics};
 
 use crate::{emit_json, flag_value, WatchedAgent};
 
@@ -25,9 +25,10 @@ pub(crate) type FaultCell = Rc<RefCell<Option<FailureKind>>>;
 /// The transport flags that name an external entrant.
 const TRANSPORTS: [&str; 3] = ["--cmd", "--http", "--image"];
 
-/// A launched sandboxed entrant: a transport while it runs, then a post-exit
-/// resource verdict. `Some(true)` is a breach of the published memory budget.
-pub(crate) trait SandboxEntrant: Agent + TransportDiagnostics {
+/// A launched sandboxed entrant: a transport while it runs, for decisions and
+/// for the identifiability probe's closed questions, then a post-exit resource
+/// verdict. `Some(true)` is a breach of the published memory budget.
+pub(crate) trait SandboxEntrant: Agent + TransportDiagnostics + LineExchange {
     fn finish(self: Box<Self>) -> Result<Option<bool>, String>;
 }
 
@@ -109,6 +110,15 @@ impl Agent for SandboxRun {
     }
 }
 
+impl LineExchange for SandboxRun {
+    fn exchange(&mut self, request: &str) -> Result<String, DecideError> {
+        self.inner
+            .as_mut()
+            .expect("the entrant is present until the run is dropped")
+            .exchange(request)
+    }
+}
+
 impl Drop for SandboxRun {
     fn drop(&mut self) {
         let Some(inner) = self.inner.take() else {
@@ -153,6 +163,27 @@ pub(crate) fn sandbox_factory<'a>(
                 fault.borrow_mut().get_or_insert(FailureKind::SpawnError);
                 Box::new(HoldAgent)
             }
+        }
+    }
+}
+
+/// A fresh container per closed question. Its post-exit verdict lands in
+/// `fault` when the channel is dropped, as a sandboxed run's does; a container
+/// that cannot start is a spawn failure.
+pub(crate) fn sandbox_channel_factory<'a>(
+    image: &'a str,
+    launcher: &'a dyn SandboxLauncher,
+    fault: FaultCell,
+) -> impl FnMut() -> Result<Box<dyn LineExchange>, FailureKind> + 'a {
+    move || match launcher.launch(image) {
+        Ok(inner) => Ok(Box::new(SandboxRun {
+            inner: Some(inner),
+            image: image.to_string(),
+            fault: fault.clone(),
+        }) as Box<dyn LineExchange>),
+        Err(error) => {
+            eprintln!("error: cannot start the sandboxed agent `{image}`: {error}");
+            Err(FailureKind::SpawnError)
         }
     }
 }
@@ -470,6 +501,13 @@ mod tests {
     impl TransportDiagnostics for FakeContainer {
         fn health(&self) -> &TransportHealth {
             &self.health
+        }
+    }
+
+    /// The trajectory commands never ask a closed question.
+    impl LineExchange for FakeContainer {
+        fn exchange(&mut self, _: &str) -> Result<String, DecideError> {
+            Err(DecideError::Protocol)
         }
     }
 

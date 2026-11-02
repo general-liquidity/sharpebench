@@ -18,6 +18,7 @@ pub mod evidence_mode;
 pub mod failure;
 pub mod fault_plan;
 pub mod gateway;
+pub mod gateway_diagnostics;
 pub mod gateway_journal;
 pub mod perturb;
 #[cfg(test)]

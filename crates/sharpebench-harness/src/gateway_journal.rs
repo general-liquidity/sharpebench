@@ -1241,6 +1241,15 @@ impl GatewayJournal {
         })
     }
 
+    /// Load a journal whatever it is bound to, for read-only diagnostics such
+    /// as [`crate::gateway_diagnostics`]. The schema version must still be one
+    /// this binary reads and the records must still validate. A gateway that
+    /// spends must never use this: it would resume a journal another
+    /// experiment owns.
+    pub fn load_for_inspection(path: &Path) -> std::io::Result<Self> {
+        Self::load_checked(path, |found| is_readable_version(&found.schema_version))
+    }
+
     fn load_checked(
         path: &Path,
         accepts: impl Fn(&JournalIdentity) -> bool,
@@ -2306,6 +2315,44 @@ mod tests {
         assert!(GatewayJournal::load_bound(&path, &other).is_err());
         assert!(GatewayJournal::load_for_routes(&path, &"a".repeat(64), budget(1_000, 8)).is_ok());
         assert!(GatewayJournal::load_for_routes(&path, &"a".repeat(64), budget(2_000, 8)).is_err());
+    }
+
+    /// The read-only loader for diagnostics takes a journal whatever it is
+    /// bound to, and still refuses an unknown schema version and a journal
+    /// that does not validate.
+    #[test]
+    fn an_inspection_load_ignores_the_binding_but_not_the_version_or_the_records() {
+        let dir = ScratchDir::new("journal-inspect");
+        let path = dir.join("journal.json");
+        let bound = identity(budget(1_000, 8)).for_sweep("1".repeat(64));
+        let mut journal = GatewayJournal::new(bound);
+        journal.reserve("alias", &card(1, 1), 100);
+        journal.save(&path).expect("save");
+        let loaded = GatewayJournal::load_for_inspection(&path).expect("any binding loads");
+        assert_eq!(loaded.records().len(), 1);
+        assert_eq!(loaded.identity.sweep_sha256, Some("1".repeat(64)));
+
+        let text = std::fs::read_to_string(&path).expect("read");
+        let mut unknown: serde_json::Value = serde_json::from_str(&text).expect("json");
+        unknown["identity"]["schema_version"] = "sharpebench.gateway-journal.v99".into();
+        std::fs::write(&path, unknown.to_string()).expect("write");
+        let error = GatewayJournal::load_for_inspection(&path).expect_err("refused");
+        assert!(error.to_string().contains("different"), "{error}");
+
+        let mut double: serde_json::Value = serde_json::from_str(&text).expect("json");
+        let settled = serde_json::json!({"record": "settled", "ordinal": 5, "settlement": "unknown", "reason": "usage_absent"});
+        double["records"]
+            .as_array_mut()
+            .expect("records")
+            .push(settled);
+        std::fs::write(&path, double.to_string()).expect("write");
+        let error = GatewayJournal::load_for_inspection(&path).expect_err("refused");
+        assert!(
+            error
+                .to_string()
+                .contains("a settlement names no reservation"),
+            "{error}"
+        );
     }
 
     /// Recovery cannot selectively erase a spent attempt: a hand-edited journal
