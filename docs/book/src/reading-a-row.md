@@ -125,6 +125,7 @@ Qualifiers are listed beside the verdict and never change it.
 | `advisory` | the classifier | the advisory reasons |
 | `declared_mandate` | `mandate_verdict_label()` | the declared-mandate verdict, when one was declared |
 | `rank_mode` | `Certification::describe()` | the opt-in rank-mode verdict, when a rank mode was applied |
+| `stalled_holds` | the signed live capture root, supplied by the caller | the bars the host held after a live-logged entrant's instance stalled, faulted or failed to launch, when above zero |
 
 A field read from a submissions file carries no evidence mode and no stress
 replay, so `score --headline`, `headline`, wasm, npm and MCP report `unknown`

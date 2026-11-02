@@ -63,7 +63,7 @@ Each row holds:
 | `dsr`, `dsr_interval`, `dsr_interval_error` | the deflated Sharpe and its bootstrap interval. `dsr` is `null` when the deflation family refused the track or could not compute it, because the stored value is then a floor, not a figure |
 | `pass_k` | `passed`, `runs_passed` and `runs_scored` |
 | `cost` | `source`, `total`, `return_per_cost`, `dsr_per_cost`. A signed board carries the cost the entrant reported, so `source` is always `entrant_reported`; `total` is `null` when no cost was reported |
-| `returns_provenance` | how an arena row's returns were obtained: `supplied`, `replayed`, `re-executed` or `live-captured` |
+| `returns_provenance` | how an arena row's returns were obtained: `supplied`, `replayed`, `re-executed`, `live-captured` or `live-rehearsal` |
 | `record` | `board_path`, `window_path`, the chain position `link` and its `link_signature` |
 
 A refusal row has the verdict `refused`, the refusal text as its cause, link 0
@@ -73,7 +73,9 @@ The evidence qualifier uses the headline's meaning of "certifying" (see
 [three meanings](reading-a-row.md#three-meanings-of-certifying)). An arena row
 has the mode `forward`; it is `certifying` exactly when the signed header says
 the board certifies, and otherwise `noncertifying` with the board's flag and
-any accepted supplied returns as reasons. A refusal and a row from a board file
+any accepted supplied returns as reasons. A live-logged row whose signed root
+counts host holds after a stall carries the `stalled_holds` qualifier with the
+count, and the table lists it among the qualifiers. A refusal and a row from a board file
 carry no evidence mode, so they read `unknown`. No signed board records a
 stress replay, so `stress` reads `not_run`.
 

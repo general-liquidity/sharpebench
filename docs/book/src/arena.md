@@ -264,12 +264,16 @@ true time.
 A log that fails is refused and recorded with the rule it broke (for example
 `live log has no complete record of run 1 step 4`). One that passes is ranked
 on its logged decisions, replayed under the window's scorer exactly as a capture
-is, with provenance `live-captured`. The window records each admitted log's
-root (`live_capture`: image, header digest, entry, bar, model call and restart
-counts, root digest, and the seal), and the signed header carries the roots.
+is, with provenance `live-captured`, or `live-rehearsal` when the log's header
+records that the host ran it under a simulated clock. The window records each
+admitted log's root (`live_capture`: image, header digest, entry, bar, model
+call and restart counts, the count of `stalled_holds` the host applied after
+the entrant's instance stalled, faulted or failed to launch, `simulated_clock`
+when set, root digest, and the seal), and the signed header carries the roots.
 Publishing refuses a root sealed under any key but the arena's, and
-verification checks every root's seal under the board's key and requires one
-root per `live-captured` row. A window that records a root is written under
+verification checks every root's seal under the board's key, requires one
+root per `live-captured` or `live-rehearsal` row, and requires a root that
+records a simulated clock to stand behind a `live-rehearsal` row and no other. A window that records a root is written under
 schema 8, which a binary built before live capture refuses rather than loading
 it and writing it back without the roots. A window that also re-executed a row
 is written under schema 9, which implies support for the roots, and keeps both
@@ -295,7 +299,7 @@ gateway, a fake image digest and a simulated clock.
 
 A board certifies its rows only when it ranked at least one row, supplied
 returns were not accepted, and every ranked row is `re-executed` or
-`live-captured`. The arena
+`live-captured`. A `live-rehearsal` row never certifies. The arena
 computes this from the rows when it scores; no option sets it. The window
 records it as `certifying`, the signed header carries it, and `arena score
 --json` reports it. A `replayed` or `supplied` row makes the board
@@ -318,7 +322,7 @@ re-executed.
 ### Provenance on the board
 
 Each ranked row's `returns_provenance`, one of `supplied`, `replayed`,
-`re-executed` or `live-captured`, is recorded in the window file and published on the row's
+`re-executed`, `live-captured` or `live-rehearsal`, is recorded in the window file and published on the row's
 signed link beside the kernel's fields. It is rank-neutral: it changes no
 score and no ordering. `board.md` lists it per agent, and `arena score --json`
 returns it as a map from agent id. A row without it has the bytes of the plain

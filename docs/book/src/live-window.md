@@ -93,7 +93,14 @@ model requests. An entrant that overruns it is stopped and holds for every
 later bar of that run; an invalid decision or an early exit holds that bar,
 and three faults in a row open the circuit breaker, after which every bar
 holds. The holds are the decisions applied, so they are what its log records,
-and the report lists each run's first fault (`run 0: BudgetOverrun`). Model calls it made before it stalled were
+each marked `host_hold`, and the report lists each run's first fault
+(`run 0: BudgetOverrun`). The count of those holds is sealed into the entrant's
+live capture root as `stalled_holds` and published on the signed board:
+`board.md` lists it beside the row's provenance (`live-captured,
+stalled_holds 12`), the [leaderboard export](leaderboard-export.md) shows it as
+the row's `stalled_holds` qualifier, and the run report gives it per entrant.
+A log that marks a decision with orders as a host hold is refused at intake.
+Model calls it made before it stalled were
 dispatched, so the gateway journal charges them by its
 [settlement rules](model-gateway.md#reservations-and-settlement). A container
 that cannot start holds the whole run the same way.
@@ -151,8 +158,15 @@ whose `bar(index)` blocks until that bar exists, and calling
 A replay of past bars under the wall clock stops at the first clock check,
 since its decisions are years late. `--simulated-clock` rehearses a window on
 a replay: the clock moves to 21:00 UTC on each bar's day as the bar arrives.
-Its log timestamps are bar times, not the host's, so a rehearsal belongs in its
-own arena directory under its own key; the JSON report marks it with
+Its log timestamps are bar times, not the host's, so every log header records
+`simulated_clock`, every row is `live-rehearsal` rather than `live-captured`,
+and the board never certifies: `board.md` opens with the noncertifying notice
+and the evaluation tier `historical-advisory`. Verification refuses a re-signed
+header that claims certification for such a board, and refuses a rehearsal row
+relabelled `live-captured`, because each root records the simulated clock. A
+window opened under the simulated clock cannot be resumed under the wall clock.
+A rehearsal belongs in its own arena directory under its own key; the report
+carries `simulated_clock: true` and the JSON output also marks it with
 `"clock": "simulated"`.
 
 ## Model-backed entrants
