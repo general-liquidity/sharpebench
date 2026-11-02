@@ -7,15 +7,32 @@ Seeds remain separate for pass^k, but pooled statistics first average aligned
 seed returns inside each window and then concatenate windows. Replicating an
 execution seed therefore cannot multiply the apparent sample size.
 
-An agent is **rank-eligible only if every gate holds**:
+An agent is **rank-eligible only if all eleven conditions hold**:
 
 ```text
-eligible = DSR ≥ dsr_bar          (survives multiple-testing deflation)
-         ∧ pass^k                  (clears the per-run bar on EVERY run)
-         ∧ process_ok              (zero block-severity trace violations)
-         ∧ bootstrap_p < alpha     (edge beats the stationary-bootstrap null)
-         ∧ mandate_ok              (respected its drawdown mandate)
+eligible = DSR ≥ dsr_bar                   (survives multiple-testing deflation)
+         ∧ pass^k                           (clears the per-run bar on EVERY run)
+         ∧ process_ok                       (zero block-severity trace violations)
+         ∧ bootstrap_p < alpha              (edge beats the stationary-bootstrap null)
+         ∧ mandate_ok                       (respected its drawdown mandate)
+         ∧ deflation_error is absent        (the deflated Sharpe and its bar were computed)
+         ∧ deflation_refusal is absent      (the deflation family did not refuse the track's shape)
+         ∧ dsr_ci_error is absent           (the deflated Sharpe's interval was estimated)
+         ∧ bootstrap_error is absent        (the bootstrap was computed)
+         ∧ standard_error_refusal is absent (the admitted DSR's standard error is certified)
+         ∧ exposure_path_refusal is absent  (the profit clears the risk its exposure history implies)
+         ∧ exposure_path_error is absent    (the exposure-path statistic was computed)
 ```
+
+The first five are the hard gates. The next four hold when the statistics the
+gates read could be computed and the track has a Sharpe ratio: a track the
+deflation family refuses for its shape, such as a constant track or one that
+never lost a bar, fails on `deflation_refusal`. The last three can only remove
+a row the earlier conditions admitted; see
+[certifying the standard error](methodology-deflated-sharpe.md#certifying-the-standard-error-before-admission)
+and [leverage timing](methodology-deflated-sharpe.md#leverage-timing-the-risk-an-exposure-history-implies).
+[How to read a row](reading-a-row.md) names the reason each failed condition
+produces and gives the one-word headline verdict a row reads as.
 
 Eligible agents sort by the **rank key** (Deflated Sharpe by default, or Alpha).
 Ineligible agents sort last, by raw return, for display only; raw return never
@@ -54,8 +71,8 @@ all volatility symmetrically.
 beats on return, drawdown and turnover at once. Only an agent whose pooled
 track has a Sharpe ratio can carry the flag. A track the kernel refuses as
 having none is never marked: it has fewer than two observations, or every
-observation is equal, or its Sharpe is not finite, and its `deflation_error`
-says which. Without that rule a track that never trades, all zeros with zero
+observation is equal, or its Sharpe is not finite, and its `deflation_refusal`
+or `deflation_error` says which. Without that rule a track that never trades, all zeros with zero
 drawdown and, having placed no orders, zero turnover, could never be dominated
 and would always be marked optimal. A refused track with at least one
 observation still counts when the flag asks whether another agent is beaten,
@@ -64,6 +81,28 @@ An agent that loses money with drawdown and orders is beaten on all three by
 a track that does nothing, so it is not Pareto-optimal. An empty track has no
 return to compare and beats nobody. The flag is reported only: no gate,
 eligibility rule or rank reads it.
+
+**Multi-objective report** (opt-in: `sharpebench pareto <field.json>`, or a
+`front` and an `elig_front` column on `sharpebench score --pareto`). It computes
+the Pareto front over six axes: mean return (higher is better), max drawdown,
+turnover, cost, volatility (lower is better) and the 5% historical expected
+shortfall as a return (higher is better). It gives the front among every agent
+and among rank-eligible agents only, and for each agent the agents that
+dominate it. Dominance needs an agent at least as good on every axis and
+strictly better on one, so agents equal on every axis are both on the front. A
+row takes part only when all six values are finite numbers: an expected
+shortfall the tail is too thin to estimate (fewer than ten observations in the
+5% tail), or a non-finite value, leaves the row out with the reason, and it
+dominates nobody. As with `pareto_optimal`, a track with no Sharpe ratio is not
+a member but still dominates. Sampling noise is reported, not hidden: each
+pooled track is resampled `n_boot` times with the board's stationary bootstrap
+(its seed and block probability, one shared index path per track length), the
+return-derived axes are recomputed with turnover and cost held fixed, and each
+member gets the fraction of resamples in which it stays on the front. The
+report is never a rank: its rows are in board order, no gate, eligibility rule
+or rank predicate reads it, and `pareto_optimal` keeps its three axes. A front
+over unadjusted axes is exactly what a lucky track can win, which is why the
+rank stays the deflated Sharpe.
 
 ## What the rank does not answer
 

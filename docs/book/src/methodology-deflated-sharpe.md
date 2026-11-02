@@ -19,6 +19,28 @@ general. Both evaluations ship; the gate keeps the observed-Sharpe one and the
 eq.-5 evaluation is an
 [opt-in diagnostic](#opt-in-diagnostics-the-gate-does-not-use).
 
+The eq.-5 evaluation is also an opt-in scoring methodology. A score
+configuration with `"psr_standard_error": "benchmark"` (on the command line,
+`--psr-standard-error benchmark`) evaluates the standard error at the benchmark
+in every PSR and deflated Sharpe the board reads: the pooled `psr`, the deflated
+Sharpe and its bootstrap interval, so the tie bands, the per-run PSR of pass^k,
+and the serial-correlation and moment-credit admission terms, whose brackets and
+Gaussian floor are then evaluated at the deflation benchmark too. Each row then
+carries `"psr_standard_error": "benchmark"`. The default, `observed`, is omitted
+from a serialized configuration and from every row, so a default board, its
+digests and the joint-gate engine fingerprint are byte-identical to a build
+without the field. The default does not change: the joint-gate protocol freezes
+the plug-in estimand. Why the opt-in exists: the plug-in PSR is not monotone in
+the observed Sharpe. With the moments fixed, its slope at a zero benchmark has
+the sign of `1 - g3 SR / 2`, so on a short, smooth, positively skewed track
+(`g3 SR > 2`) a higher Sharpe lowers it, and a pinned five-bar track shows it.
+The null-evaluated denominator does not move with the Sharpe, so that PSR is
+non-decreasing in it everywhere, and at a zero benchmark it is
+`Phi(SR sqrt(n - 1))`, taking no credit from the sample moments. The cost is
+that a negatively skewed track loses the penalty the plug-in bracket gives it
+at a zero benchmark; tail risk is reported by the `expected-shortfall`
+diagnostic and limited by the mandate.
+
 The PSR variance the kernel uses is the 2014 one, and it **assumes serially
 independent returns**. Positive autocorrelation makes the true sampling variance
 of a Sharpe estimate larger, so on autocorrelated returns the PSR and DSR point
@@ -558,8 +580,9 @@ t-statistic reaches 2 cleared every other gate on 94 of 4,000 seeds, against 16
 for a coin of the same size traded to the end.
 
 Since the change after 0.28.0, a track must also clear the risk its exposure
-history implies (`exposure_path_error`, typed requirement
-`EXPOSURE_PATH_UNPROVEN`). In each window the exposure rate is the running mean
+history implies (`exposure_path_refusal`, typed requirement
+`EXPOSURE_PATH_UNPROVEN`; a statistic that could not be computed is reported
+apart, in `exposure_path_error`). In each window the exposure rate is the running mean
 square `V_t / t` of the returns so far. The window is charged its length times the
 largest rate it showed after its first quarter, so stopping or de-risking leaves
 the charge where the history put it and raising exposure raises it. The
@@ -657,9 +680,10 @@ agents, the risk-managed agent and the five-agent luck floor, every share is
 below 0.03, the largest 0.0285 on weekly crypto, where the windows are
 shortest; a harness test
 (`honest_tracks_on_the_frozen_panels_split_almost_nothing_between_windows`)
-pins that bound. Commodities reports a reason instead of a share, because its
-raw prices include a documented negative quote that leaves non-finite returns
-in the pooled track.
+pins that bound. Commodities is among them: its raw prices include a documented
+negative quote, and the simulator books a bar that takes a book's NAV to or
+below zero as ruin and closes the book (see [The simulator](simulator.md)), so
+every pooled track stays finite.
 
 The diagnostic refuses nobody and changes no rank. It is published so that a
 gate on this shape, if one is ever wanted, can take its threshold from the

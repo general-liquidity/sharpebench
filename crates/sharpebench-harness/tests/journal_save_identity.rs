@@ -38,6 +38,7 @@ fn identity() -> JournalIdentity {
         GatewayBudget {
             max_usd_nanos: 1000,
             max_calls: 8,
+            per_cell: None,
         },
     )
 }

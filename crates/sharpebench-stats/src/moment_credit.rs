@@ -26,9 +26,9 @@
 //! The floor can only refuse a track the gate admitted, and leaves a track
 //! whose moments widen the interval exactly where the kernel puts it.
 
-use crate::deflated_sharpe::{
-    deflated_sharpe_ratio_against_null, expected_max_sharpe, observed_sharpe_ratio,
-};
+use crate::deflated_sharpe::{expected_max_sharpe, observed_sharpe_ratio};
+use crate::null_standard_error::{deflated_sharpe_ratio_against_null_at, psr_bracket};
+use crate::opt_in_diagnostics::StandardErrorAt;
 use crate::stats::{kurtosis, norm_cdf, skewness};
 use crate::validation::{
     finite_computation, finite_observations, finite_parameter, StatisticalError,
@@ -66,6 +66,27 @@ pub fn deflated_sharpe_without_moment_credit(
     null_mean_sharpe: f64,
     trials_sr_std: f64,
 ) -> Result<f64, StatisticalError> {
+    deflated_sharpe_without_moment_credit_at(
+        returns,
+        n_trials,
+        null_mean_sharpe,
+        trials_sr_std,
+        StandardErrorAt::Observed,
+    )
+}
+
+/// [`deflated_sharpe_without_moment_credit`] with both brackets, the kernel's
+/// and the Gaussian floor, evaluated where `at` says: at the observed Sharpe,
+/// or under [`StandardErrorAt::Benchmark`] at the deflation benchmark `SR_0`,
+/// where the floor is `1 + SR_0^2 / 2`. Under either evaluation the floor binds
+/// exactly where the sample skewness or kurtosis narrows the bracket.
+pub fn deflated_sharpe_without_moment_credit_at(
+    returns: &[f64],
+    n_trials: u32,
+    null_mean_sharpe: f64,
+    trials_sr_std: f64,
+    at: StandardErrorAt,
+) -> Result<f64, StatisticalError> {
     finite_observations(returns)?;
     finite_parameter(null_mean_sharpe, "null_mean_sharpe")?;
     let sr_star = finite_computation(
@@ -81,8 +102,12 @@ pub fn deflated_sharpe_without_moment_credit(
     let sr = observed_sharpe_ratio(returns)?;
     let g3 = finite_computation(skewness(returns), "return skewness")?;
     let g4 = finite_computation(kurtosis(returns), "return kurtosis")?;
-    let kernel = finite_computation(1.0 - g3 * sr + ((g4 - 1.0) / 4.0) * sr * sr, "PSR variance")?;
-    let variance = kernel.max(gaussian_bracket(sr));
+    let kernel = psr_bracket(sr, sr_star, g3, g4, at)?;
+    let evaluated_at = match at {
+        StandardErrorAt::Observed => sr,
+        StandardErrorAt::Benchmark => sr_star,
+    };
+    let variance = kernel.max(gaussian_bracket(evaluated_at));
     let numerator = finite_computation(
         (sr - sr_star) * (returns.len() as f64 - 1.0).sqrt(),
         "PSR numerator",
@@ -105,13 +130,45 @@ pub fn certify_without_moment_credit(
     trials_sr_std: f64,
     dsr_bar: f64,
 ) -> Result<(), StatisticalError> {
-    let kernel =
-        deflated_sharpe_ratio_against_null(returns, n_trials, null_mean_sharpe, trials_sr_std)?;
+    certify_without_moment_credit_at(
+        returns,
+        n_trials,
+        null_mean_sharpe,
+        trials_sr_std,
+        dsr_bar,
+        StandardErrorAt::Observed,
+    )
+}
+
+/// [`certify_without_moment_credit`] for a gate whose deflated Sharpe
+/// evaluates its standard error where `at` says. The gate's value and the
+/// floored one are both computed under that evaluation, so the term still
+/// refuses only a track the gate it guards admitted.
+pub fn certify_without_moment_credit_at(
+    returns: &[f64],
+    n_trials: u32,
+    null_mean_sharpe: f64,
+    trials_sr_std: f64,
+    dsr_bar: f64,
+    at: StandardErrorAt,
+) -> Result<(), StatisticalError> {
+    let kernel = deflated_sharpe_ratio_against_null_at(
+        returns,
+        n_trials,
+        null_mean_sharpe,
+        trials_sr_std,
+        at,
+    )?;
     if kernel < dsr_bar {
         return Ok(());
     }
-    let floored =
-        deflated_sharpe_without_moment_credit(returns, n_trials, null_mean_sharpe, trials_sr_std)?;
+    let floored = deflated_sharpe_without_moment_credit_at(
+        returns,
+        n_trials,
+        null_mean_sharpe,
+        trials_sr_std,
+        at,
+    )?;
     if floored < dsr_bar {
         return Err(StatisticalError::InvalidParameter {
             name: "returns",
@@ -124,6 +181,7 @@ pub fn certify_without_moment_credit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::deflated_sharpe::deflated_sharpe_ratio_against_null;
 
     /// Moments that already widen the interval leave the kernel's deflated
     /// Sharpe as it is, bit for bit: a negatively skewed track.

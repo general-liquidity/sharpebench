@@ -30,14 +30,81 @@ def load_checker():
 checker = load_checker()
 
 
+# Producing commits the 2026-11-02 drift audit recovered by rerunning each
+# producer at the commit that last wrote its artifact.
+RECOVERED_PRODUCING_COMMITS = {
+    "paper/evidence/final/commodities-1d.jsonl": "f49d93c18a66c67f2b6493fc32c988d60fb9584b",
+    "paper/evidence/final/luck-floor-1000.jsonl": "f49d93c18a66c67f2b6493fc32c988d60fb9584b",
+    "paper/evidence/final/external-rules.jsonl": "ae553a8f95edb51f40bed45b3157f55f622ab596",
+    "paper/evidence/final/pass-witness.jsonl": "df0cd7a052596c2047bd251ccf7b612652155a2c",
+    "paper/evidence/final/power-curve.jsonl": "f3c00af8317c0583e2434f47ce8ccaf8c2aee0af",
+    "examples/forecast-quality/fixtures/report.json": "105e596ed2bb681bd4a7e077bb5395161607db31",
+    "examples/forecast-quality/fixtures/withheld/report.json": "105e596ed2bb681bd4a7e077bb5395161607db31",
+}
+
+
+def committed_manifest() -> dict:
+    return json.loads((ROOT / "paper/evidence/provenance.json").read_text(encoding="utf-8"))
+
+
+def bound_to_current_policy(manifest: dict) -> dict:
+    """The committed manifest as make-provenance would bind it under this policy.
+
+    The committed manifest is rebound by the maintainer at integration, so on a
+    branch that changes the policy it can still carry the previous schema.
+    The rule tests below need a valid control either way.
+    """
+    bound = copy.deepcopy(manifest)
+    bound["schema_version"] = common.SCHEMA_VERSION
+    bound["artifact_scope"] = list(common.ARTIFACT_SCOPE)
+    for record in bound["artifacts"]:
+        if "produced_at" not in record:
+            record["produced_at"] = common.produced_at(ROOT, record["path"], record["sha256"])
+    return bound
+
+
 class ProvenancePolicyTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.manifest = json.loads(
-            (ROOT / "paper/evidence/provenance.json").read_text(encoding="utf-8")
-        )
+        self.manifest = bound_to_current_policy(committed_manifest())
 
     def test_current_manifest_uses_the_closed_policy(self) -> None:
         self.assertEqual(common.manifest_rule_problems(self.manifest), [])
+
+    def test_produced_at_recovers_the_commit_that_wrote_each_artifact(self) -> None:
+        for path, commit in RECOVERED_PRODUCING_COMMITS.items():
+            with self.subTest(path=path):
+                digest = common.digest_bytes((ROOT / path).read_bytes())
+                self.assertEqual(common.produced_at(ROOT, path, digest), commit)
+
+    def test_produced_at_is_carried_forward_while_the_bytes_are_unchanged(self) -> None:
+        path = "paper/evidence/final/commodities-1d.jsonl"
+        digest = common.digest_bytes((ROOT / path).read_bytes())
+        earlier = "0" * 40
+        previous = {path: {"path": path, "sha256": digest, "produced_at": earlier}}
+        self.assertEqual(common.produced_at(ROOT, path, digest, previous), earlier)
+        # New bytes are never carried: they are looked up again, and bytes no
+        # commit holds are refused rather than bound to the last writer.
+        with self.assertRaises(common.ProducedAtUnknown):
+            common.produced_at(ROOT, path, "f" * 64, previous)
+
+    def test_produced_at_must_hold_the_recorded_bytes(self) -> None:
+        artifacts = [
+            {**record}
+            for record in self.manifest["artifacts"]
+            if record["path"] in RECOVERED_PRODUCING_COMMITS
+        ]
+        self.assertEqual(checker.check_produced_at(artifacts), [])
+        # The parent of the producing commit does not hold the frozen sweep.
+        artifacts[0]["produced_at"] = "a" * 40
+        stale = {**artifacts[1], "produced_at": checker.git(
+            "rev-parse", f"{artifacts[1]['produced_at']}^"
+        ).stdout.strip()}
+        problems = checker.check_produced_at([artifacts[0], stale])
+        self.assertTrue(any("not a commit" in p for p in problems), problems)
+        self.assertTrue(
+            any("absent from" in p or "not the recorded bytes" in p for p in problems),
+            problems,
+        )
 
     def test_every_manifest_rule_rejects_its_planted_counterexample(self) -> None:
         """One registry covers every rule family with a named negative control.
@@ -60,6 +127,12 @@ class ProvenancePolicyTests(unittest.TestCase):
 
             return apply
 
+        def mutate_artifact_record(change):
+            def apply(manifest):
+                change(manifest["artifacts"][0])
+
+            return apply
+
         def duplicate_source(manifest):
             manifest["source_files"].append(copy.deepcopy(manifest["source_files"][0]))
 
@@ -69,7 +142,9 @@ class ProvenancePolicyTests(unittest.TestCase):
             ("commit identity", mutate("generated_at_head", "not-a-commit"), "not a full commit id"),
             ("dirty flag type", mutate("generated_at_head_dirty", "false"), "must be boolean"),
             ("snapshot digest", mutate("source_snapshot_sha256", "xyz"), "not a sha256"),
-            ("record schema", mutate_source_record(lambda r: r.update({"size": 1})), "exactly path and sha256"),
+            ("record schema", mutate_source_record(lambda r: r.update({"size": 1})), "exactly path, sha256"),
+            ("producing commit", mutate_artifact_record(lambda r: r.pop("produced_at")), "exactly path, produced_at, sha256"),
+            ("producing commit id", mutate_artifact_record(lambda r: r.update(produced_at="f49d93c")), "produced_at is not a full commit id"),
             ("rooted path", mutate_source_record(lambda r: r.update(path="../escape")), "invalid path"),
             ("record digest", mutate_source_record(lambda r: r.update(sha256="0")), "invalid sha256"),
             ("unique path", duplicate_source, "repeats path"),

@@ -125,7 +125,8 @@ pub struct PsrDiagnostic {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub psr: Option<f64>,
     /// Against the row's `deflation_bar_per_period`: the counterpart of the
-    /// board's `deflated_sharpe`. Absent when the row has a `deflation_error`.
+    /// board's `deflated_sharpe`. Absent when the row has a `deflation_error`
+    /// or a `deflation_refusal`, whose bar is the floor and not a measurement.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub psr_at_deflation_bar: Option<f64>,
     /// Why the diagnostic could not be computed. When present, the values it
@@ -255,9 +256,7 @@ pub fn sharpe_diagnostics(
             let pooled = submission
                 .map(|s| pooled_returns(s, cfg.execution_seeds_per_window))
                 .unwrap_or_default();
-            let bar = row
-                .deflation_error
-                .is_none()
+            let bar = (row.deflation_error.is_none() && row.deflation_refusal.is_none())
                 .then_some(row.deflation_bar_per_period);
             let wants = |d| requested.contains(&d);
             SharpeDiagnostics {
@@ -547,6 +546,50 @@ mod tests {
         let ac = diags[wave].autocorrelated_psr.as_ref().unwrap();
         assert!(ac.rho.unwrap() > 0.3);
         assert!(ac.psr.unwrap() < board[wave].psr);
+    }
+
+    /// The diagnostic against the deflation bar needs a bar that was measured.
+    /// A refused track's bar is the floor, so its diagnostic is absent; a row
+    /// whose deflated Sharpe computed and only its interval failed keeps it.
+    #[test]
+    fn a_refused_track_has_no_diagnostic_against_the_deflation_bar() {
+        let mut subs = field();
+        subs.push(sub(
+            "gains-only",
+            (0..200)
+                .map(|i| 0.002 + 0.0005 * (i as f64 * 0.7).sin())
+                .collect(),
+        ));
+        for (cfg, refused_only) in [
+            (ScoreConfig::default(), true),
+            (
+                ScoreConfig {
+                    dsr_ci_level: 1.5,
+                    ..ScoreConfig::default()
+                },
+                false,
+            ),
+        ] {
+            let board = rank(&subs, &cfg);
+            let diags = sharpe_diagnostics(&subs, &board, &cfg, &[SharpeDiagnostic::NullSePsr]);
+            for (row, d) in board.iter().zip(&diags) {
+                let refused = row.deflation_refusal.is_some();
+                assert_eq!(refused, row.agent_id == "gains-only", "{}", row.agent_id);
+                assert_eq!(
+                    row.dsr_ci_error.is_some(),
+                    !refused_only,
+                    "{}",
+                    row.agent_id
+                );
+                let null = d.null_se_psr.as_ref().unwrap();
+                assert_eq!(
+                    null.psr_at_deflation_bar.is_none(),
+                    refused,
+                    "{}",
+                    row.agent_id
+                );
+            }
+        }
     }
 
     #[test]

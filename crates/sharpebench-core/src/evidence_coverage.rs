@@ -364,9 +364,12 @@ pub const COMPOSITE_SCORE_INVENTORY: EvidenceInventory = EvidenceInventory {
         ("bootstrap_p", COVERED_SCORE),
         ("bootstrap_error", COVERED_SCORE),
         ("deflation_error", COVERED_SCORE),
+        ("deflation_refusal", COVERED_SCORE),
+        ("dsr_ci_error", COVERED_SCORE),
         ("selection_error", COVERED_SCORE),
         ("standard_error_refusal", COVERED_SCORE),
         ("exposure_path_error", COVERED_SCORE),
+        ("exposure_path_refusal", COVERED_SCORE),
         ("raw_mean_return", COVERED_SCORE),
         ("rank_eligible", COVERED_SCORE),
         ("composite", COVERED_SCORE),
@@ -456,6 +459,7 @@ pub const COMPOSITE_SCORE_INVENTORY: EvidenceInventory = EvidenceInventory {
         ("declared_passed_k", COVERED_SCORE),
         ("declared_mandate_eligible", COVERED_FIELD),
         ("declared_mandate_ordinal", COVERED_FIELD),
+        ("psr_standard_error", COVERED_SCORE),
         (
             "certification",
             Coverage::Excluded {

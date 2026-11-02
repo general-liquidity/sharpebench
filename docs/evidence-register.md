@@ -1158,7 +1158,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Artifacts.**
 - `crates/sharpebench-core/src/selfaudit.rs`, sha256 `96c2e2d67dfae121db51bea9ba31c5d81d0808619d77735cfc80a6953e0b16e7`, digest source: paper/evidence/provenance.json, carries the battery and the commit-time assertions that every case is defended and no known gap remains
-- `crates/sharpebench-arena/src/audit.rs`, sha256 `5dba8da8bce47be67aaace6b7b297668026f3a038b0b136f75a9f04f4d15cb14`, digest source: paper/evidence/provenance.json, the tenth case, against the forward arena's intake
+- `crates/sharpebench-arena/src/audit.rs`, sha256 `d6482f3905d9e8c4fa6625d99264f590917605368c528a2bf9fad31f3e739c72`, digest source: paper/evidence/provenance.json, the tenth case, against the forward arena's intake
 
 **Producer command.** sharpebench audit (paper/sections/A-commands.tex); the claim is enforced by the commit-time tests in the two files above.
 
@@ -1190,6 +1190,8 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | 2026-10-31 | still-applicable | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 | 2026-10-31 | still-applicable | model: claude-opus-5-5 | no | Rechecked at the gap-closure integration: crates/sharpebench-arena/src/audit.rs moved, and the recorded digest is rebound to the integrated tree. The claim still holds there, so the disposition is unchanged. |
 | 2026-11-01 | still-applicable | model: claude-opus-5-5 | no | Rechecked at the scorer-round integration: crates/sharpebench-core/src/selfaudit.rs moved and the recorded digests are rebound. The claim still holds on the merged scorer, so the disposition is unchanged. |
+| 2026-11-02 | still-applicable | model: claude-opus-5-5 | no | Rechecked on feat/forward-eprocess: crates/sharpebench-arena/src/audit.rs moved by one line (the window record it builds gains `forward: None`), and the recorded digest is rebound. The tenth case and its assertions are unchanged, so the disposition is unchanged. |
+| 2026-11-02 | still-applicable | model: claude-opus-5-5 | no | Rechecked at the SOTA-round integration: crates/sharpebench-arena/src/audit.rs moved again (the window record it builds gains both `forward: None` and an empty `live_capture`), and the recorded digest is rebound to the merged tree. The tenth case and its assertions are unchanged, so the disposition is unchanged. |
 
 ### `SB-tab-data`
 
@@ -1548,7 +1550,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** cargo run --release -p sharpebench-harness --example evidence_sweep -- out.jsonl [dataset] [dsr_bar], assembled by paper/evidence/assemble_sweep.py and reduced by paper/evidence/analyze.py (paper/sections/A-commands.tex)
 
-**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold.
+**Producing commit.** v0.9.0 evidence snapshot, produced at f49d93c1 (2026-08-25): the commit that last wrote each record file, where the 2026-11-02 drift audit reran the producer and reproduced the committed records byte for byte. paper/evidence/provenance.json records this per artifact as produced_at, carried forward while the bytes are unchanged; its generated_at_head is the commit the manifest was last regenerated at, which is not the source state these numbers were produced from.
 
 **Effective configuration.** Default cell beta = 0.95, host N = 50, field size eight; eight execution seeds, six disjoint windows, typical cost profile; 512 records per dataset over 64 host configurations, 4,608 in all.
 
@@ -1556,8 +1558,8 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 - The frozen records carry no DSR interval, so the table prints point estimates only (paper/sections/05-experiments.tex:68).
 
 **Relevant later changes.**
-- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention, and how far the correction moves the frozen values is not established (paper/sections/E-repairs.tex:5).
-- The simulator let a zero target cross through flat into a short position and the momentum entrant ignored its declared lookback, so the current engine reconstructs different trajectories (paper/sections/E-repairs.tex:5).
+- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention. The drift audit of 2026-11-02 measured the correction alone (0cd7d37 against its parent, on three sweep shards and the externally specified rules): it moves PSR by at most 4e-5 and the deflated Sharpe by at most 1.1e-4 on the sweep shards, and by at most 6.4e-5 on the externally specified rules; the simulator change in 4378ad4, not the moment correction, is the 1e-3 term (paper/sections/E-repairs.tex:7).
+- The simulator let a zero target cross through flat into a short position and the momentum entrant ignored its declared lookback. The commit that repaired the crossing, 4378ad4, also sizes target shares at the observed mark and charges the fee on executed notional, which moves the trajectory of every trading agent and not only those that set a zero target: buy-and-hold on us-indices-1d moves from a mean return of 0.00060162876 to 0.00060162867 and from a worst drawdown of 0.3360622 to 0.3360627. On the commodities panel that arithmetic met the WTI settlement of -36.98 that d882803 readmitted and left buy-and-hold and all five luck floors with a non-finite mean return and drawdown; the engine now treats a NAV at or below zero as ruin, books the loss on that bar and closes the book, so those tracks are finite again and still differ from the frozen ones. The current engine therefore reconstructs different trajectories (paper/sections/E-repairs.tex:7).
 - A constant observed track is now refused for PSR and DSR, so the current kernel would refuse all 576 frozen hold records as unavailable rather than scoring them (paper/sections/E-repairs.tex:9).
 - A track with no Sharpe ratio no longer votes on another agent's deflation bar. hold voted wherever a record stamps measured or floored: 64 of the 576 default-sweep panels, all 27 panels of the externally specified sweep and four of the nine power-curve panels. How far the repaired measurement would move each bar is not established and is not estimated (paper/sections/E-repairs.tex:15, :17).
 
@@ -1595,7 +1597,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** cargo run --release -p sharpebench-harness --example evidence_sweep -- out.jsonl [dataset] [dsr_bar], assembled by paper/evidence/assemble_sweep.py and reduced by paper/evidence/analyze.py (paper/sections/A-commands.tex)
 
-**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold.
+**Producing commit.** v0.9.0 evidence snapshot, produced at f49d93c1 (2026-08-25): the commit that last wrote each record file, where the 2026-11-02 drift audit reran the producer and reproduced the committed records byte for byte. paper/evidence/provenance.json records this per artifact as produced_at, carried forward while the bytes are unchanged; its generated_at_head is the commit the manifest was last regenerated at, which is not the source state these numbers were produced from.
 
 **Effective configuration.** Default cell beta = 0.95, host N = 50, field size eight; eight execution seeds, six disjoint windows, typical cost profile; 512 records per dataset over 64 host configurations, 4,608 in all.
 
@@ -1604,8 +1606,8 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 - No DSR interval is recorded, so a difference between two printed deflated Sharpes is not by itself evidence of a difference.
 
 **Relevant later changes.**
-- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention, and how far the correction moves the frozen values is not established (paper/sections/E-repairs.tex:5).
-- The simulator let a zero target cross through flat into a short position and the momentum entrant ignored its declared lookback, so the current engine reconstructs different trajectories (paper/sections/E-repairs.tex:5).
+- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention. The drift audit of 2026-11-02 measured the correction alone (0cd7d37 against its parent, on three sweep shards and the externally specified rules): it moves PSR by at most 4e-5 and the deflated Sharpe by at most 1.1e-4 on the sweep shards, and by at most 6.4e-5 on the externally specified rules; the simulator change in 4378ad4, not the moment correction, is the 1e-3 term (paper/sections/E-repairs.tex:7).
+- The simulator let a zero target cross through flat into a short position and the momentum entrant ignored its declared lookback. The commit that repaired the crossing, 4378ad4, also sizes target shares at the observed mark and charges the fee on executed notional, which moves the trajectory of every trading agent and not only those that set a zero target: buy-and-hold on us-indices-1d moves from a mean return of 0.00060162876 to 0.00060162867 and from a worst drawdown of 0.3360622 to 0.3360627. On the commodities panel that arithmetic met the WTI settlement of -36.98 that d882803 readmitted and left buy-and-hold and all five luck floors with a non-finite mean return and drawdown; the engine now treats a NAV at or below zero as ruin, books the loss on that bar and closes the book, so those tracks are finite again and still differ from the frozen ones. The current engine therefore reconstructs different trajectories (paper/sections/E-repairs.tex:7).
 - A constant observed track is now refused for PSR and DSR, so the current kernel would refuse all 576 frozen hold records as unavailable rather than scoring them (paper/sections/E-repairs.tex:9).
 - A track with no Sharpe ratio no longer votes on another agent's deflation bar. hold voted wherever a record stamps measured or floored: 64 of the 576 default-sweep panels, all 27 panels of the externally specified sweep and four of the nine power-curve panels. How far the repaired measurement would move each bar is not established and is not estimated (paper/sections/E-repairs.tex:15, :17).
 - The committed records serialize each agent's deflated and probabilistic Sharpe but not its pooled Sharpe, and the probabilistic Sharpe cannot be inverted without that track's skewness and kurtosis, so the frozen artifacts lack the inputs a repaired dispersion measurement would need (paper/sections/E-repairs.tex:17).
@@ -1644,7 +1646,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** cargo run --release -p sharpebench-harness --example evidence_sweep -- out.jsonl [dataset] [dsr_bar], assembled by paper/evidence/assemble_sweep.py and reduced by paper/evidence/analyze.py (paper/sections/A-commands.tex)
 
-**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold.
+**Producing commit.** v0.9.0 evidence snapshot, produced at f49d93c1 (2026-08-25): the commit that last wrote each record file, where the 2026-11-02 drift audit reran the producer and reproduced the committed records byte for byte. paper/evidence/provenance.json records this per artifact as produced_at, carried forward while the bytes are unchanged; its generated_at_head is the commit the manifest was last regenerated at, which is not the source state these numbers were produced from.
 
 **Effective configuration.** Default cell beta = 0.95, host N = 50, field size eight; eight execution seeds, six disjoint windows, typical cost profile; 512 records per dataset over 64 host configurations, 4,608 in all. Preset: pass mode any-run with a per-run drawdown bound of 20 percent, edge tested on the pooled track.
 
@@ -1652,8 +1654,8 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 - none identified
 
 **Relevant later changes.**
-- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention, and how far the correction moves the frozen values is not established (paper/sections/E-repairs.tex:5).
-- The simulator let a zero target cross through flat into a short position and the momentum entrant ignored its declared lookback, so the current engine reconstructs different trajectories (paper/sections/E-repairs.tex:5).
+- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention. The drift audit of 2026-11-02 measured the correction alone (0cd7d37 against its parent, on three sweep shards and the externally specified rules): it moves PSR by at most 4e-5 and the deflated Sharpe by at most 1.1e-4 on the sweep shards, and by at most 6.4e-5 on the externally specified rules; the simulator change in 4378ad4, not the moment correction, is the 1e-3 term (paper/sections/E-repairs.tex:7).
+- The simulator let a zero target cross through flat into a short position and the momentum entrant ignored its declared lookback. The commit that repaired the crossing, 4378ad4, also sizes target shares at the observed mark and charges the fee on executed notional, which moves the trajectory of every trading agent and not only those that set a zero target: buy-and-hold on us-indices-1d moves from a mean return of 0.00060162876 to 0.00060162867 and from a worst drawdown of 0.3360622 to 0.3360627. On the commodities panel that arithmetic met the WTI settlement of -36.98 that d882803 readmitted and left buy-and-hold and all five luck floors with a non-finite mean return and drawdown; the engine now treats a NAV at or below zero as ruin, books the loss on that bar and closes the book, so those tracks are finite again and still differ from the frozen ones. The current engine therefore reconstructs different trajectories (paper/sections/E-repairs.tex:7).
 - A constant observed track is now refused for PSR and DSR, so the current kernel would refuse all 576 frozen hold records as unavailable rather than scoring them (paper/sections/E-repairs.tex:9).
 
 **Present applicability.** Valid for the frozen snapshot. Drawdowns are path quantities that the simulator repair can move, and the statistical legs carry the moment repair, so the current engine's verdicts are not established.
@@ -1683,7 +1685,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** cargo run --release -p sharpebench-harness --example risk_managed_eval -- out.jsonl (paper/sections/A-commands.tex)
 
-**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold.
+**Producing commit.** v0.9.0 evidence snapshot, produced at f49d93c1 (2026-08-25): the commit that last wrote each record file, where the 2026-11-02 drift audit reran the producer and reproduced the committed records byte for byte. paper/evidence/provenance.json records this per artifact as produced_at, carried forward while the bytes are unchanged; its generated_at_head is the commit the manifest was last regenerated at, which is not the source state these numbers were produced from.
 
 **Effective configuration.** Risk-managed agent beside buy-and-hold and the luck floor on all nine datasets at documented defaults, both reliability verdicts per row, with n_sensitivity records for weekly US indices at N in {7, 10, 25, 50, 100}.
 
@@ -1691,8 +1693,8 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 - none identified
 
 **Relevant later changes.**
-- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention, and how far the correction moves the frozen values is not established (paper/sections/E-repairs.tex:5).
-- The simulator let a zero target cross through flat into a short position and the momentum entrant ignored its declared lookback, so the current engine reconstructs different trajectories (paper/sections/E-repairs.tex:5).
+- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention. The drift audit of 2026-11-02 measured the correction alone (0cd7d37 against its parent, on three sweep shards and the externally specified rules): it moves PSR by at most 4e-5 and the deflated Sharpe by at most 1.1e-4 on the sweep shards, and by at most 6.4e-5 on the externally specified rules; the simulator change in 4378ad4, not the moment correction, is the 1e-3 term (paper/sections/E-repairs.tex:7).
+- The simulator let a zero target cross through flat into a short position and the momentum entrant ignored its declared lookback. The commit that repaired the crossing, 4378ad4, also sizes target shares at the observed mark and charges the fee on executed notional, which moves the trajectory of every trading agent and not only those that set a zero target: buy-and-hold on us-indices-1d moves from a mean return of 0.00060162876 to 0.00060162867 and from a worst drawdown of 0.3360622 to 0.3360627. On the commodities panel that arithmetic met the WTI settlement of -36.98 that d882803 readmitted and left buy-and-hold and all five luck floors with a non-finite mean return and drawdown; the engine now treats a NAV at or below zero as ruin, books the loss on that bar and closes the book, so those tracks are finite again and still differ from the frozen ones. The current engine therefore reconstructs different trajectories (paper/sections/E-repairs.tex:7).
 - paper/sections/E-repairs.tex:17 records that the risk-managed gate panels are the exception among the measured records: their seven-agent field contains no hold and no other constant track, so their dispersion stamps stand unchanged.
 
 **Present applicability.** Valid for the frozen snapshot, and the one measured family the dispersion-vote repair leaves alone. The moment repair still moves its statistical legs by an unquantified amount.
@@ -1724,7 +1726,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** python paper/src/make-evidence-figures.py (paper/sections/A-commands.tex)
 
-**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold. The figure script and its test run on the current tree.
+**Producing commit.** v0.9.0 evidence snapshot, produced at f49d93c1 (2026-08-25): the commit that last wrote each record file, where the 2026-11-02 drift audit reran the producer and reproduced the committed records byte for byte. paper/evidence/provenance.json records this per artifact as produced_at, carried forward while the bytes are unchanged; its generated_at_head is the commit the manifest was last regenerated at, which is not the source state these numbers were produced from. The figure script and its test run on the current tree.
 
 **Effective configuration.** Maximum over all windows and seeds of a panel; the records store only that maximum, so no spread is shown.
 
@@ -1732,7 +1734,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 - none identified
 
 **Relevant later changes.**
-- The simulator let a zero target cross through flat into a short position and the momentum entrant ignored its declared lookback, so the current engine reconstructs different trajectories (paper/sections/E-repairs.tex:5).
+- The simulator let a zero target cross through flat into a short position and the momentum entrant ignored its declared lookback. The commit that repaired the crossing, 4378ad4, also sizes target shares at the observed mark and charges the fee on executed notional, which moves the trajectory of every trading agent and not only those that set a zero target: buy-and-hold on us-indices-1d moves from a mean return of 0.00060162876 to 0.00060162867 and from a worst drawdown of 0.3360622 to 0.3360627. On the commodities panel that arithmetic met the WTI settlement of -36.98 that d882803 readmitted and left buy-and-hold and all five luck floors with a non-finite mean return and drawdown; the engine now treats a NAV at or below zero as ruin, books the loss on that bar and closes the book, so those tracks are finite again and still differ from the frozen ones. The current engine therefore reconstructs different trajectories (paper/sections/E-repairs.tex:7).
 
 **Present applicability.** Verified on 2026-09-23 for this register: python -B -m unittest paper/src/test_evidence_figures.py passes, so the committed figure agrees with the committed records. The records themselves remain the frozen snapshot.
 
@@ -1765,7 +1767,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** python paper/src/make-evidence-figures.py (paper/sections/A-commands.tex)
 
-**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold.
+**Producing commit.** v0.9.0 evidence snapshot, produced at f49d93c1 (2026-08-25): the commit that last wrote each record file, where the 2026-11-02 drift audit reran the producer and reproduced the committed records byte for byte. paper/evidence/provenance.json records this per artifact as produced_at, carried forward while the bytes are unchanged; its generated_at_head is the commit the manifest was last regenerated at, which is not the source state these numbers were produced from.
 
 **Effective configuration.** Operational DSR of the best of five luck-floor agents against the effective trial count; one agent's DSR is a pooled-track statistic with no interval in the frozen records.
 
@@ -1773,7 +1775,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 - none identified
 
 **Relevant later changes.**
-- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention, and how far the correction moves the frozen values is not established (paper/sections/E-repairs.tex:5).
+- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention. The drift audit of 2026-11-02 measured the correction alone (0cd7d37 against its parent, on three sweep shards and the externally specified rules): it moves PSR by at most 4e-5 and the deflated Sharpe by at most 1.1e-4 on the sweep shards, and by at most 6.4e-5 on the externally specified rules; the simulator change in 4378ad4, not the moment correction, is the 1e-3 term (paper/sections/E-repairs.tex:7).
 - A track with no Sharpe ratio no longer votes on another agent's deflation bar. hold voted wherever a record stamps measured or floored: 64 of the 576 default-sweep panels, all 27 panels of the externally specified sweep and four of the nine power-curve panels. How far the repaired measurement would move each bar is not established and is not estimated (paper/sections/E-repairs.tex:15, :17).
 
 **Present applicability.** Verified for figure-to-record agreement by the passing test_evidence_figures.py on 2026-09-23. The plotted deflated Sharpes carry the superseded moment convention, and daily rates is one of the panels whose measured bar the dispersion-vote repair would move.
@@ -1804,7 +1806,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** cargo run --release -p sharpebench-harness --example external_rules_eval -- paper/evidence/final/external-rules.jsonl [dataset] (paper/sections/A-commands.tex)
 
-**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold.
+**Producing commit.** v0.9.0 evidence snapshot, produced at ae553a8f (2026-08-25): the commit that last wrote each record file, where the 2026-11-02 drift audit reran the producer and reproduced the committed records, field for field. paper/evidence/provenance.json records this per artifact as produced_at, carried forward while the bytes are unchanged; its generated_at_head is the commit the manifest was last regenerated at, which is not the source state these numbers were produced from.
 
 **Effective configuration.** Thirteen agents on nine datasets under three cost profiles, 351 records, default ScoreConfig per dataset's periods per year; the four rules use their published parameters with none fitted here.
 
@@ -1812,8 +1814,8 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 - none identified
 
 **Relevant later changes.**
-- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention, and how far the correction moves the frozen values is not established (paper/sections/E-repairs.tex:5).
-- The simulator let a zero target cross through flat into a short position and the momentum entrant ignored its declared lookback, so the current engine reconstructs different trajectories (paper/sections/E-repairs.tex:5).
+- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention. The drift audit of 2026-11-02 measured the correction alone (0cd7d37 against its parent, on three sweep shards and the externally specified rules): it moves PSR by at most 4e-5 and the deflated Sharpe by at most 1.1e-4 on the sweep shards, and by at most 6.4e-5 on the externally specified rules; the simulator change in 4378ad4, not the moment correction, is the 1e-3 term (paper/sections/E-repairs.tex:7).
+- The simulator let a zero target cross through flat into a short position and the momentum entrant ignored its declared lookback. The commit that repaired the crossing, 4378ad4, also sizes target shares at the observed mark and charges the fee on executed notional, which moves the trajectory of every trading agent and not only those that set a zero target: buy-and-hold on us-indices-1d moves from a mean return of 0.00060162876 to 0.00060162867 and from a worst drawdown of 0.3360622 to 0.3360627. On the commodities panel that arithmetic met the WTI settlement of -36.98 that d882803 readmitted and left buy-and-hold and all five luck floors with a non-finite mean return and drawdown; the engine now treats a NAV at or below zero as ruin, books the loss on that bar and closes the book, so those tracks are finite again and still differ from the frozen ones. The current engine therefore reconstructs different trajectories (paper/sections/E-repairs.tex:7).
 - A constant observed track is now refused for PSR and DSR, so the current kernel would refuse all 576 frozen hold records as unavailable rather than scoring them (paper/sections/E-repairs.tex:9).
 - A track with no Sharpe ratio no longer votes on another agent's deflation bar. hold voted wherever a record stamps measured or floored: 64 of the 576 default-sweep panels, all 27 panels of the externally specified sweep and four of the nine power-curve panels. How far the repaired measurement would move each bar is not established and is not estimated (paper/sections/E-repairs.tex:15, :17).
 - SharpeBench #172 (e8337a1) gives newly resolved stressed models a versioned two-bar FIFO decision delay. The frozen evidence executes stressed-profile decisions immediately and is not rerun (paper/sections/E-repairs.tex:3), so a current stressed run is not comparable with this row's stressed cells.
@@ -1846,7 +1848,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** cargo run --release -p sharpebench-harness --example external_rules_eval -- paper/evidence/final/external-rules.jsonl [dataset] (paper/sections/A-commands.tex)
 
-**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold.
+**Producing commit.** v0.9.0 evidence snapshot, produced at ae553a8f (2026-08-25): the commit that last wrote each record file, where the 2026-11-02 drift audit reran the producer and reproduced the committed records, field for field. paper/evidence/provenance.json records this per artifact as produced_at, carried forward while the bytes are unchanged; its generated_at_head is the commit the manifest was last regenerated at, which is not the source state these numbers were produced from.
 
 **Effective configuration.** Thirteen-agent field, default configuration, three cost profiles; the caption records that the frozen kernel let hold, and on three crypto panels faber-10m, vote on the measurement.
 
@@ -1855,7 +1857,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Relevant later changes.**
 - A track with no Sharpe ratio no longer votes on another agent's deflation bar. hold voted wherever a record stamps measured or floored: 64 of the 576 default-sweep panels, all 27 panels of the externally specified sweep and four of the nine power-curve panels. How far the repaired measurement would move each bar is not established and is not estimated (paper/sections/E-repairs.tex:15, :17).
-- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention, and how far the correction moves the frozen values is not established (paper/sections/E-repairs.tex:5).
+- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention. The drift audit of 2026-11-02 measured the correction alone (0cd7d37 against its parent, on three sweep shards and the externally specified rules): it moves PSR by at most 4e-5 and the deflated Sharpe by at most 1.1e-4 on the sweep shards, and by at most 6.4e-5 on the externally specified rules; the simulator change in 4378ad4, not the moment correction, is the 1e-3 term (paper/sections/E-repairs.tex:7).
 - SharpeBench #172 (e8337a1) gives newly resolved stressed models a versioned two-bar FIFO decision delay. The frozen evidence executes stressed-profile decisions immediately and is not rerun (paper/sections/E-repairs.tex:3), so a current stressed run is not comparable with this row's stressed cells.
 
 **Present applicability.** Every cell in the Bar columns is a field-measured dispersion that the current engine would take over a different voting set, and the caption already says so. How far each bar would move is not established and is not estimated.
@@ -1884,7 +1886,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** cargo run --release -p sharpebench-harness --example external_rules_eval -- paper/evidence/final/external-rules.jsonl [dataset] (paper/sections/A-commands.tex)
 
-**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold.
+**Producing commit.** v0.9.0 evidence snapshot, produced at ae553a8f (2026-08-25): the commit that last wrote each record file, where the 2026-11-02 drift audit reran the producer and reproduced the committed records, field for field. paper/evidence/provenance.json records this per artifact as produced_at, carried forward while the bytes are unchanged; its generated_at_head is the commit the manifest was last regenerated at, which is not the source state these numbers were produced from.
 
 **Effective configuration.** As SB-tab-external.
 
@@ -1892,8 +1894,8 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 - none identified
 
 **Relevant later changes.**
-- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention, and how far the correction moves the frozen values is not established (paper/sections/E-repairs.tex:5).
-- The simulator let a zero target cross through flat into a short position and the momentum entrant ignored its declared lookback, so the current engine reconstructs different trajectories (paper/sections/E-repairs.tex:5).
+- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention. The drift audit of 2026-11-02 measured the correction alone (0cd7d37 against its parent, on three sweep shards and the externally specified rules): it moves PSR by at most 4e-5 and the deflated Sharpe by at most 1.1e-4 on the sweep shards, and by at most 6.4e-5 on the externally specified rules; the simulator change in 4378ad4, not the moment correction, is the 1e-3 term (paper/sections/E-repairs.tex:7).
+- The simulator let a zero target cross through flat into a short position and the momentum entrant ignored its declared lookback. The commit that repaired the crossing, 4378ad4, also sizes target shares at the observed mark and charges the fee on executed notional, which moves the trajectory of every trading agent and not only those that set a zero target: buy-and-hold on us-indices-1d moves from a mean return of 0.00060162876 to 0.00060162867 and from a worst drawdown of 0.3360622 to 0.3360627. On the commodities panel that arithmetic met the WTI settlement of -36.98 that d882803 readmitted and left buy-and-hold and all five luck floors with a non-finite mean return and drawdown; the engine now treats a NAV at or below zero as ruin, books the loss on that bar and closes the book, so those tracks are finite again and still differ from the frozen ones. The current engine therefore reconstructs different trajectories (paper/sections/E-repairs.tex:7).
 - A constant observed track is now refused for PSR and DSR, so the current kernel would refuse all 576 frozen hold records as unavailable rather than scoring them (paper/sections/E-repairs.tex:9).
 - A track with no Sharpe ratio no longer votes on another agent's deflation bar. hold voted wherever a record stamps measured or floored: 64 of the 576 default-sweep panels, all 27 panels of the externally specified sweep and four of the nine power-curve panels. How far the repaired measurement would move each bar is not established and is not estimated (paper/sections/E-repairs.tex:15, :17).
 - The committed records serialize each agent's deflated and probabilistic Sharpe but not its pooled Sharpe, and the probabilistic Sharpe cannot be inverted without that track's skewness and kurtosis, so the frozen artifacts lack the inputs a repaired dispersion measurement would need (paper/sections/E-repairs.tex:17).
@@ -1928,7 +1930,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** cargo run --release -p sharpebench-harness --example relative_mandate_eval -- paper/evidence/final/relative-mandate.jsonl (paper/sections/A-commands.tex)
 
-**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold.
+**Producing commit.** v0.9.0 evidence snapshot, produced at f49d93c1 (2026-08-25): the commit that last wrote each record file, where the 2026-11-02 drift audit reran the producer and reproduced the committed records byte for byte. paper/evidence/provenance.json records this per artifact as produced_at, carried forward while the bytes are unchanged; its generated_at_head is the commit the manifest was last regenerated at, which is not the source state these numbers were produced from.
 
 **Effective configuration.** Nine-agent risk-managed field, all nine datasets, default verdict and PassMode::RelativeToBenchmark with buy-and-hold as benchmark; 81 records, six windows times eight seeds per agent per dataset.
 
@@ -1936,8 +1938,8 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 - none identified
 
 **Relevant later changes.**
-- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention, and how far the correction moves the frozen values is not established (paper/sections/E-repairs.tex:5).
-- The simulator let a zero target cross through flat into a short position and the momentum entrant ignored its declared lookback, so the current engine reconstructs different trajectories (paper/sections/E-repairs.tex:5).
+- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention. The drift audit of 2026-11-02 measured the correction alone (0cd7d37 against its parent, on three sweep shards and the externally specified rules): it moves PSR by at most 4e-5 and the deflated Sharpe by at most 1.1e-4 on the sweep shards, and by at most 6.4e-5 on the externally specified rules; the simulator change in 4378ad4, not the moment correction, is the 1e-3 term (paper/sections/E-repairs.tex:7).
+- The simulator let a zero target cross through flat into a short position and the momentum entrant ignored its declared lookback. The commit that repaired the crossing, 4378ad4, also sizes target shares at the observed mark and charges the fee on executed notional, which moves the trajectory of every trading agent and not only those that set a zero target: buy-and-hold on us-indices-1d moves from a mean return of 0.00060162876 to 0.00060162867 and from a worst drawdown of 0.3360622 to 0.3360627. On the commodities panel that arithmetic met the WTI settlement of -36.98 that d882803 readmitted and left buy-and-hold and all five luck floors with a non-finite mean return and drawdown; the engine now treats a NAV at or below zero as ruin, books the loss on that bar and closes the book, so those tracks are finite again and still differ from the frozen ones. The current engine therefore reconstructs different trajectories (paper/sections/E-repairs.tex:7).
 - paper/sections/E-repairs.tex:9 records that the benchmark-relative verdict refuses a zero-excess series through its own dispersion clause, independently of the constant-track repair.
 
 **Present applicability.** Valid as the v0.9.0 record. The per-window pass vectors are PSR comparisons that carry the superseded moment convention.
@@ -1968,7 +1970,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** cargo run --release -p sharpebench-harness --example mandate_eval -- paper/evidence/final/mandate-declaration.jsonl (paper/sections/A-commands.tex)
 
-**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold.
+**Producing commit.** v0.9.0 evidence snapshot, produced at f49d93c1 (2026-08-25): the commit that last wrote each record file, where the 2026-11-02 drift audit reran the producer and reproduced the committed records byte for byte. paper/evidence/provenance.json records this per artifact as produced_at, carried forward while the bytes are unchanged; its generated_at_head is the commit the manifest was last regenerated at, which is not the source state these numbers were produced from.
 
 **Effective configuration.** Nine-agent field on nine datasets, 81 records, 36 declared and 45 undeclared; declared columns produced by the kernel's rank_declared.
 
@@ -1976,7 +1978,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 - none identified
 
 **Relevant later changes.**
-- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention, and how far the correction moves the frozen values is not established (paper/sections/E-repairs.tex:5).
+- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention. The drift audit of 2026-11-02 measured the correction alone (0cd7d37 against its parent, on three sweep shards and the externally specified rules): it moves PSR by at most 4e-5 and the deflated Sharpe by at most 1.1e-4 on the sweep shards, and by at most 6.4e-5 on the externally specified rules; the simulator change in 4378ad4, not the moment correction, is the 1e-3 term (paper/sections/E-repairs.tex:7).
 - A constant observed track is now refused for PSR and DSR, so the current kernel would refuse all 576 frozen hold records as unavailable rather than scoring them (paper/sections/E-repairs.tex:9).
 - A track with no Sharpe ratio no longer votes on another agent's deflation bar. hold voted wherever a record stamps measured or floored: 64 of the 576 default-sweep panels, all 27 panels of the externally specified sweep and four of the nine power-curve panels. How far the repaired measurement would move each bar is not established and is not estimated (paper/sections/E-repairs.tex:15, :17).
 - paper/sections/E-repairs.tex:17 records that the reconciliation of tab:eligibility against tab:mandate is a property of the frozen kernel: withdrawing hold's vote takes the three reconciling panels below the five-vote minimum in the nine-agent field as well, so on the current engine the added agent changes the dispersion source on no panel.
@@ -2009,7 +2011,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** cargo run --release -p sharpebench-harness --example seed_leg_eval -- paper/evidence/final/seed-leg.jsonl (paper/sections/A-commands.tex)
 
-**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold.
+**Producing commit.** v0.9.0 evidence snapshot, produced at f49d93c1 (2026-08-25): the commit that last wrote each record file, where the 2026-11-02 drift audit reran the producer and reproduced the committed records byte for byte. paper/evidence/provenance.json records this per artifact as produced_at, carried forward while the bytes are unchanged; its generated_at_head is the commit the manifest was last regenerated at, which is not the source state these numbers were produced from.
 
 **Effective configuration.** Nine-agent field on US indices 1d, crypto 1d and FX 1d under the default and CostProfile::Realistic; 2,646 records, being 2,592 per-run rows and 54 per-agent verdict rows.
 
@@ -2017,8 +2019,8 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 - The across-seed standard deviations are estimated from eight seeds, for which the relative standard error of a sample standard deviation is about 27 percent (paper/sections/execution-noise-fragment.tex:63).
 
 **Relevant later changes.**
-- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention, and how far the correction moves the frozen values is not established (paper/sections/E-repairs.tex:5).
-- The simulator let a zero target cross through flat into a short position and the momentum entrant ignored its declared lookback, so the current engine reconstructs different trajectories (paper/sections/E-repairs.tex:5).
+- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention. The drift audit of 2026-11-02 measured the correction alone (0cd7d37 against its parent, on three sweep shards and the externally specified rules): it moves PSR by at most 4e-5 and the deflated Sharpe by at most 1.1e-4 on the sweep shards, and by at most 6.4e-5 on the externally specified rules; the simulator change in 4378ad4, not the moment correction, is the 1e-3 term (paper/sections/E-repairs.tex:7).
+- The simulator let a zero target cross through flat into a short position and the momentum entrant ignored its declared lookback. The commit that repaired the crossing, 4378ad4, also sizes target shares at the observed mark and charges the fee on executed notional, which moves the trajectory of every trading agent and not only those that set a zero target: buy-and-hold on us-indices-1d moves from a mean return of 0.00060162876 to 0.00060162867 and from a worst drawdown of 0.3360622 to 0.3360627. On the commodities panel that arithmetic met the WTI settlement of -36.98 that d882803 readmitted and left buy-and-hold and all five luck floors with a non-finite mean return and drawdown; the engine now treats a NAV at or below zero as ruin, books the loss on that bar and closes the book, so those tracks are finite again and still differ from the frozen ones. The current engine therefore reconstructs different trajectories (paper/sections/E-repairs.tex:7).
 
 **Present applicability.** Valid as the v0.9.0 record. The per-run PSRs carry the superseded moment convention and the noise model's parameters are hand-set rather than calibrated to a venue.
 
@@ -2048,7 +2050,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** cargo run --release -p sharpebench-harness --example risk_managed_eval -- out.jsonl for the committed spread; cargo test -p sharpebench-harness perturb for the fragile-agent separation (paper/sections/A-commands.tex)
 
-**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold. The perturbation unit test runs on the current tree.
+**Producing commit.** v0.9.0 evidence snapshot, produced at f49d93c1 (2026-08-25): the commit that last wrote each record file, where the 2026-11-02 drift audit reran the producer and reproduced the committed records byte for byte. paper/evidence/provenance.json records this per artifact as produced_at, carried forward while the bytes are unchanged; its generated_at_head is the commit the manifest was last regenerated at, which is not the source state these numbers were produced from. The perturbation unit test runs on the current tree.
 
 **Effective configuration.** Perturbed datasets whose bar-to-bar moves stay inside the empirical range of the original series, asserted per bar; spread is best minus worst per-run PSR.
 
@@ -2056,7 +2058,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 - none identified
 
 **Relevant later changes.**
-- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention, and how far the correction moves the frozen values is not established (paper/sections/E-repairs.tex:5).
+- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention. The drift audit of 2026-11-02 measured the correction alone (0cd7d37 against its parent, on three sweep shards and the externally specified rules): it moves PSR by at most 4e-5 and the deflated Sharpe by at most 1.1e-4 on the sweep shards, and by at most 6.4e-5 on the externally specified rules; the simulator change in 4378ad4, not the moment correction, is the 1e-3 term (paper/sections/E-repairs.tex:7).
 
 **Present applicability.** The committed spread is a frozen PSR statistic and carries the superseded moment convention. The synthetic separation is re-established by a test on the current tree.
 
@@ -2131,7 +2133,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** cargo run --release -p sharpebench-harness --example evidence_sweep -- out.jsonl [dataset] [dsr_bar], assembled by paper/evidence/assemble_sweep.py and reduced by paper/evidence/analyze.py (paper/sections/A-commands.tex)
 
-**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold.
+**Producing commit.** v0.9.0 evidence snapshot, produced at f49d93c1 (2026-08-25): the commit that last wrote each record file, where the 2026-11-02 drift audit reran the producer and reproduced the committed records byte for byte. paper/evidence/provenance.json records this per artifact as produced_at, carried forward while the bytes are unchanged; its generated_at_head is the commit the manifest was last regenerated at, which is not the source state these numbers were produced from.
 
 **Effective configuration.** Default cell beta = 0.95, host N = 50, field size eight; eight execution seeds, six disjoint windows, typical cost profile; 512 records per dataset over 64 host configurations, 4,608 in all. The one-symbol floor draws a random gross exposure per period, flat half the time and otherwise a uniform long weight.
 
@@ -2139,8 +2141,8 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 - none identified
 
 **Relevant later changes.**
-- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention, and how far the correction moves the frozen values is not established (paper/sections/E-repairs.tex:5).
-- The simulator let a zero target cross through flat into a short position and the momentum entrant ignored its declared lookback, so the current engine reconstructs different trajectories (paper/sections/E-repairs.tex:5).
+- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention. The drift audit of 2026-11-02 measured the correction alone (0cd7d37 against its parent, on three sweep shards and the externally specified rules): it moves PSR by at most 4e-5 and the deflated Sharpe by at most 1.1e-4 on the sweep shards, and by at most 6.4e-5 on the externally specified rules; the simulator change in 4378ad4, not the moment correction, is the 1e-3 term (paper/sections/E-repairs.tex:7).
+- The simulator let a zero target cross through flat into a short position and the momentum entrant ignored its declared lookback. The commit that repaired the crossing, 4378ad4, also sizes target shares at the observed mark and charges the fee on executed notional, which moves the trajectory of every trading agent and not only those that set a zero target: buy-and-hold on us-indices-1d moves from a mean return of 0.00060162876 to 0.00060162867 and from a worst drawdown of 0.3360622 to 0.3360627. On the commodities panel that arithmetic met the WTI settlement of -36.98 that d882803 readmitted and left buy-and-hold and all five luck floors with a non-finite mean return and drawdown; the engine now treats a NAV at or below zero as ruin, books the loss on that bar and closes the book, so those tracks are finite again and still differ from the frozen ones. The current engine therefore reconstructs different trajectories (paper/sections/E-repairs.tex:7).
 
 **Present applicability.** Valid as the v0.9.0 record. The raw-return comparison is a path quantity the simulator repair can move, and the deflated Sharpes quoted carry the superseded moment convention.
 
@@ -2171,7 +2173,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** cargo run --release -p sharpebench-harness --example luck_floor_1000 -- paper/evidence/final/luck-floor-1000.jsonl; figure by python paper/src/make-evidence-figures.py luck-floor-1000 (paper/sections/A-commands.tex)
 
-**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold.
+**Producing commit.** v0.9.0 evidence snapshot, produced at f49d93c1 (2026-08-25): the commit that last wrote each record file, where the 2026-11-02 drift audit reran the producer and reproduced the committed records byte for byte. paper/evidence/provenance.json records this per artifact as produced_at, carried forward while the bytes are unchanged; its generated_at_head is the commit the manifest was last regenerated at, which is not the source state these numbers were produced from.
 
 **Effective configuration.** 1,000 distinct seeds on us-indices-1d and crypto-majors-1d under the same windows, eight execution seeds and costs as the evidence sweep; trial count fixed at 1,000.
 
@@ -2179,8 +2181,8 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 - none identified
 
 **Relevant later changes.**
-- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention, and how far the correction moves the frozen values is not established (paper/sections/E-repairs.tex:5).
-- The simulator let a zero target cross through flat into a short position and the momentum entrant ignored its declared lookback, so the current engine reconstructs different trajectories (paper/sections/E-repairs.tex:5).
+- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention. The drift audit of 2026-11-02 measured the correction alone (0cd7d37 against its parent, on three sweep shards and the externally specified rules): it moves PSR by at most 4e-5 and the deflated Sharpe by at most 1.1e-4 on the sweep shards, and by at most 6.4e-5 on the externally specified rules; the simulator change in 4378ad4, not the moment correction, is the 1e-3 term (paper/sections/E-repairs.tex:7).
+- The simulator let a zero target cross through flat into a short position and the momentum entrant ignored its declared lookback. The commit that repaired the crossing, 4378ad4, also sizes target shares at the observed mark and charges the fee on executed notional, which moves the trajectory of every trading agent and not only those that set a zero target: buy-and-hold on us-indices-1d moves from a mean return of 0.00060162876 to 0.00060162867 and from a worst drawdown of 0.3360622 to 0.3360627. On the commodities panel that arithmetic met the WTI settlement of -36.98 that d882803 readmitted and left buy-and-hold and all five luck floors with a non-finite mean return and drawdown; the engine now treats a NAV at or below zero as ruin, books the loss on that bar and closes the book, so those tracks are finite again and still differ from the frozen ones. The current engine therefore reconstructs different trajectories (paper/sections/E-repairs.tex:7).
 
 **Present applicability.** Valid as the v0.9.0 record. The field contains no constant track, so the constant-track and dispersion-vote repairs do not reach it; the moment repair still moves every plotted deflated Sharpe by an unquantified amount.
 
@@ -2204,7 +2206,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 **Source.** `paper/sections/sybil-defense-fragment.tex:4`
 
 **Artifacts.**
-- `crates/sharpebench-harness/tests/evidence_fields_no_clone_merges.rs`, sha256 `f54f0f84c9a25d68e877338fe93ed67ddaa3de49eb4bf683140a7dbb877ba9ab`, digest source: paper/evidence/provenance.json, rebuilds every committed evidence field twice and asserts the merge counts and the stamped dispersion source
+- `crates/sharpebench-harness/tests/evidence_fields_no_clone_merges.rs`, sha256 `2891635408c819419043f753d826ca25e6f4da9d467c9ef9ddb3c9eb6ba0de95`, digest source: paper/evidence/provenance.json, rebuilds every committed evidence field twice and asserts the merge counts and the stamped dispersion source
 - `crates/sharpebench-core/src/rediscovery.rs`, sha256 `a14b70c1d1f317eee9cfec132c35a1a884875e7225497d74d66d1bcdc4db67f3`, digest source: paper/evidence/provenance.json, carries CLONE_COLLAPSE_COSINE = 0.995
 
 **Producer command.** cargo test -p sharpebench-harness --test evidence_fields_no_clone_merges (paper/sections/A-commands.tex)
@@ -2220,6 +2222,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 - A track with no Sharpe ratio no longer votes on another agent's deflation bar. hold voted wherever a record stamps measured or floored: 64 of the 576 default-sweep panels, all 27 panels of the externally specified sweep and four of the nine power-curve panels. How far the repaired measurement would move each bar is not established and is not estimated (paper/sections/E-repairs.tex:15, :17). The dispersion sample is now qualified before clone collapse, which changes which streams the similarity is taken over on panels containing a constant track.
 - A vote further than 10.75 robust scales from its own field's median no longer enters the measured dispersion. Nothing is fenced on any committed field, so the merge counts and the stamped dispersion source this row rests on are unchanged, and the same test now also pins the margin by which each measured panel sits inside the fence. The self-audit's sybil counterfactual, the arm computed with the clone collapse off, does move: two hundred near-identical puppets are the field there, so the honest votes are the distant minority and the fence removes them.
 - The 2026-11-01 scorer-round integration: fix/griefing-clones updated the clone-merge regression for entrant-only dispersion votes; the test runs in CI's slow harness job on the merged tree.
+- The engine's ruin rule for a NAV at or below zero (2026-11-02) makes every commodities trading stream finite again, where before it only one stream had a Sharpe ratio. In the named test's printed output on the current engine, six of nine panels merge at least one seed-averaged honest pair, commodities among them at 0.9965, and the highest seed-averaged honest similarity is 0.9986 on us-indices-1w rather than the quoted 0.9999, which is the frozen field's value.
 
 **Present applicability.** The merge behaviour is re-established on every commit by the named test. The quoted similarity values are the test's printed output, which the register cannot pin to a stored artifact.
 
@@ -2457,7 +2460,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** cargo run --release -p sharpebench-harness --example evidence_sweep -- out.jsonl [dataset] [dsr_bar], assembled by paper/evidence/assemble_sweep.py and reduced by paper/evidence/analyze.py (paper/sections/A-commands.tex); relative and never-catastrophic verdicts from the relative-mandate and risk-managed examples.
 
-**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold.
+**Producing commit.** v0.9.0 evidence snapshot, produced at f49d93c1 (2026-08-25): the commit that last wrote each record file, where the 2026-11-02 drift audit reran the producer and reproduced the committed records byte for byte. paper/evidence/provenance.json records this per artifact as produced_at, carried forward while the bytes are unchanged; its generated_at_head is the commit the manifest was last regenerated at, which is not the source state these numbers were produced from.
 
 **Effective configuration.** Default cell beta = 0.95, host N = 50, field size eight; eight execution seeds, six disjoint windows, typical cost profile; 512 records per dataset over 64 host configurations, 4,608 in all.
 
@@ -2465,8 +2468,8 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 - none identified
 
 **Relevant later changes.**
-- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention, and how far the correction moves the frozen values is not established (paper/sections/E-repairs.tex:5).
-- The simulator let a zero target cross through flat into a short position and the momentum entrant ignored its declared lookback, so the current engine reconstructs different trajectories (paper/sections/E-repairs.tex:5).
+- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention. The drift audit of 2026-11-02 measured the correction alone (0cd7d37 against its parent, on three sweep shards and the externally specified rules): it moves PSR by at most 4e-5 and the deflated Sharpe by at most 1.1e-4 on the sweep shards, and by at most 6.4e-5 on the externally specified rules; the simulator change in 4378ad4, not the moment correction, is the 1e-3 term (paper/sections/E-repairs.tex:7).
+- The simulator let a zero target cross through flat into a short position and the momentum entrant ignored its declared lookback. The commit that repaired the crossing, 4378ad4, also sizes target shares at the observed mark and charges the fee on executed notional, which moves the trajectory of every trading agent and not only those that set a zero target: buy-and-hold on us-indices-1d moves from a mean return of 0.00060162876 to 0.00060162867 and from a worst drawdown of 0.3360622 to 0.3360627. On the commodities panel that arithmetic met the WTI settlement of -36.98 that d882803 readmitted and left buy-and-hold and all five luck floors with a non-finite mean return and drawdown; the engine now treats a NAV at or below zero as ruin, books the loss on that bar and closes the book, so those tracks are finite again and still differ from the frozen ones. The current engine therefore reconstructs different trajectories (paper/sections/E-repairs.tex:7).
 - A constant observed track is now refused for PSR and DSR, so the current kernel would refuse all 576 frozen hold records as unavailable rather than scoring them (paper/sections/E-repairs.tex:9).
 - A track with no Sharpe ratio no longer votes on another agent's deflation bar. hold voted wherever a record stamps measured or floored: 64 of the 576 default-sweep panels, all 27 panels of the externally specified sweep and four of the nine power-curve panels. How far the repaired measurement would move each bar is not established and is not estimated (paper/sections/E-repairs.tex:15, :17).
 - The committed records serialize each agent's deflated and probabilistic Sharpe but not its pooled Sharpe, and the probabilistic Sharpe cannot be inverted without that track's skewness and kurtosis, so the frozen artifacts lack the inputs a repaired dispersion measurement would need (paper/sections/E-repairs.tex:17).
@@ -2506,7 +2509,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** cargo run --release -p sharpebench-harness --example evidence_sweep -- out.jsonl [dataset] [dsr_bar], assembled by paper/evidence/assemble_sweep.py and reduced by paper/evidence/analyze.py (paper/sections/A-commands.tex); the thousand-agent extension from the luck_floor_1000 example.
 
-**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold.
+**Producing commit.** v0.9.0 evidence snapshot, produced at f49d93c1 (2026-08-25): the commit that last wrote each record file, where the 2026-11-02 drift audit reran the producer and reproduced the committed records byte for byte. paper/evidence/provenance.json records this per artifact as produced_at, carried forward while the bytes are unchanged; its generated_at_head is the commit the manifest was last regenerated at, which is not the source state these numbers were produced from.
 
 **Effective configuration.** Default cell beta = 0.95, host N = 50, field size eight; eight execution seeds, six disjoint windows, typical cost profile; 512 records per dataset over 64 host configurations, 4,608 in all.
 
@@ -2514,8 +2517,8 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 - none identified
 
 **Relevant later changes.**
-- The simulator let a zero target cross through flat into a short position and the momentum entrant ignored its declared lookback, so the current engine reconstructs different trajectories (paper/sections/E-repairs.tex:5).
-- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention, and how far the correction moves the frozen values is not established (paper/sections/E-repairs.tex:5).
+- The simulator let a zero target cross through flat into a short position and the momentum entrant ignored its declared lookback. The commit that repaired the crossing, 4378ad4, also sizes target shares at the observed mark and charges the fee on executed notional, which moves the trajectory of every trading agent and not only those that set a zero target: buy-and-hold on us-indices-1d moves from a mean return of 0.00060162876 to 0.00060162867 and from a worst drawdown of 0.3360622 to 0.3360627. On the commodities panel that arithmetic met the WTI settlement of -36.98 that d882803 readmitted and left buy-and-hold and all five luck floors with a non-finite mean return and drawdown; the engine now treats a NAV at or below zero as ruin, books the loss on that bar and closes the book, so those tracks are finite again and still differ from the frozen ones. The current engine therefore reconstructs different trajectories (paper/sections/E-repairs.tex:7).
+- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention. The drift audit of 2026-11-02 measured the correction alone (0cd7d37 against its parent, on three sweep shards and the externally specified rules): it moves PSR by at most 4e-5 and the deflated Sharpe by at most 1.1e-4 on the sweep shards, and by at most 6.4e-5 on the externally specified rules; the simulator change in 4378ad4, not the moment correction, is the 1e-3 term (paper/sections/E-repairs.tex:7).
 
 **Present applicability.** Valid as the v0.9.0 record. The comparison is on raw return, which the moment repair does not touch, but which the simulator repair can move through the trajectories themselves.
 
@@ -2543,7 +2546,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Producer command.** cargo run --release -p sharpebench-harness --example external_rules_eval -- paper/evidence/final/external-rules.jsonl [dataset]
 
-**Producing commit.** v0.9.0 evidence snapshot. The commit that cut v0.9.0 is not recorded and stays unknown. paper/evidence/provenance.json records the commit at which the manifest itself was generated, which is rebound whenever a file in its source scope moves and is not the source state these numbers were produced from; the manifest's digest of each artifact below is the identity that does hold.
+**Producing commit.** v0.9.0 evidence snapshot, produced at ae553a8f (2026-08-25): the commit that last wrote each record file, where the 2026-11-02 drift audit reran the producer and reproduced the committed records, field for field. paper/evidence/provenance.json records this per artifact as produced_at, carried forward while the bytes are unchanged; its generated_at_head is the commit the manifest was last regenerated at, which is not the source state these numbers were produced from.
 
 **Effective configuration.** As SB-tab-external.
 
@@ -2551,8 +2554,8 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 - none identified
 
 **Relevant later changes.**
-- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention, and how far the correction moves the frozen values is not established (paper/sections/E-repairs.tex:5).
-- The simulator let a zero target cross through flat into a short position and the momentum entrant ignored its declared lookback, so the current engine reconstructs different trajectories (paper/sections/E-repairs.tex:5).
+- Standardized-moment estimators mixed finite-sample normalizations, so every probabilistic and deflated Sharpe here was computed under the superseded convention. The drift audit of 2026-11-02 measured the correction alone (0cd7d37 against its parent, on three sweep shards and the externally specified rules): it moves PSR by at most 4e-5 and the deflated Sharpe by at most 1.1e-4 on the sweep shards, and by at most 6.4e-5 on the externally specified rules; the simulator change in 4378ad4, not the moment correction, is the 1e-3 term (paper/sections/E-repairs.tex:7).
+- The simulator let a zero target cross through flat into a short position and the momentum entrant ignored its declared lookback. The commit that repaired the crossing, 4378ad4, also sizes target shares at the observed mark and charges the fee on executed notional, which moves the trajectory of every trading agent and not only those that set a zero target: buy-and-hold on us-indices-1d moves from a mean return of 0.00060162876 to 0.00060162867 and from a worst drawdown of 0.3360622 to 0.3360627. On the commodities panel that arithmetic met the WTI settlement of -36.98 that d882803 readmitted and left buy-and-hold and all five luck floors with a non-finite mean return and drawdown; the engine now treats a NAV at or below zero as ruin, books the loss on that bar and closes the book, so those tracks are finite again and still differ from the frozen ones. The current engine therefore reconstructs different trajectories (paper/sections/E-repairs.tex:7).
 - A constant observed track is now refused for PSR and DSR, so the current kernel would refuse all 576 frozen hold records as unavailable rather than scoring them (paper/sections/E-repairs.tex:9).
 - A track with no Sharpe ratio no longer votes on another agent's deflation bar. hold voted wherever a record stamps measured or floored: 64 of the 576 default-sweep panels, all 27 panels of the externally specified sweep and four of the nine power-curve panels. How far the repaired measurement would move each bar is not established and is not estimated (paper/sections/E-repairs.tex:15, :17).
 - The committed records serialize each agent's deflated and probabilistic Sharpe but not its pooled Sharpe, and the probabilistic Sharpe cannot be inverted without that track's skewness and kurtosis, so the frozen artifacts lack the inputs a repaired dispersion measurement would need (paper/sections/E-repairs.tex:17).
@@ -2580,7 +2583,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Artifacts.**
 - `crates/sharpebench-core/src/selfaudit.rs`, sha256 `96c2e2d67dfae121db51bea9ba31c5d81d0808619d77735cfc80a6953e0b16e7`, digest source: paper/evidence/provenance.json
-- `crates/sharpebench-arena/src/audit.rs`, sha256 `5dba8da8bce47be67aaace6b7b297668026f3a038b0b136f75a9f04f4d15cb14`, digest source: paper/evidence/provenance.json
+- `crates/sharpebench-arena/src/audit.rs`, sha256 `d6482f3905d9e8c4fa6625d99264f590917605368c528a2bf9fad31f3e739c72`, digest source: paper/evidence/provenance.json
 
 **Producer command.** sharpebench audit; enforced by the commit-time tests in the two files above.
 
@@ -2612,6 +2615,8 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 | 2026-10-31 | still-applicable | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
 | 2026-10-31 | still-applicable | model: claude-opus-5-5 | no | Rechecked at the gap-closure integration: crates/sharpebench-arena/src/audit.rs moved, and the recorded digest is rebound to the integrated tree. The claim still holds there, so the disposition is unchanged. |
 | 2026-11-01 | still-applicable | model: claude-opus-5-5 | no | Rechecked at the scorer-round integration: crates/sharpebench-core/src/selfaudit.rs moved and the recorded digests are rebound. The claim still holds on the merged scorer, so the disposition is unchanged. |
+| 2026-11-02 | still-applicable | model: claude-opus-5-5 | no | Rechecked on feat/forward-eprocess: crates/sharpebench-arena/src/audit.rs moved by one line (the window record it builds gains `forward: None`), and the recorded digest is rebound. The tenth case and its assertions are unchanged, so the disposition is unchanged. |
+| 2026-11-02 | still-applicable | model: claude-opus-5-5 | no | Rechecked at the SOTA-round integration: crates/sharpebench-arena/src/audit.rs moved again (the window record it builds gains both `forward: None` and an empty `live_capture`), and the recorded digest is rebound to the merged tree. The tenth case and its assertions are unchanged, so the disposition is unchanged. |
 
 ### `SB-claims-v`
 
@@ -2621,7 +2626,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Artifacts.**
 - `crates/sharpebench-core/golden/example_submissions.scores.json`, sha256 `6f74bb23887122be95b306cc6b1628d0c8d8da39eb26a96776e4c032cbfb1dcd`, digest source: computed for this register; the file is outside the provenance manifest scope
-- `crates/sharpebench-core/golden/synthetic_field.scores.json`, sha256 `c9b899e58c9d0f59d338f2d331afd49b56c9dcdbd33d310c105eb8fd047b206d`, digest source: computed for this register; the file is outside the provenance manifest scope
+- `crates/sharpebench-core/golden/synthetic_field.scores.json`, sha256 `d9a86887e1e2c3272de40adb820ddb545049dee8f3ea8e87346452765662fd65`, digest source: computed for this register; the file is outside the provenance manifest scope
 - `crates/sharpebench-core/golden/synthetic_field.input.json`, sha256 `b5d298d72a68fb5922fbcbd252a7922fe1033f133d38203f2c15a4ec01cd8b61`, digest source: computed for this register; the file is outside the provenance manifest scope
 
 **Producer command.** cargo test -p sharpebench-core --test golden_scores; cargo test -p sharpebench-sim --test golden_input; cargo test -p sharpebench-wasm --test native_parity (paper/sections/A-commands.tex)
@@ -2637,6 +2642,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 - The golden fields changed in the Pareto flag of hold and in calibration counts, Brier scores and confidence-weighted return; no gate reads those fields (paper/sections/E-repairs.tex:19).
 - The 2026-10-31 fix-round integration (fix/row-disclosures) added runs_passed, window_bars, window_pass_floors, implausible_windows and pass_k_floors_plausible to every row of crates/sharpebench-core/golden/example_submissions.scores.json, crates/sharpebench-core/golden/synthetic_field.scores.json; no existing field or value changed.
 - The 2026-11-01 scorer-round integration: fix/tail-seller rewrote skilled-momentum and ungated-bot to carry losing bars (owner-approved), which moves their return, drawdown, beta and alpha fields; every agent's verdict, deflated Sharpe, PSR, pass^k, eligibility and rank are unchanged, and the file was regenerated once at the merged tip with no further change.
+- The 2026-11-02 refusal-taxonomy change (fix/refusal-taxonomy) moved the hold row's constant-track refusal from deflation_error to deflation_refusal in crates/sharpebench-core/golden/synthetic_field.scores.json, same text; no other field or row changed.
 
 **Present applicability.** Re-established on every CI run across the three targets.
 

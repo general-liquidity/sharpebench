@@ -339,3 +339,39 @@ fn a_row_refused_on_another_gate_names_no_standard_error_refusal() {
     assert!(!row.rank_eligible, "{row:?}");
     assert_eq!(row.standard_error_refusal, None, "{row:?}");
 }
+
+/// `standard_error_refusal` is the plug-in evaluation of
+/// `standard_error_refusal_at`: on a serially correlated track it names the
+/// serial term between its two deflated Sharpes and nothing outside them.
+#[test]
+fn the_plug_in_refusal_names_the_serial_term_between_its_two_values() {
+    use sharpebench_core::standard_error::{standard_error_refusal, standard_error_refusal_at};
+    use sharpebench_stats::StandardErrorAt;
+    let windows: Vec<Vec<f64>> = (0..2)
+        .map(|w| {
+            (0..150)
+                .map(|t| {
+                    let t = t as f64 + 150.0 * w as f64;
+                    0.003 + 0.01 * (0.05 * t).sin() + 0.002 * (1.7 * t).sin()
+                })
+                .collect()
+        })
+        .collect();
+    let slices: Vec<&[f64]> = windows.iter().map(Vec::as_slice).collect();
+    let pooled = windows.concat();
+    let independent = deflated_sharpe_ratio(&pooled, 50, 0.03).unwrap();
+    let corrected = serially_corrected_deflated_sharpe(&slices, 50, 0.0, 0.03)
+        .unwrap()
+        .deflated_sharpe;
+    assert!(corrected < independent);
+    let between = (independent + corrected) / 2.0;
+    let refusal = standard_error_refusal(&slices, 50, 0.0, 0.03, between);
+    assert_eq!(refusal.as_deref(), Some(SERIAL));
+    assert_eq!(
+        refusal,
+        standard_error_refusal_at(&slices, 50, 0.0, 0.03, between, StandardErrorAt::Observed)
+    );
+    for clear in [independent + 1e-9, corrected - 1e-9] {
+        assert_eq!(standard_error_refusal(&slices, 50, 0.0, 0.03, clear), None);
+    }
+}

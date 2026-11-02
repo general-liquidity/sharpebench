@@ -34,18 +34,28 @@
 
 pub mod audit;
 pub mod execution;
+pub mod forward_evidence;
 pub mod intake;
+pub mod live_capture;
 mod persistence;
 pub mod sandbox;
 mod verify_certification;
 
 pub use audit::{forward_hindsight_oracle_case, FORWARD_HINDSIGHT_ORACLE};
 pub use execution::{ExecutionIdentity, ExecutionStatus, EXECUTION_IDENTITY_SCHEMA};
+pub use forward_evidence::{
+    declared_loss_bound, fold_window, ArtifactEvidence, ForwardEvidence, ForwardLedger,
+    ForwardObservation, ForwardRecord, FORWARD_EVIDENCE_LEVEL, FORWARD_EVIDENCE_SCHEMA,
+};
 pub use intake::{
     admit_entries, board_certifies, execution_matrix, is_reference_entrant,
     reference_entrant_digest, unnamed_entry, Admission, CapturedEntrant, DockerLauncher,
     EntrantLauncher, IntakeOptions, LaunchedEntrant, ReplayWindow, ReturnsProvenance,
     SUPPLIED_RETURNS_REFUSAL, UNNAMED_ENTRY_REFUSAL,
+};
+pub use live_capture::{
+    certify_live_log, seal_live_log, LiveCaptureRoot, LiveLogHeader, LiveLogRefusal, LiveRecorder,
+    SealedLiveLog, LIVE_CAPTURE_WINDOW_SCHEMA_VERSION,
 };
 pub use sandbox::{
     check_sandbox_readiness, classify_container_exit, docker_available, probe_egress,
@@ -139,14 +149,38 @@ pub const EXECUTED_WINDOW_SCHEMA_VERSION: u32 = 6;
 /// [`EXECUTED_WINDOW_SCHEMA_VERSION`] for a window opened under a fault plan.
 pub const EXECUTED_FAULTED_WINDOW_SCHEMA_VERSION: u32 = 7;
 
+/// Schema of a scored window that records what it contributes to the forward
+/// evidence ledger (`forward`, see [`forward_evidence`]).
+///
+/// Under any earlier version a binary that predates the field would refuse
+/// the unknown key (the record denies unknown fields), but the one that wrote
+/// [`EXECUTED_WINDOW_SCHEMA_VERSION`] could still be handed such a window if
+/// the version stayed, and publish it without the ledger, after which
+/// `verify_arena` fails every later board. It does not know this version, so
+/// it refuses the window instead. A window with no re-executed row records
+/// nothing and keeps the version it had. A faulted window refuses every
+/// capture, so it never re-executes a row and needs no faulted variant.
+///
+/// Version 8 ([`LIVE_CAPTURE_WINDOW_SCHEMA_VERSION`]) records live capture
+/// roots. Every binary that knows this version also knows that field, so this
+/// version implies support for it: a window that records both a forward
+/// contribution (a re-executed row) and a live capture root (a live-captured
+/// row) carries this version and keeps both.
+pub const FORWARD_WINDOW_SCHEMA_VERSION: u32 = 9;
+
 /// The schema a window must carry given whether it names a fault plan,
-/// whether it records what its board means, and whether it records the
-/// execution its captures were replayed under.
+/// whether it records what its board means, whether it records the execution
+/// its captures were replayed under, and whether it records a forward
+/// evidence contribution.
 fn expected_window_schema(
     fault_plan_sha256: Option<&str>,
     records_score_meaning: bool,
     records_execution: bool,
+    records_forward: bool,
 ) -> u32 {
+    if records_forward {
+        return FORWARD_WINDOW_SCHEMA_VERSION;
+    }
     match (
         fault_plan_sha256.is_some(),
         records_score_meaning,
@@ -308,16 +342,50 @@ pub struct WindowState {
     /// before the field existed. See [`EXECUTED_WINDOW_SCHEMA_VERSION`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution: Option<ExecutionIdentity>,
+    /// What the window contributes to the forward evidence ledger, recorded
+    /// at scoring when a row was re-executed and signed into the header at
+    /// publish. Omitted otherwise. See [`FORWARD_WINDOW_SCHEMA_VERSION`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forward: Option<ForwardRecord>,
+    /// The root of each admitted live log, by agent id: one per
+    /// `live-captured` row. Omitted when empty, so a window without one keeps
+    /// its bytes. See [`live_capture`] and
+    /// [`LIVE_CAPTURE_WINDOW_SCHEMA_VERSION`].
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub live_capture: BTreeMap<String, LiveCaptureRoot>,
 }
 
 impl WindowState {
     /// The schema version this record must carry.
     fn expected_schema(&self) -> u32 {
+        // Version 9 implies 8's field, so a live capture root alone asks for
+        // 8 and a forward contribution asks for 9 with or without one.
+        if self.forward.is_none() && !self.live_capture.is_empty() {
+            return LIVE_CAPTURE_WINDOW_SCHEMA_VERSION;
+        }
         expected_window_schema(
             self.fault_plan_sha256.as_deref(),
             self.records_score_meaning(),
             self.execution.is_some(),
+            self.forward.is_some(),
         )
+    }
+
+    /// A recorded forward contribution observes only rows this window
+    /// re-executed.
+    fn check_forward(&self) -> Result<(), String> {
+        let Some(record) = &self.forward else {
+            return Ok(());
+        };
+        match record.entrants.iter().find(|entrant| {
+            self.returns_provenance.get(&entrant.agent_id) != Some(&ReturnsProvenance::ReExecuted)
+        }) {
+            Some(entrant) => Err(format!(
+                "window `{}` records forward evidence for `{}`, which it did not re-execute",
+                self.id, entrant.agent_id
+            )),
+            None => Ok(()),
+        }
     }
 
     /// A recorded execution identity recomputes, and belongs to a window that
@@ -399,6 +467,8 @@ impl WindowState {
             returns_provenance,
             expired_at_epoch: _,
             execution: _,
+            forward: _,
+            live_capture: _,
         } = self;
         replay_dataset_sha256.is_some()
             || *supplied_returns_accepted
@@ -434,6 +504,11 @@ pub struct RevealedEntry {
     /// equal the window's `fault_plan_sha256`, absent for an unfaulted window.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fault_plan_sha256: Option<String>,
+    /// The sealed live log the host recorded for this entrant during the
+    /// window ([`live_capture`]). Carried instead of a capture or returns, and
+    /// omitted when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live_log: Option<SealedLiveLog>,
 }
 
 impl RevealedEntry {
@@ -509,6 +584,16 @@ pub struct WindowHeader {
     /// ([`ExecutionStatus::LegacyUnbound`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution: Option<ExecutionIdentity>,
+    /// The forward evidence ledger before and after this window (see
+    /// [`forward_evidence`]). Every board published since the ledger existed
+    /// carries one, and the next board's `prior` must be its `posterior`.
+    /// Omitted on every header signed before the field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forward_evidence: Option<ForwardEvidence>,
+    /// The window's `live_capture` roots. Omitted when empty, so a header for
+    /// a window without a live-captured row signs the same bytes as before.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub live_capture: BTreeMap<String, LiveCaptureRoot>,
 }
 
 /// The signed terminal anchor (`head.json`), rewritten by every publish in the
@@ -636,6 +721,11 @@ pub struct WindowVerification {
     /// headers without a claim remain noncertifying and have no error here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub certification_error: Option<String>,
+    /// The board's forward evidence does not follow from the previous board's
+    /// ledger and its own signed observations, or the board carries none
+    /// after the ledger began. Omitted when there is nothing wrong.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forward_evidence_error: Option<String>,
     pub detail: String,
 }
 
@@ -660,6 +750,15 @@ pub enum IdentityField {
     Certifying,
     /// The [`ExecutionIdentity`], compared whole.
     Execution,
+    /// The window's forward evidence contribution ([`ForwardRecord`]),
+    /// compared whole.
+    ForwardRecord,
+    /// The commitments a header's forward evidence counts into the family,
+    /// compared with the window's. Checked only when the header carries
+    /// forward evidence.
+    ForwardCommitments,
+    /// The live capture roots, compared whole.
+    LiveCapture,
 }
 
 impl IdentityField {
@@ -679,6 +778,9 @@ impl IdentityField {
             Self::SuppliedReturnsAccepted => "supplied_returns_accepted",
             Self::Certifying => "certifying",
             Self::Execution => "execution",
+            Self::ForwardRecord => "forward_record",
+            Self::ForwardCommitments => "forward_commitments",
+            Self::LiveCapture => "live_capture",
         }
     }
 }
@@ -714,12 +816,31 @@ fn execution_text(execution: Option<&ExecutionIdentity>) -> Result<Option<String
         .transpose()
 }
 
+/// A value as the mismatch report shows it: its canonical JSON.
+fn json_text<T: Serialize>(value: Option<&T>, label: &str) -> Result<Option<String>, String> {
+    value
+        .map(|v| serde_json::to_string(v).map_err(|e| format!("serialize {label}: {e}")))
+        .transpose()
+}
+
+/// Live capture roots as the mismatch report shows them: absent when empty,
+/// else their canonical JSON.
+fn live_capture_text(roots: &BTreeMap<String, LiveCaptureRoot>) -> Result<Option<String>, String> {
+    if roots.is_empty() {
+        return Ok(None);
+    }
+    serde_json::to_string(roots)
+        .map(Some)
+        .map_err(|e| format!("serialize live capture: {e}"))
+}
+
 /// Every identity field on which `header` and `window` disagree.
 fn identity_mismatches(
     header: &WindowHeader,
     window: &WindowState,
 ) -> Result<Vec<IdentityMismatch>, String> {
-    let pairs = [
+    let forward = header.forward_evidence.as_ref();
+    let mut pairs = vec![
         (
             IdentityField::WindowId,
             Some(header.window_id.clone()),
@@ -790,7 +911,24 @@ fn identity_mismatches(
             execution_text(header.execution.as_ref())?,
             execution_text(window.execution.as_ref())?,
         ),
+        (
+            IdentityField::ForwardRecord,
+            json_text(forward.and_then(|f| f.record.as_ref()), "forward record")?,
+            json_text(window.forward.as_ref(), "forward record")?,
+        ),
+        (
+            IdentityField::LiveCapture,
+            live_capture_text(&header.live_capture)?,
+            live_capture_text(&window.live_capture)?,
+        ),
     ];
+    if let Some(forward) = forward {
+        pairs.push((
+            IdentityField::ForwardCommitments,
+            json_text(Some(&forward.commitments), "forward commitments")?,
+            json_text(Some(&window.commitments), "commitments")?,
+        ));
+    }
     Ok(pairs
         .into_iter()
         .filter(|(_, header, window)| header != window)
@@ -836,6 +974,10 @@ pub struct ArenaVerification {
     pub verifying_key: Option<String>,
     pub windows: Vec<WindowVerification>,
     pub completeness: ArenaCompleteness,
+    /// The newest board's forward evidence ledger, recomputed and checked.
+    /// Omitted when no board carries one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forward_ledger: Option<ForwardLedger>,
 }
 
 /// The file-backed arena. Mutations use a cooperating OS writer lock, reject
@@ -1112,6 +1254,8 @@ impl Arena {
             }
             w.check_expiry()?;
             w.check_execution()?;
+            w.check_forward()?;
+            live_capture::check_window_roots(&w)?;
             windows.insert(id.clone(), w);
         }
         Ok(Self {
@@ -1332,7 +1476,12 @@ impl Arena {
             WindowState {
                 // An open window records nothing about a board yet; `save`
                 // re-derives this from the record before it is written.
-                schema_version: expected_window_schema(fault_plan_sha256.as_deref(), false, false),
+                schema_version: expected_window_schema(
+                    fault_plan_sha256.as_deref(),
+                    false,
+                    false,
+                    false,
+                ),
                 id: id.to_string(),
                 commit_deadline,
                 data_reveal_epoch,
@@ -1352,6 +1501,8 @@ impl Arena {
                 returns_provenance: BTreeMap::new(),
                 expired_at_epoch: None,
                 execution: None,
+                forward: None,
+                live_capture: BTreeMap::new(),
             },
         );
         self.state.window_order.push(id.to_string());
@@ -1571,6 +1722,8 @@ impl Arena {
         w.scores = scores.clone();
         w.returns_provenance = admission.returns_provenance;
         w.execution = admission.execution;
+        w.forward = admission.forward;
+        w.live_capture = admission.live_capture;
         w.status = WindowStatus::Scoring;
         self.save()?;
         Ok(scores)
@@ -1591,6 +1744,26 @@ impl Arena {
             .ok_or_else(|| format!("published board for `{last}` has an empty chain"))
     }
 
+    /// The forward evidence ledger the next board continues: the newest
+    /// board's posterior, or the genesis ledger when no board carries one.
+    fn prior_forward_ledger(&self) -> Result<ForwardLedger, String> {
+        let Some(last) = self.state.published_order.last() else {
+            return Ok(ForwardLedger::genesis());
+        };
+        let board: PublicChain = read_json(&self.window_dir(last).join(BOARD_FILE))?;
+        let header: WindowHeader = board
+            .chain
+            .first()
+            .ok_or_else(|| format!("published board for `{last}` has an empty chain"))
+            .and_then(|link| {
+                serde_json::from_str(&link.payload)
+                    .map_err(|e| format!("published board for `{last}` has no header: {e}"))
+            })?;
+        Ok(header
+            .forward_evidence
+            .map_or_else(ForwardLedger::genesis, |evidence| evidence.posterior))
+    }
+
     /// Publish a scored window: sign a header + one link per scored entry into
     /// an Ed25519 [`PublicChain`] (`board.json`) plus a human-readable
     /// `board.md`, both inside the window directory. The header carries the
@@ -1598,6 +1771,7 @@ impl Arena {
     /// history (see the module docs).
     pub fn publish(&mut self, window_id: &str, key: &SigningKey) -> Result<PathBuf, String> {
         let prev_final_signature = self.prev_final_signature()?;
+        let prior_ledger = self.prior_forward_ledger()?;
         let w = self
             .windows
             .get(window_id)
@@ -1627,7 +1801,18 @@ impl Arena {
             prev_final_signature,
             head_anchored: true,
             execution: w.execution.clone(),
+            forward_evidence: Some(fold_window(
+                &prior_ledger,
+                &w.id,
+                &w.commitments,
+                w.forward.as_ref(),
+            )?),
+            live_capture: w.live_capture.clone(),
         };
+        let arena_key = key.verifying_key().to_hex();
+        for (agent_id, root) in &w.live_capture {
+            live_capture::check_root(&w.id, agent_id, root, Some(&arena_key))?;
+        }
         let rows: Vec<BoardRow> = w
             .scores
             .iter()
@@ -1729,6 +1914,16 @@ fn render_markdown(header: &WindowHeader, scores: &[CompositeScore], rows: &[Boa
             execution.execution_sha256, execution.cost_model_sha256, execution.engine_version
         ));
     }
+    if !header.live_capture.is_empty() {
+        out.push_str("Live capture roots. A `live-captured` row ranks decisions the host logged bar by bar while the committed image ran, sealed under the arena key; it does not show which model snapshot a provider served.\n\n");
+        for (agent_id, root) in &header.live_capture {
+            out.push_str(&format!(
+                "- `{agent_id}`: image `{}`, root `{}`, {} bars, {} model calls, {} restarts\n",
+                root.image, root.root_sha256, root.bars, root.model_calls, root.restarts
+            ));
+        }
+        out.push('\n');
+    }
     out.push_str("```\n");
     out.push_str(&sharpebench_leaderboard::render(scores));
     out.push_str("```\n");
@@ -1744,6 +1939,9 @@ fn render_markdown(header: &WindowHeader, scores: &[CompositeScore], rows: &[Boa
             }
         }
     }
+    if let Some(evidence) = &header.forward_evidence {
+        render_forward_evidence(&mut out, evidence);
+    }
     if !header.refusals.is_empty() {
         out.push_str("\n## Refused entries\n\n");
         for r in &header.refusals {
@@ -1752,6 +1950,55 @@ fn render_markdown(header: &WindowHeader, scores: &[CompositeScore], rows: &[Boa
     }
     out.push_str("\nVerify with `sharpebench arena verify <dir> --pubkey <hex>`.\n");
     out
+}
+
+/// The forward evidence section of `board.md`: the processes this window
+/// moved, and the family's e-BH decisions.
+fn render_forward_evidence(out: &mut String, evidence: &ForwardEvidence) {
+    let ledger = &evidence.posterior;
+    out.push_str("\n## Forward evidence\n\n");
+    out.push_str("Anytime-valid and rank-neutral: the wealth of a capped fractional bet on each re-executed artifact's own returns, against a conditional mean of at most zero.\n\n");
+    if let Some(reason) = &evidence.not_applied {
+        out.push_str(&format!(
+            "This window's observations were not applied: {reason}.\n\n"
+        ));
+    }
+    if let Some(record) = evidence
+        .record
+        .as_ref()
+        .filter(|_| evidence.not_applied.is_none())
+    {
+        for entrant in &record.entrants {
+            if let Some(e) = ledger.artifacts.get(&entrant.artifact_digest) {
+                out.push_str(&format!(
+                    "- `{}` (artifact `{}`): e-value {:.6e}, anytime p {:.6e}, {} bars over {} window(s), loss bound {}{}\n",
+                    entrant.agent_id,
+                    entrant.artifact_digest,
+                    e.e_value,
+                    e.anytime_p_value,
+                    e.bars,
+                    e.windows,
+                    e.loss_bound_in_force,
+                    if e.breached { ", bound breached" } else { "" }
+                ));
+            }
+        }
+        out.push('\n');
+    }
+    let discoveries = if ledger.discoveries.is_empty() {
+        "none".to_string()
+    } else {
+        ledger
+            .discoveries
+            .iter()
+            .map(|d| format!("`{d}`"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    out.push_str(&format!(
+        "Family: {} committed artifact(s). e-BH discoveries at level {}: {discoveries}.\n",
+        ledger.family_size, ledger.level
+    ));
 }
 
 /// Verify every published board in an arena directory, and the cross-window
@@ -1814,6 +2061,37 @@ fn execution_status(header: &WindowHeader) -> (ExecutionStatus, Option<String>) 
         (None, Some(_)) => (ExecutionStatus::LegacyUnbound, None),
         (None, None) => (ExecutionStatus::NotReplayed, None),
     }
+}
+
+/// Check one board's forward evidence against the ledger the boards before it
+/// carried (`ledger`, `None` before any board carries one), and advance that
+/// ledger to this board's signed posterior. The ledger advances even when the
+/// board fails, so the next board is judged on what it continues from and a
+/// single bad board fails alone; the arena fails with it either way.
+fn forward_evidence_check(
+    header: &WindowHeader,
+    board: &PublicChain,
+    ledger: &mut Option<ForwardLedger>,
+) -> Option<String> {
+    let Some(evidence) = &header.forward_evidence else {
+        return ledger.as_ref().map(|_| {
+            "the board carries no forward evidence, but an earlier board began the ledger"
+                .to_string()
+        });
+    };
+    let reexecuted: std::collections::BTreeSet<String> = board
+        .chain
+        .iter()
+        .skip(1)
+        .filter_map(|link| serde_json::from_str::<BoardRow>(&link.payload).ok())
+        .filter(|row| row.returns_provenance == Some(ReturnsProvenance::ReExecuted))
+        .map(|row| row.score.agent_id)
+        .collect();
+    let expected_prior = ledger.clone().unwrap_or_else(ForwardLedger::genesis);
+    let error =
+        forward_evidence::evidence_error(evidence, &expected_prior, &header.window_id, &reexecuted);
+    *ledger = Some(evidence.posterior.clone());
+    error
 }
 
 /// Compare `head.json` with the published windows, as read from the documents.
@@ -1895,6 +2173,9 @@ pub fn verify_arena_expecting(
     let mut all_ok = true;
     let mut final_signatures = Vec::with_capacity(state.published_order.len());
     let mut head_required = false;
+    // The newest posterior once a board carries forward evidence. From then
+    // on every board must carry it, continuing from this ledger.
+    let mut forward_ledger: Option<ForwardLedger> = None;
 
     for id in &state.published_order {
         let board_path = dir.join(WINDOWS_DIR).join(id).join(BOARD_FILE);
@@ -1924,13 +2205,17 @@ pub fn verify_arena_expecting(
             Ok(header) => identity_mismatches(header, &window)?,
             Err(()) => Vec::new(),
         };
-        let certification_error = header
-            .as_ref()
-            .ok()
-            .and_then(|header| verify_certification::certification_error(header, &board));
+        let certification_error = header.as_ref().ok().and_then(|header| {
+            verify_certification::certification_error(header, &board)
+                .or_else(|| live_capture::board_error(header, &board))
+        });
         let (execution, execution_error) = match &header {
             Ok(header) => execution_status(header),
             Err(()) => (ExecutionStatus::NotReplayed, None),
+        };
+        let forward_evidence_error = match &header {
+            Ok(header) => forward_evidence_check(header, &board, &mut forward_ledger),
+            Err(()) => None,
         };
         let (anchor_ok, detail) = match header {
             Ok(header) if header.kind != WINDOW_HEADER_KIND => {
@@ -1962,7 +2247,8 @@ pub fn verify_arena_expecting(
             && key_ok
             && identity_mismatches.is_empty()
             && certification_error.is_none()
-            && execution_error.is_none();
+            && execution_error.is_none()
+            && forward_evidence_error.is_none();
         all_ok &= ok;
         let mut detail = if ok && detail.is_empty() {
             "ok".to_string()
@@ -1991,6 +2277,12 @@ pub fn verify_arena_expecting(
             }
             detail.push_str(&format!("execution identity: {error}"));
         }
+        if let Some(error) = &forward_evidence_error {
+            if !detail.is_empty() {
+                detail.push_str("; ");
+            }
+            detail.push_str(&format!("forward evidence: {error}"));
+        }
         windows.push(WindowVerification {
             window_id: id.clone(),
             chain_ok,
@@ -2000,6 +2292,7 @@ pub fn verify_arena_expecting(
             execution_error,
             identity_mismatches,
             certification_error,
+            forward_evidence_error,
             detail,
         });
     }
@@ -2049,6 +2342,7 @@ pub fn verify_arena_expecting(
             head_digest: final_signatures.last().map(|s| head_digest(s)),
             detail,
         },
+        forward_ledger,
     })
 }
 

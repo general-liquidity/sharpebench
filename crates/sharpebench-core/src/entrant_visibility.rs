@@ -418,9 +418,12 @@ pub const COMPOSITE_SCORE_VISIBILITY: VisibilityAllowlist = VisibilityAllowlist 
         ("bootstrap_p", V),
         ("bootstrap_error", V),
         ("deflation_error", V),
+        ("deflation_refusal", V),
+        ("dsr_ci_error", V),
         ("selection_error", V),
         ("standard_error_refusal", V),
         ("exposure_path_error", V),
+        ("exposure_path_refusal", V),
         ("raw_mean_return", V),
         ("rank_eligible", V),
         ("composite", V),
@@ -490,6 +493,7 @@ pub const COMPOSITE_SCORE_VISIBILITY: VisibilityAllowlist = VisibilityAllowlist 
         ("declared_passed_k", V),
         ("declared_mandate_eligible", V),
         ("declared_mandate_ordinal", V),
+        ("psr_standard_error", V),
         (
             "certification",
             Visibility::Nested(&CERTIFICATION_VISIBILITY),
@@ -568,8 +572,11 @@ mod tests {
         let mut score = score_agent(&probe_submission(), &ScoreConfig::default());
         score.bootstrap_error = Some("bootstrap unavailable".to_string());
         score.deflation_error = Some("deflation unavailable".to_string());
+        score.deflation_refusal = Some("deflation refused".to_string());
+        score.dsr_ci_error = Some("interval unavailable".to_string());
         score.selection_error = Some("selection unavailable".to_string());
-        score.exposure_path_error = Some("exposure path unproven".to_string());
+        score.exposure_path_error = Some("exposure path unavailable".to_string());
+        score.exposure_path_refusal = Some("exposure path unproven".to_string());
         score.dsr_ci_low = Some(0.1);
         score.dsr_ci_high = Some(0.9);
         score.dsr_se = Some(0.2);

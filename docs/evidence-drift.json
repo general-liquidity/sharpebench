@@ -1,0 +1,884 @@
+{
+  "added_fields": {
+    "evidence_sweep": [
+      "dispersion_clone_cluster",
+      "effective_config_sha256",
+      "pooled_sharpe_per_period",
+      "pooled_sharpe_unavailable"
+    ],
+    "external_rules_eval": [
+      "dispersion_clone_cluster",
+      "effective_config_sha256",
+      "pooled_sharpe_per_period",
+      "pooled_sharpe_unavailable"
+    ]
+  },
+  "change_points": [
+    {
+      "change": "stats: consistent empirical standardized moments",
+      "commit": "0cd7d37",
+      "date": "2026-09-07",
+      "id": "CP1",
+      "intended": true,
+      "magnitude": "psr <= 4e-5 and dsr <= 1.1e-4 on the sweep shards, <= 6.4e-5 on external rules; luck-floor psr <= 7e-7; seed-leg per-run psr <= 1.7e-4",
+      "merged_in": "aefd5b1 (#11)",
+      "moves": "psr and deflated_sharpe of every non-constant record"
+    },
+    {
+      "change": "sim: target shares at the observed mark, fee on executed notional, financing on absolute gross",
+      "commit": "4378ad4",
+      "date": "2026-09-07",
+      "id": "CP2",
+      "intended": true,
+      "magnitude": "sweep raw mean 4.7e-6, drawdown 1.8e-3, psr 1.0e-3, RC/SPA p 5e-4; luck floor psr 9.1e-4, dsr 8.8e-4; seed-leg per-run psr 0.06; external drawdown 0.015, psr 3.5e-3",
+      "merged_in": "#11",
+      "moves": "raw_mean_return and worst_run_drawdown of every trading agent, buy-and-hold included, then psr, dsr, bootstrap_p, Reality Check and SPA p, measured dispersion",
+      "note": "Intended for the zero-target crossing. The move of buy-and-hold, which never sets a zero target, comes from the same commit's mark-based share count and fee base."
+    },
+    {
+      "change": "sim: refuse nonpositive closes",
+      "commit": "1bd06e2",
+      "date": "2026-09-07",
+      "id": "CP3",
+      "intended": true,
+      "magnitude": "transient; reverted 14 minutes later",
+      "merged_in": "#11",
+      "moves": "commodities-1d stopped loading; the sweep of that era published 0 records with exit 0"
+    },
+    {
+      "change": "data: preserve signed raw quotes (WTI -36.98)",
+      "commit": "d882803",
+      "date": "2026-09-07",
+      "id": "CP4",
+      "intended": false,
+      "magnitude": "buy-and-hold commodities psr 0.9905 -> 0.0",
+      "merged_in": "#11",
+      "moves": "with CP2, commodities buy-and-hold and all five luck floors at raw_mean_return null, worst_run_drawdown null, psr 0",
+      "note": "The one unintended drift. Repaired by CP12."
+    },
+    {
+      "change": "sim: momentum honors its lookback",
+      "commit": "259555e",
+      "date": "2026-09-07",
+      "id": "CP5",
+      "intended": true,
+      "magnitude": "sweep psr 0.12, dsr 0.22; external psr 0.64, drawdown 0.47",
+      "merged_in": "#11",
+      "moves": "momentum rows, field-level dispersion and RC/SPA p"
+    },
+    {
+      "change": "stats: refuse invalid statistical input",
+      "commit": "1aa8a14",
+      "date": "2026-09-08",
+      "id": "CP6",
+      "intended": true,
+      "magnitude": "dsr up to 0.51 (floored bar 1.38 annualized -> 0)",
+      "moves": "commodities: the non-finite measured dispersion from CP4 refused instead of scored; deflation bar and dsr"
+    },
+    {
+      "change": "stats: refuse a constant track",
+      "commit": "3ef277d",
+      "date": "2026-09-15",
+      "id": "CP7",
+      "intended": true,
+      "magnitude": "psr 0.5",
+      "moves": "every hold row: psr 0.5 -> 0, dsr and bar 0"
+    },
+    {
+      "change": "core: a track with no Sharpe ratio no longer votes",
+      "commit": "33585a6",
+      "date": "2026-09-15",
+      "id": "CP8",
+      "intended": true,
+      "magnitude": "fx bar up to 1.5 annualized",
+      "moves": "measured dispersion where hold voted (fx, rates, crypto-1h; external)"
+    },
+    {
+      "change": "only entrants vote, influence bound; producers declare the luck floor as controls",
+      "commit": "ba6a8ca, b255d52",
+      "date": "2026-11-01",
+      "id": "CP9",
+      "intended": true,
+      "magnitude": "fx bar up to 5.4 annualized; trials_sr_std up to 2.0 annualized",
+      "moves": "fx, rates, crypto-1h and risk-managed panels go measured -> configured; external dispersions fall on six panels"
+    },
+    {
+      "change": "evaluate erf and norm_ppf exp/ln deterministically",
+      "commit": "d929f23",
+      "date": "2026-11-01",
+      "id": "CP10",
+      "intended": true,
+      "magnitude": "5.6e-17, below the shadow job's moved threshold",
+      "moves": "2 of 384 probed records in deflated_sharpe"
+    },
+    {
+      "change": "sim: versioned FIFO two-bar delay for newly resolved stressed models",
+      "commit": "e8337a1",
+      "date": "2026-10-10",
+      "id": "CP11",
+      "intended": true,
+      "magnitude": "commodities momentum stressed raw mean 0.0290 -> -0.0013",
+      "moves": "external-rules stressed rows only"
+    },
+    {
+      "change": "sim: ruin is absorbing at a nonpositive NAV",
+      "commit": "fix/evidence-drift-gates",
+      "date": "2026-11-02",
+      "id": "CP12",
+      "intended": true,
+      "magnitude": "see the commodities-1d entries below",
+      "moves": "commodities rows of every agent a negative WTI mark bankrupts: buy-and-hold and the luck floors become finite again, booking the ruin loss on 2020-04-20 and zero afterwards"
+    }
+  ],
+  "description": "Reviewed record of how the current engine's output differs from the frozen evidence in paper/evidence/final on the shadow shards that paper/src/check-current-engine-shadow.py runs in CI. The measured sections (observed, verdict_flips, added_fields) are written by that script with --write and checked by it in CI; change_points and every attributed_to list are reviewed text. Frozen evidence is never regenerated or rebound by this record.",
+  "frozen_base": "paper/evidence/final",
+  "observed": [
+    {
+      "attributed_to": [
+        "CP2",
+        "CP5"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "us-indices-1w",
+      "field": "bootstrap_p",
+      "max_abs": 0.0974512743628186,
+      "producer": "evidence_sweep",
+      "rows_moved": 64
+    },
+    {
+      "attributed_to": [
+        "CP1",
+        "CP2",
+        "CP5",
+        "CP7"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "us-indices-1w",
+      "field": "deflated_sharpe",
+      "max_abs": 0.22215541049477538,
+      "producer": "evidence_sweep",
+      "rows_moved": 128
+    },
+    {
+      "attributed_to": [
+        "CP7",
+        "CP8",
+        "CP9"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "us-indices-1w",
+      "field": "deflation_bar_annualized_equivalent",
+      "max_abs": 1.3827619531342237,
+      "producer": "evidence_sweep",
+      "rows_moved": 16
+    },
+    {
+      "attributed_to": [
+        "CP7",
+        "CP8",
+        "CP9"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "us-indices-1w",
+      "field": "deflation_bar_per_period",
+      "max_abs": 0.19175458168408374,
+      "producer": "evidence_sweep",
+      "rows_moved": 16
+    },
+    {
+      "attributed_to": [
+        "CP1",
+        "CP2",
+        "CP5",
+        "CP7"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "us-indices-1w",
+      "field": "psr",
+      "max_abs": 0.5000000005,
+      "producer": "evidence_sweep",
+      "rows_moved": 128
+    },
+    {
+      "attributed_to": [
+        "CP2",
+        "CP5"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "us-indices-1w",
+      "field": "raw_mean_return",
+      "max_abs": 0.0005424486335735168,
+      "producer": "evidence_sweep",
+      "rows_moved": 112
+    },
+    {
+      "attributed_to": [
+        "CP2",
+        "CP5"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "us-indices-1w",
+      "field": "worst_run_drawdown",
+      "max_abs": 0.0017851013207673683,
+      "producer": "evidence_sweep",
+      "rows_moved": 112
+    },
+    {
+      "attributed_to": [
+        "CP2",
+        "CP5",
+        "CP12"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "commodities-1d",
+      "field": "bootstrap_p",
+      "max_abs": 0.8755622188905547,
+      "producer": "evidence_sweep",
+      "rows_moved": 32
+    },
+    {
+      "attributed_to": [
+        "CP1",
+        "CP2",
+        "CP5",
+        "CP6",
+        "CP7",
+        "CP12"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "commodities-1d",
+      "field": "deflated_sharpe",
+      "max_abs": 0.48509245081498026,
+      "producer": "evidence_sweep",
+      "rows_moved": 92
+    },
+    {
+      "attributed_to": [
+        "CP6",
+        "CP7",
+        "CP12"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "commodities-1d",
+      "field": "deflation_bar_annualized_equivalent",
+      "max_abs": 1.3827619531342237,
+      "producer": "evidence_sweep",
+      "rows_moved": 16
+    },
+    {
+      "attributed_to": [
+        "CP6",
+        "CP7",
+        "CP12"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "commodities-1d",
+      "field": "deflation_bar_per_period",
+      "max_abs": 0.08710581548559776,
+      "producer": "evidence_sweep",
+      "rows_moved": 16
+    },
+    {
+      "attributed_to": [
+        "CP2",
+        "CP5",
+        "CP12"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "commodities-1d",
+      "field": "field_reality_check_p",
+      "max_abs": 0.6466766616691655,
+      "producer": "evidence_sweep",
+      "rows_moved": 128
+    },
+    {
+      "attributed_to": [
+        "CP2",
+        "CP5",
+        "CP12"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "commodities-1d",
+      "field": "field_spa_consistent_p",
+      "max_abs": 0.6806596701649175,
+      "producer": "evidence_sweep",
+      "rows_moved": 128
+    },
+    {
+      "attributed_to": [
+        "CP2",
+        "CP5",
+        "CP12"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "commodities-1d",
+      "field": "field_spa_p",
+      "max_abs": 0.25537231384307846,
+      "producer": "evidence_sweep",
+      "rows_moved": 128
+    },
+    {
+      "attributed_to": [
+        "CP1",
+        "CP2",
+        "CP5",
+        "CP6",
+        "CP7",
+        "CP12"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "commodities-1d",
+      "field": "psr",
+      "max_abs": 0.7538707329747365,
+      "producer": "evidence_sweep",
+      "rows_moved": 128
+    },
+    {
+      "attributed_to": [
+        "CP2",
+        "CP5",
+        "CP12"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "commodities-1d",
+      "field": "raw_mean_return",
+      "max_abs": 0.025532703565991466,
+      "producer": "evidence_sweep",
+      "rows_moved": 112
+    },
+    {
+      "attributed_to": [
+        "CP6",
+        "CP7",
+        "CP12"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "commodities-1d",
+      "field": "trials_sr_std_source",
+      "max_abs": null,
+      "producer": "evidence_sweep",
+      "rows_moved": 32
+    },
+    {
+      "attributed_to": [
+        "CP2",
+        "CP5",
+        "CP12"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "commodities-1d",
+      "field": "worst_run_drawdown",
+      "max_abs": 0.1915430593826588,
+      "producer": "evidence_sweep",
+      "rows_moved": 112
+    },
+    {
+      "attributed_to": [
+        "CP1",
+        "CP2",
+        "CP5",
+        "CP7",
+        "CP8",
+        "CP9"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "fx-majors-1d",
+      "field": "deflated_sharpe",
+      "max_abs": 0.11985343102778656,
+      "producer": "evidence_sweep",
+      "rows_moved": 27
+    },
+    {
+      "attributed_to": [
+        "CP7",
+        "CP8",
+        "CP9"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "fx-majors-1d",
+      "field": "deflation_bar_annualized_equivalent",
+      "max_abs": 8.292305138071494,
+      "producer": "evidence_sweep",
+      "rows_moved": 44
+    },
+    {
+      "attributed_to": [
+        "CP7",
+        "CP8",
+        "CP9"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "fx-majors-1d",
+      "field": "deflation_bar_per_period",
+      "max_abs": 0.5223661235904833,
+      "producer": "evidence_sweep",
+      "rows_moved": 44
+    },
+    {
+      "attributed_to": [
+        "CP2",
+        "CP5"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "fx-majors-1d",
+      "field": "field_reality_check_p",
+      "max_abs": 0.009995002498750627,
+      "producer": "evidence_sweep",
+      "rows_moved": 128
+    },
+    {
+      "attributed_to": [
+        "CP2",
+        "CP5"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "fx-majors-1d",
+      "field": "field_spa_p",
+      "max_abs": 0.0004997501249375258,
+      "producer": "evidence_sweep",
+      "rows_moved": 128
+    },
+    {
+      "attributed_to": [
+        "CP1",
+        "CP2",
+        "CP5",
+        "CP7",
+        "CP8",
+        "CP9"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "fx-majors-1d",
+      "field": "psr",
+      "max_abs": 0.5000000005,
+      "producer": "evidence_sweep",
+      "rows_moved": 32
+    },
+    {
+      "attributed_to": [
+        "CP2",
+        "CP5"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "fx-majors-1d",
+      "field": "raw_mean_return",
+      "max_abs": 0.0004521106801509602,
+      "producer": "evidence_sweep",
+      "rows_moved": 112
+    },
+    {
+      "attributed_to": [
+        "CP7",
+        "CP8",
+        "CP9"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "fx-majors-1d",
+      "field": "trials_sr_std_annualized_equivalent",
+      "max_abs": 2.4984572251484876,
+      "producer": "evidence_sweep",
+      "rows_moved": 32
+    },
+    {
+      "attributed_to": [
+        "CP7",
+        "CP8",
+        "CP9"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "fx-majors-1d",
+      "field": "trials_sr_std_source",
+      "max_abs": null,
+      "producer": "evidence_sweep",
+      "rows_moved": 32
+    },
+    {
+      "attributed_to": [
+        "CP7",
+        "CP8",
+        "CP9"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "fx-majors-1d",
+      "field": "trials_sr_std_used",
+      "max_abs": 0.1573880114065574,
+      "producer": "evidence_sweep",
+      "rows_moved": 32
+    },
+    {
+      "attributed_to": [
+        "CP2",
+        "CP5"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "fx-majors-1d",
+      "field": "worst_run_drawdown",
+      "max_abs": 0.10727454184042284,
+      "producer": "evidence_sweep",
+      "rows_moved": 112
+    },
+    {
+      "attributed_to": [
+        "CP2",
+        "CP5",
+        "CP11"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "us-indices-1w",
+      "field": "bootstrap_p",
+      "max_abs": 0.29485257371314344,
+      "producer": "external_rules_eval",
+      "rows_moved": 20
+    },
+    {
+      "attributed_to": [
+        "CP1",
+        "CP2",
+        "CP5",
+        "CP7",
+        "CP11"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "us-indices-1w",
+      "field": "deflated_sharpe",
+      "max_abs": 0.049578113827160264,
+      "producer": "external_rules_eval",
+      "rows_moved": 39
+    },
+    {
+      "attributed_to": [
+        "CP7",
+        "CP8",
+        "CP9"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "us-indices-1w",
+      "field": "deflation_bar_annualized_equivalent",
+      "max_abs": 1.1381515469446075,
+      "producer": "external_rules_eval",
+      "rows_moved": 3
+    },
+    {
+      "attributed_to": [
+        "CP7",
+        "CP8",
+        "CP9"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "us-indices-1w",
+      "field": "deflation_bar_per_period",
+      "max_abs": 0.15783322160605548,
+      "producer": "external_rules_eval",
+      "rows_moved": 3
+    },
+    {
+      "attributed_to": [
+        "CP1",
+        "CP2",
+        "CP5",
+        "CP7",
+        "CP11"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "us-indices-1w",
+      "field": "psr",
+      "max_abs": 0.5000000005,
+      "producer": "external_rules_eval",
+      "rows_moved": 39
+    },
+    {
+      "attributed_to": [
+        "CP2",
+        "CP5",
+        "CP11"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "us-indices-1w",
+      "field": "raw_mean_return",
+      "max_abs": 0.0007685597514851387,
+      "producer": "external_rules_eval",
+      "rows_moved": 25
+    },
+    {
+      "attributed_to": [
+        "CP2",
+        "CP5",
+        "CP11"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "us-indices-1w",
+      "field": "worst_run_drawdown",
+      "max_abs": 0.11287636733134165,
+      "producer": "external_rules_eval",
+      "rows_moved": 25
+    },
+    {
+      "attributed_to": [
+        "CP2",
+        "CP5",
+        "CP11",
+        "CP12"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "commodities-1d",
+      "field": "bootstrap_p",
+      "max_abs": 0.8950524737631185,
+      "producer": "external_rules_eval",
+      "rows_moved": 7
+    },
+    {
+      "attributed_to": [
+        "CP1",
+        "CP2",
+        "CP5",
+        "CP6",
+        "CP7",
+        "CP11",
+        "CP12"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "commodities-1d",
+      "field": "deflated_sharpe",
+      "max_abs": 0.0014840639731951155,
+      "producer": "external_rules_eval",
+      "rows_moved": 32
+    },
+    {
+      "attributed_to": [
+        "CP6",
+        "CP7",
+        "CP12"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "commodities-1d",
+      "field": "deflation_bar_annualized_equivalent",
+      "max_abs": 1.1381515469446075,
+      "producer": "external_rules_eval",
+      "rows_moved": 3
+    },
+    {
+      "attributed_to": [
+        "CP6",
+        "CP7",
+        "CP12"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "commodities-1d",
+      "field": "deflation_bar_per_period",
+      "max_abs": 0.07169680827425921,
+      "producer": "external_rules_eval",
+      "rows_moved": 3
+    },
+    {
+      "attributed_to": [
+        "CP1",
+        "CP2",
+        "CP5",
+        "CP6",
+        "CP7",
+        "CP11",
+        "CP12"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "commodities-1d",
+      "field": "psr",
+      "max_abs": 0.7538707329747365,
+      "producer": "external_rules_eval",
+      "rows_moved": 39
+    },
+    {
+      "attributed_to": [
+        "CP2",
+        "CP5",
+        "CP11",
+        "CP12"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "commodities-1d",
+      "field": "raw_mean_return",
+      "max_abs": 0.025532703565991466,
+      "producer": "external_rules_eval",
+      "rows_moved": 32
+    },
+    {
+      "attributed_to": [
+        "CP2",
+        "CP5",
+        "CP11",
+        "CP12"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "commodities-1d",
+      "field": "worst_run_drawdown",
+      "max_abs": 0.7661107152668964,
+      "producer": "external_rules_eval",
+      "rows_moved": 25
+    },
+    {
+      "attributed_to": [
+        "CP1",
+        "CP2",
+        "CP5",
+        "CP7",
+        "CP8",
+        "CP9",
+        "CP11"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "fx-majors-1d",
+      "field": "deflated_sharpe",
+      "max_abs": 2.2636244003115813e-06,
+      "producer": "external_rules_eval",
+      "rows_moved": 7
+    },
+    {
+      "attributed_to": [
+        "CP7",
+        "CP8",
+        "CP9"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "fx-majors-1d",
+      "field": "deflation_bar_annualized_equivalent",
+      "max_abs": 10.195390731946269,
+      "producer": "external_rules_eval",
+      "rows_moved": 27
+    },
+    {
+      "attributed_to": [
+        "CP7",
+        "CP8",
+        "CP9"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "fx-majors-1d",
+      "field": "deflation_bar_per_period",
+      "max_abs": 0.6422492475205385,
+      "producer": "external_rules_eval",
+      "rows_moved": 27
+    },
+    {
+      "attributed_to": [
+        "CP1",
+        "CP2",
+        "CP5",
+        "CP7",
+        "CP8",
+        "CP9",
+        "CP11"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "fx-majors-1d",
+      "field": "psr",
+      "max_abs": 0.5000000005,
+      "producer": "external_rules_eval",
+      "rows_moved": 23
+    },
+    {
+      "attributed_to": [
+        "CP2",
+        "CP5",
+        "CP11"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "fx-majors-1d",
+      "field": "raw_mean_return",
+      "max_abs": 0.0004521106801509602,
+      "producer": "external_rules_eval",
+      "rows_moved": 25
+    },
+    {
+      "attributed_to": [
+        "CP7",
+        "CP8",
+        "CP9"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "fx-majors-1d",
+      "field": "trials_sr_std_annualized_equivalent",
+      "max_abs": 2.133503123831888,
+      "producer": "external_rules_eval",
+      "rows_moved": 26
+    },
+    {
+      "attributed_to": [
+        "CP7",
+        "CP8",
+        "CP9"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "fx-majors-1d",
+      "field": "trials_sr_std_used",
+      "max_abs": 0.13439806397710993,
+      "producer": "external_rules_eval",
+      "rows_moved": 26
+    },
+    {
+      "attributed_to": [
+        "CP2",
+        "CP5",
+        "CP11"
+      ],
+      "became_null": 0,
+      "became_number": 0,
+      "dataset": "fx-majors-1d",
+      "field": "worst_run_drawdown",
+      "max_abs": 0.10727454184042284,
+      "producer": "external_rules_eval",
+      "rows_moved": 25
+    }
+  ],
+  "schema": "sharpebench.evidence-drift.v1",
+  "shards": "evidence_sweep at dsr_bar 0.95 and external_rules_eval, each on us-indices-1w, commodities-1d and fx-majors-1d",
+  "verdict_flips": []
+}

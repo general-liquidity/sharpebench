@@ -19,8 +19,8 @@
 //! compare and dominates nobody.
 //!
 //! The tests read the refusal off each row, not off a list kept here: under a
-//! valid configuration `deflation_error` is present exactly when the pooled
-//! track has no Sharpe ratio, a one-observation track included, and
+//! valid configuration `deflation_refusal` or `deflation_error` is present
+//! exactly when the pooled track has no Sharpe ratio, a one-observation track included, and
 //! `pooled_observations` says whether the track can dominate.
 
 use std::path::Path;
@@ -103,7 +103,7 @@ fn row<'a>(board: &'a [CompositeScore], id: &str) -> &'a CompositeScore {
 }
 
 fn refused(row: &CompositeScore) -> bool {
-    row.deflation_error.is_some()
+    row.deflation_refusal.is_some() || row.deflation_error.is_some()
 }
 
 fn can_dominate(row: &CompositeScore) -> bool {

@@ -18,6 +18,8 @@ sharpebench rescore <bundle.json>                     recompute a declared submi
 sharpebench regrade <bundle.json> --original-evaluator <json> --replacement-evaluator <json> --reason <text>   link an artifact to the evaluator superseding the one that graded it
 sharpebench audit-briefing <briefing.json>            audit a shared briefing for salience bias
 sharpebench canary <seed>                             derive a do-not-train contamination tripwire
+sharpebench contamination-probe <entrant>             real-minus-twin shape probe for path recall (rank-neutral)
+sharpebench presentation-stability <entrant>          decisions under partial blinding, reordering and a date shift (rank-neutral)
 sharpebench sandbox-check <image@sha256:digest>       run the live Docker-boundary acceptance checks
 sharpebench gateway --routes <routes.json> ...        report the host-observed model gateway configuration
 sharpebench score-allocation <alloc.json>             score a weight-vector trajectory (turnover)
@@ -202,10 +204,13 @@ declaration; this mechanism does not verify which model an entrant called.
 Version 1 excludes caching, batch discounts, tool fees and taxes. Explicitly
 zero rates can price a nonzero reported count as zero.
 
-The old `cost`, `return_per_cost` and `dsr_per_cost` columns are unchanged.
-Their legacy entrant-selected scalar can mean USD or tokens; the accounting
-record labels it `entrant_selected_usd_or_tokens_not_rate_card_priced`. Do not
-interpret those columns as the new USD quote. Token pricing does not change
+The old `cost`, `return_per_cost` and `dsr_per_cost` columns are unchanged on
+a row without host-observed gateway usage. Their legacy entrant-selected scalar
+can mean USD or tokens; the accounting record labels it
+`entrant_selected_usd_or_tokens_not_rate_card_priced`. Do not interpret those
+columns as the new USD quote. On a row with host-observed usage the three
+columns are the host-observed USD figure or are withheld, never the entrant's,
+as [the model gateway](model-gateway.md#what-leaves-the-host) describes. Token pricing does not change
 decisions, returns, scores, eligibility or ordering.
 
 See [The arena](arena.md#sandboxed-entrants) for the boundary and acceptance
@@ -344,6 +349,30 @@ protocol and the dataset. The report (`sharpebench.timing-luck.v2`) carries
 output is unchanged. A cadence longer than a declared window exits 1 with
 `window_shorter_than_cadence`. See [Timing-luck floor](timing-luck.md).
 
+## `contamination-probe` and `presentation-stability`
+
+```bash
+sharpebench contamination-probe <entrant> [--data <csv>] [--window-bars N] [--windows N] [--twin-seed N] [--frictionless] [--json]
+sharpebench presentation-stability <entrant> [--data <csv>] [--date-shift-days N] [--json]
+```
+
+`<entrant>` is exactly one of `--agent buy-and-hold|momentum`, `--cmd "<prog>"`,
+`--http <addr>` or `--image <repository@sha256:...>`, with one fresh agent (or
+container) per probe arm. `contamination-probe` scores the entrant on masked
+real windows and their synthetic twins and tests the paired edge
+(`sharpebench.contamination-probe.v1`). `presentation-stability` compares its
+decisions under tickers-only, dates-only, levels-only and full blinding, under
+reordered symbols, and under a calendar shifted by `--date-shift-days`
+(`sharpebench.presentation-stability.v1`). Both accept `--short-borrow-bps` and
+`--declared-training-cutoff`, refuse `--masked`, carry `rank_input: false`, and
+report a failed arm as a typed `unavailable` object (exit 1). See
+[Contamination probes](contamination-probes.md).
+
+`run --declared-training-cutoff YYYY-MM-DD`, with an external entrant only,
+publishes the operator's declared cutoff on the entrant's row as
+`declared_training_cutoff`, untrusted and unverified; `evidence_mode` is
+unchanged.
+
 ## `grader-search`
 
 ```bash
@@ -389,7 +418,7 @@ Ranks a JSON field of pre-computed submissions (see
 bootstrap p, and raw return, with a footer naming how many of the submitted agents
 are eligible.
 
-`score` and [`disqualify`](#disqualify) share these host scoring controls:
+`score`, [`disqualify`](#disqualify) and [`headline`](#headline) share these host scoring controls:
 
 | Flag | Meaning |
 |---|---|
@@ -424,6 +453,31 @@ The human table gains a separate block after the unchanged board; `--json`
 prints `{"board": ..., "sharpe_diagnostics": [...]}`, where `board` is the
 board-only output. An unknown identifier or a missing value exits 2 before any
 output. Without the flag the output is byte-identical to a build without it.
+
+`--headline` adds the [headline verdict](reading-a-row.md) of each row. The
+human table gains a last `headline` column; `--json` prints
+`{"board": ..., "headlines": [...]}`, where `board` is the board-only output and
+`headlines` has one record per row in board order. With `--diagnostics` as
+well, the JSON object carries all three members. The verdict is computed from
+the finished board and never written into a row, so scores, rank, ordinal and
+the sealed board are unchanged. Without the flag the output is byte-identical to
+a build without it.
+
+`--psr-standard-error observed|benchmark` (also accepted by `disqualify`)
+selects where every PSR and deflated Sharpe on the board evaluates its standard
+error, described under
+[the deflated Sharpe](methodology-deflated-sharpe.md). `observed`, the plug-in,
+is the default and leaves the output byte-identical; `benchmark` is the opt-in
+null-SE methodology and every row records it. Any other value exits 2.
+
+`--pareto` adds `front` and `elig_front` columns to the human board and a
+`pareto` key to the `--json` output, beside `board`. Each cell is `yes` or `no`
+with the bootstrap membership frequency, `refused` for a row that takes no part
+and `-` on the eligible front for an ineligible row. `sharpebench pareto
+<field.json>` takes the same flags and prints the full report alone (`--json`:
+`{"pareto": ...}`): the six axes, both fronts and the dominating agents. Both
+are described under [the multi-objective report](methodology.md). Neither
+changes the board order or any row.
 
 These identity checks do not verify temporal alignment of legacy JSON `runs`.
 The caller still supplies consistent window, seed and period order across the
@@ -879,23 +933,56 @@ leaves it false rather than blaming an argument that was not the problem.
 ## `disqualify`
 
 ```bash
-sharpebench disqualify <submissions.json> [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode MODE] [--benchmark-agent ID] [--json]
+sharpebench disqualify <submissions.json> [--require-run-keys] [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode MODE] [--benchmark-agent ID] [--psr-standard-error observed|benchmark] [--known <known.csv>]... [--rediscovery-threshold T] [--oos-windows N] [--json]
 ```
 
 Scores a JSON field of submissions (same format as `score`) and names every
 disqualification/quality signal that fired for each agent, instead of the
-single rank-eligible verdict. Pass the same field and [host controls](#score) as
-`score`: explanations come from the ranked field, including its benchmark and
-field-dependent deflation, rather than separately scoring each submission.
-The taxonomy has twelve reasons in three groups. Five mirror the scorer's hard
-eligibility gates (`FailedPassK`, `DsrBelowBar`, `ProcessViolation`,
-`BootstrapInsignificant`, `MandateBreached`). Two name the unavailability of a
-statistic the scorer really does gate on, so they are hard as well:
-`DeflationUnavailable` and `BootstrapUnavailable`. `ExposurePathUnproven` is the
-hard exposure-path gate: a profit that does not clear the risk the track's
-exposure history implies. The remaining four are
-advisory and never gate: `SelectionUnavailable`, `HighSelectionGap`,
-`IsRediscovery` and `OosDecay`.
+single rank-eligible verdict. Pass the same field, the same
+`--require-run-keys` and the same [host controls](#score) as `score`:
+explanations come from the ranked field, including its keyed cell order, its
+benchmark and field-dependent deflation, rather than separately scoring each
+submission.
+
+The taxonomy has sixteen reasons. Twelve are hard and mirror a conjunct of
+the scorer's eligibility predicate:
+
+| Reason | Row field it reads | Meaning |
+|---|---|---|
+| `FailedPassK` | `passed_k` | a run failed the per-run PSR bar |
+| `DsrBelowBar` | `deflated_sharpe` | a computed deflated Sharpe is below `dsr_bar` |
+| `ProcessViolation` | `process_ok` | a block-severity process event |
+| `BootstrapInsignificant` | `bootstrap_p` | a computed bootstrap p is at or above `alpha` |
+| `MandateBreached` | `mandate_ok` | a drawdown cap was breached |
+| `DeflationUnavailable` | `deflation_error` | the deflated Sharpe or its bar could not be computed |
+| `DeflationRefused` | `deflation_refusal` | the track was refused for its shape: constant, every window flat, no observed risk, or no observed loss |
+| `DsrIntervalUnavailable` | `dsr_ci_error` | the deflated Sharpe's bootstrap interval could not be estimated |
+| `BootstrapUnavailable` | `bootstrap_error` | the bootstrap p-value could not be computed |
+| `StandardErrorUncertified` | `standard_error_refusal` | the standard error certification refused the deflated Sharpe |
+| `ExposurePathUnproven` | `exposure_path_refusal` | the profit does not clear the risk the track's exposure history implies |
+| `ExposurePathUnavailable` | `exposure_path_error` | the exposure-path statistic could not be computed |
+
+The remaining four are advisory and never gate: `SelectionUnavailable`,
+`HighSelectionGap`, `IsRediscovery` and `OosDecay`.
+
+One cause names one reason. A deflated Sharpe that was refused or not computed
+is the 0.0 floor, not an estimate, so it carries `DeflationRefused` or
+`DeflationUnavailable` and not also `DsrBelowBar`. A bootstrap that was not
+computed reports the 1.0 sentinel, so it carries `BootstrapUnavailable` and not
+also `BootstrapInsignificant`. An interval that fails for the same reason the
+deflation already names is reported once, in the deflation's field.
+
+`IsRediscovery` and `OosDecay` need evidence a submissions file does not carry,
+so they are emitted only when it is supplied. `--known <known.csv>`, repeatable,
+screens each agent's pooled stream (its runs concatenated in submission order)
+against a library of known strategy streams, as [`rediscover`](#rediscover)
+does, at `--rediscovery-threshold` (default 0.97). The pairing is by index, so
+the known streams must be aligned to the same bars. `--oos-windows N`, N at
+least 2, splits each agent's runs window-major into N windows and reports
+`OosDecay` when less than half of the first window's Sharpe proxy is retained
+in the later windows; an agent with fewer runs than windows gets no split. A
+malformed flag exits 2 and an unreadable library file exits 1. Without these
+flags the output is what it was.
 
 `SelectionUnavailable` is advisory because the whole selection axis is. The
 scorer reports `selection_gap` and never consults it in `rank_eligible`, so the
@@ -910,6 +997,20 @@ explain the host score only, including its drawdown mandate; they do not explain
 the separate declared-mandate verdict. To inspect that verdict, use the
 `declared_*` fields returned by `score`. Explanation generation changes neither
 eligibility nor rank.
+
+## `headline`
+
+```bash
+sharpebench headline <submissions.json> [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode MODE] [--benchmark-agent ID] [--json]
+```
+
+Scores a JSON field of submissions (same format and host controls as `score`)
+and prints one [headline verdict](reading-a-row.md) per row, with its hard
+reasons and qualifiers beside it. `--json` prints the same records
+`score --headline --json` puts under `headlines`. A submissions file carries no
+evidence mode and no stress replay, so those qualifiers read `unknown` and
+`not_run`. Nothing here changes a score or the rank. A missing path exits 2 and
+an unreadable or malformed field exits 1.
 
 ## `rediscover`
 

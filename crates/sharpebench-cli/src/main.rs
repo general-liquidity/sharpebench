@@ -22,6 +22,7 @@ mod arena_cmd;
 mod artifact_preflight;
 mod cell_isolation;
 mod compare_cmd;
+mod contamination_cmd;
 mod csv_columns;
 mod decision_stability_cmd;
 mod external_capture;
@@ -52,9 +53,16 @@ fn main() -> ExitCode {
     match subcommand {
         Some("run") => run_demo(&args, json),
         Some("score") => match args.get(2) {
-            Some(path) => run_score(path, &args, json),
+            Some(path) => run_score(path, &args, json, ScoreOutput::Board),
             None => {
-                eprintln!("usage: sharpebench score <submissions.json> [--require-run-keys] [--rank-mode <id>] [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode <mode>] [--benchmark-agent <id>] [--diagnostics <list>] [--json]");
+                eprintln!("usage: sharpebench score <submissions.json> [--require-run-keys] [--rank-mode <id>] [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode <mode>] [--benchmark-agent <id>] [--psr-standard-error observed|benchmark] [--diagnostics <list>] [--pareto] [--headline] [--json]");
+                ExitCode::from(2)
+            }
+        },
+        Some("pareto") => match args.get(2) {
+            Some(path) => run_score(path, &args, json, ScoreOutput::ParetoOnly),
+            None => {
+                eprintln!("usage: sharpebench pareto <submissions.json> [score flags] [--json]");
                 ExitCode::from(2)
             }
         },
@@ -89,12 +97,21 @@ fn main() -> ExitCode {
         }
         Some("import") => ExitCode::from(import_cmd::run(&args, json).clamp(0, 255) as u8),
         Some("gateway") => ExitCode::from(gateway_cli::run(&args, json).clamp(0, 255) as u8),
+        Some("contamination-probe") => ExitCode::from(
+            contamination_cmd::run_shape(&args, json, &external_capture::DockerSandbox)
+                .clamp(0, 255) as u8,
+        ),
+        Some("presentation-stability") => ExitCode::from(
+            contamination_cmd::run_presentation(&args, json, &external_capture::DockerSandbox)
+                .clamp(0, 255) as u8,
+        ),
         Some("timing-luck") => {
             ExitCode::from(timing_luck_cmd::run(&args, json).clamp(0, 255) as u8)
         }
-        Some(sub @ ("select" | "disqualify" | "rediscover" | "uncertainty" | "decay-prior")) => {
-            ExitCode::from(analysis_cmd::run(sub, &args, json).clamp(0, 255) as u8)
-        }
+        Some(
+            sub @ ("select" | "disqualify" | "headline" | "rediscover" | "uncertainty"
+            | "decay-prior"),
+        ) => ExitCode::from(analysis_cmd::run(sub, &args, json).clamp(0, 255) as u8),
         Some("self-update" | "update") => run_self_update(),
         Some("--help") | Some("-h") | None => {
             help();
@@ -568,6 +585,32 @@ fn resolve_key(spec: &str) -> std::io::Result<Vec<u8>> {
     }
 }
 
+/// `--declared-training-cutoff YYYY-MM-DD`: an operator's statement of the
+/// entrant model's training cutoff, published beside `evidence_mode` and never
+/// trusted (see `sharpebench_harness::declared_cutoff`). It describes an
+/// external entrant, so it is refused without one.
+fn declared_training_cutoff(
+    args: &[String],
+) -> Result<Option<sharpebench_harness::declared_cutoff::DeclaredCutoff>, String> {
+    if !args.iter().any(|arg| arg == "--declared-training-cutoff") {
+        return Ok(None);
+    }
+    let Some(raw) = flag_value(args, "--declared-training-cutoff").filter(|v| !v.starts_with("--"))
+    else {
+        return Err("--declared-training-cutoff needs a calendar day YYYY-MM-DD".to_string());
+    };
+    if !["--cmd", "--image", "--http"]
+        .iter()
+        .any(|flag| args.iter().any(|arg| arg == flag))
+    {
+        return Err(
+            "--declared-training-cutoff describes an external entrant; pass --cmd, --http or --image"
+                .to_string(),
+        );
+    }
+    sharpebench_harness::declared_cutoff::DeclaredCutoff::parse(raw).map(Some)
+}
+
 fn help() {
     println!("sharpebench — luck-robust benchmark for AI trading agents\n");
     println!("USAGE:");
@@ -616,6 +659,27 @@ fn help() {
     println!(
         "                         does not use: autocorrelated-psr,null-se-psr,mppm,expected-shortfall (comma-separated)"
     );
+    println!(
+        "                       --headline: add a headline verdict column (JSON: a `headlines` list beside"
+    );
+    println!("                         the sealed board); never changes a score or the rank");
+    println!(
+        "                       --psr-standard-error observed|benchmark: where every PSR and deflated Sharpe"
+    );
+    println!(
+        "                         evaluates its standard error (default observed, the plug-in; benchmark is the"
+    );
+    println!("                         opt-in null-SE methodology, recorded on every row)");
+    println!(
+        "                       --pareto: add a multi-objective front column (never a rank input)"
+    );
+    println!(
+        "  sharpebench pareto <submissions.json>  the Pareto front over return, drawdown, turnover, cost,"
+    );
+    println!(
+        "                         volatility and expected shortfall, all and eligible-only, with bootstrap"
+    );
+    println!("                         membership frequencies; takes the score flags; never a rank input");
     println!(
         "  sharpebench commit <agent> <window> <digest> <salt> [--fault-plan <plan.json>]  forward-attestation pre-registration"
     );
@@ -681,6 +745,14 @@ fn help() {
         "  sharpebench timing-luck --cadence <m> [--data <csv>] [--periods-per-year N]  how far run's reference rows move when they rebalance every m bars and only the schedule phase moves (rank-neutral)"
     );
     println!(
+        "  sharpebench contamination-probe <entrant> [--data <csv>] [--window-bars N] [--windows N] [--twin-seed N] [--frictionless]  real-minus-twin Sharpe edge per window, a whole-window sign-flip test for recall of the price path (rank-neutral)"
+    );
+    println!(
+        "  sharpebench presentation-stability <entrant> [--data <csv>] [--date-shift-days N]  decisions under tickers-only, dates-only, levels-only and full blinding, reordered symbols and a shifted calendar, mapped back and compared (rank-neutral)"
+    );
+    println!("                       <entrant>: --agent buy-and-hold|momentum, --cmd \"<prog>\", --http <addr> or --image <repository@sha256:...>; a failed arm is a typed refusal");
+    println!("                       --declared-training-cutoff YYYY-MM-DD: also on run with an external entrant; published as a disclosure, never trusted or verified, evidence mode unchanged");
+    println!(
         "  sharpebench lineage <strategy-evidence.json> [--census] [--dataset <prices.csv>]...  verify Arena candidate ancestry, sources, and within-family robustness; --census counts test-split reads across a journal"
     );
     println!(
@@ -696,7 +768,10 @@ fn help() {
         "  sharpebench select <candidates.csv...> [--alpha A]          pick a candidate on a bootstrap percentile instead of the observed best"
     );
     println!(
-        "  sharpebench disqualify <subs.json>                          classify each agent's hard gates and advisory flags"
+        "  sharpebench disqualify <subs.json> [--require-run-keys]     classify each agent's hard gates and advisory flags"
+    );
+    println!(
+        "  sharpebench headline <subs.json>                            one verdict per row, with its hard reasons and qualifiers beside it"
     );
     println!(
         "  sharpebench rediscover <submitted.csv> <known.csv...>       flag a submission cosine-near a known strategy"
@@ -1882,6 +1957,13 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    let declared_cutoff = match declared_training_cutoff(args) {
+        Ok(cutoff) => cutoff,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::from(2);
+        }
+    };
     let fault_plan = match load_fault_plan(args) {
         Ok(plan) => plan,
         Err(error) => {
@@ -2606,6 +2688,14 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
         if let Some(replays) = &stress {
             stress_replay_cmd::attach(&mut board_json, replays);
         }
+        if let (Some(cutoff), Some((label, _, _))) = (&declared_cutoff, &external_accounting) {
+            sharpebench_harness::evidence_mode::attach_field(
+                &mut board_json,
+                label,
+                "declared_training_cutoff",
+                &sharpebench_harness::declared_cutoff::disclosure(cutoff, &data, &windows),
+            );
+        }
         // The board stays the whole document unless the evidence is asked for.
         // Wrapping it unconditionally would rename the top level of a machine
         // output every existing reader parses as an array, and the evidence is
@@ -2622,6 +2712,18 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
         if let Some((label, attempts, cost)) = external_accounting {
             print_attempt_accounting(&label, attempts, &cost);
             cell_isolation::print(&label);
+            if let Some(cutoff) = &declared_cutoff {
+                let value =
+                    sharpebench_harness::declared_cutoff::disclosure(cutoff, &data, &windows);
+                eprintln!(
+                    "declared training cutoff for {label}: {} (operator-declared, not verified, not trusted; evidence mode unchanged); windows {} before, {} straddling, {} on or after, {} unclassifiable",
+                    cutoff.as_str(),
+                    value["windows"]["ending_before_cutoff"],
+                    value["windows"]["straddling_cutoff"],
+                    value["windows"]["starting_on_or_after_cutoff"],
+                    value["windows"]["unclassifiable"],
+                );
+            }
             if let Some(report) = &fault_row {
                 print_fault_injection(&label, report);
             }
@@ -3297,7 +3399,15 @@ fn run_reexecution(
     }
 }
 
-fn run_score(path: &str, args: &[String], json: bool) -> ExitCode {
+/// What `run_score` prints: the board (with the opt-in front column under
+/// `--pareto`), or the `pareto` command's report alone.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ScoreOutput {
+    Board,
+    ParetoOnly,
+}
+
+fn run_score(path: &str, args: &[String], json: bool, output: ScoreOutput) -> ExitCode {
     let data = match std::fs::read_to_string(path) {
         Ok(d) => d,
         Err(e) => {
@@ -3305,57 +3415,13 @@ fn run_score(path: &str, args: &[String], json: bool) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    // Each object is a submission plus an optional `declared_mandate`; the
-    // declaration is scored as a labeled second verdict and never moves rank.
-    //
-    // Cross-agent comparison reads `runs[i]` for every agent. Without
-    // `--require-run-keys` that alignment is the caller's assertion, unchecked.
-    // With it, every submission must carry one `run_keys` entry per run; the
-    // field is refused unless the cells are complete, unique and shared, and the
-    // runs are reordered into one canonical cell order before scoring.
-    let require_run_keys = args.iter().any(|a| a == "--require-run-keys");
-    let (subs, declarations, keyed_seed_count) = if require_run_keys {
-        match sharpebench_core::parse_keyed_field(&data) {
-            Ok(field) => (
-                field.submissions,
-                field.declarations,
-                Some(field.seeds.len()),
-            ),
-            Err(e) => {
-                eprintln!("error: {e}");
-                return ExitCode::FAILURE;
-            }
-        }
-    } else {
-        match sharpebench_core::parse_declared_field(&data) {
-            Ok((subs, declarations)) => (subs, declarations, None),
-            Err(e) => {
-                eprintln!("error: {e}");
-                return ExitCode::FAILURE;
-            }
-        }
-    };
-    let mut cfg = match score_config_from_args(args) {
-        Ok(cfg) => cfg,
-        Err(error) => {
+    let (subs, declarations, cfg) = match scoring_field_from_args(&data, args) {
+        Ok(field) => field,
+        Err((error, code)) => {
             eprintln!("error: {error}");
-            return ExitCode::from(2);
+            return ExitCode::from(code);
         }
     };
-    if let Some(width) = keyed_seed_count {
-        // Canonical keys are window-major and contain the complete seed grid.
-        // Preserve that replicate geometry when the scorer pools observations.
-        if args.iter().any(|arg| arg == "--execution-seeds-per-window")
-            && cfg.execution_seeds_per_window != width
-        {
-            eprintln!(
-                "error: validated run keys require {width} execution seeds per window, but --execution-seeds-per-window is {}",
-                cfg.execution_seeds_per_window
-            );
-            return ExitCode::from(2);
-        }
-        cfg.execution_seeds_per_window = width;
-    }
     // `--rank-mode` is opt-in by versioned identifier. Absent, the board is
     // `rank_declared` byte for byte; an identifier the kernel does not
     // implement is refused rather than silently ranked under the legacy
@@ -3397,22 +3463,132 @@ fn run_score(path: &str, args: &[String], json: bool) -> ExitCode {
         Some(mode) => sharpebench_core::rank_certified(&subs, &declarations, &cfg, mode),
         None => sharpebench_core::rank_declared(&subs, &declarations, &cfg),
     };
-    match diagnostics {
-        None => emit_board(&board, json),
-        Some(requested) => {
-            let report = sharpebench_core::sharpe_diagnostics(&subs, &board, &cfg, &requested);
+    // `--pareto` and the `pareto` command are opt-in and read the finished
+    // board: the report is computed beside it and never reorders or edits it.
+    let pareto =
+        (output == ScoreOutput::ParetoOnly || args.iter().any(|a| a == "--pareto")).then(|| {
+            sharpebench_core::pareto_report(
+                &subs,
+                &board,
+                &cfg,
+                sharpebench_core::ParetoBootstrap::from_config(&cfg),
+            )
+        });
+    if output == ScoreOutput::ParetoOnly {
+        let report = pareto.expect("the pareto command computes the report");
+        if json {
+            emit_json(&serde_json::json!({ "pareto": report }));
+        } else {
+            print_pareto(&report);
+        }
+        return ExitCode::SUCCESS;
+    }
+    // `--headline` is opt-in. Absent, the output is byte for byte what it was;
+    // present, the verdicts are computed from the finished board and reported
+    // beside it, never written into a row, so the sealed board is unchanged.
+    let headlines = args.iter().any(|a| a == "--headline").then(|| {
+        sharpebench_core::board_headlines(
+            &board,
+            &sharpebench_core::DisqualThresholds::from_score_config(&cfg),
+        )
+    });
+    match (diagnostics, headlines, pareto) {
+        (None, None, None) => emit_board(&board, json),
+        (requested, headlines, pareto) => {
+            let report = requested
+                .as_ref()
+                .map(|r| sharpebench_core::sharpe_diagnostics(&subs, &board, &cfg, r));
             if json {
-                emit_json(&serde_json::json!({
+                let mut out = serde_json::json!({
                     "board": sharpebench_core::seal_board(&board),
-                    "sharpe_diagnostics": report,
-                }));
+                });
+                if let Some(report) = &report {
+                    out["sharpe_diagnostics"] = serde_json::json!(report);
+                }
+                if let Some(headlines) = &headlines {
+                    out["headlines"] = serde_json::json!(headlines);
+                }
+                if let Some(pareto) = &pareto {
+                    out["pareto"] = serde_json::json!(pareto);
+                }
+                emit_json(&out);
             } else {
-                print_board(&board);
-                print_sharpe_diagnostics(&report, &requested);
+                print_board_with(&board, headlines.as_deref(), pareto.as_ref());
+                if let (Some(report), Some(requested)) = (&report, &requested) {
+                    print_sharpe_diagnostics(report, requested);
+                }
+                if let Some(pareto) = &pareto {
+                    print_pareto_note(pareto);
+                }
             }
         }
     }
     ExitCode::SUCCESS
+}
+
+/// One front cell: membership, then the bootstrap frequency when there is one.
+/// `refused` when the row takes no part, `-` for a row the front does not
+/// cover (the eligible front of an ineligible row).
+fn front_cell(on: Option<bool>, frequency: Option<f64>, refused: bool) -> String {
+    if refused {
+        return "refused".to_string();
+    }
+    match (on, frequency) {
+        (None, _) => "-".to_string(),
+        (Some(on), Some(f)) => format!("{}({f:.2})", yn(on)),
+        (Some(on), None) => yn(on).to_string(),
+    }
+}
+
+/// The `pareto` command's table: every axis, both fronts and who dominates.
+fn print_pareto(report: &sharpebench_core::ParetoReport) {
+    let cell = |v: Option<f64>| v.map_or_else(|| "n/a".to_string(), |v| format!("{v:.5}"));
+    println!(
+        "{:<18} {:>10} {:>8} {:>8} {:>9} {:>9} {:>10} {:>10} {:>10}  dominated by",
+        "agent", "mean_ret", "max_dd", "turnov", "cost", "vol", "ES(5%)", "front", "elig_front"
+    );
+    println!("{}", "-".repeat(112));
+    for row in &report.rows {
+        let refused = row.refused.is_some();
+        println!(
+            "{:<18} {:>10} {:>8} {:>8} {:>9} {:>9} {:>10} {:>10} {:>10}  {}",
+            truncate(&row.agent_id, 18),
+            cell(row.axes.mean_return),
+            cell(row.axes.max_drawdown),
+            cell(row.axes.turnover),
+            cell(row.axes.cost),
+            cell(row.axes.volatility),
+            cell(row.axes.expected_shortfall),
+            front_cell(Some(row.on_front), row.front_frequency, refused),
+            front_cell(row.on_eligible_front, row.eligible_front_frequency, refused),
+            row.dominated_by.join(", "),
+        );
+    }
+    for row in report.rows.iter().filter(|r| r.refused.is_some()) {
+        println!(
+            "{}: refused, {}",
+            row.agent_id,
+            row.refused.as_deref().unwrap_or_default()
+        );
+    }
+    print_pareto_note(report);
+}
+
+/// The note every front display ends with: what the front is and is not.
+fn print_pareto_note(report: &sharpebench_core::ParetoReport) {
+    println!(
+        "\nPareto front over mean return (up), max drawdown, turnover, cost, volatility (down) and \
+         5% expected shortfall (up). Reported only: never a rank input; the board order is the \
+         deflated Sharpe's."
+    );
+    match &report.bootstrap_error {
+        None => println!(
+            "(f) is the share of {} stationary-bootstrap resamples (seed {}, block probability {}) \
+             in which the row stays on that front; turnover and cost are held fixed.",
+            report.bootstrap.n_boot, report.bootstrap.seed, report.bootstrap.block_prob
+        ),
+        Some(error) => println!("No bootstrap frequencies: {error}."),
+    }
 }
 
 /// The opt-in diagnostics as a table after the board. A value that could not
@@ -3508,6 +3684,64 @@ fn print_sharpe_diagnostics(
     }
 }
 
+/// The field and host configuration a scoring command reads, shared by `score`
+/// and `disqualify` so that both reproduce one board from the same arguments.
+///
+/// Each object is a submission plus an optional `declared_mandate`; the
+/// declaration is scored as a labeled second verdict and never moves rank.
+///
+/// Cross-agent comparison reads `runs[i]` for every agent. Without
+/// `--require-run-keys` that alignment is the caller's assertion, unchecked.
+/// With it, every submission must carry one `run_keys` entry per run; the field
+/// is refused unless the cells are complete, unique and shared, and the runs are
+/// reordered into one canonical cell order before scoring.
+///
+/// An error carries the exit code: 1 for a field that does not parse or
+/// validate, 2 for invalid controls.
+pub(crate) fn scoring_field_from_args(
+    data: &str,
+    args: &[String],
+) -> Result<
+    (
+        Vec<sharpebench_core::AgentSubmission>,
+        sharpebench_core::MandateDeclarations,
+        ScoreConfig,
+    ),
+    (String, u8),
+> {
+    let require_run_keys = args.iter().any(|a| a == "--require-run-keys");
+    let (subs, declarations, keyed_seed_count) = if require_run_keys {
+        let field = sharpebench_core::parse_keyed_field(data).map_err(|e| (e.to_string(), 1))?;
+        (
+            field.submissions,
+            field.declarations,
+            Some(field.seeds.len()),
+        )
+    } else {
+        let (subs, declarations) =
+            sharpebench_core::parse_declared_field(data).map_err(|e| (e, 1))?;
+        (subs, declarations, None)
+    };
+    let mut cfg = score_config_from_args(args).map_err(|e| (e, 2))?;
+    if let Some(width) = keyed_seed_count {
+        // Canonical keys are window-major and contain the complete seed grid.
+        // Preserve that replicate geometry when the scorer pools observations.
+        if args.iter().any(|arg| arg == "--execution-seeds-per-window")
+            && cfg.execution_seeds_per_window != width
+        {
+            return Err((
+                format!(
+                    "validated run keys require {width} execution seeds per window, but --execution-seeds-per-window is {}",
+                    cfg.execution_seeds_per_window
+                ),
+                2,
+            ));
+        }
+        cfg.execution_seeds_per_window = width;
+    }
+    Ok((subs, declarations, cfg))
+}
+
 /// Shared by `score` and `disqualify`: explanations use the same host verdict,
 /// annualization and execution-replicate controls as the displayed board.
 fn score_config_from_args(args: &[String]) -> Result<ScoreConfig, String> {
@@ -3516,6 +3750,7 @@ fn score_config_from_args(args: &[String]) -> Result<ScoreConfig, String> {
         "--execution-seeds-per-window",
         "--pass-mode",
         "--benchmark-agent",
+        "--psr-standard-error",
     ] {
         if args.iter().any(|arg| arg == name)
             && flag_value(args, name)
@@ -3531,6 +3766,9 @@ fn score_config_from_args(args: &[String]) -> Result<ScoreConfig, String> {
         cfg.execution_seeds_per_window = width;
     }
     apply_pass_mode_flags(args, &mut cfg)?;
+    if let Some(id) = flag_value(args, "--psr-standard-error") {
+        cfg.psr_standard_error = sharpebench_core::PsrStandardError::parse(id)?;
+    }
     Ok(cfg)
 }
 
@@ -3566,6 +3804,19 @@ fn emit_board(board: &[CompositeScore], json: bool) {
 }
 
 fn print_board(board: &[CompositeScore]) {
+    print_board_with(board, None, None);
+}
+
+/// The board table, with the opt-in `front` and `elig_front` columns when a
+/// Pareto report is given and the headline verdict as a last column when
+/// `headlines` is given (one per row, in board order). Without either it
+/// prints exactly the board it always has.
+fn print_board_with(
+    board: &[CompositeScore],
+    headlines: Option<&[sharpebench_core::Headline]>,
+    pareto: Option<&sharpebench_core::ParetoReport>,
+) {
+    let headline_header = if headlines.is_some() { " headline" } else { "" };
     // The mandate column appears only when some row declared one, so a board
     // with no declarations prints exactly as before.
     let declared = board.iter().any(|s| s.verdict_applied.is_some());
@@ -3573,12 +3824,29 @@ fn print_board(board: &[CompositeScore]) {
     // Likewise the certification column: present only under a rank mode.
     let certified = board.iter().any(|s| s.certification.is_some());
     let certified_header = if certified { " certified" } else { "" };
+    // And the front columns: present only when a Pareto report was asked for.
+    let front_header = if pareto.is_some() {
+        format!(" {:>10} {:>10}", "front", "elig_front")
+    } else {
+        String::new()
+    };
     println!(
-        "{:<4} {:<18} {:>9} {:>8} {:>11} {:>6} {:>9} {:>10}{mandate_header}{certified_header}",
+        "{:<4} {:<18} {:>9} {:>8} {:>11} {:>6} {:>9} {:>10}{mandate_header}{certified_header}{front_header}{headline_header}",
         "#", "agent", "DSR", "PSR", "pass^k", "proc", "boot_p", "raw_ret"
     );
     println!("{}", "-".repeat(84));
     for (i, s) in board.iter().enumerate() {
+        // The report is in board order, one row per board row.
+        let front = pareto
+            .and_then(|p| p.rows.get(i))
+            .map_or_else(String::new, |row| {
+                let refused = row.refused.is_some();
+                format!(
+                    " {:>10} {:>10}",
+                    front_cell(Some(row.on_front), row.front_frequency, refused),
+                    front_cell(row.on_eligible_front, row.eligible_front_frequency, refused)
+                )
+            });
         let pos = if s.rank_eligible {
             format!("{}", i + 1)
         } else {
@@ -3603,8 +3871,11 @@ fn print_board(board: &[CompositeScore]) {
         } else {
             String::new()
         };
+        let verdict = headlines
+            .and_then(|h| h.get(i))
+            .map_or_else(String::new, |h| format!(" {}", h.verdict.as_str()));
         println!(
-            "{:<4} {:<18} {:>9.4} {:>8.4} {:>11} {:>6} {:>9.4} {:>10.5}{mandate}{certification}",
+            "{:<4} {:<18} {:>9.4} {:>8.4} {:>11} {:>6} {:>9.4} {:>10.5}{mandate}{certification}{front}{verdict}",
             pos,
             truncate(&s.agent_id, 18),
             s.deflated_sharpe,

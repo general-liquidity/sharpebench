@@ -66,6 +66,8 @@ fn eligible_without_exposure_path(s: &CompositeScore) -> bool {
         && s.process_ok
         && s.bootstrap_error.is_none()
         && s.deflation_error.is_none()
+        && s.deflation_refusal.is_none()
+        && s.dsr_ci_error.is_none()
         && s.bootstrap_p < cfg.alpha
         && s.mandate_ok
 }
@@ -143,17 +145,19 @@ fn going_flat_once_significant_is_refused_for_the_risk_it_stopped_carrying() {
     );
     assert!(!score.rank_eligible, "{score:?}");
     let reason = score
-        .exposure_path_error
+        .exposure_path_refusal
         .as_deref()
         .expect("a typed refusal");
     assert!(reason.contains(EXPOSURE_PATH_UNPROVEN), "{reason}");
+    // A refusal is not also reported as the statistic being unavailable.
+    assert_eq!(score.exposure_path_error, None);
 
     // Scale-free: the same decisions at a thousandth of the size are refused too.
     let small: Vec<Vec<f64>> = track
         .iter()
         .map(|w| w.iter().map(|x| x * 1e-3).collect())
         .collect();
-    assert!(score_alone(&small).exposure_path_error.is_some());
+    assert!(score_alone(&small).exposure_path_refusal.is_some());
 }
 
 #[test]
@@ -168,7 +172,7 @@ fn honest_dynamic_sizing_keeps_its_eligibility() {
         let score = score_alone(&track);
         let windows: Vec<&[f64]> = track.iter().map(Vec::as_slice).collect();
         assert!(
-            score.rank_eligible && score.exposure_path_error.is_none(),
+            score.rank_eligible && score.exposure_path_refusal.is_none(),
             "{label}: z {:?} {score:?}",
             forgone_risk_z(&windows)
         );

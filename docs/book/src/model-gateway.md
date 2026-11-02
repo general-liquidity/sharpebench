@@ -217,6 +217,31 @@ both required and both nonzero. A paid run with no stated ceiling has no bound
 on what it spends before anyone notices, and a ceiling of zero would refuse
 every call.
 
+The budget may also carry `per_cell`, a call and money ceiling for each
+(window, seed) cell applied on top of the sweep ceiling.
+`GatewayBudget::with_equal_cell_shares(cells)` divides the sweep ceiling evenly
+over the declared cells, rounding down so the cell ceilings never sum past it,
+and refuses a share of zero. Every reservation a sweep makes is stamped with
+its cell (`cell` on the reserved record), and the cell ceiling is checked
+against the stamped calls of that cell in any attempt and any process, so a
+resumed cell cannot spend its ceiling twice. A cell that reaches its own
+ceiling gets the same refusals the sweep ceiling produces,
+`budget_exhausted` or `call_limit_exhausted`, as typed errors on its own pipe;
+the entrant decides what to do with them, as it does at the sweep ceiling, so
+the outcome is the agent's and not a host failure. An observed price that
+carries a cell past its money ceiling stops that cell, and only that cell.
+
+Under one sweep ceiling the cells run in order, so an entrant that overspends
+early meets `budget_exhausted` in the later windows and seeds, and a pass^k
+verdict across them then measures budget order as much as the strategy. Per
+cell ceilings remove that ordering: each cell starts with the same budget
+whatever ran before it. What they do not do is make attempts independent.
+Retries of one cell share its ceiling, so a retry after an expensive attempt
+starts with less. The ceiling is identical across a row's cells, not across
+rows; whether rows ran under equal ceilings is what `budget_parity` (below)
+states. A budget with no `per_cell` serializes exactly as before the field
+existed, so its invocation digest and journal binding are unchanged.
+
 **A binary that runs the sweep.** The CLI does not run gateway sweeps, because
 serving needs an adapter and none ships. The operator's binary calls
 `run_gateway_sweep(sweep, host, attempt)`, where `attempt` starts one entrant per
@@ -472,6 +497,13 @@ binary would drop the count, so it refuses the document instead. The
 host-observed usage on the row sums each count over the priced calls, and
 publishes the sum only when every priced call reported that count.
 
+A journal that holds a cell stamp or a decision log (see
+[What leaves the host](#what-leaves-the-host)) is written as
+`sharpebench.gateway-journal.v4`, on the same rule: an older binary would drop
+the stamps, which would let a resumed cell spend past its ceiling, so it
+refuses the document. Every journal a sweep writes holds both, so a sweep
+journal is v4 from its first call. A journal no sweep owns keeps its version.
+
 After a sweep records a class, only a binary that reads v2 can resume its
 journal. To run an older binary, start it on a fresh journal and checkpoint
 pair.
@@ -511,29 +543,89 @@ calls; their spend is folded from the journal, never re-quoted.
 
 The sweep returns the `ResilientSubmission` (the scored pool, failures and
 attempt accounting) exactly as any external sweep does, and beside it a
-`HostObservedUsage` record, `sharpebench.host-observed-usage.v1`: the route-table
+`HostObservedUsage` record, `sharpebench.host-observed-usage.v2`: the route-table
 and sweep digests, the host-observed monetary summary, the priced, unknown and
 released call counts, any overspend, the parsed answers by stop reason
 (`finish_reasons`, with `stop`, `length`, `other`, `absent` and `unrecorded`
-counts), whether the ceiling was breached, whether
+counts), the provider-reported `input_tokens` and `output_tokens` totals, the
+cache counts described above, the `budget` the sweep ran under (sweep and per
+cell ceilings), whether the ceiling was breached, whether
 journal ownership was lost, whether a settlement could not be written
-(`journal_unwritable`), and `rank_neutral: true`.
+(`journal_unwritable`), and `rank_neutral: true`. v2 adds the token totals and
+the budget; every v1 field keeps its name and meaning. A token total is present
+only when at least one call was priced and no call was charged at its
+reservation, because a sum over the priced calls alone would read as the
+sweep's figure; absent means unreported, never zero. Tokens are a
+price-independent axis: two rows can trade places on tokens and on dollars
+when their prices differ.
+
 `attach_host_observed_usage` puts it on the entrant's row of a JSON board under
-`host_observed_usage`. The board stays an array, no score field moves, and
-removing that key gives back the unattached board exactly.
+`host_observed_usage`. The board stays an array and no score, rank or
+eligibility field moves. The row's legacy cost columns stop reading the
+entrant's self-report: the entrant figure moves to `entrant_reported_cost`,
+which no ratio reads, and `cost`, `return_per_cost` and `dsr_per_cost` are
+recomputed from the host-observed USD amount, labelled
+`cost_source: "host_observed_usd"`. `dsr_per_cost` is `deflated_sharpe / cost`
+only when the deflation succeeded, so it stays null on every track the scorer
+withholds it for. When there is no positive host-observed USD amount (an
+incomplete journal, several rate cards, no calls, a zero total) all three are
+null, `cost_source` is `withheld` and `cost_withheld_reason` names why. A row
+never mixes the two sources, and a row without host usage is untouched, so
+every board and golden without a gateway row keeps its bytes.
 
 A second record, `GatewayDecisionRequests`
-(`sharpebench.gateway-decision-requests.v1`), lists every entrant decision the
+(`sharpebench.gateway-decision-requests.v2`), lists every entrant decision the
 sweep ran: its window, seed, attempt and ordinal, the gateway request lines the
-entrant sent for it (requests refused past the per-decision limit included) and
-how many of those the broker served. A faulted decision is recorded too, so the
+entrant sent for it (requests refused past the per-decision limit included),
+how many of those the broker served, the provider calls they started
+(`calls`, retries included), how many were priced, and the decision's
+`input_tokens`, `output_tokens` and `usd_nanos`, on the same presence rule as
+the sweep totals. A faulted decision is recorded too, so the
 list lines up with the run's decisions. It is diagnostic only, `rank_neutral:
 true`, and no score, rank, gate or pass^k pool reads it.
 `attach_decision_requests` puts it on the entrant's row under
-`gateway_decision_requests` on the same terms as the usage record. The counts
-are not persisted, so a resumed sweep covers only the cells it ran in this
-process and reports the rest as `cells_unrecorded` rather than as cells with no
-requests.
+`gateway_decision_requests` on the same terms as the usage record.
+
+The record survives a resume. When an attempt at a cell ends, the gateway
+appends its decisions to the journal as a decision log: per decision, the
+request and served counts and the reservations it made, named by the first
+ordinal and a count (a decision's reservations are contiguous, because one
+gateway serves one decision at a time). The log carries no amount; a
+decision's tokens and money are folded from the settlements its reservations
+name, so the published figure cannot drift from the money record. A resumed
+sweep publishes the cells an earlier process ran as well as its own, and
+attempt numbers continue from the logs, so two attempts at one cell never share
+a number. `cells_unrecorded` counts the cells the journal holds no log for: an
+attempt whose process died before it ended, or whose log could not be written.
+A log write that fails moves no money and stops nothing, except that a refused
+write still means another writer owns the file and latches like any other.
+A log naming a reservation the journal never wrote is refused on load.
+
+### Budget parity and the cost axis
+
+Nothing in a row says whether two rows can be compared at equal budget, and
+`LLM_MAX_CALLS` is equal calls per model, which is not equal spend.
+`cost_fairness::budget_parity(board)` reads each row's
+`host_observed_usage.budget` and returns a `sharpebench.budget-parity.v1`
+disclosure: `equal_ceilings`, true only when every row carries host-observed
+usage and all of them declare the same sweep and per-cell ceilings;
+`ceiling_groups`, one group of agent ids per distinct set of ceilings; and
+`unbudgeted_agent_ids` for rows with no host budget, which no parity claim can
+cover. Agent ids are sorted, so the disclosure does not follow rank order.
+`attach_budget_parity` puts the same value on every row under `budget_parity`
+and moves nothing else. Equal USD ceilings under different rate cards are equal
+spend, not equal tokens.
+
+`cost_fairness::cost_axis_report(board)` is opt-in and nothing in the harness
+calls it or ranks on it. It places each row at its deflated Sharpe against its
+host-observed USD (and, when every row reports both token counts, its tokens)
+and marks the rows no other row dominates: costs no more, scores no less, and
+is better on one. It returns `sharpebench.cost-axis.v1` with `status:
+"available"` only when every row is on the axis; a row with no host-observed
+USD, a refused deflation or no deflated Sharpe withholds the whole frontier and
+is listed under `excluded` with its reason, because a frontier over a subset
+would read as the field's. No such frontier has been published: it needs a
+field of real model runs, which this repository does not hold.
 
 Before any answer is written to the entrant, the serving loop checks it for each
 route credential, each route destination and the journal's location, raw and
@@ -658,13 +750,14 @@ the gate checks that claim too.
 
 | Where | Tests | Covers |
 |---|---|---|
-| `crates/sharpebench-harness/src/gateway.rs` | 47 | forbidden fields by name, exact alias resolution, two routes each reserved and priced under the alias named, a reservation no route explains refused at reopen, the host supplying destination, credential, revision and every bound, the envelope bounds, oversized, truncated, unparseable and unknown-field provider bodies, the shared permit pool, the reservation reaching disk before dispatch, hard money and call refusals starting no request, retries reconciled exactly once, absent usage as unknown rather than zero, framing overhead in the reservation, overspend stopping the sweep, one owner among racing gateways and a second gateway refused the journal the first owns, a settlement that cannot be persisted stopping the gateway, an unconfirmed durability published as unwritable rather than as lost ownership, a journal holding a settlement that never landed refused at reopen rather than resumed, a late answer refused and charged, resume without repricing, credential rotation excluded from identity, provider-reported cache counts recorded and unreported ones left absent, redaction and rank neutrality |
-| `crates/sharpebench-harness/src/gateway_journal.rs` | 35 | the fold, partial and unavailable totals, the `host_observed` label, an unsettled reservation charged rather than refunded, a released reservation still consuming a call, a sweep-bound journal resuming only under its sweep, and the ownership family: one holder per journal document, a second name for that document refused, a document written before it carried an identity owned on the identity derived from its bytes, a legacy document's identity resolved from a single read of it, a stale lock refused rather than broken, a takeover recording who it displaced, and the version check refusing the displaced holder's next write |
-| `crates/sharpebench-harness/src/gateway_serve_tests.rs` | 15 | the serving loop on real OS pipes and one real child process: a call through the entrant's own pipe, a scored sweep with usage on the entrant's row, resume making no new calls, an interrupted sweep rerunning only unfinished cells, typed budget refusals, overlapping windows refused before a journal is written, the checkpoint and journal pair, gateway lines never read as decisions, the per-decision ceiling, host serving time excluded from the entrant clock, no credential in any launch, host material withheld, gateway requests recorded per decision beside the rank, and a live entrant that overruns its decision budget charged with the overrun |
+| `crates/sharpebench-harness/src/gateway.rs` | 52 | forbidden fields by name, exact alias resolution, two routes each reserved and priced under the alias named, a reservation no route explains refused at reopen, the host supplying destination, credential, revision and every bound, the envelope bounds, oversized, truncated, unparseable and unknown-field provider bodies, the shared permit pool, the reservation reaching disk before dispatch, hard money and call refusals starting no request, retries reconciled exactly once, absent usage as unknown rather than zero, framing overhead in the reservation, overspend stopping the sweep, one owner among racing gateways and a second gateway refused the journal the first owns, a settlement that cannot be persisted stopping the gateway, an unconfirmed durability published as unwritable rather than as lost ownership, a journal holding a settlement that never landed refused at reopen rather than resumed, a late answer refused and charged, resume without repricing, credential rotation excluded from identity, provider-reported cache counts recorded and unreported ones left absent, a per-cell ceiling admitting its last nanodollar and refusing past it with the budget kind, a per-cell call ceiling refusing with the call-limit kind, a cell past its ceiling refusing even a free call while other cells spend, a cell exactly at its ceiling still admitting a free call, a gateway stopped on its journal writing no decision log, redaction and rank neutrality |
+| `crates/sharpebench-harness/src/gateway_journal.rs` | 42 | the fold, partial and unavailable totals, the `host_observed` label, an unsettled reservation charged rather than refunded, a released reservation still consuming a call, a sweep-bound journal resuming only under its sweep, and the ownership family: one holder per journal document, a second name for that document refused, a document written before it carried an identity owned on the identity derived from its bytes, a legacy document's identity resolved from a single read of it, a stale lock refused rather than broken, a takeover recording who it displaced, and the version check refusing the displaced holder's next write; usage over a range of reservations measured only when complete, an unreadable priced amount unmeasured, spend per cell, equal cell shares rounding down and refusing a zero share, a budget and reservation without cells keeping their bytes, a cell stamp or decision log requiring v4, and a decision log past the last reservation refused on load |
+| `crates/sharpebench-harness/src/gateway_serve_tests.rs` | 22 | the serving loop on real OS pipes and one real child process: a call through the entrant's own pipe, a scored sweep with usage on the entrant's row, resume making no new calls, an interrupted sweep rerunning only unfinished cells, typed budget refusals, overlapping windows refused before a journal is written, the checkpoint and journal pair, gateway lines never read as decisions, the per-decision ceiling, host serving time excluded from the entrant clock, no credential in any launch, host material withheld, gateway requests, calls, tokens and money recorded per decision beside the rank and published again on resume, cost columns read from the host and never the entrant, a live entrant that overruns its decision budget charged with the overrun, sweep token totals and ceilings on the usage record with a v4 journal, unreported usage publishing no token or money figure, per-cell call and money ceilings keeping early cells from starving later ones, a resumed cell drawing on its own ceiling, attempt numbers continuing from the journal, and the presentation suite run against a gateway entrant with every model call brokered and counted by the host |
+| `crates/sharpebench-harness/src/cost_fairness.rs` | 12 | host-observed USD replacing every entrant-reported cost column, a refused deflation keeping `dsr_per_cost` null, an unmeasured host cost withholding the columns with its reason, a second attach never filing the host figure as the entrant's, budget parity true under one set of ceilings and false with grouped differing ceilings or an unbudgeted row, parity attached to every row moving nothing else, and the opt-in cost axis: USD and token frontiers, dominance on one axis at equality on the other, any row off the axis withholding the frontier, and a missing token count withholding only the token frontier |
 | `crates/sharpebench-harness/tests/gateway_error_vocabulary.rs` | 2 | the detail sentence of every error kind held equal to this chapter, and the kind list held complete |
 | `crates/sharpebench-harness/tests/journal_ownership_review.rs` | 3 | the two journal-ownership findings of the [accounting review](https://github.com/general-liquidity/sharpebench/blob/main/docs/audits/2026-09-09/ACCOUNTING-REVIEW.md), through the public surface only: a holder releases the lock it holds and no other, and one journal document admits one gateway under either of two names, a document written before it carried an identity included |
 | `crates/sharpebench-harness/tests/finish_reason_accounting.rs` | 6 | stop-reason accounting: a length-stopped answer counted as `length`, the exact class vocabulary, refused and released calls in no class, the counts surviving the journal file, a journal written before the field reporting its answers as `unrecorded`, an unknown class refused at load, and a truncated sweep publishing its counts in `host_observed_usage` |
-| `crates/sharpebench-harness/tests/journal_schema_rollback.rs` | 7 | rollback safety for the class: the published version strings, a journal with no class staying v1 and passing an older binary's admission checks, the first recorded class writing v2, which those checks refuse and this binary resumes, a v1 journal that already holds classes written as v2 on its next save and not on load, unknown versions refused by both loaders, a v2 journal keeping its route, budget and sweep binding, and a journal holding a cache count written as v3 |
+| `crates/sharpebench-harness/tests/journal_schema_rollback.rs` | 7 | rollback safety for the class: the published version strings, a journal with no class staying v1 and passing an older binary's admission checks, the first recorded class writing v2, which those checks refuse and this binary resumes, a v1 journal that already holds classes written as v2 on its next save and not on load, unknown versions (v5 among them) refused by both loaders, a v2 journal keeping its route, budget and sweep binding, and a journal holding a cache count written as v3 |
 | `crates/sharpebench-cli/src/gateway_cli.rs` | 8 | the operator report, including `limits.max_requests_per_decision`, `journal_lock_held` and `finish_reasons`, a sweep-bound journal reported with its sweep, and the refusals: a malformed manifest, a missing credential, a missing or zero budget, and a journal bound to another route table |
 
 The arena's sandbox is not one of those files. Most of its tests are the

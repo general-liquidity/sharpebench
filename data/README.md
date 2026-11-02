@@ -136,7 +136,10 @@ python scripts/data/fetch_fred.py fx
   pooled moments: the realism battery reports excess kurtosis **+2438** and skew
   **-37.7** on this file, versus **+6.3** excess kurtosis when the window starts
   2020-05-01. Run `fetch_fred.py commodities --start 2020-05-01` (or any other
-  cap) if a study needs a strictly positive price path, and say so.
+  cap) if a study needs a strictly positive price path, and say so. The
+  simulator fills no order at that close, and a book the mark takes to or below
+  zero NAV is ruined: the bar books the realized loss, the book is closed at the
+  mark and later bars return zero (see `docs/book/src/simulator.md`).
 - **Source:** FRED `fredgraph.csv` (no key), data from the U.S. Energy
   Information Administration. FRED labels these series `Public Domain: Citation
   Requested`, subject to its prohibited uses. Fetched 2026-08-23; see

@@ -9,7 +9,9 @@
 //! evaluated under the null, and the manipulation-proof performance measure,
 //! are opt-in diagnostics in [`opt_in_diagnostics`]. A historical expected
 //! shortfall and a loss frequency, also unread by the gate, are in
-//! [`tail_risk`].
+//! [`tail_risk`]. An anytime-valid betting e-process for forward returns and
+//! the e-BH procedure, which the arena's forward evidence ledger uses, are in
+//! [`forward_eprocess`].
 //!
 //! Design invariants carried over verbatim from the original modules:
 //! - **Pure.** No I/O, no system clock, no ambient randomness. Any randomness
@@ -59,7 +61,9 @@ pub mod det_math;
 pub mod dissent;
 pub mod exposure_path;
 pub mod fdr;
+pub mod forward_eprocess;
 pub mod moment_credit;
+pub mod null_standard_error;
 pub mod observed_loss;
 pub mod opt_in_diagnostics;
 pub mod paired_randomization;
@@ -71,7 +75,7 @@ pub mod stylized_facts;
 pub mod tail_risk;
 pub mod validation;
 
-pub use validation::StatisticalError;
+pub use validation::{StatisticalError, CONSTANT_TRACK};
 
 pub use agreement::{
     binarize, cohens_kappa, cohens_kappa_binary, gate_vs_human, gate_vs_human_with_fields,
@@ -92,8 +96,13 @@ pub use exposure_path::{
     exposure_path_evidence, forgone_risk_z, EXPOSURE_BURN_IN_FRACTION, EXPOSURE_PATH_UNPROVEN,
 };
 pub use fdr::{benjamini_hochberg, fdr_verdict, FdrVerdict};
+pub use forward_eprocess::{
+    bet_cap, e_benjamini_hochberg, fixed_horizon_power, oracle_likelihood_ratio_power, BettorState,
+    BET_CAP_FRACTION, DEFAULT_LOSS_BOUND, WARMUP_BARS, WEALTH_CEILING,
+};
 pub use moment_credit::{
-    certify_without_moment_credit, deflated_sharpe_without_moment_credit,
+    certify_without_moment_credit, certify_without_moment_credit_at,
+    deflated_sharpe_without_moment_credit, deflated_sharpe_without_moment_credit_at,
     NOT_CERTIFIED_WITHOUT_MOMENT_CREDIT,
 };
 pub use observed_loss::{shows_an_observed_loss, NO_OBSERVED_LOSS};
@@ -108,7 +117,8 @@ pub use selection::{
     MIN_RECOMMENDED_SELECTION_ALPHA,
 };
 pub use serial_correlation::{
-    certify_under_serial_correlation, serially_corrected_deflated_sharpe,
+    certify_under_serial_correlation, certify_under_serial_correlation_at,
+    serially_corrected_deflated_sharpe, serially_corrected_deflated_sharpe_at,
     within_window_autocorrelations, SerialCorrection, NOT_CERTIFIED_UNDER_SERIAL_CORRELATION,
 };
 pub use stylized_facts::{

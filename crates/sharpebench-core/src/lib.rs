@@ -53,11 +53,14 @@ pub mod entrants;
 pub mod evidence_coverage;
 pub mod forecast;
 pub mod greeks;
+pub mod headline;
 pub mod oos;
+pub mod pareto_report;
 pub mod pass_floor;
 pub mod pass_k;
 pub mod percentile;
 pub mod process;
+pub mod psr_method;
 pub mod rediscovery;
 pub mod regime_compare;
 pub mod roles;
@@ -138,13 +141,21 @@ pub use greeks::{
     bs_greeks, bs_price, classify_greeks_risk, classify_payoff_tail, portfolio_greeks, Greeks,
     GreeksPolicy, GreeksRisk, Leg, OptionsError, PayoffTailRisk,
 };
+pub use headline::{
+    board_headlines, headline, Evidence as HeadlineEvidence, Headline, HeadlineContext,
+    HeadlineRow, Qualifiers as HeadlineQualifiers, StressMark, Verdict as HeadlineVerdict,
+};
 pub use oos::{oos_decay, OosDecayReport};
+pub use pareto_report::{
+    pareto_report, ParetoAxes, ParetoAxis, ParetoBootstrap, ParetoReport, ParetoRow,
+};
 pub use pass_k::{pass_k, PassMode};
 pub use percentile::{percentile_of, BaselineBand, HumanBaseline};
 pub use process::{
     check_lifecycle, process_score_with_ordering, ClientOrderKey, LifecycleReport, LifecycleStep,
     OrderId, OrderingViolation, Phase, PhaseKind, ProcessEvent, ProcessScore, Subject, Trace,
 };
+pub use psr_method::PsrStandardError;
 pub use rediscovery::{
     classify_rediscovery, clone_clusters, cosine_similarity, RediscoveryVerdict,
     CLONE_COLLAPSE_COSINE, DEFAULT_REDISCOVERY_THRESHOLD,

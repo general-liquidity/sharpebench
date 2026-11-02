@@ -1082,9 +1082,12 @@ mod tests {
     use super::*;
 
     /// One symbol that quadruples after a full short entered on the first bar,
-    /// which leaves NAV at about -2 while the short is worth 4.
+    /// which marks NAV at about -2 while the short is worth 4. The engine
+    /// treats that bar as ruin and closes the book at the mark, so the book
+    /// holds nothing afterwards: its exposure is zero, never a finite ratio
+    /// taken against the negative NAV.
     #[test]
-    fn a_book_below_zero_nav_has_no_finite_gross_exposure() {
+    fn a_book_ruined_below_zero_nav_is_closed_and_carries_no_exposure() {
         let data = Dataset::from_csv(
             "date,symbol,close\n2024-01-01,AAA,100\n2024-01-02,AAA,100\n2024-01-03,AAA,400\n2024-01-04,AAA,400\n",
         )
@@ -1120,7 +1123,7 @@ mod tests {
             0,
             &[short, flat.clone(), flat.clone(), flat],
         );
-        assert!(path.contains(&f64::INFINITY), "{path:?}");
+        assert_eq!(path, vec![1.0, 1.0, 0.0, 0.0], "{path:?}");
     }
 
     #[test]

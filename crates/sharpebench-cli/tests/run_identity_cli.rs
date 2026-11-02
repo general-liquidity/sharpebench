@@ -264,3 +264,78 @@ fn an_incomplete_seed_by_window_product_is_refused_even_when_agents_agree() {
         "incomplete grid",
     );
 }
+
+/// `disqualify` explains the board `score --require-run-keys` ranked: it reads
+/// the field through the same keyed reader, so the runs are reordered into the
+/// canonical cell order and pooled with the keyed seed geometry. It used to
+/// parse the unkeyed field only and explain a different board.
+#[test]
+fn disqualify_reproduces_the_keyed_board_it_explains() {
+    use sharpebench_core::{classify_disqualification, CompositeScore, DisqualThresholds};
+
+    let fixture = Fixture::new();
+    fixture.write(
+        "field.csv",
+        &long_csv(&[
+            ("mo", "w0", 1),
+            ("mo", "w1", 1),
+            ("mo", "w0", 0),
+            ("mo", "w1", 0),
+            ("bh", "w0", 0),
+            ("bh", "w0", 1),
+            ("bh", "w1", 0),
+            ("bh", "w1", 1),
+        ]),
+    );
+    assert!(fixture
+        .cli(&["import", "csv", "field.csv", "--out", "subs.json"])
+        .status
+        .success());
+    let scored = fixture.cli(&["score", "subs.json", "--require-run-keys"]);
+    assert!(scored.status.success());
+    let board: Vec<CompositeScore> = serde_json::from_slice(&scored.stdout).unwrap();
+    assert!(board.iter().all(|row| row.pooled_observations == 80));
+    let thresholds = DisqualThresholds::from_score_config(&Default::default());
+    let expected: Vec<serde_json::Value> = board
+        .iter()
+        .map(|row| {
+            serde_json::json!({
+                "agent_id": row.agent_id,
+                "rank_eligible": row.rank_eligible,
+                "reasons": classify_disqualification(row, &thresholds, None, None),
+            })
+        })
+        .collect();
+
+    let explained = fixture.cli(&["disqualify", "subs.json", "--require-run-keys"]);
+    assert!(
+        explained.status.success(),
+        "{}",
+        String::from_utf8_lossy(&explained.stderr)
+    );
+    let explained: Vec<serde_json::Value> = serde_json::from_slice(&explained.stdout).unwrap();
+    assert_eq!(explained, expected);
+
+    // The keyed geometry is enforced as `score` enforces it.
+    let conflicting = fixture.cli(&[
+        "disqualify",
+        "subs.json",
+        "--require-run-keys",
+        "--execution-seeds-per-window",
+        "3",
+    ]);
+    assert_eq!(conflicting.status.code(), Some(2));
+    assert!(conflicting.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&conflicting.stderr).contains("validated run keys require 2"));
+
+    // An unkeyed field is refused, not explained by position.
+    let mut unkeyed: serde_json::Value = serde_json::from_str(&fixture.read("subs.json")).unwrap();
+    for submission in unkeyed.as_array_mut().unwrap() {
+        submission.as_object_mut().unwrap().remove("run_keys");
+    }
+    fixture.write("unkeyed.json", &unkeyed.to_string());
+    refused(
+        &fixture.cli(&["disqualify", "unkeyed.json", "--require-run-keys"]),
+        "run_keys",
+    );
+}

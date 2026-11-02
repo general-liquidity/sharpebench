@@ -50,6 +50,10 @@ use sharpebench_sim::{
     run_backtest, walk_forward, Agent, BuyAndHold, CostModel, Dataset, Momentum, Window,
 };
 
+#[path = "support/declared_support.rs"]
+mod declared_support;
+use declared_support::{or_refuse, refuse, require_evaluated};
+
 const DATASETS: &[(&str, f64)] = &[("us-indices-1d", 252.0), ("crypto-majors-1d", 365.0)];
 const EXEC_SEEDS: [u64; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
 const N_AGENTS: usize = 1000;
@@ -235,11 +239,18 @@ fn main() {
         eprintln!("usage: luck_floor_1000 <out.jsonl>");
         std::process::exit(2);
     });
-    let mut w = BufWriter::new(File::create(&out).expect("create output"));
+    // Staged under `<out>.partial` and published only once every declared
+    // dataset has written its summary: a dataset that fails to load is a typed
+    // refusal with a non-zero exit, not a panic or a short published file.
+    let planned: Vec<String> = DATASETS.iter().map(|d| d.0.to_string()).collect();
+    let mut evaluated: Vec<String> = Vec::new();
+    let partial = format!("{out}.partial");
+    let mut w = BufWriter::new(File::create(&partial).expect("create partial output"));
 
     for (name, ppy) in DATASETS {
         let path = format!("data/{name}.csv");
-        let data = Dataset::from_csv_file(&path).expect("frozen dataset");
+        let data = Dataset::from_csv_file(&path)
+            .unwrap_or_else(|e| refuse(format!("declared dataset {name} did not load: {e}")));
         let (windows, window_len) = windows_for(data.len());
         eprintln!(
             "{name}: {} bars, {} windows of {window_len}, {N_AGENTS} random agents...",
@@ -374,6 +385,7 @@ fn main() {
         serde_json::to_writer(&mut w, &summary).expect("write summary");
         w.write_all(b"\n").expect("newline");
         w.flush().expect("flush");
+        evaluated.push(name.to_string());
         eprintln!(
             "{name}: max DSR configured={:.4}, raw-measured={:.4}, shipped-floor={:.4}, first-5={:.4}",
             summary.configured.max,
@@ -382,5 +394,8 @@ fn main() {
             summary.configured.max_first_5
         );
     }
+    or_refuse(require_evaluated("dataset", &planned, &evaluated));
+    drop(w);
+    std::fs::rename(&partial, &out).expect("publish complete evaluation atomically");
     eprintln!("wrote {out}");
 }

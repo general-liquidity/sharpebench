@@ -45,9 +45,10 @@ class GoldenKernelAgreement(unittest.TestCase):
             track = pooled_track(submission)
             self.assertEqual(len(track), score["pooled_observations"])
             with self.subTest(agent=score["agent_id"]):
-                if "deflation_error" in score:
+                if "deflation_refusal" in score:
                     # The kernel refuses a constant track; the record prints 0.0.
-                    self.assertEqual(score["deflation_error"], k.CONSTANT_TRACK_REFUSAL)
+                    self.assertNotIn("deflation_error", score)
+                    self.assertEqual(score["deflation_refusal"], k.CONSTANT_TRACK_REFUSAL)
                     self.assertEqual(score["psr"], 0.0)
                     with self.assertRaisesRegex(ValueError, "must not be constant"):
                         k.checked_probabilistic_sharpe_ratio(track, 0.0)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import subprocess
 from functools import lru_cache
 from pathlib import Path
 from pathlib import PurePosixPath
@@ -31,10 +32,13 @@ ARTIFACT_SCOPE = (
     "paper/evidence/prospective-forecast-field/**/*.json",
     "paper/evidence/prospective-forecast-field/**/*.sha256",
     "paper/figures/*.pdf",
+    # The forecast-quality tutorial's two committed reports, which the paper's
+    # forecast-quality section reads and the README describes.
+    "examples/forecast-quality/fixtures/**/report.json",
 )
 EXCLUDED_DIR_NAMES = ("target", ".venv", "__pycache__", "node_modules", ".git")
 EXCLUDED_ARTIFACT_PREFIXES = ("llm-cache-", "llm-field-")
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 REPRODUCTION_ENTRYPOINT = "commands in paper/sections/A-commands.tex"
 NOTE = "Incomplete paid LLM runs are excluded from result provenance."
 MANIFEST_FIELDS = frozenset(
@@ -119,17 +123,35 @@ def matching_files(root: Path, pattern: str, excludes: frozenset[str]) -> list[P
     ]
 
 
-def _record_problems(name: str, records: object) -> list[str]:
+SOURCE_RECORD_FIELDS = frozenset({"path", "sha256"})
+# An artifact also records the commit that produced its bytes. Unlike
+# `generated_at_head`, which moves whenever the manifest is regenerated, it is
+# carried forward while the bytes are unchanged, so it keeps naming the source
+# state the artifact was produced from.
+ARTIFACT_RECORD_FIELDS = frozenset({"path", "sha256", "produced_at"})
+
+
+def _record_problems(
+    name: str, records: object, fields: frozenset[str] = SOURCE_RECORD_FIELDS
+) -> list[str]:
     if not isinstance(records, list):
         return [f"manifest rule: {name} must be a list"]
     problems: list[str] = []
     seen: set[str] = set()
     for index, record in enumerate(records):
-        if not isinstance(record, dict) or set(record) != {"path", "sha256"}:
+        if not isinstance(record, dict) or set(record) != fields:
             problems.append(
-                f"manifest rule: {name}[{index}] must have exactly path and sha256"
+                f"manifest rule: {name}[{index}] must have exactly "
+                + ", ".join(sorted(fields))
             )
             continue
+        if "produced_at" in fields and (
+            not isinstance(record["produced_at"], str)
+            or _GIT_COMMIT.fullmatch(record["produced_at"]) is None
+        ):
+            problems.append(
+                f"manifest rule: {name}[{index}] produced_at is not a full commit id"
+            )
         path = record["path"]
         digest = record["sha256"]
         posix = PurePosixPath(path) if isinstance(path, str) else None
@@ -186,9 +208,55 @@ def manifest_rule_problems(manifest: object) -> list[str]:
     if not isinstance(snapshot, str) or _HEX_DIGEST.fullmatch(snapshot) is None:
         problems.append("manifest rule: source_snapshot_sha256 is not a sha256")
     problems.extend(_record_problems("source_files", manifest.get("source_files")))
-    problems.extend(_record_problems("artifacts", manifest.get("artifacts")))
+    problems.extend(
+        _record_problems("artifacts", manifest.get("artifacts"), ARTIFACT_RECORD_FIELDS)
+    )
     for field in ("source_files", "artifacts"):
         entries = manifest.get(field)
         if isinstance(entries, list) and not entries:
             problems.append(f"manifest rule: {field} is empty; the scope bound nothing")
     return problems
+
+
+class ProducedAtUnknown(ValueError):
+    """No commit in this history holds an artifact's current bytes."""
+
+
+def committed_blob(root: Path, commit: str, path: str) -> bytes | None:
+    completed = subprocess.run(
+        ["git", "cat-file", "blob", f"{commit}:{path}"],
+        cwd=root,
+        capture_output=True,
+        check=False,
+    )
+    return completed.stdout if completed.returncode == 0 else None
+
+
+def produced_at(
+    root: Path, path: str, digest: str, previous: dict[str, dict] | None = None
+) -> str:
+    """The commit that produced the artifact at `path` with bytes `digest`.
+
+    A previous manifest's record is carried forward while the bytes are
+    unchanged, so regenerating the manifest never rebinds it. Otherwise it is
+    the last commit that wrote `path`, provided that commit holds exactly these
+    bytes; the manifest is generated from a clean tree, so new bytes are
+    committed before it is. Anything else is refused rather than guessed.
+    """
+    record = (previous or {}).get(path)
+    if record and record.get("sha256") == digest and record.get("produced_at"):
+        return record["produced_at"]
+    commit = subprocess.run(
+        ["git", "log", "-1", "--format=%H", "--", path],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout.strip()
+    blob = committed_blob(root, commit, path) if commit else None
+    if blob is None or digest_bytes(blob) != digest:
+        raise ProducedAtUnknown(
+            f"{path}: no commit holds these bytes (last commit writing it: "
+            f"{commit or 'none'}); commit the artifact before regenerating the manifest"
+        )
+    return commit

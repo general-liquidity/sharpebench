@@ -62,8 +62,8 @@ use super::{
 };
 use crate::accounting::{MonetarySummary, RateCard};
 use crate::gateway_journal::{
-    FinishReasonCounts, GatewayBudget, GatewayJournal, JournalIdentity, JournalLock,
-    JournalSaveError,
+    CellRef, DecisionEntry, DecisionLog, FinishReasonCounts, GatewayBudget, GatewayJournal,
+    JournalIdentity, JournalLock, JournalSaveError, UsageTotals,
 };
 use crate::{AttemptObservation, ResilientSubmission, ResumePolicy, SweepContract, SweepIdentity};
 
@@ -77,10 +77,16 @@ pub const GATEWAY_INVOCATION_VERSION: &str = "sharpebench.gateway-invocation.v1"
 pub const GATEWAY_SWEEP_VERSION: &str = "sharpebench.gateway-sweep.v1";
 
 /// Schema of the usage record published beside the scored pool.
-pub const HOST_USAGE_VERSION: &str = "sharpebench.host-observed-usage.v1";
+///
+/// v2 adds the input and output token totals and the budget the sweep ran
+/// under; every v1 field keeps its name and meaning.
+pub const HOST_USAGE_VERSION: &str = "sharpebench.host-observed-usage.v2";
 
 /// Schema of the per-decision gateway request record a sweep publishes.
-pub const DECISION_REQUESTS_VERSION: &str = "sharpebench.gateway-decision-requests.v1";
+///
+/// v2 adds each decision's calls, tokens and money, and covers cells an
+/// earlier process ran; every v1 field keeps its name and meaning.
+pub const DECISION_REQUESTS_VERSION: &str = "sharpebench.gateway-decision-requests.v2";
 
 /// Bytes accepted for one entrant stdout line, decision or request. The same
 /// cap the external-agent transport puts on a decision line; a request line is
@@ -630,13 +636,25 @@ impl<T: ProviderTransport> Agent for GatewayEntrant<'_, '_, T> {
     /// one included, so the record lines up with the run's decisions.
     fn decide(&mut self, observation: &MarketObservation) -> Decision {
         let served_before = self.served;
+        let first_ordinal = self.gateway.journal().reservation_count();
         self.decision_requests = 0;
         let decision = self.decide_unrecorded(observation);
-        self.gateway.decisions.record(
-            self.decisions,
-            self.decision_requests,
-            self.served.saturating_sub(served_before),
-        );
+        let calls = self
+            .gateway
+            .journal()
+            .reservation_count()
+            .saturating_sub(first_ordinal);
+        let entry = DecisionEntry {
+            requests: self.decision_requests,
+            served: self.served.saturating_sub(served_before),
+            first_ordinal,
+            calls,
+        };
+        let usage = self
+            .gateway
+            .journal()
+            .usage_of_ordinals(first_ordinal, calls);
+        self.gateway.decisions.record(self.decisions, entry, &usage);
         self.decisions = self.decisions.saturating_add(1);
         decision
     }
@@ -767,6 +785,15 @@ pub struct HostObservedUsage {
     /// Parsed answers by why they stopped. A `length` count is a truncated
     /// completion that may still have become a decision or an abstention.
     pub finish_reasons: FinishReasonCounts,
+    /// Provider-reported input tokens summed over every call, present only when
+    /// at least one call was priced and none was charged at its reservation.
+    /// Absent means unreported, never zero. A price-independent axis: two rows
+    /// can trade places on it and on `monetary_cost` when prices differ.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_tokens: Option<u64>,
+    /// Provider-reported output tokens, on the same rule.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_tokens: Option<u64>,
     /// Provider-reported prompt-cache reads summed over the priced calls, when
     /// every priced call reported the count. Absent means unreported, never
     /// zero; it is not priced (rate card v1 does not model cache discounts).
@@ -776,6 +803,9 @@ pub struct HostObservedUsage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_write_input_tokens: Option<u64>,
     pub ceiling_breached: bool,
+    /// The ceilings this sweep ran under, sweep and per cell. What
+    /// [`crate::cost_fairness::budget_parity`] compares across rows.
+    pub budget: GatewayBudget,
     /// The gateway lost its journal file to another writer and stopped
     /// spending. The figures above are this process's in-memory record.
     pub journal_ownership_lost: bool,
@@ -802,6 +832,7 @@ impl HostObservedUsage {
         let journal = gateway.journal();
         let state = journal.spend();
         let (cache_read_input_tokens, cache_write_input_tokens) = journal.cache_token_totals();
+        let tokens = journal.usage_totals();
         Self {
             schema_version: HOST_USAGE_VERSION,
             route_table_sha256: journal.identity.route_table_sha256.clone(),
@@ -814,9 +845,12 @@ impl HostObservedUsage {
             overspent_usd_nanos: state.overspent_usd_nanos.to_string(),
             overspent_calls: state.overspent_calls,
             finish_reasons: journal.finish_reasons(),
+            input_tokens: tokens.input_tokens(),
+            output_tokens: tokens.output_tokens(),
             cache_read_input_tokens,
             cache_write_input_tokens,
             ceiling_breached: journal.ceiling_breached(),
+            budget: journal.identity.budget,
             journal_ownership_lost: gateway.journal_conflict(),
             journal_unwritable: gateway.journal_unwritable(),
             rank_neutral: true,
@@ -830,34 +864,55 @@ impl HostObservedUsage {
 pub(crate) struct DecisionRecorder {
     cell: Option<(usize, u64, u32)>,
     records: Vec<DecisionRequests>,
+    /// The current sweep-cell attempt's decisions, filed in the journal when
+    /// the attempt ends.
+    pending: Vec<DecisionEntry>,
 }
 
 impl DecisionRecorder {
-    fn record(&mut self, decision: u32, requests: u32, served: u32) {
+    /// The sweep cell being run, which every reservation is stamped with.
+    pub(crate) fn cell_ref(&self) -> Option<CellRef> {
+        self.cell
+            .map(|(window_index, seed, _)| CellRef { window_index, seed })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn enter_cell(&mut self, window_index: usize, seed: u64) {
+        self.cell = Some((window_index, seed, 0));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn leave_cell(&mut self) {
+        self.cell = None;
+    }
+
+    fn record(&mut self, decision: u32, entry: DecisionEntry, usage: &UsageTotals) {
         let (window_index, seed, attempt) = match self.cell {
             Some((window, seed, attempt)) => (Some(window), Some(seed), Some(attempt)),
             None => (None, None, None),
         };
-        self.records.push(DecisionRequests {
-            window_index,
-            seed,
-            attempt,
+        if self.cell.is_some() {
+            self.pending.push(entry);
+        }
+        self.records.push(DecisionRequests::of(
+            (window_index, seed, attempt),
             decision,
-            requests,
-            served,
-        });
+            entry,
+            usage,
+        ));
     }
 }
 
 /// One entrant decision as the host saw it at the gateway.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct DecisionRequests {
     /// The sweep cell's window, `None` for a decision made outside
     /// [`run_gateway_sweep`].
     pub window_index: Option<usize>,
     /// The sweep cell's seed, `None` outside a sweep.
     pub seed: Option<u64>,
-    /// Which attempt at the cell, from 0, counted in this process.
+    /// Which attempt at the cell, from 0, numbered after every attempt the
+    /// journal has a log for, whichever process ran it.
     pub attempt: Option<u32>,
     /// The decision's ordinal within its attempt, from 0.
     pub decision: u32,
@@ -866,6 +921,68 @@ pub struct DecisionRequests {
     pub requests: u32,
     /// Of those, the requests handed to the broker.
     pub served: u32,
+    /// Provider calls the decision's requests started, retries included.
+    pub calls: u32,
+    /// Of those, the calls priced from provider-reported usage.
+    pub priced_calls: u32,
+    /// Provider-reported input tokens of the decision's calls, present only
+    /// when at least one was priced and none was charged at its reservation.
+    /// Absent means unreported, never zero.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_tokens: Option<u64>,
+    /// Provider-reported output tokens, on the same rule.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_tokens: Option<u64>,
+    /// Host-priced USD nanodollars of the decision's calls, as a decimal
+    /// string, on the same rule.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usd_nanos: Option<String>,
+}
+
+impl DecisionRequests {
+    fn of(
+        (window_index, seed, attempt): (Option<usize>, Option<u64>, Option<u32>),
+        decision: u32,
+        entry: DecisionEntry,
+        usage: &UsageTotals,
+    ) -> Self {
+        Self {
+            window_index,
+            seed,
+            attempt,
+            decision,
+            requests: entry.requests,
+            served: entry.served,
+            calls: entry.calls,
+            priced_calls: usage.priced_calls,
+            input_tokens: usage.input_tokens(),
+            output_tokens: usage.output_tokens(),
+            usd_nanos: usage.usd_nanos().map(|nanos| nanos.to_string()),
+        }
+    }
+}
+
+/// The per-decision record of every attempt the journal has a log for, in
+/// the order the attempts finished, priced from the journal's own settlements.
+fn logged_decisions(journal: &GatewayJournal) -> Vec<DecisionRequests> {
+    journal
+        .decision_logs()
+        .iter()
+        .flat_map(|log| {
+            log.decisions
+                .iter()
+                .zip(0_u32..)
+                .map(move |(entry, decision)| {
+                    let usage = journal.usage_of_ordinals(entry.first_ordinal, entry.calls);
+                    DecisionRequests::of(
+                        (Some(log.window_index), Some(log.seed), Some(log.attempt)),
+                        decision,
+                        *entry,
+                        &usage,
+                    )
+                })
+        })
+        .collect()
 }
 
 impl<T: ProviderTransport> ModelGateway<'_, T> {
@@ -880,10 +997,11 @@ impl<T: ProviderTransport> ModelGateway<'_, T> {
 /// scored pool and read by no score, rank, gate or pass^k pool: it says how an
 /// entrant used the gateway, decision by decision, not how well it traded.
 ///
-/// It covers the cells run by this process. A resumed sweep skips its finished
-/// cells, and their per-decision counts were not persisted, so
-/// `cells_unrecorded` names how many cells the record does not cover rather
-/// than letting them read as cells with no requests.
+/// Every finished attempt files its decisions in the money journal, so a
+/// resumed sweep publishes the cells an earlier process ran as well as its own.
+/// `cells_unrecorded` names the cells the journal holds no log for, an attempt
+/// whose log could not be written among them, rather than letting them read as
+/// cells with no requests.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct GatewayDecisionRequests {
     pub schema_version: &'static str,
@@ -1002,8 +1120,14 @@ where
     };
     // Attempts per cell in this process, so the record can say which attempt
     // a decision belonged to and which cells it never saw.
+    // Seeded from the journal's logs, so an attempt an earlier process ran
+    // keeps its number and a resumed attempt does not reuse it.
     let mut attempts: std::collections::BTreeMap<(usize, u64), u32> =
         std::collections::BTreeMap::new();
+    for log in gateway.journal.decision_logs() {
+        let next = attempts.entry((log.window_index, log.seed)).or_insert(0);
+        *next = (*next).max(log.attempt.saturating_add(1));
+    }
     let result = crate::run_resumable_sweep_observed(
         sweep.checkpoint,
         sweep.agent_id,
@@ -1012,19 +1136,33 @@ where
         sweep.policy,
         |window, seed| {
             let attempt_index = attempts.entry((window, seed)).or_insert(0);
-            gateway.decisions.cell = Some((window, seed, *attempt_index));
+            let this_attempt = *attempt_index;
+            gateway.decisions.cell = Some((window, seed, this_attempt));
             *attempt_index = attempt_index.saturating_add(1);
             let observed = attempt(window, seed, &mut gateway);
             gateway.decisions.cell = None;
+            let decisions = std::mem::take(&mut gateway.decisions.pending);
+            gateway.file_decision_log(DecisionLog {
+                window_index: window,
+                seed,
+                attempt: this_attempt,
+                decisions,
+            });
             observed
         },
     )?;
     let cells = sweep.windows.len().saturating_mul(sweep.seeds.len());
+    let logged: std::collections::BTreeSet<(usize, u64)> = gateway
+        .journal
+        .decision_logs()
+        .iter()
+        .map(|log| (log.window_index, log.seed))
+        .collect();
     let decision_requests = GatewayDecisionRequests {
         schema_version: DECISION_REQUESTS_VERSION,
         sweep_sha256: sweep_sha256.clone(),
-        decisions: std::mem::take(&mut gateway.decisions.records),
-        cells_unrecorded: cells.saturating_sub(attempts.len()),
+        decisions: logged_decisions(&gateway.journal),
+        cells_unrecorded: cells.saturating_sub(logged.len()),
         rank_neutral: true,
     };
     let host_observed = HostObservedUsage::of(&gateway, sweep_sha256);
@@ -1037,17 +1175,26 @@ where
 }
 
 /// Put the host-observed usage on the entrant's row of a JSON board, beside its
-/// scores. The board stays an array and every other field is untouched.
+/// scores. The board stays an array and no score, rank or eligibility field
+/// moves.
+///
+/// The row's cost columns stop reading the entrant's self-report: `cost`,
+/// `return_per_cost` and `dsr_per_cost` become the host-observed USD figure,
+/// or are withheld with a label, and the entrant's figure moves to
+/// `entrant_reported_cost` (see [`crate::cost_fairness::apply_host_observed_cost`]).
 pub fn attach_host_observed_usage(
     board: &mut serde_json::Value,
     agent_id: &str,
     usage: &HostObservedUsage,
 ) {
-    let usage = serde_json::to_value(usage).expect("host-observed usage serializes");
+    let value = serde_json::to_value(usage).expect("host-observed usage serializes");
     if let Some(rows) = board.as_array_mut() {
         for row in rows {
             if row["agent_id"].as_str() == Some(agent_id) {
-                row["host_observed_usage"] = usage.clone();
+                if let Some(columns) = row.as_object_mut() {
+                    crate::cost_fairness::apply_host_observed_cost(columns, usage);
+                }
+                row["host_observed_usage"] = value.clone();
             }
         }
     }

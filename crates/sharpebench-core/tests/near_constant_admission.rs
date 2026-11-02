@@ -140,7 +140,7 @@ fn a_track_that_never_moved_is_refused_alone_and_in_a_field() {
     for (label, windows) in shapes {
         let alone = rank(&[agent("attacker", windows.clone())], &cfg());
         assert_eq!(
-            alone[0].deflation_error.as_deref(),
+            alone[0].deflation_refusal.as_deref(),
             Some(REFUSED),
             "{label}"
         );
@@ -153,7 +153,7 @@ fn a_track_that_never_moved_is_refused_alone_and_in_a_field() {
             let board = rank(&attacked, &cfg());
             let attacker = row(&board, "attacker");
             assert_eq!(
-                attacker.deflation_error.as_deref(),
+                attacker.deflation_refusal.as_deref(),
                 Some(REFUSED),
                 "{label}"
             );
@@ -200,7 +200,7 @@ fn a_flood_of_near_constant_copies_moves_no_honest_bar() {
     );
     for k in 0..3 {
         let copy = row(&board, &format!("copy-{k}"));
-        assert_eq!(copy.deflation_error.as_deref(), Some(REFUSED));
+        assert_eq!(copy.deflation_refusal.as_deref(), Some(REFUSED));
         assert!(!copy.rank_eligible, "{copy:?}");
     }
 }
@@ -219,12 +219,12 @@ fn the_refusal_stands_at_samuelsons_bound() {
     assert!(sign_is_forced_by_moments(&window(bound * 1.01)));
 
     let above = rank(&[agent("above", vec![window(bound * 1.01); 2])], &cfg());
-    assert_eq!(above[0].deflation_error.as_deref(), Some(REFUSED));
+    assert_eq!(above[0].deflation_refusal.as_deref(), Some(REFUSED));
     // A window this strong still loses no bar, so the observed-loss rule
     // (tests/tail_seller_admission.rs) refuses it under its own name. What this
     // test pins is that the moments no longer force its sign.
     let well_below = rank(&[agent("below", vec![window(bound * 0.5); 2])], &cfg());
-    assert_ne!(well_below[0].deflation_error.as_deref(), Some(REFUSED));
+    assert_ne!(well_below[0].deflation_refusal.as_deref(), Some(REFUSED));
 }
 
 /// The rule reads a ratio. Rescaling a track changes neither its Sharpe nor its
@@ -241,7 +241,7 @@ fn the_answer_does_not_move_with_position_size() {
         };
         let refused = rank(&[agent("a", scaled(alternating(1e-8)))], &cfg());
         assert_eq!(
-            refused[0].deflation_error.as_deref(),
+            refused[0].deflation_refusal.as_deref(),
             Some(REFUSED),
             "{scale}"
         );
@@ -252,7 +252,7 @@ fn the_answer_does_not_move_with_position_size() {
             )],
             &cfg(),
         );
-        assert_eq!(kept[0].deflation_error, None, "{scale}");
+        assert_eq!(kept[0].deflation_refusal, None, "{scale}");
     }
 }
 
@@ -268,7 +268,7 @@ fn a_strong_honest_track_far_from_the_field_is_not_refused() {
     field.push(agent("strong", windows));
     let board = rank(&field, &cfg());
     let strong = row(&board, "strong");
-    assert_eq!(strong.deflation_error, None);
+    assert_eq!(strong.deflation_refusal, None);
     assert!(strong.rank_eligible, "{strong:?}");
 }
 
@@ -278,7 +278,7 @@ fn a_strong_honest_track_far_from_the_field_is_not_refused() {
 fn one_ordinary_window_beside_a_flat_level_keeps_the_sharpe() {
     let windows = vec![vec![0.001; 60], moving(4, 60, 1.0)];
     let board = rank(&[agent("mixed", windows)], &cfg());
-    assert_eq!(board[0].deflation_error, None);
+    assert_eq!(board[0].deflation_refusal, None);
 }
 
 /// The rule must not become a median test. Bailey and Lopez de Prado's worked
@@ -290,11 +290,11 @@ fn a_distribution_with_a_mode_is_not_a_track_that_never_moved() {
     let mut discrete = vec![0.01_f64; 1145];
     discrete.extend(vec![-0.02_f64; 105]);
     let board = rank(&[agent("discrete", vec![discrete])], &cfg());
-    assert_eq!(board[0].deflation_error, None);
+    assert_eq!(board[0].deflation_refusal, None);
 
     let mut sparse = vec![0.0_f64; 30];
     sparse[4] = 0.01;
     sparse[17] = -0.004;
     let board = rank(&[agent("sparse", vec![sparse.clone(), sparse])], &cfg());
-    assert_eq!(board[0].deflation_error, None);
+    assert_eq!(board[0].deflation_refusal, None);
 }

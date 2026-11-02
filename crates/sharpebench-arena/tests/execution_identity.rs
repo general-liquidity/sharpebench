@@ -75,6 +75,7 @@ impl Fixture {
             );
             capture.contract.as_mut().unwrap().runner_artifact_sha256 = Some(scorer);
             RevealedEntry {
+                live_log: None,
                 agent_id: Some("alpha".to_string()),
                 submission: None,
                 capture: Some(capture),
@@ -84,6 +85,7 @@ impl Fixture {
             }
         } else {
             RevealedEntry {
+                live_log: None,
                 agent_id: None,
                 submission: Some(AgentSubmission {
                     agent_id: "alpha".to_string(),

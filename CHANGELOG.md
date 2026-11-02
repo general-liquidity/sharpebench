@@ -47,6 +47,15 @@ The six scorer stages that answer the `grader-search` admissions. Stages 1, 2 an
 - stats: `GateAgreement` withholds kappa on a constant rater (`kappa_unavailable`) and reports always-majority and single-field baselines.
 - register: status entries record `recorded_by` and `independent`. Every earlier entry is migrated as unknown and not independent, apart from the integration rechecks, which record the model that wrote them. Empty artifacts and the empty-input digest are refused unless declared, and a missing manuscript label source now fails coverage.
 - scripts: the citation register accepts a bibliography entry named only by a code credit, and the three evidence-register scripts are byte-identical with SharpeArena's.
+- core: score rows report a track refused for its shape in `deflation_refusal` and the exposure-path refusal in `exposure_path_refusal`, separate from unavailability in `deflation_error` and `exposure_path_error`. A DSR interval failure is reported in `dsr_ci_error` instead of `deflation_error`.
+- core: `disqualify` names one reason per cause, with new reasons `deflation_refused`, `dsr_interval_unavailable` and `exposure_path_unavailable`, and accepts `--require-run-keys`. A deflated Sharpe that was refused or not computed is no longer also `dsr_below_bar`, and a bootstrap that was not computed is no longer also `bootstrap_insignificant`.
+- core: refused tracks no longer publish `dsr_percentile`, `dsr_per_cost`, the rolling Sharpe summary or the econ-rationality score.
+- core: `deflation_unavailable` now means a numerical or configuration failure only. The headline verdict `degenerate_track` reads a row's `deflation_refusal` (reason `deflation_refused`).
+- arena: windows that record a live capture root use schema 8, and signed headers carry the roots. Publish and verify check them under the arena key. A window that also records a forward evidence contribution uses schema 9, which implies support for the roots, and keeps both records.
+- harness: host-observed usage v2 publishes input and output token totals (absent means unreported) and the budget the sweep ran under.
+- harness: the per-decision gateway record (v2) carries calls, tokens and USD per decision, and a resumed sweep republishes the cells an earlier process ran from the journal's decision logs.
+- harness: on a row with host-observed usage, `cost`, `return_per_cost` and `dsr_per_cost` read the host-observed USD figure or are withheld with a reason, and the entrant figure moves to `entrant_reported_cost`. Rows without host usage are unchanged.
+- ci: the PR-diff mutation gate runs in eight shards instead of four.
 
 ### Corrected
 
@@ -125,6 +134,7 @@ The six scorer stages that answer the `grader-search` admissions. Stages 1, 2 an
   separate one-sided 5 percent tail. The recorded development run remains
   unchanged; its misnamed two-sided intervals have nominal 90 percent coverage,
   while its one-sided upper bounds retain their 95 percent interpretation.
+- 0.19.0: the note on fully filled zero targets understated 4378ad4. The commit also sized target shares at the observed mark and charged the fee on executed notional, which moved every trading agent, buy-and-hold included. The note on "two finite-Sharpe streams" in the commodities reconstruction described a defect, not a correction (see Fixed, sim).
 
 ### Added
 
@@ -161,6 +171,20 @@ The six scorer stages that answer the `grader-search` admissions. Stages 1, 2 an
 - paper: `refs.bib` entries for KTD-Fin, ALE-Bench and The Probability of Backtest Overfitting (2017), so every code credit resolves to a verified source.
 - stats: `GateAgreement` reports `tpr` and `tnr`, the per-human-class agreement rates with counts and 95 percent Wilson intervals, withheld when the class is empty. `wilson_interval_95`, `ClassRate` and `ProportionInterval` are exported. The change is additive.
 - tests: seeded property tests for PSR and DSR cover trial-count monotonicity, scale invariance, [0, 1] bounds, monotonicity in the observed Sharpe inside the region where the plug-in PSR is monotone, and sign symmetry. A pinned case records that the eq. 3 plug-in PSR can fall as the Sharpe rises on a positively skewed short track.
+- core, cli, npm, mcp: `sharpebench headline` and `score --headline`, the wasm and npm `headline` export and the MCP `headline` tool give one rank-neutral verdict per row with its qualifiers beside it. The verdict is never a score field.
+- cli: `disqualify --known`, `--rediscovery-threshold` and `--oos-windows` emit `is_rediscovery` and `oos_decay`, which no surface emitted before.
+- stats: `sharpebench_stats::forward_eprocess`, a betting e-process for forward returns against a conditional mean of at most zero, with base e-BH and closed forms for its power under Brownian returns.
+- arena: a forward evidence ledger. Each published header carries prior and posterior ledgers per artifact digest with e-BH decisions over every committed artifact at 0.05. Scored windows that re-executed a row use schema 9, and `arena verify` recomputes the ledger. The ledger is rank-neutral, and boards signed before it verify unchanged.
+- arena: live forward capture certifies gateway-attached (model-backed) entrants from a sealed, hash-chained log of each bar's observation, decision and model calls, with typed refusals. Such rows are `live-captured`.
+- core, cli: an opt-in `psr_standard_error` score configuration (`observed` by default, `benchmark` for the null standard error of Lopez de Prado, Lipton and Zoonekynd, eqs. 4 and 5) with `--psr-standard-error`. Opting in applies to pooled PSR, DSR and its interval, per-run pass^k PSR and the admission checks, and each row records the method. Default output is byte-identical.
+- core, cli: `sharpebench pareto` and `score --pareto`, an opt-in multi-objective front over return, drawdown, turnover, cost, volatility and expected shortfall, among all agents and among eligible agents, with bootstrap membership frequencies. The front is never a rank input.
+- cli: `sharpebench contamination-probe` and `sharpebench presentation-stability` run the shape probe and presentation suite against `--agent`, `--cmd`, `--http` and `--image` entrants, and against gateway entrants through the harness. Both are rank-neutral, and a failed arm is a typed refusal.
+- sim: partial blinding levels (tickers only, dates only, levels only; full is unchanged), a date-shift presentation pair, and an identifiability probe whose path-matching negative control re-identifies every masked window.
+- cli: `run --declared-training-cutoff`, a disclosure only. It is never trusted, and `evidence_mode` is unchanged.
+- harness: `GatewayBudget.per_cell` adds a ceiling per (window, seed) cell on top of the sweep ceiling. A cell at its ceiling gets the existing budget refusals, and journals holding cell stamps or decision logs are written as `gateway-journal.v4`.
+- harness: a rank-neutral `cost_fairness::budget_parity` disclosure and an opt-in `cost_axis_report`, which scores against host-observed USD and token frontiers.
+- ci: an `evidence-drift` job and `docs/evidence-drift.json`. Any change from frozen evidence on three cheap shards that the manifest does not list fails CI.
+- provenance: schema 4 with a per-artifact `produced_at`, carried forward and checked against Git. The forecast-quality reports join the artifact scope.
 
 ### Fixed
 
@@ -189,6 +213,9 @@ The six scorer stages that answer the `grader-search` admissions. Stages 1, 2 an
 - ci: the PR-diff mutation gate runs on eight shards instead of four, so the same mutant population finishes inside each shard's 20-minute budget.
 - ci: `.cargo/mutants.toml` records 20 equivalent `det_math` mutants, each anchored to its file, line and column with the reason it cannot change a result.
 - tests: the scorer round reached main without a pull request and so skipped the PR-diff mutation gate. Its diff now passes that gate, with 368 mutants and 0 missed. 59 survivors are killed by tests that pin the Newey-West bandwidth to Andrews (1991), the serial-correlation and moment-credit certification bounds, the influence reach and the leverage branch, and 15 equivalent mutants are recorded in `.cargo/mutants.toml` with their reasons. A new test also requires the self-audit's clean skilled fixture to be finite, to show a loss and to be eligible.
+- sim: a NAV at or below zero is absorbing ruin. The bar books the realized loss, the book is closed at the mark and later bars return 0. Before this fix, commodities buy-and-hold and all five luck floors had a non-finite mean return, since 4378ad4 met the WTI -36.98 close that d882803 readmitted. Commodities trajectories change, and no other dataset moves.
+- harness: `luck_floor_1000`, `mandate_eval`, `relative_mandate_eval` and `seed_leg_eval` refuse with exit 1 when a declared dataset fails to load or yields no records, instead of publishing with exit 0.
+- core: a uniformly correlated field now measures exactly the plain dispersion.
 
 ### Documentation
 
@@ -200,6 +227,7 @@ The six scorer stages that answer the `grader-search` admissions. Stages 1, 2 an
 - paper: the paper says `GateAgreement` withholds kappa for a constant rater.
 - stats: the `agreement` module and the integrity chapter no longer describe a human-triaged gold set as existing. Both say what exists and what a gold set would need before kappa, rho or per-class rates could be reported over it. An older CHANGELOG entry that said the same is corrected.
 - docs: the paper and book state the residual dispersion-griefing limit and the mitigations, and the vote-fence documentation describes entrant-only voting and the influence bound.
+- docs: reason and gate counts are corrected, and a new page, "How to read a row", walks through the headline verdict, the eligibility conditions, refusals and qualifiers.
 
 ## [0.28.0] - 2026-09-18
 
