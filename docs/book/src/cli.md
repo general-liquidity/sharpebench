@@ -5,6 +5,8 @@ The `sharpebench` binary (crate `sharpebench-cli`) is the command-line entry poi
 ```text
 sharpebench run                       run reference agents through the sim and rank them
 sharpebench score <submissions.json>  rank a JSON field of pre-computed submissions
+sharpebench init-agent <dir> --kind cmd|http|image   write a minimal agent template
+sharpebench check-agent <dir>                         check an agent against every submission gate
 sharpebench check <returns.csv> --trials N [--periods-per-year N]   test one return series for backtest honesty
 sharpebench realism [--data <csv>]    run the stylized-facts dataset gate
 sharpebench commit <agent> <window> <digest> <salt> [--fault-plan <plan.json>]   forward-attestation pre-registration
@@ -340,6 +342,34 @@ decisions by requests and calls and of calls by route alias
 provider and takes no lock. It exits 2 without `--journal` and 1 when the
 journal cannot be read or does not validate. See
 [Struggle diagnostics](model-gateway.md#struggle-diagnostics).
+
+## `init-agent` / `check-agent`
+
+`init-agent <dir> --kind cmd|http|image` writes a minimal agent for one
+transport into `<dir>`: the Python policy (`agent.py`, or `server.py` for
+`http`), a `Dockerfile` for `image`, a README, and `sharpebench-agent.json`
+(schema `sharpebench.agent-spec.v1`), which records the `cmd`, `http` address or
+`image` reference. `--python <interpreter>` names the interpreter the template
+calls (default `python3`, or `python` on Windows). It never overwrites a file:
+if any file it would write exists, it writes nothing and exits 1.
+
+`check-agent` takes an agent directory or spec file, or one of `--cmd
+"<prog>"`, `--http <addr>` and `--image <repository@sha256:...>`, and drives
+the entrant through a synthetic check window (4 symbols, windows 20-50 and
+50-80, seeds 0 and 1). It reports seven gates: `launch`, `transport`,
+`protocol`, `budget`, `determinism`, `verdict` (the headline verdict) and
+`network`. Each is `pass`, `fail`, `advisory` or `not_run`. It exits 0 when no
+gate failed, 1 when one did, and 2 on a usage error. `--json` prints the report
+(schema `sharpebench.check-agent.v1`); `--short-borrow-bps` is accepted as for
+`run`.
+
+```bash
+sharpebench init-agent my-agent --kind cmd
+sharpebench check-agent my-agent --json
+```
+
+[Submit your agent](submit-your-agent.md) walks through both commands and
+explains each gate.
 
 ## `timing-luck`
 

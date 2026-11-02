@@ -168,7 +168,7 @@ const DEFAULT_HTTP_RETRIES: u32 = 2;
 /// timeout (unlike sockets), so a subprocess that consumes the observation but
 /// never answers - a shell entrypoint, a wedged agent - would block the harness
 /// forever without this bound.
-const STDIO_DECIDE_TIMEOUT: Duration = Duration::from_secs(30);
+pub const STDIO_DECIDE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Wall-clock budget for one HTTP decision attempt, matching
 /// [`STDIO_DECIDE_TIMEOUT`]. Socket options bound one syscall each, not the
@@ -176,7 +176,7 @@ const STDIO_DECIDE_TIMEOUT: Duration = Duration::from_secs(30);
 /// just inside every read timeout, stays under the per-operation bound forever
 /// while the advertised per-decision budget goes past. The budget is therefore
 /// an absolute instant that connect, write and every read are measured against.
-const HTTP_DECIDE_TIMEOUT: Duration = Duration::from_secs(30);
+pub const HTTP_DECIDE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Floor for a socket timeout derived from the remaining budget. Windows carries
 /// `SO_RCVTIMEO` in whole milliseconds and reads zero as "block forever", so a
