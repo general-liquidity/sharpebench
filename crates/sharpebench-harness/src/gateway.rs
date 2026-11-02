@@ -3085,6 +3085,76 @@ mod tests {
         );
     }
 
+    /// A cell whose committed money equals its ceiling exactly has not passed
+    /// it: a call that reserves nothing is still admitted, as at the sweep
+    /// ceiling. 20 + 9 tokens at one nanodollar each settle at exactly 29.
+    #[test]
+    fn a_cell_exactly_at_its_ceiling_still_admits_a_free_call() {
+        let routes = priced_and_free_routes();
+        let permits = CallPermits::new(4);
+        let mut gateway = ModelGateway::new(
+            &routes,
+            &permits,
+            FakeProvider::new(vec![
+                ProviderOutcome::Answered {
+                    status: 200,
+                    body: body("ok", Some((20, 9))),
+                },
+                ProviderOutcome::Answered {
+                    status: 200,
+                    body: body("ok", Some((1, 1))),
+                },
+            ]),
+            with_cell(29, 100),
+            GatewayLimits::default(),
+        );
+        gateway.decisions.enter_cell(0, 0);
+        assert_eq!(refused(&mut gateway, &request("hello", 16)), None);
+        let cell = CellRef {
+            window_index: 0,
+            seed: 0,
+        };
+        assert_eq!(gateway.journal().cell_spend(cell).committed_usd_nanos(), 29);
+        let mut free: serde_json::Value =
+            serde_json::from_str(&request("hello", 16)).expect("json");
+        free["model_alias"] = "free.v1".into();
+        assert_eq!(refused(&mut gateway, &free.to_string()), None);
+    }
+
+    /// A gateway stopped on an unwritable journal files a later decision log
+    /// in memory only: the file keeps what it held when the gateway stopped.
+    #[test]
+    fn a_gateway_stopped_on_its_journal_writes_no_decision_log() {
+        let dir = temp_dir("log-after-unwritable");
+        let path = dir.join("journal.json");
+        let routes = table("2026-01-01");
+        let permits = CallPermits::new(4);
+        let mut gateway = ModelGateway::open(
+            &routes,
+            &permits,
+            FakeProvider::answering(4),
+            budget(u128::MAX, 8),
+            GatewayLimits::default(),
+            &path,
+        )
+        .expect("open");
+        crate::gateway_journal::fault_injection::fail_next_parent_sync();
+        assert_eq!(
+            refused(&mut gateway, &request("hello", 16)),
+            Some(GatewayErrorKind::JournalUnwritable)
+        );
+        assert!(gateway.journal_unwritable() && !gateway.journal_conflict());
+        let before = std::fs::read(&path).expect("journal");
+        gateway.file_decision_log(crate::gateway_journal::DecisionLog {
+            window_index: 0,
+            seed: 0,
+            attempt: 0,
+            decisions: Vec::new(),
+        });
+        assert_eq!(gateway.journal().decision_logs().len(), 1, "kept in memory");
+        assert_eq!(std::fs::read(&path).expect("journal"), before);
+    }
+
     /// The call ceiling per cell: one call, then the existing call-limit kind.
     #[test]
     fn a_cell_call_ceiling_refuses_with_the_call_limit_kind() {

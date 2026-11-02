@@ -635,6 +635,15 @@ mod tests {
                 ("pricey", false, None)
             ]
         );
+        // Alone, the cheaper of two equal scores is what removes the other.
+        let pair = json!([
+            axis_row("cheap", 0.5, "100", None),
+            axis_row("pricey", 0.5, "101", None),
+        ]);
+        assert_eq!(
+            frontier(&cost_axis_report(&pair)),
+            [("cheap", true, None), ("pricey", false, None)]
+        );
     }
 
     /// A frontier over a subset would read as the field's, so any row off the
