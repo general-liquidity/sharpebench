@@ -3,8 +3,8 @@ name: Mutation
 # Deferred item 5 of the 2026-09-07 audit checklist, "full mutation and
 # paired-boundary gates as a standing CI leg", in its bounded form. Mutation:
 # cargo-mutants runs only the mutants the pull request's own diff introduces,
-# only in the four pure crates. That population is split across four parallel
-# shards, each shard running the same command with its own `--shard i/4`, each
+# only in the four pure crates. That population is split across eight parallel
+# shards, each shard running the same command with its own `--shard i/8`, each
 # using every core the runner reports, under a 20 minute per-shard budget. The
 # shards partition the population exactly: `--shard` is 0 based, every mutant
 # lands in exactly one shard, and an out of range index is a hard error rather
@@ -19,7 +19,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  MUTANT_SHARDS: 4
+  MUTANT_SHARDS: 8
 
 concurrency:
   group: mutation-${{ github.ref }}
@@ -36,7 +36,7 @@ jobs:
       fail-fast: false
       matrix:
         # 0 based, and MUTANT_SHARDS above must equal this list's length.
-        shard: [0, 1, 2, 3]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
     steps:
       # Full history so the merge base with the target branch is present.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
