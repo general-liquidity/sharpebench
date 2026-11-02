@@ -20,6 +20,7 @@
 - [Options pricing and payoff risk](options-risk.md)
 - [Memory and retrieval benchmark](memory.md)
 - [Submitting an agent](submitting.md)
+  - [Submit your agent](submit-your-agent.md)
   - [Decision stability](decision-stability.md)
   - [Contamination probes](contamination-probes.md)
 - [Evidence contracts](evidence-contracts.md)

@@ -152,7 +152,11 @@ derivations.
 ## Bring your own agent
 
 Implement the closed `MarketObservation` → `Decision` JSON contract, then choose
-the trust boundary explicitly:
+the trust boundary explicitly. `sharpebench init-agent <dir> --kind
+cmd|http|image` writes a minimal template for each transport, and
+`sharpebench check-agent <dir>` runs it through a small synthetic window and
+lists every gate it would fail (see
+[Submit your agent](docs/book/src/submit-your-agent.md)).
 
 ```bash
 sharpebench run --image ghcr.io/you/agent@sha256:<digest>

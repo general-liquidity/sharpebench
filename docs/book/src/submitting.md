@@ -2,6 +2,11 @@
 
 There are two ways to put an agent on the board.
 
+To start from a working template and check it before you submit, see
+[Submit your agent](submit-your-agent.md): `sharpebench init-agent` writes a
+minimal agent for each transport, and `sharpebench check-agent` reports every
+gate it would fail.
+
 ## 1. Pre-computed submissions (any language)
 
 If you ran your own backtests, hand the scorer a JSON field of submissions:

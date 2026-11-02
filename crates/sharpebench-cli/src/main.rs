@@ -35,6 +35,7 @@ mod regrade_cmd;
 mod replay_diagnostics_cmd;
 mod rescore_cmd;
 mod stress_replay_cmd;
+mod submit_cmd;
 mod timing_luck_cmd;
 #[cfg(feature = "self-update")]
 mod update;
@@ -104,6 +105,11 @@ fn main() -> ExitCode {
         Some("presentation-stability") => ExitCode::from(
             contamination_cmd::run_presentation(&args, json, &external_capture::DockerSandbox)
                 .clamp(0, 255) as u8,
+        ),
+        Some("init-agent") => ExitCode::from(submit_cmd::run_init(&args, json).clamp(0, 255) as u8),
+        Some("check-agent") => ExitCode::from(
+            submit_cmd::run_check(&args, json, &external_capture::DockerSandbox).clamp(0, 255)
+                as u8,
         ),
         Some("timing-luck") => {
             ExitCode::from(timing_luck_cmd::run(&args, json).clamp(0, 255) as u8)
@@ -636,6 +642,15 @@ fn help() {
     println!("                       --stress-replay: replay every admitted row through the synthetic stress suite and mark,");
     println!("                         beside the score, a row that loses more than the unlevered market there (a mitigation,");
     println!("                         rank-neutral; crashes shaped unlike the stress set are not detected; relaunches --cmd/--http)");
+    println!(
+        "  sharpebench init-agent <dir> --kind cmd|http|image  write a minimal agent template (policy, README, spec)"
+    );
+    println!("                       --python <interpreter>: the interpreter the template calls (default python3; python on Windows)");
+    println!(
+        "  sharpebench check-agent <dir|spec.json> | --cmd \"<prog>\" | --http <addr> | --image <ref>"
+    );
+    println!("                       drive the agent through a small synthetic window and report every gate it would fail:");
+    println!("                       launch, transport, protocol, budget, determinism, network and the headline verdict");
     println!(
         "  sharpebench score <submissions.json>  rank a JSON field of pre-computed submissions"
     );
