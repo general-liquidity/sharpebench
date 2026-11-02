@@ -1110,6 +1110,14 @@ mod tests {
         }
     }
 
+    /// `check-agent` asks no identity question, so the side channel the
+    /// identifiability probe uses is never opened here.
+    impl sharpebench_sim::LineExchange for FakeContainer {
+        fn exchange(&mut self, _request: &str) -> Result<String, DecideError> {
+            Err(DecideError::Protocol)
+        }
+    }
+
     impl SandboxEntrant for FakeContainer {
         fn finish(self: Box<Self>) -> Result<Option<bool>, String> {
             Ok(Some(self.behaviour == Behaviour::Oom))
@@ -1367,6 +1375,7 @@ mod tests {
             hard_reasons: Vec::new(),
             cause: None,
             qualifiers: sharpebench_core::headline::Qualifiers {
+                tier: sharpebench_core::EvaluationTier::HistoricalAdvisory,
                 evidence: Evidence::Unknown,
                 tied: false,
                 tie_group: 1,
