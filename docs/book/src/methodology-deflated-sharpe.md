@@ -558,8 +558,9 @@ t-statistic reaches 2 cleared every other gate on 94 of 4,000 seeds, against 16
 for a coin of the same size traded to the end.
 
 Since the change after 0.28.0, a track must also clear the risk its exposure
-history implies (`exposure_path_error`, typed requirement
-`EXPOSURE_PATH_UNPROVEN`). In each window the exposure rate is the running mean
+history implies (`exposure_path_refusal`, typed requirement
+`EXPOSURE_PATH_UNPROVEN`; a statistic that could not be computed is reported
+apart, in `exposure_path_error`). In each window the exposure rate is the running mean
 square `V_t / t` of the returns so far. The window is charged its length times the
 largest rate it showed after its first quarter, so stopping or de-risking leaves
 the charge where the history put it and raising exposure raises it. The

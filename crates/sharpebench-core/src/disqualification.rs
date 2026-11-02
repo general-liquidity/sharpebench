@@ -21,10 +21,14 @@ use crate::oos::OosDecayReport;
 use crate::rediscovery::RediscoveryVerdict;
 
 /// A single reason an agent was (or should be) demoted. The first five mirror the
-/// original eligibility gates in [`crate::composite::score_agent`]; two more name
-/// the unavailability of a statistic the scorer does gate on, one the standard
-/// error certification of an admitted deflated Sharpe, and one the exposure-path
-/// gate added after 0.28.0. The last four are
+/// original eligibility gates in [`crate::composite::score_agent`]. Then come the
+/// deflation family's refusal of the track's shape and the unavailability of a
+/// statistic the scorer does gate on (the deflated Sharpe, its interval, the
+/// bootstrap), the standard error certification of an admitted deflated Sharpe,
+/// and the exposure-path gate added after 0.28.0, with its own unavailability.
+/// Each cause names one reason: a deflated Sharpe that was refused or not
+/// computed is not also below its bar, and a bootstrap that was not computed is
+/// not also insignificant. The last four are
 /// advisory quality flags the scorer reports but does not gate on, surfaced here so
 /// they are legible alongside the hard failures. `SelectionUnavailable` is advisory
 /// because the whole selection axis is: the scorer reports `selection_gap` and never
@@ -46,8 +50,17 @@ pub enum FailReason {
     BootstrapInsignificant,
     /// The agent breached its trading mandate (e.g. the drawdown cap).
     MandateBreached,
-    /// Deflation or its confidence interval could not be computed.
+    /// The deflated Sharpe or its bar could not be computed
+    /// (`CompositeScore::deflation_error`).
     DeflationUnavailable,
+    /// The deflation family refused the track for its shape
+    /// (`CompositeScore::deflation_refusal`): it is constant, every window is
+    /// flat, no window shows observed risk, or no bar is a loss. The track has no
+    /// Sharpe ratio to deflate.
+    DeflationRefused,
+    /// The bootstrap interval of the deflated Sharpe could not be estimated
+    /// (`CompositeScore::dsr_ci_error`).
+    DsrIntervalUnavailable,
     /// The bootstrap significance test could not be computed.
     BootstrapUnavailable,
     /// The deflated Sharpe cleared its bar only with a standard error the
@@ -55,9 +68,12 @@ pub enum FailReason {
     /// credit (`CompositeScore::standard_error_refusal`).
     StandardErrorUncertified,
     /// The profit does not clear the risk the track's exposure history implies
-    /// (`exposure_path_error`): stopping or de-risking once ahead, or raising
+    /// (`exposure_path_refusal`): stopping or de-risking once ahead, or raising
     /// exposure after losses, could have produced it.
     ExposurePathUnproven,
+    /// The exposure-path statistic could not be computed
+    /// (`exposure_path_error`).
+    ExposurePathUnavailable,
     /// Advisory: candidate-selection statistics could not be computed, so the
     /// selection-gap flag below could not be evaluated. The scorer does not gate
     /// on the selection axis, so this never demotes an agent.
@@ -147,13 +163,17 @@ pub fn classify_disqualification(
     if !score.passed_k {
         reasons.push(FailReason::FailedPassK);
     }
-    if score.deflated_sharpe < thresholds.dsr_bar {
+    // A deflated Sharpe that was refused or not computed is the no-skill floor,
+    // not an estimate below the bar: its cause is named once, below.
+    let deflation_computed = score.deflation_error.is_none() && score.deflation_refusal.is_none();
+    if deflation_computed && score.deflated_sharpe < thresholds.dsr_bar {
         reasons.push(FailReason::DsrBelowBar);
     }
     if !score.process_ok {
         reasons.push(FailReason::ProcessViolation);
     }
-    if score.bootstrap_p >= thresholds.alpha {
+    // Likewise the 1.0 sentinel of a bootstrap that was not computed.
+    if score.bootstrap_error.is_none() && score.bootstrap_p >= thresholds.alpha {
         reasons.push(FailReason::BootstrapInsignificant);
     }
     if !score.mandate_ok {
@@ -162,14 +182,23 @@ pub fn classify_disqualification(
     if score.deflation_error.is_some() {
         reasons.push(FailReason::DeflationUnavailable);
     }
+    if score.deflation_refusal.is_some() {
+        reasons.push(FailReason::DeflationRefused);
+    }
+    if score.dsr_ci_error.is_some() {
+        reasons.push(FailReason::DsrIntervalUnavailable);
+    }
     if score.bootstrap_error.is_some() {
         reasons.push(FailReason::BootstrapUnavailable);
     }
     if score.standard_error_refusal.is_some() {
         reasons.push(FailReason::StandardErrorUncertified);
     }
-    if score.exposure_path_error.is_some() {
+    if score.exposure_path_refusal.is_some() {
         reasons.push(FailReason::ExposurePathUnproven);
+    }
+    if score.exposure_path_error.is_some() {
+        reasons.push(FailReason::ExposurePathUnavailable);
     }
 
     // Advisory quality flags (reported by the scorer / supplied out of band).
@@ -273,7 +302,7 @@ mod tests {
             ..ScoreConfig::default()
         };
         let score = score_agent(&agent("strong", vec![run(0.002, 0.004, 60)]), &cfg);
-        assert!(score.deflation_error.is_some());
+        assert!(score.dsr_ci_error.is_some() && score.deflation_error.is_none());
         assert!(!score.rank_eligible);
         let reasons = classify_disqualification(
             &score,
@@ -283,11 +312,15 @@ mod tests {
         );
         assert!(serde_json::to_string(&reasons)
             .unwrap()
-            .contains("deflation_unavailable"));
+            .contains("dsr_interval_unavailable"));
 
         for (error, label) in [
             ("deflation", "deflation_unavailable"),
+            ("refusal", "deflation_refused"),
+            ("interval", "dsr_interval_unavailable"),
             ("bootstrap", "bootstrap_unavailable"),
+            ("exposure", "exposure_path_unavailable"),
+            ("exposure refusal", "exposure_path_unproven"),
             ("selection", "selection_unavailable"),
         ] {
             let mut score = score_agent(
@@ -297,7 +330,13 @@ mod tests {
             assert!(score.rank_eligible);
             match error {
                 "deflation" => score.deflation_error = Some("test unavailable".into()),
+                "refusal" => score.deflation_refusal = Some("test refused".into()),
+                "interval" => score.dsr_ci_error = Some("test unavailable".into()),
                 "bootstrap" => score.bootstrap_error = Some("test unavailable".into()),
+                "exposure" => score.exposure_path_error = Some("test unavailable".into()),
+                "exposure refusal" => {
+                    score.exposure_path_refusal = Some("test refused".into());
+                }
                 _ => score.selection_error = Some("test unavailable".into()),
             }
             let reasons = classify_disqualification(&score, &thresholds(), None, None);
@@ -315,6 +354,125 @@ mod tests {
                 reasons[0].is_advisory(),
                 error == "selection",
                 "{label} is labelled against the scorer's own gate chain"
+            );
+        }
+    }
+
+    /// One cause, one reason. A deflated Sharpe that was refused or not
+    /// computed is the 0.0 floor, which is below any positive bar; a bootstrap
+    /// that was not computed is the 1.0 sentinel, which is at or above any
+    /// alpha up to 1. Neither placeholder is a measurement, so each failure is
+    /// named once, by the reason that says why, and the verdict still agrees.
+    #[test]
+    fn a_refused_or_unavailable_statistic_is_named_once() {
+        let skilled = || agent("skilled", (0..5).map(|_| run(0.002, 0.004, 60)).collect());
+        let flat = agent("flat", (0..5).map(|_| run(0.001, 0.0, 60)).collect());
+        let cases = [
+            (
+                "constant track",
+                flat,
+                ScoreConfig::default(),
+                FailReason::DeflationRefused,
+            ),
+            (
+                "invalid dispersion",
+                skilled(),
+                ScoreConfig {
+                    trials_sr_std: -1.0,
+                    ..ScoreConfig::default()
+                },
+                FailReason::DeflationUnavailable,
+            ),
+            (
+                "no resamples",
+                skilled(),
+                ScoreConfig {
+                    n_boot: 0,
+                    ..ScoreConfig::default()
+                },
+                FailReason::BootstrapUnavailable,
+            ),
+        ];
+        for (label, sub, cfg, cause) in cases {
+            let score = score_agent(&sub, &cfg);
+            let thresholds = DisqualThresholds::from_score_config(&cfg);
+            assert!(!score.rank_eligible, "{label}");
+            let reasons = classify_disqualification(&score, &thresholds, None, None);
+            assert!(reasons.contains(&cause), "{label}: {reasons:?}");
+            match cause {
+                FailReason::BootstrapUnavailable => {
+                    assert_eq!(score.bootstrap_p, 1.0, "{label}");
+                    assert!(
+                        !reasons.contains(&FailReason::BootstrapInsignificant),
+                        "{label}: {reasons:?}"
+                    );
+                }
+                _ => {
+                    assert_eq!(score.deflated_sharpe, 0.0, "{label}");
+                    assert!(
+                        !reasons.contains(&FailReason::DsrBelowBar),
+                        "{label}: {reasons:?}"
+                    );
+                }
+            }
+            assert_eq!(
+                score.rank_eligible,
+                reasons.iter().all(|r| r.is_advisory()),
+                "{label}"
+            );
+        }
+
+        // The skilled track itself clears both statistics, so in the no-resample
+        // case its deflated Sharpe is computed and only its interval fails.
+        let score = score_agent(
+            &skilled(),
+            &ScoreConfig {
+                n_boot: 0,
+                ..ScoreConfig::default()
+            },
+        );
+        let reasons = classify_disqualification(&score, &thresholds(), None, None);
+        assert_eq!(
+            reasons,
+            vec![
+                FailReason::DsrIntervalUnavailable,
+                FailReason::BootstrapUnavailable
+            ]
+        );
+    }
+
+    /// A computed deflated Sharpe below its bar and a computed insignificant
+    /// bootstrap still name their reasons: the suppression reads the
+    /// statistic's availability, not its value.
+    #[test]
+    fn a_computed_statistic_below_its_bar_is_still_named() {
+        let mut score = score_agent(
+            &agent("strong", vec![run(0.002, 0.004, 60)]),
+            &ScoreConfig::default(),
+        );
+        assert!(score.rank_eligible);
+        score.deflated_sharpe = 0.5;
+        score.bootstrap_p = 0.5;
+        assert_eq!(
+            classify_disqualification(&score, &thresholds(), None, None),
+            vec![FailReason::DsrBelowBar, FailReason::BootstrapInsignificant]
+        );
+        for refused in [false, true] {
+            let mut withheld = score.clone();
+            if refused {
+                withheld.deflation_refusal = Some("refused".into());
+            } else {
+                withheld.deflation_error = Some("unavailable".into());
+            }
+            withheld.bootstrap_error = Some("unavailable".into());
+            let expected = if refused {
+                FailReason::DeflationRefused
+            } else {
+                FailReason::DeflationUnavailable
+            };
+            assert_eq!(
+                classify_disqualification(&withheld, &thresholds(), None, None),
+                vec![expected, FailReason::BootstrapUnavailable]
             );
         }
     }

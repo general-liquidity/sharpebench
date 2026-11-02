@@ -197,7 +197,7 @@ export function createServer(): McpServer {
 
   server.tool(
     "classify_disqualification",
-    "Name every disqualification/quality signal that fired for each agent in a field of submissions (the same input the score tool takes). Pure legibility over the composite score: five reasons mirror the scorer's hard eligibility gates (failed_pass_k, dsr_below_bar, process_violation, bootstrap_insignificant, mandate_breached); the advisory flags (high_selection_gap, is_rediscovery, oos_decay) never gate. Empty reasons = no signal fired.",
+    "Name every disqualification/quality signal that fired for each agent in a field of submissions (the same input the score tool takes). Pure legibility over the composite score: the hard reasons mirror the scorer's eligibility gates (failed_pass_k, dsr_below_bar, process_violation, bootstrap_insignificant, mandate_breached, deflation_unavailable, deflation_refused, dsr_interval_unavailable, bootstrap_unavailable, standard_error_uncertified, exposure_path_unproven, exposure_path_unavailable); the advisory flags (selection_unavailable, high_selection_gap, is_rediscovery, oos_decay) never gate. One cause names one reason. Empty reasons = no signal fired.",
     { submissions: z.array(z.any()), config: z.any().optional() },
     async ({ submissions, config }) => run(() => sb.classifyDisqualification(submissions, config)),
   );

@@ -696,7 +696,7 @@ fn help() {
         "  sharpebench select <candidates.csv...> [--alpha A]          pick a candidate on a bootstrap percentile instead of the observed best"
     );
     println!(
-        "  sharpebench disqualify <subs.json>                          classify each agent's hard gates and advisory flags"
+        "  sharpebench disqualify <subs.json> [--require-run-keys]     classify each agent's hard gates and advisory flags"
     );
     println!(
         "  sharpebench rediscover <submitted.csv> <known.csv...>       flag a submission cosine-near a known strategy"
@@ -3305,57 +3305,13 @@ fn run_score(path: &str, args: &[String], json: bool) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    // Each object is a submission plus an optional `declared_mandate`; the
-    // declaration is scored as a labeled second verdict and never moves rank.
-    //
-    // Cross-agent comparison reads `runs[i]` for every agent. Without
-    // `--require-run-keys` that alignment is the caller's assertion, unchecked.
-    // With it, every submission must carry one `run_keys` entry per run; the
-    // field is refused unless the cells are complete, unique and shared, and the
-    // runs are reordered into one canonical cell order before scoring.
-    let require_run_keys = args.iter().any(|a| a == "--require-run-keys");
-    let (subs, declarations, keyed_seed_count) = if require_run_keys {
-        match sharpebench_core::parse_keyed_field(&data) {
-            Ok(field) => (
-                field.submissions,
-                field.declarations,
-                Some(field.seeds.len()),
-            ),
-            Err(e) => {
-                eprintln!("error: {e}");
-                return ExitCode::FAILURE;
-            }
-        }
-    } else {
-        match sharpebench_core::parse_declared_field(&data) {
-            Ok((subs, declarations)) => (subs, declarations, None),
-            Err(e) => {
-                eprintln!("error: {e}");
-                return ExitCode::FAILURE;
-            }
-        }
-    };
-    let mut cfg = match score_config_from_args(args) {
-        Ok(cfg) => cfg,
-        Err(error) => {
+    let (subs, declarations, cfg) = match scoring_field_from_args(&data, args) {
+        Ok(field) => field,
+        Err((error, code)) => {
             eprintln!("error: {error}");
-            return ExitCode::from(2);
+            return ExitCode::from(code);
         }
     };
-    if let Some(width) = keyed_seed_count {
-        // Canonical keys are window-major and contain the complete seed grid.
-        // Preserve that replicate geometry when the scorer pools observations.
-        if args.iter().any(|arg| arg == "--execution-seeds-per-window")
-            && cfg.execution_seeds_per_window != width
-        {
-            eprintln!(
-                "error: validated run keys require {width} execution seeds per window, but --execution-seeds-per-window is {}",
-                cfg.execution_seeds_per_window
-            );
-            return ExitCode::from(2);
-        }
-        cfg.execution_seeds_per_window = width;
-    }
     // `--rank-mode` is opt-in by versioned identifier. Absent, the board is
     // `rank_declared` byte for byte; an identifier the kernel does not
     // implement is refused rather than silently ranked under the legacy
@@ -3506,6 +3462,64 @@ fn print_sharpe_diagnostics(
             }
         );
     }
+}
+
+/// The field and host configuration a scoring command reads, shared by `score`
+/// and `disqualify` so that both reproduce one board from the same arguments.
+///
+/// Each object is a submission plus an optional `declared_mandate`; the
+/// declaration is scored as a labeled second verdict and never moves rank.
+///
+/// Cross-agent comparison reads `runs[i]` for every agent. Without
+/// `--require-run-keys` that alignment is the caller's assertion, unchecked.
+/// With it, every submission must carry one `run_keys` entry per run; the field
+/// is refused unless the cells are complete, unique and shared, and the runs are
+/// reordered into one canonical cell order before scoring.
+///
+/// An error carries the exit code: 1 for a field that does not parse or
+/// validate, 2 for invalid controls.
+pub(crate) fn scoring_field_from_args(
+    data: &str,
+    args: &[String],
+) -> Result<
+    (
+        Vec<sharpebench_core::AgentSubmission>,
+        sharpebench_core::MandateDeclarations,
+        ScoreConfig,
+    ),
+    (String, u8),
+> {
+    let require_run_keys = args.iter().any(|a| a == "--require-run-keys");
+    let (subs, declarations, keyed_seed_count) = if require_run_keys {
+        let field = sharpebench_core::parse_keyed_field(data).map_err(|e| (e.to_string(), 1))?;
+        (
+            field.submissions,
+            field.declarations,
+            Some(field.seeds.len()),
+        )
+    } else {
+        let (subs, declarations) =
+            sharpebench_core::parse_declared_field(data).map_err(|e| (e, 1))?;
+        (subs, declarations, None)
+    };
+    let mut cfg = score_config_from_args(args).map_err(|e| (e, 2))?;
+    if let Some(width) = keyed_seed_count {
+        // Canonical keys are window-major and contain the complete seed grid.
+        // Preserve that replicate geometry when the scorer pools observations.
+        if args.iter().any(|arg| arg == "--execution-seeds-per-window")
+            && cfg.execution_seeds_per_window != width
+        {
+            return Err((
+                format!(
+                    "validated run keys require {width} execution seeds per window, but --execution-seeds-per-window is {}",
+                    cfg.execution_seeds_per_window
+                ),
+                2,
+            ));
+        }
+        cfg.execution_seeds_per_window = width;
+    }
+    Ok((subs, declarations, cfg))
 }
 
 /// Shared by `score` and `disqualify`: explanations use the same host verdict,

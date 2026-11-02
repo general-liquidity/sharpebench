@@ -197,7 +197,7 @@ def checked_probabilistic_sharpe_ratio(xs, sr_benchmark: float) -> float:
     """The kernel's checked PSR (`checked_probabilistic_sharpe_ratio`): a track whose
     observations all equal the first has no Sharpe ratio and is refused, where the
     unchecked form substitutes a Sharpe of zero. The pooled `psr` in a score record
-    comes from this form; a refused record prints 0.0 beside a `deflation_error`."""
+    comes from this form; a refused record prints 0.0 beside a `deflation_refusal`."""
     if len(xs) >= 2 and all(x == xs[0] for x in xs):
         raise ValueError(CONSTANT_TRACK_REFUSAL)
     return probabilistic_sharpe_ratio(xs, sr_benchmark)

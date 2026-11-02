@@ -529,7 +529,7 @@ fn too_short_dataset_is_typed_unavailable() {
 }
 
 /// With no bootstrap resamples the score's interval fails and the score
-/// reports that through `deflation_error`, but the deflation itself succeeded.
+/// reports that through `dsr_ci_error`, but the deflation itself succeeded.
 /// The report keeps the deflated Sharpe, identical to the one computed with an
 /// interval.
 #[test]
@@ -550,9 +550,9 @@ fn deflated_sharpe_survives_a_failed_interval() {
         0,
     );
     let board = rank(&field, &without);
-    assert!(board
-        .iter()
-        .all(|s| s.deflation_error.is_some() && s.dsr_ci_low.is_none()));
+    assert!(board.iter().all(|s| s.deflation_error.is_none()
+        && s.dsr_ci_error.is_some()
+        && s.dsr_ci_low.is_none()));
 
     let measure = |cfg: &ScoreConfig| {
         timing_luck(&data, &windows, &seeds, CostModel::default(), cfg, spec(2))

@@ -199,7 +199,11 @@ pub fn read_back(
         .max(u32::try_from(field_size).unwrap_or(u32::MAX));
     let prior_per_period = rule.dispersion_prior / cfg.periods_per_year.sqrt();
     for score in board {
-        if score.deflation_error.is_some() {
+        // A row whose deflated Sharpe or interval was refused or unavailable.
+        if score.deflation_error.is_some()
+            || score.deflation_refusal.is_some()
+            || score.dsr_ci_error.is_some()
+        {
             continue;
         }
         if score.effective_n_trials != n_expected {
@@ -266,7 +270,12 @@ pub fn reduce(board: &[CompositeScore], cfg: &ScoreConfig, planted: bool) -> (Ro
     let eligible_count = board.iter().filter(|s| s.rank_eligible).count() as u32;
     let unavailable = board
         .iter()
-        .filter(|s| s.deflation_error.is_some() || s.bootstrap_error.is_some())
+        .filter(|s| {
+            s.deflation_error.is_some()
+                || s.deflation_refusal.is_some()
+                || s.dsr_ci_error.is_some()
+                || s.bootstrap_error.is_some()
+        })
         .count();
     (
         Row {
@@ -275,7 +284,10 @@ pub fn reduce(board: &[CompositeScore], cfg: &ScoreConfig, planted: bool) -> (Ro
             focal_eligible: focal.rank_eligible,
             any_false,
             eligible_count,
-            focal_dsr_leg: focal.deflation_error.is_none() && focal.deflated_sharpe >= cfg.dsr_bar,
+            focal_dsr_leg: focal.deflation_error.is_none()
+                && focal.deflation_refusal.is_none()
+                && focal.dsr_ci_error.is_none()
+                && focal.deflated_sharpe >= cfg.dsr_bar,
             focal_reliability_leg: focal.passed_k,
             focal_bootstrap_leg: focal.bootstrap_error.is_none() && focal.bootstrap_p < cfg.alpha,
             bar_annual: focal.deflation_bar_annualized_equivalent,

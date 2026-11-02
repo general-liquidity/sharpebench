@@ -2621,7 +2621,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Artifacts.**
 - `crates/sharpebench-core/golden/example_submissions.scores.json`, sha256 `6f74bb23887122be95b306cc6b1628d0c8d8da39eb26a96776e4c032cbfb1dcd`, digest source: computed for this register; the file is outside the provenance manifest scope
-- `crates/sharpebench-core/golden/synthetic_field.scores.json`, sha256 `c9b899e58c9d0f59d338f2d331afd49b56c9dcdbd33d310c105eb8fd047b206d`, digest source: computed for this register; the file is outside the provenance manifest scope
+- `crates/sharpebench-core/golden/synthetic_field.scores.json`, sha256 `d9a86887e1e2c3272de40adb820ddb545049dee8f3ea8e87346452765662fd65`, digest source: computed for this register; the file is outside the provenance manifest scope
 - `crates/sharpebench-core/golden/synthetic_field.input.json`, sha256 `b5d298d72a68fb5922fbcbd252a7922fe1033f133d38203f2c15a4ec01cd8b61`, digest source: computed for this register; the file is outside the provenance manifest scope
 
 **Producer command.** cargo test -p sharpebench-core --test golden_scores; cargo test -p sharpebench-sim --test golden_input; cargo test -p sharpebench-wasm --test native_parity (paper/sections/A-commands.tex)
@@ -2637,6 +2637,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 - The golden fields changed in the Pareto flag of hold and in calibration counts, Brier scores and confidence-weighted return; no gate reads those fields (paper/sections/E-repairs.tex:19).
 - The 2026-10-31 fix-round integration (fix/row-disclosures) added runs_passed, window_bars, window_pass_floors, implausible_windows and pass_k_floors_plausible to every row of crates/sharpebench-core/golden/example_submissions.scores.json, crates/sharpebench-core/golden/synthetic_field.scores.json; no existing field or value changed.
 - The 2026-11-01 scorer-round integration: fix/tail-seller rewrote skilled-momentum and ungated-bot to carry losing bars (owner-approved), which moves their return, drawdown, beta and alpha fields; every agent's verdict, deflated Sharpe, PSR, pass^k, eligibility and rank are unchanged, and the file was regenerated once at the merged tip with no further change.
+- The 2026-11-02 refusal-taxonomy change (fix/refusal-taxonomy) moved the hold row's constant-track refusal from deflation_error to deflation_refusal in crates/sharpebench-core/golden/synthetic_field.scores.json, same text; no other field or row changed.
 
 **Present applicability.** Re-established on every CI run across the three targets.
 

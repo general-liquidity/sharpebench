@@ -20,7 +20,7 @@ use sharpebench_core::{
     rank, score_agent, AgentSubmission, CompositeScore, Run, ScoreConfig, TrialsSrStdSource,
 };
 
-/// The refusal as `deflation_error` renders it. Pinned here as a literal rather
+/// The refusal as `deflation_refusal` renders it. Pinned here as a literal rather
 /// than imported, so this file compiles against the tree that had the defect and
 /// fails on its assertions instead of on a missing symbol.
 const NO_WINDOW_VARIES: &str = concat!(
@@ -81,7 +81,7 @@ fn two_constant_windows_have_no_sharpe_ratio() {
         &constant_windows("split constant", &[0.001, 0.002], 30),
         &cfg,
     );
-    assert_eq!(score.deflation_error.as_deref(), Some(NO_WINDOW_VARIES));
+    assert_eq!(score.deflation_refusal.as_deref(), Some(NO_WINDOW_VARIES));
     assert_eq!(score.deflated_sharpe, 0.0);
     assert!(!score.rank_eligible);
 }
@@ -99,7 +99,7 @@ fn any_number_of_constant_windows_is_refused() {
     ] {
         let score = score_agent(&constant_windows("trap", &levels, 30), &cfg);
         assert_eq!(
-            score.deflation_error.as_deref(),
+            score.deflation_refusal.as_deref(),
             Some(NO_WINDOW_VARIES),
             "{levels:?}"
         );
@@ -124,7 +124,7 @@ fn constant_execution_replicates_average_to_a_constant_window() {
         ],
     );
     let score = score_agent(&sub, &cfg);
-    assert_eq!(score.deflation_error.as_deref(), Some(NO_WINDOW_VARIES));
+    assert_eq!(score.deflation_refusal.as_deref(), Some(NO_WINDOW_VARIES));
 }
 
 /// Standing aside in one regime is not the same mistake. The traded window is
@@ -135,7 +135,7 @@ fn a_flat_window_beside_a_traded_one_still_has_a_sharpe_ratio() {
     let mut sub = honest(3);
     sub.runs[0].returns = vec![0.0; 30];
     let score = score_agent(&sub, &cfg);
-    assert_eq!(score.deflation_error, None);
+    assert_eq!(score.deflation_refusal, None);
     assert!(score.deflated_sharpe.is_finite());
 }
 
@@ -149,7 +149,7 @@ fn a_wholly_constant_track_keeps_the_error_it_had() {
     for levels in [vec![0.0, 0.0], vec![0.001, 0.001]] {
         let score = score_agent(&constant_windows("flat", &levels, 30), &cfg);
         assert_eq!(
-            score.deflation_error.as_deref(),
+            score.deflation_refusal.as_deref(),
             Some(CONSTANT_TRACK),
             "{levels:?}"
         );
@@ -158,6 +158,10 @@ fn a_wholly_constant_track_keeps_the_error_it_had() {
     assert_eq!(
         empty.deflation_error.as_deref(),
         Some("at least 2 observations are required, got 0")
+    );
+    assert_eq!(
+        empty.deflation_refusal, None,
+        "too short is unavailable, not refused"
     );
 }
 
@@ -185,7 +189,7 @@ fn a_constant_window_track_does_not_vote_on_the_field_dispersion() {
     let board = rank(&with_trap, &cfg);
     let trap = row(&board, "split constant");
 
-    assert_eq!(trap.deflation_error.as_deref(), Some(NO_WINDOW_VARIES));
+    assert_eq!(trap.deflation_refusal.as_deref(), Some(NO_WINDOW_VARIES));
     assert_eq!(trap.deflated_sharpe, 0.0, "a refused track is not deflated");
     assert!(!trap.pareto_optimal, "a refused track is not a member");
     assert!(!trap.rank_eligible);

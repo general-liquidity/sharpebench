@@ -123,7 +123,7 @@ fn the_tail_seller_that_missed_its_crash_is_refused_alone_and_in_a_field() {
         "the report's track never lost"
     );
     let alone = rank(&[agent("seller", windows.clone())], &cfg());
-    assert_eq!(alone[0].deflation_error.as_deref(), Some(REFUSED));
+    assert_eq!(alone[0].deflation_refusal.as_deref(), Some(REFUSED));
     assert!(!alone[0].rank_eligible);
 
     for honest_count in [6, 12] {
@@ -132,7 +132,7 @@ fn the_tail_seller_that_missed_its_crash_is_refused_alone_and_in_a_field() {
         field.push(agent("seller", windows.clone()));
         let board = rank(&field, &cfg());
         let seller = row(&board, "seller");
-        assert_eq!(seller.deflation_error.as_deref(), Some(REFUSED));
+        assert_eq!(seller.deflation_refusal.as_deref(), Some(REFUSED));
         assert!(!seller.rank_eligible);
         for r in &clean {
             let after = row(&board, &r.agent_id);
@@ -155,13 +155,13 @@ fn the_refusal_does_not_move_with_position_size() {
         let seller: Vec<f64> = found().iter().map(|x| x * scale).collect();
         let board = rank(&[agent("seller", vec![seller])], &cfg());
         assert_eq!(
-            board[0].deflation_error.as_deref(),
+            board[0].deflation_refusal.as_deref(),
             Some(REFUSED),
             "{scale}"
         );
         let losing = vec![moving(1, 60, 1.0, scale), moving(2, 60, 1.0, scale)];
         let board = rank(&[agent("losing", losing)], &cfg());
-        assert_eq!(board[0].deflation_error, None, "{scale}");
+        assert_eq!(board[0].deflation_refusal, None, "{scale}");
     }
 }
 
@@ -175,7 +175,7 @@ fn a_crash_in_the_sample_is_priced_and_one_outside_it_cannot_be() {
     // Per-bar Sharpe 1 with unit noise, so about one bar in six loses.
     let premium = || vec![moving(7, 120, 1.0, 0.002), moving(8, 120, 1.0, 0.002)];
     let crash_free = rank(&[agent("crash-free", premium())], &cfg());
-    assert_eq!(crash_free[0].deflation_error, None);
+    assert_eq!(crash_free[0].deflation_refusal, None);
     assert!(crash_free[0].rank_eligible, "{:?}", crash_free[0]);
 
     // One crash at rate 0.01, sized so the expected bar return is zero.
@@ -183,6 +183,6 @@ fn a_crash_in_the_sample_is_priced_and_one_outside_it_cannot_be() {
     let mut crashed = premium();
     crashed[1][60] = -0.002 * (1.0 - crash_rate) / crash_rate;
     let board = rank(&[agent("crashed", crashed)], &cfg());
-    assert_eq!(board[0].deflation_error, None, "priced, not refused");
+    assert_eq!(board[0].deflation_refusal, None, "priced, not refused");
     assert!(!board[0].rank_eligible, "{:?}", board[0]);
 }

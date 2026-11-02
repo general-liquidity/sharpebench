@@ -879,23 +879,44 @@ leaves it false rather than blaming an argument that was not the problem.
 ## `disqualify`
 
 ```bash
-sharpebench disqualify <submissions.json> [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode MODE] [--benchmark-agent ID] [--json]
+sharpebench disqualify <submissions.json> [--require-run-keys] [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode MODE] [--benchmark-agent ID] [--json]
 ```
 
 Scores a JSON field of submissions (same format as `score`) and names every
 disqualification/quality signal that fired for each agent, instead of the
-single rank-eligible verdict. Pass the same field and [host controls](#score) as
-`score`: explanations come from the ranked field, including its benchmark and
-field-dependent deflation, rather than separately scoring each submission.
-The taxonomy has twelve reasons in three groups. Five mirror the scorer's hard
-eligibility gates (`FailedPassK`, `DsrBelowBar`, `ProcessViolation`,
-`BootstrapInsignificant`, `MandateBreached`). Two name the unavailability of a
-statistic the scorer really does gate on, so they are hard as well:
-`DeflationUnavailable` and `BootstrapUnavailable`. `ExposurePathUnproven` is the
-hard exposure-path gate: a profit that does not clear the risk the track's
-exposure history implies. The remaining four are
-advisory and never gate: `SelectionUnavailable`, `HighSelectionGap`,
-`IsRediscovery` and `OosDecay`.
+single rank-eligible verdict. Pass the same field, the same
+`--require-run-keys` and the same [host controls](#score) as `score`:
+explanations come from the ranked field, including its keyed cell order, its
+benchmark and field-dependent deflation, rather than separately scoring each
+submission.
+
+The taxonomy has sixteen reasons. Twelve are hard and mirror a conjunct of
+the scorer's eligibility predicate:
+
+| Reason | Row field it reads | Meaning |
+|---|---|---|
+| `FailedPassK` | `passed_k` | a run failed the per-run PSR bar |
+| `DsrBelowBar` | `deflated_sharpe` | a computed deflated Sharpe is below `dsr_bar` |
+| `ProcessViolation` | `process_ok` | a block-severity process event |
+| `BootstrapInsignificant` | `bootstrap_p` | a computed bootstrap p is at or above `alpha` |
+| `MandateBreached` | `mandate_ok` | a drawdown cap was breached |
+| `DeflationUnavailable` | `deflation_error` | the deflated Sharpe or its bar could not be computed |
+| `DeflationRefused` | `deflation_refusal` | the track was refused for its shape: constant, every window flat, no observed risk, or no observed loss |
+| `DsrIntervalUnavailable` | `dsr_ci_error` | the deflated Sharpe's bootstrap interval could not be estimated |
+| `BootstrapUnavailable` | `bootstrap_error` | the bootstrap p-value could not be computed |
+| `StandardErrorUncertified` | `standard_error_refusal` | the standard error certification refused the deflated Sharpe |
+| `ExposurePathUnproven` | `exposure_path_refusal` | the profit does not clear the risk the track's exposure history implies |
+| `ExposurePathUnavailable` | `exposure_path_error` | the exposure-path statistic could not be computed |
+
+The remaining four are advisory and never gate: `SelectionUnavailable`,
+`HighSelectionGap`, `IsRediscovery` and `OosDecay`.
+
+One cause names one reason. A deflated Sharpe that was refused or not computed
+is the 0.0 floor, not an estimate, so it carries `DeflationRefused` or
+`DeflationUnavailable` and not also `DsrBelowBar`. A bootstrap that was not
+computed reports the 1.0 sentinel, so it carries `BootstrapUnavailable` and not
+also `BootstrapInsignificant`. An interval that fails for the same reason the
+deflation already names is reported once, in the deflation's field.
 
 `SelectionUnavailable` is advisory because the whole selection axis is. The
 scorer reports `selection_gap` and never consults it in `rank_eligible`, so the
