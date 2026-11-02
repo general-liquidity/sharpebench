@@ -709,5 +709,19 @@ mod tests {
             freqs.iter().any(|f| *f > 0.0 && *f < 1.0),
             "expected a fractional membership, got {freqs:?}"
         );
+        // The note is a function of its seed: the same seed, field and
+        // settings reproduce these frequencies to the last bit.
+        let pinned: Vec<(&str, u64)> = report
+            .rows
+            .iter()
+            .map(|r| (r.agent_id.as_str(), r.front_frequency.unwrap().to_bits()))
+            .collect();
+        assert_eq!(
+            pinned,
+            vec![
+                ("bold", 1.0f64.to_bits()),
+                ("calm", 4_605_966_446_900_627_374)
+            ]
+        );
     }
 }
