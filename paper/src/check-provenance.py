@@ -201,6 +201,40 @@ def check_generation(manifest: dict) -> list[str]:
     return problems
 
 
+def check_produced_at(artifacts: list[dict[str, str]]) -> list[str]:
+    """Every artifact's producing commit is in this history and holds its bytes.
+
+    `produced_at` is what the manifest claims about where each artifact came
+    from, so it is checked against Git rather than trusted: the commit must be
+    an ancestor of HEAD and must contain the artifact at exactly the recorded
+    digest. Outside a Git worktree the leg is reported as unenforced.
+    """
+    if git("rev-parse", "--git-dir").returncode != 0:
+        print("produced_at: not a Git worktree, so producing commits are NOT enforced here.")
+        return []
+    problems: list[str] = []
+    by_commit: dict[str, list[dict[str, str]]] = {}
+    for record in artifacts:
+        by_commit.setdefault(record["produced_at"], []).append(record)
+    for commit, records in sorted(by_commit.items()):
+        if git("cat-file", "-e", f"{commit}^{{commit}}").returncode != 0:
+            problems.append(f"produced_at: {commit} is not a commit in this repository")
+            continue
+        if git("merge-base", "--is-ancestor", commit, "HEAD").returncode != 0:
+            problems.append(f"produced_at: {commit} is not an ancestor of HEAD")
+            continue
+        blobs = git_blobs(commit, [record["path"] for record in records])
+        for record in records:
+            blob = blobs.get(record["path"])
+            if blob is None:
+                problems.append(f"produced_at: {record['path']} is absent from {commit}")
+            elif digest_bytes(blob) != record["sha256"]:
+                problems.append(
+                    f"produced_at: {record['path']} at {commit} is not the recorded bytes"
+                )
+    return problems
+
+
 def main() -> int:
     if not MANIFEST.is_file():
         print(f"missing manifest: {MANIFEST}", file=sys.stderr)
@@ -217,6 +251,7 @@ def main() -> int:
         "source", manifest["source_files"], canonical_text=True
     )
     problems += check_group("artifact", manifest["artifacts"])
+    problems += check_produced_at(manifest["artifacts"])
     recorded_head = manifest["generated_at_head"]
     if git("cat-file", "-e", f"{recorded_head}^{{commit}}").returncode == 0:
         problems += check_committed_group(
