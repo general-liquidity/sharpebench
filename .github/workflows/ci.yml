@@ -217,6 +217,34 @@ jobs:
       - name: Run the ignored clone-merge regression
         run: cargo test -p sharpebench-harness --test evidence_fields_no_clone_merges -- --ignored
 
+  evidence-drift:
+    name: current-engine shadow (evidence drift)
+    # Runs evidence_sweep (dsr_bar 0.95) and external_rules_eval on three
+    # one-dataset shards, us-indices-1w, commodities-1d and fx-majors-1d, and
+    # compares every field with the frozen rows in paper/evidence/final. A field
+    # change or verdict flip that docs/evidence-drift.json does not list and
+    # attribute fails here, and so does a listed one that no longer occurs, so a
+    # pull request that moves what the current engine computes on frozen inputs
+    # records it in the same diff. Producer output goes to the runner's temp
+    # directory: frozen evidence and its provenance are never regenerated or
+    # rebound. The six producers run in parallel in about a minute after the
+    # release build of the two examples.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
+        with:
+          toolchain: "1.96.0"
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+      - name: The shadow comparison's own rules hold
+        run: python -m unittest paper/src/test_current_engine_shadow.py
+      - name: Every current-engine change on the shadow shards is listed and attributed
+        run: python paper/src/check-current-engine-shadow.py
+
   python:
     name: sharpebench-py (fmt, clippy, maturin, pytest)
     runs-on: ubuntu-latest
