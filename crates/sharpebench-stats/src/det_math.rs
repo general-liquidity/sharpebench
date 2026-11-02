@@ -1,4 +1,5 @@
-//! Deterministic `exp`, `exp_m1`, `ln`, `ln_1p`, `powf` and `powi` in pure Rust.
+//! Deterministic `exp`, `exp_m1`, `ln`, `ln_1p`, `powf`, `powi` and `cbrt` in
+//! pure Rust.
 //!
 //! `f64::exp` and `f64::ln` lower to LLVM intrinsics. At run time they call the
 //! platform libm; when the argument is a compile-time constant, an optimised
@@ -557,6 +558,58 @@ pub fn powi(x: f64, n: i32) -> f64 {
     }
 }
 
+/// Deterministic real cube root, correctly rounded like the other functions
+/// here. Defined on every double: NaN propagates, `+-0` and `+-inf` return
+/// themselves, and `cbrt(-x) = -cbrt(x)`, so a negative finite argument has a
+/// negative finite root.
+///
+/// `f64::cbrt` calls the platform libm, which is not required to round
+/// correctly and differs between platforms. This one reduces `|x| = m 2^(3q)`
+/// with `m` in `[1, 8)` exactly, takes Newton steps on `y^3 = m` in plain
+/// doubles, then one Newton correction with the residual `m - y^3` formed in
+/// double-double, so the corrected root is good to about 2^-100 relative and
+/// rounds once. `2^q` is a normal power of two and the root of `m` lies in
+/// `[1, 2)`, so the final scaling is exact, subnormal arguments included.
+pub fn cbrt(x: f64) -> f64 {
+    if x.is_nan() || x == 0.0 || x.is_infinite() {
+        return x;
+    }
+    let mut ax = x.abs();
+    // A subnormal is scaled by 2^54 (exact), a multiple of three in the exponent.
+    let mut e: i32 = 0;
+    if ax < f64::MIN_POSITIVE {
+        ax *= f64::from_bits(0x4350_0000_0000_0000); // 2^54
+        e -= 54;
+    }
+    let bits = ax.to_bits();
+    e += ((bits >> 52) & 0x7ff) as i32 - 1023;
+    // e = 3q + r with r in {0, 1, 2}, so |x| = (f 2^r) 2^(3q), f in [1, 2).
+    let q = e.div_euclid(3);
+    let r = e.rem_euclid(3);
+    let m = f64::from_bits((bits & 0x000f_ffff_ffff_ffff) | (((r + 1023) as u64) << 52));
+    // A chord through (1, 1) and (8, 2) starts within 11% of the root, above
+    // or below it. Newton on y^3 = m roughly squares the relative error each
+    // step and, from the second step on, approaches the root from above:
+    // inv: after step i the relative error is at most about 0.11^(2^i).
+    // term: a fixed six steps, past the 2^-52 a double can hold.
+    let mut y = 1.0 + (m - 1.0) / 7.0;
+    for _ in 0..6 {
+        y -= (y * y * y - m) / (3.0 * y * y);
+    }
+    // One more Newton step with the residual m - y^3 in double-double: y^2 is
+    // formed exactly, y^3 to about 2^-104 relative, so the step leaves an
+    // error near (2^-52)^2 plus that, about 2^-100 relative.
+    let (p, pe) = two_prod(y, y);
+    let cube = Dd { hi: p, lo: pe }.mul_f(y);
+    let residual = Dd::from(m).add(Dd {
+        hi: -cube.hi,
+        lo: -cube.lo,
+    });
+    // y + step is one IEEE addition, so the root is rounded exactly once.
+    let root = y + residual.hi / (3.0 * p);
+    root * pow2(q) * x.signum()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -833,6 +886,80 @@ mod tests {
             assert_eq!(powf(2.0, f64::from(n)), 2f64.powi(n));
             assert_eq!(powf(-3.0, f64::from(n)), powi(-3.0, n), "(-3)^{n}");
         }
+    }
+
+    // (argument bits, correctly rounded cube root bits), the roots from exact
+    // integer arithmetic (the root is rounded by comparing the cube of the
+    // rounding midpoint with the argument as an exact rational). The first eight
+    // are arguments where the x86_64-pc-windows-gnu libm `cbrt` returns the
+    // other neighbour.
+    const CBRT_REF: &[(u64, u64)] = &[
+        (0x9710_1dce_4e7b_fb79, 0xb250_09e9_4a7c_c777),
+        (0x3cd2_e144_d6e8_f2cf, 0x3ee5_4d5a_62f8_9123),
+        (0x544b_0ec7_6d00_616d, 0x46b8_0460_378e_d979),
+        (0x44db_9b7e_9a31_9aef, 0x4193_30ca_fd53_8f93),
+        (0x0d09_81e8_c1fa_7be4, 0x2ef7_8ca2_a26e_b9cf),
+        (0x4458_7021_3498_f7f5, 0x4167_372c_e4e2_04f3),
+        (0xbc3a_5b41_9a43_afd2, 0xbeb2_e570_f354_811b),
+        (0x3d77_4cf8_41ee_8ab9, 0x3f1c_c9eb_3f8e_39b3),
+        (0x4000_0000_0000_0000, 0x3ff4_28a2_f98d_728b), // 2
+        (0x4008_0000_0000_0000, 0x3ff7_1374_4912_3ef6), // 3
+        (0x4024_0000_0000_0000, 0x4001_3c48_4138_704f), // 10
+        (0x3fb9_9999_9999_999a, 0x3fdd_b4c7_760b_cff3), // 0.1
+        (0x3fe0_0000_0000_0000, 0x3fe9_65fe_a53d_6e3d), // 0.5
+        (0x01a5_6e1f_c2f8_f359, 0x2b2b_ff2e_e48e_0530), // 1e-300
+        (0xc014_0000_0000_0000, 0xbffb_5c0f_bcfe_c4d4), // -5
+    ];
+
+    #[test]
+    fn cbrt_is_correctly_rounded_on_reference_arguments() {
+        for &(x, want) in CBRT_REF {
+            let x = f64::from_bits(x);
+            assert_eq!(cbrt(x).to_bits(), want, "cbrt({x:e})");
+            // The same bits when the argument is not a compile-time constant,
+            // so a release build cannot fold the call to other bits.
+            assert_eq!(
+                cbrt(std::hint::black_box(x)).to_bits(),
+                want,
+                "cbrt({x:e}) at run time"
+            );
+        }
+    }
+
+    /// The edges of `cbrt`'s domain: the values returned unchanged, the
+    /// subnormal scaling, the extremes of the exponent reduction, exact cubes,
+    /// and the top of `[1, 8)` whose root rounds up to 2.
+    #[test]
+    fn cbrt_boundaries() {
+        let b = f64::from_bits;
+        let bits = |x: f64| x.to_bits();
+        assert!(cbrt(f64::NAN).is_nan());
+        assert_eq!(bits(cbrt(0.0)), bits(0.0));
+        assert_eq!(bits(cbrt(-0.0)), bits(-0.0));
+        assert_eq!(cbrt(f64::INFINITY), f64::INFINITY);
+        assert_eq!(cbrt(f64::NEG_INFINITY), f64::NEG_INFINITY);
+        let cases: &[(u64, u64)] = &[
+            (0x0000_0000_0000_0001, 0x2990_0000_0000_0000), // smallest subnormal, 2^-1074
+            (0x000f_ffff_ffff_ffff, 0x2aa4_28a2_f98d_728a), // largest subnormal
+            (0x0010_0000_0000_0000, 0x2aa4_28a2_f98d_728b), // f64::MIN_POSITIVE
+            (0x7fef_ffff_ffff_ffff, 0x5544_28a2_f98d_728b), // f64::MAX
+            (0x401f_ffff_ffff_ffff, 0x4000_0000_0000_0000), // 8 - ulp rounds to 2
+            (0x3ff0_0000_0000_0001, 0x3ff0_0000_0000_0000), // 1 + ulp rounds to 1
+        ];
+        for &(x, want) in cases {
+            assert_eq!(bits(cbrt(b(x))), want, "cbrt({:e})", b(x));
+            assert_eq!(bits(cbrt(-b(x))), want | (1 << 63), "cbrt(-{:e})", b(x));
+        }
+        for n in -40..=40 {
+            let n = f64::from(n);
+            assert_eq!(cbrt(n * n * n), n, "cbrt({n}^3)");
+        }
+        assert_eq!(cbrt(1e-300), 1e-100);
+        assert_eq!(cbrt(0.125), 0.5);
+        assert_eq!(
+            cbrt(b(0x0000_0000_0000_0008)),
+            b(0x2990_0000_0000_0000) * 2.0
+        );
     }
 
     #[test]
