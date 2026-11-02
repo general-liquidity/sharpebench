@@ -84,6 +84,12 @@ open -> committed -> scoring -> published
    board's header is also checked against its window file (see
    [the header and the window file](#the-header-and-the-window-file)).
 
+8. **`arena live-window <dir> --window <spec.json> --entrants <manifest.json>
+   --data-feed replay:<dataset.csv> --key <key> [--simulated-clock]`** does
+   steps 2 to 7 for a window whose entrants run under
+   [live forward capture](#live-forward-capture), driving each committed image
+   bar by bar. See the [live window runbook](live-window.md).
+
 All subcommands honor the global `--json` flag and the `env:NAME` /
 `file:PATH` key convention.
 
@@ -277,10 +283,13 @@ provider served the model snapshot the route names (the host knows what it
 asked for, not what answered), that the host clock is true time, or that the
 host did not hold the data early. The timestamps and the seal are the
 operator's statement, under the same custody re-execution already rests on.
-Running a live window needs a host that stays up for the whole window and a
-live data feed; neither ships here. The recorder, the wrappers and the intake
-rules are built and tested with a fake provider behind the real gateway, a
-fake image digest and a fake clock.
+`arena live-window` runs a whole live window from open to a verified board;
+the [live window runbook](live-window.md) describes it. It needs a host that
+stays up for the whole window and a live data feed. The host side ships; a
+live market-data adapter does not, so the command takes bars from a replay
+file, for tests and rehearsals. The recorder, the wrappers, the runner and the
+intake rules are built and tested with a fake provider behind the real
+gateway, a fake image digest and a simulated clock.
 
 ### Certifying boards
 

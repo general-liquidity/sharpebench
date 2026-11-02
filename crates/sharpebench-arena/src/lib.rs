@@ -38,6 +38,7 @@ pub mod forward_evidence;
 pub mod intake;
 pub mod leaderboard_export;
 pub mod live_capture;
+pub mod live_window;
 mod persistence;
 pub mod sandbox;
 mod verify_certification;
@@ -57,6 +58,11 @@ pub use intake::{
 pub use live_capture::{
     certify_live_log, seal_live_log, LiveCaptureRoot, LiveLogHeader, LiveLogRefusal, LiveRecorder,
     SealedLiveLog, LIVE_CAPTURE_WINDOW_SCHEMA_VERSION,
+};
+pub use live_window::{
+    run_live_window, HostClock, LiveBar, LiveEntrant, LiveEntrantReport, LiveEntrants, LiveFeed,
+    LiveHost, LiveWindowReport, LiveWindowRun, LiveWindowSpec, ReplayFeed, SimulatedClock,
+    LIVE_ENTRANTS_SCHEMA, LIVE_WINDOW_SPEC_SCHEMA,
 };
 pub use sandbox::{
     check_sandbox_readiness, classify_container_exit, docker_available, probe_egress,

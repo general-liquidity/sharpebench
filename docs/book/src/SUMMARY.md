@@ -32,6 +32,7 @@
   - [Entrant image preflight](image-preflight.md)
   - [Host-observed model gateway](model-gateway.md)
   - [Forward evidence ledger](forward-evidence.md)
+  - [Running a live window](live-window.md)
   - [Leaderboard export](leaderboard-export.md)
 - [Importing a rival field](importing.md)
 - [Benchmark integrity](integrity.md)
