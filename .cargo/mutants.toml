@@ -70,6 +70,10 @@ exclude_re = [
     '^crates/sharpebench-stats/src/det_math\.rs:524:10: replace < with <= in powf$',
     # powi 553:10: at n = 0 the loop leaves acc = 1, and 1 / 1 = 1.
     '^crates/sharpebench-stats/src/det_math\.rs:553:10: replace < with <= in powi$',
+    # cbrt 599:11: at ax = f64::MIN_POSITIVE the 2^54 rescale is exact and e absorbs it: same m, same q, same result.
+    '^crates/sharpebench-stats/src/det_math\.rs:599:11: replace < with <= in cbrt$',
+    # cbrt 608:59: the masked mantissa has a zero exponent field, so OR and XOR with the exponent bits agree.
+    '^crates/sharpebench-stats/src/det_math\.rs:608:59: replace \| with \^ in cbrt$',
 
     # Equivalent mutants, each anchored to its file and line so it is the only
     # mutant the pattern drops; if the code moves, the mutant reappears and the

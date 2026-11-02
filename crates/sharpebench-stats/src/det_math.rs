@@ -558,6 +558,25 @@ pub fn powi(x: f64, n: i32) -> f64 {
     }
 }
 
+/// The cube root of `m` in `[1, 8)` to a few ulps, in plain doubles.
+///
+/// The chord through (1, 1) and (8, 2) lies under the concave root and starts
+/// within 11% of it. Newton on y^3 = m roughly squares the relative error each
+/// step and, from the first step on, approaches from above.
+fn cbrt_newton(m: f64) -> f64 {
+    // inv: after step i the relative error is at most about 0.11^(2^i).
+    // term: a fixed four steps, which take 0.11 to at most 1.2e-15 in exact
+    // arithmetic (measured at 2001 points of [1, 8) in 60-digit decimals),
+    // about five ulps. No more are taken: the double-double step in `cbrt`
+    // squares what is left, so this bound is what makes `cbrt` correctly
+    // rounded, and `cbrt_newton_reaches_a_few_ulps` pins it.
+    let mut y = 1.0 + (m - 1.0) / 7.0;
+    for _ in 0..4 {
+        y -= (y * y * y - m) / (3.0 * y * y);
+    }
+    y
+}
+
 /// Deterministic real cube root, correctly rounded like the other functions
 /// here. Defined on every double: NaN propagates, `+-0` and `+-inf` return
 /// themselves, and `cbrt(-x) = -cbrt(x)`, so a negative finite argument has a
@@ -587,19 +606,7 @@ pub fn cbrt(x: f64) -> f64 {
     let q = e.div_euclid(3);
     let r = e.rem_euclid(3);
     let m = f64::from_bits((bits & 0x000f_ffff_ffff_ffff) | (((r + 1023) as u64) << 52));
-    // The chord through (1, 1) and (8, 2) lies under the concave root and
-    // starts within 11% of it. Newton on y^3 = m roughly squares the relative
-    // error each step and, from the first step on, approaches from above:
-    // inv: after step i the relative error is at most about 0.11^(2^i).
-    // term: a fixed four steps, which take 0.11 to at most 1.2e-15 in exact
-    // arithmetic (measured at 2001 points of [1, 8) in 60-digit decimals), about
-    // five ulps. No more are taken: the double-double step below squares that,
-    // and a worse start would leave an error it cannot square away, which the
-    // reference pins catch.
-    let mut y = 1.0 + (m - 1.0) / 7.0;
-    for _ in 0..4 {
-        y -= (y * y * y - m) / (3.0 * y * y);
-    }
+    let y = cbrt_newton(m);
     // One more Newton step with the residual m - y^3 in double-double: y^2 is
     // formed exactly, y^3 to about 2^-104 relative, so the step leaves an
     // error near (1.2e-15)^2 plus that, about 2^-99 relative.
@@ -611,7 +618,8 @@ pub fn cbrt(x: f64) -> f64 {
     });
     // y + step is one IEEE addition, so the root is rounded exactly once.
     let root = y + residual.hi / (3.0 * p);
-    root * pow2(q) * x.signum()
+    // The scaling by a normal power of two is exact, and so is the sign.
+    (root * pow2(q)).copysign(x)
 }
 
 #[cfg(test)]
@@ -926,6 +934,28 @@ mod tests {
                 cbrt(std::hint::black_box(x)).to_bits(),
                 want,
                 "cbrt({x:e}) at run time"
+            );
+        }
+    }
+
+    /// Four Newton steps from the chord reach a few ulps on all of `[1, 8)`,
+    /// ends included, which the double-double step then squares. A worse
+    /// start (or fewer steps) stays tens of ulps off at an end.
+    #[test]
+    fn cbrt_newton_reaches_a_few_ulps() {
+        let b = f64::from_bits;
+        // (m, correctly rounded cube root of m)
+        let cases: &[(f64, f64)] = &[
+            (1.0, 1.0),
+            (2.0, b(0x3ff4_28a2_f98d_728b)),
+            (5.0, b(0x3ffb_5c0f_bcfe_c4d4)),
+            (b(0x401f_ffff_ffff_ffff), 2.0),
+        ];
+        for &(m, root) in cases {
+            let y = cbrt_newton(m);
+            assert!(
+                ((y - root) / root).abs() <= 2e-15,
+                "cbrt_newton({m}) = {y:e}, root {root:e}"
             );
         }
     }
