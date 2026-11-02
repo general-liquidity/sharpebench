@@ -6404,4 +6404,208 @@ mod tests {
             assert_eq!(s.rank_ordinal, p.rank_ordinal);
         }
     }
+
+    /// The weighted median at hand-checked values: the first value whose
+    /// cumulative weight passes half the total, and the midpoint where the
+    /// cumulative weight lands exactly on half.
+    #[test]
+    fn the_weighted_median_takes_the_midpoint_only_at_exactly_half() {
+        assert_eq!(weighted_median(&mut []), 0.0);
+        assert_eq!(weighted_median(&mut [(4.0, 0.5)]), 4.0);
+        // Equal weights, even count: half lands on the first value, midpoint 2.
+        assert_eq!(weighted_median(&mut [(3.0, 1.0), (1.0, 1.0)]), 2.0);
+        assert_eq!(
+            weighted_median(&mut [(1.0, 1.0), (2.0, 1.0), (6.0, 1.0), (10.0, 1.0)]),
+            4.0
+        );
+        // Total 7, half 3.5: cumulative 1, 2, 7, so the heavy vote is the median.
+        assert_eq!(
+            weighted_median(&mut [(10.0, 5.0), (1.0, 1.0), (2.0, 1.0)]),
+            10.0
+        );
+    }
+
+    /// Three copies crowd the low end of a five-vote field and two independent
+    /// votes sit above them, so the weighting raises the dispersion: weights
+    /// 1/3, 1/3, 1/3, 1, 1; weighted 0.67528 against plain 0.65803. The vote at
+    /// 1.5 is the most influential, and its leverage is read on the branch that
+    /// set the bar: without it the weighted dispersion is 0.55565 (leverage
+    /// 1.21529), where the plain one would be 0.45735 (leverage 1.47650).
+    #[test]
+    fn leverage_is_read_on_the_weighted_branch_when_the_weighting_set_the_bar() {
+        let sharpes = [0.0, 0.1, 0.2, 1.0, 1.5];
+        let votes: Vec<Vote> = sharpes
+            .iter()
+            .enumerate()
+            .map(|(i, &sharpe)| Vote {
+                index: i,
+                members: vec![i],
+                sharpe,
+                stream: i,
+            })
+            .collect();
+        let shared = SharedVariance {
+            rows: (0..5)
+                .map(|a| {
+                    (0..5)
+                        .map(|b| if a == b || (a < 3 && b < 3) { 1.0 } else { 0.0 })
+                        .collect()
+                })
+                .collect(),
+        };
+        let refs: Vec<&Vote> = votes.iter().collect();
+        assert_eq!(
+            independence_weights(&refs, &shared),
+            vec![1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0, 1.0, 1.0]
+        );
+        let plain = plain_dispersion(&votes, None);
+        let sr_std = field_dispersion(&votes, &shared, None);
+        assert!((sr_std - 0.675_277_720_645_365_3).abs() < 1e-12, "{sr_std}");
+        assert!((plain - 0.658_027_355_054_484_1).abs() < 1e-12, "{plain}");
+        let ids = ["a", "b", "c", "d", "e"];
+        let lev = most_influential_vote(&votes, &shared, sr_std, &ids).unwrap();
+        assert_eq!(lev.agent_id, "e");
+        assert!(
+            (lev.measured_dispersion_without_it - 0.555_652_769_272_321_7).abs() < 1e-12,
+            "{}",
+            lev.measured_dispersion_without_it
+        );
+        let leverage = lev.leverage.unwrap();
+        assert!((leverage - 1.215_287_240_500_4).abs() < 1e-12, "{leverage}");
+    }
+
+    /// The influence bound's reach by field size: the five-vote entry for any
+    /// smaller field, the simulated table from five to thirty, and past thirty
+    /// the largest of `votes` normal draws plus the 0.4 scale allowance.
+    #[test]
+    fn the_influence_reach_follows_its_table_and_tail_by_field_size() {
+        for votes in [0, 2, 4, 5] {
+            assert_eq!(influence_bound_z(votes), 5.28, "{votes} votes");
+        }
+        assert_eq!(influence_bound_z(7), 4.12);
+        assert_eq!(influence_bound_z(30), 3.82);
+        assert_eq!(influence_bound_z(31), norm_ppf(1.0 - 0.01 / 31.0) + 0.4);
+        assert!((influence_bound_z(31) - 3.82).abs() < 0.03);
+    }
+
+    /// On an exact tie the plain branch set the bar, since the weighted one is
+    /// taken only when it is strictly larger, so leverage is read on the plain
+    /// branch too. Four votes whose shares make the weighted dispersion equal
+    /// the plain one to the last bit (share 0.0021571... between the first two,
+    /// found by bisection): the most influential vote is the top one, and the
+    /// dispersion without it is the plain 0.73711, not the weighted 0.69223.
+    #[test]
+    fn on_an_exact_tie_leverage_is_read_on_the_plain_branch() {
+        let votes: Vec<Vote> = [0.0, 0.3, 1.4, 2.0]
+            .iter()
+            .enumerate()
+            .map(|(i, &sharpe)| Vote {
+                index: i,
+                members: vec![i],
+                sharpe,
+                stream: i,
+            })
+            .collect();
+        let t = f64::from_bits(0x3f61_abcb_aa93_7900);
+        let shared = SharedVariance {
+            rows: vec![
+                vec![1.0, t, 0.81, 0.61],
+                vec![t, 1.0, 0.84, 0.77],
+                vec![0.81, 0.84, 1.0, 0.89],
+                vec![0.61, 0.77, 0.89, 1.0],
+            ],
+        };
+        let plain = plain_dispersion(&votes, None);
+        let weighted = weighted_dispersion(&votes, &shared, None).unwrap();
+        assert_eq!(weighted.to_bits(), plain.to_bits(), "the fixture is a tie");
+        let without_plain = plain_dispersion(&votes, Some(3));
+        let without_weighted = weighted_dispersion(&votes, &shared, Some(3)).unwrap();
+        assert!((without_plain - without_weighted).abs() > 0.04);
+        let lev = most_influential_vote(&votes, &shared, plain, &["a", "b", "c", "d"]).unwrap();
+        assert_eq!(lev.agent_id, "d");
+        assert_eq!(
+            lev.measured_dispersion_without_it.to_bits(),
+            without_plain.to_bits()
+        );
+    }
+
+    /// Equal weights leave the dispersion to the plain branch, so a field the
+    /// weighting cannot move keeps its plain value bit for bit: no shares, and
+    /// a share every pair holds alike. A share of 0.3 sums to bitwise equal
+    /// overlaps in every row; 0.4 does not, because each row adds its own 1.0
+    /// at a different position, and its weights then differ by an ulp.
+    #[test]
+    fn equal_independence_weights_have_no_weighted_dispersion() {
+        let votes: Vec<Vote> = [0.0, 0.3, 1.4, 2.0]
+            .iter()
+            .enumerate()
+            .map(|(i, &sharpe)| Vote {
+                index: i,
+                members: vec![i],
+                sharpe,
+                stream: i,
+            })
+            .collect();
+        let alike = |share: f64| SharedVariance {
+            rows: (0..4)
+                .map(|a| (0..4).map(|b| if a == b { 1.0 } else { share }).collect())
+                .collect(),
+        };
+        for share in [0.0, 0.3] {
+            assert_eq!(weighted_dispersion(&votes, &alike(share), None), None);
+            assert_eq!(
+                field_dispersion(&votes, &alike(share), None).to_bits(),
+                plain_dispersion(&votes, None).to_bits()
+            );
+        }
+    }
+
+    /// The shared variance of two streams, at hand-worked values. Over 36 bars
+    /// tau = 9 / 36 = 0.25. `a` alternates and `c` has period four, so both are
+    /// centred and orthogonal with equal norms, and `b = 0.8 a + 0.6 c` has a
+    /// centred correlation of 0.8 with `a`: share (0.64 - 0.25) / 0.75 = 0.52.
+    /// A shifted, scaled copy shares everything, and a pair of nine bars
+    /// (tau = 1) can resolve nothing.
+    #[test]
+    fn shared_variance_is_the_squared_correlation_in_excess_of_noise() {
+        let a: Vec<f64> = (0..36)
+            .map(|t| if t % 2 == 0 { 1.0 } else { -1.0 })
+            .collect();
+        let c: Vec<f64> = (0..36)
+            .map(|t| if t % 4 < 2 { 1.0 } else { -1.0 })
+            .collect();
+        let b: Vec<f64> = a.iter().zip(&c).map(|(x, y)| 0.8 * x + 0.6 * y).collect();
+        let copy: Vec<f64> = a.iter().map(|x| 2.0 * x + 3.0).collect();
+        let shared = SharedVariance::of(&[&a, &b, &copy]);
+        assert_eq!(shared.rows[0][0], 1.0);
+        assert!(
+            (shared.rows[0][1] - 0.52).abs() < 1e-12,
+            "{}",
+            shared.rows[0][1]
+        );
+        assert_eq!(shared.rows[1][0], shared.rows[0][1]);
+        assert_eq!(shared.rows[0][2], 1.0);
+        let short = SharedVariance::of(&[&a[..9], &copy[..9]]);
+        assert_eq!(short.rows[0][1], 0.0);
+    }
+
+    /// A field whose median pairwise distance is zero states no scale, so the
+    /// influence bound clips nobody even though one vote stands apart: four
+    /// equal votes and one at 2 make six zero gaps out of ten.
+    #[test]
+    fn a_field_with_no_robust_scale_clips_no_vote() {
+        let mut votes: Vec<Vote> = [1.0, 1.0, 1.0, 1.0, 2.0]
+            .iter()
+            .enumerate()
+            .map(|(i, &sharpe)| Vote {
+                index: i,
+                members: vec![i],
+                sharpe,
+                stream: i,
+            })
+            .collect();
+        let clips = clip_distant_votes(&mut votes, &SharedVariance::default(), 0.0);
+        assert!(clips.is_empty());
+        assert_eq!(votes[4].sharpe, 2.0);
+    }
 }
