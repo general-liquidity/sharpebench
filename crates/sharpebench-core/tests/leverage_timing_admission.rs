@@ -149,6 +149,8 @@ fn going_flat_once_significant_is_refused_for_the_risk_it_stopped_carrying() {
         .as_deref()
         .expect("a typed refusal");
     assert!(reason.contains(EXPOSURE_PATH_UNPROVEN), "{reason}");
+    // A refusal is not also reported as the statistic being unavailable.
+    assert_eq!(score.exposure_path_error, None);
 
     // Scale-free: the same decisions at a thousandth of the size are refused too.
     let small: Vec<Vec<f64>> = track

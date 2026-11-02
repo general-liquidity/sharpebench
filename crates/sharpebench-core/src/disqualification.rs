@@ -451,6 +451,13 @@ mod tests {
             &ScoreConfig::default(),
         );
         assert!(score.rank_eligible);
+        // Exactly at the bar clears it; at alpha does not.
+        score.deflated_sharpe = thresholds().dsr_bar;
+        score.bootstrap_p = thresholds().alpha;
+        assert_eq!(
+            classify_disqualification(&score, &thresholds(), None, None),
+            vec![FailReason::BootstrapInsignificant]
+        );
         score.deflated_sharpe = 0.5;
         score.bootstrap_p = 0.5;
         assert_eq!(
