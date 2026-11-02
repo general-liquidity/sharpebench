@@ -384,7 +384,7 @@ fn classify_board(
 /// over the composite score: nothing here changes eligibility semantics.
 fn run_disqualify(args: &[String], json: bool) -> i32 {
     let Some(path) = args.get(2).filter(|p| !p.starts_with('-')) else {
-        eprintln!("usage: sharpebench disqualify <submissions.json> [--require-run-keys] [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode MODE] [--benchmark-agent ID] [--known <known.csv>]... [--rediscovery-threshold T] [--oos-windows N] [--json]");
+        eprintln!("usage: sharpebench disqualify <submissions.json> [--require-run-keys] [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode MODE] [--benchmark-agent ID] [--psr-standard-error observed|benchmark] [--known <known.csv>]... [--rediscovery-threshold T] [--oos-windows N] [--json]");
         return 2;
     };
     let data = match read_file(path) {

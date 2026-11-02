@@ -63,6 +63,7 @@ pub mod exposure_path;
 pub mod fdr;
 pub mod forward_eprocess;
 pub mod moment_credit;
+pub mod null_standard_error;
 pub mod observed_loss;
 pub mod opt_in_diagnostics;
 pub mod paired_randomization;
@@ -100,7 +101,8 @@ pub use forward_eprocess::{
     BET_CAP_FRACTION, DEFAULT_LOSS_BOUND, WARMUP_BARS, WEALTH_CEILING,
 };
 pub use moment_credit::{
-    certify_without_moment_credit, deflated_sharpe_without_moment_credit,
+    certify_without_moment_credit, certify_without_moment_credit_at,
+    deflated_sharpe_without_moment_credit, deflated_sharpe_without_moment_credit_at,
     NOT_CERTIFIED_WITHOUT_MOMENT_CREDIT,
 };
 pub use observed_loss::{shows_an_observed_loss, NO_OBSERVED_LOSS};
@@ -115,7 +117,8 @@ pub use selection::{
     MIN_RECOMMENDED_SELECTION_ALPHA,
 };
 pub use serial_correlation::{
-    certify_under_serial_correlation, serially_corrected_deflated_sharpe,
+    certify_under_serial_correlation, certify_under_serial_correlation_at,
+    serially_corrected_deflated_sharpe, serially_corrected_deflated_sharpe_at,
     within_window_autocorrelations, SerialCorrection, NOT_CERTIFIED_UNDER_SERIAL_CORRELATION,
 };
 pub use stylized_facts::{

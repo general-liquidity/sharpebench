@@ -52,9 +52,16 @@ fn main() -> ExitCode {
     match subcommand {
         Some("run") => run_demo(&args, json),
         Some("score") => match args.get(2) {
-            Some(path) => run_score(path, &args, json),
+            Some(path) => run_score(path, &args, json, ScoreOutput::Board),
             None => {
-                eprintln!("usage: sharpebench score <submissions.json> [--require-run-keys] [--rank-mode <id>] [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode <mode>] [--benchmark-agent <id>] [--diagnostics <list>] [--json]");
+                eprintln!("usage: sharpebench score <submissions.json> [--require-run-keys] [--rank-mode <id>] [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode <mode>] [--benchmark-agent <id>] [--psr-standard-error observed|benchmark] [--diagnostics <list>] [--pareto] [--headline] [--json]");
+                ExitCode::from(2)
+            }
+        },
+        Some("pareto") => match args.get(2) {
+            Some(path) => run_score(path, &args, json, ScoreOutput::ParetoOnly),
+            None => {
+                eprintln!("usage: sharpebench pareto <submissions.json> [score flags] [--json]");
                 ExitCode::from(2)
             }
         },
@@ -621,6 +628,23 @@ fn help() {
         "                       --headline: add a headline verdict column (JSON: a `headlines` list beside"
     );
     println!("                         the sealed board); never changes a score or the rank");
+    println!(
+        "                       --psr-standard-error observed|benchmark: where every PSR and deflated Sharpe"
+    );
+    println!(
+        "                         evaluates its standard error (default observed, the plug-in; benchmark is the"
+    );
+    println!("                         opt-in null-SE methodology, recorded on every row)");
+    println!(
+        "                       --pareto: add a multi-objective front column (never a rank input)"
+    );
+    println!(
+        "  sharpebench pareto <submissions.json>  the Pareto front over return, drawdown, turnover, cost,"
+    );
+    println!(
+        "                         volatility and expected shortfall, all and eligible-only, with bootstrap"
+    );
+    println!("                         membership frequencies; takes the score flags; never a rank input");
     println!(
         "  sharpebench commit <agent> <window> <digest> <salt> [--fault-plan <plan.json>]  forward-attestation pre-registration"
     );
@@ -3305,7 +3329,15 @@ fn run_reexecution(
     }
 }
 
-fn run_score(path: &str, args: &[String], json: bool) -> ExitCode {
+/// What `run_score` prints: the board (with the opt-in front column under
+/// `--pareto`), or the `pareto` command's report alone.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ScoreOutput {
+    Board,
+    ParetoOnly,
+}
+
+fn run_score(path: &str, args: &[String], json: bool, output: ScoreOutput) -> ExitCode {
     let data = match std::fs::read_to_string(path) {
         Ok(d) => d,
         Err(e) => {
@@ -3361,6 +3393,26 @@ fn run_score(path: &str, args: &[String], json: bool) -> ExitCode {
         Some(mode) => sharpebench_core::rank_certified(&subs, &declarations, &cfg, mode),
         None => sharpebench_core::rank_declared(&subs, &declarations, &cfg),
     };
+    // `--pareto` and the `pareto` command are opt-in and read the finished
+    // board: the report is computed beside it and never reorders or edits it.
+    let pareto =
+        (output == ScoreOutput::ParetoOnly || args.iter().any(|a| a == "--pareto")).then(|| {
+            sharpebench_core::pareto_report(
+                &subs,
+                &board,
+                &cfg,
+                sharpebench_core::ParetoBootstrap::from_config(&cfg),
+            )
+        });
+    if output == ScoreOutput::ParetoOnly {
+        let report = pareto.expect("the pareto command computes the report");
+        if json {
+            emit_json(&serde_json::json!({ "pareto": report }));
+        } else {
+            print_pareto(&report);
+        }
+        return ExitCode::SUCCESS;
+    }
     // `--headline` is opt-in. Absent, the output is byte for byte what it was;
     // present, the verdicts are computed from the finished board and reported
     // beside it, never written into a row, so the sealed board is unchanged.
@@ -3370,9 +3422,9 @@ fn run_score(path: &str, args: &[String], json: bool) -> ExitCode {
             &sharpebench_core::DisqualThresholds::from_score_config(&cfg),
         )
     });
-    match (diagnostics, headlines) {
-        (None, None) => emit_board(&board, json),
-        (requested, headlines) => {
+    match (diagnostics, headlines, pareto) {
+        (None, None, None) => emit_board(&board, json),
+        (requested, headlines, pareto) => {
             let report = requested
                 .as_ref()
                 .map(|r| sharpebench_core::sharpe_diagnostics(&subs, &board, &cfg, r));
@@ -3386,16 +3438,87 @@ fn run_score(path: &str, args: &[String], json: bool) -> ExitCode {
                 if let Some(headlines) = &headlines {
                     out["headlines"] = serde_json::json!(headlines);
                 }
+                if let Some(pareto) = &pareto {
+                    out["pareto"] = serde_json::json!(pareto);
+                }
                 emit_json(&out);
             } else {
-                print_board_with(&board, headlines.as_deref());
+                print_board_with(&board, headlines.as_deref(), pareto.as_ref());
                 if let (Some(report), Some(requested)) = (&report, &requested) {
                     print_sharpe_diagnostics(report, requested);
+                }
+                if let Some(pareto) = &pareto {
+                    print_pareto_note(pareto);
                 }
             }
         }
     }
     ExitCode::SUCCESS
+}
+
+/// One front cell: membership, then the bootstrap frequency when there is one.
+/// `refused` when the row takes no part, `-` for a row the front does not
+/// cover (the eligible front of an ineligible row).
+fn front_cell(on: Option<bool>, frequency: Option<f64>, refused: bool) -> String {
+    if refused {
+        return "refused".to_string();
+    }
+    match (on, frequency) {
+        (None, _) => "-".to_string(),
+        (Some(on), Some(f)) => format!("{}({f:.2})", yn(on)),
+        (Some(on), None) => yn(on).to_string(),
+    }
+}
+
+/// The `pareto` command's table: every axis, both fronts and who dominates.
+fn print_pareto(report: &sharpebench_core::ParetoReport) {
+    let cell = |v: Option<f64>| v.map_or_else(|| "n/a".to_string(), |v| format!("{v:.5}"));
+    println!(
+        "{:<18} {:>10} {:>8} {:>8} {:>9} {:>9} {:>10} {:>10} {:>10}  dominated by",
+        "agent", "mean_ret", "max_dd", "turnov", "cost", "vol", "ES(5%)", "front", "elig_front"
+    );
+    println!("{}", "-".repeat(112));
+    for row in &report.rows {
+        let refused = row.refused.is_some();
+        println!(
+            "{:<18} {:>10} {:>8} {:>8} {:>9} {:>9} {:>10} {:>10} {:>10}  {}",
+            truncate(&row.agent_id, 18),
+            cell(row.axes.mean_return),
+            cell(row.axes.max_drawdown),
+            cell(row.axes.turnover),
+            cell(row.axes.cost),
+            cell(row.axes.volatility),
+            cell(row.axes.expected_shortfall),
+            front_cell(Some(row.on_front), row.front_frequency, refused),
+            front_cell(row.on_eligible_front, row.eligible_front_frequency, refused),
+            row.dominated_by.join(", "),
+        );
+    }
+    for row in report.rows.iter().filter(|r| r.refused.is_some()) {
+        println!(
+            "{}: refused, {}",
+            row.agent_id,
+            row.refused.as_deref().unwrap_or_default()
+        );
+    }
+    print_pareto_note(report);
+}
+
+/// The note every front display ends with: what the front is and is not.
+fn print_pareto_note(report: &sharpebench_core::ParetoReport) {
+    println!(
+        "\nPareto front over mean return (up), max drawdown, turnover, cost, volatility (down) and \
+         5% expected shortfall (up). Reported only: never a rank input; the board order is the \
+         deflated Sharpe's."
+    );
+    match &report.bootstrap_error {
+        None => println!(
+            "(f) is the share of {} stationary-bootstrap resamples (seed {}, block probability {}) \
+             in which the row stays on that front; turnover and cost are held fixed.",
+            report.bootstrap.n_boot, report.bootstrap.seed, report.bootstrap.block_prob
+        ),
+        Some(error) => println!("No bootstrap frequencies: {error}."),
+    }
 }
 
 /// The opt-in diagnostics as a table after the board. A value that could not
@@ -3557,6 +3680,7 @@ fn score_config_from_args(args: &[String]) -> Result<ScoreConfig, String> {
         "--execution-seeds-per-window",
         "--pass-mode",
         "--benchmark-agent",
+        "--psr-standard-error",
     ] {
         if args.iter().any(|arg| arg == name)
             && flag_value(args, name)
@@ -3572,6 +3696,9 @@ fn score_config_from_args(args: &[String]) -> Result<ScoreConfig, String> {
         cfg.execution_seeds_per_window = width;
     }
     apply_pass_mode_flags(args, &mut cfg)?;
+    if let Some(id) = flag_value(args, "--psr-standard-error") {
+        cfg.psr_standard_error = sharpebench_core::PsrStandardError::parse(id)?;
+    }
     Ok(cfg)
 }
 
@@ -3607,12 +3734,18 @@ fn emit_board(board: &[CompositeScore], json: bool) {
 }
 
 fn print_board(board: &[CompositeScore]) {
-    print_board_with(board, None);
+    print_board_with(board, None, None);
 }
 
-/// The board table, with the headline verdict as a last column when
-/// `headlines` is given (one per row, in board order).
-fn print_board_with(board: &[CompositeScore], headlines: Option<&[sharpebench_core::Headline]>) {
+/// The board table, with the opt-in `front` and `elig_front` columns when a
+/// Pareto report is given and the headline verdict as a last column when
+/// `headlines` is given (one per row, in board order). Without either it
+/// prints exactly the board it always has.
+fn print_board_with(
+    board: &[CompositeScore],
+    headlines: Option<&[sharpebench_core::Headline]>,
+    pareto: Option<&sharpebench_core::ParetoReport>,
+) {
     let headline_header = if headlines.is_some() { " headline" } else { "" };
     // The mandate column appears only when some row declared one, so a board
     // with no declarations prints exactly as before.
@@ -3621,12 +3754,29 @@ fn print_board_with(board: &[CompositeScore], headlines: Option<&[sharpebench_co
     // Likewise the certification column: present only under a rank mode.
     let certified = board.iter().any(|s| s.certification.is_some());
     let certified_header = if certified { " certified" } else { "" };
+    // And the front columns: present only when a Pareto report was asked for.
+    let front_header = if pareto.is_some() {
+        format!(" {:>10} {:>10}", "front", "elig_front")
+    } else {
+        String::new()
+    };
     println!(
-        "{:<4} {:<18} {:>9} {:>8} {:>11} {:>6} {:>9} {:>10}{mandate_header}{certified_header}{headline_header}",
+        "{:<4} {:<18} {:>9} {:>8} {:>11} {:>6} {:>9} {:>10}{mandate_header}{certified_header}{front_header}{headline_header}",
         "#", "agent", "DSR", "PSR", "pass^k", "proc", "boot_p", "raw_ret"
     );
     println!("{}", "-".repeat(84));
     for (i, s) in board.iter().enumerate() {
+        // The report is in board order, one row per board row.
+        let front = pareto
+            .and_then(|p| p.rows.get(i))
+            .map_or_else(String::new, |row| {
+                let refused = row.refused.is_some();
+                format!(
+                    " {:>10} {:>10}",
+                    front_cell(Some(row.on_front), row.front_frequency, refused),
+                    front_cell(row.on_eligible_front, row.eligible_front_frequency, refused)
+                )
+            });
         let pos = if s.rank_eligible {
             format!("{}", i + 1)
         } else {
@@ -3655,7 +3805,7 @@ fn print_board_with(board: &[CompositeScore], headlines: Option<&[sharpebench_co
             .and_then(|h| h.get(i))
             .map_or_else(String::new, |h| format!(" {}", h.verdict.as_str()));
         println!(
-            "{:<4} {:<18} {:>9.4} {:>8.4} {:>11} {:>6} {:>9.4} {:>10.5}{mandate}{certification}{verdict}",
+            "{:<4} {:<18} {:>9.4} {:>8.4} {:>11} {:>6} {:>9.4} {:>10.5}{mandate}{certification}{front}{verdict}",
             pos,
             truncate(&s.agent_id, 18),
             s.deflated_sharpe,

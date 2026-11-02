@@ -434,6 +434,22 @@ the finished board and never written into a row, so scores, rank, ordinal and
 the sealed board are unchanged. Without the flag the output is byte-identical to
 a build without it.
 
+`--psr-standard-error observed|benchmark` (also accepted by `disqualify`)
+selects where every PSR and deflated Sharpe on the board evaluates its standard
+error, described under
+[the deflated Sharpe](methodology-deflated-sharpe.md). `observed`, the plug-in,
+is the default and leaves the output byte-identical; `benchmark` is the opt-in
+null-SE methodology and every row records it. Any other value exits 2.
+
+`--pareto` adds `front` and `elig_front` columns to the human board and a
+`pareto` key to the `--json` output, beside `board`. Each cell is `yes` or `no`
+with the bootstrap membership frequency, `refused` for a row that takes no part
+and `-` on the eligible front for an ineligible row. `sharpebench pareto
+<field.json>` takes the same flags and prints the full report alone (`--json`:
+`{"pareto": ...}`): the six axes, both fronts and the dominating agents. Both
+are described under [the multi-objective report](methodology.md). Neither
+changes the board order or any row.
+
 These identity checks do not verify temporal alignment of legacy JSON `runs`.
 The caller still supplies consistent window, seed and period order across the
 field; use [captured trajectory contracts](evidence-contracts.md#captured-trajectories)
@@ -888,7 +904,7 @@ leaves it false rather than blaming an argument that was not the problem.
 ## `disqualify`
 
 ```bash
-sharpebench disqualify <submissions.json> [--require-run-keys] [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode MODE] [--benchmark-agent ID] [--known <known.csv>]... [--rediscovery-threshold T] [--oos-windows N] [--json]
+sharpebench disqualify <submissions.json> [--require-run-keys] [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode MODE] [--benchmark-agent ID] [--psr-standard-error observed|benchmark] [--known <known.csv>]... [--rediscovery-threshold T] [--oos-windows N] [--json]
 ```
 
 Scores a JSON field of submissions (same format as `score`) and names every

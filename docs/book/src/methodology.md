@@ -82,6 +82,28 @@ a track that does nothing, so it is not Pareto-optimal. An empty track has no
 return to compare and beats nobody. The flag is reported only: no gate,
 eligibility rule or rank reads it.
 
+**Multi-objective report** (opt-in: `sharpebench pareto <field.json>`, or a
+`front` and an `elig_front` column on `sharpebench score --pareto`). It computes
+the Pareto front over six axes: mean return (higher is better), max drawdown,
+turnover, cost, volatility (lower is better) and the 5% historical expected
+shortfall as a return (higher is better). It gives the front among every agent
+and among rank-eligible agents only, and for each agent the agents that
+dominate it. Dominance needs an agent at least as good on every axis and
+strictly better on one, so agents equal on every axis are both on the front. A
+row takes part only when all six values are finite numbers: an expected
+shortfall the tail is too thin to estimate (fewer than ten observations in the
+5% tail), or a non-finite value, leaves the row out with the reason, and it
+dominates nobody. As with `pareto_optimal`, a track with no Sharpe ratio is not
+a member but still dominates. Sampling noise is reported, not hidden: each
+pooled track is resampled `n_boot` times with the board's stationary bootstrap
+(its seed and block probability, one shared index path per track length), the
+return-derived axes are recomputed with turnover and cost held fixed, and each
+member gets the fraction of resamples in which it stays on the front. The
+report is never a rank: its rows are in board order, no gate, eligibility rule
+or rank predicate reads it, and `pareto_optimal` keeps its three axes. A front
+over unadjusted axes is exactly what a lucky track can win, which is why the
+rank stays the deflated Sharpe.
+
 ## What the rank does not answer
 
 Two boundaries come straight from Sharpe's own 1994 statement of the ratio, and

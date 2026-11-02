@@ -493,6 +493,7 @@ pub const COMPOSITE_SCORE_VISIBILITY: VisibilityAllowlist = VisibilityAllowlist 
         ("declared_passed_k", V),
         ("declared_mandate_eligible", V),
         ("declared_mandate_ordinal", V),
+        ("psr_standard_error", V),
         (
             "certification",
             Visibility::Nested(&CERTIFICATION_VISIBILITY),

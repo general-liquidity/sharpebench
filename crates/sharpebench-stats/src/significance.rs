@@ -9,7 +9,11 @@
 //! The RNG is a seeded SplitMix64 so a given (data, seed) always yields the same
 //! p-value — a benchmark result must be reproducible.
 
-use crate::deflated_sharpe::{deflated_sharpe_ratio_against_null, deflated_sharpe_ratio_of, Track};
+use crate::deflated_sharpe::Track;
+use crate::null_standard_error::{
+    deflated_sharpe_ratio_against_null_at, deflated_sharpe_ratio_at_of,
+};
+use crate::opt_in_diagnostics::StandardErrorAt;
 use crate::stats::{mean, norm_ppf};
 use crate::validation::{
     block_probability, bootstrap_inputs, dispersion, field_inputs, finite_computation,
@@ -158,6 +162,37 @@ pub fn bootstrap_dsr_ci_against_null(
     block_prob: f64,
     ci: f64,
 ) -> Result<DsrConfidence, StatisticalError> {
+    bootstrap_dsr_ci_against_null_at(
+        returns,
+        n_trials,
+        null_mean_sharpe,
+        trials_sr_std,
+        seed,
+        n_boot,
+        block_prob,
+        ci,
+        StandardErrorAt::Observed,
+    )
+}
+
+/// As [`bootstrap_dsr_ci_against_null`], with the point estimate and every
+/// resample's deflated Sharpe computed with the PSR standard error evaluated
+/// where `at` says (see
+/// [`crate::null_standard_error::checked_probabilistic_sharpe_ratio_at`]), so the
+/// interval brackets the same statistic as the point. The resampling path does
+/// not depend on `at`: the same seed draws the same resamples under both.
+#[allow(clippy::too_many_arguments)]
+pub fn bootstrap_dsr_ci_against_null_at(
+    returns: &[f64],
+    n_trials: u32,
+    null_mean_sharpe: f64,
+    trials_sr_std: f64,
+    seed: u64,
+    n_boot: usize,
+    block_prob: f64,
+    ci: f64,
+    at: StandardErrorAt,
+) -> Result<DsrConfidence, StatisticalError> {
     finite_observations(returns)?;
     finite_parameter(null_mean_sharpe, "null_mean_sharpe")?;
     dispersion(trials_sr_std, "trials_sr_std")?;
@@ -167,8 +202,13 @@ pub fn bootstrap_dsr_ci_against_null(
     // interval nothing was resampled for is unavailable, not tight.
     bootstrap_inputs(returns, n_boot, block_prob)?;
     let n = returns.len();
-    let point =
-        deflated_sharpe_ratio_against_null(returns, n_trials, null_mean_sharpe, trials_sr_std)?;
+    let point = deflated_sharpe_ratio_against_null_at(
+        returns,
+        n_trials,
+        null_mean_sharpe,
+        trials_sr_std,
+        at,
+    )?;
     let mut rng = SplitMix64(seed ^ 0x0DEF_1A7E_D5B0_07C1);
     let mut boots: Vec<f64> = Vec::with_capacity(n_boot);
     let mut resample = vec![0.0; n];
@@ -184,12 +224,13 @@ pub fn bootstrap_dsr_ci_against_null(
                 idx = (idx + 1) % n;
             }
         }
-        boots.push(deflated_sharpe_ratio_of(
+        boots.push(deflated_sharpe_ratio_at_of(
             &resample,
             n_trials,
             null_mean_sharpe,
             trials_sr_std,
             Track::Resample,
+            at,
         )?);
     }
     let m = mean(&boots);
@@ -611,6 +652,7 @@ mod tests {
     }
 
     use super::*;
+    use crate::deflated_sharpe::deflated_sharpe_ratio_against_null;
 
     #[test]
     fn overflowing_step_down_statistics_are_unavailable() {

@@ -24,20 +24,23 @@ use crate::certification::Certification;
 use crate::comparison_sets::{comparison_set, restrict_to_shared, TaggedRun, TaggedSubmission};
 use crate::decay::return_drift_half_life;
 use crate::deflated_sharpe::{
-    checked_probabilistic_sharpe_ratio, deflated_sharpe_ratio_against_null, expected_max_sharpe,
-    observed_sharpe_ratio_of_windows, per_period_from_annualized,
+    expected_max_sharpe, observed_sharpe_ratio_of_windows, per_period_from_annualized,
 };
 use crate::econrationality::{elicit_revealed_selection, rationality_score};
 use crate::pass_k::{pass_k, PassMode};
 use crate::percentile::percentile_of;
 use crate::process::{process_score, ProcessEvent, ProcessScore, Trace};
+use crate::psr_method::PsrStandardError;
 use crate::rediscovery::{clone_clusters, cosine_similarity, CLONE_COLLAPSE_COSINE};
 use crate::roles::{attribute_behavior_roles, RoleContribution};
 use crate::rolling::rolling_sharpe;
 use crate::selection::{selection_robustness, SelectionRobustness};
 use crate::significance::bootstrap_pvalue;
-use crate::standard_error::standard_error_refusal;
+use crate::standard_error::standard_error_refusal_at;
 use crate::stats::{mean, norm_ppf, std_dev};
+use sharpebench_stats::null_standard_error::{
+    checked_probabilistic_sharpe_ratio_at, deflated_sharpe_ratio_against_null_at,
+};
 
 /// One seed×window run of an agent: its per-period returns plus the decision
 /// trace and (optionally) per-decision confidences/outcomes.
@@ -555,6 +558,14 @@ pub struct ScoreConfig {
     /// bound used to bind on honest reference agents.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dispersion_controls: Vec<String>,
+    /// Where every PSR and deflated Sharpe the board reads evaluates the
+    /// standard error of the Sharpe estimator (see [`crate::psr_method`]). The
+    /// default, the plug-in at the observed Sharpe, is the estimand the
+    /// joint-gate protocol freezes, and is omitted when serialized, so a
+    /// configuration that leaves it alone digests as it did before the field
+    /// existed. `benchmark` is an opt-in methodology, not a fix.
+    #[serde(default, skip_serializing_if = "PsrStandardError::is_default")]
+    pub psr_standard_error: PsrStandardError,
 }
 
 /// Default rolling-Sharpe window length (21 periods ≈ one trading month).
@@ -646,12 +657,13 @@ pub fn per_run_passes(
     cfg: &ScoreConfig,
 ) -> Vec<bool> {
     let bar = per_run_psr_benchmark(cfg);
+    let at = cfg.psr_standard_error.at();
     match cfg.pass_mode {
         PassMode::All | PassMode::Any | PassMode::AtLeast(_) => sub
             .runs
             .iter()
             .map(|r| {
-                checked_probabilistic_sharpe_ratio(&r.returns, bar)
+                checked_probabilistic_sharpe_ratio_at(&r.returns, bar, at)
                     .is_ok_and(|psr| psr >= cfg.per_run_psr_bar)
             })
             .collect(),
@@ -665,7 +677,7 @@ pub fn per_run_passes(
                     .and_then(|b| excess_returns(&r.returns, &b.returns))
                     .is_some_and(|e| {
                         std_dev(&e) > 0.0
-                            && checked_probabilistic_sharpe_ratio(&e, bar)
+                            && checked_probabilistic_sharpe_ratio_at(&e, bar, at)
                                 .is_ok_and(|psr| psr >= cfg.per_run_psr_bar)
                     })
             })
@@ -872,6 +884,7 @@ impl Default for ScoreConfig {
             min_measured_trials_sr_std: default_min_measured_trials_sr_std(),
             execution_seeds_per_window: default_execution_seeds_per_window(),
             dispersion_controls: Vec::new(),
+            psr_standard_error: PsrStandardError::default(),
         }
     }
 }
@@ -1367,6 +1380,12 @@ pub struct CompositeScore {
     /// board ranked without a mode is byte-identical.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub certification: Option<Certification>,
+    /// Where this row's PSR, deflated Sharpe, interval and pass^k evaluated the
+    /// Sharpe standard error: `cfg.psr_standard_error`, recorded so a row read
+    /// alone says which method scored it. Absent when it is the default
+    /// plug-in, so a default board is byte-identical.
+    #[serde(default, skip_serializing_if = "PsrStandardError::is_default")]
+    pub psr_standard_error: PsrStandardError,
 }
 
 impl CompositeScore {
@@ -1544,7 +1563,8 @@ fn score_agent_with(
 
     // A pooled track with no PSR (a constant one) reports the 0.0 floor; the
     // deflated Sharpe below is refused on the same track and names the cause.
-    let pooled_psr = checked_probabilistic_sharpe_ratio(&pooled, 0.0);
+    let at = cfg.psr_standard_error.at();
+    let pooled_psr = checked_probabilistic_sharpe_ratio_at(&pooled, 0.0, at);
     // The refusals that say the pooled track has no Sharpe ratio at all: it is
     // constant, or its Sharpe does not stay finite (a computed standard
     // deviation that underflows to zero). Every reported figure read off that
@@ -1583,11 +1603,12 @@ fn score_agent_with(
         .and_then(|()| observed_sharpe_ratio_of_windows(&window_slices(&tracks)).map(|_| ()))
         .and_then(|()| expected_max_sharpe(defl.sr_std, effective_n_trials))
         .and_then(|bar| {
-            let dsr = deflated_sharpe_ratio_against_null(
+            let dsr = deflated_sharpe_ratio_against_null_at(
                 &pooled,
                 effective_n_trials,
                 defl.null_mean_per_period,
                 defl.sr_std,
+                at,
             )?;
             Ok((dsr, defl.null_mean_per_period + bar))
         });
@@ -1809,7 +1830,7 @@ fn score_agent_with(
     // the leaderboard can flag noise-separated entries as tied rather than impose a
     // false hard ordering. Reuses the stationary-bootstrap resampler.
     let dsr_ci = frequency.and_then(|()| {
-        crate::significance::bootstrap_dsr_ci_against_null(
+        crate::significance::bootstrap_dsr_ci_against_null_at(
             &pooled,
             effective_n_trials,
             defl.null_mean_per_period,
@@ -1818,6 +1839,7 @@ fn score_agent_with(
             cfg.n_boot,
             cfg.block_prob,
             cfg.dsr_ci_level,
+            at,
         )
     });
     // An interval that could not be estimated is not a tight one. Any number in
@@ -1873,12 +1895,13 @@ fn score_agent_with(
     // risk its exposure history implies. Each is reported only on a row whose
     // host or declared verdict the earlier gates admit, so it names a term
     // that refused the row and leaves every other row's bytes as they were.
-    let standard_error = standard_error_refusal(
+    let standard_error = standard_error_refusal_at(
         &window_slices(&tracks),
         effective_n_trials,
         defl.null_mean_per_period,
         defl.sr_std,
         cfg.dsr_bar,
+        at,
     );
     let exposure_path_failure = deflation_computed
         .then(|| exposure_path_evidence(&window_slices(&tracks), cfg.alpha).err())
@@ -2034,6 +2057,7 @@ fn score_agent_with(
         declared_mandate_eligible,
         declared_mandate_ordinal: None,
         certification: None,
+        psr_standard_error: cfg.psr_standard_error,
     }
 }
 
@@ -3371,7 +3395,8 @@ fn ci_overlap(a: &CompositeScore, b: &CompositeScore) -> bool {
 mod tests {
     use super::*;
     use crate::deflated_sharpe::{
-        deflated_sharpe_ratio, expected_max_sharpe, probabilistic_sharpe_ratio, sharpe_ratio,
+        checked_probabilistic_sharpe_ratio, deflated_sharpe_ratio, expected_max_sharpe,
+        probabilistic_sharpe_ratio, sharpe_ratio,
     };
     use crate::process::ProcessEvent;
 

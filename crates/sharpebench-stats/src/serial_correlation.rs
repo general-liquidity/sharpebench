@@ -38,9 +38,9 @@
 //! correction, toward less significance, but its expected block of ten bars is
 //! short against an autocorrelation time of fifty.
 
-use crate::deflated_sharpe::{
-    deflated_sharpe_ratio_against_null, expected_max_sharpe, observed_sharpe_ratio,
-};
+use crate::deflated_sharpe::{expected_max_sharpe, observed_sharpe_ratio};
+use crate::null_standard_error::{deflated_sharpe_ratio_against_null_at, psr_bracket};
+use crate::opt_in_diagnostics::StandardErrorAt;
 use crate::stats::{kurtosis, mean, norm_cdf, skewness};
 use crate::validation::{
     finite_computation, finite_observations, finite_parameter, StatisticalError,
@@ -159,6 +159,26 @@ pub fn serially_corrected_deflated_sharpe(
     null_mean_sharpe: f64,
     trials_sr_std: f64,
 ) -> Result<SerialCorrection, StatisticalError> {
+    serially_corrected_deflated_sharpe_at(
+        windows,
+        n_trials,
+        null_mean_sharpe,
+        trials_sr_std,
+        StandardErrorAt::Observed,
+    )
+}
+
+/// [`serially_corrected_deflated_sharpe`] with the bracket the ratio multiplies
+/// evaluated where `at` says: at the observed Sharpe, or under
+/// [`StandardErrorAt::Benchmark`] at the deflation benchmark, the evaluation of
+/// the deflated Sharpe whose admission this corrects.
+pub fn serially_corrected_deflated_sharpe_at(
+    windows: &[&[f64]],
+    n_trials: u32,
+    null_mean_sharpe: f64,
+    trials_sr_std: f64,
+    at: StandardErrorAt,
+) -> Result<SerialCorrection, StatisticalError> {
     let pooled: Vec<f64> = windows.iter().flat_map(|w| w.iter().copied()).collect();
     finite_observations(&pooled)?;
     finite_parameter(null_mean_sharpe, "null_mean_sharpe")?;
@@ -187,7 +207,7 @@ pub fn serially_corrected_deflated_sharpe(
     let sr = observed_sharpe_ratio(&pooled)?;
     let g3 = finite_computation(skewness(&pooled), "return skewness")?;
     let g4 = finite_computation(kurtosis(&pooled), "return kurtosis")?;
-    let bracket = finite_computation(1.0 - g3 * sr + ((g4 - 1.0) / 4.0) * sr * sr, "PSR variance")?;
+    let bracket = psr_bracket(sr, sr_star, g3, g4, at)?;
     let variance = finite_computation(bracket * applied_ratio, "corrected PSR variance")?;
     let numerator = finite_computation(
         (sr - sr_star) * (pooled.len() as f64 - 1.0).sqrt(),
@@ -218,14 +238,46 @@ pub fn certify_under_serial_correlation(
     trials_sr_std: f64,
     dsr_bar: f64,
 ) -> Result<(), StatisticalError> {
+    certify_under_serial_correlation_at(
+        windows,
+        n_trials,
+        null_mean_sharpe,
+        trials_sr_std,
+        dsr_bar,
+        StandardErrorAt::Observed,
+    )
+}
+
+/// [`certify_under_serial_correlation`] for a gate whose deflated Sharpe
+/// evaluates its standard error where `at` says. The independent value and the
+/// corrected one are both computed under that evaluation, so the term still
+/// refuses only a track the gate it guards admitted.
+pub fn certify_under_serial_correlation_at(
+    windows: &[&[f64]],
+    n_trials: u32,
+    null_mean_sharpe: f64,
+    trials_sr_std: f64,
+    dsr_bar: f64,
+    at: StandardErrorAt,
+) -> Result<(), StatisticalError> {
     let pooled: Vec<f64> = windows.iter().flat_map(|w| w.iter().copied()).collect();
-    let independent =
-        deflated_sharpe_ratio_against_null(&pooled, n_trials, null_mean_sharpe, trials_sr_std)?;
+    let independent = deflated_sharpe_ratio_against_null_at(
+        &pooled,
+        n_trials,
+        null_mean_sharpe,
+        trials_sr_std,
+        at,
+    )?;
     if independent < dsr_bar {
         return Ok(());
     }
-    let corrected =
-        serially_corrected_deflated_sharpe(windows, n_trials, null_mean_sharpe, trials_sr_std)?;
+    let corrected = serially_corrected_deflated_sharpe_at(
+        windows,
+        n_trials,
+        null_mean_sharpe,
+        trials_sr_std,
+        at,
+    )?;
     if corrected.deflated_sharpe < dsr_bar {
         return Err(StatisticalError::InvalidParameter {
             name: "returns",
@@ -238,6 +290,7 @@ pub fn certify_under_serial_correlation(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::deflated_sharpe::deflated_sharpe_ratio_against_null;
 
     /// A track whose serial correlation makes its mean no less precise scores
     /// exactly as the kernel does, so the rule cannot move a verdict on it: an
