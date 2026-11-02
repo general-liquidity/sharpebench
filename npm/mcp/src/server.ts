@@ -204,7 +204,7 @@ export function createServer(): McpServer {
 
   server.tool(
     "headline",
-    "One verdict per row of a scored field (the same input the score tool takes), first matching rule wins: refused, unavailable (a statistic a gate needs could not be computed), degenerate_track (the deflation family refused the track for its shape, reason deflation_refused, so it has no Sharpe ratio), disqualified (process violation or breached mandate), skill_supported (rank-eligible), cannot_tell (pass^k is the only hard reason and its floors are out of practical reach), no_evidence_of_skill. The hard reasons and the qualifiers (evidence mode, tie band, stress mark, advisory reasons, declared-mandate and rank-mode labels) are listed beside the verdict and never change it. Never changes a score or a rank.",
+    "One verdict per row of a scored field (the same input the score tool takes), first matching rule wins: refused, unavailable (a statistic a gate needs could not be computed), degenerate_track (the deflation family refused the track for its shape, reason deflation_refused, so it has no Sharpe ratio), disqualified (process violation or breached mandate), skill_supported (rank-eligible), cannot_tell (pass^k is the only hard reason and its floors are out of practical reach), no_evidence_of_skill. The hard reasons and the qualifiers (evaluation tier, evidence mode, tie band, stress mark, advisory reasons, declared-mandate and rank-mode labels) are listed beside the verdict and never change it. Never changes a score or a rank.",
     { submissions: z.array(z.any()), config: z.any().optional() },
     async ({ submissions, config }) => run(() => sb.headline(submissions, config)),
   );

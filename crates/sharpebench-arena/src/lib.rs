@@ -1871,6 +1871,14 @@ impl Arena {
 fn render_markdown(header: &WindowHeader, scores: &[CompositeScore], rows: &[BoardRow]) -> String {
     let mut out = String::new();
     out.push_str(&format!("# Arena window `{}`\n\n", header.window_id));
+    // The evaluation tier comes first: an arena window is a forward window,
+    // and the board certifies its rows only when its signed header says so.
+    let tier = sharpebench_core::EvaluationTier::of_signed_forward_board(header.certifying);
+    out.push_str(&format!(
+        "Evaluation tier: `{}` ({}).\n\n",
+        tier.as_str(),
+        tier.meaning()
+    ));
     if header.certifying != Some(true) {
         out.push_str("**Noncertifying board.** Nothing on this board certifies that its rows were measured without hindsight:\n\n");
         if rows.is_empty() {

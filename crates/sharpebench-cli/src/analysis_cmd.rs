@@ -514,6 +514,7 @@ pub(crate) fn headline_line(h: &Headline) -> String {
         let reasons: Vec<String> = h.hard_reasons.iter().map(|r| format!("{r:?}")).collect();
         line.push_str(&format!(" [{}]", reasons.join(", ")));
     }
+    line.push_str(&format!(", tier {}", h.qualifiers.tier.as_str()));
     if h.qualifiers.tied {
         line.push_str(&format!(", tied in band {}", h.qualifiers.tie_group));
     }

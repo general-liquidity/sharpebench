@@ -50,7 +50,9 @@ pub mod disqualification;
 pub mod econrationality;
 pub mod entrant_visibility;
 pub mod entrants;
+pub mod evaluation_tier;
 pub mod evidence_coverage;
+pub mod fast_signals;
 pub mod forecast;
 pub mod greeks;
 pub mod headline;
@@ -124,10 +126,15 @@ pub use entrants::{
     GateDecision, GateState, GateStatus, IndexBar, RegimeRsiParams, RegimeRsiSignal, RsiBands,
     Side, TrendRegime,
 };
+pub use evaluation_tier::{EvaluationTier, EVALUATION_TIER_VERSION};
 pub use evidence_coverage::{
     Coverage, DigestId, EvidenceInventory, InventoryAudit, PreimageEncoding, PreimageError,
     RunProvenance, COMPOSITE_SCORE_INVENTORY, EVIDENCE_PREIMAGE_VERSION, REDACTED,
     RUN_PROVENANCE_INVENTORY,
+};
+pub use fast_signals::{
+    fast_signals, AgentSignals, FastSignalsReport, SignalDirection, SignalEvidence, SignalInterval,
+    SignalMeasure, FAST_SIGNALS_VERSION,
 };
 pub use forecast::{
     analyze_forecast_quality, analyze_forecast_quality_against_plan, parse_forecast_contract_plan,

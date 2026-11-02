@@ -436,7 +436,10 @@ every platform.
 Ranks a JSON field of pre-computed submissions (see
 [Submitting an agent](submitting.md)). The board shows DSR, PSR, pass^k, process,
 bootstrap p, and raw return, with a footer naming how many of the submitted agents
-are eligible.
+are eligible. The human board's first line is its
+[evaluation tier](evaluation-tiers.md), always `historical-advisory` here
+because a submissions file is not a signed forward window; the human board of
+`run` prints the same line. The `--json` board is unchanged.
 
 `score`, [`disqualify`](#disqualify) and [`headline`](#headline) share these host scoring controls:
 
@@ -482,6 +485,13 @@ well, the JSON object carries all three members. The verdict is computed from
 the finished board and never written into a row, so scores, rank, ordinal and
 the sealed board are unchanged. Without the flag the output is byte-identical to
 a build without it.
+
+`--signals` adds the rank-neutral [fast signals](fast-signals.md) the
+submissions support: process, mandate, turnover and cost measures with their
+intervals. The human output gains a block after the unchanged board; `--json`
+prints `{"board": ..., "fast_signals": {...}}`, where `board` is the board-only
+output. No score, rank or verdict reads the report, and none of its measures is
+evidence of skill.
 
 `--psr-standard-error observed|benchmark` (also accepted by `disqualify`)
 selects where every PSR and deflated Sharpe on the board evaluates its standard
@@ -1040,8 +1050,35 @@ and prints one [headline verdict](reading-a-row.md) per row, with its hard
 reasons and qualifiers beside it. `--json` prints the same records
 `score --headline --json` puts under `headlines`. A submissions file carries no
 evidence mode and no stress replay, so those qualifiers read `unknown` and
-`not_run`. Nothing here changes a score or the rank. A missing path exits 2 and
-an unreadable or malformed field exits 1.
+`not_run`, and the first qualifier, `tier`, reads `historical-advisory`. The
+human line reports the tier after the hard reasons, for example
+`noise: no_evidence_of_skill [FailedPassK], tier historical-advisory`. Nothing
+here changes a score or the rank. A missing path exits 2 and an unreadable or
+malformed field exits 1.
+
+## `signals`
+
+```bash
+sharpebench signals <submissions.json> [--suite-evidence <path>] [--host-cost <board.json>] [--contamination-probe <agent>=<path>] [--presentation-stability <agent>=<path>] [--decision-stability <path>] [score flags] [--json]
+```
+
+Prints the rank-neutral [fast-signal report](fast-signals.md) for a field
+(same format and host controls as `score`). The submission measures are always
+present. Each evidence flag may repeat and fills the measures that need it:
+
+| Flag | Document | Fills |
+|---|---|---|
+| `--suite-evidence` | `run --json --suite-evidence` output, or its `suite_evidence` object | `agent_fault_cells`, from each agent's census row |
+| `--host-cost` | a JSON board whose rows carry `cost_source: "host_observed_usd"` | `cost_per_run`, replacing the entrant figure |
+| `--contamination-probe <agent>=<path>` | `contamination-probe --json` | `contamination_mean_edge` |
+| `--presentation-stability <agent>=<path>` | `presentation-stability --json` | `presentation_disagreement` |
+| `--decision-stability` | `decision-stability --json`, matched by its `agent_id` | `decision_disagreement` |
+
+`--json` prints `{"fast_signals": {...}}`; the human form prints one block per
+agent with each measure's value, unit count, direction and interval, then the
+statement that no measure is evidence of skill. Evidence for an agent the field
+does not contain is listed under `unmatched_evidence`. A missing path or a flag
+without a value exits 2; an unreadable field or evidence document exits 1.
 
 ## `rediscover`
 

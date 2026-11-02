@@ -15,6 +15,8 @@
   - [Replay diagnostics](replay-diagnostics.md)
   - [Timing-luck floor](timing-luck.md)
   - [How to read a row](reading-a-row.md)
+  - [Evaluation tiers](evaluation-tiers.md)
+  - [Fast signals](fast-signals.md)
 - [Prospective forecast quality](forecast-quality.md)
 - [The simulator](simulator.md)
 - [Options pricing and payoff risk](options-risk.md)

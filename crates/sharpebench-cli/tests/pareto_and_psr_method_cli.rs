@@ -137,7 +137,8 @@ fn the_pareto_report_sits_beside_an_unchanged_board() {
     assert_eq!(report["pareto"], with["pareto"]);
 
     let table = stdout(&fx.cli(&["score", "field.json", "--pareto"]));
-    assert!(table.lines().next().unwrap().ends_with("front elig_front"));
+    // Line 0 is the evaluation tier; the column header follows it.
+    assert!(table.lines().nth(1).unwrap().ends_with("front elig_front"));
     assert!(table.contains("never a rank input"));
     let human = stdout(&fx.cli(&["pareto", "field.json"]));
     assert!(human.contains("dominated by"));

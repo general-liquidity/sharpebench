@@ -35,6 +35,7 @@ mod lineage_cmd;
 mod regrade_cmd;
 mod replay_diagnostics_cmd;
 mod rescore_cmd;
+mod signals_cmd;
 mod stress_replay_cmd;
 mod timing_luck_cmd;
 #[cfg(feature = "self-update")]
@@ -56,7 +57,7 @@ fn main() -> ExitCode {
         Some("score") => match args.get(2) {
             Some(path) => run_score(path, &args, json, ScoreOutput::Board),
             None => {
-                eprintln!("usage: sharpebench score <submissions.json> [--require-run-keys] [--rank-mode <id>] [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode <mode>] [--benchmark-agent <id>] [--psr-standard-error observed|benchmark] [--diagnostics <list>] [--pareto] [--headline] [--json]");
+                eprintln!("usage: sharpebench score <submissions.json> [--require-run-keys] [--rank-mode <id>] [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode <mode>] [--benchmark-agent <id>] [--psr-standard-error observed|benchmark] [--diagnostics <list>] [--pareto] [--headline] [--signals] [--json]");
                 ExitCode::from(2)
             }
         },
@@ -82,6 +83,7 @@ fn main() -> ExitCode {
             ExitCode::from(decision_stability_cmd::run(&args, json).clamp(0, 255) as u8)
         }
         Some("rescore") => ExitCode::from(rescore_cmd::run(&args, json).clamp(0, 255) as u8),
+        Some("signals") => ExitCode::from(signals_cmd::run(&args, json).clamp(0, 255) as u8),
         Some("regrade") => ExitCode::from(regrade_cmd::run(&args, json).clamp(0, 255) as u8),
         Some("compare") => ExitCode::from(compare_cmd::run(&args, json).clamp(0, 255) as u8),
         Some("audit-briefing") => run_audit_briefing(&args, json),
@@ -658,6 +660,12 @@ fn help() {
         "                         adds a certification verdict per row, never changes the host rank"
     );
     println!(
+        "                       --signals: also report the rank-neutral fast signals (process, mandate,"
+    );
+    println!(
+        "                         turnover, cost) with intervals; never evidence of skill, never a rank input"
+    );
+    println!(
         "                       --diagnostics <list>: also report opt-in Sharpe diagnostics the gate"
     );
     println!(
@@ -779,6 +787,9 @@ fn help() {
     );
     println!(
         "  sharpebench headline <subs.json>                            one verdict per row, with its hard reasons and qualifiers beside it"
+    );
+    println!(
+        "  sharpebench signals <subs.json> [evidence flags]            rank-neutral fast signals with intervals; never evidence of skill"
     );
     println!(
         "  sharpebench rediscover <submitted.csv> <known.csv...>       flag a submission cosine-near a known strategy"
@@ -1426,6 +1437,7 @@ fn run_board_json(
                 if let Some(isolation) = external.cell_isolation {
                     row["cell_isolation"] = cell_isolation::disclosure(isolation);
                     row["evidence_mode"] = cell_isolation::run_evidence_mode(isolation);
+                    row["evaluation_tier"] = cell_isolation::run_evaluation_tier();
                 }
             }
         }
@@ -3499,9 +3511,15 @@ fn run_score(path: &str, args: &[String], json: bool, output: ScoreOutput) -> Ex
             &sharpebench_core::DisqualThresholds::from_score_config(&cfg),
         )
     });
-    match (diagnostics, headlines, pareto) {
-        (None, None, None) => emit_board(&board, json),
-        (requested, headlines, pareto) => {
+    // `--signals` is opt-in and reads the submissions, never the board: the
+    // report sits beside it and no score, rank or verdict reads it.
+    let signals = args
+        .iter()
+        .any(|a| a == "--signals")
+        .then(|| sharpebench_core::fast_signals(&subs, &cfg, &std::collections::BTreeMap::new()));
+    match (diagnostics, headlines, pareto, signals) {
+        (None, None, None, None) => emit_board(&board, json),
+        (requested, headlines, pareto, signals) => {
             let report = requested
                 .as_ref()
                 .map(|r| sharpebench_core::sharpe_diagnostics(&subs, &board, &cfg, r));
@@ -3518,6 +3536,9 @@ fn run_score(path: &str, args: &[String], json: bool, output: ScoreOutput) -> Ex
                 if let Some(pareto) = &pareto {
                     out["pareto"] = serde_json::json!(pareto);
                 }
+                if let Some(signals) = &signals {
+                    out["fast_signals"] = serde_json::json!(signals);
+                }
                 emit_json(&out);
             } else {
                 print_board_with(&board, headlines.as_deref(), pareto.as_ref());
@@ -3526,6 +3547,9 @@ fn run_score(path: &str, args: &[String], json: bool, output: ScoreOutput) -> Ex
                 }
                 if let Some(pareto) = &pareto {
                     print_pareto_note(pareto);
+                }
+                if let Some(signals) = &signals {
+                    signals_cmd::print_report(signals);
                 }
             }
         }
@@ -3823,6 +3847,14 @@ fn print_board_with(
     headlines: Option<&[sharpebench_core::Headline]>,
     pareto: Option<&sharpebench_core::ParetoReport>,
 ) {
+    // Every board this command prints is scored on historical windows or on
+    // a submissions file: neither is a signed forward window, so the tier is
+    // always historical-advisory. It is printed first so no verdict below it
+    // reads as certified skill.
+    println!(
+        "{}",
+        sharpebench_core::EvaluationTier::HistoricalAdvisory.board_line()
+    );
     let headline_header = if headlines.is_some() { " headline" } else { "" };
     // The mandate column appears only when some row declared one, so a board
     // with no declarations prints exactly as before.
