@@ -30,6 +30,8 @@ The six scorer stages that answer the `grader-search` admissions. Stages 1, 2 an
 
 ### Changed
 
+- cli, behaviour: `sharpebench contamination-probe` runs both arms frictionless by default, because it measures whether an agent recalls the path, not whether recall pays after costs. `--with-costs` opts into `run`'s cost model and is the only way `--short-borrow-bps` and `--fill-delay-bars` apply; either without it, or `--with-costs` with `--frictionless`, is a usage error. `context.frictionless` still records the mode.
+- cli and harness, behaviour: `sharpebench gateway` requires `--cells <n>` and, for a sweep of more than one (window, seed) cell, reports and binds a budget with equal per-cell ceilings by default (`GatewayBudget::for_published_sweep`, `CellCeilings`); `--no-cell-ceilings` opts out, and a ceiling too small for a nonzero share is refused. The report names `cells`, `per_cell` and `cell_ceilings`, and `budget_parity` gains `per_cell_ceilings`. Library budgets stay sweep-only unless built this way.
 - core, breaking (digest bytes): evidence preimages are framed as `sharpebench/evidence-preimage/v1` with length-prefixed names and values, so a value can no longer imitate a field boundary (BM10). `ControlBinding` publishes `preimage_encoding`, and `SuiteControlEvidence::digest_encoding` identifies digests under the non-injective `legacy` form. Suite control digests change.
 - arena: `ArenaVerification` gains a required `completeness` field, and `WindowHeader` gains `head_anchored`.
 - arena: a window that records an execution identity is written as schema 6, or 7 under a fault plan. Binaries that predate it refuse such windows instead of stripping the field, and `arena verify` text output states the limit for legacy boards that replayed captures without a bound execution identity.
@@ -219,6 +221,7 @@ The six scorer stages that answer the `grader-search` admissions. Stages 1, 2 an
 
 ### Documentation
 
+- docs: three owner-confirmed conventions are stated: ruin stays uncapped, so a ruin bar can book a return below -100 percent when a negative mark carries NAV through zero (simulator); live forward capture keeps its two-minute clock tolerance and UTC bar days (arena); null-SE PSR stays opt-in until a named-rule run in the joint-gate study (deflated Sharpe methodology).
 - docs: agent instructions, plan, handoff pointer and validation status state the gap programme goal, `data/README.md` records survivorship limits, and the `clone_state` docs state the snapshot cost.
 - docs: the vote-fence documentation no longer claims the fence keeps a fenced track off the board, and known `grader-search` admissions on the fixed seed are documented, including near-constant tracks that clear the bar measured with their own vote.
 - docs: the false-pass sweep gains a dated note with the completed mutation counts.

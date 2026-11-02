@@ -352,7 +352,7 @@ output is unchanged. A cadence longer than a declared window exits 1 with
 ## `contamination-probe` and `presentation-stability`
 
 ```bash
-sharpebench contamination-probe <entrant> [--data <csv>] [--window-bars N] [--windows N] [--twin-seed N] [--frictionless] [--json]
+sharpebench contamination-probe <entrant> [--data <csv>] [--window-bars N] [--windows N] [--twin-seed N] [--with-costs] [--json]
 sharpebench presentation-stability <entrant> [--data <csv>] [--date-shift-days N] [--json]
 ```
 
@@ -360,10 +360,14 @@ sharpebench presentation-stability <entrant> [--data <csv>] [--date-shift-days N
 `--http <addr>` or `--image <repository@sha256:...>`, with one fresh agent (or
 container) per probe arm. `contamination-probe` scores the entrant on masked
 real windows and their synthetic twins and tests the paired edge
-(`sharpebench.contamination-probe.v1`). `presentation-stability` compares its
+(`sharpebench.contamination-probe.v1`). It runs both arms frictionless unless
+`--with-costs` opts them into `run`'s cost model, because it measures recall and
+not whether recall pays after costs; `context.frictionless` records which.
+`presentation-stability` compares its
 decisions under tickers-only, dates-only, levels-only and full blinding, under
 reordered symbols, and under a calendar shifted by `--date-shift-days`
-(`sharpebench.presentation-stability.v1`). Both accept `--short-borrow-bps` and
+(`sharpebench.presentation-stability.v1`). Both accept `--short-borrow-bps`
+(`contamination-probe` only with `--with-costs`) and
 `--declared-training-cutoff`, refuse `--masked`, carry `rank_input: false`, and
 report a failed arm as a typed `unavailable` object (exit 1). See
 [Contamination probes](contamination-probes.md).
@@ -881,7 +885,7 @@ establish payoff boundedness; see [Options pricing and payoff risk](options-risk
 ## `gateway`
 
 ```bash
-sharpebench gateway --routes <routes.json> --budget-usd-nanos <n> --max-calls <n> [--journal <journal.json>] [--json]
+sharpebench gateway --routes <routes.json> --budget-usd-nanos <n> --max-calls <n> --cells <n> [--no-cell-ceilings] [--journal <journal.json>] [--json]
 ```
 
 Reports and preflights the host-observed model gateway. It never calls a
@@ -896,6 +900,17 @@ zero: a paid run without a stated ceiling has no bound on what it spends before
 anyone notices, and a zero ceiling would refuse every call. A missing
 credential, a malformed manifest, inline key material and a journal bound to
 another route table each refuse with a nonzero exit code.
+
+`--cells` is required too: the number of (window, seed) cells the sweep runs.
+With more than one cell the budget carries per-cell ceilings by default, each
+cell an equal share of the sweep ceiling rounded down
+(`GatewayBudget::for_published_sweep`), so an entrant that overspends early
+cannot leave its later cells to `budget_exhausted` and a pass^k verdict across
+them does not measure budget order. `--no-cell-ceilings` opts out. A ceiling
+too small to give every cell a nonzero share is refused. The report's `budget`
+names `cells`, `per_cell` and `cell_ceilings`: `equal_shares`, `single_cell`
+or `opted_out`. A journal is bound to its budget, per-cell ceilings included,
+so reading one takes the same `--cells` and opt-out the sweep ran with.
 
 The report labels its own provenance: `usage_provenance` is
 `host_observed_not_verified_billing`, and `provider_transport` is
