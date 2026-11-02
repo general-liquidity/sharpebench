@@ -845,4 +845,22 @@ mod tests {
             "perturbed series loses money anyway"
         );
     }
+
+    /// The skilled fixture is the control half of every case built on it: on
+    /// its own and clean it must be rank-eligible, show losing bars for the
+    /// observed-loss rule, and keep a positive drift. Otherwise a case could
+    /// read as defended because the fixture failed, not because the defence
+    /// held.
+    #[test]
+    fn the_skilled_fixture_is_eligible_on_its_own() {
+        let run = skilled_run(60);
+        assert!(run.returns.iter().all(|r| r.is_finite()));
+        assert!(run.returns.iter().any(|r| *r < 0.0), "shows a loss");
+        assert!(crate::stats::mean(&run.returns) > 0.0);
+        let s = score_agent(
+            &agent("skilled", (0..5).map(|_| skilled_run(60)).collect()),
+            &ScoreConfig::default(),
+        );
+        assert!(s.rank_eligible, "{s:?}");
+    }
 }

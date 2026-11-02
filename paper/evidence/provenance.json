@@ -179,7 +179,7 @@
       "sha256": "beaa2054f85384b12334267e10b7981a22967b6983f65bd75b0b1bfbcc262e86"
     }
   ],
-  "generated_at_head": "1e7224cf1c0359a71c0a1202d66cc2785344f0ed",
+  "generated_at_head": "c18fa475f6b88d6a7e5426a468291acb1cff8c81",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -591,7 +591,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/composite.rs",
-      "sha256": "e3562e5e9d27c799c57df5d154c43b10632c520dac5fa98cfea51f517c80b245"
+      "sha256": "c9cfec83bc4424211d2481e753946a50b1d8ea324d6dd372fc013f5a4a4e8acf"
     },
     {
       "path": "crates/sharpebench-core/src/correlation.rs",
@@ -679,7 +679,7 @@
     },
     {
       "path": "crates/sharpebench-core/src/selfaudit.rs",
-      "sha256": "30fe452f24b34d286086d6e1d1afde7b9134c76568539f0d97a553744c066cbc"
+      "sha256": "187b68cfd75021a37647dd00a55fe8d944b41b009b7f30001d21f3d9934cb305"
     },
     {
       "path": "crates/sharpebench-core/src/sharpe_diagnostics.rs",
@@ -775,7 +775,7 @@
     },
     {
       "path": "crates/sharpebench-core/tests/standard_error_admission.rs",
-      "sha256": "42d4356d6f073a3077c0cbc836541c44812e7de45d8edcc2d9b875f893202405"
+      "sha256": "256b0140bae3089ca6abf9f67aef664a6854fd276fa9fe8ddc52e653333a5e70"
     },
     {
       "path": "crates/sharpebench-core/tests/stated_confidence_weighting.rs",
@@ -1315,7 +1315,7 @@
     },
     {
       "path": "crates/sharpebench-stats/src/moment_credit.rs",
-      "sha256": "f1dd103b2d9c5a4f57eddde5d785debc0c079497b7953fe2a4953d8a3b0549d5"
+      "sha256": "fcb7b13c36de214c90bc06e707f3aad3610fa2e54670f6cb7a22613640621cdd"
     },
     {
       "path": "crates/sharpebench-stats/src/observed_loss.rs",
@@ -1335,7 +1335,7 @@
     },
     {
       "path": "crates/sharpebench-stats/src/serial_correlation.rs",
-      "sha256": "0b0c147d2da34c593dfcce078ad56b8a9cd9114e3bfd8e56c5131391c5f41fb7"
+      "sha256": "5e6518e2a5e5a626c2a724b465af29b7ca6c3476f5f173b08b799353c5d58c22"
     },
     {
       "path": "crates/sharpebench-stats/src/significance.rs",
@@ -1775,5 +1775,5 @@
     "data/*.csv",
     "arena/windows/**/*.json"
   ],
-  "source_snapshot_sha256": "ba4e590f67ae4b755d53260a2008de78a7b90adb42b87524ecf17643f5ac4668"
+  "source_snapshot_sha256": "18e04da30c45f61c1f91d61f2d426d49a35817dd0be213e1774be46f9652cf40"
 }
