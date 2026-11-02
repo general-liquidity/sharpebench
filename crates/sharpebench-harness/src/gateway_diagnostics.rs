@@ -1,8 +1,9 @@
 //! How an entrant struggled at the model gateway, decision by decision.
 //!
 //! Every finished sweep-cell attempt files its decisions in the money journal
-//! ([`DecisionLog`]): how many request lines the entrant sent, how many the host
-//! handed to the broker, and which reservations they started. The journal also
+//! ([`DecisionLog`](crate::gateway_journal::DecisionLog)): how many request
+//! lines the entrant sent, how many the host handed to the broker, and which
+//! reservations they started. The journal also
 //! holds every reservation's route alias and settlement. [`gateway_diagnostics`]
 //! joins the two into counters an operator can read without reading the
 //! journal: calls, retries, requests refused by the per-decision limit, faulted

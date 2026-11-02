@@ -13,8 +13,9 @@
 //! of a board checks: the deflated Sharpe and its interval, the pass^k count,
 //! eligibility, the cost columns, and the address of the signed link the row
 //! came from. A refusal recorded on a board header is exported as a row with
-//! the verdict [`Verdict::Refused`] and no figures, so an entrant the board
-//! turned away is not silently missing from the export.
+//! the verdict [`Verdict::Refused`](crate::headline::Verdict::Refused) and no
+//! figures, so an entrant the board turned away is not silently missing from
+//! the export.
 
 use serde::{Deserialize, Serialize};
 
