@@ -299,15 +299,9 @@ fn shape_probe_convicts_a_cmd_memorizer_and_clears_an_honest_entrant() {
     let data = f.data.display().to_string();
     let run = |agent: &str| {
         let cmd = f.agent(agent);
-        let (code, doc) = f.json(&[
-            "contamination-probe",
-            "--cmd",
-            &cmd,
-            "--data",
-            &data,
-            "--frictionless",
-        ]);
+        let (code, doc) = f.json(&["contamination-probe", "--cmd", &cmd, "--data", &data]);
         assert_eq!(code, Some(0), "{agent}: {doc}");
+        // Frictionless is the default: no flag asks for it.
         assert_eq!(doc["context"]["frictionless"], true);
         assert_eq!(doc["schema_version"], "sharpebench.contamination-probe.v1");
         assert_eq!(doc["rank_input"], false);
@@ -323,6 +317,26 @@ fn shape_probe_convicts_a_cmd_memorizer_and_clears_an_honest_entrant() {
     assert_eq!(
         honest["result"]["report"]["memorization"], false,
         "{honest}"
+    );
+}
+
+fn with_costs_opts_both_arms_into_runs_cost_model() {
+    let f = Fixture::new("with-costs");
+    let data = f.data.display().to_string();
+    let cmd = f.agent("memorizer");
+    let probe = |extra: &[&str]| {
+        let mut args = vec!["contamination-probe", "--cmd", &cmd, "--data", &data];
+        args.extend_from_slice(extra);
+        let (code, doc) = f.json(&args);
+        assert_eq!(code, Some(0), "{extra:?}: {doc}");
+        doc
+    };
+    let free = probe(&[]);
+    let costed = probe(&["--with-costs", "--short-borrow-bps", "25"]);
+    assert_eq!(costed["context"]["frictionless"], false, "{costed}");
+    assert_ne!(
+        costed["result"]["report"]["mean_edge"], free["result"]["report"]["mean_edge"],
+        "the costed arms must actually pay costs"
     );
 }
 
@@ -451,6 +465,21 @@ fn usage_errors_launch_nothing() {
             "--windows",
             "x",
         ],
+        // A cost flag without --with-costs would be silently ignored.
+        vec![
+            "contamination-probe",
+            "--agent",
+            "momentum",
+            "--short-borrow-bps",
+            "25",
+        ],
+        vec![
+            "contamination-probe",
+            "--agent",
+            "momentum",
+            "--with-costs",
+            "--frictionless",
+        ],
         vec![
             "presentation-stability",
             "--agent",
@@ -490,6 +519,10 @@ const CASES: &[Case] = &[
     (
         "shape_probe_convicts_a_cmd_memorizer_and_clears_an_honest_entrant",
         shape_probe_convicts_a_cmd_memorizer_and_clears_an_honest_entrant,
+    ),
+    (
+        "with_costs_opts_both_arms_into_runs_cost_model",
+        with_costs_opts_both_arms_into_runs_cost_model,
     ),
     (
         "a_failed_cmd_arm_is_a_typed_refusal_naming_the_arm",

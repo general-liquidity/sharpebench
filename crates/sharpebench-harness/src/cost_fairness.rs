@@ -120,6 +120,10 @@ pub struct BudgetParity {
     /// declare the same sweep and per-cell ceilings. Equal USD ceilings under
     /// different rate cards are equal spend, not equal tokens.
     pub equal_ceilings: bool,
+    /// True only when every row carries host-observed usage and every one of
+    /// their budgets has a per-cell ceiling, so no row's later (window, seed)
+    /// cells ran on what its earlier cells left over.
+    pub per_cell_ceilings: bool,
     /// One group per distinct set of ceilings, in ceiling order.
     pub ceiling_groups: Vec<CeilingGroup>,
     /// Rows with no host-observed budget, which no parity claim can cover.
@@ -158,6 +162,11 @@ pub fn budget_parity(board: &Value) -> BudgetParity {
     BudgetParity {
         schema_version: BUDGET_PARITY_VERSION,
         equal_ceilings: unbudgeted.is_empty() && ceiling_groups.len() == 1,
+        per_cell_ceilings: unbudgeted.is_empty()
+            && !ceiling_groups.is_empty()
+            && ceiling_groups
+                .iter()
+                .all(|group| group.budget.per_cell.is_some()),
         ceiling_groups,
         unbudgeted_agent_ids: unbudgeted,
         rank_neutral: true,
@@ -491,6 +500,7 @@ mod tests {
         ]);
         let parity = budget_parity(&board);
         assert!(parity.equal_ceilings && parity.rank_neutral);
+        assert!(!parity.per_cell_ceilings, "a sweep ceiling alone");
         assert_eq!(parity.schema_version, BUDGET_PARITY_VERSION);
         assert_eq!(
             parity.ceiling_groups,
@@ -517,6 +527,10 @@ mod tests {
         ]);
         let parity = budget_parity(&board);
         assert!(!parity.equal_ceilings);
+        assert!(
+            !parity.per_cell_ceilings,
+            "a and c ran on one shared ceiling"
+        );
         assert_eq!(
             parity.ceiling_groups,
             [
@@ -532,6 +546,29 @@ mod tests {
         );
     }
 
+    /// The disclosure says per-cell ceilings applied only when every row's
+    /// budget carries one, whether or not the rows' ceilings are equal.
+    #[test]
+    fn per_cell_ceilings_are_disclosed_only_when_every_row_ran_under_one() {
+        let cell = |max_calls| {
+            Some(CellBudget {
+                max_usd_nanos: 500,
+                max_calls,
+            })
+        };
+        let all = json!([
+            board_row("a", Some(budget(1_000, cell(5)))),
+            board_row("b", Some(budget(1_000, cell(4)))),
+        ]);
+        let parity = budget_parity(&all);
+        assert!(parity.per_cell_ceilings && !parity.equal_ceilings);
+        let unbudgeted = json!([
+            board_row("a", Some(budget(1_000, cell(5)))),
+            board_row("z", None),
+        ]);
+        assert!(!budget_parity(&unbudgeted).per_cell_ceilings);
+    }
+
     /// A row with no host budget cannot be covered by a parity claim, and an
     /// empty board claims nothing.
     #[test]
@@ -544,7 +581,8 @@ mod tests {
         assert!(!parity.equal_ceilings);
         assert_eq!(parity.unbudgeted_agent_ids, ["z"]);
         assert_eq!(parity.ceiling_groups.len(), 1);
-        assert!(!budget_parity(&json!([])).equal_ceilings);
+        let empty = budget_parity(&json!([]));
+        assert!(!empty.equal_ceilings && !empty.per_cell_ceilings);
     }
 
     #[test]

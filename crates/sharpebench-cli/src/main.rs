@@ -745,7 +745,7 @@ fn help() {
         "  sharpebench timing-luck --cadence <m> [--data <csv>] [--periods-per-year N]  how far run's reference rows move when they rebalance every m bars and only the schedule phase moves (rank-neutral)"
     );
     println!(
-        "  sharpebench contamination-probe <entrant> [--data <csv>] [--window-bars N] [--windows N] [--twin-seed N] [--frictionless]  real-minus-twin Sharpe edge per window, a whole-window sign-flip test for recall of the price path (rank-neutral)"
+        "  sharpebench contamination-probe <entrant> [--data <csv>] [--window-bars N] [--windows N] [--twin-seed N] [--with-costs]  real-minus-twin Sharpe edge per window (frictionless unless --with-costs), a whole-window sign-flip test for recall of the price path (rank-neutral)"
     );
     println!(
         "  sharpebench presentation-stability <entrant> [--data <csv>] [--date-shift-days N]  decisions under tickers-only, dates-only, levels-only and full blinding, reordered symbols and a shifted calendar, mapped back and compared (rank-neutral)"

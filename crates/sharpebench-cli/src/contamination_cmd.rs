@@ -216,7 +216,33 @@ fn figure(value: Option<f64>) -> String {
     value.map_or_else(|| "n/a".to_string(), |v| format!("{v:.4}"))
 }
 
-const SHAPE_USAGE: &str = "usage: sharpebench contamination-probe <entrant> [--data <csv>] [--window-bars N] [--windows N] [--twin-seed N] [--frictionless] [--short-borrow-bps <bps>] [--declared-training-cutoff YYYY-MM-DD] [--json]";
+const SHAPE_USAGE: &str = "usage: sharpebench contamination-probe <entrant> [--data <csv>] [--window-bars N] [--windows N] [--twin-seed N] [--with-costs [--short-borrow-bps <bps>] [--fill-delay-bars N]] [--declared-training-cutoff YYYY-MM-DD] [--json]";
+
+/// Whether both probe arms run without frictions.
+///
+/// Recall is what the probe measures, not whether recall pays after costs. A
+/// recalling agent that switches its book every bar would pay away under the
+/// run's impact charge what it remembers, so both arms run frictionless unless
+/// the operator opts into `run`'s cost model with `--with-costs`. A cost flag
+/// without `--with-costs` would be ignored, so it is refused instead.
+fn shape_cost_mode(args: &[String]) -> Result<bool, String> {
+    let with_costs = args.iter().any(|arg| arg == "--with-costs");
+    if !with_costs {
+        if let Some(flag) = ["--short-borrow-bps", "--fill-delay-bars"]
+            .into_iter()
+            .find(|flag| args.iter().any(|arg| arg == flag))
+        {
+            return Err(format!(
+                "{flag} applies only with --with-costs; the probe runs frictionless by default"
+            ));
+        }
+        return Ok(true);
+    }
+    if args.iter().any(|arg| arg == "--frictionless") {
+        return Err("--with-costs and --frictionless contradict each other".to_string());
+    }
+    Ok(false)
+}
 
 /// `contamination-probe`: `0` measured, `1` unavailable or unreadable, `2` usage.
 pub(crate) fn run_shape(args: &[String], json: bool, launcher: &dyn SandboxLauncher) -> i32 {
@@ -237,6 +263,13 @@ pub(crate) fn run_shape(args: &[String], json: bool, launcher: &dyn SandboxLaunc
         );
         return 2;
     }
+    let frictionless = match shape_cost_mode(args) {
+        Ok(frictionless) => frictionless,
+        Err(error) => {
+            eprintln!("error: {error}\n{SHAPE_USAGE}");
+            return 2;
+        }
+    };
     let mut setup = match setup(args, launcher) {
         Ok(setup) => setup,
         Err((error, code)) => {
@@ -252,10 +285,6 @@ pub(crate) fn run_shape(args: &[String], json: bool, launcher: &dyn SandboxLaunc
         .into_iter()
         .take(count)
         .collect();
-    // Recall is what the probe measures. A recalling agent that switches its
-    // book every bar would pay away under the run's impact charge what it
-    // remembers, so the operator may run both arms without frictions.
-    let frictionless = args.iter().any(|arg| arg == "--frictionless");
     let costs = if frictionless {
         sharpebench_sim::CostProfile::None.resolve().costs
     } else {
