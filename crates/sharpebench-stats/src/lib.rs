@@ -71,7 +71,7 @@ pub mod stylized_facts;
 pub mod tail_risk;
 pub mod validation;
 
-pub use validation::StatisticalError;
+pub use validation::{StatisticalError, CONSTANT_TRACK};
 
 pub use agreement::{
     binarize, cohens_kappa, cohens_kappa_binary, gate_vs_human, gate_vs_human_with_fields,

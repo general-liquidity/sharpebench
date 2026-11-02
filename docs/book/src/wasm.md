@@ -98,8 +98,11 @@ example, is not zero required observations.
 The full verdict also exposes its existing kernel `hlz` diagnostic as
 `{tStat, tThreshold, passed, explanation}`. It is separate from the headline
 honesty verdict. Board explanations include `deflation_unavailable`,
-`bootstrap_unavailable` and `selection_unavailable`. The first two are hard,
-because the scorer gates on the statistics they name. `selection_unavailable` is
+`deflation_refused`, `dsr_interval_unavailable`, `bootstrap_unavailable`,
+`exposure_path_unavailable` and `selection_unavailable`. All but the last are
+hard, because the scorer gates on the statistics they name. `deflation_refused`
+is a verdict on the track's shape rather than a failure to compute, and is read
+from the row's `deflation_refusal`. `selection_unavailable` is
 advisory: the scorer reports `selection_gap` and never consults it in
 `rank_eligible`, so a submission carrying only that reason is still
 rank-eligible. Read `rank_eligible` for the verdict rather than the presence of

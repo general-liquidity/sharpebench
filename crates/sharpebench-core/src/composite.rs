@@ -958,7 +958,7 @@ pub struct CompositeScore {
     /// PSR of the pooled track against a zero Sharpe. Reported, never a gate.
     /// 0.0, the no-skill floor rather than an estimate, when the pooled track
     /// has no PSR (a constant track has no Sharpe ratio); the deflated Sharpe is
-    /// refused on the same track, so `deflation_error` is then present.
+    /// refused on the same track, so `deflation_refusal` is then present.
     pub psr: f64,
     pub passed_k: bool,
     /// How many of the per-run tests pass^k aggregates passed; k is
@@ -996,14 +996,36 @@ pub struct CompositeScore {
     /// Why the single-series bootstrap was unavailable. Omitted for valid inputs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bootstrap_error: Option<String>,
-    /// Why the deflation family (the Deflated Sharpe, its bar and its bootstrap
-    /// interval) was unavailable. Omitted for valid inputs. When present,
+    /// Why the Deflated Sharpe or its bar could not be computed: an invalid
+    /// configuration, a non-finite observation, too few observations, or a
+    /// quantity that did not stay finite. Omitted for valid inputs, and when the
+    /// track was refused instead (`deflation_refusal`). When present,
     /// `deflated_sharpe` and `deflation_bar_per_period` are the no-skill floor
-    /// rather than estimates, `dsr_ci_low`, `dsr_ci_high` and `dsr_se` are
-    /// absent rather than numeric, `composite` is 0.0 and `rank_eligible` is
-    /// always false.
+    /// rather than estimates, `composite` is 0.0 and `rank_eligible` is always
+    /// false.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deflation_error: Option<String>,
+    /// Why the deflation family refused the track for its shape rather than
+    /// failing to compute: it is constant, every window of it is flat, no window
+    /// shows observed risk, or no bar of it is a loss (the requirements
+    /// [`sharpebench_stats::StatisticalError::is_track_refusal`] names). Such a
+    /// track has no Sharpe ratio to deflate. When present, `deflated_sharpe` and
+    /// `deflation_bar_per_period` are the no-skill floor rather than estimates,
+    /// `dsr_percentile`, `dsr_per_cost`, the rolling Sharpe summary and
+    /// `econ_rationality_score` are withheld, `composite` is 0.0 and
+    /// `rank_eligible` is always false. Its name does not end in `_error`
+    /// because it is a verdict on the track, not kernel unavailability.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deflation_refusal: Option<String>,
+    /// Why the bootstrap interval of the Deflated Sharpe could not be estimated,
+    /// reported apart from the deflation itself so an interval failure on a
+    /// computed Deflated Sharpe does not read as deflation unavailable. Omitted
+    /// when the interval was estimated, and when its failure is the same error
+    /// `deflation_error` or `deflation_refusal` already names. When present,
+    /// `dsr_ci_low`, `dsr_ci_high` and `dsr_se` are absent and `rank_eligible`
+    /// is always false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dsr_ci_error: Option<String>,
     /// Why the selection-robustness diagnostic was unavailable. Omitted for
     /// valid inputs and for a submission that declared no candidates; when
     /// present, `selection_median_dsr` and `selection_gap` are both `None`.
@@ -1016,13 +1038,20 @@ pub struct CompositeScore {
     /// refused on another gate reads as it did before the rule.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub standard_error_refusal: Option<String>,
-    /// Why the track's profit does not clear the risk its exposure history
-    /// implies ([`sharpebench_stats::exposure_path`]). Omitted when it clears,
-    /// and when another gate already refuses both the host and any declared
-    /// verdict, so it names the refusing term; when present, `rank_eligible` is
-    /// false.
+    /// Why the exposure-path statistic could not be computed
+    /// ([`sharpebench_stats::exposure_path`]): no window carried any exposure,
+    /// the statistic did not stay finite, or `alpha` is not a number. Omitted
+    /// when it computed, and when another gate already refuses both the host and
+    /// any declared verdict; when present, `rank_eligible` is false.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exposure_path_error: Option<String>,
+    /// Why the track's profit does not clear the risk its exposure history
+    /// implies ([`sharpebench_stats::EXPOSURE_PATH_UNPROVEN`]). Omitted when it
+    /// clears, when the statistic was unavailable (`exposure_path_error`), and
+    /// when another gate already refuses both the host and any declared verdict,
+    /// so it names the refusing term; when present, `rank_eligible` is false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exposure_path_refusal: Option<String>,
     pub raw_mean_return: f64,
     pub rank_eligible: bool,
     /// The ranking key: the deflated Sharpe when eligible, else 0.0.
@@ -1177,8 +1206,9 @@ pub struct CompositeScore {
     /// Lower bound of the bootstrapped Deflated-Sharpe confidence interval (at
     /// `cfg.dsr_ci_level`). The DSR point estimate is `deflated_sharpe`; this is
     /// how far it might sink under resampling noise. Absent, with the other two
-    /// interval fields, when `deflation_error` says the interval could not be
-    /// estimated: an interval nothing was resampled for is unavailable, and a
+    /// interval fields, when the interval could not be estimated (`dsr_ci_error`,
+    /// or the `deflation_error` or `deflation_refusal` it shares): an interval
+    /// nothing was resampled for is unavailable, and a
     /// number in its place reads as a precision the estimator never had.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dsr_ci_low: Option<f64>,
@@ -1520,9 +1550,11 @@ fn score_agent_with(
     // deviation that underflows to zero). Every reported figure read off that
     // Sharpe (the rolling summary, the revealed-selection valuation) or off the
     // floored deflated Sharpe (per cost, percentile) is then absent, not the
-    // number the zero-variance sentinel or the floor would produce. Any other
-    // refusal (a non-finite observation, an overflowing moment, an invalid
-    // configuration) is outside this rule and leaves those fields as they were.
+    // number the zero-variance sentinel or the floor would produce. A track the
+    // windowed shape refusals reject is withheld the same way (`withheld`
+    // below). Unavailability (a non-finite observation, an overflowing moment,
+    // an invalid configuration) is outside this rule and leaves those fields as
+    // they were.
     let sharpe_undefined = matches!(
         pooled_psr,
         Err(StatisticalError::InvalidParameter {
@@ -1559,8 +1591,22 @@ fn score_agent_with(
             )?;
             Ok((dsr, defl.null_mean_per_period + bar))
         });
-    let deflation_error = deflation.as_ref().err().map(ToString::to_string);
+    // A refusal of the track's shape and a statistic that could not be
+    // computed are different verdicts, so each has its own field: the shape
+    // refusal is the gate deciding about the returns, the error is the kernel
+    // unable to answer.
+    let deflation_failure = deflation.as_ref().err().copied();
+    let deflation_refused = deflation_failure.is_some_and(|e| e.is_track_refusal());
+    let deflation_refusal = deflation_failure
+        .filter(|_| deflation_refused)
+        .map(|e| e.to_string());
+    let deflation_error = deflation_failure
+        .filter(|_| !deflation_refused)
+        .map(|e| e.to_string());
     let (dsr, deflation_bar_per_period) = deflation.unwrap_or((0.0, 0.0));
+    // A refused track publishes nothing derived from the floor that stands in
+    // for its deflated Sharpe, nor from the Sharpe it does not have.
+    let withheld = sharpe_undefined || deflation_refused;
 
     // pass^k: each run individually clears the per-run PSR bar against the
     // per-period benchmark the annualized minimum converts to (0 by default), on
@@ -1695,8 +1741,8 @@ fn score_agent_with(
 
     // Legibility: percentile of the Deflated Sharpe within the frozen reference
     // population (e.g. real fund track records). None when unconfigured, and
-    // when the pooled track has no Sharpe ratio to deflate.
-    let dsr_percentile = if cfg.reference_dsr_population.is_empty() || sharpe_undefined {
+    // when the track has no Sharpe ratio to deflate.
+    let dsr_percentile = if cfg.reference_dsr_population.is_empty() || withheld {
         None
     } else {
         Some(percentile_of(dsr, &cfg.reference_dsr_population))
@@ -1731,7 +1777,7 @@ fn score_agent_with(
     // Sharpe ratio the summary is absent, like the Sharpe it summarizes, while
     // the window count still says how many windows the track spans.
     let rolling = rolling_sharpe(&pooled, cfg.rolling_window);
-    let rolling_summary = rolling.filter(|_| !sharpe_undefined);
+    let rolling_summary = rolling.filter(|_| !withheld);
     let rolling_min_sharpe = rolling_summary.map(|r| r.min_sharpe);
     let rolling_frac_positive = rolling_summary.map(|r| r.frac_positive);
     let rolling_windows = rolling.map_or(0, |r| r.n_windows);
@@ -1742,7 +1788,7 @@ fn score_agent_with(
     let downside_deviation = crate::stats::downside_deviation(&pooled, 0.0);
 
     // Budget-normalized Deflated Sharpe: luck-robust skill per unit of spend.
-    let dsr_per_cost = if cost > 0.0 && !sharpe_undefined {
+    let dsr_per_cost = if cost > 0.0 && !withheld {
         Some(dsr / cost)
     } else {
         None
@@ -1777,16 +1823,22 @@ fn score_agent_with(
     // An interval that could not be estimated is not a tight one. Any number in
     // its place is read as a bound, so the entry is reported without one and
     // with the reason, rather than with a width the estimator never measured.
-    let dsr_ci_error = dsr_ci.as_ref().err().map(ToString::to_string);
+    // It is reported in its own field, so an interval failure on a computed
+    // deflated Sharpe does not read as deflation unavailable, and is left out
+    // only where it is the very error the deflation already names.
+    let dsr_ci_error = dsr_ci
+        .as_ref()
+        .err()
+        .filter(|e| Some(**e) != deflation_failure)
+        .map(ToString::to_string);
     let dsr_ci = dsr_ci.ok();
-    let deflation_error = deflation_error.or(dsr_ci_error);
 
     // Economic rationality, elicited from the one choice a frozen submission
     // records: submitting this track out of the declared candidate set (see
     // [`crate::econrationality::elicit_revealed_selection`]). Reported, never
     // gating; `None` when the submission declared nothing comparable, and when
     // the submitted track has no Sharpe ratio to value the choice by.
-    let econ_choice = if sharpe_undefined {
+    let econ_choice = if withheld {
         None
     } else {
         elicit_revealed_selection(&sub.candidates, &pooled)
@@ -1805,11 +1857,12 @@ fn score_agent_with(
     // pooled result. Reported, never gating; empty when not estimable.
     let role_contributions = attribute_behavior_roles(&sub.runs, seeds_per_window);
 
+    let deflation_computed = deflation_failure.is_none() && dsr_ci_error.is_none();
     let eligible_before_exposure_path = dsr >= cfg.dsr_bar
         && passed_k
         && process_ok
         && bootstrap_error.is_none()
-        && deflation_error.is_none()
+        && deflation_computed
         && bootstrap_p < cfg.alpha
         && mandate_ok;
     // Two gates added after 0.28.0 can only remove eligibility, and each is
@@ -1827,15 +1880,13 @@ fn score_agent_with(
         defl.sr_std,
         cfg.dsr_bar,
     );
-    let exposure_path_refusal = deflation_error
-        .is_none()
+    let exposure_path_failure = deflation_computed
         .then(|| exposure_path_evidence(&window_slices(&tracks), cfg.alpha).err())
-        .flatten()
-        .map(|e| e.to_string());
+        .flatten();
     let refused_by_standard_error = eligible_before_exposure_path && standard_error.is_some();
     let rank_eligible = eligible_before_exposure_path
         && standard_error.is_none()
-        && exposure_path_refusal.is_none();
+        && exposure_path_failure.is_none();
     let composite = if rank_eligible { dsr } else { 0.0 };
 
     // The declared verdict, if any: the same predicate as `rank_eligible` with
@@ -1858,13 +1909,13 @@ fn score_agent_with(
             && declared_passed_k
             && process_ok
             && bootstrap_error.is_none()
-            && deflation_error.is_none()
+            && deflation_computed
             && bootstrap_p < cfg.alpha
             && mandate_ok
             && verdict.drawdown_bound_holds(worst_run_drawdown);
         let refused = eligible_before && standard_error.is_some();
         let eligible =
-            eligible_before && standard_error.is_none() && exposure_path_refusal.is_none();
+            eligible_before && standard_error.is_none() && exposure_path_failure.is_none();
         (
             d.mandate.clone(),
             verdict,
@@ -1876,8 +1927,14 @@ fn score_agent_with(
     });
     let declared_refused_by_standard_error = declared.as_ref().is_some_and(|d| d.4);
     let declared_before_exposure_path = declared.as_ref().is_some_and(|d| d.5);
-    let exposure_path_error = exposure_path_refusal
+    let exposure_path_reported = exposure_path_failure
         .filter(|_| eligible_before_exposure_path || declared_before_exposure_path);
+    let exposure_path_refusal = exposure_path_reported
+        .filter(StatisticalError::is_track_refusal)
+        .map(|e| e.to_string());
+    let exposure_path_error = exposure_path_reported
+        .filter(|e| !e.is_track_refusal())
+        .map(|e| e.to_string());
     let (declared_mandate, verdict_applied, declared_passed_k, declared_mandate_eligible) =
         match declared {
             Some((m, v, p, e, _, _)) => (Some(m), Some(v), Some(p), Some(e)),
@@ -1907,9 +1964,12 @@ fn score_agent_with(
         bootstrap_p,
         bootstrap_error,
         deflation_error,
+        deflation_refusal,
+        dsr_ci_error,
         selection_error,
         standard_error_refusal,
         exposure_path_error,
+        exposure_path_refusal,
         raw_mean_return,
         rank_eligible,
         composite,
@@ -2485,13 +2545,26 @@ fn independence_weights(votes: &[&Vote], shared: &SharedVariance) -> Vec<f64> {
     if shared.rows.is_empty() {
         return vec![1.0; votes.len()];
     }
+    // Each sum starts from the vote's share with itself and then adds its
+    // shares with the other votes in vote order, so the sum's order does not
+    // depend on where the vote sits: a uniformly correlated field gives every
+    // vote the same overlap bit for bit, hence equal weights and the plain
+    // dispersion, as documented.
     // inv: each overlap is 1 plus the vote's shares with the other votes, each
     // in [0, 1], so it lies in [1, votes.len()] and each weight in
     // [1 / votes.len(), 1].
     votes
         .iter()
-        .map(|a| {
-            let overlap: f64 = votes.iter().map(|b| shared.rows[a.stream][b.stream]).sum();
+        .enumerate()
+        .map(|(i, a)| {
+            let row = &shared.rows[a.stream];
+            // inv: the accumulator is row[a] plus the shares with the votes
+            // before position j other than a; j rises by 1 to votes.len().
+            let overlap = votes
+                .iter()
+                .enumerate()
+                .filter(|&(j, _)| j != i)
+                .fold(row[a.stream], |acc, (_, b)| acc + row[b.stream]);
             1.0 / overlap
         })
         .collect()
@@ -3356,6 +3429,50 @@ mod tests {
         }
     }
 
+    /// The documented claim that a uniformly correlated field measures exactly
+    /// the plain dispersion. Every pair shares 0.4, so every vote's overlap is
+    /// `1 + 0.4 (n - 1)` and every weight is the same; the weighted branch must
+    /// then leave the answer to the plain one, bit for bit, with or without a
+    /// vote left out. Summing each row in vote order put the self-share 1.0 at
+    /// a different place in each vote's sum, so the overlaps differed in their
+    /// last bits and the weighted branch answered instead.
+    #[test]
+    fn a_uniformly_correlated_field_measures_exactly_the_plain_dispersion() {
+        for n in [3, 5, 7, 9, 12] {
+            let votes: Vec<Vote> = (0..n)
+                .map(|i| Vote {
+                    index: i,
+                    members: vec![i],
+                    sharpe: -0.05 + 0.031 * i as f64 + 0.002 * (i * i) as f64,
+                    stream: i,
+                })
+                .collect();
+            let shared = SharedVariance {
+                rows: (0..n)
+                    .map(|i| (0..n).map(|j| if i == j { 1.0 } else { 0.4 }).collect())
+                    .collect(),
+            };
+            let kept: Vec<&Vote> = votes.iter().collect();
+            let weights = independence_weights(&kept, &shared);
+            assert!(
+                weights.iter().all(|w| w.to_bits() == weights[0].to_bits()),
+                "{n}: {weights:?}"
+            );
+            for skip in std::iter::once(None).chain((0..n).map(Some)) {
+                assert_eq!(
+                    weighted_dispersion(&votes, &shared, skip),
+                    None,
+                    "{n} {skip:?}"
+                );
+                assert_eq!(
+                    field_dispersion(&votes, &shared, skip).to_bits(),
+                    plain_dispersion(&votes, skip).to_bits(),
+                    "{n} {skip:?}"
+                );
+            }
+        }
+    }
+
     /// A frequency that is not one cannot score, on the same boundary as a
     /// dispersion that is not one. `+inf` used to divide the annualized prior to
     /// a zero dispersion and score the agent against no deflation bar at all;
@@ -3607,8 +3724,11 @@ mod tests {
             ..ScoreConfig::default()
         };
         let score = score_agent(&entrant, &cfg);
+        // The deflated Sharpe itself computed; only its interval did not, and
+        // the report says so in the interval's own field.
+        assert_eq!(score.deflation_error, None);
         assert_eq!(
-            score.deflation_error.as_deref(),
+            score.dsr_ci_error.as_deref(),
             Some("n_boot must be positive")
         );
         assert_eq!(
@@ -3632,9 +3752,10 @@ mod tests {
             );
         }
         assert_eq!(
-            report["deflation_error"], "n_boot must be positive",
+            report["dsr_ci_error"], "n_boot must be positive",
             "the report states why the interval is unavailable"
         );
+        assert!(report.get("deflation_error").is_none(), "{report}");
 
         // A supported configuration still carries all three numbers.
         let supported = score_agent(&entrant, &ScoreConfig::default());
@@ -3691,7 +3812,9 @@ mod tests {
             score_agent(&sub, &cfg),
             rank(std::slice::from_ref(&sub), &cfg).remove(0),
         ] {
-            assert_eq!(score.deflation_error.as_deref(), Some(CONSTANT_TRACK));
+            assert_eq!(score.deflation_refusal.as_deref(), Some(CONSTANT_TRACK));
+            assert_eq!(score.deflation_error, None);
+            assert_eq!(score.dsr_ci_error, None, "one cause, reported once");
             assert_eq!(score.bootstrap_error, None);
             assert!(score.passed_k && score.process_ok && score.mandate_ok);
             assert!(score.bootstrap_p < cfg.alpha);
@@ -3703,7 +3826,7 @@ mod tests {
             assert!(!score.rank_eligible);
             assert_eq!(
                 crate::disqualification::classify_disqualification(&score, &thresholds, None, None),
-                vec![crate::disqualification::FailReason::DeflationUnavailable]
+                vec![crate::disqualification::FailReason::DeflationRefused]
             );
         }
     }
@@ -3726,15 +3849,17 @@ mod tests {
             let sub = agent("flat", runs);
             let score = score_agent(&sub, &cfg);
             assert_eq!(
-                score.deflation_error.as_deref(),
+                score.deflation_refusal.as_deref(),
                 Some(CONSTANT_TRACK),
                 "{value}"
             );
+            assert_eq!(score.deflation_error, None, "{value}");
             assert_eq!((score.deflated_sharpe, score.psr), (0.0, 0.0));
             assert_eq!(per_run_passes(&sub, None, &cfg), vec![false; 6]);
             assert!(!score.passed_k && !score.rank_eligible);
             let report = serde_json::to_value(&score).expect("serialize the score");
-            assert_eq!(report["deflation_error"], CONSTANT_TRACK);
+            assert_eq!(report["deflation_refusal"], CONSTANT_TRACK);
+            assert!(report.get("deflation_error").is_none(), "{report}");
         }
     }
 
@@ -3747,11 +3872,17 @@ mod tests {
     /// figure read off the pooled Sharpe or the deflated Sharpe is live whenever
     /// the track has a Sharpe ratio. The default 21-bar rolling window fits.
     fn exercised(track: impl Fn(usize) -> f64) -> AgentSubmission {
+        exercised_by_run(|_, bar| track(bar))
+    }
+
+    /// [`exercised`] with a track that may differ from run to run: `track(run,
+    /// bar)`. One seed per window, so each run is a window.
+    fn exercised_by_run(track: impl Fn(usize, usize) -> f64) -> AgentSubmission {
         let mut sub = agent(
             "exercised",
             (0..6)
-                .map(|_| Run {
-                    returns: (0..60).map(&track).collect(),
+                .map(|run| Run {
+                    returns: (0..60).map(|bar| track(run, bar)).collect(),
                     cost: 0.25,
                     ..Run::default()
                 })
@@ -3775,27 +3906,77 @@ mod tests {
         }
     }
 
-    /// Pooled tracks with no Sharpe ratio and the refusal each carries: all
+    /// The deflation family's verdict on `score` is `reason`, in the field its
+    /// kind belongs in: a shape refusal in `deflation_refusal`, anything else
+    /// in `deflation_error`, and never both.
+    fn assert_deflation_cause(score: &CompositeScore, reason: &str, label: &str) {
+        let (expected_refusal, expected_error) = if reason == NON_FINITE_SHARPE {
+            (None, Some(reason))
+        } else {
+            (Some(reason), None)
+        };
+        assert_eq!(
+            (
+                score.deflation_refusal.as_deref(),
+                score.deflation_error.as_deref()
+            ),
+            (expected_refusal, expected_error),
+            "{label}"
+        );
+    }
+
+    /// Tracks with no Sharpe ratio, and the refusal each carries. Pooled: all
     /// zero (`hold`), constant at a value whose rounded mean leaves a residual
     /// variance (a Sharpe near 2.25e15 under the zero-variance sentinel),
     /// constant and negative, and a non-constant track whose squared deviations
-    /// underflow, so its computed standard deviation is exactly zero. Each is
-    /// scored alone and as a one-entry board.
-    fn no_sharpe_scores() -> Vec<(String, CompositeScore, &'static str)> {
+    /// underflow, so its computed standard deviation is exactly zero. Windowed,
+    /// where the pooled track has a finite Sharpe the deflation family refuses:
+    /// every window constant at its own level, every window a level with a 1e-8
+    /// perturbation around it, and a track that never lost a bar. Each is scored
+    /// alone and as a one-entry board.
+    fn no_sharpe_scores() -> Vec<(String, CompositeScore, String)> {
         let cfg = exercised_config();
+        let returns = |requirement: &str| format!("returns {requirement}");
         let subs = [
-            ("all zero", exercised(|_| 0.0), CONSTANT_TRACK),
-            ("constant 0.001", exercised(|_| 0.001), CONSTANT_TRACK),
-            ("constant -0.002", exercised(|_| -0.002), CONSTANT_TRACK),
+            ("all zero", exercised(|_| 0.0), CONSTANT_TRACK.to_string()),
+            (
+                "constant 0.001",
+                exercised(|_| 0.001),
+                CONSTANT_TRACK.to_string(),
+            ),
+            (
+                "constant -0.002",
+                exercised(|_| -0.002),
+                CONSTANT_TRACK.to_string(),
+            ),
             (
                 "underflowing",
                 exercised(|i| (i % 2) as f64 * 1e-170),
-                NON_FINITE_SHARPE,
+                NON_FINITE_SHARPE.to_string(),
+            ),
+            (
+                "every window flat",
+                exercised_by_run(|run, _| 0.001 * (run + 1) as f64),
+                returns(sharpebench_stats::NO_WINDOW_VARIES),
+            ),
+            (
+                "no observed risk",
+                exercised(|i| 0.001 + if i % 2 == 0 { 1e-8 } else { -1e-8 }),
+                returns(sharpebench_stats::NO_RESOLVED_MOTION),
+            ),
+            (
+                "never lost a bar",
+                exercised(|i| 0.002 + 0.0005 * (i as f64 * 0.7).sin()),
+                returns(sharpebench_stats::NO_OBSERVED_LOSS),
             ),
         ];
         let mut scores = Vec::new();
         for (label, sub, reason) in subs {
-            scores.push((format!("{label} scored"), score_agent(&sub, &cfg), reason));
+            scores.push((
+                format!("{label} scored"),
+                score_agent(&sub, &cfg),
+                reason.clone(),
+            ));
             scores.push((
                 format!("{label} ranked"),
                 rank(std::slice::from_ref(&sub), &cfg).remove(0),
@@ -3831,16 +4012,11 @@ mod tests {
         let cfg = exercised_config();
         assert!(!cfg.reference_dsr_population.is_empty());
         for (label, score, reason) in no_sharpe_scores() {
-            assert_eq!(score.deflation_error.as_deref(), Some(reason), "{label}");
+            assert_deflation_cause(&score, &reason, &label);
             assert!(score.cost > 0.0, "{label}");
             assert_eq!(
                 (score.dsr_per_cost, score.dsr_percentile),
                 (None, None),
-                "{label}"
-            );
-            assert_eq!(
-                (score.dsr_ci_low, score.dsr_ci_high, score.dsr_se),
-                (None, None, None),
                 "{label}"
             );
             assert_null_in_report(&score, &["dsr_per_cost", "dsr_percentile"], &label);
@@ -3858,7 +4034,7 @@ mod tests {
     #[test]
     fn a_track_with_no_sharpe_ratio_reports_no_rolling_sharpe_summary() {
         for (label, score, reason) in no_sharpe_scores() {
-            assert_eq!(score.deflation_error.as_deref(), Some(reason), "{label}");
+            assert_deflation_cause(&score, &reason, &label);
             assert_eq!(score.rolling_windows, 340, "{label}");
             assert_eq!(
                 (score.rolling_min_sharpe, score.rolling_frac_positive),
@@ -3884,12 +4060,12 @@ mod tests {
     #[test]
     fn a_track_with_no_sharpe_ratio_reports_no_revealed_selection_score() {
         let control = score_agent(
-            &exercised(|i| 0.002 + 0.0005 * (i as f64 * 0.7).sin()),
+            &exercised(|i| 0.002 + 0.004 * (i as f64 * 0.7).sin()),
             &exercised_config(),
         );
         assert!(control.econ_rationality_score.is_some());
         for (label, score, reason) in no_sharpe_scores() {
-            assert_eq!(score.deflation_error.as_deref(), Some(reason), "{label}");
+            assert_deflation_cause(&score, &reason, &label);
             assert_eq!(
                 (
                     score.econ_rationality_score,
@@ -4109,7 +4285,10 @@ mod tests {
                     trials_sr_std: -1.0,
                     ..base.clone()
                 },
-                Some("trials_sr_std must be finite and non-negative"),
+                Some((
+                    "deflation_error",
+                    "trials_sr_std must be finite and non-negative",
+                )),
                 None,
             ),
             (
@@ -4118,7 +4297,7 @@ mod tests {
                     n_boot: 0,
                     ..base.clone()
                 },
-                Some("n_boot must be positive"),
+                Some(("dsr_ci_error", "n_boot must be positive")),
                 Some("n_boot must be positive"),
             ),
             (
@@ -4127,10 +4306,21 @@ mod tests {
                     execution_seeds_per_window: 2,
                     ..base
                 },
-                Some(CONSTANT_TRACK),
+                Some(("deflation_refusal", CONSTANT_TRACK)),
                 None,
             ),
         ];
+        // Each cause is named once, in the one field its kind belongs in.
+        let deflation_cause = |s: &CompositeScore| -> Vec<(&'static str, String)> {
+            [
+                ("deflation_error", &s.deflation_error),
+                ("deflation_refusal", &s.deflation_refusal),
+                ("dsr_ci_error", &s.dsr_ci_error),
+            ]
+            .into_iter()
+            .filter_map(|(name, value)| value.clone().map(|v| (name, v)))
+            .collect()
+        };
         let absolute = [
             DeclaredMandate::AbsoluteReturn,
             DeclaredMandate::DrawdownCapped {
@@ -4160,7 +4350,11 @@ mod tests {
             }
             for score in scores {
                 let label = format!("{:?} {:?}", score.declared_mandate, deflation_error);
-                assert_eq!(score.deflation_error.as_deref(), deflation_error, "{label}");
+                let expected: Vec<(&str, String)> = deflation_error
+                    .iter()
+                    .map(|(name, value)| (*name, value.to_string()))
+                    .collect();
+                assert_eq!(deflation_cause(&score), expected, "{label}");
                 assert_eq!(score.bootstrap_error.as_deref(), bootstrap_error, "{label}");
                 assert_eq!(score.declared_passed_k, Some(true), "{label}");
                 assert_eq!(score.declared_mandate_eligible, Some(available), "{label}");
@@ -4872,7 +5066,7 @@ mod tests {
         field.push(flat_entrant("flat", 0.001));
         let board = rank(&field, &cfg);
         let flat = by_id(&board, "flat");
-        assert_eq!(flat.deflation_error.as_deref(), Some(CONSTANT_TRACK));
+        assert_eq!(flat.deflation_refusal.as_deref(), Some(CONSTANT_TRACK));
         assert_eq!((flat.deflated_sharpe, flat.psr), (0.0, 0.0));
         assert!(!flat.rank_eligible && flat.runs_scored == 5);
         assert_eq!(

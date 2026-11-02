@@ -495,8 +495,8 @@ impl DeflationBar {
     }
 
     /// The deflated Sharpe of `pooled` under this bar. A refusal of the
-    /// score's bootstrap interval, which the score also reports through
-    /// `deflation_error`, does not reach this computation.
+    /// score's bootstrap interval, which the score reports through
+    /// `dsr_ci_error`, does not reach this computation.
     fn deflate(&self, pooled: &[f64]) -> Option<f64> {
         deflated_sharpe_ratio_against_null(
             pooled,

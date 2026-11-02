@@ -347,8 +347,9 @@ dataset, and nothing should rank on it"
 /// field of submissions, taking the same JSON array `score_json` takes. Pure
 /// legibility over the composite score: nothing here changes eligibility
 /// semantics. Output: `[{agent_id, rank_eligible, reasons}]` with reasons in
-/// stable enum order; the advisory reasons (high_selection_gap, is_rediscovery,
-/// oos_decay) never gate.
+/// stable enum order; the advisory reasons (selection_unavailable,
+/// high_selection_gap, is_rediscovery, oos_decay) never gate, and each cause
+/// names one reason.
 pub fn classify_disqualification_json(
     submissions_json: &str,
     config_json: &str,

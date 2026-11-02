@@ -54,8 +54,8 @@ all volatility symmetrically.
 beats on return, drawdown and turnover at once. Only an agent whose pooled
 track has a Sharpe ratio can carry the flag. A track the kernel refuses as
 having none is never marked: it has fewer than two observations, or every
-observation is equal, or its Sharpe is not finite, and its `deflation_error`
-says which. Without that rule a track that never trades, all zeros with zero
+observation is equal, or its Sharpe is not finite, and its `deflation_refusal`
+or `deflation_error` says which. Without that rule a track that never trades, all zeros with zero
 drawdown and, having placed no orders, zero turnover, could never be dominated
 and would always be marked optimal. A refused track with at least one
 observation still counts when the flag asks whether another agent is beaten,

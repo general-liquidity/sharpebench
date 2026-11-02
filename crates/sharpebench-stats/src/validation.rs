@@ -49,6 +49,46 @@ impl fmt::Display for StatisticalError {
 
 impl std::error::Error for StatisticalError {}
 
+/// The requirement [`crate::deflated_sharpe::observed_sharpe_ratio`] refuses a
+/// track on when every observation of it is the same value.
+pub const CONSTANT_TRACK: &str = "must not be constant: a constant series has no Sharpe ratio";
+
+/// The requirements a track is refused on for its shape: a deliberate gate
+/// verdict about the returns, not a statistic that failed to compute. Each is
+/// the exported constant its gate names, so the classification reads the typed
+/// requirement and never the rendered message.
+const TRACK_REFUSALS: [&str; 5] = [
+    CONSTANT_TRACK,
+    crate::deflated_sharpe::NO_WINDOW_VARIES,
+    crate::deflated_sharpe::NO_RESOLVED_MOTION,
+    crate::observed_loss::NO_OBSERVED_LOSS,
+    crate::exposure_path::EXPOSURE_PATH_UNPROVEN,
+];
+
+impl StatisticalError {
+    /// Whether this error is a gate's refusal of the track it was asked about
+    /// rather than unavailability: the track is constant ([`CONSTANT_TRACK`]), no window of it varies
+    /// ([`crate::deflated_sharpe::NO_WINDOW_VARIES`]), no window shows observed
+    /// risk ([`crate::deflated_sharpe::NO_RESOLVED_MOTION`]), no bar of it is a
+    /// loss ([`crate::observed_loss::NO_OBSERVED_LOSS`]), or its profit does not
+    /// clear the risk its exposure history implies
+    /// ([`crate::exposure_path::EXPOSURE_PATH_UNPROVEN`]).
+    ///
+    /// Everything else is unavailability: an invalid parameter, a non-finite
+    /// observation, too few observations, or a quantity that did not stay
+    /// finite (including a Sharpe whose computed standard deviation underflows
+    /// to zero on a series that is not constant).
+    pub fn is_track_refusal(&self) -> bool {
+        matches!(
+            self,
+            Self::InvalidParameter {
+                name: "returns",
+                requirement,
+            } if TRACK_REFUSALS.contains(requirement)
+        )
+    }
+}
+
 pub(crate) fn finite_computation(
     value: f64,
     quantity: &'static str,

@@ -343,12 +343,17 @@ export interface CrowdingDecayPrior {
 // --- Disqualification-reason taxonomy ---------------------------------------
 
 /**
- * A reason an agent was (or should be) demoted. The first five mirror the hard
- * eligibility gates in the scorer; two more name the unavailability of a
- * statistic the scorer does gate on. The last four are advisory quality flags
- * that never gate. `selection_unavailable` is advisory because the scorer
- * reports the selection axis and never consults it in `rank_eligible`, so an
- * agent carrying it alone is still ranked.
+ * A reason an agent was (or should be) demoted. All but the last four are hard
+ * and mirror a conjunct of the scorer's eligibility predicate:
+ * `deflation_refused` names a track refused for its shape (constant, every
+ * window flat, no observed risk, or no observed loss), and the `_unavailable`
+ * reasons name a statistic the scorer gates on that could not be computed. One
+ * cause names one reason, so a refused or unavailable deflated Sharpe is not
+ * also `dsr_below_bar` and an unavailable bootstrap is not also
+ * `bootstrap_insignificant`. The last four are advisory quality flags that
+ * never gate. `selection_unavailable` is advisory because the scorer reports
+ * the selection axis and never consults it in `rank_eligible`, so an agent
+ * carrying it alone is still ranked.
  */
 export type FailReason =
   | "failed_pass_k"
@@ -357,7 +362,12 @@ export type FailReason =
   | "bootstrap_insignificant"
   | "mandate_breached"
   | "deflation_unavailable"
+  | "deflation_refused"
+  | "dsr_interval_unavailable"
   | "bootstrap_unavailable"
+  | "standard_error_uncertified"
+  | "exposure_path_unproven"
+  | "exposure_path_unavailable"
   | "selection_unavailable"
   | "high_selection_gap"
   | "is_rediscovery"

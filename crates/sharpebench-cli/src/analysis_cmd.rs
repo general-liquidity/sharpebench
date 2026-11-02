@@ -265,7 +265,7 @@ fn run_select(args: &[String], json: bool) -> i32 {
 /// over the composite score: nothing here changes eligibility semantics.
 fn run_disqualify(args: &[String], json: bool) -> i32 {
     let Some(path) = args.get(2).filter(|p| !p.starts_with('-')) else {
-        eprintln!("usage: sharpebench disqualify <submissions.json> [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode MODE] [--benchmark-agent ID] [--json]");
+        eprintln!("usage: sharpebench disqualify <submissions.json> [--require-run-keys] [--periods-per-year N] [--execution-seeds-per-window N] [--pass-mode MODE] [--benchmark-agent ID] [--json]");
         return 2;
     };
     let data = match read_file(path) {
@@ -275,18 +275,13 @@ fn run_disqualify(args: &[String], json: bool) -> i32 {
             return 1;
         }
     };
-    let (subs, declarations) = match sharpebench_core::parse_declared_field(&data) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return 1;
-        }
-    };
-    let cfg = match crate::score_config_from_args(args) {
-        Ok(cfg) => cfg,
-        Err(error) => {
+    // The same field reader `score` uses, so `--require-run-keys` reorders the
+    // runs into the canonical cell order the keyed board was scored in.
+    let (subs, declarations, cfg) = match crate::scoring_field_from_args(&data, args) {
+        Ok(field) => field,
+        Err((error, code)) => {
             eprintln!("error: {error}");
-            return 2;
+            return i32::from(code);
         }
     };
     let thresholds = DisqualThresholds::from_score_config(&cfg);
