@@ -303,6 +303,8 @@ jobs:
         shell: bash
         run: |
           cargo test --release --locked -p sharpebench-stats --test special_function_bits
+          cargo test --release --locked -p sharpebench-stats --test det_math_bits
+          cargo test --release --locked -p sharpebench-core --test rerouted_math_bits
           cargo test --release --locked -p sharpebench-core --test golden_scores
       - name: Release-built CLI output → byte-identical to the committed golden fixture
         shell: bash

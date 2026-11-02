@@ -82,7 +82,11 @@ pub fn sortino_ratio(xs: &[f64], target: f64) -> Option<f64> {
 // Standardized empirical moments use m2 = sum((x - mean)^2) / n, not
 // the n-1 sample variance used to estimate return volatility for the Sharpe.
 fn population_std_dev(xs: &[f64], center: f64) -> f64 {
-    (xs.iter().map(|x| (x - center).powi(2)).sum::<f64>() / xs.len() as f64).sqrt()
+    (xs.iter()
+        .map(|x| crate::det_math::powi(x - center, 2))
+        .sum::<f64>()
+        / xs.len() as f64)
+        .sqrt()
 }
 
 /// Empirical population skewness (third standardized moment, no bias adjustment).
@@ -98,7 +102,10 @@ pub fn skewness(xs: &[f64]) -> f64 {
     if s == 0.0 {
         return 0.0;
     }
-    let sum: f64 = xs.iter().map(|x| ((x - m) / s).powi(3)).sum();
+    let sum: f64 = xs
+        .iter()
+        .map(|x| crate::det_math::powi((x - m) / s, 3))
+        .sum();
     sum / n as f64
 }
 
@@ -116,7 +123,10 @@ pub fn kurtosis(xs: &[f64]) -> f64 {
     if s == 0.0 {
         return 3.0;
     }
-    let sum: f64 = xs.iter().map(|x| ((x - m) / s).powi(4)).sum();
+    let sum: f64 = xs
+        .iter()
+        .map(|x| crate::det_math::powi((x - m) / s, 4))
+        .sum();
     sum / n as f64
 }
 

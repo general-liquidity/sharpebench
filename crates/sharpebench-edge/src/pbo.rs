@@ -155,7 +155,7 @@ pub fn pbo_status(perf_matrix: &[Vec<f64>], s: usize) -> Result<f64, PboUnavaila
             .filter(|&&v| v < oos_sharpes[n_star])
             .count();
         let omega = r as f64 / (n_strats as f64 + 1.0);
-        let lambda = (omega / (1.0 - omega)).ln();
+        let lambda = sharpebench_stats::det_math::ln(omega / (1.0 - omega));
         if lambda <= 0.0 {
             overfit += 1;
         }

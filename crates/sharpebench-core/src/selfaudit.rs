@@ -666,10 +666,13 @@ mod tests {
     /// recomputed over all of them, and the kernel's cases are left as they were.
     #[test]
     fn an_appended_case_is_summarized_with_the_kernel_cases() {
+        // One kernel run, cloned per variant: `run_self_audit` is a pure
+        // function of fixed fixtures (no statics, no randomness), so a clone is
+        // the same report a second call would build, at a quarter of the cost.
         let kernel = run_self_audit();
         let names: Vec<String> = kernel.cases.iter().map(|c| c.name.clone()).collect();
 
-        let defended = run_self_audit().with_case(appended(true, false));
+        let defended = kernel.clone().with_case(appended(true, false));
         assert_eq!(defended.cases.len(), 10);
         assert!(defended.all_defended);
         assert_eq!(defended.known_gaps, 0);
@@ -677,14 +680,14 @@ mod tests {
         let kept: Vec<String> = defended.cases[..9].iter().map(|c| c.name.clone()).collect();
         assert_eq!(kept, names);
 
-        let gamed = run_self_audit().with_case(appended(false, false));
+        let gamed = kernel.clone().with_case(appended(false, false));
         assert!(
             !gamed.all_defended,
             "an undefended appended case fails the audit"
         );
         assert_eq!(gamed.known_gaps, 0);
 
-        let gap = run_self_audit().with_case(appended(false, true));
+        let gap = kernel.clone().with_case(appended(false, true));
         assert!(gap.all_defended, "a documented gap does not fail the audit");
         assert_eq!(gap.known_gaps, 1);
     }

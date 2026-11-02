@@ -130,6 +130,13 @@ fn a_track_that_never_moved_is_refused_alone_and_in_a_field() {
         ("one bar -0.05", one_bar(-0.05)),
         ("one trade at zero", one_trade()),
     ];
+    // The clean boards do not depend on the shape, and `rank` is a pure
+    // function of its input, so each is ranked once here rather than once per
+    // shape: the same values reach the same assertions at under half the cost.
+    let clean_boards: Vec<(usize, Vec<CompositeScore>)> = [6, 7, 12, 24]
+        .into_iter()
+        .map(|n| (n, rank(&honest_field(n), &cfg())))
+        .collect();
     for (label, windows) in shapes {
         let alone = rank(&[agent("attacker", windows.clone())], &cfg());
         assert_eq!(
@@ -139,8 +146,8 @@ fn a_track_that_never_moved_is_refused_alone_and_in_a_field() {
         );
         assert!(!alone[0].rank_eligible, "{label}");
 
-        for honest_count in [6, 7, 12, 24] {
-            let clean = rank(&honest_field(honest_count), &cfg());
+        for (honest_count, clean) in &clean_boards {
+            let honest_count = *honest_count;
             let mut attacked = honest_field(honest_count);
             attacked.push(agent("attacker", windows.clone()));
             let board = rank(&attacked, &cfg());
@@ -152,7 +159,7 @@ fn a_track_that_never_moved_is_refused_alone_and_in_a_field() {
             );
             assert!(!attacker.rank_eligible, "{label}");
             assert!(!attacker.pareto_optimal, "{label}");
-            for r in &clean {
+            for r in clean {
                 let after = row(&board, &r.agent_id);
                 assert_eq!(
                     r.deflation_bar_per_period.to_bits(),

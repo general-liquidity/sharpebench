@@ -454,7 +454,11 @@ fn dynamic_leverage(
     let sharpe = |x: &[f64]| {
         let n = x.len() as f64;
         let m = x.iter().sum::<f64>() / n;
-        let v = x.iter().map(|a| (a - m).powi(2)).sum::<f64>() / (n - 1.0);
+        let v = x
+            .iter()
+            .map(|a| sharpebench_core::det_math::powi(a - m, 2))
+            .sum::<f64>()
+            / (n - 1.0);
         m / v.sqrt()
     };
     let mut field = peers(stream, block, vol);

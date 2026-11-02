@@ -1,4 +1,4 @@
-//! Deterministic `exp` and `ln` in pure Rust.
+//! Deterministic `exp`, `exp_m1`, `ln`, `ln_1p`, `powf` and `powi` in pure Rust.
 //!
 //! `f64::exp` and `f64::ln` lower to LLVM intrinsics. At run time they call the
 //! platform libm; when the argument is a compile-time constant, an optimised
@@ -94,7 +94,9 @@ impl Dd {
 
     /// The double nearest to `hi + lo` (the pair is normalised, so it is `hi`).
     fn round(self) -> f64 {
-        self.hi + self.lo
+        // Every pair reaching here came out of `norm`, so |lo| <= ulp(hi) / 2
+        // and a tie has already gone to the even hi: hi + lo rounds to hi.
+        self.hi
     }
 }
 
@@ -261,27 +263,21 @@ fn pow2(k: i32) -> f64 {
     f64::from_bits(((k + 1023) as u64) << 52)
 }
 
-/// Deterministic `e^x`. NaN propagates; `+inf -> +inf`, `-inf -> 0`.
-pub fn exp(x: f64) -> f64 {
-    if x.is_nan() {
-        return x;
-    }
-    if x > 709.8 {
-        return f64::INFINITY;
-    }
-    if x < -746.0 {
-        return 0.0;
-    }
-    // k = nearest integer to x / ln 2, |k| <= 1077. `round` is exact IEEE.
-    let k = (x * std::f64::consts::LOG2_E).round();
-    // r = x - k ln 2 in double-double. k * LN2_HI and k * LN2_LO are formed
-    // exactly by `two_prod`, so cancellation against x loses nothing.
+/// `exp` argument reduction and series, shared by [`exp`], [`exp_m1`] and
+/// [`powf`]. For `a = hi + lo` with `-746 <= hi <= 709.8`, returns `(u, k)`
+/// with `e^a = 2^k (1 + u)`, `u` a double-double and `k` in `[-1077, 1024]`.
+fn exp_parts(a: Dd) -> (Dd, i32) {
+    // k = nearest integer to hi / ln 2. `round` is exact IEEE.
+    let k = (a.hi * std::f64::consts::LOG2_E).round();
+    // r = a - k ln 2 in double-double. k * LN2_HI and k * LN2_LO are formed
+    // exactly by `two_prod`, so cancellation against a loses nothing.
     let (p1, e1) = two_prod(k, LN2_HI);
     let (p2, e2) = two_prod(k, LN2_LO);
-    let r = Dd::from(x)
+    let r = Dd::from(a.hi)
         .add(Dd { hi: -p1, lo: -e1 })
         .add(Dd { hi: -p2, lo: -e2 })
-        .add(Dd::from(-k * LN2_LO2));
+        .add(Dd::from(-k * LN2_LO2))
+        .add(Dd::from(a.lo));
     // |r| <= ln2 / 2 + tiny. Scale by 2^-8 (exact) so the series converges fast.
     const SQUARINGS: i32 = 8;
     let s = Dd {
@@ -302,15 +298,20 @@ pub fn exp(x: f64) -> f64 {
     for _ in 0..SQUARINGS {
         u = u.mul_f(2.0).add(u.mul(u));
     }
-    let y = Dd::from(1.0).add(u).round();
-    // Scale by 2^k. k is in [-1077, 1024]; split it so each factor is a normal
-    // power of two. Products with normal results are exact; only an overflow
-    // or a subnormal result rounds here.
-    let k = k as i32;
+    (u, k as i32)
+}
+
+/// `y * 2^k` for `k` in `[-1077, 1024]`, split so each factor is a normal power
+/// of two. A product with a normal result is exact; only an overflow or a
+/// subnormal result rounds.
+fn scale(y: f64, k: i32) -> f64 {
     if k > 1023 {
-        y * pow2(1023) * pow2(k - 1023)
+        // `exp_parts` caps k at 1024, and 2^1024 is not a double: two exact
+        // steps, the second of which is where an overflow rounds to infinity.
+        debug_assert_eq!(k, 1024);
+        y * pow2(1023) * 2.0
     } else if k < -1022 {
-        // y * 2^(k+1022) is normal (k + 1022 >= -54), so the only rounding
+        // y * 2^(k+1022) is normal (k + 1022 >= -55), so the only rounding
         // is the final step into the subnormal range.
         y * pow2(k + 1022) * pow2(-1022)
     } else {
@@ -318,36 +319,97 @@ pub fn exp(x: f64) -> f64 {
     }
 }
 
-/// Deterministic natural logarithm. NaN and negative arguments give NaN,
-/// `+-0 -> -inf`, `+inf -> +inf`.
-pub fn ln(x: f64) -> f64 {
-    if x.is_nan() || x < 0.0 {
-        return f64::NAN;
+/// `e^a` for a double-double argument, rounded once (twice for a subnormal
+/// result). NaN in `a.hi` propagates.
+fn exp_dd(a: Dd) -> f64 {
+    if a.hi.is_nan() {
+        return a.hi;
     }
-    if x == 0.0 {
-        return f64::NEG_INFINITY;
+    if a.hi > 709.8 {
+        return f64::INFINITY;
     }
-    if x == f64::INFINITY {
+    if a.hi < -746.0 {
+        return 0.0;
+    }
+    let (u, k) = exp_parts(a);
+    scale(Dd::from(1.0).add(u).round(), k)
+}
+
+/// Deterministic `e^x`. NaN propagates; `+inf -> +inf`, `-inf -> 0`.
+pub fn exp(x: f64) -> f64 {
+    exp_dd(Dd::from(x))
+}
+
+/// Below this magnitude `e^x - 1` and `ln(1 + x)` round to `x` itself: the
+/// next term, `x^2 / 2`, is under half an ulp of `x`.
+const TINY: f64 = f64::from_bits(0x3c90_0000_0000_0000); // 2^-54
+
+/// Deterministic `e^x - 1`, accurate near zero like `f64::exp_m1`. NaN
+/// propagates, `+-0` and tiny arguments return themselves, `+inf -> +inf`,
+/// `-inf -> -1`.
+pub fn exp_m1(x: f64) -> f64 {
+    if x.is_nan() || x.abs() < TINY {
+        // The tiny branch also keeps -0 and subnormals exact, which the 2^-8
+        // scaling inside the series would not.
         return x;
     }
-    // x = m * 2^e with m in [sqrt(1/2), sqrt(2)).
-    let mut bits = x.to_bits();
+    if x > 700.0 {
+        // e^x - 1 and e^x round to the same double this far out.
+        return exp(x);
+    }
+    if x < -40.0 {
+        // e^-40 = 4.2e-18 is below a quarter ulp of 1, so the result is -1.
+        return -1.0;
+    }
+    let (u, k) = exp_parts(Dd::from(x));
+    if k == 0 {
+        return u.round();
+    }
+    // 2^k (1 + u) - 1 with k in [-58, 1010]: scaling a double-double by a
+    // normal power of two is exact for both halves here.
+    let p = pow2(k);
+    let y = Dd::from(1.0).add(u);
+    Dd {
+        hi: y.hi * p,
+        lo: y.lo * p,
+    }
+    .add(Dd::from(-1.0))
+    .round()
+}
+
+/// `ln a` for a double-double `a` with `a.hi > 0` finite, unrounded.
+fn ln_dd(a: Dd) -> Dd {
+    // a = m * 2^e with m in [sqrt(1/2), sqrt(2)); a.lo is carried along.
+    let (mut hi, lo) = (a.hi, a.lo);
     let mut e: i64 = 0;
-    if bits >> 52 == 0 {
-        // Subnormal: scale by 2^54 (exact) into the normal range.
-        bits = (x * f64::from_bits(0x4350_0000_0000_0000)).to_bits();
+    if hi < f64::MIN_POSITIVE {
+        // Subnormal: scale by 2^54 (exact) into the normal range. Every caller
+        // passes lo = 0 here: `ln` and `powf` pass a plain double, and the
+        // `1 + x` of `ln_1p` is never below 2^-53, so there is no lo to scale.
+        debug_assert_eq!(lo, 0.0);
+        hi *= f64::from_bits(0x4350_0000_0000_0000);
         e -= 54;
     }
-    e += ((bits >> 52) & 0x7ff) as i64 - 1023;
+    let bits = hi.to_bits();
+    let be = ((bits >> 52) & 0x7ff) as i32 - 1023;
+    e += i64::from(be);
     let mut m = f64::from_bits((bits & 0x000f_ffff_ffff_ffff) | 0x3ff0_0000_0000_0000);
+    // lo * 2^-be. At be = 1023 (where 2^-1023 is not a normal power of two)
+    // the only lo a caller passes is the 1 that `ln_1p` carries out of 1 + x
+    // for x >= 2^1023, so lo * 2^-1023 sits below 2^-900 relative to m - 1
+    // and cannot move the rounded result: it is dropped.
+    let mut lo_m = if be == 1023 { 0.0 } else { lo * pow2(-be) };
     if m > std::f64::consts::SQRT_2 {
         m *= 0.5;
+        lo_m *= 0.5;
         e += 1;
     }
     // ln m = 2 atanh(s), s = (m - 1) / (m + 1), |s| <= 0.1716.
     // m - 1 is exact (Sterbenz), m + 1 is captured exactly by two_sum.
     let (a_hi, a_lo) = two_sum(m, 1.0);
-    let s = Dd::from(m - 1.0).div(Dd { hi: a_hi, lo: a_lo });
+    let num = Dd::from(m - 1.0).add(Dd::from(lo_m));
+    let den = Dd { hi: a_hi, lo: a_lo }.add(Dd::from(lo_m));
+    let s = num.div(den);
     let s2 = s.mul(s);
     // atanh(s)/s = sum_{j>=0} s2^j / (2j+1). s2 <= 0.0295, s2^25 < 2^-125.
     // inv: after folding INV_ODD[j], acc = sum_{i=j}^{24} s2^(i-j) / (2i+1) (Horner).
@@ -365,7 +427,134 @@ pub fn ln(x: f64) -> f64 {
         .add(Dd { hi: p2, lo: e2 })
         .add(Dd::from(ef * LN2_LO2))
         .add(ln_m)
-        .round()
+}
+
+/// Deterministic natural logarithm. NaN and negative arguments give NaN,
+/// `+-0 -> -inf`, `+inf -> +inf`.
+pub fn ln(x: f64) -> f64 {
+    if x.is_nan() || x < 0.0 {
+        return f64::NAN;
+    }
+    if x == 0.0 {
+        return f64::NEG_INFINITY;
+    }
+    if x == f64::INFINITY {
+        return x;
+    }
+    ln_dd(Dd::from(x)).round()
+}
+
+/// Deterministic `ln(1 + x)`, accurate near zero like `f64::ln_1p`. NaN and
+/// `x < -1` give NaN, `-1 -> -inf`, `+inf -> +inf`, `+-0` and tiny arguments
+/// return themselves.
+pub fn ln_1p(x: f64) -> f64 {
+    if x.is_nan() || x < -1.0 {
+        return f64::NAN;
+    }
+    if x == -1.0 {
+        return f64::NEG_INFINITY;
+    }
+    if x == f64::INFINITY || x.abs() < TINY {
+        return x;
+    }
+    // 1 + x is formed exactly as a double-double.
+    let (hi, lo) = two_sum(1.0, x);
+    ln_dd(Dd::norm(hi, lo)).round()
+}
+
+/// Deterministic `x^y` with the special cases of C99 Annex F `pow`.
+///
+/// Evaluated as `e^(y ln x)` with `ln x` and the product in double-double, so
+/// a finite result is the correctly rounded value except in the hard-to-round
+/// cases above and when the exact result is itself a rounding midpoint (for
+/// example `(1 + 2^-27)^2`), which libm `pow` implementations special-case and
+/// this one rounds to a neighbour. Either way it is the same bits everywhere.
+pub fn powf(x: f64, y: f64) -> f64 {
+    if y == 0.0 || x == 1.0 {
+        return 1.0;
+    }
+    if x.is_nan() || y.is_nan() {
+        return f64::NAN;
+    }
+    if y.is_infinite() {
+        let ax = x.abs();
+        return if ax == 1.0 {
+            1.0
+        } else if (ax < 1.0) == (y < 0.0) {
+            f64::INFINITY
+        } else {
+            0.0
+        };
+    }
+    let y_int = y == y.trunc();
+    // Every double at or above 2^53 is an even integer.
+    let y_odd = y_int && y.abs() < 9_007_199_254_740_992.0 && (y * 0.5).trunc() != y * 0.5;
+    if x == 0.0 {
+        return match (y < 0.0, y_odd) {
+            (true, true) => 1.0 / x, // +-inf with the sign of x
+            (true, false) => f64::INFINITY,
+            (false, true) => x,
+            (false, false) => 0.0,
+        };
+    }
+    if x.is_infinite() {
+        let magnitude = if y < 0.0 { 0.0 } else { f64::INFINITY };
+        return if x < 0.0 && y_odd {
+            -magnitude
+        } else {
+            magnitude
+        };
+    }
+    let sign = if x > 0.0 {
+        1.0
+    } else if !y_int {
+        return f64::NAN;
+    } else if y_odd {
+        -1.0
+    } else {
+        1.0
+    };
+    let l = ln_dd(Dd::from(x.abs()));
+    // Decide overflow and underflow before the exact product, whose Dekker
+    // split would itself overflow for |y| near f64::MAX.
+    let t = l.hi * y;
+    if t > 750.0 {
+        return sign * f64::INFINITY;
+    }
+    if t < -760.0 {
+        return sign * 0.0;
+    }
+    sign * exp_dd(l.mul_f(y))
+}
+
+/// Deterministic `x^n`, bit-identical to the binary-exponentiation loop of
+/// `compiler-builtins`' `__powidf2`, which LLVM's constant folder also uses.
+///
+/// `f64::powi` is not deterministic across builds: an optimised build folds a
+/// constant call with that loop, while the runtime routine linked on
+/// `x86_64-pc-windows-gnu` returns other bits for about a quarter of cubes.
+/// This loop uses only IEEE multiplication and division, so it gives the same
+/// bits everywhere.
+pub fn powi(x: f64, n: i32) -> f64 {
+    let mut base = x;
+    let mut rest = n.unsigned_abs();
+    let mut acc = 1.0;
+    // inv: acc * base^rest = x^|n| in exact arithmetic (each product rounded).
+    // term: a fixed 32 passes, one per bit of |n|, so the loop ends however
+    // its body is changed. Once the bits run out, rest is 0 and the remaining
+    // passes only square base, which is never multiplied into acc again.
+    for _ in 0..u32::BITS {
+        if rest & 1 == 1 {
+            acc *= base;
+        }
+        rest >>= 1;
+        base *= base;
+    }
+    if n < 0 {
+        1.0 / acc
+    } else {
+        acc
+    }
 }
 
 #[cfg(test)]
@@ -446,6 +635,103 @@ mod tests {
         }
     }
 
+    /// The error-free transformations and the double-double operations
+    /// against exact rational arithmetic (Python `fractions`), on operands
+    /// chosen so that a shortcut shows: a small factor for the Dekker split,
+    /// low parts in both addends, and quotients far from 1 in magnitude.
+    #[test]
+    fn double_double_primitives_are_exact_where_they_claim_to_be() {
+        let b = f64::from_bits;
+        let products: &[(f64, f64, u64, u64)] = &[
+            (
+                1.2345678901234568e-10,
+                9.876543212345679e-7,
+                0x3ca19285241c5842,
+                0xb912136bac7f2520,
+            ),
+            (
+                std::f64::consts::FRAC_1_SQRT_2,
+                std::f64::consts::SQRT_2,
+                0x3ff0000000000001,
+                0xbc9898208143bbae,
+            ),
+            (
+                123456789.12345679,
+                3.3333333333333335e-5,
+                0x40b01339ef1105d9,
+                0x3d458adaeb0c06d8,
+            ),
+        ];
+        for &(x, y, p, e) in products {
+            assert_eq!(two_prod(x, y), (b(p), b(e)), "two_prod({x}, {y})");
+        }
+        // (1 + 2^-60) + (1 + 2^-60) = 2 + 2^-59: the low parts must add.
+        let tiny = b(0x3c30_0000_0000_0000); // 2^-60
+        let sum = Dd { hi: 1.0, lo: tiny }.add(Dd { hi: 1.0, lo: tiny });
+        assert_eq!((sum.hi, sum.lo), (2.0, 2.0 * tiny));
+        // Low parts whose own sum rounds: the rounding error f is carried.
+        let x = Dd {
+            hi: b(0x3ffe_65a8_1575_d683),
+            lo: b(0xbca1_af82_0b24_2c39),
+        };
+        let y = Dd {
+            hi: b(0x3ff8_296f_5ff4_170a),
+            lo: b(0x3944_6bdc_c73b_f73f),
+        };
+        let sum = x.add(y);
+        assert_eq!(
+            (sum.hi, sum.lo),
+            (b(0x400b_478b_bab4_f6c6), b(0x3c9c_a0fb_e9b7_a78f))
+        );
+        // 1e100 / 3e100 as the double-double nearest the exact ratio.
+        let q = Dd::from(1e100).div(Dd::from(3e100));
+        let (hi, lo) = (b(0x3fd5_5555_5555_5556), b(0xbc71_c7d6_5148_def2));
+        assert_eq!(q.hi, hi);
+        assert!((q.lo - lo).abs() <= 1e-30 * hi, "lo {:e} vs {lo:e}", q.lo);
+    }
+
+    /// `exp_parts` against `e^x / 2^k - 1` from 90-digit decimal arithmetic, at
+    /// x = the double nearest k ln 2, where r = x - k ln 2 is about 5e-14 and
+    /// so every term of the reduction (including the 2^-100 tail of k ln 2)
+    /// shows in u. A sign slip in any term moves u by more than 1e-17 relative;
+    /// the reduction itself is good to about 1e-31 here.
+    #[test]
+    fn exp_reduction_keeps_every_term_of_k_ln2() {
+        let cases: &[(f64, i32, u64, u64)] = &[
+            (
+                693.1471805599454,
+                1000,
+                0x3d2971e6bd14ed03,
+                0x397243189a935e1b,
+            ),
+            (
+                -693.1471805599454,
+                -1000,
+                0xbd2971e6bd14ebbf,
+                0xb9c25a4aa5767df7,
+            ),
+            (
+                709.0895657128241,
+                1023,
+                0x3d219508762aa75e,
+                0xb9c1d5ba724ed630,
+            ),
+            (
+                -741.6674831991414,
+                -1070,
+                0x3d2d180bab714b95,
+                0xb9c7f00739bcd966,
+            ),
+        ];
+        for &(x, k_want, hi, lo) in cases {
+            let (u, k) = exp_parts(Dd::from(x));
+            assert_eq!(k, k_want, "k for {x}");
+            let (hi, lo) = (f64::from_bits(hi), f64::from_bits(lo));
+            let err = ((u.hi - hi) + (u.lo - lo)).abs();
+            assert!(err <= 1e-25 * hi.abs(), "u for {x}: off by {err:e}");
+        }
+    }
+
     #[test]
     fn exp_and_ln_edge_cases() {
         assert_eq!(exp(0.0), 1.0);
@@ -467,5 +753,99 @@ mod tests {
         assert!(ln(f64::NAN).is_nan());
         // ln of the smallest subnormal: -744.4400719213812.
         assert_eq!(ln(f64::from_bits(1)), -744.4400719213812);
+    }
+
+    #[test]
+    fn exp_m1_and_ln_1p_edge_cases() {
+        let bits = |x: f64| x.to_bits();
+        assert_eq!(bits(exp_m1(-0.0)), bits(-0.0));
+        assert_eq!(bits(ln_1p(-0.0)), bits(-0.0));
+        assert_eq!(exp_m1(f64::from_bits(1)), f64::from_bits(1));
+        assert_eq!(ln_1p(f64::from_bits(1)), f64::from_bits(1));
+        assert_eq!(exp_m1(f64::INFINITY), f64::INFINITY);
+        assert_eq!(exp_m1(f64::NEG_INFINITY), -1.0);
+        assert_eq!(exp_m1(-50.0), -1.0);
+        assert_eq!(exp_m1(710.0), f64::INFINITY);
+        assert!(exp_m1(f64::NAN).is_nan());
+        assert_eq!(ln_1p(-1.0), f64::NEG_INFINITY);
+        assert_eq!(ln_1p(f64::INFINITY), f64::INFINITY);
+        assert!(ln_1p(-1.5).is_nan());
+        assert!(ln_1p(f64::NAN).is_nan());
+        assert_eq!(ln_1p(1.0), std::f64::consts::LN_2);
+        assert_eq!(exp_m1(std::f64::consts::LN_2), 1.0);
+        // The largest finite double: ln_1p must not lose 1 + x.
+        assert_eq!(ln_1p(f64::MAX), ln(f64::MAX));
+    }
+
+    #[test]
+    fn powf_follows_the_c99_special_cases() {
+        let inf = f64::INFINITY;
+        let nan = f64::NAN;
+        let bits = |x: f64| x.to_bits();
+        let cases: &[(f64, f64, f64)] = &[
+            (nan, 0.0, 1.0),
+            (1.0, nan, 1.0),
+            (-1.0, inf, 1.0),
+            (-1.0, -inf, 1.0),
+            (0.5, inf, 0.0),
+            (0.5, -inf, inf),
+            (2.0, inf, inf),
+            (2.0, -inf, 0.0),
+            (0.0, -3.0, inf),
+            (-0.0, -3.0, -inf),
+            (-0.0, -2.0, inf),
+            (-0.0, -0.5, inf),
+            (0.0, 3.0, 0.0),
+            (-0.0, 3.0, -0.0),
+            (-0.0, 2.0, 0.0),
+            (-0.0, 0.5, 0.0),
+            (-inf, -3.0, -0.0),
+            (-inf, -2.0, 0.0),
+            (-inf, 3.0, -inf),
+            (-inf, 2.0, inf),
+            (inf, -0.5, 0.0),
+            (inf, 0.5, inf),
+            (-8.0, 1.0 / 3.0, nan),
+            (2.0, 1024.0, inf),
+            (2.0, -1074.0, f64::from_bits(1)),
+            (2.0, -1080.0, 0.0),
+            (-2.0, 1025.0, -inf),
+            (1.5, f64::MAX, inf),
+            (1.5, -f64::MAX, 0.0),
+            // A NaN base with an integer exponent is NaN, not e^(y ln NaN).
+            (nan, -1.0, nan),
+            (nan, 3.0, nan),
+            // Past the early overflow test the sign still follows an odd y.
+            (-2.0, 1083.0, -inf),
+            (-2.0, -1083.0, -0.0),
+            (-1.5, 9_007_199_254_740_992.0, inf),
+        ];
+        for &(x, y, want) in cases {
+            let got = powf(x, y);
+            if want.is_nan() {
+                assert!(got.is_nan(), "powf({x}, {y}) = {got}");
+            } else {
+                assert_eq!(bits(got), bits(want), "powf({x}, {y}) = {got}");
+            }
+        }
+        // Integer powers that are exact stay exact.
+        for n in -20..=20 {
+            assert_eq!(powf(2.0, f64::from(n)), 2f64.powi(n));
+            assert_eq!(powf(-3.0, f64::from(n)), powi(-3.0, n), "(-3)^{n}");
+        }
+    }
+
+    #[test]
+    fn powi_is_the_binary_exponentiation_loop() {
+        let x = 1.000_000_123_456_789_f64;
+        assert_eq!(powi(x, 0), 1.0);
+        assert_eq!(powi(x, 1), x);
+        assert_eq!(powi(x, 2), x * x);
+        assert_eq!(powi(x, 3), x * (x * x));
+        assert_eq!(powi(x, 4), (x * x) * (x * x));
+        assert_eq!(powi(x, 5), x * ((x * x) * (x * x)));
+        assert_eq!(powi(x, -2), 1.0 / (x * x));
+        assert_eq!(powi(2.0, i32::MIN), 0.0);
+        assert_eq!(powi(-1.0, i32::MAX), -1.0);
     }
 }

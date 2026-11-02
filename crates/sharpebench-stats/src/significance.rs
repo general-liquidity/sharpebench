@@ -228,7 +228,7 @@ pub fn runs_for_power(effect: f64, alpha: f64, power: f64) -> usize {
     }
     let za = norm_ppf((1.0 - alpha).clamp(0.0, 1.0));
     let zb = norm_ppf(power.clamp(0.0, 1.0));
-    let k = ((za + zb) / effect).powi(2);
+    let k = crate::det_math::powi((za + zb) / effect, 2);
     if k <= 1.0 {
         return 1;
     }
@@ -353,7 +353,11 @@ pub fn spa_pvalue(
     let omega: Vec<f64> = (0..k)
         .map(|ki| {
             let col_mean = rows.iter().map(|r| r[ki]).sum::<f64>() / n_boot as f64;
-            let var = rows.iter().map(|r| (r[ki] - col_mean).powi(2)).sum::<f64>() / n_boot as f64;
+            let var = rows
+                .iter()
+                .map(|r| crate::det_math::powi(r[ki] - col_mean, 2))
+                .sum::<f64>()
+                / n_boot as f64;
             Ok(finite_computation(var.sqrt(), "bootstrap studentizing scale")?.max(1e-8))
         })
         .collect::<Result<_, StatisticalError>>()?;
@@ -437,7 +441,11 @@ pub fn spa_consistent_pvalue(
     let omega: Vec<f64> = (0..k)
         .map(|ki| {
             let col_mean = rows.iter().map(|r| r[ki]).sum::<f64>() / n_boot as f64;
-            let var = rows.iter().map(|r| (r[ki] - col_mean).powi(2)).sum::<f64>() / n_boot as f64;
+            let var = rows
+                .iter()
+                .map(|r| crate::det_math::powi(r[ki] - col_mean, 2))
+                .sum::<f64>()
+                / n_boot as f64;
             Ok(finite_computation(var.sqrt(), "bootstrap studentizing scale")?.max(1e-8))
         })
         .collect::<Result<_, StatisticalError>>()?;
@@ -460,7 +468,7 @@ pub fn spa_consistent_pvalue(
     // Consistent recentering: a model with studentized mean below -sqrt(2 ln ln n)
     // is dropped from the null max. For tiny n (ln ln n ≤ 0) keep every model
     // (threshold → ∞), reducing exactly to the studentized SPA.
-    let lnln = (n as f64).ln().ln();
+    let lnln = crate::det_math::ln(crate::det_math::ln(n as f64));
     let thresh = if lnln > 0.0 {
         (2.0 * lnln).sqrt()
     } else {

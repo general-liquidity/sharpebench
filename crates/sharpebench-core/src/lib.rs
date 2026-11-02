@@ -22,7 +22,9 @@
 // The pure statistics core lives in `sharpebench-stats`; re-export the modules so
 // every existing path (`crate::stats::…`, `sharpebench_core::deflated_sharpe::…`,
 // `…::significance::*`, `…::selection::*`) keeps resolving byte-for-byte.
-pub use sharpebench_stats::{deflated_sharpe, selection, significance, stats, stylized_facts};
+pub use sharpebench_stats::{
+    deflated_sharpe, det_math, selection, significance, stats, stylized_facts,
+};
 
 // The dataset-realism validator (Cont's stylized facts) — certifies that a frozen
 // or synthetic dataset actually behaves like a market before any score is trusted.

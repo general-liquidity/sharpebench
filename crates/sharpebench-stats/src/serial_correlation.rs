@@ -118,7 +118,10 @@ pub fn within_window_autocorrelations(
 /// AR(1) plug-in, `floor(1.1447 * (alpha * T)^(1/3))`, capped at one less than
 /// the shortest window so every lag is measured in every window.
 fn andrews_bartlett_bandwidth(rho_1: f64, observations: usize, shortest_window: usize) -> usize {
-    let alpha = 4.0 * rho_1 * rho_1 / ((1.0 - rho_1).powi(2) * (1.0 + rho_1).powi(2));
+    let alpha = 4.0 * rho_1 * rho_1
+        / (crate::det_math::powi(1.0 - rho_1, 2) * crate::det_math::powi(1.0 + rho_1, 2));
+    // `cbrt` stays the platform routine: the result is floored to a whole lag, so
+    // a last-place difference can matter only within one ulp of an integer.
     let bandwidth = 1.1447 * (alpha * observations as f64).cbrt();
     let cap = shortest_window.saturating_sub(1);
     if bandwidth.is_finite() && bandwidth >= 0.0 {
