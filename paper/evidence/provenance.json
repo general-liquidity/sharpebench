@@ -179,7 +179,7 @@
       "sha256": "beaa2054f85384b12334267e10b7981a22967b6983f65bd75b0b1bfbcc262e86"
     }
   ],
-  "generated_at_head": "2d94e8f3c5bfbe86f00af977311b2e252103f81b",
+  "generated_at_head": "d2e861ee23f0eb4c4c3b95a603e4b210bd4aa479",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -191,7 +191,7 @@
     },
     {
       "path": "Cargo.toml",
-      "sha256": "a3901fdea37c047db27fcd58f044f2e8bd01715a4cf5b2fcc74b0cbbdd074348"
+      "sha256": "1b8b6acad741a3aacfe258c91171f0f97c03dc9ea40c5d5597796fd94897993f"
     },
     {
       "path": "arena/windows/window-001/window.json",
@@ -1783,5 +1783,5 @@
     "data/*.csv",
     "arena/windows/**/*.json"
   ],
-  "source_snapshot_sha256": "8d08f94283abfe5cb5a2bb8e24a84904c3c3ec0f6dcdde4a9ca962d78451466f"
+  "source_snapshot_sha256": "ce9faafb8a4af63269b1c766a1975e4bfac0131f2cdcd90f3c9568bb18ad6aab"
 }
