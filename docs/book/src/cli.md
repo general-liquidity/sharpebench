@@ -604,7 +604,7 @@ record and a Markdown table derived only from the signed links:
 `leaderboard.json` and `leaderboard.md` under `--out`, or the table (the record
 under `--json`) on standard output. An input that does not verify exits 1 and
 writes nothing; a usage error exits 2. Each row carries the headline verdict,
-tier, qualifiers, the deflated Sharpe with its interval, the pass^k count,
+the evaluation tier, the tie band, qualifiers, the deflated Sharpe with its interval, the pass^k count,
 eligibility, the evidence mode, the cost columns and the signed link it came
 from. See [Leaderboard export](leaderboard-export.md).
 

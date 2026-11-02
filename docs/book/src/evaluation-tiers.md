@@ -63,6 +63,9 @@ conditions is `historical-advisory`.
 - The entrant row of `sharpebench run --json` carries an `evaluation_tier`
   object (`sharpebench.evaluation-tier.v1`) beside `evidence_mode`.
 - An arena `board.md` states the tier on the line after its title.
+- The [leaderboard export](leaderboard-export.md) writes it on every row as
+  `tier`, beside the deflated-Sharpe tie band `tie_band`, and its Markdown
+  table lists each board's tier.
 
 The JSON board array of `score --json` is unchanged: the tier is never written
 into a scored row, so the sealed board and every golden keep their bytes.

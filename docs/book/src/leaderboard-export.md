@@ -57,7 +57,8 @@ Each row holds:
 | Field | Meaning |
 |---|---|
 | `headline` | the [headline verdict](reading-a-row.md) with its hard reasons, cause and qualifiers |
-| `tier` | the row's tie band (`tie_group`) when it is rank-eligible; rows in one tier are statistically indistinguishable on the deflated Sharpe. `null` for a row that cannot be ranked |
+| `tier` | the row's [evaluation tier](evaluation-tiers.md), equal to the headline's first qualifier: `forward-certifying` for a scored row of a board whose signed header certifies it, and `historical-advisory` for every other row, refusals and signed board files included |
+| `tie_band` | the row's tie band (`tie_group`) when it is rank-eligible; rows in one band are statistically indistinguishable on the deflated Sharpe. `null` for a row that cannot be ranked |
 | `rank_eligible` | the scorer's eligibility |
 | `dsr`, `dsr_interval`, `dsr_interval_error` | the deflated Sharpe and its bootstrap interval. `dsr` is `null` when the deflation family refused the track or could not compute it, because the stored value is then a floor, not a figure |
 | `pass_k` | `passed`, `runs_passed` and `runs_scored` |
@@ -83,9 +84,10 @@ stated `completeness_limit` says so.
 ## The table
 
 `leaderboard.md` is the record's reading, not a second record. It states the
-source and the verification limit, lists the boards, and prints one table row
-per record row with the columns board, record (`<board_path>#<link>`), agent,
-verdict, tier, DSR, DSR interval, pass^k, eligible, evidence, cost, qualifiers
+source and the verification limit, lists the boards with the evaluation tier
+each board's signed header gives its rows, and prints one table row per record
+row with the columns board, record (`<board_path>#<link>`), agent, verdict,
+tier, tie band, DSR, DSR interval, pass^k, eligible, evidence, cost, qualifiers
 and reasons. A figure that does not exist prints `unavailable` on a scored row
 and `-` on a refusal. Pipes and backslashes in signed text are escaped and
 control characters become spaces, so an agent id cannot break the table.
