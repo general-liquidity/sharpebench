@@ -5,8 +5,9 @@
 use sharpebench_protocol::{Action, Decision, MarketObservation, Order};
 use sharpebench_sim::windows::walk_forward;
 use sharpebench_sim::{
-    build_twin, run_backtest, shape_probe, window_sharpe, Agent, BuyAndHold, CostModel,
-    CostProfile, Dataset, Momentum, PairedScore, ProbeConfig, ShapeProbeReport, TwinPair, TwinSpec,
+    build_twin, run_backtest, run_shape_probe, shape_probe, window_sharpe, Agent, BuyAndHold,
+    CostModel, CostProfile, Dataset, Momentum, PairedScore, ProbeConfig, ShapeProbeReport,
+    ShapeProbeUnavailable, TwinArm, TwinPair, TwinSpec,
 };
 
 const WARMUP: usize = 20;
@@ -171,4 +172,135 @@ fn the_memorizer_recognises_every_real_window_and_no_twin() {
             assert_eq!(agent.found, expect, "window {i}");
         }
     }
+}
+
+fn source_and_windows() -> (Dataset, Vec<sharpebench_sim::Window>) {
+    let source = Dataset::synthetic(3, WARMUP + 12 * 40, 2026);
+    let windows = walk_forward(source.len(), WARMUP, 40, 40);
+    (source, windows)
+}
+
+/// The orchestrator an external entrant runs through: twins built from the
+/// declared seeds, one fresh agent per arm, the same verdicts as the paired
+/// scores computed by hand above.
+#[test]
+fn the_probe_run_convicts_the_memorizer_and_clears_momentum() {
+    let (source, windows) = source_and_windows();
+    let lib = library(&pairs());
+    let costs = CostProfile::None.resolve().costs;
+    let run = |make: &dyn Fn() -> Box<dyn Agent>| {
+        run_shape_probe::<()>(
+            &source,
+            &windows,
+            &TwinSpec::default(),
+            ProbeConfig::default(),
+            1000,
+            &mut |_, data, window| Ok(run_backtest(data, make().as_mut(), window, 0, costs).returns),
+        )
+        .unwrap()
+    };
+    let memorizer = run(&|| {
+        Box::new(Memorizer {
+            library: lib.clone(),
+            found: None,
+            step: 0,
+        })
+    });
+    assert_eq!(memorizer.windows.len(), 12);
+    assert_eq!(
+        (
+            memorizer.windows[1].source_start,
+            memorizer.windows[1].source_end
+        ),
+        (60, 100)
+    );
+    assert!(memorizer.report.memorization, "{memorizer:?}");
+    let by_hand = probe(&pairs(), &|| {
+        Box::new(Memorizer {
+            library: lib.clone(),
+            found: None,
+            step: 0,
+        })
+    });
+    assert_eq!(memorizer.report, by_hand);
+    let momentum = run(&|| Box::new(Momentum::default()));
+    assert!(!momentum.report.memorization, "{momentum:?}");
+}
+
+#[test]
+fn the_probe_run_names_the_window_it_cannot_twin_run_or_score() {
+    let (source, windows) = source_and_windows();
+    let costs = CostProfile::None.resolve().costs;
+    let mut arms = Vec::new();
+    let failed = run_shape_probe(
+        &source,
+        &windows,
+        &TwinSpec::default(),
+        ProbeConfig::default(),
+        1000,
+        &mut |arm, data, window| {
+            arms.push(arm);
+            if arms.len() == 4 {
+                Err("spawn")
+            } else {
+                Ok(run_backtest(data, &mut BuyAndHold, window, 0, costs).returns)
+            }
+        },
+    );
+    assert_eq!(
+        failed.unwrap_err(),
+        ShapeProbeUnavailable::Arm {
+            window: 1,
+            arm: TwinArm::Twin,
+            error: "spawn"
+        }
+    );
+    assert_eq!(
+        arms,
+        [TwinArm::Real, TwinArm::Twin, TwinArm::Real, TwinArm::Twin]
+    );
+
+    let flat = run_shape_probe::<()>(
+        &source,
+        &windows,
+        &TwinSpec::default(),
+        ProbeConfig::default(),
+        1000,
+        &mut |_, _, window| Ok(vec![0.0; window.end - window.start]),
+    );
+    assert_eq!(
+        flat.unwrap_err(),
+        ShapeProbeUnavailable::ScoreUnavailable { window: 0 }
+    );
+
+    let mut ran = false;
+    let short = [sharpebench_sim::Window { start: 5, end: 40 }];
+    let refused = run_shape_probe::<()>(
+        &source,
+        &short,
+        &TwinSpec::default(),
+        ProbeConfig::default(),
+        1000,
+        &mut |_, _, _| {
+            ran = true;
+            Ok(Vec::new())
+        },
+    );
+    assert!(matches!(
+        refused.unwrap_err(),
+        ShapeProbeUnavailable::Twin { window: 0, .. }
+    ));
+    assert!(!ran, "no arm runs when a window cannot be twinned");
+    assert!(matches!(
+        run_shape_probe::<()>(
+            &source,
+            &[],
+            &TwinSpec::default(),
+            ProbeConfig::default(),
+            1000,
+            &mut |_, _, _| Ok(Vec::new()),
+        )
+        .unwrap_err(),
+        ShapeProbeUnavailable::Probe { .. }
+    ));
 }

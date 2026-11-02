@@ -18,6 +18,8 @@ sharpebench rescore <bundle.json>                     recompute a declared submi
 sharpebench regrade <bundle.json> --original-evaluator <json> --replacement-evaluator <json> --reason <text>   link an artifact to the evaluator superseding the one that graded it
 sharpebench audit-briefing <briefing.json>            audit a shared briefing for salience bias
 sharpebench canary <seed>                             derive a do-not-train contamination tripwire
+sharpebench contamination-probe <entrant>             real-minus-twin shape probe for path recall (rank-neutral)
+sharpebench presentation-stability <entrant>          decisions under partial blinding, reordering and a date shift (rank-neutral)
 sharpebench sandbox-check <image@sha256:digest>       run the live Docker-boundary acceptance checks
 sharpebench gateway --routes <routes.json> ...        report the host-observed model gateway configuration
 sharpebench score-allocation <alloc.json>             score a weight-vector trajectory (turnover)
@@ -343,6 +345,30 @@ protocol and the dataset. The report (`sharpebench.timing-luck.v2`) carries
 `rank_input: false`; `--cmd`, `--image` and `--http` are refused, and `run`
 output is unchanged. A cadence longer than a declared window exits 1 with
 `window_shorter_than_cadence`. See [Timing-luck floor](timing-luck.md).
+
+## `contamination-probe` and `presentation-stability`
+
+```bash
+sharpebench contamination-probe <entrant> [--data <csv>] [--window-bars N] [--windows N] [--twin-seed N] [--frictionless] [--json]
+sharpebench presentation-stability <entrant> [--data <csv>] [--date-shift-days N] [--json]
+```
+
+`<entrant>` is exactly one of `--agent buy-and-hold|momentum`, `--cmd "<prog>"`,
+`--http <addr>` or `--image <repository@sha256:...>`, with one fresh agent (or
+container) per probe arm. `contamination-probe` scores the entrant on masked
+real windows and their synthetic twins and tests the paired edge
+(`sharpebench.contamination-probe.v1`). `presentation-stability` compares its
+decisions under tickers-only, dates-only, levels-only and full blinding, under
+reordered symbols, and under a calendar shifted by `--date-shift-days`
+(`sharpebench.presentation-stability.v1`). Both accept `--short-borrow-bps` and
+`--declared-training-cutoff`, refuse `--masked`, carry `rank_input: false`, and
+report a failed arm as a typed `unavailable` object (exit 1). See
+[Contamination probes](contamination-probes.md).
+
+`run --declared-training-cutoff YYYY-MM-DD`, with an external entrant only,
+publishes the operator's declared cutoff on the entrant's row as
+`declared_training_cutoff`, untrusted and unverified; `evidence_mode` is
+unchanged.
 
 ## `grader-search`
 

@@ -382,45 +382,7 @@ impl Dataset {
     /// The dataset carries no volume, so there is no volume to normalize.
     /// Declared mark times are carried under the renamed symbols.
     pub fn masked_view(&self) -> Result<MaskedView, MaskError> {
-        let dates: Vec<String> = (0..self.dates.len()).map(|i| format!("t{i}")).collect();
-        let mut closes = BTreeMap::new();
-        let mut dividends = BTreeMap::new();
-        let mut symbols = Vec::with_capacity(self.closes.len());
-        for (i, (symbol, series)) in self.closes.iter().enumerate() {
-            let opaque = format!("ASSET_{i:03}");
-            let exponent = rebase_exponent(symbol, series)?;
-            closes.insert(opaque.clone(), scale_series(symbol, series, exponent)?);
-            if let Some(stream) = self.dividends.get(symbol) {
-                dividends.insert(opaque.clone(), scale_series(symbol, stream, exponent)?);
-            }
-            symbols.push(MaskedSymbol {
-                source: symbol.clone(),
-                opaque,
-                scale_exponent: exponent,
-            });
-        }
-        let marks = self.marks.as_ref().map(|sheet| {
-            let mut renamed = sheet.clone();
-            renamed.symbols = symbols
-                .iter()
-                .filter_map(|m| {
-                    sheet
-                        .symbols
-                        .get(&m.source)
-                        .map(|mark| (m.opaque.clone(), mark.clone()))
-                })
-                .collect();
-            renamed
-        });
-        Ok(MaskedView {
-            dataset: Dataset {
-                dates,
-                closes,
-                dividends,
-                marks,
-            },
-            symbols,
-        })
+        crate::blinding::blind(self, crate::blinding::BlindingLevel::Full)
     }
 
     /// Attach a declared mark-time sheet. The sheet must name exactly the
@@ -441,7 +403,7 @@ impl Dataset {
 
 /// The exponent `k` for which `|first nonzero close| * 2^k` lies in `[64, 128)`.
 /// A series of zeros keeps `k = 0`: there is no level to hide.
-fn rebase_exponent(symbol: &str, series: &[f64]) -> Result<i32, MaskError> {
+pub(crate) fn rebase_exponent(symbol: &str, series: &[f64]) -> Result<i32, MaskError> {
     let Some(step) = series.iter().position(|x| *x != 0.0) else {
         return Ok(0);
     };
@@ -457,7 +419,11 @@ fn rebase_exponent(symbol: &str, series: &[f64]) -> Result<i32, MaskError> {
     Ok(6 - e)
 }
 
-fn scale_series(symbol: &str, series: &[f64], exponent: i32) -> Result<Vec<f64>, MaskError> {
+pub(crate) fn scale_series(
+    symbol: &str,
+    series: &[f64],
+    exponent: i32,
+) -> Result<Vec<f64>, MaskError> {
     if !(-1022..=1023).contains(&exponent) {
         return Err(MaskError::UnscalableLevel {
             symbol: symbol.to_string(),
