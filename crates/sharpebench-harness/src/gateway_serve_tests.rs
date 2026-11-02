@@ -1117,3 +1117,60 @@ fn scripted_process(dir: &Path) -> EntrantLaunch {
             .collect(),
     )
 }
+
+/// The contamination probes reach a gateway-attached entrant the way they
+/// reach any other: one fresh entrant per arm, every model call brokered and
+/// counted by the host. The scripted entrant sizes the first listed symbol from
+/// the model's answer, so every blinding level leaves its decisions unchanged
+/// and only the reordered pair separates its arms.
+#[test]
+fn the_presentation_suite_runs_against_a_gateway_entrant() {
+    use sharpebench_sim::{presentation_suite, Presentation, SuiteSpec, BLINDING_LEVELS};
+
+    let routes = table();
+    let permits = CallPermits::new(4);
+    let provider = ScriptedProvider::answering("0.25");
+    let mut gateway = ModelGateway::new(
+        &routes,
+        &permits,
+        provider.clone(),
+        budget(1_000_000, 1_000),
+        GatewayLimits::default(),
+    );
+    let data = Dataset::synthetic(3, 40, 9);
+    let window = Window { start: 20, end: 26 };
+    let log = Log::default();
+    let suite = presentation_suite(
+        &data,
+        window,
+        0,
+        sharpebench_sim::CostModel::default(),
+        SuiteSpec::default(),
+        &mut |request| {
+            let mut entrant =
+                GatewayEntrant::new(in_thread(model_entrant(log.clone(), 1)), &mut gateway);
+            crate::contamination_probe::record_external_run(
+                request.data,
+                &mut entrant,
+                request.window,
+                request.seed,
+                request.costs,
+            )
+        },
+    )
+    .expect("every arm ran cleanly");
+    let arms = BLINDING_LEVELS.len() + 2;
+    assert_eq!(provider.calls(), arms * STEPS);
+    assert_eq!(
+        gateway.journal().spend().priced_calls as usize,
+        arms * STEPS
+    );
+    for pair in &suite.pairs {
+        let expected = if pair.variant == Presentation::Reordered {
+            STEPS
+        } else {
+            0
+        };
+        assert_eq!(pair.comparison.disagreeing_steps, expected, "{pair:?}");
+    }
+}

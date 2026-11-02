@@ -10,6 +10,12 @@ repository.workspace = true
 name = "sharpebench"
 path = "src/main.rs"
 
+# The test binary doubles as its own planted `--cmd` entrant, so it owns its
+# stdout and answers nextest's `--list` itself.
+[[test]]
+name = "contamination_probe_cli"
+harness = false
+
 [dependencies]
 sharpebench-core = { path = "../sharpebench-core", version = "0.28.0" }
 sharpebench-protocol = { path = "../sharpebench-protocol", version = "0.28.0" }

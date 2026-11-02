@@ -125,16 +125,27 @@ pub fn disclosure(
     })
 }
 
-/// Put the disclosure on the entrant's row of a JSON board. The board stays an
-/// array and every other field is untouched.
-pub fn attach(board: &mut serde_json::Value, agent_id: &str, disclosure: &serde_json::Value) {
+/// Put `value` under `field` on the entrant's row of a JSON board. The board
+/// stays an array and every other field is untouched.
+pub fn attach_field(
+    board: &mut serde_json::Value,
+    agent_id: &str,
+    field: &str,
+    value: &serde_json::Value,
+) {
     if let Some(rows) = board.as_array_mut() {
         for row in rows {
             if row["agent_id"].as_str() == Some(agent_id) {
-                row["evidence_mode"] = disclosure.clone();
+                row[field] = value.clone();
             }
         }
     }
+}
+
+/// Put the disclosure on the entrant's row of a JSON board. The board stays an
+/// array and every other field is untouched.
+pub fn attach(board: &mut serde_json::Value, agent_id: &str, disclosure: &serde_json::Value) {
+    attach_field(board, agent_id, "evidence_mode", disclosure);
 }
 
 #[cfg(test)]

@@ -152,7 +152,7 @@ fn segment_stats(data: &Dataset, window: Window) -> Option<SegmentStats> {
 
 /// One draw's seed: a SplitMix64 finalizer over the window seed and the draw
 /// index, so consecutive draws are not overlapping streams of one generator.
-fn draw_seed(seed: u64, draw: u64) -> u64 {
+pub(crate) fn draw_seed(seed: u64, draw: u64) -> u64 {
     let mut z = seed ^ draw.wrapping_mul(0xD1B5_4A32_D192_ED03);
     z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
@@ -299,7 +299,7 @@ impl Default for ProbeConfig {
 }
 
 /// Paired real-minus-twin result over a set of windows.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct ShapeProbeReport {
     /// `real - twin`, one per window, in input order.
     pub edges: Vec<f64>,
@@ -352,6 +352,123 @@ pub fn shape_probe(
         pvalue: test.pvalue,
         memorization: test.pvalue <= config.alpha && test.observed_mean >= config.min_edge,
         edges,
+    })
+}
+
+/// Which arm of a twin pair an agent is run on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TwinArm {
+    Real,
+    Twin,
+}
+
+/// One window of a probe run: where it sits in the source, how many draws
+/// its twin took, and the two scores.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct ShapeWindow {
+    /// The scored window's bars in the source dataset, `[start, end)`.
+    pub source_start: usize,
+    pub source_end: usize,
+    pub twin_draws: usize,
+    pub real_sharpe: Option<f64>,
+    pub twin_sharpe: Option<f64>,
+}
+
+/// A whole probe run over a set of windows.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct ShapeProbeRun {
+    pub windows: Vec<ShapeWindow>,
+    pub report: ShapeProbeReport,
+}
+
+/// Why a probe run has no verdict. Nothing is dropped: one window that cannot
+/// be twinned, run or scored refuses the run and is named.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(tag = "reason", rename_all = "snake_case")]
+pub enum ShapeProbeUnavailable<E> {
+    /// The window could not be twinned under the declared [`TwinSpec`].
+    Twin { window: usize, error: String },
+    /// The entrant failed on one arm.
+    Arm {
+        window: usize,
+        arm: TwinArm,
+        error: E,
+    },
+    /// An arm ran but its Sharpe ratio is undefined (constant or non-finite
+    /// returns).
+    ScoreUnavailable { window: usize },
+    /// Fewer than one window, or the test itself refused.
+    Probe { error: String },
+}
+
+/// Runs a fresh agent on one arm's masked dataset over the scored window and
+/// returns its per-bar returns, or why it could not.
+pub type ShapeArmRunner<'a, E> = dyn FnMut(TwinArm, &Dataset, Window) -> Result<Vec<f64>, E> + 'a;
+
+/// Twin every window, run the entrant on each real and twin arm, and test the
+/// paired edge. `run_arm` runs a fresh agent on the masked dataset it is handed
+/// over the scored window and returns its per-bar returns; the probe scores
+/// them with [`window_sharpe`]. Window `i` is twinned with seed
+/// `twin_seed + i`. Every twin is built before any arm runs, so an
+/// unmatchable window costs no entrant run.
+pub fn run_shape_probe<E>(
+    source: &Dataset,
+    windows: &[Window],
+    spec: &TwinSpec,
+    config: ProbeConfig,
+    twin_seed: u64,
+    run_arm: &mut ShapeArmRunner<'_, E>,
+) -> Result<ShapeProbeRun, ShapeProbeUnavailable<E>> {
+    if windows.is_empty() {
+        return Err(ShapeProbeUnavailable::Probe {
+            error: "no windows to probe".to_string(),
+        });
+    }
+    let mut pairs = Vec::with_capacity(windows.len());
+    for (i, w) in windows.iter().enumerate() {
+        let pair = build_twin(source, *w, spec, twin_seed.wrapping_add(i as u64)).map_err(|e| {
+            ShapeProbeUnavailable::Twin {
+                window: i,
+                error: e.to_string(),
+            }
+        })?;
+        pairs.push(pair);
+    }
+    let mut rows = Vec::with_capacity(pairs.len());
+    let mut scores = Vec::with_capacity(pairs.len());
+    for (i, (pair, w)) in pairs.iter().zip(windows).enumerate() {
+        let mut score = |arm: TwinArm, data: &Dataset| {
+            run_arm(arm, data, pair.window)
+                .map(|returns| window_sharpe(&returns))
+                .map_err(|error| ShapeProbeUnavailable::Arm {
+                    window: i,
+                    arm,
+                    error,
+                })
+        };
+        let real = score(TwinArm::Real, &pair.real)?;
+        let twin = score(TwinArm::Twin, &pair.twin)?;
+        scores.push(PairedScore { real, twin });
+        rows.push(ShapeWindow {
+            source_start: w.start,
+            source_end: w.end,
+            twin_draws: pair.draws,
+            real_sharpe: real,
+            twin_sharpe: twin,
+        });
+    }
+    let report = shape_probe(&scores, config).map_err(|e| match e {
+        ProbeError::ScoreUnavailable { window } => {
+            ShapeProbeUnavailable::ScoreUnavailable { window }
+        }
+        ProbeError::Statistics(error) => ShapeProbeUnavailable::Probe {
+            error: format!("{error:?}"),
+        },
+    })?;
+    Ok(ShapeProbeRun {
+        windows: rows,
+        report,
     })
 }
 

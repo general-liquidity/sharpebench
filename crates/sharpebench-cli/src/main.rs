@@ -22,6 +22,7 @@ mod arena_cmd;
 mod artifact_preflight;
 mod cell_isolation;
 mod compare_cmd;
+mod contamination_cmd;
 mod csv_columns;
 mod decision_stability_cmd;
 mod external_capture;
@@ -96,6 +97,14 @@ fn main() -> ExitCode {
         }
         Some("import") => ExitCode::from(import_cmd::run(&args, json).clamp(0, 255) as u8),
         Some("gateway") => ExitCode::from(gateway_cli::run(&args, json).clamp(0, 255) as u8),
+        Some("contamination-probe") => ExitCode::from(
+            contamination_cmd::run_shape(&args, json, &external_capture::DockerSandbox)
+                .clamp(0, 255) as u8,
+        ),
+        Some("presentation-stability") => ExitCode::from(
+            contamination_cmd::run_presentation(&args, json, &external_capture::DockerSandbox)
+                .clamp(0, 255) as u8,
+        ),
         Some("timing-luck") => {
             ExitCode::from(timing_luck_cmd::run(&args, json).clamp(0, 255) as u8)
         }
@@ -576,6 +585,32 @@ fn resolve_key(spec: &str) -> std::io::Result<Vec<u8>> {
     }
 }
 
+/// `--declared-training-cutoff YYYY-MM-DD`: an operator's statement of the
+/// entrant model's training cutoff, published beside `evidence_mode` and never
+/// trusted (see `sharpebench_harness::declared_cutoff`). It describes an
+/// external entrant, so it is refused without one.
+fn declared_training_cutoff(
+    args: &[String],
+) -> Result<Option<sharpebench_harness::declared_cutoff::DeclaredCutoff>, String> {
+    if !args.iter().any(|arg| arg == "--declared-training-cutoff") {
+        return Ok(None);
+    }
+    let Some(raw) = flag_value(args, "--declared-training-cutoff").filter(|v| !v.starts_with("--"))
+    else {
+        return Err("--declared-training-cutoff needs a calendar day YYYY-MM-DD".to_string());
+    };
+    if !["--cmd", "--image", "--http"]
+        .iter()
+        .any(|flag| args.iter().any(|arg| arg == flag))
+    {
+        return Err(
+            "--declared-training-cutoff describes an external entrant; pass --cmd, --http or --image"
+                .to_string(),
+        );
+    }
+    sharpebench_harness::declared_cutoff::DeclaredCutoff::parse(raw).map(Some)
+}
+
 fn help() {
     println!("sharpebench — luck-robust benchmark for AI trading agents\n");
     println!("USAGE:");
@@ -709,6 +744,14 @@ fn help() {
     println!(
         "  sharpebench timing-luck --cadence <m> [--data <csv>] [--periods-per-year N]  how far run's reference rows move when they rebalance every m bars and only the schedule phase moves (rank-neutral)"
     );
+    println!(
+        "  sharpebench contamination-probe <entrant> [--data <csv>] [--window-bars N] [--windows N] [--twin-seed N] [--frictionless]  real-minus-twin Sharpe edge per window, a whole-window sign-flip test for recall of the price path (rank-neutral)"
+    );
+    println!(
+        "  sharpebench presentation-stability <entrant> [--data <csv>] [--date-shift-days N]  decisions under tickers-only, dates-only, levels-only and full blinding, reordered symbols and a shifted calendar, mapped back and compared (rank-neutral)"
+    );
+    println!("                       <entrant>: --agent buy-and-hold|momentum, --cmd \"<prog>\", --http <addr> or --image <repository@sha256:...>; a failed arm is a typed refusal");
+    println!("                       --declared-training-cutoff YYYY-MM-DD: also on run with an external entrant; published as a disclosure, never trusted or verified, evidence mode unchanged");
     println!(
         "  sharpebench lineage <strategy-evidence.json> [--census] [--dataset <prices.csv>]...  verify Arena candidate ancestry, sources, and within-family robustness; --census counts test-split reads across a journal"
     );
@@ -1914,6 +1957,13 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    let declared_cutoff = match declared_training_cutoff(args) {
+        Ok(cutoff) => cutoff,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::from(2);
+        }
+    };
     let fault_plan = match load_fault_plan(args) {
         Ok(plan) => plan,
         Err(error) => {
@@ -2638,6 +2688,14 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
         if let Some(replays) = &stress {
             stress_replay_cmd::attach(&mut board_json, replays);
         }
+        if let (Some(cutoff), Some((label, _, _))) = (&declared_cutoff, &external_accounting) {
+            sharpebench_harness::evidence_mode::attach_field(
+                &mut board_json,
+                label,
+                "declared_training_cutoff",
+                &sharpebench_harness::declared_cutoff::disclosure(cutoff, &data, &windows),
+            );
+        }
         // The board stays the whole document unless the evidence is asked for.
         // Wrapping it unconditionally would rename the top level of a machine
         // output every existing reader parses as an array, and the evidence is
@@ -2654,6 +2712,18 @@ fn run_demo(args: &[String], json: bool) -> ExitCode {
         if let Some((label, attempts, cost)) = external_accounting {
             print_attempt_accounting(&label, attempts, &cost);
             cell_isolation::print(&label);
+            if let Some(cutoff) = &declared_cutoff {
+                let value =
+                    sharpebench_harness::declared_cutoff::disclosure(cutoff, &data, &windows);
+                eprintln!(
+                    "declared training cutoff for {label}: {} (operator-declared, not verified, not trusted; evidence mode unchanged); windows {} before, {} straddling, {} on or after, {} unclassifiable",
+                    cutoff.as_str(),
+                    value["windows"]["ending_before_cutoff"],
+                    value["windows"]["straddling_cutoff"],
+                    value["windows"]["starting_on_or_after_cutoff"],
+                    value["windows"]["unclassifiable"],
+                );
+            }
             if let Some(report) = &fault_row {
                 print_fault_injection(&label, report);
             }
