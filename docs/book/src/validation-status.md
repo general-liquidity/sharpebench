@@ -55,6 +55,23 @@ no-feasible-geometry result. Sealing is not running: no frozen draw has been rea
 no rate in this book comes from it, and the producer refuses a frozen run until the
 owner approves the budget and the protocol binds the merged engine.
 
+Once a run exists, `joint-gate-study prevalence` reads a board's observed eligible
+count against it: the focal eligibility of a primary power cell is the gate's
+sensitivity at that cell's effect and history, and the focal eligibility of a
+primary null cell of the same rule and history is its false-eligibility rate (one
+minus specificity). The Rogan and Gladen (1978) estimator,
+`(apparent - false eligibility) / (sensitivity - false eligibility)`, turns the
+observed share into the share of tracks with skill at least as strong as the power
+cell's effect. A raw value below zero (fewer admitted than false eligibility alone
+predicts) is reported as zero and one above one as one, and the reading says which.
+A gate with sensitivity + specificity at or below one cannot tell skill from its
+absence, so the reading is refused. The interval takes the extreme corners of the
+box of the three 99% Wilson intervals, so it covers with probability at least 0.97
+by the union bound, and it is the whole of `[0, 1]` when that box reaches a gate no
+better than chance. The reading is a diagnostic beside the report: it is not one of
+the protocol's stated outcomes and moves no rank. The formula lives in
+`sharpebench_stats::prevalence`.
+
 These are remaining measurement and delivery decisions. A declared,
 protocol-frozen experiment may run once the owner approves it, and its result is
 published beside the frozen evidence. Frozen results are not rewritten, and

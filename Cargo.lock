@@ -733,6 +733,7 @@ dependencies = [
  "sharpebench-harness",
  "sharpebench-protocol",
  "sharpebench-sim",
+ "sharpebench-stats",
  "sharpebench-study",
 ]
 

@@ -7,12 +7,17 @@
 //! joint-gate-study smoke  --campaign FILE --out DIR --replicates N [--workers W]
 //! joint-gate-study frozen --campaign FILE --out DIR --protocol FILE [--protocol FILE] [--workers W]
 //! joint-gate-study report --campaign FILE --out DIR
+//! joint-gate-study prevalence --campaign FILE --out DIR --power-cell I --null-cell J --eligible E --tracks T
 //! ```
 //!
 //! `smoke` runs reduced counts on seeds disjoint from the frozen ones. `frozen`
 //! refuses unless every named protocol validates, its budget is approved, and it
 //! binds this campaign and the linked engine. Both resume: rerun the same
-//! command after an interruption. Exit status is nonzero on any refusal.
+//! command after an interruption. `prevalence` reads an observed eligible count
+//! (E of T tracks admitted) against the sensitivity of power cell I and the
+//! false-eligibility rate of null cell J and prints the Rogan-Gladen corrected
+//! share of skilled tracks as JSON; it writes nothing. Exit status is nonzero on
+//! any refusal.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -20,7 +25,8 @@ use std::process::ExitCode;
 
 use sharpebench_joint_gate::campaign::Campaign;
 use sharpebench_joint_gate::gate::{authorize_frozen, protocol_digest, run_identity};
-use sharpebench_joint_gate::report::build;
+use sharpebench_joint_gate::prevalence::corrected_prevalence;
+use sharpebench_joint_gate::report::{build, Report};
 use sharpebench_joint_gate::shards::{
     check_output_dir, engine_fingerprint, load_rows, rank_calls_per_replicate, run_all, RunError,
     RunIdentity, Tier,
@@ -39,6 +45,10 @@ struct Args {
     replicates: Option<u64>,
     workers: Option<usize>,
     stop_after: Option<usize>,
+    power_cell: Option<usize>,
+    null_cell: Option<usize>,
+    eligible: Option<u64>,
+    tracks: Option<u64>,
 }
 
 fn parse(mut tokens: std::vec::IntoIter<String>) -> Result<Args, RunError> {
@@ -64,6 +74,22 @@ fn parse(mut tokens: std::vec::IntoIter<String>) -> Result<Args, RunError> {
             "--stop-after" => {
                 let v = value()?;
                 args.stop_after = Some(v.parse().map_err(|_| refuse(format!("bad count {v}")))?);
+            }
+            "--power-cell" => {
+                let v = value()?;
+                args.power_cell = Some(v.parse().map_err(|_| refuse(format!("bad cell {v}")))?);
+            }
+            "--null-cell" => {
+                let v = value()?;
+                args.null_cell = Some(v.parse().map_err(|_| refuse(format!("bad cell {v}")))?);
+            }
+            "--eligible" => {
+                let v = value()?;
+                args.eligible = Some(v.parse().map_err(|_| refuse(format!("bad count {v}")))?);
+            }
+            "--tracks" => {
+                let v = value()?;
+                args.tracks = Some(v.parse().map_err(|_| refuse(format!("bad count {v}")))?);
             }
             other => return Err(refuse(format!("unknown argument {other}"))),
         }
@@ -91,6 +117,19 @@ fn output_dir(args: &Args) -> Result<PathBuf, RunError> {
     check_output_dir(&out, &built)?;
     check_output_dir(&out, Path::new("."))?;
     Ok(out)
+}
+
+/// The report of the run in `--out`, rebuilt from its shards.
+fn load_report(args: &Args, campaign: &Campaign) -> Result<Report, RunError> {
+    let out = output_dir(args)?;
+    let text =
+        fs::read_to_string(out.join("run-identity.json")).map_err(|e| refuse(e.to_string()))?;
+    let identity: RunIdentity = serde_json::from_str(&text).map_err(|e| refuse(e.to_string()))?;
+    if identity.campaign_digest != campaign.digest() {
+        return Err(refuse("the run in --out used another campaign"));
+    }
+    let (rows, controls) = load_rows(campaign, &identity, &out)?;
+    Ok(build(campaign, identity.tier, &rows, &controls))
 }
 
 fn workers(args: &Args) -> usize {
@@ -191,16 +230,8 @@ fn command(name: &str, args: &Args) -> Result<(), RunError> {
         }
         "report" => {
             let campaign = load_campaign(args)?;
+            let report = load_report(args, &campaign)?;
             let out = output_dir(args)?;
-            let text = fs::read_to_string(out.join("run-identity.json"))
-                .map_err(|e| refuse(e.to_string()))?;
-            let identity: RunIdentity =
-                serde_json::from_str(&text).map_err(|e| refuse(e.to_string()))?;
-            if identity.campaign_digest != campaign.digest() {
-                return Err(refuse("the run in --out used another campaign"));
-            }
-            let (rows, controls) = load_rows(&campaign, &identity, &out)?;
-            let report = build(&campaign, identity.tier, &rows, &controls);
             let text = serde_json::to_string_pretty(&report).expect("a report serializes") + "\n";
             fs::write(out.join("report.json"), &text).map_err(|e| refuse(e.to_string()))?;
             eprintln!(
@@ -211,6 +242,32 @@ fn command(name: &str, args: &Args) -> Result<(), RunError> {
             );
             Ok(())
         }
+        "prevalence" => {
+            let campaign = load_campaign(args)?;
+            let report = load_report(args, &campaign)?;
+            let need =
+                |v: Option<u64>, flag: &str| v.ok_or_else(|| refuse(format!("{flag} is required")));
+            let power = args
+                .power_cell
+                .ok_or_else(|| refuse("--power-cell is required"))?;
+            let null = args
+                .null_cell
+                .ok_or_else(|| refuse("--null-cell is required"))?;
+            let reading = corrected_prevalence(
+                &campaign,
+                &report,
+                power,
+                null,
+                need(args.eligible, "--eligible")?,
+                need(args.tracks, "--tracks")?,
+            )
+            .map_err(refuse)?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&reading).expect("a reading serializes")
+            );
+            Ok(())
+        }
         other => Err(refuse(format!("unknown command {other}"))),
     }
 }
@@ -218,7 +275,9 @@ fn command(name: &str, args: &Args) -> Result<(), RunError> {
 fn main() -> ExitCode {
     let mut tokens = std::env::args().skip(1).collect::<Vec<_>>().into_iter();
     let Some(name) = tokens.next() else {
-        eprintln!("usage: joint-gate-study fingerprint|plan|seal|smoke|frozen|report ...");
+        eprintln!(
+            "usage: joint-gate-study fingerprint|plan|seal|smoke|frozen|report|prevalence ..."
+        );
         return ExitCode::from(2);
     };
     match parse(tokens).and_then(|args| command(&name, &args)) {
