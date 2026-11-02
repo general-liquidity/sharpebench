@@ -680,9 +680,10 @@ agents, the risk-managed agent and the five-agent luck floor, every share is
 below 0.03, the largest 0.0285 on weekly crypto, where the windows are
 shortest; a harness test
 (`honest_tracks_on_the_frozen_panels_split_almost_nothing_between_windows`)
-pins that bound. Commodities reports a reason instead of a share, because its
-raw prices include a documented negative quote that leaves non-finite returns
-in the pooled track.
+pins that bound. Commodities is among them: its raw prices include a documented
+negative quote, and the simulator books a bar that takes a book's NAV to or
+below zero as ruin and closes the book (see [The simulator](simulator.md)), so
+every pooled track stays finite.
 
 The diagnostic refuses nobody and changes no rank. It is published so that a
 gate on this shape, if one is ever wanted, can take its threshold from the

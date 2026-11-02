@@ -31,6 +31,10 @@ use sharpebench_sim::{
     tag_regime, walk_forward, Agent, BuyAndHold, CostModel, Dataset, HoldAgent, Momentum, Window,
 };
 
+#[path = "support/declared_support.rs"]
+mod declared_support;
+use declared_support::{or_refuse, refuse, require_evaluated};
+
 /// Frozen datasets and their periods per year: same table as `evidence_sweep`.
 const DATASETS: &[(&str, &str, f64)] = &[
     ("us-indices-1d", "1d", 252.0),
@@ -109,17 +113,22 @@ fn main() {
         eprintln!("usage: relative_mandate_eval <out.jsonl>");
         std::process::exit(2);
     });
-    let mut w = BufWriter::new(File::create(&out).expect("create output"));
+    // Staged under `<out>.partial` and published only once every declared
+    // dataset has contributed records, so a dataset that fails to load, or
+    // yields nothing, is a non-zero refusal rather than a short file under the
+    // published name.
+    let planned: Vec<String> = DATASETS.iter().map(|d| d.0.to_string()).collect();
+    let mut evaluated: Vec<String> = Vec::new();
+    let partial = format!("{out}.partial");
+    let mut w = BufWriter::new(File::create(&partial).expect("create partial output"));
     let mut n_records = 0usize;
 
     for (name, tf, ppy) in DATASETS {
+        let records_before = n_records;
         let path = format!("data/{name}.csv");
         let data = match Dataset::from_csv_file(&path) {
             Ok(d) => d,
-            Err(e) => {
-                eprintln!("skip {name}: {e}");
-                continue;
-            }
+            Err(e) => refuse(format!("declared dataset {name} did not load: {e}")),
         };
         let n = data.len();
         let windows = windows_for(n);
@@ -279,8 +288,14 @@ fn main() {
             w.write_all(b"\n").expect("newline");
             n_records += 1;
         }
+        if n_records > records_before {
+            evaluated.push(name.to_string());
+        }
     }
 
+    or_refuse(require_evaluated("dataset", &planned, &evaluated));
     w.flush().expect("flush");
+    drop(w);
+    std::fs::rename(&partial, &out).expect("publish complete evaluation atomically");
     eprintln!("\nwrote {n_records} records to {out}");
 }

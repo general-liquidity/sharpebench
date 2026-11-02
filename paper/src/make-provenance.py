@@ -14,11 +14,13 @@ from provenance_common import (
     EXCLUDED_ARTIFACT_PREFIXES,
     EXCLUDED_DIR_NAMES,
     NOTE,
+    ProducedAtUnknown,
     REPRODUCTION_ENTRYPOINT,
     SCHEMA_VERSION,
     SOURCE_SCOPE,
     digest_bytes,
     matching_files,
+    produced_at,
     snapshot_digest,
 )
 
@@ -75,10 +77,26 @@ artifact_paths = [
     for path in files(ARTIFACT_SCOPE)
     if not path.name.startswith(EXCLUDED_ARTIFACT_PREFIXES)
 ]
-artifacts = [
-    {"path": path.relative_to(ROOT).as_posix(), "sha256": sha256(path)}
-    for path in artifact_paths
-]
+# The producing commit of each artifact is carried forward from the manifest
+# being replaced while the artifact's bytes are unchanged; see produced_at.
+previous = (
+    {
+        record["path"]: record
+        for record in json.loads(OUT.read_text(encoding="utf-8")).get("artifacts", [])
+    }
+    if OUT.is_file()
+    else {}
+)
+artifacts = []
+for path in artifact_paths:
+    relative = path.relative_to(ROOT).as_posix()
+    digest = sha256(path)
+    try:
+        commit = produced_at(ROOT, relative, digest, previous)
+    except ProducedAtUnknown as unknown:
+        print(f"refusing to write the manifest: {unknown}", file=sys.stderr)
+        raise SystemExit(2)
+    artifacts.append({"path": relative, "sha256": digest, "produced_at": commit})
 
 head = subprocess.check_output(
     ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True

@@ -37,8 +37,13 @@ cargo run -q -p sharpebench -- forecast-quality \
   --json
 ```
 
-The command preserves the numerical results in historical `fixtures/report.json`
-while emitting schema v5 and explicit `binary_brier`/`binary` stratum labels:
+The command reproduces every numerical result in historical `fixtures/report.json`
+but one, while emitting schema v5 and explicit `binary_brier`/`binary` stratum
+labels. The exception is the measured size of the familywise test:
+`measured_size_at_nominal_5pct` is 0.140 at the fixture's six blocks, where the
+historical report records 0.138, and the `familywise_size` note now quotes
+60,000 replications where the historical one quotes 6,000 draws; the size
+constants were remeasured after the report was frozen. The rest is unchanged:
 twelve exact-common-support
 questions in six blocks, a mean Brier loss of 0.1054 for `agent-alpha` against
 0.2474 for `agent-beta`, an observed mean-loss difference of -0.1420 with a
@@ -46,12 +51,14 @@ questions in six blocks, a mean Brier loss of 0.1054 for `agent-alpha` against
 plus-one-corrected p-value of 4/401, and a familywise-significant Holm verdict
 at alpha 0.05. The bootstrap has between-block variation to work with because
 one block goes against `agent-alpha`. Pointing the same command at
-`fixtures/withheld/` preserves the numerical results in `fixtures/withheld/report.json`, whose
-comparison carries `inference_error` and no interval or p-value.
+`fixtures/withheld/` reproduces `fixtures/withheld/report.json`, whose
+comparison carries `inference_error` and no interval or p-value, with the same
+change to the `familywise_size` note.
 
 The core test suite checks every historical report field after removing only
-the v5 stratum labels and restoring the historical schema tag, and verifies each
-producer artifact against its `manifest.json`.
+the v5 stratum labels, restoring the historical schema tag and setting aside the
+remeasured size, which it pins on both sides, and verifies each producer
+artifact against its `manifest.json`.
 
 This is a deterministic compatibility fixture, not evidence that either named
 agent was evaluated prospectively. It also demonstrates that a retained late

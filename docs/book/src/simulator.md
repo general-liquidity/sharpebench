@@ -56,6 +56,34 @@ No shipped profile sets a short borrow rate, so the reported profiles and the ev
 recorded under them are unchanged by the field; `stressed` still charges nothing on an
 unlevered short book.
 
+## Nonpositive prices and ruin
+
+A close can be zero or negative: the frozen WTI series settles at -36.98 on
+2020-04-20, and the loader keeps that row as published. The engine never fills
+an order at a nonpositive close, because a target weight cannot be turned into a
+share count at that price, but it marks every position held there at the close,
+so a long book can lose more than its equity on that bar.
+
+A book whose NAV is at or below `1e-12` is ruined, and ruin is absorbing:
+
+- A bar whose pre-trade NAV is at or below that level fills nothing. The
+  decision, any order carried to it by the execution noise and its stated
+  confidence are dropped, so it opens no calibration pair.
+- A bar whose post-trade NAV is at or below that level closes every position at
+  that bar's close, without costs, and clears every carried or delayed order. It
+  books the realized return against the previous NAV, which is finite and can be
+  below -100 percent.
+- Every later bar books a return of exactly 0, and the book stays at the ruined
+  NAV.
+
+Every return of a run is therefore finite. Before this rule the engine sized the
+next targets against the negative NAV, which turned every long into a short and,
+through the participation term of the impact model, compounded the commodities
+buy-and-hold track to an infinite return. A book that a negative mark leaves with
+positive equity is not ruined and keeps trading its other symbols. The harness
+test `finite_reference_tracks` runs every reference agent on every `data/*.csv`
+and requires a finite mean, drawdown and PSR under this rule.
+
 ## Decision delay
 
 New stressed runs carry `CostModel::fixed_delay` with schema version
