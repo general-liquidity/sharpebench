@@ -58,6 +58,9 @@ The six scorer stages that answer the `grader-search` admissions. Stages 1, 2 an
 - harness: the per-decision gateway record (v2) carries calls, tokens and USD per decision, and a resumed sweep republishes the cells an earlier process ran from the journal's decision logs.
 - harness: on a row with host-observed usage, `cost`, `return_per_cost` and `dsr_per_cost` read the host-observed USD figure or are withheld with a reason, and the entrant figure moves to `entrant_reported_cost`. Rows without host usage are unchanged.
 - ci: the PR-diff mutation gate runs in eight shards instead of four.
+- identifiability: a declined or failed identity question refuses the identifiability document as a typed unavailability (`declined`, or `failed` with its failure kind), never scored as a miss.
+- stats: the Newey-West bandwidth uses the new deterministic, correctly rounded `det_math::cbrt` in place of the platform `cbrt`. Goldens and bit pins are unchanged.
+- sim: `sharpebench_sim::external::{STDIO_DECIDE_TIMEOUT, HTTP_DECIDE_TIMEOUT}` are now public.
 
 ### Corrected
 
@@ -187,6 +190,17 @@ The six scorer stages that answer the `grader-search` admissions. Stages 1, 2 an
 - harness: a rank-neutral `cost_fairness::budget_parity` disclosure and an opt-in `cost_axis_report`, which scores against host-observed USD and token frontiers.
 - ci: an `evidence-drift` job and `docs/evidence-drift.json`. Any change from frozen evidence on three cheap shards that the manifest does not list fails CI.
 - provenance: schema 4 with a per-artifact `produced_at`, carried forward and checked against Git. The forecast-quality reports join the artifact scope.
+- cli, core: `sharpebench signals` and opt-in `score --signals`, a rank-neutral fast-signal report (`sharpebench.fast-signals.v1`): process, mandate, turnover, cost, agent-fault, contamination, presentation and decision-stability measures, each with scale, direction and an exact or bootstrap 95% interval, and never evidence of skill.
+- core, cli, arena: evaluation tiers (`historical-advisory`, `forward-certifying`), printed first on every human board, as `qualifiers.tier` in headlines, on the `run` entrant row and in arena `board.md`. Verdicts, scores and ranks are unchanged.
+- cli: `sharpebench init-agent <dir> --kind cmd|http|image`, which writes a minimal agent template (policy, README, Dockerfile for image, `sharpebench-agent.json`).
+- cli: `sharpebench check-agent`, which runs an entrant on a small synthetic window and reports each submission gate (launch, transport, protocol, budget, determinism, headline verdict, network) in plain language, with schema `sharpebench.check-agent.v1`. Rank-neutral.
+- cli, core, arena: `sharpebench leaderboard export <arena-dir|board.json>` verifies the arena or signed board first, refuses anything unverified, and writes a canonical JSON record (`sharpebench.leaderboard-export.v1`) and a Markdown table of every signed row: headline verdict, evaluation tier (`tier`), deflated-Sharpe tie band (`tie_band`), qualifiers, DSR with interval, pass^k count, eligibility, evidence mode, entrant-reported cost and the signed link. Byte-deterministic. CLI and agent use only; no page or hosting.
+- arena, cli: `sharpebench arena live-window`, which runs a forward window end to end under live capture: a fixed bar count, each committed image driven bar by bar, append-only live logs and feed journal, host clock checks, resume after restart, then seal, score, publish and verify. The `LiveFeed`, `ReplayFeed`, `LiveHost`, `HostClock`, `SimulatedClock` and `run_live_window` arena APIs back it.
+- arena: a live window run under the simulated clock is a rehearsal. Every log header records `simulated_clock`, its rows are `live-rehearsal` rather than `live-captured`, and its board never certifies; verification refuses a re-signed header that claims certification for it and a rehearsal row relabelled `live-captured`.
+- arena, core: a hold the host applies after an entrant's instance stalled, faulted or failed to launch is logged with `host_hold` and counted into the signed live capture root as `stalled_holds`. `board.md` lists it beside the row's provenance, the leaderboard export carries it as the headline qualifier `stalled_holds`, and the live-window report gives it per entrant. A host hold that carries orders is refused at intake.
+- cli, sim, harness: `sharpebench identifiability-probe` asks a `--cmd`, `--http` (`POST /identify`), `--image` or gateway-attached entrant the closed ticker-and-year question about each masked series and its synthetic twin, over the entrant's own transport, and scores typed answers (`sharpebench.identity-answer.v1`) against chance and the whole-window sign-flip test. Rank-neutral, with one fresh entrant per question.
+- cli, harness: `sharpebench gateway-diagnostics`, the gateway struggle counters (calls, bounded retries, requests refused by the per-decision limit, faults by cause, truncated answers, tokens per decision) and a tool-use breakdown, read from a sweep's journal. Rank-neutral.
+- stats, joint-gate: `sharpebench_stats::prevalence` and `joint-gate-study prevalence`, the Rogan-Gladen (1978) share of truly skilled tracks behind an observed eligible share, refused when sensitivity plus specificity is at most 1, clamped and labelled, with a union-bound corner interval.
 
 ### Fixed
 
@@ -218,6 +232,7 @@ The six scorer stages that answer the `grader-search` admissions. Stages 1, 2 an
 - sim: a NAV at or below zero is absorbing ruin. The bar books the realized loss, the book is closed at the mark and later bars return 0. Before this fix, commodities buy-and-hold and all five luck floors had a non-finite mean return, since 4378ad4 met the WTI -36.98 close that d882803 readmitted. Commodities trajectories change, and no other dataset moves.
 - harness: `luck_floor_1000`, `mandate_eval`, `relative_mandate_eval` and `seed_leg_eval` refuse with exit 1 when a declared dataset fails to load or yields no records, instead of publishing with exit 0.
 - core: a uniformly correlated field now measures exactly the plain dispersion.
+- paper: the `kernel_stats.py` docstring names `deflation_refusal`, and its evidence-register row is rebound.
 
 ### Documentation
 
@@ -231,6 +246,7 @@ The six scorer stages that answer the `grader-search` admissions. Stages 1, 2 an
 - stats: the `agreement` module and the integrity chapter no longer describe a human-triaged gold set as existing. Both say what exists and what a gold set would need before kappa, rho or per-class rates could be reported over it. An older CHANGELOG entry that said the same is corrected.
 - docs: the paper and book state the residual dispersion-griefing limit and the mitigations, and the vote-fence documentation describes entrant-only voting and the influence bound.
 - docs: reason and gate counts are corrected, and a new page, "How to read a row", walks through the headline verdict, the eligibility conditions, refusals and qualifiers.
+- docs: new book pages "Evaluation tiers", "Fast signals", "Submit your agent", "Running a live window" and "Leaderboard export".
 
 ## [0.28.0] - 2026-09-18
 
