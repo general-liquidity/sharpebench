@@ -1155,10 +1155,11 @@ fn oversized_lags_and_draw_counts_are_refused() {
     assert!(refusal.to_string().contains("at most 100000 draws"));
 }
 
-/// A levered book whose NAV reaches exactly zero while it still holds a
-/// position counts as invested on that bar.
+/// A levered book whose NAV reaches exactly zero is ruined on that bar: the
+/// engine closes it at the mark, so the bar ends flat like any other close and
+/// only the bar that opened the position counts as invested.
 #[test]
-fn a_book_at_zero_nav_with_a_position_is_invested() {
+fn a_book_ruined_at_zero_nav_is_closed_on_that_bar() {
     let mut closes = vec![100.0, 50.0];
     closes.extend(std::iter::repeat_n(50.0, 28));
     let data = Dataset {
@@ -1168,7 +1169,7 @@ fn a_book_at_zero_nav_with_a_position_is_invested() {
         marks: None,
     };
     // Twice levered at 100, held through the halving (NAV -1 + 0.02 * 50 = 0),
-    // then closed.
+    // where ruin closes it; the later targets are never filled.
     let run = planted(&data, (0, 30), |bar| match bar {
         0 => Some(2.0),
         1 => None,
@@ -1178,6 +1179,6 @@ fn a_book_at_zero_nav_with_a_position_is_invested() {
     let RunTimingNull::Available { exposure, .. } = &report.runs[0] else {
         panic!("{report:?}");
     };
-    assert_eq!((exposure.invested_bars, exposure.holding_periods), (2, 1));
+    assert_eq!((exposure.invested_bars, exposure.holding_periods), (1, 1));
     assert_eq!(exposure.mean_gross_when_invested, 2.0);
 }

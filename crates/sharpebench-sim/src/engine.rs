@@ -16,6 +16,35 @@ const CONCENTRATION_CAP: f64 = 0.5;
 /// Per-name weight beyond which (or if non-finite) an order is treated as a
 /// simulator-exploitation attempt — a block-severity violation.
 const HARD_WEIGHT_CAP: f64 = 5.0;
+/// The NAV at or below which a book is ruined: its equity is exhausted, so a
+/// target weight has no capital to size against. The same threshold the
+/// engine already used to stop dividing by a vanishing base.
+///
+/// Ruin is absorbing. A nonpositive close is a real market event (the WTI
+/// settlement of 2020-04-20 was -36.98), and a long book marked through it can
+/// lose more than its equity. The engine books that loss in full and then
+/// stops the book, instead of sizing the next targets against a negative NAV,
+/// which inverts every long into a short and, through the participation term
+/// of the impact model, compounds to a non-finite return:
+///
+/// 1. A bar whose pre-trade NAV is at or below this level fills no order: the
+///    decision, its carried orders and its stated confidence are dropped.
+/// 2. A bar whose post-trade NAV is at or below this level closes every
+///    position at that bar's mark, without costs, and clears every carried or
+///    delayed order. The bar books the realized return against the previous
+///    NAV, which is finite and can be below -1 when the mark went through zero.
+/// 3. Every later bar books a return of exactly 0 against the ruined NAV,
+///    which is kept unchanged.
+///
+/// Every return of a run is therefore finite, and the compounded equity curve
+/// stays at the ruined value after the loss.
+const RUIN_NAV: f64 = 1e-12;
+
+/// Whether a book at `nav` has equity to trade with: strictly above
+/// [`RUIN_NAV`]. A NaN NAV is not funded.
+fn funded(nav: f64) -> bool {
+    nav > RUIN_NAV
+}
 
 /// A simulation window over the dataset's date axis: steps `[start, end)`.
 #[derive(Clone, Copy, Debug)]
@@ -363,9 +392,17 @@ fn step_eligible(
     let held_book_return =
         (held_base > 1e-12).then(|| (cur_nav + held_dividends) / held_base - 1.0);
 
+    // Ruin (see [`RUIN_NAV`]): a book already ruined, or one whose pre-trade
+    // mark has exhausted its equity, fills nothing at this bar.
+    let ruined = !funded(book.prev_nav);
+    let solvent = !ruined && funded(cur_nav);
+
     // Orders carried from the previous bar by the execution-noise model fill
     // first, at this bar's price, unless the agent re-issues an order on the
     // same symbol this bar (cancel/replace supersedes the carried order).
+    if !solvent {
+        book.pending.clear();
+    }
     if !book.pending.is_empty() {
         let carried = std::mem::take(&mut book.pending);
         for (symbol, pend) in carried {
@@ -409,6 +446,9 @@ fn step_eligible(
         // Sim-exploitation guard: non-finite or absurd weights are gaming attempts.
         if !ord.target_weight.is_finite() || ord.target_weight.abs() > HARD_WEIGHT_CAP {
             book.trace.events.push(ProcessEvent::ManipulativeOrder);
+            continue;
+        }
+        if !solvent {
             continue;
         }
         if ord.target_weight.abs() > CONCENTRATION_CAP {
@@ -497,19 +537,40 @@ fn step_eligible(
     // daily return = post-trade NAV vs the prior step's NAV (captures the price
     // move on held positions, dividends, financing, and trading costs).
     let navc = nav(data, symbols, &book.shares, book.cash, t);
-    let ret = if book.prev_nav.abs() > 1e-12 {
-        navc / book.prev_nav - 1.0
-    } else {
+    // A ruined book holds nothing and books no return. A solvent previous NAV
+    // is strictly positive, so the ratio is finite and keeps its sign.
+    let ret = if ruined {
         0.0
+    } else {
+        navc / book.prev_nav - 1.0
     };
+    if !funded(navc) {
+        // The book is ruined at this bar (or already was): close every
+        // position at the mark. The close moves value between shares and cash
+        // and leaves NAV where it stood; nothing is carried into a bar the
+        // book cannot fund. On a book already closed it changes nothing.
+        for s in symbols {
+            if let Some(held) = book.shares.get_mut(s) {
+                book.cash += *held * price(data, s, t);
+                *held = 0.0;
+            }
+        }
+        book.pending.clear();
+        book.delayed_decisions.clear();
+    }
     // Capture the decision's stated conviction, so the scoring kernel's
     // calibration axis is fed from the live run. Only stated confidences count:
     // the mean over the orders that carry one, and no value at all for a hold,
     // for orders that state none, or for a decision the noise deferred.
     let stated = || decision.orders.iter().filter_map(|o| o.confidence);
     let n_stated = stated().count();
-    let confidence = (n_stated > 0 && !deferred).then(|| stated().sum::<f64>() / n_stated as f64);
-    book.prev_nav = navc;
+    let confidence =
+        (n_stated > 0 && !deferred && solvent).then(|| stated().sum::<f64>() / n_stated as f64);
+    // The ruined NAV is kept as it was, so a rounding residual of the close
+    // cannot lift the book back above the ruin level.
+    if !ruined {
+        book.prev_nav = navc;
+    }
     book.prev_carry = carry;
     StepOutcome {
         ret,
@@ -1181,5 +1242,203 @@ mod tests {
             "2x gross / 0x net exposure must pay one 100bp leveraged carry charge: {}",
             outcome.ret
         );
+    }
+
+    /// Two symbols, equal-weight long, where `B` settles at -15 on bar 2: the
+    /// pre-trade NAV is 0.5 + 0.05 * -15 = -0.25, below zero.
+    fn negative_mark_fixture() -> Dataset {
+        Dataset::from_csv(
+            "date,symbol,close\n\
+             t0,A,10\nt0,B,10\n\
+             t1,A,10\nt1,B,10\n\
+             t2,A,10\nt2,B,-15\n\
+             t3,A,10\nt3,B,4\n\
+             t4,A,11\nt4,B,6\n",
+        )
+        .unwrap()
+    }
+
+    fn equal_weight(data: &Dataset, book: &Book, t: usize) -> Decision {
+        BuyAndHold.decide(&build_observation(data, &data.symbols(), book, t))
+    }
+
+    fn frictionless() -> CostModel {
+        CostModel {
+            fee_bps: 0.0,
+            slippage_bps: 0.0,
+            impact_bps: 0.0,
+            financing_bps: 0.0,
+            ..CostModel::default()
+        }
+    }
+
+    /// The pre-fix engine sized the ruin bar's targets against the negative
+    /// NAV and, through the impact model's participation term, compounded the
+    /// commodities buy-and-hold track to an infinite return (4378ad4 with the
+    /// WTI close readmitted by d882803).
+    #[test]
+    fn a_mark_through_zero_books_the_loss_once_and_closes_the_book() {
+        let data = negative_mark_fixture();
+        let symbols = data.symbols();
+        let costs = CostModel::default();
+        let mut book = Book::new(&symbols, 5);
+        for t in 0..2 {
+            let d = equal_weight(&data, &book, t);
+            step_once(&data, &symbols, &mut book, &costs, 5, t, &d);
+        }
+        let prev = book.prev_nav;
+        let marked = nav(&data, &symbols, &book.shares, book.cash, 2);
+        assert!(prev > 0.9 && marked < -0.2, "prev {prev}, marked {marked}");
+        let events_before = book.trace.events.len();
+        let d = equal_weight(&data, &book, 2);
+        let out = step_once(&data, &symbols, &mut book, &costs, 5, 2, &d);
+        // Nothing fills at the ruin bar, so the booked loss is exactly the mark.
+        assert_eq!(out.ret, marked / prev - 1.0);
+        assert!(out.ret < -1.0, "a long book can lose more than its equity");
+        assert_eq!(out.confidence, None, "an unfilled decision states nothing");
+        assert_eq!(book.trace.events.len(), events_before, "no order placed");
+        assert!(book.shares.values().all(|&q| q == 0.0), "{:?}", book.shares);
+        assert!(
+            (book.cash - marked).abs() < 1e-15,
+            "the close is NAV-neutral"
+        );
+        assert_eq!(book.prev_nav, marked);
+        // Absorbing: later bars book exactly zero and never trade again.
+        for t in 3..5 {
+            let d = equal_weight(&data, &book, t);
+            let out = step_once(&data, &symbols, &mut book, &costs, 5, t, &d);
+            assert_eq!(out.ret, 0.0);
+            assert_eq!(out.held_book_return, None);
+            assert_eq!(out.confidence, None);
+            assert!(book.shares.values().all(|&q| q == 0.0));
+            assert_eq!(book.prev_nav, marked);
+        }
+    }
+
+    /// A negative mark alone is not ruin: a book whose equity stays positive
+    /// keeps trading the positive-price symbol and books ordinary returns.
+    #[test]
+    fn a_book_that_stays_funded_through_a_negative_mark_keeps_trading() {
+        let data = Dataset::from_csv(
+            "date,symbol,close\n\
+             t0,A,10\nt0,B,10\n\
+             t1,A,10\nt1,B,10\n\
+             t2,A,10\nt2,B,-5\n\
+             t3,A,10\nt3,B,4\n\
+             t4,A,10\nt4,B,6\n",
+        )
+        .unwrap();
+        let run = run_backtest(
+            &data,
+            &mut BuyAndHold,
+            Window { start: 0, end: 5 },
+            0,
+            frictionless(),
+        );
+        // Bar 2: NAV 0.5 - 0.25 = 0.25, B is not traded at its negative close
+        // and A is cut to half of 0.25. Bar 3 rebuys both at NAV 0.7, bar 4
+        // marks 0.35 + 0.0875 * 6 = 0.875.
+        let expected = [0.0, 0.0, -0.75, 1.8, 0.25];
+        assert_eq!(run.returns.len(), expected.len());
+        for (got, want) in run.returns.iter().zip(expected) {
+            assert!((got - want).abs() < 1e-12, "{:?}", run.returns);
+        }
+    }
+
+    /// An order the execution noise carried into a ruin bar is dropped there,
+    /// not filled against the negative NAV.
+    #[test]
+    fn a_carried_order_does_not_fill_on_a_ruin_bar() {
+        let data = negative_mark_fixture();
+        let symbols = data.symbols();
+        let costs = CostModel::default();
+        let mut book = Book::new(&symbols, 5);
+        for t in 0..2 {
+            let d = equal_weight(&data, &book, t);
+            step_once(&data, &symbols, &mut book, &costs, 5, t, &d);
+        }
+        book.pending
+            .insert("A".to_string(), PendingOrder { target_weight: 0.9 });
+        let prev = book.prev_nav;
+        let marked = nav(&data, &symbols, &book.shares, book.cash, 2);
+        let hold = Decision {
+            orders: Vec::new(),
+            reasoning: String::new(),
+            cost: None,
+        };
+        let out = step_once(&data, &symbols, &mut book, &costs, 5, 2, &hold);
+        assert_eq!(out.ret, marked / prev - 1.0);
+        assert!(book.pending.is_empty());
+    }
+
+    /// Ruin under the fixed decision delay leaves no queued submission behind
+    /// in the book's snapshot state.
+    #[test]
+    fn ruin_clears_delayed_submissions() {
+        let data = negative_mark_fixture();
+        let symbols = data.symbols();
+        let costs = CostModel {
+            fixed_delay: Some(crate::costs::FixedDecisionDelay::Fifo { bars: 1 }),
+            ..CostModel::default()
+        };
+        let mut book = Book::new(&symbols, 5);
+        for t in 0..3 {
+            let d = equal_weight(&data, &book, t);
+            step_once(&data, &symbols, &mut book, &costs, 5, t, &d);
+        }
+        assert!(book.shares.values().all(|&q| q == 0.0));
+        assert!(
+            book.delayed_decisions.is_empty(),
+            "{:?}",
+            book.delayed_decisions
+        );
+    }
+
+    /// Ruin is decided on the NAV the book was left at, at exactly the ruin
+    /// level, and a cash residual above it cannot revive a ruined book.
+    #[test]
+    fn a_ruined_book_stays_ruined_whatever_its_cash_residual() {
+        let data = Dataset::from_csv("date,symbol,close\nt0,A,10\nt1,A,10\nt2,A,10\n").unwrap();
+        let symbols = data.symbols();
+        let mut book = Book::new(&symbols, 0);
+        book.prev_nav = RUIN_NAV;
+        book.cash = 1.0;
+        for t in 0..3 {
+            let d = equal_weight(&data, &book, t);
+            let out = step_once(&data, &symbols, &mut book, &CostModel::default(), 0, t, &d);
+            assert_eq!(out.ret, 0.0);
+            assert_eq!(book.shares["A"], 0.0, "bar {t}");
+            assert_eq!(book.prev_nav, RUIN_NAV);
+        }
+    }
+
+    /// A pre-trade NAV at or below zero fills nothing even when the bar's
+    /// dividends leave the book funded, and that unfilled decision opens no
+    /// calibration pair.
+    #[test]
+    fn an_unfunded_bar_rescued_by_its_dividend_opens_no_pair() {
+        let data = Dataset {
+            dates: (0..4).map(|t| format!("t{t}")).collect(),
+            closes: BTreeMap::from([("A".to_string(), vec![10.0, 10.0, -10.0, 10.0])]),
+            dividends: BTreeMap::from([("A".to_string(), vec![0.0, 0.0, 30.0, 0.0])]),
+            marks: None,
+        };
+        let run = run_backtest(
+            &data,
+            &mut BuyAndHold,
+            Window { start: 0, end: 4 },
+            0,
+            frictionless(),
+        );
+        // Bar 2 marks 0.1 * -10 = -1, collects 0.1 * 30 = 3 and closes at 2.
+        // Bar 3 marks 3 + 1 = 4.
+        let expected = [0.0, 0.0, 1.0, 1.0];
+        assert_eq!(run.returns.len(), expected.len());
+        for (got, want) in run.returns.iter().zip(expected) {
+            assert!((got - want).abs() < 1e-12, "{:?}", run.returns);
+        }
+        // Decisions 0 and 1 are graded; decision 2 never filled.
+        assert_eq!(run.confidences, vec![0.5, 0.5]);
+        assert_eq!(run.outcomes, vec![false, true]);
     }
 }

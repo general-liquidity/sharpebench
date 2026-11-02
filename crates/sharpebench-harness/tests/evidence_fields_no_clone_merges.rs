@@ -3,8 +3,9 @@
 //! Reconstructing a field with today's engine is not replay of a historical
 //! artifact. Changes here require an explicit impact assessment; they never
 //! authorize rewriting the paper's frozen results. In particular, the corrected
-//! inventory path changes the commodities support (see the paired historical
-//! assertion below), whose raw WTI prices include a documented negative quote.
+//! inventory path and the engine's ruin rule for nonpositive marks change the
+//! commodities support (see the paired historical assertion below), whose raw
+//! WTI prices include a documented negative quote.
 //!
 //! `rank` collapses near-clone streams to one vote each before it measures
 //! `trials_sr_std` (see `sharpebench_core::CLONE_COLLAPSE_COSINE`). On a field
@@ -206,11 +207,11 @@ fn committed_evidence_fields_have_no_clone_merges() {
 /// (qualifiers whose stream has a Sharpe ratio, clusters vote once, `min_field`
 /// five), and asserts current-engine support. The qualification predicate is
 /// `observed_sharpe_ratio`, the engine's own: `hold`, whose seed-averaged stream
-/// is identically zero, no longer qualifies and no longer votes. The commodities
-/// field no longer reproduces its historical measured stamp: only one current
-/// stream has a Sharpe ratio. This test records the incompatibility; neither
-/// successful CSV parsing nor a dispersion fallback validates percentage returns
-/// across a negative raw quote.
+/// is identically zero, no longer qualifies and no longer votes. On commodities
+/// every trading stream qualifies again: the engine books the WTI settlement of
+/// -36.98 as ruin for a book it bankrupts instead of compounding that book to a
+/// non-finite return, so the field votes a measured dispersion as the frozen
+/// stamp did, from current streams that differ from the frozen ones.
 #[test]
 fn current_seed_averaged_streams_have_expected_dispersion_support() {
     use sharpebench_core::composite::pooled_returns;
@@ -223,7 +224,6 @@ fn current_seed_averaged_streams_have_expected_dispersion_support() {
         "crypto-majors-1d",
         "us-indices-1d",
         "crypto-majors-4h",
-        "commodities-1d",
     ];
     const MIN_FIELD: usize = 5;
 
@@ -289,12 +289,12 @@ fn current_seed_averaged_streams_have_expected_dispersion_support() {
 
         let expect_configured = CONFIGURED_FALLBACK.contains(name);
         if *name == "commodities-1d" {
-            // One, not two: the second of the two streams that used to qualify
-            // here was `hold`, which has no Sharpe ratio.
+            // Every agent but `hold`, which has no Sharpe ratio. Before the
+            // ruin rule only one stream stayed finite here (2026-11-02 audit).
             assert_eq!(
                 averaged.len(),
-                1,
-                "review the documented nonfinite-support limitation if this changes"
+                7,
+                "review the engine's ruin rule for nonpositive marks if this changes"
             );
             let path = Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("../../paper/evidence/final/commodities-1d.jsonl");
@@ -886,13 +886,9 @@ fn honest_tracks_on_the_frozen_panels_split_almost_nothing_between_windows() {
                         largest = (share, format!("{name} {}", row.agent_id));
                     }
                 }
-                None => {
-                    assert_eq!(name, "commodities-1d", "{}: {:?}", row.agent_id, d.error);
-                    assert_eq!(
-                        d.error.as_deref(),
-                        Some("a pooled observation is not finite")
-                    );
-                }
+                // Commodities used to land here with "a pooled observation is
+                // not finite"; under the ruin rule every pooled track is finite.
+                None => panic!("{name} {}: {:?}", row.agent_id, d.error),
             }
         }
     }
