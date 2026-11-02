@@ -271,6 +271,7 @@ fn run_case() -> Result<AuditCase, String> {
         returns_provenance: BTreeMap::new(),
         expired_at_epoch: None,
         execution: None,
+        forward: None,
     };
 
     let replayed = admit_entries(

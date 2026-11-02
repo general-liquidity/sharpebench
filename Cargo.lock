@@ -673,6 +673,7 @@ dependencies = [
  "sharpebench-leaderboard",
  "sharpebench-protocol",
  "sharpebench-sim",
+ "sharpebench-stats",
 ]
 
 [[package]]

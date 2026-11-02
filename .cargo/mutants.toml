@@ -73,6 +73,10 @@ exclude_re = [
     # `i + 0.7`: still a clean drifting track with losing bars, eligible on its
     # own, so every case verdict is the same.
     'selfaudit\.rs:84:48: replace \* with (\+|/) in skilled_run$',
+    # Equivalent: at ratio == cap both branches return the same value.
+    'forward_eprocess\.rs:260:21: replace > with >= in BettorState::bet$',
+    # Equivalent: at wealth == max_wealth the assignment stores the same value.
+    'forward_eprocess\.rs:292:32: replace > with >= in BettorState::step$',
 ]
 
 # Timeouts. The default is 1.5x the baseline test time with a 20 second floor,
