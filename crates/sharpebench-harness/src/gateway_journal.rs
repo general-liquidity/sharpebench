@@ -42,6 +42,16 @@ pub const JOURNAL_SCHEMA_VERSION_V2: &str = "sharpebench.gateway-journal.v2";
 /// journal with no cache count keeps the version it had.
 pub const JOURNAL_SCHEMA_VERSION_V3: &str = "sharpebench.gateway-journal.v3";
 
+/// The version of a journal that carries what a sweep needs to resume its
+/// per-decision record and its per-cell budget: a reservation stamped with its
+/// cell, or a decision log.
+///
+/// The same rollback rule as [`JOURNAL_SCHEMA_VERSION_V2`]: a binary built
+/// before either existed would drop the stamps on its next save and let a
+/// resumed cell spend past its ceiling, so such a journal is written under a
+/// version that binary refuses. A journal with neither keeps its version.
+pub const JOURNAL_SCHEMA_VERSION_V4: &str = "sharpebench.gateway-journal.v4";
+
 /// Schema of the document a [`JournalLock`] writes. A lock is not a journal:
 /// it lives at a different path, carries a different schema version and is
 /// refused by [`GatewayJournal::load_bound`] like any other foreign document.
@@ -155,6 +165,9 @@ pub enum JournalRecord {
         revision: String,
         rate_card_sha256: String,
         reserved_usd_nanos: String,
+        /// The sweep cell this call was made for, when a sweep made it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cell: Option<CellRef>,
     },
     Settled {
         ordinal: u32,
@@ -171,13 +184,128 @@ pub enum JournalRecord {
 
 /// The host-owned spending ceiling for one sweep. Both limits are hard: a call
 /// that would cross either one is refused before anything is dispatched.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GatewayBudget {
     /// Total money the sweep may commit, in integer USD nanodollars.
     pub max_usd_nanos: u128,
     /// Total provider calls the sweep may start, retries included.
     pub max_calls: u32,
+    /// A second ceiling for each (window, seed) cell, applied on top of the
+    /// sweep ceiling, so a cell that overspends cannot starve the cells after
+    /// it. Every attempt at a cell, in any process, draws on the same cell
+    /// ceiling. Absent means the sweep ceiling is the only one, and keeps a
+    /// budget written before the field existed byte for byte what it was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub per_cell: Option<CellBudget>,
+}
+
+/// The ceiling one (window, seed) cell may commit. Both limits are hard, like
+/// the sweep's: a call that would cross either is refused before dispatch, and
+/// the refusal is the same budget kind the sweep ceiling produces.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CellBudget {
+    /// Money one cell may commit, in integer USD nanodollars.
+    pub max_usd_nanos: u128,
+    /// Provider calls one cell may start, retries included.
+    pub max_calls: u32,
+}
+
+impl GatewayBudget {
+    /// This budget with the sweep ceiling divided evenly over `cells` cells,
+    /// rounding each share down so the cell ceilings never sum past the sweep
+    /// ceiling. `None` when there are no cells, or when a share would be zero,
+    /// which would refuse every call of every cell.
+    pub fn with_equal_cell_shares(self, cells: usize) -> Option<Self> {
+        let cells_u32 = u32::try_from(cells).ok().filter(|&n| n > 0)?;
+        let max_calls = self.max_calls / cells_u32;
+        let max_usd_nanos = self.max_usd_nanos / u128::from(cells_u32);
+        if max_calls == 0 || max_usd_nanos == 0 {
+            return None;
+        }
+        Some(Self {
+            per_cell: Some(CellBudget {
+                max_usd_nanos,
+                max_calls,
+            }),
+            ..self
+        })
+    }
+}
+
+/// The sweep cell a reservation was made for. Written on reservations a sweep
+/// makes and absent on every other, so a journal no sweep owns keeps the bytes
+/// it had before the field existed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CellRef {
+    pub window_index: usize,
+    pub seed: u64,
+}
+
+/// One entrant decision as the gateway filed it: how many request lines the
+/// entrant sent, how many were handed to the broker, and which reservations
+/// the decision made. A decision's reservations are contiguous, because one
+/// gateway serves one decision at a time, so they are named by the first
+/// ordinal and a count rather than listed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DecisionEntry {
+    pub requests: u32,
+    pub served: u32,
+    pub first_ordinal: u32,
+    pub calls: u32,
+}
+
+/// Every decision of one attempt at one sweep cell, appended when the attempt
+/// ends. It is what lets a resumed sweep publish the per-decision record of
+/// cells an earlier process ran. It carries no amount: what a decision cost is
+/// a fold over the money records its reservations name.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DecisionLog {
+    pub window_index: usize,
+    pub seed: u64,
+    pub attempt: u32,
+    pub decisions: Vec<DecisionEntry>,
+}
+
+/// What a set of reservations used, folded from their settlements. The token
+/// and money totals are measured only when at least one call was priced and
+/// none was charged at its reservation: a sum over the priced calls alone
+/// would read as the whole set's figure. A released call used nothing and
+/// does not make a set unmeasured.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct UsageTotals {
+    pub calls_started: u32,
+    pub priced_calls: u32,
+    /// Calls settled as unknown cost, or not settled at all.
+    pub unmeasured_calls: u32,
+    input_tokens: u64,
+    output_tokens: u64,
+    priced_usd_nanos: u128,
+}
+
+impl UsageTotals {
+    fn is_measured(&self) -> bool {
+        self.priced_calls > 0 && self.unmeasured_calls == 0
+    }
+
+    /// Provider-reported input tokens, or `None` when unmeasured.
+    pub fn input_tokens(&self) -> Option<u64> {
+        self.is_measured().then_some(self.input_tokens)
+    }
+
+    /// Provider-reported output tokens, or `None` when unmeasured.
+    pub fn output_tokens(&self) -> Option<u64> {
+        self.is_measured().then_some(self.output_tokens)
+    }
+
+    /// Host-priced money, or `None` when unmeasured.
+    pub fn usd_nanos(&self) -> Option<u128> {
+        self.is_measured().then_some(self.priced_usd_nanos)
+    }
 }
 
 /// What the journal is bound to. A journal is resumable only against an
@@ -240,6 +368,7 @@ fn is_readable_version(version: &str) -> bool {
     version == JOURNAL_SCHEMA_VERSION
         || version == JOURNAL_SCHEMA_VERSION_V2
         || version == JOURNAL_SCHEMA_VERSION_V3
+        || version == JOURNAL_SCHEMA_VERSION_V4
 }
 
 /// Derived spend state. Every field is a fold over the records; none of it is
@@ -1012,6 +1141,11 @@ pub struct GatewayJournal {
     #[serde(skip)]
     source_document_id: Option<String>,
     records: Vec<JournalRecord>,
+    /// Per-decision request logs, one per finished sweep-cell attempt. Not a
+    /// money record: nothing here is folded into spend. Absent when empty, so
+    /// a journal with none keeps the bytes it had before the field existed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    decision_logs: Vec<DecisionLog>,
 }
 
 impl GatewayJournal {
@@ -1022,6 +1156,7 @@ impl GatewayJournal {
             journal_id: Some(fresh_token()),
             source_document_id: None,
             records: Vec::new(),
+            decision_logs: Vec::new(),
         }
     }
 
@@ -1146,21 +1281,49 @@ impl GatewayJournal {
                 }
             }
         }
+        let reservations = reserved.len() as u64;
+        let names_unwritten_reservations = self.decision_logs.iter().any(|log| {
+            log.decisions
+                .iter()
+                .any(|entry| u64::from(entry.first_ordinal) + u64::from(entry.calls) > reservations)
+        });
+        if names_unwritten_reservations {
+            return Err(invalid(
+                "a decision log names a reservation that was never written",
+            ));
+        }
         Ok(())
     }
 
     /// Fold the records into spend state. Amounts are read, never recomputed:
     /// resuming a journal cannot reprice what an earlier process already paid.
     pub fn spend(&self) -> SpendState {
+        self.spend_where(|_| true)
+    }
+
+    /// [`Self::spend`] over the reservations made for one sweep cell, in any
+    /// process: what the cell's own ceiling is checked against.
+    pub fn cell_spend(&self, cell: CellRef) -> SpendState {
+        self.spend_where(|stamp| stamp == Some(&cell))
+    }
+
+    fn spend_where(&self, admits: impl Fn(Option<&CellRef>) -> bool) -> SpendState {
         let mut state = SpendState::default();
         let mut open: Vec<(u32, u128)> = Vec::new();
+        // inv: `open` holds exactly the admitted reservations visited so far
+        // with no settlement visited yet; `state` folds every admitted
+        // reservation and settlement visited so far.
         for record in &self.records {
             match record {
                 JournalRecord::Reserved {
                     ordinal,
                     reserved_usd_nanos,
+                    cell,
                     ..
                 } => {
+                    if !admits(cell.as_ref()) {
+                        continue;
+                    }
                     state.calls_started = state.calls_started.saturating_add(1);
                     open.push((*ordinal, reserved_usd_nanos.parse().unwrap_or(u128::MAX)));
                 }
@@ -1225,13 +1388,31 @@ impl GatewayJournal {
 
     /// Append a reservation. The caller must persist before dispatching.
     pub fn reserve(&mut self, alias: &str, card: &RateCard, reserved_usd_nanos: u128) -> u32 {
-        let ordinal = u32::try_from(
+        self.reserve_for(alias, card, reserved_usd_nanos, None)
+    }
+
+    /// The number of reservations this journal holds, which is also the
+    /// ordinal the next one will get.
+    pub fn reservation_count(&self) -> u32 {
+        u32::try_from(
             self.records
                 .iter()
                 .filter(|record| matches!(record, JournalRecord::Reserved { .. }))
                 .count(),
         )
-        .unwrap_or(u32::MAX);
+        .unwrap_or(u32::MAX)
+    }
+
+    /// [`Self::reserve`], stamping the reservation with the sweep cell it pays
+    /// for, so the cell's ceiling still sees it after a resume.
+    pub fn reserve_for(
+        &mut self,
+        alias: &str,
+        card: &RateCard,
+        reserved_usd_nanos: u128,
+        cell: Option<CellRef>,
+    ) -> u32 {
+        let ordinal = self.reservation_count();
         self.records.push(JournalRecord::Reserved {
             ordinal,
             alias: alias.to_string(),
@@ -1240,8 +1421,83 @@ impl GatewayJournal {
             revision: card.revision().to_string(),
             rate_card_sha256: card.digest(),
             reserved_usd_nanos: reserved_usd_nanos.to_string(),
+            cell,
         });
         ordinal
+    }
+
+    /// Append the decision log of one finished sweep-cell attempt. The caller
+    /// persists it with the next save.
+    pub fn log_decisions(&mut self, log: DecisionLog) {
+        self.decision_logs.push(log);
+    }
+
+    /// Every decision log, in the order the attempts finished.
+    pub fn decision_logs(&self) -> &[DecisionLog] {
+        &self.decision_logs
+    }
+
+    /// What every reservation used, folded from the settlements.
+    pub fn usage_totals(&self) -> UsageTotals {
+        self.usage_of_ordinals(0, u32::MAX)
+    }
+
+    /// What the `calls` reservations from `first_ordinal` on used. A
+    /// reservation with no settlement is unmeasured.
+    pub fn usage_of_ordinals(&self, first_ordinal: u32, calls: u32) -> UsageTotals {
+        let end = first_ordinal.saturating_add(calls);
+        let inside = |ordinal: u32| ordinal >= first_ordinal && ordinal < end;
+        let mut totals = UsageTotals::default();
+        let mut settled = 0_u32;
+        // inv: `totals` folds every reservation and settlement in
+        // [first_ordinal, end) visited so far; `settled` counts those
+        // settlements. A journal settles each reservation at most once.
+        for record in &self.records {
+            match record {
+                JournalRecord::Reserved { ordinal, .. } if inside(*ordinal) => {
+                    totals.calls_started = totals.calls_started.saturating_add(1);
+                }
+                JournalRecord::Settled {
+                    ordinal,
+                    settlement,
+                    ..
+                } if inside(*ordinal) => {
+                    settled = settled.saturating_add(1);
+                    match settlement {
+                        Settlement::Priced {
+                            input_tokens,
+                            output_tokens,
+                            usd_nanos,
+                            ..
+                        } => match usd_nanos.parse::<u128>() {
+                            // A priced amount that is not an integer is not a
+                            // measurement; a loaded journal never holds one.
+                            Err(_) => {
+                                totals.unmeasured_calls = totals.unmeasured_calls.saturating_add(1);
+                            }
+                            Ok(nanos) => {
+                                totals.priced_calls = totals.priced_calls.saturating_add(1);
+                                totals.priced_usd_nanos =
+                                    totals.priced_usd_nanos.saturating_add(nanos);
+                                totals.input_tokens =
+                                    totals.input_tokens.saturating_add(*input_tokens);
+                                totals.output_tokens =
+                                    totals.output_tokens.saturating_add(*output_tokens);
+                            }
+                        },
+                        Settlement::Unknown { .. } => {
+                            totals.unmeasured_calls = totals.unmeasured_calls.saturating_add(1);
+                        }
+                        Settlement::Released { .. } => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+        // A reservation nothing settled is a call whose outcome is missing.
+        let unsettled = totals.calls_started.saturating_sub(settled);
+        totals.unmeasured_calls = totals.unmeasured_calls.saturating_add(unsettled);
+        totals
     }
 
     pub fn settle(&mut self, ordinal: u32, settlement: Settlement) {
@@ -1255,6 +1511,14 @@ impl GatewayJournal {
     /// The schema version these records need on disk. See
     /// [`JOURNAL_SCHEMA_VERSION_V2`].
     pub fn required_schema_version(&self) -> &'static str {
+        let holds_a_cell = !self.decision_logs.is_empty()
+            || self
+                .records
+                .iter()
+                .any(|record| matches!(record, JournalRecord::Reserved { cell: Some(_), .. }));
+        if holds_a_cell {
+            return JOURNAL_SCHEMA_VERSION_V4;
+        }
         let holds_a_cache_count = self.records.iter().any(|record| {
             matches!(
                 record,
@@ -1629,6 +1893,238 @@ mod tests {
         GatewayBudget {
             max_usd_nanos,
             max_calls,
+            per_cell: None,
+        }
+    }
+
+    fn priced_usage(input_tokens: u64, output_tokens: u64, usd_nanos: u128) -> Settlement {
+        Settlement::Priced {
+            input_tokens,
+            output_tokens,
+            usd_nanos: usd_nanos.to_string(),
+            cache_read_input_tokens: None,
+            cache_write_input_tokens: None,
+        }
+    }
+
+    /// Ordinals 0 (priced), 1 (released), 2 (priced), 3 (unknown), 4 (open).
+    fn mixed_journal() -> GatewayJournal {
+        let mut journal = GatewayJournal::new(identity(budget(10_000, 8)));
+        for _ in 0..5 {
+            journal.reserve("alias", &card(1, 1), 100);
+        }
+        journal.settle(0, priced_usage(3, 2, 5));
+        journal.settle(
+            1,
+            Settlement::Released {
+                reason: ReleaseReason::NeverDispatched,
+            },
+        );
+        journal.settle(2, priced_usage(7, 1, 8));
+        journal.settle(
+            3,
+            Settlement::Unknown {
+                reason: UnknownCostReason::UsageAbsent,
+            },
+        );
+        journal
+    }
+
+    fn measured(totals: UsageTotals) -> (Option<u64>, Option<u64>, Option<u128>) {
+        (
+            totals.input_tokens(),
+            totals.output_tokens(),
+            totals.usd_nanos(),
+        )
+    }
+
+    /// A range of priced and released calls is measured; a range holding an
+    /// unknown cost, an unsettled reservation or no priced call is not, and
+    /// says nothing rather than a partial sum. The range is half open.
+    #[test]
+    fn usage_over_a_range_of_reservations_is_measured_only_when_complete() {
+        let journal = mixed_journal();
+        assert_eq!(
+            measured(journal.usage_of_ordinals(0, 3)),
+            (Some(10), Some(3), Some(13))
+        );
+        assert_eq!(
+            measured(journal.usage_of_ordinals(2, 1)),
+            (Some(7), Some(1), Some(8))
+        );
+        assert_eq!(
+            measured(journal.usage_of_ordinals(1, 1)),
+            (None, None, None)
+        );
+        assert_eq!(
+            measured(journal.usage_of_ordinals(0, 0)),
+            (None, None, None)
+        );
+        let unknown = journal.usage_of_ordinals(2, 2);
+        assert_eq!(
+            (
+                unknown.calls_started,
+                unknown.priced_calls,
+                unknown.unmeasured_calls
+            ),
+            (2, 1, 1)
+        );
+        assert_eq!(measured(unknown), (None, None, None));
+        let open = journal.usage_of_ordinals(4, 1);
+        assert_eq!((open.calls_started, open.unmeasured_calls), (1, 1));
+        let all = journal.usage_totals();
+        assert_eq!(
+            (all.calls_started, all.priced_calls, all.unmeasured_calls),
+            (5, 2, 2)
+        );
+        assert_eq!(measured(all), (None, None, None));
+    }
+
+    /// A priced amount that is not an integer is not a measurement. A loaded
+    /// journal never holds one; an in-memory one is still folded honestly.
+    #[test]
+    fn an_unreadable_priced_amount_is_unmeasured() {
+        let mut journal = GatewayJournal::new(identity(budget(10_000, 8)));
+        let ordinal = journal.reserve("alias", &card(1, 1), 100);
+        journal.settle(
+            ordinal,
+            Settlement::Priced {
+                input_tokens: 1,
+                output_tokens: 1,
+                usd_nanos: "x".to_string(),
+                cache_read_input_tokens: None,
+                cache_write_input_tokens: None,
+            },
+        );
+        let totals = journal.usage_totals();
+        assert_eq!((totals.priced_calls, totals.unmeasured_calls), (0, 1));
+        assert_eq!(measured(totals), (None, None, None));
+    }
+
+    /// Spend per cell counts only that cell's stamped reservations.
+    #[test]
+    fn cell_spend_folds_only_that_cells_reservations() {
+        let mut journal = GatewayJournal::new(identity(budget(10_000, 8)));
+        let a = CellRef {
+            window_index: 0,
+            seed: 1,
+        };
+        let b = CellRef {
+            window_index: 1,
+            seed: 1,
+        };
+        let first = journal.reserve_for("alias", &card(1, 1), 100, Some(a));
+        journal.reserve_for("alias", &card(1, 1), 40, Some(b));
+        journal.reserve("alias", &card(1, 1), 7);
+        journal.settle(first, priced_usage(1, 1, 30));
+        let spent = journal.cell_spend(a);
+        assert_eq!((spent.calls_started, spent.committed_usd_nanos()), (1, 30));
+        let spent = journal.cell_spend(b);
+        assert_eq!((spent.calls_started, spent.outstanding_usd_nanos), (1, 40));
+        assert_eq!(journal.spend().calls_started, 3);
+        assert_eq!(journal.reservation_count(), 3);
+    }
+
+    #[test]
+    fn equal_cell_shares_round_down_and_refuse_a_zero_share() {
+        let shared = budget(100, 7).with_equal_cell_shares(3).expect("a share");
+        assert_eq!(
+            shared.per_cell,
+            Some(CellBudget {
+                max_usd_nanos: 33,
+                max_calls: 2,
+            })
+        );
+        assert_eq!((shared.max_usd_nanos, shared.max_calls), (100, 7));
+        assert_eq!(
+            budget(100, 3)
+                .with_equal_cell_shares(3)
+                .map(|b| b.per_cell.map(|c| c.max_calls)),
+            Some(Some(1))
+        );
+        assert_eq!(
+            budget(3, 9)
+                .with_equal_cell_shares(3)
+                .map(|b| b.per_cell.map(|c| c.max_usd_nanos)),
+            Some(Some(1))
+        );
+        assert_eq!(budget(100, 7).with_equal_cell_shares(0), None);
+        assert_eq!(budget(100, 2).with_equal_cell_shares(3), None);
+        assert_eq!(budget(2, 7).with_equal_cell_shares(3), None);
+        assert_eq!(budget(100, 7).with_equal_cell_shares(usize::MAX), None);
+    }
+
+    /// A budget with no cell ceiling, and a reservation with no cell, are
+    /// written exactly as before either field existed.
+    #[test]
+    fn a_budget_and_reservation_without_cells_keep_their_bytes() {
+        assert_eq!(
+            serde_json::to_string(&budget(5, 2)).expect("serializes"),
+            r#"{"max_usd_nanos":5,"max_calls":2}"#
+        );
+        let mut journal = GatewayJournal::new(identity(budget(5, 2)));
+        journal.reserve("alias", &card(1, 1), 1);
+        let wire = serde_json::to_string(&journal.records()[0]).expect("serializes");
+        assert!(!wire.contains("cell"), "{wire}");
+        assert_eq!(journal.required_schema_version(), JOURNAL_SCHEMA_VERSION);
+    }
+
+    /// A cell stamp, or a decision log alone, puts the journal at v4, which a
+    /// binary that would drop either refuses.
+    #[test]
+    fn a_cell_stamp_or_a_decision_log_requires_v4() {
+        let mut stamped = GatewayJournal::new(identity(budget(5, 2)));
+        stamped.reserve_for(
+            "alias",
+            &card(1, 1),
+            1,
+            Some(CellRef {
+                window_index: 0,
+                seed: 0,
+            }),
+        );
+        assert_eq!(stamped.required_schema_version(), JOURNAL_SCHEMA_VERSION_V4);
+        let mut logged = GatewayJournal::new(identity(budget(5, 2)));
+        logged.log_decisions(DecisionLog {
+            window_index: 0,
+            seed: 0,
+            attempt: 0,
+            decisions: Vec::new(),
+        });
+        assert_eq!(logged.required_schema_version(), JOURNAL_SCHEMA_VERSION_V4);
+        assert_eq!(logged.decision_logs().len(), 1);
+    }
+
+    /// A decision log naming a reservation the journal never wrote is refused
+    /// on load; one naming exactly the last reservation is admitted.
+    #[test]
+    fn a_decision_log_past_the_last_reservation_is_refused_on_load() {
+        let dir = ScratchDir::new("journal-decision-log");
+        let path = dir.join("journal.json");
+        for (calls, admitted) in [(2, true), (3, false)] {
+            std::fs::remove_file(&path).ok();
+            let mut journal = GatewayJournal::new(identity(budget(1_000, 8)));
+            journal.reserve("alias", &card(1, 1), 1);
+            journal.reserve("alias", &card(1, 1), 1);
+            journal.settle(0, priced_usage(1, 1, 1));
+            journal.settle(1, priced_usage(1, 1, 1));
+            journal.log_decisions(DecisionLog {
+                window_index: 0,
+                seed: 0,
+                attempt: 0,
+                decisions: vec![DecisionEntry {
+                    requests: 1,
+                    served: 1,
+                    first_ordinal: 0,
+                    calls,
+                }],
+            });
+            journal.save(&path).expect("saved");
+            let loaded = GatewayJournal::load_bound(&path, &identity(budget(1_000, 8)));
+            assert_eq!(loaded.is_ok(), admitted, "calls {calls}");
+            if let Ok(loaded) = loaded {
+                assert_eq!(loaded.decision_logs(), journal.decision_logs());
+            }
         }
     }
 

@@ -1032,13 +1032,34 @@ impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
         if reserve > self.journal.available_usd_nanos() {
             return Err(GatewayErrorKind::BudgetExhausted);
         }
+        let cell = self.decisions.cell_ref();
+        // The cell's own ceiling, on top of the sweep's: what earlier cells
+        // spent cannot reach this one, and what this cell spent in an earlier
+        // attempt or process still counts against it.
+        if let (Some(cell), Some(ceiling)) = (cell, self.journal.identity.budget.per_cell) {
+            let spent = self.journal.cell_spend(cell);
+            // An observed price above its reservation can carry a cell past
+            // its ceiling, as it can the sweep; that is not authority to spend.
+            if spent.committed_usd_nanos() > ceiling.max_usd_nanos {
+                return Err(GatewayErrorKind::BudgetExhausted);
+            }
+            if spent.calls_started >= ceiling.max_calls {
+                return Err(GatewayErrorKind::CallLimitExhausted);
+            }
+            let available = ceiling
+                .max_usd_nanos
+                .saturating_sub(spent.committed_usd_nanos());
+            if reserve > available {
+                return Err(GatewayErrorKind::BudgetExhausted);
+            }
+        }
         let Some(permit) = self.permits.try_acquire() else {
             return Err(GatewayErrorKind::ConcurrencyLimit);
         };
 
         let ordinal = self
             .journal
-            .reserve(route.alias(), route.rate_card(), reserve);
+            .reserve_for(route.alias(), route.rate_card(), reserve, cell);
         // Durable before dispatch: a process that dies during the call leaves a
         // reservation behind, which folds as consumed rather than as free.
         if let Some(path) = &self.journal_path {
@@ -1305,6 +1326,27 @@ impl<'a, T: ProviderTransport> ModelGateway<'a, T> {
         }
     }
 
+    /// File one finished sweep-cell attempt's decision log in the journal and
+    /// persist it. The log moves no money, so a write that fails stops nothing:
+    /// the log stays in memory for this process's record, and a resume counts
+    /// the cell as unrecorded. A refused write still means another writer owns
+    /// the file, and latches like any other. A gateway already stopped on its
+    /// journal writes nothing more to it.
+    pub(crate) fn file_decision_log(&mut self, log: crate::gateway_journal::DecisionLog) {
+        self.journal.log_decisions(log);
+        if self.journal_conflict || self.journal_unwritable {
+            return;
+        }
+        let Some(path) = &self.journal_path else {
+            return;
+        };
+        if let Err(JournalSaveError::Conflict { .. } | JournalSaveError::IdentityConflict { .. }) =
+            self.journal.save(path)
+        {
+            self.journal_conflict = true;
+        }
+    }
+
     /// Every credential the routes hold, for redacting an operator-facing string.
     pub fn redact_for_evidence(&self, text: &str) -> String {
         redact(text, &self.routes.secrets())
@@ -1375,7 +1417,7 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
 
     use super::*;
-    use crate::gateway_journal::JournalLockError;
+    use crate::gateway_journal::{CellRef, JournalLockError};
     use crate::scratch::ScratchDir;
 
     const KEY: &str = "sk-live-test-do-not-log-0123456789";
@@ -1409,6 +1451,7 @@ mod tests {
         GatewayBudget {
             max_usd_nanos,
             max_calls,
+            per_cell: None,
         }
     }
 
@@ -2946,6 +2989,236 @@ mod tests {
     /// A reservation bounds what this host authorizes, not what a provider may
     /// bill. When the observed price lands above it, the gap is recorded rather
     /// than absorbed, and the sweep stops instead of spending past the ceiling.
+    fn priced_and_free_routes() -> RouteTable {
+        RouteTable::new(vec![
+            ModelRoute::new(
+                "fake.v1",
+                "https://provider.invalid/v1/messages",
+                Secret::new(KEY),
+                card(1, 1, "2026-01-01"),
+                4096,
+                TEST_OVERHEAD,
+            )
+            .expect("route"),
+            ModelRoute::new(
+                "free.v1",
+                "https://provider.invalid/v1/free",
+                Secret::new(KEY),
+                card(0, 0, "2026-01-01"),
+                4096,
+                TEST_OVERHEAD,
+            )
+            .expect("route"),
+        ])
+        .expect("table")
+    }
+
+    fn with_cell(max_usd_nanos: u128, max_calls: u32) -> GatewayBudget {
+        GatewayBudget {
+            per_cell: Some(crate::gateway_journal::CellBudget {
+                max_usd_nanos,
+                max_calls,
+            }),
+            ..budget(1_000_000, 100)
+        }
+    }
+
+    fn refused(
+        gateway: &mut ModelGateway<'_, FakeProvider>,
+        line: &str,
+    ) -> Option<GatewayErrorKind> {
+        parse(&gateway.serve_line(line))
+            .error
+            .map(|error| error.kind)
+    }
+
+    /// Each "hello" call reserves 29. A cell ceiling of exactly 29 admits the
+    /// first call, and the second (29 against 27 left) is refused with the
+    /// budget kind while the sweep has money to spare. Another cell, and a
+    /// call outside any cell, draw on their own ceilings.
+    #[test]
+    fn a_cell_ceiling_admits_its_last_nano_and_refuses_past_it() {
+        let routes = table("2026-01-01");
+        let permits = CallPermits::new(4);
+        let mut gateway = ModelGateway::new(
+            &routes,
+            &permits,
+            FakeProvider::answering(4),
+            with_cell(29, 100),
+            GatewayLimits::default(),
+        );
+        gateway.decisions.enter_cell(0, 7);
+        assert_eq!(refused(&mut gateway, &request("hello", 16)), None);
+        assert_eq!(
+            refused(&mut gateway, &request("hello", 16)),
+            Some(GatewayErrorKind::BudgetExhausted)
+        );
+        gateway.decisions.enter_cell(0, 8);
+        assert_eq!(refused(&mut gateway, &request("hello", 16)), None);
+        gateway.decisions.leave_cell();
+        assert_eq!(refused(&mut gateway, &request("hello", 16)), None);
+        let stamps: Vec<Option<CellRef>> = gateway
+            .journal()
+            .records()
+            .iter()
+            .filter_map(|record| match record {
+                JournalRecord::Reserved { cell, .. } => Some(*cell),
+                JournalRecord::Settled { .. } => None,
+            })
+            .collect();
+        let cell = |seed| {
+            Some(CellRef {
+                window_index: 0,
+                seed,
+            })
+        };
+        assert_eq!(stamps, [cell(7), cell(8), None]);
+        assert_eq!(
+            gateway
+                .journal()
+                .cell_spend(CellRef {
+                    window_index: 0,
+                    seed: 7
+                })
+                .calls_started,
+            1
+        );
+    }
+
+    /// A cell whose committed money equals its ceiling exactly has not passed
+    /// it: a call that reserves nothing is still admitted, as at the sweep
+    /// ceiling. 20 + 9 tokens at one nanodollar each settle at exactly 29.
+    #[test]
+    fn a_cell_exactly_at_its_ceiling_still_admits_a_free_call() {
+        let routes = priced_and_free_routes();
+        let permits = CallPermits::new(4);
+        let mut gateway = ModelGateway::new(
+            &routes,
+            &permits,
+            FakeProvider::new(vec![
+                ProviderOutcome::Answered {
+                    status: 200,
+                    body: body("ok", Some((20, 9))),
+                },
+                ProviderOutcome::Answered {
+                    status: 200,
+                    body: body("ok", Some((1, 1))),
+                },
+            ]),
+            with_cell(29, 100),
+            GatewayLimits::default(),
+        );
+        gateway.decisions.enter_cell(0, 0);
+        assert_eq!(refused(&mut gateway, &request("hello", 16)), None);
+        let cell = CellRef {
+            window_index: 0,
+            seed: 0,
+        };
+        assert_eq!(gateway.journal().cell_spend(cell).committed_usd_nanos(), 29);
+        let mut free: serde_json::Value =
+            serde_json::from_str(&request("hello", 16)).expect("json");
+        free["model_alias"] = "free.v1".into();
+        assert_eq!(refused(&mut gateway, &free.to_string()), None);
+    }
+
+    /// A gateway stopped on an unwritable journal files a later decision log
+    /// in memory only: the file keeps what it held when the gateway stopped.
+    #[test]
+    fn a_gateway_stopped_on_its_journal_writes_no_decision_log() {
+        let dir = temp_dir("log-after-unwritable");
+        let path = dir.join("journal.json");
+        let routes = table("2026-01-01");
+        let permits = CallPermits::new(4);
+        let mut gateway = ModelGateway::open(
+            &routes,
+            &permits,
+            FakeProvider::answering(4),
+            budget(u128::MAX, 8),
+            GatewayLimits::default(),
+            &path,
+        )
+        .expect("open");
+        crate::gateway_journal::fault_injection::fail_next_parent_sync();
+        assert_eq!(
+            refused(&mut gateway, &request("hello", 16)),
+            Some(GatewayErrorKind::JournalUnwritable)
+        );
+        assert!(gateway.journal_unwritable() && !gateway.journal_conflict());
+        let before = std::fs::read(&path).expect("journal");
+        gateway.file_decision_log(crate::gateway_journal::DecisionLog {
+            window_index: 0,
+            seed: 0,
+            attempt: 0,
+            decisions: Vec::new(),
+        });
+        assert_eq!(gateway.journal().decision_logs().len(), 1, "kept in memory");
+        assert_eq!(std::fs::read(&path).expect("journal"), before);
+    }
+
+    /// The call ceiling per cell: one call, then the existing call-limit kind.
+    #[test]
+    fn a_cell_call_ceiling_refuses_with_the_call_limit_kind() {
+        let routes = table("2026-01-01");
+        let permits = CallPermits::new(4);
+        let mut gateway = ModelGateway::new(
+            &routes,
+            &permits,
+            FakeProvider::answering(4),
+            with_cell(1_000_000, 1),
+            GatewayLimits::default(),
+        );
+        gateway.decisions.enter_cell(1, 0);
+        assert_eq!(refused(&mut gateway, &request("hello", 16)), None);
+        assert_eq!(
+            refused(&mut gateway, &request("hello", 16)),
+            Some(GatewayErrorKind::CallLimitExhausted)
+        );
+        gateway.decisions.enter_cell(2, 0);
+        assert_eq!(refused(&mut gateway, &request("hello", 16)), None);
+    }
+
+    /// An observed price above its reservation carries the cell past its
+    /// ceiling. A call on a free route then reserves nothing, so only the
+    /// breach check stops it; the sweep is nowhere near its own ceiling.
+    #[test]
+    fn a_cell_past_its_ceiling_refuses_even_a_free_call() {
+        let routes = priced_and_free_routes();
+        let permits = CallPermits::new(4);
+        let mut gateway = ModelGateway::new(
+            &routes,
+            &permits,
+            FakeProvider::new(vec![
+                ProviderOutcome::Answered {
+                    status: 200,
+                    body: body("ok", Some((100, 0))),
+                },
+                ProviderOutcome::Answered {
+                    status: 200,
+                    body: body("ok", Some((1, 1))),
+                },
+            ]),
+            with_cell(40, 100),
+            GatewayLimits::default(),
+        );
+        gateway.decisions.enter_cell(0, 0);
+        assert_eq!(refused(&mut gateway, &request("hello", 16)), None);
+        assert!(!gateway.journal().ceiling_breached(), "the sweep is fine");
+        let mut free: serde_json::Value =
+            serde_json::from_str(&request("hello", 16)).expect("json");
+        free["model_alias"] = "free.v1".into();
+        let free = free.to_string();
+        assert_eq!(
+            refused(&mut gateway, &free),
+            Some(GatewayErrorKind::BudgetExhausted)
+        );
+        gateway.decisions.enter_cell(0, 1);
+        assert_eq!(
+            refused(&mut gateway, &free),
+            None,
+            "another cell is untouched"
+        );
+    }
+
     #[test]
     fn usage_above_the_reservation_is_recorded_and_stops_the_sweep() {
         // A priced route and a route the host prices at nothing, sharing one

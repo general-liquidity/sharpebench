@@ -116,6 +116,7 @@ fn budget() -> GatewayBudget {
     GatewayBudget {
         max_usd_nanos: 1_000_000_000_000,
         max_calls: 1_000,
+        per_cell: None,
     }
 }
 

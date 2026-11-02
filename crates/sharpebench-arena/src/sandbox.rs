@@ -2511,6 +2511,7 @@ done
         let budget = GatewayBudget {
             max_usd_nanos: 1_000_000,
             max_calls: 100,
+            per_cell: None,
         };
         let provider = RecordingProvider::default();
         let data = Dataset::synthetic(4, 60, 7);

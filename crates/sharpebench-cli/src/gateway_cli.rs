@@ -136,6 +136,7 @@ fn parse_budget(args: &[String]) -> Result<GatewayBudget, String> {
     Ok(GatewayBudget {
         max_usd_nanos,
         max_calls,
+        per_cell: None,
     })
 }
 
@@ -444,6 +445,7 @@ mod tests {
         let budget = GatewayBudget {
             max_usd_nanos: 1000,
             max_calls: 5,
+            per_cell: None,
         };
         GatewayJournal::new(JournalIdentity::new(routes.identity_digest(), budget))
             .save(&journal)
@@ -491,6 +493,7 @@ mod tests {
         let budget = GatewayBudget {
             max_usd_nanos: 1000,
             max_calls: 5,
+            per_cell: None,
         };
         let journal = dir.join("journal.json");
         let sweep = "9".repeat(64);
@@ -531,6 +534,7 @@ mod tests {
         let budget = GatewayBudget {
             max_usd_nanos: 1000,
             max_calls: 5,
+            per_cell: None,
         };
         let path = dir.join("journal.json");
         let mut journal =
@@ -587,6 +591,7 @@ mod tests {
         let budget = GatewayBudget {
             max_usd_nanos: 1000,
             max_calls: 5,
+            per_cell: None,
         };
         let path = dir.join("journal.json");
         GatewayJournal::new(JournalIdentity::new(routes.identity_digest(), budget))

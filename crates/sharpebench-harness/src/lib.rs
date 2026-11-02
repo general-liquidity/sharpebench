@@ -11,6 +11,7 @@ pub mod artifact_scan;
 pub mod artifact_tar;
 pub mod checkpoint;
 pub mod contamination_probe;
+pub mod cost_fairness;
 pub mod decision_stability;
 pub mod declared_cutoff;
 pub mod evidence_mode;

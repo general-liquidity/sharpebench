@@ -170,6 +170,7 @@ impl ModelEntrant {
                 GatewayBudget {
                     max_usd_nanos: 10_000_000,
                     max_calls: 1_000,
+                    per_cell: None,
                 },
                 GatewayLimits::default(),
             ),
