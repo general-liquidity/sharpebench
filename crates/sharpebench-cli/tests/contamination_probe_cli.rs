@@ -1,11 +1,12 @@
-//! `contamination-probe`, `presentation-stability` and `run
-//! --declared-training-cutoff` end to end, against planted `--cmd` entrants.
-//! No model is called.
+//! `contamination-probe`, `presentation-stability`, `identifiability-probe`
+//! and `run --declared-training-cutoff` end to end, against planted `--cmd`
+//! entrants. No model is called.
 //!
 //! This target is built with `harness = false`, so the test binary is also
 //! its own subprocess fixture: run as `<binary> --planted-agent <name>`, it
 //! speaks the `--cmd` wire protocol (one observation line in, one decision
-//! line out) as the named planted agent. Otherwise it runs the tests below.
+//! line out, or one identity question in and one typed answer out) as the
+//! named planted agent. Otherwise it runs the tests below.
 //! It answers `--list` the way nextest expects, so it runs under nextest and
 //! under `cargo test` alike.
 
@@ -15,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use sharpebench_protocol::{Action, Decision, MarketObservation, Order};
-use sharpebench_sim::Dataset;
+use sharpebench_sim::{iso_year, Dataset, IdentityQuestion, IDENTITY_ANSWER_SCHEMA};
 
 // ---------------------------------------------------------------- planted agents
 
@@ -126,6 +127,60 @@ fn planted(name: &str, public: Option<Dataset>) -> Box<dyn FnMut(&MarketObservat
     }
 }
 
+/// A planted agent's answer to a closed question: ranked tickers and a year,
+/// or `None` to decline.
+type Answerer = Box<dyn FnMut(&IdentityQuestion) -> Option<(Vec<String>, Option<i64>)>>;
+
+fn volatility(series: &[f64]) -> f64 {
+    let r: Vec<f64> = relatives(series).iter().map(|x| x - 1.0).collect();
+    let m = r.iter().sum::<f64>() / r.len() as f64;
+    (r.iter().map(|x| (x - m).powi(2)).sum::<f64>() / (r.len() - 1) as f64).sqrt()
+}
+
+/// The planted agents that answer identity questions. Any other planted agent
+/// does not speak the question and exits when it is asked one.
+fn answerer(name: &str, public: Option<Dataset>) -> Option<Answerer> {
+    match name {
+        // Recalls whole paths: looks the masked return path up in the public
+        // data and names the ticker and year it finds there. Unrecognized, it
+        // names nothing.
+        "path-recall" => {
+            let data = public.expect("path-recall needs --data-file");
+            Some(Box::new(move |q| {
+                let wanted = relatives(&q.closes);
+                for (symbol, series) in &data.closes {
+                    let have = relatives(series);
+                    if let Some(offset) = have.windows(wanted.len()).position(|w| w == wanted) {
+                        return Some((
+                            vec![symbol.clone()],
+                            iso_year(&data.dates[offset + q.scored_from]),
+                        ));
+                    }
+                }
+                Some((Vec::new(), None))
+            }))
+        }
+        // Reads texture only: ranks the tickers by how close their whole-history
+        // volatility is to the series', and never names a year.
+        "texture" => {
+            let data = public.expect("texture needs --data-file");
+            let profile: Vec<(String, f64)> = data
+                .closes
+                .iter()
+                .map(|(s, v)| (s.clone(), volatility(v)))
+                .collect();
+            Some(Box::new(move |q| {
+                let vol = volatility(&q.closes);
+                let mut ranked = profile.clone();
+                ranked.sort_by(|a, b| (a.1 - vol).abs().total_cmp(&(b.1 - vol).abs()));
+                Some((ranked.into_iter().map(|(s, _)| s).collect(), None))
+            }))
+        }
+        "decline" => Some(Box::new(|_| None)),
+        _ => None,
+    }
+}
+
 fn serve(args: &[String]) {
     let name = &args[args.iter().position(|a| a == "--planted-agent").unwrap() + 1];
     if name == "exit" {
@@ -135,16 +190,42 @@ fn serve(args: &[String]) {
         .iter()
         .position(|a| a == "--data-file")
         .map(|i| Dataset::from_csv_file(&args[i + 1]).unwrap());
-    let mut agent = planted(name, public);
+    let mut answer = answerer(name, public.clone());
+    let mut agent: Box<dyn FnMut(&MarketObservation) -> Decision> = if answer.is_some() {
+        Box::new(|_: &MarketObservation| panic!("a question-only agent is never asked to decide"))
+    } else {
+        planted(name, public)
+    };
     let stdin = std::io::stdin();
     let mut out = std::io::stdout().lock();
     for line in stdin.lock().lines() {
         let Ok(line) = line else { return };
-        let obs: MarketObservation = serde_json::from_str(&line).unwrap();
-        let decision = agent(&obs);
-        if writeln!(out, "{}", serde_json::to_string(&decision).unwrap()).is_err()
-            || out.flush().is_err()
-        {
+        let reply = match serde_json::from_str::<IdentityQuestion>(&line) {
+            Ok(question) => {
+                let Some(answer) = answer.as_mut() else {
+                    // Does not speak the question: exits, as a decision-only
+                    // entrant would.
+                    return;
+                };
+                let mut reply = serde_json::json!({
+                    "schema_version": IDENTITY_ANSWER_SCHEMA,
+                    "question_id": question.question_id,
+                });
+                match answer(&question) {
+                    Some((tickers, year)) => {
+                        reply["tickers"] = tickers.into();
+                        reply["year"] = year.into();
+                    }
+                    None => reply["declined"] = true.into(),
+                }
+                reply.to_string()
+            }
+            Err(_) => {
+                let obs: MarketObservation = serde_json::from_str(&line).unwrap();
+                serde_json::to_string(&agent(&obs)).unwrap()
+            }
+        };
+        if writeln!(out, "{reply}").is_err() || out.flush().is_err() {
             return;
         }
     }
@@ -443,6 +524,120 @@ fn run_publishes_the_declared_cutoff_without_touching_evidence_mode() {
     );
 }
 
+fn identifiability_probe_catches_a_recalling_cmd_entrant_and_not_a_texture_reader() {
+    let f = Fixture::new("identify");
+    let data = f.data.display().to_string();
+    let run = |agent: &str| {
+        let cmd = f.agent(agent);
+        let (code, doc) = f.json(&["identifiability-probe", "--cmd", &cmd, "--data", &data]);
+        assert_eq!(code, Some(0), "{agent}: {doc}");
+        assert_eq!(doc["status"], "measured");
+        assert_eq!(
+            doc["schema_version"],
+            "sharpebench.identifiability-probe.v1"
+        );
+        assert_eq!(doc["rank_input"], false);
+        assert_eq!(doc["rank_neutral"], true);
+        doc["result"].clone()
+    };
+    // 300 bars give seven 40-bar windows after the warmup, of three symbols.
+    let recall = run("path-recall");
+    assert_eq!(recall["windows"], 7, "{recall}");
+    assert_eq!(recall["real"]["questions"], 21);
+    assert_eq!(recall["twin"]["questions"], 21);
+    assert_eq!(recall["real"]["joint"], 1.0, "{recall}");
+    assert_eq!(recall["twin"]["joint"], 0.0, "{recall}");
+    assert_eq!(recall["path_identified"], true, "{recall}");
+    // The chance bar a mask must be held to: one ticker in three.
+    let chance = recall["chance"]["ticker_top1"].as_f64().unwrap();
+    assert!((chance - 1.0 / 3.0).abs() < 1e-12, "{recall}");
+
+    let texture = run("texture");
+    assert_eq!(texture["real"]["year"], 0.0, "{texture}");
+    assert_eq!(texture["path_identified"], false, "{texture}");
+    let gap = texture["real"]["ticker_top1"].as_f64().unwrap()
+        - texture["twin"]["ticker_top1"].as_f64().unwrap();
+    assert!(gap.abs() <= 0.2, "texture survives the twin: {texture}");
+}
+
+fn a_refusing_or_mute_entrant_reads_unavailable() {
+    let f = Fixture::new("identify-refusal");
+    let data = f.data.display().to_string();
+    let refused = |agent: &str| {
+        let cmd = f.agent(agent);
+        let (code, doc) = f.json(&["identifiability-probe", "--cmd", &cmd, "--data", &data]);
+        assert_eq!(code, Some(1), "{agent}: {doc}");
+        assert_eq!(doc["status"], "unavailable");
+        assert_eq!(doc["rank_input"], false);
+        assert!(doc.get("result").is_none(), "{doc}");
+        assert_eq!(doc["unavailable"]["reason"], "answer", "{doc}");
+        assert_eq!(doc["unavailable"]["question_id"], 0, "{doc}");
+        doc["unavailable"]["error"].clone()
+    };
+    assert_eq!(
+        refused("decline"),
+        serde_json::json!({ "kind": "declined" })
+    );
+    // A decision-only entrant does not speak the question and exits.
+    let mute = refused("hold-even");
+    assert_eq!(mute["kind"], "failed", "{mute}");
+    assert_eq!(mute["failure"], "transport_error", "{mute}");
+    // The source must carry calendar years to score against.
+    let cmd = f.agent("path-recall");
+    let (code, doc) = f.json(&["identifiability-probe", "--cmd", &cmd]);
+    assert_eq!(code, Some(1), "{doc}");
+    assert_eq!(doc["unavailable"]["reason"], "undated_window", "{doc}");
+}
+
+/// `--http` asks over `POST /identify`: an endpoint that declines the first
+/// question it is sent leaves the probe unavailable.
+fn an_http_entrant_is_asked_over_identify() {
+    let f = Fixture::new("identify-http");
+    let data = f.data.display().to_string();
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    let server = std::thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        let mut reader = std::io::BufReader::new(socket.try_clone().unwrap());
+        let mut request_line = String::new();
+        reader.read_line(&mut request_line).unwrap();
+        let mut length = 0;
+        loop {
+            let mut header = String::new();
+            reader.read_line(&mut header).unwrap();
+            if header.trim().is_empty() {
+                break;
+            }
+            if let Some(value) = header.to_ascii_lowercase().strip_prefix("content-length:") {
+                length = value.trim().parse::<usize>().unwrap();
+            }
+        }
+        let mut body = vec![0; length];
+        std::io::Read::read_exact(&mut reader, &mut body).unwrap();
+        let question: IdentityQuestion = serde_json::from_slice(&body).unwrap();
+        let reply = serde_json::json!({
+            "schema_version": IDENTITY_ANSWER_SCHEMA,
+            "question_id": question.question_id,
+            "declined": true,
+        })
+        .to_string();
+        write!(
+            socket,
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}",
+            reply.len()
+        )
+        .unwrap();
+        let _ = socket.shutdown(std::net::Shutdown::Write);
+        let _ = std::io::Read::read_to_end(&mut reader, &mut Vec::new());
+        request_line
+    });
+    let (code, doc) = f.json(&["identifiability-probe", "--http", &addr, "--data", &data]);
+    assert_eq!(code, Some(1), "{doc}");
+    assert_eq!(doc["context"]["entrant"], format!("http:{addr}"));
+    assert_eq!(doc["unavailable"]["error"]["kind"], "declined", "{doc}");
+    assert_eq!(server.join().unwrap().trim_end(), "POST /identify HTTP/1.1");
+}
+
 fn usage_errors_launch_nothing() {
     let f = Fixture::new("usage");
     let cmd = f.agent("hold-even");
@@ -494,6 +689,10 @@ fn usage_errors_launch_nothing() {
             "--declared-training-cutoff",
             "2017-02-30",
         ],
+        vec!["identifiability-probe", "--agent", "momentum"],
+        vec!["identifiability-probe", "--cmd", &cmd, "--with-costs"],
+        vec!["identifiability-probe", "--cmd", &cmd, "--top-k", "0"],
+        vec!["identifiability-probe"],
         vec!["run", "--declared-training-cutoff", "2017-01-01"],
         vec!["run", "--cmd", &cmd, "--declared-training-cutoff"],
     ] {
@@ -535,6 +734,18 @@ const CASES: &[Case] = &[
     (
         "run_publishes_the_declared_cutoff_without_touching_evidence_mode",
         run_publishes_the_declared_cutoff_without_touching_evidence_mode,
+    ),
+    (
+        "identifiability_probe_catches_a_recalling_cmd_entrant_and_not_a_texture_reader",
+        identifiability_probe_catches_a_recalling_cmd_entrant_and_not_a_texture_reader,
+    ),
+    (
+        "a_refusing_or_mute_entrant_reads_unavailable",
+        a_refusing_or_mute_entrant_reads_unavailable,
+    ),
+    (
+        "an_http_entrant_is_asked_over_identify",
+        an_http_entrant_is_asked_over_identify,
     ),
     ("usage_errors_launch_nothing", usage_errors_launch_nothing),
 ];

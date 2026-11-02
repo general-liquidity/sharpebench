@@ -46,6 +46,7 @@ use crate::contamination::{
 };
 use crate::data::Dataset;
 use crate::engine::Window;
+use crate::transport::{DecideError, LineExchange};
 
 /// Schema of an [`IdentityQuestion`] on the wire.
 pub const IDENTITY_QUESTION_SCHEMA: &str = "sharpebench.identity-question.v1";
@@ -339,4 +340,231 @@ pub fn identifiability_probe<E>(
         path_identified: joint_edge.memorization,
         joint_edge,
     })
+}
+
+/// Schema of an entrant's answer to an [`IdentityQuestion`] on the wire.
+pub const IDENTITY_ANSWER_SCHEMA: &str = "sharpebench.identity-answer.v1";
+
+/// The answer line as an entrant writes it. Closed: an unknown member is a
+/// protocol fault, not something silently dropped.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WireAnswer {
+    schema_version: String,
+    /// The `question_id` this answers. A line that answers another question is
+    /// a protocol fault, so a late line can never be scored against the wrong
+    /// series.
+    question_id: usize,
+    #[serde(default)]
+    tickers: Vec<String>,
+    #[serde(default)]
+    year: Option<i64>,
+    /// The entrant refuses to answer. It then names nothing.
+    #[serde(default)]
+    declined: bool,
+}
+
+/// What an entrant's answer line says.
+#[derive(Clone, Debug, PartialEq)]
+pub enum IdentityReply {
+    /// Ranked tickers and a year, any of them possibly empty: an entrant that
+    /// does not know says so by naming nothing, and scores no hit.
+    Answered(IdentityAnswer),
+    /// The entrant refused the question.
+    Declined,
+}
+
+/// Parse one answer line against the question it answers, or say why it is
+/// not one.
+pub fn identity_reply_from_wire(
+    line: &str,
+    question: &IdentityQuestion,
+) -> Result<IdentityReply, String> {
+    let wire: WireAnswer = serde_json::from_str(line).map_err(|error| {
+        format!("not an identity answer ({error}); the schema is {IDENTITY_ANSWER_SCHEMA}")
+    })?;
+    if wire.schema_version != IDENTITY_ANSWER_SCHEMA {
+        return Err(format!(
+            "schema_version is `{}`, expected `{IDENTITY_ANSWER_SCHEMA}`",
+            wire.schema_version
+        ));
+    }
+    if wire.question_id != question.question_id {
+        return Err(format!(
+            "the answer is to question {}, but question {} was asked",
+            wire.question_id, question.question_id
+        ));
+    }
+    if wire.declined {
+        if !wire.tickers.is_empty() || wire.year.is_some() {
+            return Err("a declined answer names no ticker and no year".to_string());
+        }
+        return Ok(IdentityReply::Declined);
+    }
+    Ok(IdentityReply::Answered(IdentityAnswer {
+        tickers: wire.tickers,
+        year: wire.year,
+    }))
+}
+
+/// Why an entrant gave no scorable answer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AskError {
+    /// The exchange failed, or the line was not an answer to this question
+    /// ([`DecideError::Protocol`]).
+    Transport(DecideError),
+    /// The entrant refused the question.
+    Declined,
+}
+
+/// Ask one closed question over an entrant's own transport and read its typed
+/// answer. A line that is not an answer to this question is the entrant's
+/// protocol fault, with the diagnostic on stderr the way a malformed decision's
+/// is.
+pub fn ask_identity<C: LineExchange + ?Sized>(
+    channel: &mut C,
+    question: &IdentityQuestion,
+) -> Result<IdentityAnswer, AskError> {
+    let request = serde_json::to_string(question).expect("a question serializes");
+    let line = channel.exchange(&request).map_err(AskError::Transport)?;
+    match identity_reply_from_wire(&line, question) {
+        Ok(IdentityReply::Answered(answer)) => Ok(answer),
+        Ok(IdentityReply::Declined) => Err(AskError::Declined),
+        Err(diagnostic) => {
+            eprintln!("agent protocol fault: {diagnostic}");
+            Err(AskError::Transport(DecideError::Protocol))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Answers every request with a fixed line, or a fixed fault, and keeps
+    /// what it was sent.
+    struct Scripted {
+        reply: Result<String, DecideError>,
+        sent: Vec<String>,
+    }
+
+    impl LineExchange for Scripted {
+        fn exchange(&mut self, request: &str) -> Result<String, DecideError> {
+            self.sent.push(request.to_string());
+            self.reply.clone()
+        }
+    }
+
+    fn question() -> IdentityQuestion {
+        IdentityQuestion {
+            schema_version: IDENTITY_QUESTION_SCHEMA.to_string(),
+            question_id: 3,
+            symbol: "ASSET_000".to_string(),
+            dates: vec!["t0".to_string(), "t1".to_string()],
+            closes: vec![1.0, 1.5],
+            scored_from: 1,
+            candidate_tickers: vec!["NDX".to_string(), "SPX".to_string()],
+            candidate_years: vec![2016, 2017],
+            top_k: 2,
+        }
+    }
+
+    fn ask(line: &str) -> Result<IdentityAnswer, AskError> {
+        let mut channel = Scripted {
+            reply: Ok(line.to_string()),
+            sent: Vec::new(),
+        };
+        let answer = ask_identity(&mut channel, &question());
+        let sent: IdentityQuestion = serde_json::from_str(&channel.sent[0]).unwrap();
+        assert_eq!(sent, question(), "the question travels whole");
+        answer
+    }
+
+    #[test]
+    fn a_typed_answer_is_read_and_a_declined_one_is_not_scored() {
+        assert_eq!(
+            ask(
+                r#"{"schema_version":"sharpebench.identity-answer.v1","question_id":3,"tickers":["SPX"],"year":2017}"#
+            ),
+            Ok(IdentityAnswer {
+                tickers: vec!["SPX".to_string()],
+                year: Some(2017),
+            })
+        );
+        // Naming nothing is an answer: the entrant does not know.
+        assert_eq!(
+            ask(r#"{"schema_version":"sharpebench.identity-answer.v1","question_id":3}"#),
+            Ok(IdentityAnswer::default())
+        );
+        assert_eq!(
+            ask(
+                r#"{"schema_version":"sharpebench.identity-answer.v1","question_id":3,"declined":true}"#
+            ),
+            Err(AskError::Declined)
+        );
+        assert_eq!(
+            ask(
+                r#"{"schema_version":"sharpebench.identity-answer.v1","question_id":3,"declined":false,"year":2016}"#
+            ),
+            Ok(IdentityAnswer {
+                tickers: Vec::new(),
+                year: Some(2016),
+            })
+        );
+    }
+
+    #[test]
+    fn a_line_that_is_not_an_answer_to_this_question_is_a_protocol_fault() {
+        for line in [
+            // A decision, from an entrant that does not speak the question.
+            r#"{"orders":[]}"#,
+            r#"{"schema_version":"sharpebench.identity-answer.v0","question_id":3}"#,
+            r#"{"schema_version":"sharpebench.identity-answer.v1","question_id":2}"#,
+            r#"{"schema_version":"sharpebench.identity-answer.v1","question_id":3,"declined":true,"tickers":["SPX"]}"#,
+            r#"{"schema_version":"sharpebench.identity-answer.v1","question_id":3,"declined":true,"year":2016}"#,
+            r#"{"schema_version":"sharpebench.identity-answer.v1","question_id":3,"confidence":0.9}"#,
+            "not json",
+        ] {
+            assert_eq!(
+                ask(line),
+                Err(AskError::Transport(DecideError::Protocol)),
+                "{line}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_transport_fault_is_passed_through_typed() {
+        for fault in [
+            DecideError::Timeout,
+            DecideError::BudgetOverrun,
+            DecideError::Exited(Some(3)),
+        ] {
+            let mut channel = Scripted {
+                reply: Err(fault),
+                sent: Vec::new(),
+            };
+            assert_eq!(
+                ask_identity(&mut channel, &question()),
+                Err(AskError::Transport(fault))
+            );
+        }
+    }
+
+    #[test]
+    fn the_parser_names_what_is_wrong() {
+        let q = question();
+        let wrong_id = identity_reply_from_wire(
+            r#"{"schema_version":"sharpebench.identity-answer.v1","question_id":9}"#,
+            &q,
+        )
+        .unwrap_err();
+        assert!(wrong_id.contains("question 9") && wrong_id.contains("question 3 was asked"));
+        let wrong_schema =
+            identity_reply_from_wire(r#"{"schema_version":"x","question_id":3}"#, &q).unwrap_err();
+        assert!(
+            wrong_schema.contains(IDENTITY_ANSWER_SCHEMA),
+            "{wrong_schema}"
+        );
+    }
 }

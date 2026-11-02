@@ -1225,6 +1225,169 @@ fn the_presentation_suite_runs_against_a_gateway_entrant() {
     }
 }
 
+/// A provider that recalls price paths: the model text it returns names the
+/// ticker and year of the exact return path it is shown, found in the public
+/// dataset it holds, and names nothing when the path is not there. A stand-in
+/// for a model that memorized the history; it opens no socket.
+#[derive(Clone)]
+struct RecallingProvider {
+    public: Arc<Dataset>,
+    calls: Arc<Mutex<usize>>,
+}
+
+fn relatives(series: &[f64]) -> Vec<f64> {
+    series.windows(2).map(|w| w[1] / w[0]).collect()
+}
+
+impl ProviderTransport for RecallingProvider {
+    fn call(&mut self, call: ProviderCall<'_>) -> ProviderOutcome {
+        *self.calls.lock().expect("calls lock") += 1;
+        let question: sharpebench_sim::IdentityQuestion =
+            serde_json::from_str(&call.messages[0].content)
+                .expect("the entrant forwards the question");
+        let wanted = relatives(&question.closes);
+        let found = self.public.closes.iter().find_map(|(symbol, series)| {
+            relatives(series)
+                .windows(wanted.len())
+                .position(|w| w == wanted)
+                .map(|offset| {
+                    serde_json::json!({
+                        "tickers": [symbol],
+                        "year": sharpebench_sim::iso_year(
+                            &self.public.dates[offset + question.scored_from]
+                        ),
+                    })
+                })
+        });
+        let text = found.unwrap_or_else(|| serde_json::json!({ "tickers": [] }));
+        ProviderOutcome::Answered {
+            status: 200,
+            body: serde_json::to_vec(&ProviderBody {
+                text: text.to_string(),
+                finish_reason: Some("stop".into()),
+                usage: Some(ProviderUsage {
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    cache_read_input_tokens: None,
+                    cache_write_input_tokens: None,
+                }),
+            })
+            .expect("a provider body serializes"),
+        }
+    }
+}
+
+/// The scripted question-answering entrant: for each closed question it asks
+/// the model once with the question as the message and writes the model's
+/// names back as its typed answer, or declines without asking.
+fn identity_entrant(
+    decline: bool,
+) -> impl FnOnce(&mut dyn BufRead, &mut dyn Write) + Send + 'static {
+    move |input, output| loop {
+        let mut line = String::new();
+        if input.read_line(&mut line).unwrap_or(0) == 0 {
+            return;
+        }
+        let question: sharpebench_sim::IdentityQuestion =
+            serde_json::from_str(&line).expect("the host writes questions");
+        let mut reply = if decline {
+            serde_json::json!({ "declined": true })
+        } else {
+            if writeln!(output, "{}", request_line(line.trim_end())).is_err()
+                || output.flush().is_err()
+            {
+                return;
+            }
+            let mut answer = String::new();
+            if input.read_line(&mut answer).unwrap_or(0) == 0 {
+                return;
+            }
+            let answer: GatewayResponse =
+                serde_json::from_str(&answer).expect("the host writes gateway responses");
+            serde_json::from_str(&answer.text.expect("the model answered"))
+                .expect("the model names tickers")
+        };
+        reply["schema_version"] = sharpebench_sim::IDENTITY_ANSWER_SCHEMA.into();
+        reply["question_id"] = question.question_id.into();
+        if writeln!(output, "{reply}").is_err() || output.flush().is_err() {
+            return;
+        }
+    }
+}
+
+/// The identifiability probe reaches a gateway-attached entrant the way it
+/// reaches any other: one fresh entrant per closed question, every model call
+/// brokered and charged by the host. A model that recalls price paths is
+/// caught on the real windows and not on their twins; an entrant that declines
+/// leaves the probe unavailable, and nothing is spent on it.
+#[test]
+fn the_identifiability_probe_runs_against_a_gateway_entrant() {
+    use sharpebench_sim::{
+        identifiability_probe, IdentifiabilityConfig, IdentifiabilityUnavailable,
+    };
+
+    let public = Dataset::from_csv_file(&format!(
+        "{}/../../data/us-indices-1d.csv",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .expect("the frozen daily index file");
+    let windows: Vec<Window> = sharpebench_sim::walk_forward(public.len(), 20, 40, 150)
+        .into_iter()
+        .take(6)
+        .collect();
+    let routes = table();
+    let permits = CallPermits::new(4);
+    let provider = RecallingProvider {
+        public: Arc::new(public.clone()),
+        calls: Arc::default(),
+    };
+    let mut gateway = ModelGateway::new(
+        &routes,
+        &permits,
+        provider.clone(),
+        budget(1_000_000, 1_000),
+        GatewayLimits::default(),
+    );
+    let report = identifiability_probe(
+        &public,
+        &windows,
+        IdentifiabilityConfig::default(),
+        &mut |question| {
+            let mut entrant = GatewayEntrant::new(in_thread(identity_entrant(false)), &mut gateway);
+            crate::contamination_probe::ask_external(&mut entrant, question)
+        },
+    )
+    .expect("every question was answered");
+    let questions = windows.len() * public.closes.len() * 2;
+    assert_eq!(*provider.calls.lock().expect("calls lock"), questions);
+    assert_eq!(
+        gateway.journal().spend().priced_calls as usize,
+        questions,
+        "every model call the answers needed is brokered and charged"
+    );
+    assert_eq!(report.real.joint, 1.0, "{report:?}");
+    assert_eq!(report.twin.joint, 0.0, "{report:?}");
+    assert!(report.path_identified, "{report:?}");
+
+    let declined = identifiability_probe(
+        &public,
+        &windows,
+        IdentifiabilityConfig::default(),
+        &mut |question| {
+            let mut entrant = GatewayEntrant::new(in_thread(identity_entrant(true)), &mut gateway);
+            crate::contamination_probe::ask_external(&mut entrant, question)
+        },
+    );
+    assert_eq!(
+        declined,
+        Err(IdentifiabilityUnavailable::Answer {
+            question_id: 0,
+            error: crate::contamination_probe::AnswerFailure::Declined,
+        })
+    );
+    assert_eq!(*provider.calls.lock().expect("calls lock"), questions);
+}
+
 fn with_cell_ceiling(sweep: GatewayBudget, max_usd_nanos: u128, max_calls: u32) -> GatewayBudget {
     GatewayBudget {
         per_cell: Some(crate::gateway_journal::CellBudget {

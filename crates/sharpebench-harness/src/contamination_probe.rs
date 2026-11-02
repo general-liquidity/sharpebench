@@ -2,7 +2,10 @@
 //! ([`sharpebench_sim::run_shape_probe`]) and the presentation suite
 //! ([`sharpebench_sim::presentation_suite`]), run against any entrant the host
 //! can drive as an [`Agent`] with transport diagnostics: a host process, a
-//! sandboxed image or a gateway-attached entrant.
+//! sandboxed image or a gateway-attached entrant. The identifiability probe
+//! ([`sharpebench_sim::identifiability_probe`]) reaches the same entrants over
+//! [`LineExchange`]: the closed question travels the entrant's own transport,
+//! and [`ask_external`] reads its typed answer.
 //!
 //! A transport failure on any arm is a typed refusal of the whole report, never
 //! a dropped arm: an external agent that degrades to a hold would otherwise put
@@ -13,8 +16,10 @@
 
 use serde::Serialize;
 use sharpebench_sim::{
-    record_run, Agent, ArmRun, CostModel, Dataset, PresentationSuite, ShapeProbeRun,
-    ShapeProbeUnavailable, SuiteError, TransportDiagnostics, Window,
+    ask_identity, record_run, Agent, ArmRun, AskError, CostModel, Dataset, DecideError,
+    IdentifiabilityReport, IdentifiabilityUnavailable, IdentityAnswer, IdentityQuestion,
+    LineExchange, PresentationSuite, ShapeProbeRun, ShapeProbeUnavailable, SuiteError,
+    TransportDiagnostics, TransportHealth, Window,
 };
 
 use crate::{transport_failure, FailureKind};
@@ -23,6 +28,8 @@ use crate::{transport_failure, FailureKind};
 pub const CONTAMINATION_PROBE_SCHEMA: &str = "sharpebench.contamination-probe.v1";
 /// Schema of the presentation-stability document.
 pub const PRESENTATION_STABILITY_SCHEMA: &str = "sharpebench.presentation-stability.v1";
+/// Schema of the identifiability-probe document.
+pub const IDENTIFIABILITY_PROBE_SCHEMA: &str = "sharpebench.identifiability-probe.v1";
 
 /// Run an external agent on one arm and record its decisions, or the typed
 /// transport failure that makes the arm unusable.
@@ -38,6 +45,42 @@ pub fn record_external_run<A: Agent + TransportDiagnostics>(
         Some(kind) => Err(kind),
         None => Ok(run),
     }
+}
+
+/// Why an entrant gave no scorable answer to a closed question. Either way
+/// the whole identifiability document is refused, never scored as a miss: an
+/// entrant that refuses or fails would otherwise read as one that cannot
+/// identify the series.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AnswerFailure {
+    /// The entrant answered that it declines the question.
+    Declined,
+    /// The exchange failed, or the answer was malformed, classified the way a
+    /// failed decision is.
+    Failed { failure: FailureKind },
+}
+
+/// The failure a single transport fault is, through the same taxonomy a
+/// decision's faults go through.
+fn failure_of(error: DecideError) -> FailureKind {
+    let mut health = TransportHealth::default();
+    health.record(error, false);
+    transport_failure(&health).expect("a recorded fault is a failure")
+}
+
+/// Ask one closed question over an entrant's transport and read its typed
+/// answer, or the typed reason there is none.
+pub fn ask_external<C: LineExchange + ?Sized>(
+    channel: &mut C,
+    question: &IdentityQuestion,
+) -> Result<IdentityAnswer, AnswerFailure> {
+    ask_identity(channel, question).map_err(|error| match error {
+        AskError::Declined => AnswerFailure::Declined,
+        AskError::Transport(error) => AnswerFailure::Failed {
+            failure: failure_of(error),
+        },
+    })
 }
 
 /// What a document says about the run that produced it.
@@ -98,6 +141,14 @@ pub fn presentation_document(
     outcome: &Result<PresentationSuite, SuiteError<FailureKind>>,
 ) -> serde_json::Value {
     probe_document(PRESENTATION_STABILITY_SCHEMA, context, outcome.as_ref())
+}
+
+/// The identifiability-probe document for one entrant.
+pub fn identifiability_document(
+    context: &ProbeContext<'_>,
+    outcome: &Result<IdentifiabilityReport, IdentifiabilityUnavailable<AnswerFailure>>,
+) -> serde_json::Value {
+    probe_document(IDENTIFIABILITY_PROBE_SCHEMA, context, outcome.as_ref())
 }
 
 #[cfg(test)]
@@ -208,5 +259,80 @@ mod tests {
         assert_eq!(doc["status"], "unavailable");
         assert_eq!(doc["unavailable"]["reason"], "score_unavailable");
         assert_eq!(doc["unavailable"]["window"], 3);
+    }
+
+    /// Answers every question with one fixed line, or one fixed fault.
+    struct Fixed(Result<String, DecideError>);
+
+    impl LineExchange for Fixed {
+        fn exchange(&mut self, _: &str) -> Result<String, DecideError> {
+            self.0.clone()
+        }
+    }
+
+    fn question() -> IdentityQuestion {
+        IdentityQuestion {
+            schema_version: sharpebench_sim::IDENTITY_QUESTION_SCHEMA.to_string(),
+            question_id: 0,
+            symbol: "ASSET_000".to_string(),
+            dates: vec!["t0".to_string(), "t1".to_string()],
+            closes: vec![1.0, 1.1],
+            scored_from: 1,
+            candidate_tickers: vec!["SPX".to_string()],
+            candidate_years: vec![2016],
+            top_k: 1,
+        }
+    }
+
+    #[test]
+    fn an_answer_failure_is_classified_the_way_a_decision_fault_is() {
+        let failed = |failure| Err(AnswerFailure::Failed { failure });
+        for (reply, expected) in [
+            (
+                Ok(r#"{"schema_version":"sharpebench.identity-answer.v1","question_id":0,"tickers":["SPX"]}"#.to_string()),
+                Ok(IdentityAnswer {
+                    tickers: vec!["SPX".to_string()],
+                    year: None,
+                }),
+            ),
+            (
+                Ok(r#"{"schema_version":"sharpebench.identity-answer.v1","question_id":0,"declined":true}"#.to_string()),
+                Err(AnswerFailure::Declined),
+            ),
+            (Ok(r#"{"orders":[]}"#.to_string()), failed(FailureKind::AgentProtocolViolation)),
+            (Err(DecideError::Exited(Some(0))), failed(FailureKind::TransportError)),
+            (Err(DecideError::BudgetOverrun), failed(FailureKind::DecisionBudgetExceeded)),
+            (Err(DecideError::Oversized), failed(FailureKind::AgentProtocolViolation)),
+        ] {
+            assert_eq!(ask_external(&mut Fixed(reply.clone()), &question()), expected, "{reply:?}");
+        }
+    }
+
+    #[test]
+    fn the_identifiability_document_is_rank_neutral_and_names_the_refusal() {
+        let refused: Result<IdentifiabilityReport, _> = Err(IdentifiabilityUnavailable::Answer {
+            question_id: 5,
+            error: AnswerFailure::Failed {
+                failure: FailureKind::Timeout,
+            },
+        });
+        let doc = identifiability_document(&context(), &refused);
+        assert_eq!(doc["schema_version"], IDENTIFIABILITY_PROBE_SCHEMA);
+        assert_eq!(doc["status"], "unavailable");
+        assert_eq!(doc["rank_input"], false);
+        assert_eq!(doc["rank_neutral"], true);
+        assert_eq!(doc["unavailable"]["reason"], "answer");
+        assert_eq!(doc["unavailable"]["question_id"], 5);
+        assert_eq!(doc["unavailable"]["error"]["kind"], "failed");
+        assert_eq!(doc["unavailable"]["error"]["failure"], "timeout");
+        let declined: Result<IdentifiabilityReport, _> = Err(IdentifiabilityUnavailable::Answer {
+            question_id: 0,
+            error: AnswerFailure::Declined,
+        });
+        let doc = identifiability_document(&context(), &declined);
+        assert_eq!(
+            doc["unavailable"]["error"],
+            serde_json::json!({ "kind": "declined" })
+        );
     }
 }

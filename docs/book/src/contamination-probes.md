@@ -118,28 +118,92 @@ records the mode as `context.frictionless`.
 Its stated limit stands: block resampling copies stretches of the real path into
 the twin, which biases the edge toward zero, never toward a false conviction.
 
-## Identifiability probe
+## `identifiability-probe`
 
-`sharpebench_sim::identifiability_probe` asks a closed question per window and
-symbol, after KTD-Fin's de-anonymization probe (section 4.3): here is one
-masked close series, here are the candidate tickers and years, name your top-k
-tickers and one year. It asks the same question about the window's twin, whose
-answer is taken to be the real window's, and never says which arm a question
-comes from; the two are asked in a seeded order. It reports top-1, top-k, year
-and joint (top-1 ticker and year) hit rates for each arm, the rates of a
-uniform guesser, and a sign-flip test on the per-window real-minus-twin joint
-rate (`path_identified`). The questions and answers are serde types, so an
-external attacker can be wired to it; running it on a model field needs model
-calls and is future work.
+```bash
+sharpebench identifiability-probe (--cmd "<prog>" | --http <addr> | --image <repository@sha256:...>) [--data <csv>] [--window-bars N] [--windows N] [--twin-seed N] [--top-k N] [--year-tolerance N] [--declared-training-cutoff YYYY-MM-DD] [--json]
+```
+
+The probe asks a closed question per window and symbol, after KTD-Fin's
+de-anonymization probe (section 4.3): here is one masked close series, here are
+the candidate tickers and years, name your top-k tickers and one year. It asks
+the same question about the window's twin, whose answer is taken to be the real
+window's, and never says which arm a question comes from; the two are asked in
+a seeded order. It reports top-1, top-k, year and joint (top-1 ticker and year)
+hit rates for each arm, the rates of a uniform guesser, and a sign-flip test on
+the per-window real-minus-twin joint rate (`path_identified`). Windows are those
+of `contamination-probe` (`--window-bars`, default 40, after a 20-bar warmup, up
+to `--windows`, default 12); `--top-k` defaults to 2 and `--year-tolerance` to
+0. The source must carry `YYYY-MM-DD` dates, because the year of a window's
+first scored bar is the truth, so the synthetic default dataset is refused as
+`undated_window`. The document is `sharpebench.identifiability-probe.v1`.
+
+The question travels the entrant's own transport, so the probe reaches every
+external entrant the other probes reach. A `--cmd` or `--image` entrant reads a
+question as one stdin line in place of an observation, an `--http` entrant
+receives it as `POST /identify`, and a gateway-attached entrant gets it on the
+decision pipe, where any model call it makes to answer is brokered, charged and
+journaled like a decision's
+(`sharpebench_harness::contamination_probe::ask_external` over a
+`GatewayEntrant`). The question is `sharpebench.identity-question.v1`:
+
+```json
+{"schema_version":"sharpebench.identity-question.v1","question_id":0,"symbol":"ASSET_000",
+ "dates":["t0","t1","..."],"closes":[64.0,64.3,"..."],"scored_from":20,
+ "candidate_tickers":["NDX","RUT","SPX"],"candidate_years":[2016,2017],"top_k":2}
+```
+
+and the answer is one line of `sharpebench.identity-answer.v1` that echoes the
+`question_id`:
+
+```json
+{"schema_version":"sharpebench.identity-answer.v1","question_id":0,"tickers":["SPX","NDX"],"year":2016}
+{"schema_version":"sharpebench.identity-answer.v1","question_id":0,"declined":true}
+```
+
+Tickers are ranked best first and only the first `top_k` count; a name that is
+not a candidate is a miss. Naming nothing (no tickers, no year) is an answer
+and scores no hit. The answer is closed: an unknown member, another
+`question_id`, a declined answer that also names something, or a line that is
+not an answer at all is the entrant's protocol fault. Every question runs on a
+fresh entrant (a fresh process, connection or container), so no answer can
+lean on an earlier question and a real window never meets its twin in one
+process. The reference agents have no channel to answer on, so `--agent` is a
+usage error here, and so are the cost flags, because the probe runs no
+backtest.
+
+A declined question, or a spawn, transport, protocol, budget or resource
+failure on any question, refuses the whole document with
+`unavailable.reason: "answer"`, the `question_id`, and an `error` of
+`{"kind":"declined"}` or `{"kind":"failed","failure":"<failure kind>"}`. No
+failed question is scored as a miss: an entrant that refuses or crashes would
+otherwise read as one that cannot identify the series.
 
 The negative control is the expected result, and it is reported as such. A
 planted path-matching attacker that holds the public frozen dataset
-re-identifies every masked window, ticker and year, on twelve windows of the
-daily index file, and none of the twins, because masked returns are
-bit-identical to the source's. The mask defeats name, date and level lookups,
-not path lookups. A planted texture reader that ranks tickers by volatility
-identifies the twins as often as the real windows, and is not called a path
-identification. See `crates/sharpebench-sim/tests/identifiability.rs`.
+re-identifies every masked window, ticker and year, and none of the twins,
+because masked returns are bit-identical to the source's. The mask defeats
+name, date and level lookups, not path lookups. A planted texture reader that
+ranks tickers by volatility identifies the twins as often as the real windows,
+and is not called a path identification. What the planted entrants show over
+`--cmd` on the first 300 dates of the daily index file (seven windows, three
+symbols, 42 questions):
+
+| Planted entrant | real joint | twin joint | real top-1 | twin top-1 | `path_identified` | status |
+|---|---|---|---|---|---|---|
+| path recall (looks the path up) | 1.0 | 0.0 | 1.0 | 0.0 | true | measured |
+| texture only (volatility rank, no year) | 0.0 | 0.0 | 0.48 | 0.48 | false | measured |
+| declines every question | | | | | | unavailable, `declined` |
+| decision-only (exits when asked) | | | | | | unavailable, `transport_error` |
+| uniform guesser (chance) | 0.17 | | 0.33 | | | |
+
+See `crates/sharpebench-sim/tests/identifiability.rs`,
+`crates/sharpebench-cli/tests/contamination_probe_cli.rs` and
+`the_identifiability_probe_runs_against_a_gateway_entrant` in
+`crates/sharpebench-harness/src/gateway_serve_tests.rs`, where a fake provider
+that recalls paths is caught through the gateway on the real windows and not on
+their twins. Pointing the probe at a model field needs model calls and is a
+separate study; nothing here calls one.
 
 ## Declared training cutoff
 

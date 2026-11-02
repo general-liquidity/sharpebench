@@ -74,9 +74,17 @@ impl DecideError {
 /// agent's own fault, not the harness's). Pure over the injected `attempt`, so a
 /// transient blip that recovers on retry yields `Ok`, while a persistent fault
 /// surfaces the last error to the caller.
-pub fn decide_with_retry<F>(max_retries: u32, mut attempt: F) -> Result<Decision, DecideError>
+pub fn decide_with_retry<F>(max_retries: u32, attempt: F) -> Result<Decision, DecideError>
 where
     F: FnMut() -> Result<Decision, DecideError>,
+{
+    with_retry(max_retries, attempt)
+}
+
+/// [`decide_with_retry`] for any exchange, a closed question's included.
+pub(crate) fn with_retry<T, F>(max_retries: u32, mut attempt: F) -> Result<T, DecideError>
+where
+    F: FnMut() -> Result<T, DecideError>,
 {
     let mut tries = 0u32;
     loop {
@@ -180,6 +188,16 @@ impl TransportHealth {
 pub trait TransportDiagnostics {
     /// The rolling transport health accumulated across the run so far.
     fn health(&self) -> &TransportHealth;
+}
+
+/// A transport that carries one request line besides the decision protocol and
+/// returns the entrant's one response line, with the same typed faults and the
+/// same budgets a decision has. The closed questions of the identifiability
+/// probe ([`crate::identifiability`]) travel over it, so an entrant answers them
+/// on the transport it is scored on, whatever that transport is.
+pub trait LineExchange {
+    /// Send `request` and return the response line, unparsed.
+    fn exchange(&mut self, request: &str) -> Result<String, DecideError>;
 }
 
 #[cfg(test)]

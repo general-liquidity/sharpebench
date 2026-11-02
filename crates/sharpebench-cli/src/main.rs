@@ -101,6 +101,10 @@ fn main() -> ExitCode {
             contamination_cmd::run_shape(&args, json, &external_capture::DockerSandbox)
                 .clamp(0, 255) as u8,
         ),
+        Some("identifiability-probe") => ExitCode::from(
+            contamination_cmd::run_identify(&args, json, &external_capture::DockerSandbox)
+                .clamp(0, 255) as u8,
+        ),
         Some("presentation-stability") => ExitCode::from(
             contamination_cmd::run_presentation(&args, json, &external_capture::DockerSandbox)
                 .clamp(0, 255) as u8,
@@ -749,6 +753,9 @@ fn help() {
     );
     println!(
         "  sharpebench presentation-stability <entrant> [--data <csv>] [--date-shift-days N]  decisions under tickers-only, dates-only, levels-only and full blinding, reordered symbols and a shifted calendar, mapped back and compared (rank-neutral)"
+    );
+    println!(
+        "  sharpebench identifiability-probe <external entrant> [--data <csv>] [--window-bars N] [--windows N] [--twin-seed N] [--top-k N] [--year-tolerance N]  closed questions over the entrant's own transport: name the ticker and year of a masked series and of its synthetic twin; hit rates against chance and a whole-window sign-flip test (rank-neutral)"
     );
     println!("                       <entrant>: --agent buy-and-hold|momentum, --cmd \"<prog>\", --http <addr> or --image <repository@sha256:...>; a failed arm is a typed refusal");
     println!("                       --declared-training-cutoff YYYY-MM-DD: also on run with an external entrant; published as a disclosure, never trusted or verified, evidence mode unchanged");
