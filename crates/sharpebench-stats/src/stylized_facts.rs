@@ -325,7 +325,7 @@ mod tests {
             log_vol = mean_lv + 0.94 * (log_vol - mean_lv) - 0.20 * z_prev + 0.30 * eta;
             let heavy = if r.u() < 0.04 { 3.5 } else { 1.0 };
             let z = r.z() * heavy;
-            out.push(0.0003 + log_vol.exp() * z);
+            out.push(0.0003 + crate::det_math::exp(log_vol) * z);
             z_prev = z;
         }
         out

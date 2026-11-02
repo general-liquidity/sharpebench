@@ -68,7 +68,7 @@ fn finite(value: f64) -> Result<f64, OptionsError> {
 }
 
 fn discounted_strike(strike: f64, t: f64, r: f64) -> Result<f64, OptionsError> {
-    let discount = finite((-finite(r * t)?).exp())?;
+    let discount = finite(sharpebench_stats::det_math::exp(-finite(r * t)?))?;
     let discounted = finite(strike * discount)?;
     if discount == 0.0 || discounted == 0.0 {
         return Err(OptionsError::NumericalRange);
@@ -79,7 +79,7 @@ fn discounted_strike(strike: f64, t: f64, r: f64) -> Result<f64, OptionsError> {
 /// Standard-normal PDF.
 fn norm_pdf(x: f64) -> f64 {
     use std::f64::consts::PI;
-    (-0.5 * x * x).exp() / (2.0 * PI).sqrt()
+    sharpebench_stats::det_math::exp(-0.5 * x * x) / (2.0 * PI).sqrt()
 }
 
 /// erf via Abramowitz & Stegun 7.1.26 (max abs error 1.5e-7).
@@ -91,7 +91,7 @@ fn erf(x: f64) -> f64 {
         - (((((1.061_405_429 * t - 1.453_152_027) * t) + 1.421_413_741) * t - 0.284_496_736) * t
             + 0.254_829_592)
             * t
-            * (-x * x).exp();
+            * sharpebench_stats::det_math::exp(-x * x);
     sign * y
 }
 
@@ -127,7 +127,12 @@ fn d1_d2(spot: f64, strike: f64, t: f64, r: f64, vol: f64) -> Result<(f64, f64),
     if std_dev == 0.0 {
         return Err(OptionsError::NumericalRange);
     }
-    let d1 = finite((spot.ln() - strike.ln() + finite(r * t)?) / std_dev + 0.5 * std_dev)?;
+    let d1 = finite(
+        (sharpebench_stats::det_math::ln(spot) - sharpebench_stats::det_math::ln(strike)
+            + finite(r * t)?)
+            / std_dev
+            + 0.5 * std_dev,
+    )?;
     Ok((d1, finite(d1 - std_dev)?))
 }
 
