@@ -183,9 +183,14 @@ fn routes() -> &'static RouteTable {
     })
 }
 
+/// Call permits for one instance. A process-wide set would be shared by the
+/// tests running in parallel here, and `try_acquire` refuses rather than waits,
+/// so a busy moment in one test could refuse another test's call and change
+/// its model-call count. Each instance makes at most one call at a time, so its
+/// own small set never refuses. Leaked because the gateway borrows it for the
+/// worker thread's life; a test process leaks a few bytes per run.
 fn permits() -> &'static CallPermits {
-    static PERMITS: OnceLock<CallPermits> = OnceLock::new();
-    PERMITS.get_or_init(|| CallPermits::new(4))
+    Box::leak(Box::new(CallPermits::new(4)))
 }
 
 /// The entrant process: an in-process thread on a real OS pipe pair. For each
