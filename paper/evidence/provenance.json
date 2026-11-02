@@ -232,7 +232,7 @@
       "sha256": "beaa2054f85384b12334267e10b7981a22967b6983f65bd75b0b1bfbcc262e86"
     }
   ],
-  "generated_at_head": "89904d62ea5def07947a9470384acdfde9037982",
+  "generated_at_head": "47a9c5ce3341bd4cbd6bba967783dbb15fd580de",
   "generated_at_head_dirty": false,
   "note": "Incomplete paid LLM runs are excluded from result provenance.",
   "reproduction_entrypoint": "commands in paper/sections/A-commands.tex",
@@ -440,7 +440,7 @@
     },
     {
       "path": "crates/sharpebench-cli/src/contamination_cmd.rs",
-      "sha256": "c0b1e1085f21b2bb9876fbc170b60e06d43137d268f943700c70c6d9d5644f43"
+      "sha256": "bf9363ebf1427ea926171fa0fbb170e93dd1762df67b2dfa2f2c585b34a0d5c0"
     },
     {
       "path": "crates/sharpebench-cli/src/csv_columns.rs",
@@ -460,7 +460,7 @@
     },
     {
       "path": "crates/sharpebench-cli/src/gateway_cli.rs",
-      "sha256": "5b531e05541cdf2241bcd7952666c547bcd35fef7a2377954eb4c602f9915e84"
+      "sha256": "89987750d427532a8da5563d9428237f9a17a74c660f257e1bc88451bb839d88"
     },
     {
       "path": "crates/sharpebench-cli/src/grader_search_cmd.rs",
@@ -476,7 +476,7 @@
     },
     {
       "path": "crates/sharpebench-cli/src/main.rs",
-      "sha256": "07fe00a80d1195c9b3dcb343f65adeead988fd53cea7f286d38d713f0b2b97f5"
+      "sha256": "dd4ab813e776a94c8530ef92416ec9f64dbef9300ba5ed8ebcc3def74dc3f496"
     },
     {
       "path": "crates/sharpebench-cli/src/regrade_cmd.rs",
@@ -532,7 +532,7 @@
     },
     {
       "path": "crates/sharpebench-cli/tests/contamination_probe_cli.rs",
-      "sha256": "6b98e42e7318c443aaed6e1efe2fce47d66d1d2641ba320b8db2889425dd80f1"
+      "sha256": "c08d4f4408722e0306b1ee0047ced210c1cefc1ae6ce23e57cd54cdbf88464b7"
     },
     {
       "path": "crates/sharpebench-cli/tests/decision_stability_cli.rs",
@@ -992,7 +992,7 @@
     },
     {
       "path": "crates/sharpebench-harness/src/cost_fairness.rs",
-      "sha256": "515726807ea6cc39e59dd4e2be3e8ca8271ce78186641dc417f010a959ceac58"
+      "sha256": "cabe4b1636014c6ecb6c1475636a20ed3ba39673781676bca8bb4925060d96cf"
     },
     {
       "path": "crates/sharpebench-harness/src/decision_stability.rs",
@@ -1024,7 +1024,7 @@
     },
     {
       "path": "crates/sharpebench-harness/src/gateway_journal.rs",
-      "sha256": "cf16419c0246f2ece203ae1899a8e592cc7c6fe862910f186afc988b39b3a7a5"
+      "sha256": "3bef9bd4b54210cd50942132d5db11478a6d906c49f436e87a09903b7198c63a"
     },
     {
       "path": "crates/sharpebench-harness/src/gateway_serve.rs",
@@ -1940,5 +1940,5 @@
     "data/*.csv",
     "arena/windows/**/*.json"
   ],
-  "source_snapshot_sha256": "bcb5907c7f77b6dbdd2a8abd236eb49a715cccb73c2e5fe387f985b108d606b0"
+  "source_snapshot_sha256": "19ab169cd714f2a47e3e92815ed7b4dc9271f627e59b34d265f12278949b235e"
 }
