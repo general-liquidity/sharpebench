@@ -325,6 +325,22 @@ census does not move a score, the controls carry no score field, and the binding
 is provenance beside a result; none of them reaches the gate, eligibility or the
 rank.
 
+## `gateway-diagnostics`
+
+```bash
+sharpebench gateway-diagnostics --journal <journal.json> [--json]
+```
+
+Reads a gateway sweep's money journal and reports how the entrant struggled at
+the gateway: calls, retries (bounded, exact for a decision with one served
+request), requests refused by the per-decision limit, faulted calls by cause,
+truncated answers and tokens per decision, with a tool-use breakdown of
+decisions by requests and calls and of calls by route alias
+(`sharpebench.gateway-diagnostics.v1`, `rank_neutral: true`). It never calls a
+provider and takes no lock. It exits 2 without `--journal` and 1 when the
+journal cannot be read or does not validate. See
+[Struggle diagnostics](model-gateway.md#struggle-diagnostics).
+
 ## `timing-luck`
 
 ```bash

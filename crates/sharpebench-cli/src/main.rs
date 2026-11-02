@@ -28,6 +28,7 @@ mod decision_stability_cmd;
 mod external_capture;
 mod forecast_cmd;
 mod gateway_cli;
+mod gateway_diagnostics_cmd;
 mod grader_search_cmd;
 mod import_cmd;
 mod lineage_cmd;
@@ -97,6 +98,9 @@ fn main() -> ExitCode {
         }
         Some("import") => ExitCode::from(import_cmd::run(&args, json).clamp(0, 255) as u8),
         Some("gateway") => ExitCode::from(gateway_cli::run(&args, json).clamp(0, 255) as u8),
+        Some("gateway-diagnostics") => {
+            ExitCode::from(gateway_diagnostics_cmd::run(&args, json).clamp(0, 255) as u8)
+        }
         Some("contamination-probe") => ExitCode::from(
             contamination_cmd::run_shape(&args, json, &external_capture::DockerSandbox)
                 .clamp(0, 255) as u8,
@@ -740,6 +744,9 @@ fn help() {
     );
     println!(
         "  sharpebench regime <a.csv> <b.csv> <regimes.csv> [--col NAME]  compare two return series within each regime (labels are an input)"
+    );
+    println!(
+        "  sharpebench gateway-diagnostics --journal <journal.json>  calls, retries, requests refused by limit, faults, truncated answers and tokens per decision, and the tool-use breakdown, from a gateway sweep's journal (rank-neutral)"
     );
     println!(
         "  sharpebench timing-luck --cadence <m> [--data <csv>] [--periods-per-year N]  how far run's reference rows move when they rebalance every m bars and only the schedule phase moves (rank-neutral)"
