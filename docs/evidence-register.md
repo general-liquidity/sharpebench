@@ -1381,7 +1381,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 
 **Artifacts.**
 - `paper/figures/sharpebench-deflation-curve.pdf`, sha256 `3a17ec9552773904e079fdfe933e06e35b791be345b49651e70fe255a2832579`, digest source: paper/evidence/provenance.json
-- `paper/src/kernel_stats.py`, sha256 `836a71dc2411869de43960cb85cf8ad000762d7225053092da112973c8539191`, digest source: paper/evidence/provenance.json, the Python transcription of the kernel's formulas that draws the panel
+- `paper/src/kernel_stats.py`, sha256 `d1a7b2cdbbb0ff4ed3dc72c6ba76d01f55a1c089c2e1ae90e09b12cf4f6e1daa`, digest source: paper/evidence/provenance.json, the Python transcription of the kernel's formulas that draws the panel
 
 **Producer command.** python paper/src/make-figures.py (paper/sections/A-commands.tex)
 
@@ -1409,6 +1409,7 @@ Covers the **sharpearena** repository, which is not part of this tree. Paths bel
 |---|---|---|---|---|
 | 2026-09-23 | still-applicable | unknown | no | Initial entry: The producer agrees with the current kernel under a passing pinned test, and the panel's inputs are stated constants rather than frozen measurements. |
 | 2026-10-31 | still-applicable | unknown | no | Rechecked against SharpeBench #118, #171 and #172, SharpeArena #118 and the foundation branch through 180723d: none of them touches this row's producer, inputs or claim. Source locations and in-repository digests were verified at that tip. |
+| 2026-11-02 | still-applicable | model: claude-opus-5-5 | no | Rechecked on the small-items branch: paper/src/kernel_stats.py moved by a docstring fix only (a refused record prints 0.0 beside `deflation_refusal`, not `deflation_error`) and the recorded digest is rebound. No formula changed and python -B -m unittest paper/src/test_kernel_stats.py passes, so the claim and its disposition stand. |
 
 ### `SB-tab-units`
 
