@@ -16,7 +16,8 @@ module.exports = function assertKernelRepairContract(sb, version) {
   };
   const [diagnostic] = sb.classifyDisqualification(field, config);
   assert.equal(diagnostic.rank_eligible, false);
-  assert.ok(diagnostic.reasons.includes("deflation_unavailable"));
+  assert.ok(diagnostic.reasons.includes("dsr_interval_unavailable"));
+  assert.ok(!diagnostic.reasons.includes("deflation_unavailable"));
   assert.ok(!diagnostic.reasons.includes("deflation_refused"));
 
   const selection = sb.percentileSelection([[], [-0.02, -0.01, -0.03]], { nBoot: 10 });
