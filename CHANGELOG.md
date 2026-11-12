@@ -9,9 +9,11 @@ are the twelve listed in [RELEASING.md](RELEASING.md), and `xtask`,
 are `publish = false`. Each section is one `v*` tag
 and links the commits it was built from.
 
-[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.29.0...HEAD
+[Unreleased]: https://github.com/general-liquidity/sharpebench/compare/v0.29.1...HEAD
 
 ## [Unreleased]
+
+## [0.29.1] - 2026-11-12
 
 ### Fixed
 
@@ -1043,6 +1045,7 @@ First published release.
 ### Fixed
 - Constant-time HMAC verification and bounded, timed agent HTTP reads ([6c3d174](https://github.com/general-liquidity/sharpebench/commit/6c3d174)).
 
+[0.29.1]: https://github.com/general-liquidity/sharpebench/compare/v0.29.0...v0.29.1
 [0.29.0]: https://github.com/general-liquidity/sharpebench/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/general-liquidity/sharpebench/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/general-liquidity/sharpebench/compare/v0.26.0...v0.27.0
