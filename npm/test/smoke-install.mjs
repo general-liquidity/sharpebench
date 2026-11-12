@@ -69,9 +69,12 @@ try {
       return relative !== "node_modules" && relative !== path.join("pkg", ".gitignore");
     },
   });
-  const packed = JSON.parse(
+  // npm 11 prints an array of tarball reports; npm 12 prints an object keyed by
+  // package name. Read both, so the check counts tarballs under either.
+  const report = JSON.parse(
     npm(["pack", "--json", "--pack-destination", workDir], { cwd: stageDir }),
   );
+  const packed = Array.isArray(report) ? report : Object.values(report);
   assert.strictEqual(packed.length, 1, `npm pack must produce exactly one tarball, got ${packed.length}`);
   const [tarball] = packed;
   assert(tarball.files.length > 0, "npm pack produced an empty tarball");

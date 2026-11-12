@@ -13,6 +13,10 @@ and links the commits it was built from.
 
 ## [Unreleased]
 
+### Fixed
+
+- npm: the pre-publish smoke test reads `npm pack --json` from npm 11 (an array) and npm 12 (an object keyed by package name). Under npm 12, which the release job uses, it read no tarball and failed, so `@general-liquidity/sharpebench` and `-mcp` 0.29.0 never reached npm; crates.io, PyPI and the binary did publish 0.29.0. The npm CI job now installs the release job's npm, so this drift fails a pull request instead of a release.
+
 ## [0.29.0] - 2026-11-12
 
 ### Breaking (scoring)
