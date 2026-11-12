@@ -27,6 +27,12 @@ jobs:
         with:
           node-version: 24
 
+      # The same npm the release job publishes with (release.yml), so a change in
+      # npm's own output, such as npm 12 turning `npm pack --json` from an array
+      # into an object keyed by package name, fails here and not at release time.
+      # That drift broke the v0.29.0 npm publish.
+      - run: npm install -g npm@12.0.2
+
       - name: Build the WASM kernel
         run: wasm-pack build crates/sharpebench-wasm --target nodejs --out-dir ../../npm/pkg --out-name sharpebench
 
