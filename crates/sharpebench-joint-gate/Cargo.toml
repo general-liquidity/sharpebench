@@ -13,12 +13,12 @@ name = "joint-gate-study"
 path = "src/bin/joint_gate_study.rs"
 
 [dependencies]
-sharpebench-core = { path = "../sharpebench-core", version = "0.29.0" }
-sharpebench-harness = { path = "../sharpebench-harness", version = "0.29.0" }
-sharpebench-protocol = { path = "../sharpebench-protocol", version = "0.29.0" }
-sharpebench-sim = { path = "../sharpebench-sim", version = "0.29.0" }
-sharpebench-stats = { path = "../sharpebench-stats", version = "0.29.0" }
-sharpebench-study = { path = "../sharpebench-study", version = "0.29.0" }
+sharpebench-core = { path = "../sharpebench-core", version = "0.29.1" }
+sharpebench-harness = { path = "../sharpebench-harness", version = "0.29.1" }
+sharpebench-protocol = { path = "../sharpebench-protocol", version = "0.29.1" }
+sharpebench-sim = { path = "../sharpebench-sim", version = "0.29.1" }
+sharpebench-stats = { path = "../sharpebench-stats", version = "0.29.1" }
+sharpebench-study = { path = "../sharpebench-study", version = "0.29.1" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 

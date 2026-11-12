@@ -17,14 +17,14 @@ name = "contamination_probe_cli"
 harness = false
 
 [dependencies]
-sharpebench-core = { path = "../sharpebench-core", version = "0.29.0" }
-sharpebench-protocol = { path = "../sharpebench-protocol", version = "0.29.0" }
-sharpebench-sim = { path = "../sharpebench-sim", version = "0.29.0" }
-sharpebench-harness = { path = "../sharpebench-harness", version = "0.29.0" }
-sharpebench-attest = { path = "../sharpebench-attest", version = "0.29.0" }
-sharpebench-leaderboard = { path = "../sharpebench-leaderboard", version = "0.29.0" }
-sharpebench-edge = { path = "../sharpebench-edge", version = "0.29.0" }
-sharpebench-arena = { path = "../sharpebench-arena", version = "0.29.0" }
+sharpebench-core = { path = "../sharpebench-core", version = "0.29.1" }
+sharpebench-protocol = { path = "../sharpebench-protocol", version = "0.29.1" }
+sharpebench-sim = { path = "../sharpebench-sim", version = "0.29.1" }
+sharpebench-harness = { path = "../sharpebench-harness", version = "0.29.1" }
+sharpebench-attest = { path = "../sharpebench-attest", version = "0.29.1" }
+sharpebench-leaderboard = { path = "../sharpebench-leaderboard", version = "0.29.1" }
+sharpebench-edge = { path = "../sharpebench-edge", version = "0.29.1" }
+sharpebench-arena = { path = "../sharpebench-arena", version = "0.29.1" }
 serde = "1"
 serde_json = "1"
 # Owned, unlinked capture files for the opt-in image preflight: the Docker
