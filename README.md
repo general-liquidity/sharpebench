@@ -16,7 +16,7 @@ process checks, using one deterministic Rust kernel across every surface.
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue?style=flat-square)](LICENSE-MIT)
 [![Unsafe](https://img.shields.io/badge/workspace%20packages-unsafe%20forbidden-success?style=flat-square)](docs/book/src/introduction.md)
 
-**[Quick start](#quick-start) · [Gates](#what-makes-an-agent-rank-eligible) · [Bring an agent](#bring-your-own-agent) · [Verify](#capture-and-verify) · [Paper](paper/main.pdf) · [Documentation](#documentation)**
+**[Quick start](#quick-start) · [Gates](#what-makes-an-agent-rank-eligible) · [Bring an agent](#bring-your-own-agent) · [Verify](#capture-and-verify) · [Paper](https://general-liquidity.github.io/sharpebench/paper/) · [PDF](paper/main.pdf) · [Documentation](#documentation)**
 
 </div>
 
